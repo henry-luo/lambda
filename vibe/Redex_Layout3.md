@@ -2,7 +2,7 @@
 
 > Advancing the PLT Redex CSS layout specification toward complete baseline coverage, plus improvements across all test suites.
 > 
-> **Status: Phase 3 In Progress — 1785/1821 baseline (98.0%), up from 1541 (84.4%)**
+> **Status: Phase 3 In Progress — 1788/1821 baseline (98.2%), up from 1541 (84.4%)**
 
 ---
 
@@ -22,7 +22,7 @@
 12. [Phase 3I: Performance — ✅ IMPLEMENTED](#12-phase-3i-performance--depth-guard--implemented)
 13. [Implementation Priority & Milestones](#13-implementation-priority--milestones)
 14. [Known Limitations / Deferred](#14-known-limitations--deferred)
-15. [Appendix A: All Remaining Failing Tests (36)](#15-appendix-a-all-remaining-failing-tests-36-baseline)
+15. [Appendix A: All Remaining Failing Tests (33)](#15-appendix-a-all-remaining-failing-tests-33-baseline)
 16. [Appendix B: Progress Log](#16-appendix-b-progress-log)
 
 ---
@@ -47,7 +47,7 @@
 
 | Suite | Total | Pass | Fail | Pass Rate | Δ from Phase 2 |
 |-------|-------|------|------|-----------|-----------------|
-| **baseline** | 1821 | **1785** | **36** | **98.0%** | **+244 tests (+13.4%)** |
+| **baseline** | 1821 | **1788** | **33** | **98.2%** | **+247 tests (+13.6%)** |
 | **flex** | 156 | 153 | 3 | **98.1%** | — |
 | **grid** | 123 | 117 | 6 | **95.1%** | — |
 | **box** | 77 | 62 | 15 | **80.5%** | -6 (reclassified) |
@@ -55,11 +55,11 @@
 | **position** | 53 | **27** | **26** | **50.9%** | **+8 tests (+15.1%)** |
 | **table** | 103 | **53** | **50** | **51.5%** | **+2 tests (+2.0%)** |
 | **text_flow** | 14 | 14 | 0 | **100%** | — |
-| **Grand Total** | ~2435 | **~2271** | **~164** | **~93.3%** | **+255 tests** |
+| **Grand Total** | ~2435 | **~2274** | **~161** | **~93.4%** | **+258 tests** |
 
-### Baseline Progress: 284 → 36 failures (244 tests fixed, 0 regressions, 4 JS-dependent tests moved to advanced suite)
+### Baseline Progress: 284 → 33 failures (247 tests fixed, 0 regressions, 4 JS-dependent tests moved to advanced suite)
 
-The Phase 3 implementation fixed **135 previously-failing tests** from the Phase 2 starting point of 174 (after initial automated fixes brought 284 down to 174). 4 tests requiring JavaScript DOM manipulation (`table-anonymous-objects-039/-045/-047/-049`) were moved to the `advanced` suite as they cannot be evaluated in static layout analysis. Key areas of improvement:
+The Phase 3 implementation fixed **138 previously-failing tests** from the Phase 2 starting point of 174 (after initial automated fixes brought 284 down to 174). 4 tests requiring JavaScript DOM manipulation (`table-anonymous-objects-039/-045/-047/-049`) were moved to the `advanced` suite as they cannot be evaluated in static layout analysis. Key areas of improvement:
 
 - **Table layout**: 60 table tests fixed (anonymous boxes, row groups, captions, border-spacing, height algorithm, cell alignment, fixed table layout, anonymous row/cell wrapping)
 - **Float layout**: 25+ float tests fixed (BFC height, float avoidance, clearance, float property application)
@@ -69,7 +69,7 @@ The Phase 3 implementation fixed **135 previously-failing tests** from the Phase
 - **Font-size zero**: 23 tests fixed (zero-height text rendering)
 - **List-item display**: 9 tests fixed (list markers, list-style properties)
 - **White-space / text**: 8+ tests fixed (white-space processing, text-indent, text-align, nowrap)
-- **Block layout**: 7+ tests fixed (BFC fit, margin collapsing, block width, block-in-inline struts, inline-block height)
+- **Block layout**: 10+ tests fixed (BFC fit, margin collapsing, block width, block-in-inline struts, inline-block height, inline formatting context for inline-block children)
 
 ### Critical Bug Found: Exponential Blowup on Nested Flex
 
@@ -86,24 +86,24 @@ This isn't infinite recursion (it's bounded by tree depth), but it's **exponenti
 
 ## 2. Cross-Suite Test Results
 
-### Baseline Remaining Failures (36 tests)
+### Baseline Remaining Failures (33 tests)
 
 | Category | Count | % of Remaining | Status |
 |----------|-------|----------------|--------|
-| **Table layout** | 9 | 25.0% | Anonymous objects (font-metrics) & misc table edge cases |
-| **Float layout** | 7 | 19.4% | Most float tests fixed; complex stacking remains |
-| **Inline/block misc** | 5 | 13.9% | Whitespace nodes, HTML parser, inline-block, ::before |
-| **Flex** | 4 | 11.1% | Nested blocks, lists, flex, table content |
-| **Font/text** | 4 | 11.1% | text-transform, font handling, line-height, bidi |
-| **Box model** | 3 | 8.3% | width, centering, overflow |
-| **Grid** | 2 | 5.6% | aspect-ratio (writing-mode), span+max-content |
-| **List-item position** | 2 | 5.6% | list-style-position inside/outside |
+| **Table layout** | 8 | 24.2% | Anonymous objects (font-metrics) & misc table edge cases |
+| **Float layout** | 7 | 21.2% | Most float tests fixed; complex stacking remains |
+| **Inline/block misc** | 2 | 6.1% | ::before content, blocks-017 (4px y offset pre-existing) |
+| **Flex** | 4 | 12.1% | Nested blocks, lists, flex, table content |
+| **Font/text** | 4 | 12.1% | text-transform, font handling, line-height, bidi |
+| **Box model** | 3 | 9.1% | width, centering, overflow |
+| **Grid** | 2 | 6.1% | aspect-ratio (writing-mode), span+max-content |
+| **List-item position** | 2 | 6.1% | list-style-position inside/outside |
 
-### Baseline Failure Breakdown (36 tests)
+### Baseline Failure Breakdown (33 tests)
 
 | Sub-category | Tests | Notes |
 |-------------|-------|-------|
-| table-anonymous-objects-* | 5 | 4 font-metrics (040/046/048/050), 1 body-as-table (209) |
+| table-anonymous-objects-* | 4 | 4 font-metrics (040/046/048/050) |
 | float/position | 7 | Complex float stacking, relative+float combo |
 | flex_* (misc) | 4 | Nested blocks, lists, table content, deeply nested flex |
 | table_* (custom tests) | 3 | HTML table parsing, vertical-align, overflow |
@@ -111,7 +111,7 @@ This isn't infinite recursion (it's bounded by tree depth), but it's **exponenti
 | font/text | 4 | text-transform, bidirectionality, font handling, line-height |
 | grid_* (misc) | 2 | aspect-ratio (vertical writing-mode), span+max-content |
 | list-style-position | 2 | Marker position inside/outside |
-| inline/block misc | 4 | whitespace nodes, HTML parser, inline-block height, ::before |
+| inline/block misc | 2 | blocks-017 (4px y pre-existing), ::before |
 | table-layout-applies-to-016 | 1 | `display:none` comparison edge case |
 | table-height-algorithm-010 | 1 | Multi-column width distribution |
 
@@ -182,13 +182,16 @@ This isn't infinite recursion (it's bounded by tree depth), but it's **exponenti
 12. ✅ **Border-collapse**: basic support for `border-collapse: collapse`
 13. ✅ **`table-layout` property scope**: `table-layout` only applies to elements with `display:table`
 
-**Remaining (13 baseline tests):**
-- `table-anonymous-objects-*` (8 tests): complex anonymous table box generation (4 require JS DOM manipulation, 4 have font-metrics mismatches)
+**Remaining (8 baseline tests):**
+- `table-anonymous-objects-*` (4 tests): font-metrics mismatches (040/046/048/050)
 - `table-layout-applies-to-016`: `display:none` comparison edge case
 - `table-height-algorithm-010`: multi-column content-based width distribution
 - `table_013_html_table`: HTML `<table>` element-specific parsing
 - `table_019_vertical_alignment`: additional vertical alignment edge cases
 - `table_020_overflow_wrapping`: overflow/wrapping in table cells
+
+> **Note:** 4 JS-dependent tests (`table-anonymous-objects-039/-045/-047/-049`) were moved to the `advanced` suite.
+> `table-anonymous-objects-209` was fixed in Phase 3L via body `display:table` detection + UA margin injection.
 
 ### Category 5: List-Item Display — ✅ MOSTLY COMPLETED
 
@@ -214,8 +217,9 @@ This isn't infinite recursion (it's bounded by tree depth), but it's **exponenti
 **Remaining:**
 - `text-transform`: uppercase/lowercase text width (1 test)
 - `white-space-bidirectionality`: bidi text handling (1 test)
-- Inline-block non-replaced height (2 tests)
 - Various box model edge cases (3 tests)
+
+> **Note:** `inline-block-non-replaced-height-001` was fixed in Phase 3L via strut descent calculation in the IFC path.
 
 ---
 
@@ -313,17 +317,19 @@ Complex float stacking rules (CSS 2.1 §9.5.1 rules 3, 6, 7) and float-relative 
 - Column groups wrap child columns; empty group = 1 implicit column
 - Column heights set to table content height in post-processing
 
-### Remaining Table Failures (13 baseline)
+### Remaining Table Failures (8 baseline)
 
 | Sub-category | Count | Notes |
 |-------------|-------|-------|
-| `table-anonymous-objects-*` | 8 | 4 require JS DOM manipulation (039/045/047/049), 4 have font-metrics issues (040/046/048/050) |
-| `table-anonymous-objects-209` | 1 | `<body>` as `display:table` — should shrink-to-fit, not use viewport width |
+| `table-anonymous-objects-*` | 4 | Font-metrics issues (040/046/048/050) |
 | `table-layout-applies-to-016` | 1 | `display:none` comparison edge case |
 | `table-height-algorithm-010` | 1 | Multi-column content-based width distribution (2-column table) |
 | `table_013_html_table` | 1 | HTML `<table>` element parsing nuances (colspan width distribution) |
 | `table_019_vertical_alignment` | 1 | Additional VA edge cases (font-metrics) |
 | `table_020_overflow_wrapping` | 1 | Overflow and text wrapping in cells (font-metrics) |
+
+> **Note:** 4 JS-dependent tests (`table-anonymous-objects-039/-045/-047/-049`) were moved to `test/layout/data/advanced/`.
+> `table-anonymous-objects-209` was fixed in Phase 3L (body `display:table` detection).
 
 ---
 
@@ -364,6 +370,7 @@ The 42px width difference is the list marker's contribution. The child-count dif
 - ✅ `<br>` element handling — line-break views cause text splitting
 - ✅ `white-space: pre` — whitespace preserved in pre-formatted contexts
 - ✅ Basic whitespace text node preservation
+- ✅ IFC whitespace text nodes between inline-blocks (Phase 3L)
 
 ### Remaining (need full IFC)
 
@@ -395,7 +402,6 @@ Most width mismatches were fixed as side effects of:
 | Pattern | Count | Status |
 |---------|-------|--------|
 | `text-transform` width | 1 | Deferred — needs text transform before measurement |
-| Inline-block shrink-to-fit | 1 | `inline-block-non-replaced-height-001` (line-height half-leading gap) |
 
 ### 10.2 Height — Partially Addressed
 
@@ -406,8 +412,9 @@ Several height fixes came from table height distribution and VA work.
 | Pattern | Count | Status |
 |---------|-------|--------|
 | `line-height` precision | 2 | `issue-font-handling.html`, `line-height-test.html` (proportional font model) |
-| Inline-block content height | 1 | `inline-block-non-replaced-height-001.htm` (line-height half-leading: 96→100) |
 | `overflow: hidden` height | 1 | `box_012_overflow.html` (edge case) |
+
+> **Note:** `inline-block-non-replaced-height-001` was fixed in Phase 3L via strut descent in the IFC path.
 
 ---
 
@@ -475,26 +482,27 @@ The depth guard was added as a simple parameterized counter with `max-layout-dep
 | **3A: Root margin** | ~20 | ✅ Complete |
 | **3B: Font-size zero** | 23 | ✅ Complete |
 | **3C: Float layout** | ~56 | ✅ Mostly complete (7 edge cases remain) |
-| **3D: Table layout** | 60 | ✅ Major implementation (13 edge cases remain) |
+| **3D: Table layout** | 60 | ✅ Major implementation (9 edge cases remain in baseline) |
 | **3E: List-item display** | 9 | ✅ Mostly complete (2 remain) |
 | **3G: Block width/height** | ~12 | ✅ Partially addressed |
 | **3H: Flex wrap-reverse & gaps** | 8 | ✅ Complete |
 | **3H: Grid fixes** | 6 | ✅ Mostly complete (2 edge cases remain) |
 | **3J: Table cleanup** | 8 | ✅ Complete (anonymous wrapping, table-layout scope) |
 | **3K: Block-in-inline & misc** | 3 | ✅ Complete (strut removal, inline-block height) |
+| **3L: IFC + body-table + strut** | 3 | ✅ Complete (IFC path, body display:table, inline-block strut descent) |
 
-### Remaining Work (40 baseline failures)
+### Remaining Work (33 baseline failures)
 
 ```
-Table anonymous objects (8+1) ── 4 JS-dependent, 4 font-metrics, 1 body-as-table
+Table anonymous objects (4)   ── 4 font-metrics (040/046/048/050)
 Float complex (7)             ── Multi-float stacking, relative combo, text wrapping
-Inline/block misc (5)         ── Whitespace nodes, HTML parser, inline-block, ::before
+Inline/block misc (2)         ── blocks-017 (4px y pre-existing), ::before
 Flex nested (4)               ── Nested blocks, lists, table content, <br> handling
 Font-metrics/text (4)         ── text-transform, bidi, font handling, line-height
 Box model (3)                 ── width/height, centering, overflow
 Grid (2)                      ── vertical writing-mode, malformed HTML
 List-style-position (2)       ── Inside vs outside marker placement
-Table misc (4)                ── height-algorithm, HTML parsing, VA, overflow
+Table misc (5)                ── height-algorithm, HTML parsing, VA, overflow, display:none
 ```
 
 ### Remaining Failure Root-Cause Analysis
@@ -502,17 +510,24 @@ Table misc (4)                ── height-algorithm, HTML parsing, VA, overflo
 | Root Cause               | Count | Tests                                                                                                                                                                                                                                                                                                                                                                                | Tractability                                                                 |
 | ------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | **Font-metrics**         | 16    | before-content-display-005, box_001, box_008, flex_012, flex_020, floats-wrap-bfc-005, table_019, table_020, text-transform-003, white-space-bidirectionality-001, table-anonymous-objects-040/-046/-048/-050, list-style-position-001/-002                                                                                                                                          | Platform-dependent text width/height — intractable without real font shaping |
-| **Structural/Tractable** | 9     | baseline_820 (whitespace text nodes), blocks-017 (HTML parser `<tbody>`), floats-001 (float exclusion for IFC), flex_014 (`<br>` + metrics), inline-block-non-replaced-height-001 (line-height strut), table-anonymous-objects-209 (body as table), table-layout-applies-to-016 (display:none), grid_aspect_ratio_fill_child_max_height (writing-mode), grid_span_2 (malformed HTML) | Potentially fixable with targeted work                                       |
+| **Structural/Tractable** | 6     | blocks-017 (HTML parser `<tbody>` — 4px y offset pre-existing), floats-001 (float exclusion for IFC), flex_014 (`<br>` + metrics), table-layout-applies-to-016 (display:none), grid_aspect_ratio_fill_child_max_height (writing-mode), grid_span_2 (malformed HTML) | Potentially fixable with targeted work                                       |
 | **Complex layout**       | 7     | floats-104, position_001/-002/-003/-013 (float text wrapping), table-height-algorithm-010 (rowspan distribution), table_013 (colspan width)                                                                                                                                                                                                                                          | Requires significant new infrastructure                                      |
-| **JS-dependent**         | 4     | table-anonymous-objects-039/-045/-047/-049                                                                                                                                                                                                                                                                                                                                           | Require JavaScript DOM manipulation — impossible in static analysis          |
 | **Edge-case**            | 4     | box_012 (overflow panels), flex_011 (anon block in flex), issue-font-handling (font fallback), line-height-test (proportional font model)                                                                                                                                                                                                                                            | Low priority                                                                 |
+
+> **Note:** 4 JS-dependent tests (`table-anonymous-objects-039/-045/-047/-049`) were moved to the `advanced` suite as they require JavaScript DOM manipulation and cannot be evaluated in static layout analysis.
 
 ### Next Priority Actions
 
-1. **Whitespace text node generation** — would fix `baseline_820_inline_block` and potentially other inline formatting tests
-2. **HTML parser `<tbody>` auto-insertion** — would fix `blocks-017` structural mismatch
-3. **`table-anonymous-objects-209`** — body as `display:table` should shrink-to-fit, not use viewport width
-4. **`inline-block-non-replaced-height-001`** — inline-block auto-height should include line-height half-leading (96→100)
+1. ~~**Whitespace text node generation**~~ — ✅ FIXED in Phase 3L: IFC path in block layout handles inline-block children with whitespace text nodes. `baseline_820_inline_block` now passes.
+2. ~~**HTML parser `<tbody>` auto-insertion**~~ — ⚠️ MOSTLY FIXED in Phase 3L: Auto-insert-tbody structural fix works + anon-table flattening in comparator. `blocks-017` has 4px y offset remaining (pre-existing border-box counting difference).
+3. ~~**`table-anonymous-objects-209`**~~ — ✅ FIXED in Phase 3L: Body `display:table` detection in both box-tree builder and expected-layout finder, with UA margin injection (`8px`).
+4. ~~**`inline-block-non-replaced-height-001`**~~ — ✅ FIXED in Phase 3L: Strut descent calculation in IFC path with multiple guards (baseline-aligned, no text children, bottom baseline IB detection).
+
+**New Priority Actions (Phase 4):**
+1. **Float text wrapping (IFC)** — would fix `position_001/-002/-003` and potentially `floats-001` (requires float exclusion zones in inline formatting context)
+2. **`writing-mode: vertical-lr`** — would fix `grid_aspect_ratio_fill_child_max_height` + 3 flex + 3 grid tests (cross-cutting axis swap)
+3. **`flex_011_nested_blocks`** — anonymous block wrapping in flex container
+4. **`table-layout-applies-to-016`** — `display:none` comparison edge case
 
 ---
 
@@ -523,12 +538,13 @@ Table misc (4)                ── height-algorithm, HTML parsing, VA, overflo
 | Feature | Tests Blocked | Reason |
 |---------|--------------|--------|
 | `writing-mode: vertical-lr` | 3 flex + 3 grid + 1 baseline | Cross-cutting: requires axis swap in all layout modes |
-| Full Inline Formatting Context | ~3 | Complex: inline box splitting, baseline alignment |
+| Full Inline Formatting Context | ~3 | Partially implemented (inline-block IFC path); full IFC needs inline box splitting, float exclusion zones |
 | Non-Ahem font precision | ~16 | Would need a real font shaping engine; platform-dependent |
 | `text-transform` width changes | 1 | Requires text transformation before measurement |
-| JS-dependent test references | 4 | table-anonymous-objects tests requiring DOM manipulation |
 | Complex float stacking | ~3 | CSS 2.1 §9.5.1 rules 3, 6, 7 with inline content |
 | Float text wrapping | ~4 | Requires float exclusion zones in inline formatting context |
+
+> **Moved to advanced suite:** 4 JS-dependent tests (`table-anonymous-objects-039/-045/-047/-049`) that require JavaScript DOM manipulation were relocated from `test/layout/data/baseline/` to `test/layout/data/advanced/`.
 
 ### Architecture Notes
 
@@ -538,14 +554,17 @@ Table misc (4)                ── height-algorithm, HTML parsing, VA, overflo
 - **Anonymous table wrapping (CSS 2.2 §17.2.1)**: Two-step algorithm: (1) wrap consecutive non-proper-table children in anonymous table-row, (2) within anonymous rows, wrap non-table-cell children in anonymous table-cell. The comparator uses two-tier flattening — `anon-row-`/`anon-cell-` always flattened with coordinate offset adjustment; `anon-table-`/`anon-tbody-` only flattened on child-count mismatch.
 - **Block-in-inline struts**: Empty anonymous inline fragments (before first block child / after last block child) should have **zero height** — no strut injection needed. Non-empty fragments get height from their inline content naturally.
 - **Grid aspect-ratio + max-constraint**: When stretching with aspect-ratio, derive the cross dimension first, then cap by max-height/max-width, then re-derive the stretch dimension if capped.
+- **Inline Formatting Context (IFC) in block layout**: When a block's visible children are all inline-level AND at least one is `inline-block`, the block delegates to `layout-inline-children` (from `layout-inline.rkt`). This handles line-breaking, text-align per line, text-indent on first line, and strut descent for baseline alignment. Whitespace text nodes between inline-blocks generate single-space text views. Out-of-flow children (abs-pos/fixed) are excluded from whitespace stripping decisions but preserved in the final child list.
+- **Strut descent in IFC**: Only applied when: (1) has inline-block children, (2) no text children, (3) all children baseline-aligned, (4) at least one IB has a bottom baseline (no in-flow line boxes). Uses descent-ratio (Times 0.216, Arial 0.212) + half-leading, clamped to `max(0, ...)`.
+- **nth-child counter**: `text-node-whitespace` and `text-node-raw` entries in the box tree must NOT increment the CSS nth-child counter in `apply-style-rules`.
 
 ---
 
-## 15. Appendix A: All Remaining Failing Tests (40 baseline)
+## 15. Appendix A: All Remaining Failing Tests (33 baseline)
 
-### Table Layout (13 tests)
+### Table Layout (8 tests)
 
-- `table-anonymous-objects-039.htm`, `-040.htm`, `-045.htm` through `-050.htm`, `-209.htm` — Complex anonymous table box generation (4 JS-dependent: 039/045/047/049; 4 font-metrics: 040/046/048/050; 1 body-as-table: 209)
+- `table-anonymous-objects-040.htm`, `-046.htm`, `-048.htm`, `-050.htm` — Anonymous table box generation (font-metrics mismatches)
 - `table-layout-applies-to-016.htm` — `display:none` comparison edge case
 - `table-height-algorithm-010.htm` — Multi-column content-based width (rowspan distribution)
 - `table_013_html_table.html` — HTML `<table>` colspan width distribution
@@ -571,12 +590,10 @@ Table misc (4)                ── height-algorithm, HTML parsing, VA, overflo
 - `grid_aspect_ratio_fill_child_max_height.html` — Requires `writing-mode: vertical-lr`
 - `grid_span_2_max_content_auto_indefinite_hidden.html` — Malformed HTML (span + max-content)
 
-### Inline/Block Misc (5 tests)
+### Inline/Block Misc (2 tests)
 
-- `baseline_820_inline_block.html` — Missing whitespace text nodes between inline-blocks (child-count 7→4)
 - `before-content-display-005.htm` — `::before` with display change (font-metrics)
-- `blocks-017.htm` — HTML parser not auto-inserting `<tbody>` (structural mismatch)
-- `inline-block-non-replaced-height-001.htm` — Inline-block auto-height should include line-height half-leading (96→100)
+- `blocks-017.htm` — HTML parser auto-inserts `<tbody>` (structural fix works), 4px y offset remaining (pre-existing border-box counting)
 
 ### Box Model (3 tests)
 
@@ -619,7 +636,7 @@ Key achievements from Phase 2:
 
 ### Phase 3 Progress (Feb 17-18, 2026)
 
-**1785/1825 baseline (97.8%), ~2271/~2435 cross-suite (~93.3%)**
+**1788/1821 baseline (98.2%), ~2274/~2435 cross-suite (~93.4%)**
 
 #### Checkpoint Progression (baseline failures)
 
@@ -653,6 +670,7 @@ Key achievements from Phase 2:
 | `failures_1782` | 43 | 20 | Flex wrap-reverse, yoga gaps, grid order/masonry/fr-span, table-layout-applies-to scope, fixed table layout first-row, white-space:nowrap, inline-block margin-box height, heading regex fix |
 | `failures_1784` | 41 | 2 | Anonymous table wrapping (CSS 2.2 §17.2.1), block-in-inline strut removal |
 | **`failures_1785`** | **40** | **1** | Grid aspect-ratio + max-height constraint (CSS Grid Level 2 §6.6.1) |
+| **`failures_1788`** | **33** | **3** | Phase 3L: IFC path for inline-block children (baseline_820), body `display:table` detection (table-anonymous-objects-209), strut descent in IFC (inline-block-non-replaced-height-001) |
 
 #### Key Implementation Milestones
 
@@ -685,11 +703,16 @@ Key achievements from Phase 2:
 15. **Grid aspect-ratio + max-height** (Feb 18): Grid stretch pre-computation caps derived dimension by `max-height`/`max-width` constraints before injecting stretch size.
 16. **Inline-block margin-box height** (Feb 18): Inline-block height computation uses margin-box instead of border-box.
 17. **HTML comment & heading regex** (Feb 18): Fixed comment parsing in HTML import and heading element regex pattern.
+18. **Inline Formatting Context (IFC) in block layout** (Feb 18): When all visible children of a block are inline-level and at least one is `inline-block`, the block delegates to `layout-inline-children`. Handles line-breaking, text-align per line, text-indent on first line. Whitespace text nodes between inline-blocks generate single-space text views. Out-of-flow children excluded from whitespace stripping but preserved in child list. Fixed nth-child counter bug (skip `text-node-whitespace`/`text-node-raw`), auto-insert-tbody whitespace handling, and multiple IFC detection refinements to avoid regressions. `baseline_820_inline_block` now passes.
+19. **Body `display:table` detection** (Feb 18): `reference-import.rkt` now detects `<body>` with `display:table` from CSS rules, creates synthetic body element with UA margins (`"8px"`), and `find-test-root` uses body as layout root with html's offsets. `table-anonymous-objects-209` now passes.
+20. **Strut descent in IFC** (Feb 18): Added strut descent calculation for inline-block containers with multiple guards: (1) has inline-block children, (2) no text children, (3) all baseline-aligned, (4) at least one IB has bottom baseline (no in-flow line boxes). Uses font descent-ratio + half-leading, clamped to `max(0, ...)`. Text line-contribution includes half-leading (`ch + 2*text-half-leading`). `inline-block-non-replaced-height-001` now passes.
+21. **Auto-insert-tbody whitespace** (Feb 18): Whitespace text nodes between `<tr>` elements no longer break consecutive TR run detection in `auto-insert-tbody`. Fixed 5 table test regressions.
+22. **Compare-layouts anon-table flattening** (Feb 18): `compare-layouts.rkt` now always flattens `anon-table-` prefixed wrappers (CSS §17.2.1 anonymous table objects) regardless of child-count match, fixing `blocks-017` structural comparison.
 
-#### Tests Fixed (135 from Phase 2 starting point)
+#### Tests Fixed (138 from Phase 2 starting point)
 
 <details>
-<summary>Click to expand full list of 135 newly-passing tests</summary>
+<summary>Click to expand full list of 138 newly-passing tests</summary>
 
 **Table (60 tests):**
 `fixed-table-layout-001`, `table-001`, `table_001_basic_layout`, `table_002_cell_alignment`, `table_006_border_collapse`, `table_007_empty_cells`, `table_011_colspan`, `table_012_rowspan`, `table_016_empty_cells_hide`, `table-anonymous-block-004` through `-010`, `-015` through `-017`, `table-anonymous-objects-000`, `table-caption-001`, `table-caption-003`, `table-caption-optional-001`, `table-cell-001`, `table-column-001`, `table-column-group-001`, `table-column-rendering-003`, `-004`, `table-footer-group-001`, `-002`, `-004`, `table-header-group-001`, `-002`, `table-height-algorithm-001` through `-004`, `-008`, `-009`, `table-layout-003`, `table-layout-applies-to-002` through `-014`, `table-layout-inherited-001`, `table-layout-property-001`, `table-margin-004`, `table-row-001`, `table-row-group-001`
@@ -709,8 +732,8 @@ Key achievements from Phase 2:
 **Text/White-space (8 tests):**
 `baseline_501_line_breaks`, `baseline_502_text_wrapping`, `white-space-008`, `white-space-applies-to-012`, `-013`, `white-space-processing-054`, `-056`, `text-align-004`, `text-indent-applies-to-012`, `-013`, `text-indent-inherited-001`
 
-**Block/Inline (3 tests):**
-`block-in-inline-003`, `inline-block-non-replaced-height-002`, `block-non-replaced-width-007`
+**Block/Inline (6 tests):**
+`block-in-inline-003`, `inline-block-non-replaced-height-002`, `block-non-replaced-width-007`, `baseline_820_inline_block`, `inline-block-non-replaced-height-001`, `table-anonymous-objects-209`
 
 **Other:**
 `after-content-display-002`, `-003`, `before-content-display-003`, `box_002_margins`, `box_005_box_sizing`, `grid_014_overlapping`, `inline-block-height-001`, `inline-block-height-001-ref`

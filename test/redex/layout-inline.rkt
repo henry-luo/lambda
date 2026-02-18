@@ -40,7 +40,7 @@
      (define bm (extract-box-model styles avail-w))
      (define max-content-w (- avail-w (horizontal-pb bm)))
 
-     (define-values (child-views total-height)
+     (define-values (child-views total-height _line-widths)
        (layout-inline-children children max-content-w bm dispatch-fn))
 
      ;; inline boxes shrink-wrap to their content (CSS 2.2 §9.2.2)
@@ -64,9 +64,10 @@
 
 ;; lay out inline children into line boxes.
 ;; simple greedy line-breaking algorithm.
+;; avail-h: available height for percentage resolution (or #f for indefinite)
 ;;
-;; returns (values child-views total-height)
-(define (layout-inline-children children max-line-width parent-bm dispatch-fn)
+;; returns (values child-views total-height line-widths)
+(define (layout-inline-children children max-line-width parent-bm dispatch-fn [avail-h #f])
   (define offset-x (+ (box-model-padding-left parent-bm) (box-model-border-left parent-bm)))
   (define offset-y (+ (box-model-padding-top parent-bm) (box-model-border-top parent-bm)))
 
@@ -83,6 +84,9 @@
       ;; proportional: use font metrics ratio
       [else (* 1.15 fs)]))
 
+  ;; track cursor-based width of each completed line (mutable accumulator)
+  (define completed-line-widths '())
+
   (let loop ([remaining children]
              [current-x 0]
              [current-y 0]
@@ -90,7 +94,9 @@
              [views '()])
     (cond
       [(null? remaining)
-       (values (reverse views) (+ current-y line-height))]
+       ;; current-x is the cursor-based width of the last (current) line
+       (values (reverse views) (+ current-y line-height)
+               (reverse (cons current-x completed-line-widths)))]
       [else
        (define child (car remaining))
 
@@ -118,6 +124,7 @@
           (define br-view
             `(view ,br-id ,(+ offset-x current-x) ,(+ offset-y current-y) 0 ,br-height ()))
           (define new-line-height (max line-height br-height))
+          (set! completed-line-widths (cons current-x completed-line-widths))
           (loop (cdr remaining)
                 0
                 (+ current-y new-line-height)
@@ -134,10 +141,16 @@
             (define laid-out (dispatch-fn child text-avail))
             (define cw (view-width laid-out))
             (define ch (view-height laid-out))
+            ;; CSS 2.2 §10.6.1: text view height = font-size (em-box), but the
+            ;; line box contribution includes half-leading above and below.
+            ;; view-y stores half-leading; line contribution = ch + 2*half-leading
+            (define text-half-leading (view-y laid-out))
+            (define line-contribution (+ ch (* 2 text-half-leading)))
             ;; check if text fits on current line
             (cond
               [(and (> current-x 0) (> (+ current-x cw) max-line-width))
                ;; wrap to next line
+               (set! completed-line-widths (cons current-x completed-line-widths))
                (set! current-x 0)
                (set! current-y (+ current-y line-height))
                (set! line-height 0)]
@@ -147,26 +160,38 @@
                                 (+ offset-x current-x)
                                 (+ offset-y current-y)))
             (set! current-x (+ current-x cw))
-            (set! line-height (max line-height ch))
+            (set! line-height (max line-height line-contribution))
             positioned]
 
            ;; inline-block: lay out as block, then place inline
+           ;; CSS 2.2 §10.3.9: inline-block boxes have margins that affect inline placement
            [`(inline-block ,id ,styles ,children-inner)
-            (define child-avail `(avail (definite ,max-line-width) indefinite))
+            (define child-avail
+              `(avail (definite ,max-line-width)
+                      ,(if avail-h `(definite ,avail-h) 'indefinite)))
             (define laid-out (dispatch-fn child child-avail))
             (define cw (view-width laid-out))
             (define ch (view-height laid-out))
+            ;; extract margins for inline-block positioning
+            (define ib-bm (extract-box-model styles max-line-width))
+            (define ml (box-model-margin-left ib-bm))
+            (define mr (box-model-margin-right ib-bm))
+            (define mt (box-model-margin-top ib-bm))
+            (define mb (box-model-margin-bottom ib-bm))
+            ;; margin-box width for line wrapping check
+            (define margin-box-w (+ ml cw mr))
             ;; wrap if needed
-            (when (and (> current-x 0) (> (+ current-x cw) max-line-width))
+            (when (and (> current-x 0) (> (+ current-x margin-box-w) max-line-width))
+              (set! completed-line-widths (cons current-x completed-line-widths))
               (set! current-x 0)
               (set! current-y (+ current-y line-height))
               (set! line-height 0))
             (define positioned
               (set-view-position laid-out
-                                (+ offset-x current-x)
-                                (+ offset-y current-y)))
-            (set! current-x (+ current-x cw))
-            (set! line-height (max line-height ch))
+                                (+ offset-x current-x ml)
+                                (+ offset-y current-y mt)))
+            (set! current-x (+ current-x margin-box-w))
+            (set! line-height (max line-height (+ mt ch mb)))
             positioned]
 
            ;; nested inline
@@ -177,6 +202,7 @@
             (define cw (view-width laid-out))
             (define ch (view-height laid-out))
             (when (and (> current-x 0) (> (+ current-x cw) max-line-width))
+              (set! completed-line-widths (cons current-x completed-line-widths))
               (set! current-x 0)
               (set! current-y (+ current-y line-height))
               (set! line-height 0))
@@ -195,6 +221,7 @@
               (define cw (view-width laid-out))
               (define ch (view-height laid-out))
               (when (and (> current-x 0) (> (+ current-x cw) max-line-width))
+                (set! completed-line-widths (cons current-x completed-line-widths))
                 (set! current-x 0)
                 (set! current-y (+ current-y line-height))
                 (set! line-height 0))
