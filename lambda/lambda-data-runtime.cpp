@@ -289,6 +289,29 @@ Item list_end(List *list) {
     }
 }
 
+// create a plain array without frame management (for auxiliary arrays like sort keys)
+Array* array_plain() {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    return arr;
+}
+
+// drop first n items from array in-place (for order by + offset)
+void array_drop_inplace(Array* arr, int64_t n) {
+    if (n <= 0) return;
+    if (n >= arr->length) { arr->length = 0; return; }
+    for (int64_t i = 0; i < arr->length - n; i++) {
+        arr->items[i] = arr->items[i + n];
+    }
+    arr->length -= n;
+}
+
+// limit array to first n items in-place (for order by + limit)
+void array_limit_inplace(Array* arr, int64_t n) {
+    if (n < 0) n = 0;
+    if (n < arr->length) arr->length = n;
+}
+
 // create a spreadable array for for-expression results
 Array* array_spreadable() {
     log_debug("array_spreadable: creating spreadable array");
