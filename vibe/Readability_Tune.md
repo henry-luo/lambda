@@ -158,3 +158,129 @@ The `where text_len >= 25` filter in `score_candidates` does full text extractio
 
 ### 7. Reduce `should_clean_conditionally` cost
 This function (line ~1175) calls `find_all` 7 times per element (p, img, li, input, embed, object, iframe) + `collect_by_tags` for headings + `get_link_density` + `get_text_density`. For pages with many containers, this is called during `build_result` on every child of the article — multiplicative with container count.
+
+---
+
+## Phase 1 Caching Results (VMap)
+
+### Changes Applied
+
+Three caching optimizations were implemented using Lambda's new `map([k1,v1,...])` dynamic map (VMap) support:
+
+1. **Meta tag index** (`build_meta_index`) — Single `find_all(doc, "meta")` call builds a VMap keyed by normalized meta name/property. All `extract_metadata` lookups become O(1) VMap reads instead of repeated tree traversals (addresses optimization #2).
+
+2. **Text cache in `score_candidates`** — Builds a VMap with element references as keys and pre-computed `get_inner_text` results as values. The scoring loop and `get_link_density_cached` read from this cache instead of recomputing text (addresses optimization #1 partially — within `score_candidates`).
+
+3. **Combined `collect_by_tags`** — Replaces 4× `find_all(body, tag)` with a single `collect_by_tags(body, ['div', 'section', 'article', 'main'])` recursive walk (addresses optimization #5).
+
+### Before vs After (21 slowest tests)
+
+| Test | Before | After | Speedup |
+|------|-------:|------:|--------:|
+| mozilla-1 | 40.8s | 21.8s | 1.9x |
+| mercurial | 28.4s | 17.7s | 1.6x |
+| lwn-1 | 24.7s | 14.8s | 1.7x |
+| google-sre-book-1 | 24.5s | 14.0s | 1.7x |
+| herald-sun-1 | 24.1s | 12.2s | 2.0x |
+| dropbox-blog | 23.2s | 11.8s | 2.0x |
+| keep-tabular-data | 19.7s | 11.9s | 1.7x |
+| firefox-nightly-blog | 13.9s | 7.3s | 1.9x |
+| ehow-1 | 13.0s | 5.9s | 2.2x |
+| tmz-1 | 11.7s | 5.0s | 2.3x |
+| gitlab-blog | 11.6s | 6.2s | 1.9x |
+| simplyfound-1 | 11.3s | 6.2s | 1.8x |
+| lemonde-1 | 10.3s | 4.1s | 2.5x |
+| v8-blog | 9.9s | 6.2s | 1.6x |
+| ars-1 | 9.8s | 4.4s | 2.2x |
+| ebb-org | 9.5s | 4.4s | 2.2x |
+| ietf-1 | 9.1s | 4.0s | 2.3x |
+| mozilla-2 | 8.4s | 4.1s | 2.1x |
+| hukumusume | 7.4s | 4.5s | 1.6x |
+| heise | 7.1s | 2.2s | 3.3x |
+| la-nacion | 6.7s | 2.7s | 2.5x |
+
+### Summary
+
+| Metric | Before | After | Change |
+|--------|-------:|------:|-------:|
+| Total suite time | 371s | 203s | **1.8x faster** |
+| Tests >5s | 21 | 13 | −8 |
+| Tests >2s | 26 | 23 | −3 |
+| Average | 5.89s | 3.23s | **1.8x** |
+| Median | 0.89s | 0.66s | 1.3x |
+| Max (mozilla-1) | 40.8s | 21.8s | **1.9x** |
+
+Biggest individual speedups: **heise** (3.3x), **lemonde-1** (2.5x), **la-nacion** (2.5x), **tmz-1** (2.3x), **ietf-1** (2.3x), **ehow-1** (2.2x).
+
+### Remaining Bottlenecks
+
+The text cache only covers `score_candidates` — `get_inner_text` is still called redundantly in `should_clean_conditionally` (during `build_result`), `find_byline_in_body`, and `calc_para_score`. Extending the cache to these call sites would further reduce the O(n²) behavior.
+
+Other potential gains from the original list remain unaddressed: redundant body traversals (#3), bounded-length text extraction (#4), pattern pre-compilation (#6), and `should_clean_conditionally` cost (#7).
+
+---
+
+## Phase 2 Investigation: Caching get_inner_text() Beyond Containers
+
+**Goal:** Extend the container-only VMap cache (Phase 1) to cover ALL `get_inner_text` call sites — paragraphs in `calc_para_score`, links in `get_link_density`, and all other body elements.
+
+### Approaches Tested
+
+#### 1. Naive Body-Wide Cache (O(n²) — REJECTED)
+
+Pre-collect all body elements via `collect_all_elements(body)`, then call `get_inner_text(e, true)` independently for each. Build VMap from all pairs.
+
+**Problem:** Each `get_inner_text` call recursively traverses an element's subtree. For overlapping container subtrees, the same nodes are visited repeatedly. Total work: O(n × avg_subtree_size) ≈ O(n²).
+
+**Result — mozilla-1:** 24.4s (worse than Phase 1's 21.8s). The upfront cost of computing text for all 882 elements exceeds the savings from cached lookups.
+
+#### 2. Bottom-Up Text Computation (O(n×depth) — MIXED)
+
+Single recursive post-order traversal composing each element's raw text from its children's already-computed text. Each element visited exactly once. Returns `{raw, pairs}` where `raw` is used for parent composition and `pairs` accumulates `[element, normalized_text]` for VMap construction.
+
+**Key correctness point:** Must compose from RAW child text (preserving inter-child whitespace), then normalize only at cache storage. Normalizing at each level loses whitespace between children.
+
+**Problem:** Pair accumulation `[for (r in children) for (p in r.pairs) p]` copies all descendant pairs at each node. Total work: O(n × tree_depth). For deep trees, this approaches O(n²).
+
+| Test | Phase 1 | Bottom-Up | Baseline |
+|------|--------:|----------:|---------:|
+| mozilla-1 (depth 13, 883 elems) | 21.8s | **20.7s** ✓ | 40.8s |
+| mercurial (depth ?, 65KB) | 17.7s | **15.2s** ✓ | 28.4s |
+| lwn-1 (depth 19, 698 elems) | **14.8s** | 24.3s ✗ | 24.7s |
+
+**Observation:** Bottom-up helps wide-shallow trees (mozilla-1: −1.1s, mercurial: −2.5s) but devastates deep trees (lwn-1: +9.5s, back to baseline). lwn-1's depth-19 tree causes excessive pair array copying.
+
+#### 3. Selective Block-Level Caching (O(n×depth) reduced — INSUFFICIENT)
+
+Modified bottom-up to only add block-level elements (div, p, section, h1-h6, td, etc.) to the pairs array. Inline elements (span, a, em, strong) still participate in text computation but don't generate pair entries. Reduces total pairs from ~700 to ~200.
+
+**Result — lwn-1:** 23.8s (only 0.5s better than full bottom-up, still 9s worse than Phase 1). The overhead isn't just pair accumulation — it's the recursive `{raw, pairs}` map allocation + `str_join` at every node of the depth-19 tree.
+
+#### 4. Link Text Cache Addition
+
+Added `find_all(body, "a")` to pre-compute link text alongside container text. Intended to eliminate per-link `get_inner_text` calls inside `get_link_density_cached`.
+
+**Result:** Net negative — the upfront traversal cost (~1s) exceeded savings from cached link text lookups. Links are small (leaf-like elements), so their text is cheap to compute per-access.
+
+### Root Cause: Pure Functional Caching Limitations
+
+In Lambda's `fn` context (pure functions, no mutable state), comprehensive text caching faces a fundamental tradeoff:
+
+| Approach | Complexity | Works When |
+|----------|-----------|------------|
+| Independent per-element | O(n²) | Never efficient for all elements |
+| Bottom-up with pair accumulation | O(n × depth) | Wide, shallow trees only |
+| Container-only (Phase 1) | O(n × containers) | Always — containers ≪ n |
+
+Without mutable memoization (prohibited in `fn`), there is no O(n) way to build a flat `element → text` cache for all elements. The container-only approach is optimal because containers are the most expensive elements to compute (largest subtrees) while being few in number.
+
+### Conclusion
+
+**Phase 1 container-only cache remains the optimal approach.** Further `get_inner_text` caching was attempted via four strategies but none improved the overall suite performance. The remaining scoring loop cost is dominated by inherent algorithmic complexity (O(containers × children_per_container) traversals) rather than redundant text computation.
+
+| Metric | Baseline | Phase 1 | Best Phase 2 Attempt |
+|--------|-------:|------:|------:|
+| mozilla-1 | 40.8s | 21.8s | 20.7s (bottom-up) |
+| mercurial | 28.4s | 17.7s | 15.2s (bottom-up) |
+| lwn-1 | 24.7s | **14.8s** | 24.3s (bottom-up, regression) |
+| Total suite | 371s | **203s** | 206s (bottom-up, net negative) |
