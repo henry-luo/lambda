@@ -411,6 +411,38 @@
          (define stretch-cell-w (max 0 (- cell-w ml mr)))
          (define stretch-cell-h (max 0 (- cell-h mt mb)))
 
+         ;; CSS aspect-ratio + max-height/max-width constraint on stretch:
+         ;; When stretching with aspect-ratio, max-height can limit the width
+         ;; and max-width can limit the height through the ratio.
+         (define effective-stretch-w
+           (if (and stretch-w item-has-aspect-ratio)
+               (let* ([ar item-has-aspect-ratio]
+                      ;; derive height from stretched width via aspect-ratio
+                      [derived-h (/ stretch-cell-w ar)]
+                      ;; apply max-height constraint
+                      [mh-val (get-style-prop item-styles 'max-height #f)]
+                      [mh-px (resolve-size-value mh-val cell-h)]
+                      [capped-h (if mh-px (min derived-h mh-px) derived-h)])
+                 ;; if max-height capped the height, re-derive width
+                 (if (< capped-h derived-h)
+                     (* capped-h ar)
+                     stretch-cell-w))
+               stretch-cell-w))
+         (define effective-stretch-h
+           (if (and stretch-h item-has-aspect-ratio)
+               (let* ([ar item-has-aspect-ratio]
+                      ;; derive width from stretched height via aspect-ratio
+                      [derived-w (* stretch-cell-h ar)]
+                      ;; apply max-width constraint
+                      [mw-val (get-style-prop item-styles 'max-width #f)]
+                      [mw-px (resolve-size-value mw-val cell-w)]
+                      [capped-w (if mw-px (min derived-w mw-px) derived-w)])
+                 ;; if max-width capped the width, re-derive height
+                 (if (< capped-w derived-w)
+                     (/ capped-w ar)
+                     stretch-cell-h))
+               stretch-cell-h))
+
          ;; lay out child with cell dimensions
          ;; Per CSS Grid: the grid cell is the item's containing block.
          ;; Available width is always the cell width (even for non-stretched items),
@@ -418,7 +450,7 @@
          ;; width, the item shrinks to content within this constraint.
          (define actual-box
            (if (or stretch-w stretch-h)
-               (inject-stretch-size (grid-item-box item) stretch-w stretch-cell-w stretch-h stretch-cell-h)
+               (inject-stretch-size (grid-item-box item) stretch-w effective-stretch-w stretch-h effective-stretch-h)
                (grid-item-box item)))
          (define avail-w-for-child `(definite ,cell-w))
          (define avail-h-for-child `(definite ,cell-h))

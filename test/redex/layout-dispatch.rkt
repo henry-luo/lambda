@@ -250,7 +250,14 @@
 
      ;; detect intrinsic sizing mode: min-content forces maximum wrapping (avail-w → 0)
      (define is-min-content? (eq? (cadr avail) 'av-min-content))
-     (define effective-avail-w (if is-min-content? 0 avail-w))
+     ;; CSS 2.2 §16.6: white-space:nowrap prevents text from wrapping
+     (define ws-val (get-style-prop styles 'white-space #f))
+     (define is-nowrap? (eq? ws-val 'nowrap))
+     (define effective-avail-w
+       (cond
+         [is-min-content? 0]
+         [is-nowrap? #f]  ;; no width constraint → text won't wrap
+         [else avail-w]))
 
      ;; detect font type: Ahem (Taffy tests) vs proportional (CSS2.1 tests)
      (define font-type (get-style-prop styles 'font-type 'ahem))
@@ -710,10 +717,6 @@
      (define total-h-spacing (* (+ num-columns 1) bs-h))
      (define cell-available-w (max 0 (- content-w total-h-spacing)))
 
-     ;; DEBUG: print table layout values
-     (eprintf "TABLE-LAYOUT: avail-w=~a content-w=~a num-cols=~a cell-avail=~a fixed?=~a explicit-w=~a\n"
-              avail-w content-w num-columns cell-available-w is-fixed-layout? explicit-width)
-
      ;; CSS 2.2 §17.5.2.1: Fixed table layout algorithm.
      ;; 1. Columns with explicit widths (from first-row cells) get those widths.
      ;; 2. Remaining space distributed equally among auto-width columns.
@@ -735,7 +738,6 @@
               (match cell
                 [`(block ,_ ,s ,_)
                  (define w-prop (get-style-prop s 'width #f))
-                 (eprintf "  CELL ~a: w-prop=~a\n" i w-prop)
                  (cond
                    [(and (number? w-prop) (> w-prop 0)) w-prop]
                    ;; percentage width stored as (% num): resolve against cell-available-w
