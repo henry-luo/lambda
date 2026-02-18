@@ -1284,6 +1284,57 @@ Item fn_sort1(Item item) {
     }
 }
 
+// sort_by_keys(values, keys, descending) - sort values array in-place by corresponding keys
+// Keys are compared as doubles; values preserve their original Item type
+void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
+    int64_t len = vector_length(values);
+    int64_t key_len = vector_length(keys);
+    if (len == 0 || key_len == 0) {
+        return;
+    }
+    if (len != key_len) {
+        log_error("sort_by_keys: values length %ld != keys length %ld", len, key_len);
+        return;
+    }
+
+    // build index permutation array and extract key doubles
+    int64_t* indices = (int64_t*)calloc(len, sizeof(int64_t));
+    double*  key_vals = (double*)calloc(len, sizeof(double));
+    for (int64_t i = 0; i < len; i++) {
+        indices[i] = i;
+        key_vals[i] = item_to_double(vector_get(keys, i));
+    }
+
+    // bubble sort indices by key_vals
+    for (int64_t i = 0; i < len - 1; i++) {
+        for (int64_t j = 0; j < len - i - 1; j++) {
+            bool swap = descending ? (key_vals[indices[j]] < key_vals[indices[j + 1]])
+                                   : (key_vals[indices[j]] > key_vals[indices[j + 1]]);
+            if (swap) {
+                int64_t tmp = indices[j];
+                indices[j] = indices[j + 1];
+                indices[j + 1] = tmp;
+            }
+        }
+    }
+
+    // rearrange values array in-place using the sorted index permutation
+    // values must be an Array (LMD_TYPE_ARRAY) with items pointer
+    Array* arr = values.array;
+    Item* temp = (Item*)malloc(len * sizeof(Item));
+    for (int64_t i = 0; i < len; i++) {
+        temp[i] = arr->items[indices[i]];
+    }
+    memcpy(arr->items, temp, len * sizeof(Item));
+    free(temp);
+    free(indices);
+    free(key_vals);
+
+    // mark as non-spreadable so the sorted result displays as a single array
+    // (without this, list_push_spread would spread individual items)
+    arr->is_spreadable = false;
+}
+
 // sort(vec, direction) - sort with direction ('asc' or 'desc')
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
