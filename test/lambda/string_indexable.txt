@@ -1,0 +1,84 @@
+'reverse passthrough'
+{
+  r: "hello"
+}
+{
+  r: "café"
+}
+'sort passthrough'
+{
+  r: "hello"
+}
+{
+  r: "hello"
+}
+'unique passthrough'
+{
+  r: "hello"
+}
+'min passthrough'
+{
+  r: "abc"
+}
+'max passthrough'
+{
+  r: "xyz"
+}
+'take'
+{
+  r: "hel"
+}
+{
+  r: "caf"
+}
+{
+  r: "hello"
+}
+'drop'
+{
+  r: "llo"
+}
+{
+  r: "é"
+}
+{
+  r: "world"
+}
+'concat'
+{
+  r: "hello world"
+}
+{
+  r: "foobar"
+}
+'chars'
+{
+  r: ["h", "e", "l", "l", "o"]
+}
+{
+  r: ["c", "a", "f", "é"]
+}
+{
+  r: ["a"]
+}
+'indexing'
+{
+  r: "h"
+}
+{
+  r: "o"
+}
+{
+  r: "é"
+}
+{
+  r: "c"
+}
+'slice'
+{
+  r: "ell"
+}
+{
+  r: "café"
+}
+'ALL TESTS COMPLETE'
