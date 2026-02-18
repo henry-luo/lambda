@@ -135,6 +135,15 @@
   (set! s (string-replace s "&ZeroWidthSpace;" "\u200B"))
   (set! s (string-replace s "&#8203;" "\u200B"))
   (set! s (string-replace s "&#x200B;" "\u200B"))
+  ;; decode numeric HTML entities: &#xHHHH; (hex) and &#DDDD; (decimal)
+  (set! s (regexp-replace* #rx"&#x([0-9a-fA-F]+);"
+                           s
+                           (lambda (full hex-str)
+                             (string (integer->char (string->number hex-str 16))))))
+  (set! s (regexp-replace* #rx"&#([0-9]+);"
+                           s
+                           (lambda (full dec-str)
+                             (string (integer->char (string->number dec-str))))))
   s)
 
 ;; extract non-whitespace text content from a string.
@@ -149,6 +158,7 @@
 ;; measure text width using Ahem font metrics.
 ;; in Ahem, every visible character is 1em wide.
 ;; zero-width space (U+200B) has 0 width.
+;; Unicode space characters have typographic widths per Unicode standard.
 ;; returns width in pixels at the given font-size.
 (define (measure-text-ahem text [font-size ahem-font-size])
   (define total 0)
@@ -160,6 +170,18 @@
            (char=? ch #\u200D)  ;; zero-width joiner
            (char=? ch #\uFEFF)) ;; zero-width no-break space
        (void)]
+      ;; Unicode space characters with fractional-em widths
+      [(char=? ch #\u2000) (set! total (+ total (* 0.5 font-size)))]   ;; en quad = 0.5em
+      [(char=? ch #\u2001) (set! total (+ total font-size))]           ;; em quad = 1em
+      [(char=? ch #\u2002) (set! total (+ total (* 0.5 font-size)))]   ;; en space = 0.5em
+      [(char=? ch #\u2003) (set! total (+ total font-size))]           ;; em space = 1em
+      [(char=? ch #\u2004) (set! total (+ total (* 0.333 font-size)))] ;; three-per-em space
+      [(char=? ch #\u2005) (set! total (+ total (* 0.25 font-size)))]  ;; four-per-em space
+      [(char=? ch #\u2006) (set! total (+ total (* 0.167 font-size)))] ;; six-per-em space
+      [(char=? ch #\u2007) (set! total (+ total (* 0.5 font-size)))]   ;; figure space ≈ digit width
+      [(char=? ch #\u2008) (set! total (+ total (* 0.333 font-size)))] ;; punctuation space
+      [(char=? ch #\u2009) (set! total (+ total (* 0.2 font-size)))]   ;; thin space
+      [(char=? ch #\u200A) (set! total (+ total (* 0.1 font-size)))]   ;; hair space
       [else (set! total (+ total font-size))]))
   total)
 
@@ -199,7 +221,7 @@
      (#\0 . 0.556) (#\1 . 0.556) (#\2 . 0.556) (#\3 . 0.556)
      (#\4 . 0.556) (#\5 . 0.556) (#\6 . 0.556) (#\7 . 0.556)
      (#\8 . 0.556) (#\9 . 0.556)
-     (#\space . 0.278) (#\. . 0.278) (#\, . 0.278) (#\: . 0.278)
+     (#\space . 0.278) (#\u00A0 . 0.278) (#\. . 0.278) (#\, . 0.278) (#\: . 0.278)
      (#\; . 0.278) (#\! . 0.278) (#\? . 0.556) (#\- . 0.333)
      (#\( . 0.333) (#\) . 0.333) (#\/ . 0.278) (#\& . 0.667)
      (#\' . 0.191) (#\" . 0.355))))
@@ -225,7 +247,7 @@
      (#\0 . 0.500) (#\1 . 0.500) (#\2 . 0.500) (#\3 . 0.500)
      (#\4 . 0.500) (#\5 . 0.500) (#\6 . 0.500) (#\7 . 0.500)
      (#\8 . 0.500) (#\9 . 0.500)
-     (#\space . 0.250) (#\. . 0.250) (#\, . 0.250) (#\: . 0.278)
+     (#\space . 0.250) (#\u00A0 . 0.250) (#\. . 0.250) (#\, . 0.250) (#\: . 0.278)
      (#\; . 0.278) (#\! . 0.333) (#\? . 0.444) (#\- . 0.333)
      (#\( . 0.333) (#\) . 0.333) (#\/ . 0.278) (#\& . 0.778)
      (#\' . 0.180) (#\" . 0.408))))
@@ -309,23 +331,28 @@
               [else
                (loop (cdr props) (cons (caar props) seen)
                      (cons (car props) result))])))
-        ;; expand font shorthand: "font: [style] size family"
-        ;; extract font-size and font-family from font shorthand
+        ;; expand font shorthand: "font: [style] size[/line-height] family[, fallback]"
+        ;; extract font-size, line-height, and font-family from font shorthand
         (define font-val (cdr-or-false 'font deduped))
         (if font-val
             (let ()
-              (define parts (string-split (string-trim font-val)))
-              ;; find the font-size (number+unit) and family (last word)
-              (define family (if (>= (length parts) 2)
-                                (last parts)
-                                #f))
+              (define trimmed-font (string-trim font-val))
+              (define parts (string-split trimmed-font))
               ;; find font-size: look for a part with a unit or slash
-              (define size-line-part
-                (for/first ([p (in-list parts)]
+              (define size-line-idx
+                (for/first ([i (in-range (length parts))]
                             #:when (regexp-match?
                                     #rx"^[0-9.]+(px|pt|em|ex|in|cm|mm|pc|rem|ch|%)"
-                                    p))
-                  p))
+                                    (list-ref parts i)))
+                  i))
+              (define size-line-part
+                (and size-line-idx (list-ref parts size-line-idx)))
+              ;; font-family is everything AFTER the size part (may include fallbacks)
+              ;; e.g., "1em/1 Ahem, sans-serif" → family = "Ahem, sans-serif"
+              (define family
+                (if (and size-line-idx (< (add1 size-line-idx) (length parts)))
+                    (string-join (drop parts (add1 size-line-idx)) " ")
+                    (if (>= (length parts) 2) (last parts) #f)))
               ;; split "32px/4" into font-size "32px" and line-height "4"
               (define size-split (if size-line-part (string-split size-line-part "/") '()))
               (define size-part (and (>= (length size-split) 1) (car size-split)))
@@ -373,11 +400,18 @@
              (define content-raw (cdr-or-false 'content matching-before))
              (define content-text
                (if (and content-raw (string? content-raw))
-                   (regexp-replace* #rx"^['\"]|['\"]$" content-raw "")
+                   (let ([stripped (regexp-replace* #rx"^['\"]|['\"]$" content-raw "")])
+                     ;; CSS 2.2 §12.2: "none" and "normal" on ::before/::after produce no content
+                     (if (or (equal? stripped "none") (equal? stripped "normal"))
+                         #f
+                         stripped))
                    #f))
              (define before-display (or (cdr-or-false 'display matching-before) "inline"))
+             ;; CSS 2.2 §9.2.4: block-level display types for ::before/::after
+             (define is-block-display?
+               (member before-display '("block" "list-item" "table" "flex" "grid")))
              (if (and content-text (> (string-length content-text) 0)
-                      (equal? before-display "block"))
+                      is-block-display?)
                  ;; block ::before: compute height from parent's font metrics
                  ;; font-size and line-height from parent (inherited) or before-rule
                  (let* ([parent-fs-raw (or (cdr-or-false 'font-size inline-alist) "16px")]
@@ -398,23 +432,106 @@
                          (cons (cons '__before-block-height parent-lh) inline-alist)])
                    `(element ,tag ,id ,class ,new-alist ,new-children))
                  ;; inline/run-in ::before: measure content width and add as x-offset
+                 ;; also add line-height contribution for empty parent elements
                  (if (and content-text (> (string-length content-text) 0))
-                     (let* ([parent-fs-raw (or (cdr-or-false 'font-size inline-alist) "16px")]
+                     (let* ([;; use ::before's own font-size if specified, else inherit from parent
+                            before-fs-raw (cdr-or-false 'font-size matching-before)]
+                            [before-fs (if before-fs-raw (or (parse-css-px before-fs-raw) #f) #f)]
+                            [parent-fs-raw (or (cdr-or-false 'font-size inline-alist) "16px")]
                             [parent-fs (or (parse-css-px parent-fs-raw) 16)]
+                            [effective-fs (or before-fs parent-fs)]
                             ;; determine font metrics for width measurement
-                            [ff-val (cdr-or-false 'font-family inline-alist)]
-                            [fw-val (cdr-or-false 'font-weight inline-alist)]
+                            [ff-val (or (cdr-or-false 'font-family matching-before)
+                                        (cdr-or-false 'font-family inline-alist))]
+                            [fw-val (or (cdr-or-false 'font-weight matching-before)
+                                        (cdr-or-false 'font-weight inline-alist))]
                             [is-bold? (and fw-val (or (equal? fw-val "bold") (equal? fw-val "700")))]
                             [is-sans? (and ff-val
                                            (or (regexp-match? #rx"(?i:sans-serif)" ff-val)
                                                (regexp-match? #rx"(?i:arial)" ff-val)))]
                             [fm (if (or is-bold? is-sans?) 'arial 'times)]
-                            [content-w (measure-text-proportional content-text parent-fs ff-val fm)]
+                            [content-w (measure-text-proportional content-text effective-fs ff-val fm)]
+                            ;; compute line-height from ::before's font metrics
+                            ;; normal line-height ≈ 1.2 × font-size
+                            [before-lh-raw (cdr-or-false 'line-height matching-before)]
+                            [before-lh (cond
+                                         [(not before-lh-raw) (* effective-fs 1.2)]
+                                         [(and (string? before-lh-raw)
+                                               (regexp-match #rx"^([0-9.]+)$" before-lh-raw))
+                                          (* effective-fs (string->number before-lh-raw))]
+                                         [else (or (parse-css-px before-lh-raw) (* effective-fs 1.2))])]
                             [new-alist
-                             (cons (cons '__before-inline-width content-w) inline-alist)])
+                             ;; always add inline-width; add line-height for empty elements
+                             (let ([alist1 (cons (cons '__before-inline-width content-w) inline-alist)])
+                               (if (null? new-children)
+                                   (cons (cons '__before-line-height before-lh) alist1)
+                                   alist1))])
                        `(element ,tag ,id ,class ,new-alist ,new-children))
                      ;; empty: no change
                      `(element ,tag ,id ,class ,inline-alist ,new-children))))
+           `(element ,tag ,id ,class ,inline-alist ,new-children))]
+      [_ elem])))
+
+;; ============================================================
+;; ::after Pseudo-element Content Injection
+;; ============================================================
+
+;; walk the element tree and handle ::after pseudo-element content.
+;; for block-display ::after, add a __after-block-height property to the parent
+;; which layout-block-children uses as additional height after all children.
+(define (inject-after-content elements after-rules ancestor-chain)
+  (for/list ([elem (in-list elements)])
+    (match elem
+      [`(element ,tag ,id ,class ,inline-alist ,children)
+       ;; check if any after-rule matches this element
+       (define matching-after
+         (for/fold ([found #f]) ([rule (in-list after-rules)])
+           (if found found
+               (let ([selector (car rule)]
+                     [props (cdr rule)])
+                 (if (selector-matches? selector tag id class ancestor-chain)
+                     props
+                     #f)))))
+       ;; recurse into children
+       (define new-chain (cons (list tag id class) ancestor-chain))
+       (define new-children
+         (inject-after-content children after-rules new-chain))
+       ;; handle ::after content
+       (if matching-after
+           (let ()
+             (define content-raw (cdr-or-false 'content matching-after))
+             (define content-text
+               (if (and content-raw (string? content-raw))
+                   (let ([stripped (regexp-replace* #rx"^['\"]|['\"]$" content-raw "")])
+                     (if (or (equal? stripped "none") (equal? stripped "normal"))
+                         #f
+                         stripped))
+                   #f))
+             (define after-display (or (cdr-or-false 'display matching-after) "inline"))
+             ;; CSS 2.2 §9.2.4: block-level display types
+             (define is-block-display?
+               (member after-display '("block" "list-item" "table" "flex" "grid")))
+             (if (and content-text (> (string-length content-text) 0)
+                      is-block-display?)
+                 ;; block ::after: compute height and add as __after-block-height
+                 (let* ([parent-fs-raw (or (cdr-or-false 'font-size inline-alist) "16px")]
+                        [parent-fs (or (parse-css-px parent-fs-raw)
+                                       (if (string? parent-fs-raw)
+                                           (let ([m (regexp-match #rx"([0-9.]+)" parent-fs-raw)])
+                                             (if m (string->number (cadr m)) 16))
+                                           16))]
+                        [parent-lh-raw (cdr-or-false 'line-height inline-alist)]
+                        [parent-lh (cond
+                                     [(not parent-lh-raw) parent-fs]
+                                     [(and (string? parent-lh-raw)
+                                           (regexp-match #rx"^([0-9.]+)$" parent-lh-raw))
+                                      (* parent-fs (string->number parent-lh-raw))]
+                                     [else (or (parse-css-px parent-lh-raw) parent-fs)])]
+                        [new-alist
+                         (cons (cons '__after-block-height parent-lh) inline-alist)])
+                   `(element ,tag ,id ,class ,new-alist ,new-children))
+                 ;; inline ::after: not yet needed (future)
+                 `(element ,tag ,id ,class ,inline-alist ,new-children)))
            `(element ,tag ,id ,class ,inline-alist ,new-children))]
       [_ elem])))
 
@@ -424,11 +541,20 @@
 ;; only handles div elements (sufficient for Taffy tests).
 (define (html-file->inline-styles html-path)
   (define html-content (file->string html-path))
-  (define-values (style-rules before-rules) (extract-style-rules html-content))
+  (define-values (style-rules before-rules after-rules) (extract-style-rules html-content))
   (define elements (parse-html-body html-content))
+  ;; extract body element's id and class attributes for CSS rule matching
+  ;; so selectors like ".body div" or "#main div" work correctly
+  (define body-tag-match (regexp-match #rx"<body([^>]*)>" html-content))
+  (define body-attrs (if body-tag-match (cadr body-tag-match) ""))
+  (define body-id-match (regexp-match #rx"id=\"([^\"]+)\"" body-attrs))
+  (define body-class-match (regexp-match #rx"class=\"([^\"]+)\"" body-attrs))
+  (define body-id (and body-id-match (cadr body-id-match)))
+  (define body-class (and body-class-match (cadr body-class-match)))
   ;; apply style block rules to elements if any
   ;; include html → body in ancestor chain so selectors like "body > div" work
-  (define body-ancestor-chain '(("body" #f #f) ("html" #f #f)))
+  (define body-ancestor-chain
+    (list (list "body" body-id body-class) '("html" #f #f)))
   ;; compute body element's resolved CSS properties from style rules
   ;; rules matching "body" (e.g., "body { font-size: 12px; }") should be inherited
   (define body-props
@@ -440,7 +566,7 @@
              (define selector (car rule))
              (define props (cdr rule))
              ;; match selectors that target the body element
-             (if (selector-matches? selector "body" #f #f '(("html" #f #f)) 1)
+             (if (selector-matches? selector "body" body-id body-class '(("html" #f #f)) 1)
                  props
                  #f))
            style-rules))))
@@ -467,9 +593,14 @@
         (for/list ([e (in-list elements)] [i (in-naturals 1)])
           (apply-style-rules e style-rules body-ancestor-chain parent-props i))))
   ;; then inject ::before pseudo-element content (needs resolved font properties)
-  (if (null? before-rules)
-      styled-elements
-      (inject-before-content styled-elements before-rules body-ancestor-chain)))
+  (define after-before
+    (if (null? before-rules)
+        styled-elements
+        (inject-before-content styled-elements before-rules body-ancestor-chain)))
+  ;; then inject ::after pseudo-element content
+  (if (null? after-rules)
+      after-before
+      (inject-after-content after-before after-rules body-ancestor-chain)))
 
 ;; ============================================================
 ;; CSS <style> Block Parser
@@ -481,6 +612,7 @@
 (define (extract-style-rules html-str)
   (define results '())
   (define before-results '())
+  (define after-results '())
   ;; find all <style>...</style> blocks
   (define style-matches
     (regexp-match* #rx"<style[^>]*>(.*?)</style>" html-str #:match-select cadr))
@@ -505,16 +637,26 @@
           (when (> (string-length trimmed-sel) 0)
             ;; check for ::before / :before pseudo-element
             (define is-before? (regexp-match? #rx"::?before" trimmed-sel))
-            (if is-before?
-                (let ([base-sel (string-trim (regexp-replace #rx"::?before$" trimmed-sel ""))])
-                  (when (> (string-length base-sel) 0)
-                    (let ([parsed-sel (parse-css-selector base-sel)])
-                      (when parsed-sel
-                        (set! before-results (cons (cons parsed-sel props) before-results))))))
-                (let ([parsed-sel (parse-css-selector trimmed-sel)])
-                  (when parsed-sel
-                    (set! results (cons (cons parsed-sel props) results))))))))))
-  (values (reverse results) (reverse before-results)))
+            ;; check for ::after / :after pseudo-element
+            (define is-after? (regexp-match? #rx"::?after" trimmed-sel))
+            (cond
+              [is-before?
+               (let ([base-sel (string-trim (regexp-replace #rx"::?before$" trimmed-sel ""))])
+                 (when (> (string-length base-sel) 0)
+                   (let ([parsed-sel (parse-css-selector base-sel)])
+                     (when parsed-sel
+                       (set! before-results (cons (cons parsed-sel props) before-results))))))]
+              [is-after?
+               (let ([base-sel (string-trim (regexp-replace #rx"::?after$" trimmed-sel ""))])
+                 (when (> (string-length base-sel) 0)
+                   (let ([parsed-sel (parse-css-selector base-sel)])
+                     (when parsed-sel
+                       (set! after-results (cons (cons parsed-sel props) after-results))))))]
+              [else
+               (let ([parsed-sel (parse-css-selector trimmed-sel)])
+                 (when parsed-sel
+                   (set! results (cons (cons parsed-sel props) results))))]))))))
+  (values (reverse results) (reverse before-results) (reverse after-results)))
 
 ;; parse a simple CSS selector into a structured form.
 ;; supports: element (div), id (#foo), class (.bar), descendant (div div),
@@ -562,6 +704,11 @@
      parts))
   (if (null? parsed) #f parsed))
 
+;; CSS class matching: exact word match in space-separated class string.
+;; e.g. class="col" should NOT match selector ".colgroup"
+(define (has-css-class? elem-class cls)
+  (and elem-class (member cls (string-split elem-class)) #t))
+
 ;; check if a single selector part matches an element.
 ;; child-index: 1-based position among siblings (for :nth-child)
 (define (selector-part-matches? part elem-tag elem-id elem-class [child-index 0])
@@ -569,13 +716,13 @@
     [`(universal) #t]  ;; * matches everything
     [`(element ,tag) (equal? tag elem-tag)]
     [`(id ,id-str) (and elem-id (equal? id-str elem-id))]
-    [`(class ,cls) (and elem-class (string-contains? elem-class cls))]
+    [`(class ,cls) (has-css-class? elem-class cls)]
     [`(element+id ,tag ,id-str) (and (equal? tag elem-tag) elem-id (equal? id-str elem-id))]
-    [`(element+class ,tag ,cls) (and (equal? tag elem-tag) elem-class (string-contains? elem-class cls))]
+    [`(element+class ,tag ,cls) (and (equal? tag elem-tag) (has-css-class? elem-class cls))]
     [`(nth ,n) (= child-index n)]
-    [`(class+nth ,cls ,n) (and elem-class (string-contains? elem-class cls) (= child-index n))]
+    [`(class+nth ,cls ,n) (and (has-css-class? elem-class cls) (= child-index n))]
     [`(element+nth ,tag ,n) (and (equal? tag elem-tag) (= child-index n))]
-    [`(element+class+nth ,tag ,cls ,n) (and (equal? tag elem-tag) elem-class (string-contains? elem-class cls) (= child-index n))]
+    [`(element+class+nth ,tag ,cls ,n) (and (equal? tag elem-tag) (has-css-class? elem-class cls) (= child-index n))]
     [_ #f]))
 
 ;; check if a full selector (list of parts, possibly with '> markers) matches
@@ -678,12 +825,13 @@
                         prop))  ;; keep inherit if parent doesn't have it
                   prop))
             merged-raw))
-     ;; CSS inherited properties: automatically inherit from parent if not set
-     ;; (font-family, font-size, font, line-height, color, direction, text-align,
-     ;;  visibility, white-space, word-spacing, letter-spacing, text-indent,
-     ;;  text-transform, list-style, cursor)
+     ;; CSS inherited properties: automatically inherit from parent if not set.
+     ;; Note: font-size and font shorthand are NOT inherited here because they
+     ;; contain relative units (em, %) that would be double-resolved.
+     ;; Font-size inheritance is handled by current-em-size parameter in
+     ;; inline-styles->redex-styles, which propagates the computed pixel value.
      (define css-inherited-props
-       '(font-family font-size font line-height color direction text-align
+       '(font-family line-height color direction text-align
          visibility white-space word-spacing letter-spacing text-indent
          text-transform))
      (define merged
@@ -736,9 +884,10 @@
   (let loop ()
     (when (< pos len)
       ;; find next opening tag — include common HTML elements
+      ;; longer tag names must precede shorter prefixes (br before b, iframe before i, etc.)
       (define tag-match
         (regexp-match-positions
-         #rx"<(div|span|img|p|iframe|strong|em|b|i|u|a|br|table|tr|td|th|dl|dt|dd|ol|ul|li|object|embed|video|canvas)([^>]*)>"
+         #rx"<(iframe|strong|embed|object|video|canvas|span|table|tbody|thead|tfoot|caption|colgroup|col|bdo|br|tr|td|th|dl|dt|dd|ol|ul|li|div|img|em|b|i|u|a|p)([^>]*)>"
          html-str pos))
       (when tag-match
         (define tag-start (caar tag-match))
@@ -781,7 +930,7 @@
 
         ;; check for self-closing (void elements + explicit />)
         (define self-closing?
-          (or (member tag-name '("img" "br" "hr" "input" "meta" "link"))
+          (or (member tag-name '("img" "br" "hr" "input" "meta" "link" "col"))
               (regexp-match? #rx"/>\\s*$" (substring html-str (car (car tag-match))
                                                               tag-end))))
 
@@ -824,14 +973,15 @@
       (when (and (> (string-length text) 0)
                  ;; skip pure whitespace between elements (unless white-space: pre)
                  (not (regexp-match? #rx"^[ \t\r\n]+$" text)))
-        (set! children (cons (list 'text-node text) children)))))
+        ;; store both normalized and raw text; box builder chooses based on white-space
+        (set! children (cons (list 'text-node-raw decoded text) children)))))
 
   (let loop ()
     (when (< pos len)
       ;; look for either an opening tag or a closing tag
       (define open-match
         (regexp-match-positions
-         #rx"<(div|span|img|p|iframe|strong|em|b|i|u|a|br|table|tr|td|th|dl|dt|dd|ol|ul|li|object|embed|video|canvas)([^>]*)>"
+         #rx"<(iframe|strong|embed|object|video|canvas|span|table|tbody|thead|tfoot|caption|colgroup|col|bdo|br|tr|td|th|dl|dt|dd|ol|ul|li|div|img|em|b|i|u|a|p)([^>]*)>"
          html-str pos))
       (define close-match
         (regexp-match-positions close-rx html-str pos))
@@ -881,7 +1031,7 @@
          (define inline-style (append inline-style-raw html-attrs-as-css))
 
          (define self-closing?
-           (or (member child-tag '("img" "br" "hr" "input" "meta" "link"))
+           (or (member child-tag '("img" "br" "hr" "input" "meta" "link" "col"))
                (regexp-match? #rx"/>\\s*$"
                               (substring html-str tag-start tag-end))))
 
@@ -930,12 +1080,17 @@
   (cond
     [(member tag '("strong" "em" "b" "i" "u" "a" "span" "code" "small" "big"
                    "abbr" "cite" "dfn" "kbd" "samp" "var" "sub" "sup"
-                   "q" "ins" "del" "mark" "s" "strike" "font"))
+                   "q" "ins" "del" "mark" "s" "strike" "font" "bdo" "bdi"))
      "inline"]
     [(member tag '("table")) "table"]
     [(member tag '("tr")) "table-row"]
     [(member tag '("td" "th")) "table-cell"]
-    [(member tag '("tbody" "thead" "tfoot")) "table-row-group"]
+    [(member tag '("tbody")) "table-row-group"]
+    [(member tag '("thead")) "table-header-group"]
+    [(member tag '("tfoot")) "table-footer-group"]
+    [(member tag '("caption")) "table-caption"]
+    [(member tag '("colgroup")) "table-column-group"]
+    [(member tag '("col")) "table-column"]
     [(member tag '("li")) "list-item"]
     [(member tag '("br" "img")) "inline"]
     [else #f]))
@@ -968,16 +1123,39 @@
 
   (add! 'box-sizing (string->symbol box-sizing))
 
+  ;; store original display type in styles for BFC detection (CSS 2.2 §10.6.7)
+  ;; this is the CSS-specified display, not the box type after blockification
+  (add! 'display (string->symbol display-str))
+
   ;; detect font properties to set em/ex context for CSS unit conversion
   ;; font-size from font shorthand or font-size property
   (define font-size-str (cdr-or-false 'font-size inline-alist))
   (define elem-font-size
     (if font-size-str
-        ;; parse font-size without em/ex recursion — use absolute units only
-        (let ([m (regexp-match #rx"^([0-9.]+)(px|pt|in|cm|mm|pc)$"
-                               (string-trim font-size-str))])
-          (if m (css-unit->px (string->number (cadr m)) (caddr m))
-              (current-em-size)))
+        ;; parse font-size — handles absolute units, percentages, em/ex/rem
+        (let* ([trimmed (string-trim font-size-str)]
+               ;; bare "0", "-0", "+0" (no unit) is valid CSS: means 0px
+               [m-abs (if (member trimmed '("0" "-0" "+0")) #f
+                          (regexp-match #rx"^([+-]?[0-9.]+)(px|pt|in|cm|mm|pc)$" trimmed))]
+               ;; percentage: relative to parent font-size
+               [m-pct (regexp-match #rx"^([+-]?[0-9.]+)%$" trimmed)]
+               ;; em: relative to parent font-size
+               [m-em (regexp-match #rx"^([+-]?[0-9.]+)em$" trimmed)]
+               ;; ex: relative to parent font-size × ex-ratio
+               [m-ex (regexp-match #rx"^([+-]?[0-9.]+)ex$" trimmed)]
+               ;; rem: relative to root font-size (16px)
+               [m-rem (regexp-match #rx"^([+-]?[0-9.]+)rem$" trimmed)]
+               [raw
+                (cond
+                  [(member trimmed '("0" "-0" "+0")) 0]
+                  [m-abs (css-unit->px (string->number (cadr m-abs)) (caddr m-abs))]
+                  [m-pct (* (/ (string->number (cadr m-pct)) 100) (current-em-size))]
+                  [m-rem (* (string->number (cadr m-rem)) 16)]  ;; rem = root em = 16px
+                  [m-em (* (string->number (cadr m-em)) (current-em-size))]
+                  [m-ex (* (string->number (cadr m-ex)) (current-em-size) (current-ex-ratio))]
+                  [else (current-em-size)])])
+          ;; CSS: negative font-size is invalid → clamp to 0
+          (max 0 raw))
         (current-em-size)))
   ;; detect font-family for ex ratio (Ahem: 0.8, default: 0.5)
   (define font-family-str (cdr-or-false 'font-family inline-alist))
@@ -1000,6 +1178,11 @@
       [(cdr-or-false 'position inline-alist)]
       [else (hash-ref (base-defaults) 'position)]))
   (add! 'position (string->symbol position))
+
+  ;; CSS direction property (inherited)
+  (let ([dir (cdr-or-false 'direction inline-alist)])
+    (when (and dir (string=? dir "rtl"))
+      (add! 'direction 'rtl)))
 
   ;; width/height
   (for ([prop '(width height min-width min-height max-width max-height)])
@@ -1158,6 +1341,22 @@
       (when parsed
         (add! 'text-indent parsed))))
 
+  ;; list-style-position (CSS 2.2 §12.5.1): inside or outside
+  ;; also handle the shorthand 'list-style' which may contain the position value
+  (let ([v (or (cdr-or-false 'list-style-position inline-alist)
+               (cdr-or-false 'list-style inline-alist))])
+    (when v
+      (define val (string-trim v))
+      (cond
+        [(string=? val "inside")
+         (add! 'list-style-position 'inside)]
+        [(regexp-match? #rx"(?i:inside)" val)
+         (add! 'list-style-position 'inside)]
+        [(string=? val "outside")
+         (add! 'list-style-position 'outside)]
+        [(regexp-match? #rx"(?i:outside)" val)
+         (add! 'list-style-position 'outside)])))
+
   ;; float and clear
   (let ([v (cdr-or-false 'float inline-alist)])
     (when v
@@ -1305,6 +1504,58 @@
   (let ([v (cdr-or-false '__before-inline-width inline-alist)])
     (when (and v (number? v) (> v 0))
       (add! '__before-inline-width v)))
+
+  ;; pass through __before-line-height from inline ::before on empty elements
+  (let ([v (cdr-or-false '__before-line-height inline-alist)])
+    (when (and v (number? v) (> v 0))
+      (add! '__before-line-height v)))
+
+  ;; pass through __after-block-height from ::after pseudo-element injection
+  (let ([v (cdr-or-false '__after-block-height inline-alist)])
+    (when (and v (number? v) (> v 0))
+      (add! '__after-block-height v)))
+
+  ;; CSS 2.2 §17.6: table border model properties
+  ;; border-collapse: separate (default) | collapse
+  (let ([v (cdr-or-false 'border-collapse inline-alist)])
+    (when v
+      (define val (string-trim v))
+      (add! 'border-collapse (string->symbol val))))
+
+  ;; CSS 2.2 §17.5.2: table-layout: auto (default) | fixed
+  ;; Only applies to display: table / inline-table elements,
+  ;; but we parse it for all and let the layout code check.
+  (let ([v (cdr-or-false 'table-layout inline-alist)])
+    (when v
+      (define val (string-trim v))
+      (add! 'table-layout (string->symbol val))))
+
+  ;; CSS 2.2 §17.4.1: caption-side: top (default) | bottom
+  ;; Controls whether the table caption is above or below the table grid.
+  (let ([v (cdr-or-false 'caption-side inline-alist)])
+    (when v
+      (define val (string-trim v))
+      (add! 'caption-side (string->symbol val))))
+
+  ;; CSS 2.2 §17.6.1: border-spacing applies only when border-collapse is separate.
+  ;; Can be one value (both H and V) or two values (horizontal vertical).
+  ;; Default is 2px (browser default).
+  (let ([v (cdr-or-false 'border-spacing inline-alist)])
+    (when v
+      (define parts (string-split (string-trim v)))
+      (cond
+        [(= (length parts) 2)
+         ;; two values: horizontal vertical
+         (let ([h (parse-css-px (car parts))]
+               [vv (parse-css-px (cadr parts))])
+           (when h (add! 'border-spacing-h h))
+           (when vv (add! 'border-spacing-v vv)))]
+        [(= (length parts) 1)
+         (let ([s (parse-css-px (car parts))])
+           (when s
+             (add! 'border-spacing-h s)
+             (add! 'border-spacing-v s)))]
+        [else (void)])))
 
   `(style ,@(reverse props)))
 
@@ -2033,6 +2284,15 @@
 ;; convert a parsed element tree to a Redex box tree.
 ;; elem: (element tag-name id class inline-alist children)
 ;; counter: box counter for generating unique ids
+;; Create an anonymous tbody (table-row-group) box wrapping the given row boxes.
+;; This mirrors the HTML spec behavior where browsers auto-insert <tbody>.
+(define (make-anon-tbody-box row-boxes counter)
+  (define tbody-id (string->symbol (format "anon-tbody-~a" (unbox counter))))
+  (set-box! counter (add1 (unbox counter)))
+  `(block ,tbody-id
+          (style (display table-row-group))
+          ,row-boxes))
+
 ;; is-root?: whether this is the body > * element
 ;; parent-w: parent's content width in px (for resolving percentages), or #f
 (define (element->box-tree elem counter is-root? [parent-w #f])
@@ -2045,7 +2305,32 @@
            (string->symbol (format "~a:box~a" tag (unbox counter)))))
      (set-box! counter (add1 (unbox counter)))
 
-     (define styles (inline-styles->redex-styles inline-alist is-root? class tag))
+     (define base-styles (inline-styles->redex-styles inline-alist is-root? class tag))
+
+     ;; CSS UA default: <td> and <th> have vertical-align: middle
+     ;; and padding: 1px. These are from the HTML UA stylesheet.
+     ;; Only apply if not already set by author/inline styles.
+     ;; CSS UA default: <table> has border-spacing: 2px.
+     (define styles
+       (let* ([s1 (if (and (member tag '("td" "th"))
+                           (not (get-style-prop base-styles 'vertical-align #f)))
+                      (append base-styles `((vertical-align va-middle)))
+                      base-styles)]
+              [s2 (if (and (member tag '("td" "th"))
+                           (not (get-style-prop s1 'padding-top #f))
+                           (not (get-style-prop s1 'padding-right #f))
+                           (not (get-style-prop s1 'padding-bottom #f))
+                           (not (get-style-prop s1 'padding-left #f)))
+                      (append s1 `((padding-top 1) (padding-right 1) (padding-bottom 1) (padding-left 1)))
+                      s1)]
+              ;; HTML UA stylesheet: <table> { border-spacing: 2px; }
+              ;; Only for actual <table> HTML elements, not CSS display:table divs.
+              [s3 (if (and (equal? tag "table")
+                           (not (get-style-prop s2 'border-spacing-h #f))
+                           (not (get-style-prop s2 'border-spacing-v #f)))
+                      (append s2 `((border-spacing-h 2) (border-spacing-v 2)))
+                      s2)])
+         s3))
 
      ;; determine display type from inline styles, tag default, or base default
      (define display-str
@@ -2056,10 +2341,23 @@
      ;; resolve this element's content width for children
      (define this-w (resolve-element-content-width styles parent-w))
 
+     ;; CSS 2.2 §9.3.2: <br> generates a forced line break in inline flow.
+     ;; We encode it as an inline box with a __forced-break marker so that
+     ;; layout-inline-children can advance to the next line.
+     ;; The break also contributes one line-height to ensure empty lines have height.
+     (define br-tags '("br"))
+
      ;; check if this is a replaced element (iframe, img, object, embed, video)
      ;; replaced elements have intrinsic dimensions instead of child content
      (define replaced-tags '("iframe" "img" "object" "embed" "video" "canvas"))
      (cond
+       [(member tag br-tags)
+        ;; <br> forced line break — zero-width inline with forced-break flag
+        (define br-styles
+          (match styles
+            [`(style ,@props) `(style ,@props (__forced-break #t))]
+            [_ `(style (__forced-break #t))]))
+        `(inline ,box-id ,br-styles ())]
        [(member tag replaced-tags)
         ;; return a replaced element box with intrinsic dimensions
         ;; iframe: default 300×150 (CSS spec default object size)
@@ -2085,7 +2383,13 @@
           (parameterize ([current-em-size (current-em-size)]
                          [current-ex-ratio (current-ex-ratio)])
           (match c
-            [`(text-node ,text)
+            [(or `(text-node ,norm-text)
+                 `(text-node-raw ,_ ,norm-text))
+             ;; get raw text if available (for white-space: pre)
+             (define raw-text
+               (match c
+                 [`(text-node-raw ,r ,_) r]
+                 [_ norm-text]))
              ;; create a text box with pre-measured width
              (define text-id (string->symbol (format "txt~a" (unbox counter))))
              (set-box! counter (add1 (unbox counter)))
@@ -2097,13 +2401,12 @@
                    (and font-family-val
                         (regexp-match? #rx"(?i:ahem)" font-family-val))))
              ;; detect font-size from parent element's styles
-             (define font-size-val
-               (cdr-or-false 'font-size inline-alist))
+             ;; current-em-size was already set by inline-styles->redex-styles
+             ;; to the correctly resolved value (including em/% relative to parent)
              (define effective-font-size
                (cond
-                 [font-size-val (or (parse-css-px font-size-val) 16)]
                  [(uses-taffy-base?) ahem-font-size]
-                 [else 16]))
+                 [else (current-em-size)]))
              (define text-box-sizing (if (uses-taffy-base?) 'border-box 'content-box))
              ;; inherit line-height from parent styles
              (define parent-line-height (get-style-prop styles 'line-height #f))
@@ -2125,25 +2428,49 @@
                             (regexp-match? #rx"(?i:helvetica)" font-family-val)))))
              (define font-metrics-sym (if use-arial-metrics? 'arial 'times))
              ;; detect white-space: pre from parent (preserves whitespace text nodes)
+             ;; pre and pre-wrap preserve all whitespace; pre-line only preserves
+             ;; line breaks (spaces still collapse), so we don't treat it as "pre"
+             ;; for character measurement purposes
              (define white-space-val (cdr-or-false 'white-space inline-alist))
              (define is-pre? (and white-space-val
                                   (or (equal? white-space-val "pre")
-                                      (equal? white-space-val "pre-wrap")
-                                      (equal? white-space-val "pre-line"))))
+                                      (equal? white-space-val "pre-wrap"))))
+             ;; CSS 2.2 §16.5: text-transform — apply case transformation before measurement
+             (define text-transform-val (cdr-or-false 'text-transform inline-alist))
+             (define (apply-text-transform s)
+               (cond
+                 [(not text-transform-val) s]
+                 [(equal? text-transform-val "uppercase") (string-upcase s)]
+                 [(equal? text-transform-val "lowercase") (string-downcase s)]
+                 [(equal? text-transform-val "capitalize")
+                  ;; capitalize first letter of each word
+                  (string-join
+                   (for/list ([word (in-list (string-split s " "))])
+                     (if (> (string-length word) 0)
+                         (string-append (string-upcase (substring word 0 1))
+                                        (substring word 1))
+                         word))
+                   " ")]
+                 [else s]))
              (cond
                [uses-ahem?
                 ;; Ahem font: each visible char = font-size wide
+                ;; use raw text for white-space:pre, normalized text otherwise
+                (define ahem-text (apply-text-transform (if is-pre? raw-text norm-text)))
+                (when (string=? ahem-text "") #f)
                 (define text-styles
                   (if parent-line-height
                       `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)
                               (line-height ,parent-line-height))
                       `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size))))
-                (define measured-w (measure-text-ahem text effective-font-size))
-                `(text ,text-id ,text-styles ,text ,measured-w)]
+                (define measured-w (measure-text-ahem ahem-text effective-font-size))
+                (if (string=? ahem-text "")
+                    #f
+                    `(text ,text-id ,text-styles ,ahem-text ,measured-w))]
                [else
-                ;; non-Ahem: normalize whitespace (unless white-space: pre)
+                ;; non-Ahem: use raw text for white-space:pre, normalized otherwise
                 (define normalized
-                  (if is-pre? text (normalize-text-content text)))
+                  (apply-text-transform (if is-pre? raw-text norm-text)))
                 (cond
                   [(string=? normalized "")
                    ;; empty text after normalization → skip
@@ -2173,6 +2500,24 @@
         children))
 
      (define display-sym (string->symbol display-str))
+
+     ;; CSS 2.2 §9.7: float blockification
+     ;; when float is not none, certain display types are blockified
+     (define float-val-str (cdr-or-false 'float inline-alist))
+     (define is-floated?
+       (and float-val-str
+            (not (string=? (string-trim float-val-str) "none"))))
+     (when is-floated?
+       (set! display-sym
+             (case display-sym
+               [(inline inline-block table-row-group table-header-group
+                 table-footer-group table-row table-cell table-column
+                 table-column-group table-caption list-item run-in)
+                'block]
+               [(inline-table) 'table]
+               [(inline-flex) 'flex]
+               [(inline-grid) 'grid]
+               [else display-sym])))
 
      ;; CSS 2.2 §9.2.1.1: when an inline element contains block children,
      ;; convert to block and add strut heights for the anonymous block portions
@@ -2241,14 +2586,59 @@
         `(block ,box-id ,styles ,child-boxes)]
        [(list-item)
         ;; list-item is a block-level box with optional marker
-        `(block ,box-id ,styles ,child-boxes)]
-       [(table inline-table)
-        ;; table display types use shrink-to-fit when width:auto (CSS 2.2 §17.5.2)
-        ;; use inline-block box type to get shrink-to-fit behavior
-        (define explicit-width (get-style-prop styles 'width #f))
-        (if (or (not explicit-width) (eq? explicit-width 'auto))
-            `(inline-block ,box-id ,styles ,child-boxes)
+        ;; CSS 2.2 §12.5.1: when list-style-position is 'inside', the marker
+        ;; is placed inline before the content. We encode this as a
+        ;; __list-marker-inside-width style property so the layout engine
+        ;; can offset the first line's inline content.
+        (define lsp (get-style-prop styles 'list-style-position #f))
+        (if (eq? lsp 'inside)
+            ;; compute marker width: "• " (bullet + space) in the element's font
+            ;; At 16px Times, Chrome measures this as ~22px
+            (let* ([fs-val (get-style-prop styles 'font-size 16)]
+                   [fs (if (number? fs-val) fs-val 16)]
+                   ;; bullet character "•" is roughly 0.5em wide, plus trailing space (~0.25em)
+                   ;; In Chrome at 16px, bullet marker = ~22px for disc style
+                   [marker-w (* fs 1.375)]
+                   [new-styles (append styles `((__list-marker-inside-width ,marker-w)))])
+              `(block ,box-id ,new-styles ,child-boxes))
             `(block ,box-id ,styles ,child-boxes))]
+       [(table inline-table)
+        ;; All tables go through table layout, regardless of explicit width.
+        ;; CSS 2.2 §17.5.2: auto-width tables use shrink-to-fit sizing,
+        ;; handled by layout-table-simple.
+        ;; HTML spec: browsers automatically insert anonymous <tbody> wrappers
+        ;; around consecutive <tr> elements that are direct children of <table>.
+        ;; We replicate this behavior here so our box tree matches the browser DOM.
+        (define (is-table-row-box? box)
+          (match box
+            [`(block ,_ ,s ,_)
+             (let ([d (get-style-prop s 'display #f)])
+               (eq? d 'table-row))]
+            [_ #f]))
+        ;; Only wrap in anonymous tbody for actual HTML <table> elements,
+        ;; not for divs with display:table (CSS-only tables).
+        ;; HTML spec: browsers auto-insert <tbody> around <tr> direct children.
+        (define final-children
+          (if (equal? tag "table")
+              (let loop ([boxes child-boxes] [acc '()] [row-acc '()])
+                (cond
+                  [(null? boxes)
+                   (if (null? row-acc)
+                       (reverse acc)
+                       (reverse (cons (make-anon-tbody-box (reverse row-acc) counter)
+                                      acc)))]
+                  [(is-table-row-box? (car boxes))
+                   (loop (cdr boxes) acc (cons (car boxes) row-acc))]
+                  [else
+                   (if (null? row-acc)
+                       (loop (cdr boxes) (cons (car boxes) acc) '())
+                       (loop (cdr boxes)
+                             (cons (car boxes)
+                                   (cons (make-anon-tbody-box (reverse row-acc) counter)
+                                         acc))
+                             '()))]))
+              child-boxes))
+        `(table ,box-id ,styles ,final-children)]
        [(table-row table-row-group table-header-group table-footer-group
                    table-cell table-column table-column-group table-caption)
         ;; inner table parts: treat as block
@@ -2509,22 +2899,44 @@
     ;; for non-Taffy tests, subtract body margin from viewport dimensions.
     ;; Taffy tests have body { margin: 0; } so no adjustment needed.
     ;; CSS2.1 tests use browser default body margin (typically 8px).
-    ;; Extract actual body margin from reference layout data.
-    (define effective-vp-w
+    ;; Extract actual body margin and padding from reference layout data.
+    (define-values (effective-vp-w body-pad-left body-pad-top)
       (if (uses-taffy-base?)
-          vp-w
+          (values vp-w 0 0)
           (let* ([layout-tree (hash-ref ref-json 'layout_tree (hash))]
                  [html-children (hash-ref layout-tree 'children '())]
                  [body-node
                   (for/first ([c (in-list html-children)]
                               #:when (equal? (hash-ref c 'tag #f) "body"))
                     c)]
+                 [body-computed (if body-node (hash-ref body-node 'computed (hash)) (hash))]
                  [body-layout (if body-node (hash-ref body-node 'layout (hash)) (hash))]
-                 [body-x (hash-ref body-layout 'x 0)])
-            ;; body-x is the left margin; subtract both left and right margins
-            (- vp-w (* 2 body-x)))))
+                 [body-x (hash-ref body-layout 'x 0)]
+                 ;; extract body margins from computed styles (CSS may set them asymmetrically)
+                 [margin-left (hash-ref body-computed 'marginLeft 8)]
+                 [margin-right (hash-ref body-computed 'marginRight 8)]
+                 ;; extract body padding from computed styles
+                 [pad-left (hash-ref body-computed 'paddingLeft 0)]
+                 [pad-right (hash-ref body-computed 'paddingRight 0)]
+                 [pad-top (hash-ref body-computed 'paddingTop 0)])
+            ;; effective viewport width = viewport - body margins - body padding
+            (values (- vp-w margin-left margin-right pad-left pad-right)
+                    pad-left pad-top))))
 
-    (reference-test-case name box-tree expected (cons effective-vp-w vp-h))))
+    ;; inject body padding into root box styles so layout-document can offset
+    (define final-box-tree
+      (if (and (or (> body-pad-left 0) (> body-pad-top 0))
+               (pair? box-tree) (>= (length box-tree) 4))
+          (match box-tree
+            [`(,type ,id (style ,@props) ,@rest)
+             `(,type ,id (style ,@props
+                                (__body-padding-left ,body-pad-left)
+                                (__body-padding-top ,body-pad-top))
+                     ,@rest)]
+            [_ box-tree])
+          box-tree))
+
+    (reference-test-case name final-box-tree expected (cons effective-vp-w vp-h))))
 
 ;; ============================================================
 ;; Utilities
