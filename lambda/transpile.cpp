@@ -3801,6 +3801,31 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             }
         }
 
+        // ==== VMap: map() and m.set(k, v) ====
+        if (strcmp(fn_name, "map") == 0 && sys_fn_node->fn_info->fn == SYSFUNC_VMAP_NEW) {
+            if (!first_arg) {
+                // map() → vmap_new()
+                strbuf_append_str(tp->code_buf, "vmap_new()");
+            } else {
+                // map([k1, v1, k2, v2, ...]) → vmap_from_array(arr)
+                strbuf_append_str(tp->code_buf, "vmap_from_array(");
+                transpile_box_item(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            return;
+        }
+        if (sys_fn_node->fn_info->fn == SYSPROC_VMAP_SET) {
+            // m.set(k, v) → vmap_set(m, k, v)
+            strbuf_append_str(tp->code_buf, "vmap_set(");
+            transpile_box_item(tp, first_arg);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, second_arg);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, second_arg->next);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+
         // Use the sys func name from fn_info, not from TSNode source
         // This correctly handles method-style calls (obj.method()) which are desugared to sys func calls
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
