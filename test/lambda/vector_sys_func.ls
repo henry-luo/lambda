@@ -160,6 +160,11 @@ sort(1 to 5, "descending")
 {r: unique([1.5, 2.5, 1.5, 3.5, 2.5])}
 {r: unique(["a", "b", "a", "c", "b", "c"])}
 {r: unique(["hello", "world", "hello", "foo", "world"])}
+'unique (list input - spreadable)'
+{r: unique((1, 2, 1, 3, 2))}
+unique(("a", "b", "a"))
+'unique (array input - non-spreadable)'
+{r: unique([1, 2, 1, 3, 2])}
 
 'concat'
 {r: concat([1, 2, 3], [4, 5, 6])}
