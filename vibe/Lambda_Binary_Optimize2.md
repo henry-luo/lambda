@@ -46,27 +46,27 @@ Defines:   -DNDEBUG
 
 ### In-Binary Size Contributions (Release, by symbol group)
 
-| Group | Size | % | Symbols | Notes |
-|-------|------|---|---------|-------|
-| **turbojpeg** | ~240 KB | ~2.9% | 237 | Rebuilt -Os, arith coding removed; `jpeg_aritab` 859 KB was nm error |
-| **Project code** | **825 KB** | **10.5%** | 187 | Heavily stripped — most project symbols invisible |
-| **curl + deps** | **680 KB** | **8.7%** | 0 | Invisible to `nm` (LTO internalized all symbols); verified by stub-linking |
-| **mbedTLS** | 500 KB | 6.4% | 764 | SSL/TLS + crypto + X.509 (partially overlaps with curl) |
-| **MIR (JIT compiler)** | **396 KB** | **5.1%** | 103 | c2mir: 180 KB, mir.o+mir-gen.o: 215 KB (verified by full stub-linking) |
-| **tree-sitter** | 346 KB | 4.4% | 63 | All 4 grammars combined |
-| **woff2** | 205 KB | 2.6% | 13 | Font decompression |
-| **brotli** | 167 KB | 2.1% | 11 | Dictionary data (130 KB) |
-| **mpdec** | 131 KB | 1.7% | 66 | Decimal arithmetic |
-| **freetype** | 87 KB | 1.1% | 56 | Font rendering |
-| **libpng** | 73 KB | 0.9% | 195 | PNG support |
-| **zlib** | 50 KB | 0.6% | 14 | Compression |
-| **GLFW** | 48 KB | 0.6% | 265 | Window management |
-| **nghttp2** | 47 KB | 0.6% | 59 | HTTP/2 (curl dependency) |
-| **libevent** | 39 KB | 0.5% | 128 | Event loop |
-| **bzip2** | 19 KB | 0.2% | 9 | Compression |
-| **re2** | 214 KB | 2.6% | — | Regex engine (static, no abseil; LTO internalized all symbols) |
-| **rpmalloc** | 9 KB | 0.1% | 8 | Memory allocator |
-| **utf8proc** | 4 KB | 0.1% | 9 | Unicode (tables in __TEXT const) |
+| Group                  | Size       | %         | Symbols | Notes                                                                      |
+| ---------------------- | ---------- | --------- | ------- | -------------------------------------------------------------------------- |
+| **Project code**       | **825 KB** | **10.5%** | 187     | Heavily stripped — most project symbols invisible                          |
+| **curl + deps**        | **680 KB** | **8.7%**  | 0       | Invisible to `nm` (LTO internalized all symbols); verified by stub-linking |
+| **mbedTLS**            | 500 KB     | 6.4%      | 764     | SSL/TLS + crypto + X.509 (partially overlaps with curl)                    |
+| **MIR (JIT compiler)** | **396 KB** | **5.1%**  | 103     | c2mir: 180 KB, mir.o+mir-gen.o: 215 KB (verified by full stub-linking)     |
+| **tree-sitter**        | 346 KB     | 4.4%      | 63      | All 4 grammars combined                                                    |
+| **turbojpeg**          | ~240 KB    | ~2.9%     | 237     | Rebuilt -Os, arith coding removed; `jpeg_aritab` 859 KB was nm error       |
+| **woff2**              | 205 KB     | 2.6%      | 13      | Font decompression                                                         |
+| **brotli**             | 167 KB     | 2.1%      | 11      | Dictionary data (130 KB)                                                   |
+| **mpdec**              | 131 KB     | 1.7%      | 66      | Decimal arithmetic                                                         |
+| **freetype**           | 87 KB      | 1.1%      | 56      | Font rendering                                                             |
+| **libpng**             | 73 KB      | 0.9%      | 195     | PNG support                                                                |
+| **zlib**               | 50 KB      | 0.6%      | 14      | Compression                                                                |
+| **GLFW**               | 48 KB      | 0.6%      | 265     | Window management                                                          |
+| **nghttp2**            | 47 KB      | 0.6%      | 59      | HTTP/2 (curl dependency)                                                   |
+| **libevent**           | 39 KB      | 0.5%      | 128     | Event loop                                                                 |
+| **bzip2**              | 19 KB      | 0.2%      | 9       | Compression                                                                |
+| **re2**                | 214 KB     | 2.6%      | —       | Regex engine (static, no abseil; LTO internalized all symbols)             |
+| **rpmalloc**           | 9 KB       | 0.1%      | 8       | Memory allocator                                                           |
+| **utf8proc**           | 4 KB       | 0.1%      | 9       | Unicode (tables in __TEXT const)                                           |
 
 **Note**: "Project code" at 825 KB is an undercount — the release build's `-Wl,-x` stripped most local symbols, so ~410 KB of project code hides inside the `operator delete` → GLFW gap and other stripped regions. True project code contribution is estimated at **~1.5-2 MB**.
 
