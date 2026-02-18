@@ -344,6 +344,16 @@ void free_container(Container* cont, bool clear_entry) {
             pool_free(context->heap->pool, cont);
         }
     }
+    else if (type_id == LMD_TYPE_VMAP) {
+        VMap *vm = (VMap*)cont;
+        if (!vm->ref_cnt) {
+            log_debug("freeing vmap: %p, vtable=%p, data=%p", vm, vm->vtable, vm->data);
+            if (vm->vtable && vm->data) {
+                vm->vtable->destroy(vm->data);
+            }
+            pool_free(context->heap->pool, cont);
+        }
+    }
     else if (type_id == LMD_TYPE_ELEMENT) {
         Element *elmt = (Element*)cont;
         if (!elmt->ref_cnt) {

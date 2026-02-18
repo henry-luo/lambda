@@ -1,0 +1,19 @@
+0
+"Alice"
+30
+2
+3.14
+[true, false]
+"hello world"
+42
+["a=1", "b=2", "c=3"]
+[1, 2, 3]
+["a", "b", "c"]
+3
+["one", "two", "three"]
+2
+2
+["yes", "no"]
+5
+3
+[0, "Alice", 30, 2, 3.14, true, "hello world", 42, 3, 3, 2, 2, 5, 3]
