@@ -421,6 +421,10 @@ for (i in 1 to 5) i * i       // [1, 4, 9, 16, 25]
 // Conditional in body
 for (num in [1, 2, 3, 4, 5])
     if (num % 2 == 0) num else null
+    
+// for loop over map by keys
+for (k at {a: 1, b: 2}) k      // "a", "b"
+for (k, v at {a: 1, b: 2}) k ++ v  // ["a1", "b2"]    
 ```
 
 #### Spreadable Array Behavior

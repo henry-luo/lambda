@@ -1574,9 +1574,17 @@ Item fn_index(Item item, Item index_item) {
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:
         return fn_member(item, index_item);
-    default:
+    default: {
+        // for VMap, support arbitrary key types (int, float, etc.)
+        TypeId item_type = get_type_id(item);
+        if (item_type == LMD_TYPE_VMAP) {
+            VMap* vm = item.vmap;
+            if (vm && vm->vtable) return vm->vtable->get(vm->data, index_item);
+            return ItemNull;
+        }
         log_debug("invalid index type %d", index_item._type_id);
         return ItemNull;
+    }
     }
 
     log_debug("fn_index item index: %ld", index);
@@ -1779,6 +1787,11 @@ Item fn_member(Item item, Item key) {
         Map *map = item.map;
         return map_get(map, key);
     }
+    case LMD_TYPE_VMAP: {
+        VMap *vm = item.vmap;
+        if (!vm || !vm->vtable) return ItemNull;
+        return vm->vtable->get(vm->data, key);
+    }
     case LMD_TYPE_ELEMENT: {
         Element *elmt = item.element;
         return elmt_get(elmt, key);
@@ -1826,6 +1839,11 @@ int64_t fn_len(Item item) {
         break;
     case LMD_TYPE_MAP: {
         size = 0;
+        break;
+    }
+    case LMD_TYPE_VMAP: {
+        VMap* vm = item.vmap;
+        if (vm && vm->vtable) size = vm->vtable->count(vm->data);
         break;
     }
     case LMD_TYPE_ELEMENT: {
@@ -3148,6 +3166,18 @@ void fn_array_set(Array* arr, int index, Item value) {
 // If the field does not exist or type changes, logs an error.
 void fn_map_set(Item map_item, Item key, Item value) {
     TypeId map_type_id = get_type_id(map_item);
+
+    // VMap: in-place mutation via vtable
+    if (map_type_id == LMD_TYPE_VMAP) {
+        VMap* vm = map_item.vmap;
+        if (!vm || !vm->vtable) {
+            log_error("fn_map_set: null vmap or vtable");
+            return;
+        }
+        vm->vtable->set(vm->data, key, value);
+        return;
+    }
+
     if (map_type_id != LMD_TYPE_MAP || !map_item.map) {
         log_error("fn_map_set: not a map (type=%d)", map_type_id);
         return;
