@@ -1,0 +1,1598 @@
+{
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+  "test_file": "c17-comments-000.htm",
+========
+  "test_file": "forced-page-breaks-000.htm",
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "nodeType": "element",
+    "selector": "html",
+    "tag": "html",
+    "id": null,
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 220,
+      "contentWidth": 1200,
+      "contentHeight": 800,
+      "scrollWidth": 1200,
+      "scrollHeight": 800
+    },
+    "computed": {
+      "display": "block",
+      "position": "static",
+      "marginTop": 0,
+      "marginRight": 0,
+      "marginBottom": 0,
+      "marginLeft": 0,
+      "paddingTop": 0,
+      "paddingRight": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "borderTopWidth": 0,
+      "borderRightWidth": 0,
+      "borderBottomWidth": 0,
+      "borderLeftWidth": 0,
+      "flexDirection": "row",
+      "flexWrap": "nowrap",
+      "justifyContent": "normal",
+      "alignItems": "normal",
+      "alignContent": "normal",
+      "flexGrow": 0,
+      "flexShrink": 1,
+      "flexBasis": "auto",
+      "alignSelf": "auto",
+      "order": 0,
+      "gap": "normal",
+      "fontSize": 16,
+      "lineHeight": "normal",
+      "fontFamily": "Times",
+      "fontWeight": "400",
+      "textAlign": "start",
+      "verticalAlign": "baseline",
+      "top": "auto",
+      "right": "auto",
+      "bottom": "auto",
+      "left": "auto",
+      "zIndex": "auto",
+      "overflow": "visible",
+      "overflowX": "visible",
+      "overflowY": "visible"
+    },
+    "depth": 0,
+    "elementIndex": 0,
+    "children": [
+      {
+        "nodeType": "element",
+        "selector": "head",
+        "tag": "head",
+        "id": null,
+        "classes": [],
+        "layout": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "contentWidth": 0,
+          "contentHeight": 0,
+          "scrollWidth": 0,
+          "scrollHeight": 0
+        },
+        "computed": {
+          "display": "none",
+          "position": "static",
+          "marginTop": 0,
+          "marginRight": 0,
+          "marginBottom": 0,
+          "marginLeft": 0,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "borderTopWidth": 0,
+          "borderRightWidth": 0,
+          "borderBottomWidth": 0,
+          "borderLeftWidth": 0,
+          "flexDirection": "row",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "alignItems": "normal",
+          "alignContent": "normal",
+          "flexGrow": 0,
+          "flexShrink": 1,
+          "flexBasis": "auto",
+          "alignSelf": "auto",
+          "order": 0,
+          "gap": "normal",
+          "fontSize": 16,
+          "lineHeight": "normal",
+          "fontFamily": "Times",
+          "fontWeight": "400",
+          "textAlign": "start",
+          "verticalAlign": "baseline",
+          "top": "auto",
+          "right": "auto",
+          "bottom": "auto",
+          "left": "auto",
+          "zIndex": "auto",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible"
+        },
+        "depth": 1,
+        "elementIndex": 0,
+        "children": [
+          {
+            "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "text": "\n  ",
+            "length": 3,
+========
+            "text": "\n",
+            "length": 1,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "title",
+            "tag": "title",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "CSS Test: Comments",
+                "length": 18,
+========
+                "text": "CSS Test: forced page breaks",
+                "length": 28,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "text": "\n  ",
+            "length": 3,
+========
+            "text": "\n",
+            "length": 1,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "link:nth-of-type(1)",
+            "tag": "link",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "text": "\n  ",
+            "length": 3,
+========
+            "text": "\n",
+            "length": 1,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "link:nth-of-type(2)",
+            "tag": "link",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 5,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "text": "\n  ",
+            "length": 3,
+========
+            "text": "\n",
+            "length": 1,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "selector": "link:nth-of-type(3)",
+            "tag": "link",
+========
+            "selector": "meta:nth-of-type(1)",
+            "tag": "meta",
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 7,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "text": "\n  ",
+            "length": 3,
+========
+            "text": "\n",
+            "length": 1,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+========
+            "selector": "meta:nth-of-type(2)",
+            "tag": "meta",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 9,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 10,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "selector": "style",
+            "tag": "style",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "elementIndex": 9,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n   body { color: red; }\n   /* This is a CSS comment. */\n   .one {color: green;} /* Another comment */\n   /* The following should not be used:\n   .two {color: red;} */\n   .three {color: green; /* color: red; */}\n   /**\n   .four {color: red;} */\n   .five {color: green;}\n   /**/\n   .six {color: green;}\n   /*********/\n   .seven {color: green;}\n   /* a comment **/\n   .eight {color: green;}\n  ",
+                "length": 391,
+========
+            "elementIndex": 11,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n\t@page {\n\t\tcounter-increment: page;\n\t\tmargin: 7%;\n\t\t@top-right {\n           content: content: \"Page \" counter(page);\n        }\n\t}\n\t@page :first {\n\t\t@top-center {\n           content: \"This test requires 7 pages\";\n        }\n\t}\n\n\t.breakBefore {page-break-before: always;}\n\t.breakAfter {page-break-after: always;}\n\t\n\t.breakBeforeLeft {page-break-before: left;}\n\t.breakBeforeRight {page-break-before: right;}\n",
+                "length": 405,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "nodeIndex": 10,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "link:nth-of-type(4)",
+            "tag": "link",
+========
+            "nodeIndex": 12,
+            "children": []
+          }
+        ]
+      },
+      {
+        "nodeType": "element",
+        "selector": "body",
+        "tag": "body",
+        "id": null,
+        "classes": [],
+        "layout": {
+          "x": 8,
+          "y": 16,
+          "width": 1184,
+          "height": 188,
+          "contentWidth": 1184,
+          "contentHeight": 188,
+          "scrollWidth": 1184,
+          "scrollHeight": 188
+        },
+        "computed": {
+          "display": "block",
+          "position": "static",
+          "marginTop": 8,
+          "marginRight": 8,
+          "marginBottom": 8,
+          "marginLeft": 8,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "borderTopWidth": 0,
+          "borderRightWidth": 0,
+          "borderBottomWidth": 0,
+          "borderLeftWidth": 0,
+          "flexDirection": "row",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "alignItems": "normal",
+          "alignContent": "normal",
+          "flexGrow": 0,
+          "flexShrink": 1,
+          "flexBasis": "auto",
+          "alignSelf": "auto",
+          "order": 0,
+          "gap": "normal",
+          "fontSize": 16,
+          "lineHeight": "normal",
+          "fontFamily": "Times",
+          "fontWeight": "400",
+          "textAlign": "start",
+          "verticalAlign": "baseline",
+          "top": "auto",
+          "right": "auto",
+          "bottom": "auto",
+          "left": "auto",
+          "zIndex": "auto",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible"
+        },
+        "depth": 1,
+        "elementIndex": 2,
+        "children": [
+          {
+            "nodeType": "element",
+            "selector": "p.breakAfter.breakBeforeLeft:nth-of-type(1)",
+            "tag": "p",
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "id": null,
+            "classes": [
+              "breakAfter",
+              "breakBeforeLeft"
+            ],
+            "layout": {
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 11,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n ",
+            "length": 2,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 12,
+            "children": []
+          }
+        ]
+      },
+      {
+        "nodeType": "element",
+        "selector": "body",
+        "tag": "body",
+        "id": null,
+        "classes": [],
+        "layout": {
+          "x": 8,
+          "y": 16,
+          "width": 1184,
+          "height": 188,
+          "contentWidth": 1184,
+          "contentHeight": 188,
+          "scrollWidth": 1184,
+          "scrollHeight": 188
+        },
+        "computed": {
+          "display": "block",
+          "position": "static",
+          "marginTop": 8,
+          "marginRight": 8,
+          "marginBottom": 8,
+          "marginLeft": 8,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "borderTopWidth": 0,
+          "borderRightWidth": 0,
+          "borderBottomWidth": 0,
+          "borderLeftWidth": 0,
+          "flexDirection": "row",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "alignItems": "normal",
+          "alignContent": "normal",
+          "flexGrow": 0,
+          "flexShrink": 1,
+          "flexBasis": "auto",
+          "alignSelf": "auto",
+          "order": 0,
+          "gap": "normal",
+          "fontSize": 16,
+          "lineHeight": "normal",
+          "fontFamily": "Times",
+          "fontWeight": "400",
+          "textAlign": "start",
+          "verticalAlign": "baseline",
+          "top": "auto",
+          "right": "auto",
+          "bottom": "auto",
+          "left": "auto",
+          "zIndex": "auto",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible"
+        },
+        "depth": 1,
+        "elementIndex": 2,
+        "children": [
+          {
+            "nodeType": "element",
+            "selector": "p.one:nth-of-type(1)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "one"
+            ],
+            "layout": {
+========
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+              "x": 8,
+              "y": 16,
+              "width": 1184,
+              "height": 18,
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
+            },
+            "computed": {
+              "display": "block",
+              "position": "static",
+              "marginTop": 16,
+              "marginRight": 0,
+              "marginBottom": 16,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "\n   This line should be green.\n  ",
+                "length": 33,
+========
+                "text": "When printed, this sentence should appear by itself on page 2.",
+                "length": 62,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 16,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                      "width": 165.75,
+                      "height": 18,
+                      "right": 173.75,
+                      "bottom": 34,
+                      "text": "\n   This line should be green.\n  ",
+                      "startIndex": 0,
+                      "endIndex": 33
+========
+                      "width": 397.22,
+                      "height": 18,
+                      "right": 405.22,
+                      "bottom": 34,
+                      "text": "When printed, this sentence should appear by itself on page 2.",
+                      "startIndex": 0,
+                      "endIndex": 62
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "selector": "p.three:nth-of-type(2)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "three"
+========
+            "selector": "p.breakBefore:nth-of-type(2)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "breakBefore"
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            ],
+            "layout": {
+              "x": 8,
+              "y": 50,
+              "width": 1184,
+              "height": 18,
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
+            },
+            "computed": {
+              "display": "block",
+              "position": "static",
+              "marginTop": 16,
+              "marginRight": 0,
+              "marginBottom": 16,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "\n   This line should be green.\n  ",
+                "length": 33,
+========
+                "text": "This sentence should appear by itself on page 3.",
+                "length": 48,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 50,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                      "width": 165.75,
+                      "height": 18,
+                      "right": 173.75,
+                      "bottom": 68,
+                      "text": "\n   This line should be green.\n  ",
+                      "startIndex": 0,
+                      "endIndex": 33
+========
+                      "width": 307.03,
+                      "height": 18,
+                      "right": 315.03,
+                      "bottom": 68,
+                      "text": "This sentence should appear by itself on page 3.",
+                      "startIndex": 0,
+                      "endIndex": 48
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "selector": "p.five:nth-of-type(3)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "five"
+========
+            "selector": "p.breakBefore:nth-of-type(3)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "breakBefore"
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            ],
+            "layout": {
+              "x": 8,
+              "y": 84,
+              "width": 1184,
+              "height": 18,
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
+            },
+            "computed": {
+              "display": "block",
+              "position": "static",
+              "marginTop": 16,
+              "marginRight": 0,
+              "marginBottom": 16,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "\n   This line should be green.\n  ",
+                "length": 33,
+========
+                "text": "This sentence should appear on page 4.",
+                "length": 38,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 84,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                      "width": 165.75,
+                      "height": 18,
+                      "right": 173.75,
+                      "bottom": 102,
+                      "text": "\n   This line should be green.\n  ",
+                      "startIndex": 0,
+                      "endIndex": 33
+========
+                      "width": 251.03,
+                      "height": 18,
+                      "right": 259.03,
+                      "bottom": 102,
+                      "text": "This sentence should appear on page 4.",
+                      "startIndex": 0,
+                      "endIndex": 38
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "selector": "p.six:nth-of-type(4)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "six"
+========
+            "selector": "p.breakAfter:nth-of-type(4)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "breakAfter"
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            ],
+            "layout": {
+              "x": 8,
+              "y": 118,
+              "width": 1184,
+              "height": 18,
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
+            },
+            "computed": {
+              "display": "block",
+              "position": "static",
+              "marginTop": 16,
+              "marginRight": 0,
+              "marginBottom": 16,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "\n   This line should be green.\n  ",
+                "length": 33,
+========
+                "text": "This sentence should also appear on page 4.",
+                "length": 43,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 118,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                      "width": 165.75,
+                      "height": 18,
+                      "right": 173.75,
+                      "bottom": 136,
+                      "text": "\n   This line should be green.\n  ",
+                      "startIndex": 0,
+                      "endIndex": 33
+========
+                      "width": 280.81,
+                      "height": 18,
+                      "right": 288.81,
+                      "bottom": 136,
+                      "text": "This sentence should also appear on page 4.",
+                      "startIndex": 0,
+                      "endIndex": 43
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "selector": "p.seven:nth-of-type(5)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "seven"
+            ],
+========
+            "selector": "p:nth-of-type(5)",
+            "tag": "p",
+            "id": null,
+            "classes": [],
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            "layout": {
+              "x": 8,
+              "y": 152,
+              "width": 1184,
+              "height": 18,
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
+            },
+            "computed": {
+              "display": "block",
+              "position": "static",
+              "marginTop": 16,
+              "marginRight": 0,
+              "marginBottom": 16,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 9,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "\n   This line should be green.\n  ",
+                "length": 33,
+========
+                "text": "This sentence should appear by itself on page 5.",
+                "length": 48,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 152,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                      "width": 165.75,
+                      "height": 18,
+                      "right": 173.75,
+                      "bottom": 170,
+                      "text": "\n   This line should be green.\n  ",
+                      "startIndex": 0,
+                      "endIndex": 33
+========
+                      "width": 307.03,
+                      "height": 18,
+                      "right": 315.03,
+                      "bottom": 170,
+                      "text": "This sentence should appear by itself on page 5.",
+                      "startIndex": 0,
+                      "endIndex": 48
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "element",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+            "selector": "p.eight:nth-of-type(6)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "eight"
+========
+            "selector": "p.breakBeforeRight:nth-of-type(6)",
+            "tag": "p",
+            "id": null,
+            "classes": [
+              "breakBeforeRight"
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+            ],
+            "layout": {
+              "x": 8,
+              "y": 186,
+              "width": 1184,
+              "height": 18,
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
+            },
+            "computed": {
+              "display": "block",
+              "position": "static",
+              "marginTop": 16,
+              "marginRight": 0,
+              "marginBottom": 16,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 11,
+            "children": [
+              {
+                "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                "text": "\n   This line should be green.\n  ",
+                "length": 33,
+========
+                "text": "This sentence should appear by itself on page 7.",
+                "length": 48,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 186,
+<<<<<<<< HEAD:test/layout/reference/c17-comments-000.json
+                      "width": 165.75,
+                      "height": 18,
+                      "right": 173.75,
+                      "bottom": 204,
+                      "text": "\n   This line should be green.\n  ",
+                      "startIndex": 0,
+                      "endIndex": 33
+========
+                      "width": 307.03,
+                      "height": 18,
+                      "right": 315.03,
+                      "bottom": 204,
+                      "text": "This sentence should appear by itself on page 7.",
+                      "startIndex": 0,
+                      "endIndex": 48
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/forced-page-breaks-000.json
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  }
+}
