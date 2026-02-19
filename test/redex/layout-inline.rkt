@@ -158,7 +158,7 @@
                (set! line-height 0)]
               [else (void)])
             (define positioned
-              (set-view-position laid-out
+              (set-view-pos laid-out
                                 (+ offset-x current-x)
                                 (+ offset-y current-y)))
             (set! current-x (+ current-x cw))
@@ -189,7 +189,7 @@
               (set! current-y (+ current-y line-height))
               (set! line-height 0))
             (define positioned
-              (set-view-position laid-out
+              (set-view-pos laid-out
                                 (+ offset-x current-x ml)
                                 (+ offset-y current-y mt)))
             (set! current-x (+ current-x margin-box-w))
@@ -209,7 +209,7 @@
               (set! current-y (+ current-y line-height))
               (set! line-height 0))
             (define positioned
-              (set-view-position laid-out
+              (set-view-pos laid-out
                                 (+ offset-x current-x)
                                 (+ offset-y current-y)))
             (set! current-x (+ current-x cw))
@@ -228,7 +228,7 @@
                 (set! current-y (+ current-y line-height))
                 (set! line-height 0))
               (define positioned
-                (set-view-position laid-out
+                (set-view-pos laid-out
                                   (+ offset-x current-x)
                                   (+ offset-y current-y)))
               (set! current-x (+ current-x cw))
@@ -238,16 +238,5 @@
        (loop (cdr remaining)
              current-x current-y line-height
              (cons child-view views))])])))  ;; close else, cond, loop-case
-;; ============================================================
-;; Helper: Set view position
-;; ============================================================
 
-(define (set-view-position view x y)
-  (match view
-    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,_ ,_ ,w ,h ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,_ ,_ ,w ,h ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
+;; set-view-pos — imported from layout-common.rkt (as set-view-pos)

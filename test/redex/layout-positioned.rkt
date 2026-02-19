@@ -252,16 +252,7 @@
      (offset-view view dx dy)]
     [else view]))
 
-;; offset a view's position by (dx, dy)
-(define (offset-view view dx dy)
-  (match view
-    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
-     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children ,baseline)]
-    [`(view ,id ,x ,y ,w ,h ,children)
-     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children)]
-    [`(view-text ,id ,x ,y ,w ,h ,text)
-     `(view-text ,id ,(+ x dx) ,(+ y dy) ,w ,h ,text)]
-    [_ view]))
+;; offset-view, set-view-pos, set-view-size — imported from layout-common.rkt
 
 ;; ============================================================
 ;; Helpers
@@ -291,22 +282,3 @@
     [`(replaced ,id ,_ ,iw ,ih)     `(replaced ,id ,new-styles ,iw ,ih)]
     [_ box]))
 
-(define (set-view-pos view x y)
-  (match view
-    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,_ ,_ ,w ,h ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,_ ,_ ,w ,h ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
-
-(define (set-view-size view w h)
-  (match view
-    [`(view ,id ,x ,y ,_ ,_ ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,x ,y ,_ ,_ ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,x ,y ,_ ,_ ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
