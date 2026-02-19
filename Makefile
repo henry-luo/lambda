@@ -1800,6 +1800,19 @@ capture-layout:
 	                        FOUND_SUITE="$$dir"; \
 	                        break; \
 	                    fi; \
+	                    for subdir in data/$$dir/*/; do \
+	                        if [ -d "$$subdir" ]; then \
+	                            if [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
+	                                TEST_FILE="$${subdir}$${TEST_VAR}.htm"; \
+	                                FOUND_SUITE="$$dir"; \
+	                                break 2; \
+	                            elif [ -f "$${subdir}$${TEST_VAR}.html" ]; then \
+	                                TEST_FILE="$${subdir}$${TEST_VAR}.html"; \
+	                                FOUND_SUITE="$$dir"; \
+	                                break 2; \
+	                            fi; \
+	                        fi; \
+	                    done; \
 	                done; \
 	                if [ -z "$$TEST_FILE" ]; then \
 	                    echo "❌ Error: Test file '$$TEST_VAR' not found in any suite directory"; \
@@ -1847,6 +1860,17 @@ test-layout:
 							TEST_FILE="$${TEST_VAR}.html"; \
 							break; \
 						fi; \
+						for subdir in test/layout/data/$$dir/*/; do \
+							if [ -d "$$subdir" ]; then \
+								if [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
+									TEST_FILE="$${TEST_VAR}.htm"; \
+									break 2; \
+								elif [ -f "$${subdir}$${TEST_VAR}.html" ]; then \
+									TEST_FILE="$${TEST_VAR}.html"; \
+									break 2; \
+								fi; \
+							fi; \
+						done; \
 					done; \
 					if [ -z "$$TEST_FILE" ]; then \
 						TEST_FILE="$${TEST_VAR}.html"; \
