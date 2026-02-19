@@ -14,6 +14,16 @@
 (provide (all-defined-out))
 
 ;; ============================================================
+;; Named Constants
+;; ============================================================
+
+;; CSS 2.2 §15.7: initial value of 'font-size' is medium, mapped to 16px
+(define CSS-DEFAULT-FONT-SIZE 16)
+
+;; CSS 2.2 §8.3: user-agent default margin for <body>
+(define UA-BODY-MARGIN 8)
+
+;; ============================================================
 ;; Style Accessors — extract properties from a Styles term
 ;; ============================================================
 
@@ -97,7 +107,7 @@
               (not (infinite? containing-size)))
          (* (/ pct 100) containing-size)
          #f)]            ; percentage against indefinite/infinite → not resolved
-    [`(em ,n) (* n 16)]  ; simplified: assume 1em = 16px
+    [`(em ,n) (* n CSS-DEFAULT-FONT-SIZE)]  ; simplified: assume 1em = 16px
     ['min-content 'min-content]
     ['max-content 'max-content]
     ['fit-content 'fit-content]
@@ -354,3 +364,91 @@
 ;; extract stored baseline (returns #f if not stored)
 (define (view-baseline v)
   (if (> (length v) 7) (list-ref v 7) #f))
+
+;; ============================================================
+;; View Manipulation Helpers
+;; ============================================================
+
+;; set the x/y position of a view node, preserving all other fields
+(define (set-view-pos view x y)
+  (match view
+    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
+    [`(view ,id ,_ ,_ ,w ,h ,children)
+     `(view ,id ,x ,y ,w ,h ,children)]
+    [`(view-text ,id ,_ ,_ ,w ,h ,text)
+     `(view-text ,id ,x ,y ,w ,h ,text)]
+    [_ view]))
+
+;; set the width/height of a view node, preserving all other fields
+(define (set-view-size view w h)
+  (match view
+    [`(view ,id ,x ,y ,_ ,_ ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
+    [`(view ,id ,x ,y ,_ ,_ ,children)
+     `(view ,id ,x ,y ,w ,h ,children)]
+    [`(view-text ,id ,x ,y ,_ ,_ ,text)
+     `(view-text ,id ,x ,y ,w ,h ,text)]
+    [_ view]))
+
+;; offset a view's position by (dx, dy)
+(define (offset-view view dx dy)
+  (match view
+    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
+     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children ,baseline)]
+    [`(view ,id ,x ,y ,w ,h ,children)
+     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children)]
+    [`(view-text ,id ,x ,y ,w ,h ,text)
+     `(view-text ,id ,(+ x dx) ,(+ y dy) ,w ,h ,text)]
+    [_ view]))
+
+;; ============================================================
+;; Box Style Extraction
+;; ============================================================
+
+;; extract the styles term from any box type
+(define (get-box-styles box)
+  (match box
+    [`(block ,_ ,styles ,_) styles]
+    [`(inline ,_ ,styles ,_) styles]
+    [`(inline-block ,_ ,styles ,_) styles]
+    [`(flex ,_ ,styles ,_) styles]
+    [`(grid ,_ ,styles ,_ ,_) styles]
+    [`(table ,_ ,styles ,_) styles]
+    [`(text ,_ ,styles ,_ ,_) styles]
+    [`(replaced ,_ ,styles ,_ ,_) styles]
+    [`(none ,_) '(style)]
+    [_ '(style)]))
+
+;; ============================================================
+;; Baseline Computation
+;; ============================================================
+
+;; compute the first baseline of a view tree.
+;; if the view has a stored baseline, use that; otherwise, recurse into
+;; the first child.
+(define (compute-view-baseline view)
+  (define stored (view-baseline view))
+  (if stored
+      stored
+      (let ([h (view-height view)]
+            [children (view-children view)])
+        (if (or (null? children) (not (pair? children)))
+            h
+            (let ([first-child (car children)])
+              (+ (view-y first-child) (compute-view-baseline first-child)))))))
+
+;; ============================================================
+;; Gap Resolution
+;; ============================================================
+
+;; resolve a gap value (column-gap or row-gap) against a reference size.
+;; supports numeric values and percentage values `(% pct)`.
+(define (resolve-gap gap-val avail)
+  (cond
+    [(number? gap-val) gap-val]
+    [(and (pair? gap-val) (eq? (car gap-val) '%))
+     (if (and avail (number? avail) (not (infinite? avail)))
+         (* (/ (cadr gap-val) 100) avail)
+         0)]
+    [else 0]))
