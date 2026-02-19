@@ -224,8 +224,12 @@ func_obj_t func_list[] = {
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
     {"it2i", (fn_ptr) it2i},
+    {"it2b", (fn_ptr) it2b},
     {"it2s", (fn_ptr) it2s},
     {"fn_to_cstr", (fn_ptr) fn_to_cstr},
+    // MIR swap-safe store functions (external call prevents SSA reordering)
+    {"_store_i64", (fn_ptr) _store_i64},
+    {"_store_f64", (fn_ptr) _store_f64},
     {"to_fn", (fn_ptr) to_fn},
     {"to_fn_n", (fn_ptr) to_fn_n},
     {"to_fn_named", (fn_ptr) to_fn_named},

@@ -9,9 +9,11 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void transpile_expr_tco(Transpiler* tp, AstNode *expr_node, bool in_tail_position);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node);
+void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node);
 bool has_typed_params(AstFuncNode* fn_node);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
+void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global);
 void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
@@ -345,18 +347,63 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     return true;
 }
 
-// Check if a function has any explicitly typed (non-any) parameters
-// Used to determine if we should generate both boxed and unboxed versions
+// Check if a function has any explicitly typed (non-any) parameters with concrete scalar C types.
+// Only concrete scalar types (int, float, bool, string, etc.) are considered "typed" because
+// they use native C types that differ from Item. Union types (int^), function types, container
+// types, etc. are all passed as Item (or Item-compatible pointers) at runtime.
 bool has_typed_params(AstFuncNode* fn_node) {
     AstNamedNode *param = fn_node->param;
     while (param) {
         TypeParam* pt = (TypeParam*)param->type;
-        // TypeParam extends Type, so pt->type_id is the declared type
-        if (pt && pt->type_id != LMD_TYPE_ANY) {
-            return true;
+        if (pt) {
+            TypeId tid = pt->type_id;
+            if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
+                tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
+                tid == LMD_TYPE_STRING || tid == LMD_TYPE_BINARY ||
+                tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_DECIMAL ||
+                tid == LMD_TYPE_DTIME) {
+                return true;
+            }
         }
         param = (AstNamedNode*)param->next;
     }
+    return false;
+}
+
+// Check if a function needs a fn_call*-compatible wrapper (_w suffix).
+// fn_call* casts function pointers to Item(*)(Item,...) ABI.
+// A wrapper is needed when the function's native signature doesn't match this ABI:
+//   - Has typed params (native types instead of Item)
+//   - Returns a native type AND has no params (e.g., fn g() { 42 })
+// Functions with ALL untyped params already use Item-level operations internally,
+// so their body effectively returns Items — no wrapper needed.
+// Closures and can_raise functions already have Item params/return, so no wrapper needed.
+bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
+    if (fn_node->captures) return false;  // closures already use Item ABI
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+
+    // Functions with typed params need param unboxing wrapper
+    if (has_typed_params(fn_node)) return true;
+
+    // Functions with ALL untyped params: body uses Item-level ops → effectively returns Item
+    // No wrapper needed (fn_call* can use the function directly)
+    if (fn_node->param) return false;
+
+    // Functions with NO params: body may return raw native values → needs wrapper
+    if (!fn_type->can_raise) {
+        Type *ret_type = fn_type->returned;
+        if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
+        if (!ret_type) ret_type = &TYPE_ANY;
+        TypeId ret_tid = ret_type->type_id;
+        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64 ||
+            ret_tid == LMD_TYPE_FLOAT || ret_tid == LMD_TYPE_BOOL ||
+            ret_tid == LMD_TYPE_STRING || ret_tid == LMD_TYPE_BINARY ||
+            ret_tid == LMD_TYPE_SYMBOL || ret_tid == LMD_TYPE_DECIMAL ||
+            ret_tid == LMD_TYPE_DTIME) {
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -701,10 +748,151 @@ bool emit_param_item(Transpiler* tp, AstNode* item) {
     return false;
 }
 
+// Check if a call expression will use fn_call* dynamic dispatch (returns Item).
+// Dynamic dispatch occurs when calling through a variable, parameter, index,
+// member, or chained call — i.e., anything other than a direct named function.
+bool is_dynamic_fn_call(AstNode* node) {
+    // Unwrap primary expression wrapper
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        if (pri->expr) node = pri->expr;
+    }
+    if (node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)node;
+    // sys func calls are never dynamic dispatch
+    if (call->function->node_type == AST_NODE_SYS_FUNC) return false;
+    AstPrimaryNode* primary = call->function->node_type == AST_NODE_PRIMARY ?
+        (AstPrimaryNode*)call->function : NULL;
+    if (!primary || !primary->expr || primary->expr->node_type != AST_NODE_IDENT)
+        return true;  // non-identifier callee (index, member, call expr) → dynamic
+    AstIdentNode* ident = (AstIdentNode*)primary->expr;
+    if (!ident->entry || !ident->entry->node) return true;  // unresolved → dynamic
+    AstNodeType entry_type = ident->entry->node->node_type;
+    // Direct function/proc references use direct call, everything else is dynamic
+    return entry_type != AST_NODE_FUNC && entry_type != AST_NODE_FUNC_EXPR && entry_type != AST_NODE_PROC;
+}
+
+// Check if a binary expression uses Item-returning runtime functions (fn_add, fn_sub, fn_mul)
+// rather than native C operators. When operands are not both concrete numeric types,
+// the transpiler uses runtime functions which return Item — boxing is not needed.
+static bool binary_already_returns_item(AstNode* node) {
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        if (pri->expr) node = pri->expr;
+    }
+    if (node->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* bin_node = (AstBinaryNode*)node;
+    TypeId lt = bin_node->left->type ? bin_node->left->type->type_id : LMD_TYPE_ANY;
+    TypeId rt = bin_node->right->type ? bin_node->right->type->type_id : LMD_TYPE_ANY;
+    bool both_numeric = (LMD_TYPE_INT <= lt && lt <= LMD_TYPE_FLOAT &&
+                         LMD_TYPE_INT <= rt && rt <= LMD_TYPE_FLOAT);
+
+    switch (bin_node->op) {
+    case OPERATOR_IDIV:
+    case OPERATOR_MOD:
+        // Always use Item-returning fn_idiv/fn_mod
+        return true;
+    case OPERATOR_POW:
+        // Numeric → push_d(fn_pow_u(...)) returns double* which needs boxing
+        // Non-numeric → fn_pow returns Item
+        return !both_numeric;
+    case OPERATOR_DIV:
+        // Numeric → native ((double)left/(double)right) returns double, needs boxing
+        // Non-numeric → fn_div returns Item
+        return !both_numeric;
+    case OPERATOR_ADD:
+    case OPERATOR_SUB:
+    case OPERATOR_MUL: {
+        // Same numeric type → native C op → returns raw value
+        if (lt == rt && (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT)) {
+            return false;
+        }
+        // Both in numeric range → native C op
+        if (both_numeric) return false;
+        // Otherwise, fn_add/fn_sub/fn_mul are used → returns Item
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+// Check if a direct call targets a function whose boxed version effectively returns Item.
+// Functions with ALL untyped (ANY) params use Item-level runtime operations internally,
+// so their body returns Item values even though the C return type is int64_t/double/etc.
+static bool direct_call_returns_item(AstNode* node) {
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        if (pri->expr) node = pri->expr;
+    }
+    if (node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)node;
+    if (call->function->node_type == AST_NODE_SYS_FUNC) return false;
+    AstPrimaryNode* primary = call->function->node_type == AST_NODE_PRIMARY ?
+        (AstPrimaryNode*)call->function : NULL;
+    if (!primary || !primary->expr || primary->expr->node_type != AST_NODE_IDENT) return false;
+    AstIdentNode* ident = (AstIdentNode*)primary->expr;
+    if (!ident->entry || !ident->entry->node) return false;
+    AstNode* entry_node = ident->entry->node;
+    if (entry_node->node_type != AST_NODE_FUNC && entry_node->node_type != AST_NODE_FUNC_EXPR)
+        return false;
+    AstFuncNode* fn_node = (AstFuncNode*)entry_node;
+    // If function has ALL untyped params (no typed params but HAS params),
+    // body uses Item-level operations → returns Item effectively
+    if (fn_node->param && !has_typed_params(fn_node)) return true;
+    return false;
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
         return;
+    }
+
+    // fn_call* dispatch always returns Item — skip boxing to avoid double-boxing
+    // Also skip for binary exprs and direct calls that already return Item
+    if (is_dynamic_fn_call(item) || binary_already_returns_item(item) || direct_call_returns_item(item)) {
+        transpile_expr(tp, item);
+        return;
+    }
+
+    // Handle single-value CONTENT blocks: emit declarations + box last value.
+    // Must be done before the type switch because a CONTENT node's type_id can be
+    // LIST, ANY, BOOL, etc. — all need the same "declarations; box(last_val)" pattern.
+    if (item->node_type == AST_NODE_CONTENT) {
+        AstListNode* content = (AstListNode*)item;
+        // count declarations vs value items directly (not depending on list_type)
+        int decl_count = 0;
+        int value_count = 0;
+        AstNode* last_val = nullptr;
+        AstNode* scan = content->item;
+        while (scan) {
+            if (scan->node_type == AST_NODE_LET_STAM || scan->node_type == AST_NODE_PUB_STAM ||
+                scan->node_type == AST_NODE_TYPE_STAM || scan->node_type == AST_NODE_FUNC ||
+                scan->node_type == AST_NODE_FUNC_EXPR || scan->node_type == AST_NODE_PROC ||
+                scan->node_type == AST_NODE_STRING_PATTERN || scan->node_type == AST_NODE_SYMBOL_PATTERN) {
+                decl_count++;
+            } else {
+                value_count++;
+                last_val = scan;
+            }
+            scan = scan->next;
+        }
+        if (value_count == 1 && last_val && decl_count > 0) {
+            // single-value block expression: emit declarations, then box the last value
+            strbuf_append_str(tp->code_buf, "({");
+            AstNode* ci = content->item;
+            while (ci) {
+                if (ci->node_type == AST_NODE_LET_STAM || ci->node_type == AST_NODE_PUB_STAM || ci->node_type == AST_NODE_TYPE_STAM) {
+                    transpile_let_stam(tp, (AstLetNode*)ci, false);
+                }
+                ci = ci->next;
+            }
+            strbuf_append_char(tp->code_buf, '\n');
+            transpile_box_item(tp, last_val);
+            strbuf_append_str(tp->code_buf, ";})");
+            return;
+        }
     }
 
     switch (item->type->type_id) {
@@ -742,17 +930,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         if (is_captured_var_ref(tp, item)) {
             emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
             break;
-        }
-
-        // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, OPERATOR_IDIV, or OPERATOR_MOD,
-        // don't wrap with i2it because these functions already return an Item
-        if (item->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* bin_node = (AstBinaryNode*)item;
-            if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV ||
-                bin_node->op == OPERATOR_IDIV || bin_node->op == OPERATOR_MOD) {
-                transpile_expr(tp, item);
-                break;
-            }
         }
 
         strbuf_append_str(tp->code_buf, "i2it(");
@@ -864,7 +1041,9 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         break;
     }
     case LMD_TYPE_LIST:
-        transpile_expr(tp, item);  // list_end() -> Item
+        // Single-value CONTENT blocks are handled above (before the switch).
+        // Multi-value content/list: list_end() already returns Item.
+        transpile_expr(tp, item);
         break;
     case LMD_TYPE_PATH:
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
@@ -1108,8 +1287,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     } else {
                         // Regular function without captures - use to_fn_named for stack traces
                         strbuf_append_format(tp->code_buf, "to_fn_named(");
-                        write_fn_name(tp->code_buf, fn_node,
-                            (AstImportNode*)ident_node->entry->import);
+                        // use _w wrapper for functions with non-Item ABI so fn_call* works correctly
+                        if (needs_fn_call_wrapper(fn_node)) {
+                            write_fn_name_ex(tp->code_buf, fn_node,
+                                (AstImportNode*)ident_node->entry->import, "_w");
+                        } else {
+                            write_fn_name(tp->code_buf, fn_node,
+                                (AstImportNode*)ident_node->entry->import);
+                        }
                         strbuf_append_format(tp->code_buf, ",%d,", arity);
                         // pass function name as string literal for stack traces
                         if (fn_node->name && fn_node->name->chars) {
@@ -2827,7 +3012,23 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
 
     strbuf_append_str(tp->code_buf, "\nreturn ");
     if (return_node->value) {
-        transpile_box_item(tp, return_node->value);
+        // check if enclosing function returns native type (not Item)
+        // if so, don't box — the raw value is what the C function returns
+        bool func_returns_native = false;
+        if (tp->current_func_node) {
+            TypeFunc* fn_type = (TypeFunc*)tp->current_func_node->type;
+            Type *ret = fn_type ? fn_type->returned : nullptr;
+            if (ret && !tp->current_func_node->captures && !fn_type->can_raise) {
+                TypeId rt = ret->type_id;
+                func_returns_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 ||
+                                      rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_BOOL);
+            }
+        }
+        if (func_returns_native) {
+            transpile_expr(tp, return_node->value);
+        } else {
+            transpile_box_item(tp, return_node->value);
+        }
     } else {
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
@@ -2885,21 +3086,26 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         return;
     }
 
-    // MIR JIT workaround: inside while loops, use *(&_var)=value for native
-    // scalar types to force memory store/load. This prevents MIR's GVN/SSA
-    // destruction from incorrectly reordering swap-pattern assignments.
-    bool use_ptr_write = false;
+    // MIR JIT workaround: inside while loops, use _store_i64(&_var, value) or
+    // _store_f64(&_var, value) for native scalar types. These are external runtime
+    // functions that MIR can't inline or reorder, preventing the lost-copy SSA bug.
+    bool use_store_func = false;
+    const char* store_fn = NULL;
     if (tp->while_depth > 0 && assign_node->target_node && assign_node->target_node->type) {
         TypeId tid = assign_node->target_node->type->type_id;
-        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {
-            use_ptr_write = true;
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) {
+            use_store_func = true;
+            store_fn = "_store_i64";
+        } else if (tid == LMD_TYPE_FLOAT) {
+            use_store_func = true;
+            store_fn = "_store_f64";
         }
     }
 
-    if (use_ptr_write) {
-        strbuf_append_str(tp->code_buf, "\n *(&_");
+    if (use_store_func) {
+        strbuf_append_format(tp->code_buf, "\n %s(&_", store_fn);
         strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
-        strbuf_append_str(tp->code_buf, ")=");
+        strbuf_append_str(tp->code_buf, ",");
     } else {
         strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
         strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
@@ -2936,7 +3142,8 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         transpile_expr(tp, assign_node->value);
         if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
     }
-    strbuf_append_char(tp->code_buf, ';');
+    // close with ) for store function call, or ; for regular assignment
+    strbuf_append_str(tp->code_buf, use_store_func ? ");" : ";");
 }
 
 // compound assignment: arr[i] = val → fn_array_set(arr, i, val)
@@ -3089,6 +3296,39 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
 
     TypeArray *type = list_node->list_type;
     log_debug("transpile_list_expr: type->length = %ld", type->length);
+
+    // block expression optimization: when there's exactly one value expression
+    // and declarations (let bindings), emit as statement expression that evaluates
+    // to the single value directly, instead of wrapping in a list.
+    // e.g., (let x = 10, x) → ({ int64_t _x = 10; _x; })
+    // This is critical for typed functions where returning List* as int64_t causes errors.
+    if (type->length == 1 && list_node->declare) {
+        strbuf_append_str(tp->code_buf, "({\n");
+        // emit declarations
+        AstNode *declare = list_node->declare;
+        while (declare) {
+            if (declare->node_type != AST_NODE_ASSIGN) {
+                log_error("Error: transpile_list_expr found non-assign node in declare chain");
+                declare = declare->next;
+                continue;
+            }
+            transpile_assign_expr(tp, (AstNamedNode*)declare);
+            strbuf_append_str(tp->code_buf, "\n");
+            declare = declare->next;
+        }
+        // emit the single value expression as the result
+        // use transpile_box_item to ensure proper Item boxing, since list expressions
+        // are expected to return Item-typed values
+        AstNode *item = list_node->item;
+        if (item) {
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ";})");
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_NULL;})");
+        }
+        return;
+    }
+
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");
     // let declare first
@@ -3213,7 +3453,27 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         scan = scan->next;
     }
 
-    strbuf_append_str(tp->code_buf, "({\n Item result = ITEM_NULL;");
+    // determine if enclosing function returns native type (not Item)
+    bool returns_native = false;
+    if (tp->current_func_node) {
+        TypeFunc* fn_type = (TypeFunc*)tp->current_func_node->type;
+        Type *ret = fn_type ? fn_type->returned : nullptr;
+        if (ret && !tp->current_func_node->captures && !fn_type->can_raise) {
+            TypeId rt = ret->type_id;
+            returns_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 ||
+                              rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_BOOL);
+        }
+    }
+
+    strbuf_append_str(tp->code_buf, "({\n ");
+    if (returns_native) {
+        // use the native C type for result variable
+        TypeFunc* fn_type = (TypeFunc*)tp->current_func_node->type;
+        write_type(tp->code_buf, fn_type->returned);
+        strbuf_append_str(tp->code_buf, " result = 0;");
+    } else {
+        strbuf_append_str(tp->code_buf, "Item result = ITEM_NULL;");
+    }
 
     while (item) {
         // handle declarations
@@ -3285,7 +3545,11 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
             // other expressions - capture if last
             if (item == last_item) {
                 strbuf_append_str(tp->code_buf, "\n result = ");
-                transpile_box_item(tp, item);
+                if (returns_native) {
+                    transpile_expr(tp, item);
+                } else {
+                    transpile_box_item(tp, item);
+                }
                 strbuf_append_char(tp->code_buf, ';');
             } else {
                 strbuf_append_str(tp->code_buf, "\n ");
@@ -3304,14 +3568,75 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
     log_debug("transpile content expr");
     TypeArray *type = list_node->list_type;
-    // create list before the declarations, to contain all the allocations
-    strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
-    // let declare first
+
+    // count effective (non-declaration) items first
     AstNode *item = list_node->item;
     int effective_length = type->length;
+    AstNode *last_value_item = nullptr;
+    AstNode *scan = list_node->item;
+    while (scan) {
+        if (scan->node_type == AST_NODE_LET_STAM || scan->node_type == AST_NODE_PUB_STAM || scan->node_type == AST_NODE_TYPE_STAM ||
+            scan->node_type == AST_NODE_FUNC || scan->node_type == AST_NODE_FUNC_EXPR || scan->node_type == AST_NODE_PROC ||
+            scan->node_type == AST_NODE_STRING_PATTERN || scan->node_type == AST_NODE_SYMBOL_PATTERN) {
+            // declaration, not a value item
+        } else {
+            last_value_item = scan;
+        }
+        scan = scan->next;
+    }
+
+    // when there is exactly one value expression (block expression with let bindings),
+    // emit as a statement expression that evaluates to that single value directly,
+    // instead of wrapping in a list. This is critical for typed functions:
+    // fn f() int { (let x = 10, x) } should return int64_t, not List*
+    item = list_node->item;
+    int decl_count = 0;
     while (item) {
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM) {
-            effective_length--;
+            decl_count++;
+        } else if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
+            decl_count++;
+        }
+        item = item->next;
+    }
+    effective_length = type->length - decl_count;
+
+    if (effective_length == 1 && last_value_item && decl_count > 0 && !is_global
+        && last_value_item->node_type != AST_NODE_FOR_EXPR) {
+        // block expression: (let x = 10, x) → ({ int64_t _x = 10; _x; })
+        // NOT applied at global scope (root content goes into Item result, needs list wrapping)
+        // NOT applied for for-expressions (which produce spreadable arrays requiring list_push_spread)
+        strbuf_append_str(tp->code_buf, "({");
+        // emit declarations
+        item = list_node->item;
+        while (item) {
+            if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM) {
+                if (is_global && !tp->is_main &&
+                    (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM)) {
+                    // skip - assignments generated in transpile_ast_root pre-pass
+                } else {
+                    transpile_let_stam(tp, (AstLetNode*)item, is_global);
+                }
+            }
+            item = item->next;
+        }
+        // emit the single value expression as the result
+        // use transpile_expr here (not transpile_box_item) because this is the
+        // "native" path — for typed function returns, we need the raw scalar value.
+        // when Item boxing is needed, the caller ensures it via transpile_box_item
+        // on the content node, which is handled in transpile_box_item's LMD_TYPE_LIST case.
+        strbuf_append_char(tp->code_buf, '\n');
+        transpile_expr(tp, last_value_item);
+        strbuf_append_str(tp->code_buf, ";})");
+        return;
+    }
+
+    // multi-value list: create list to contain all the items
+    strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
+    // let declare first
+    item = list_node->item;
+    while (item) {
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM) {
             // For modules: LET/PUB_STAM assignments are hoisted to top level of main()
             // to avoid MIR JIT optimizing away writes inside ({...}) statement expressions
             if (is_global && !tp->is_main &&
@@ -3320,10 +3645,6 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_glob
             } else {
                 transpile_let_stam(tp, (AstLetNode*)item, is_global);
             }
-        }
-        else if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
-            effective_length--;
-            // already transpiled
         }
         item = item->next;
     }
@@ -3464,8 +3785,27 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 transpile_expr(tp, param_type->default_value);
             }
         } else {
-            // No default value - use null for missing optional parameters
-            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            // No default value - use null/zero for missing parameters
+            // For typed params, use native zero values to match the function's native param types
+            if (param_type && !param_type->is_optional) {
+                switch (param_type->type_id) {
+                case LMD_TYPE_INT:
+                case LMD_TYPE_INT64:
+                    strbuf_append_str(tp->code_buf, "0");
+                    break;
+                case LMD_TYPE_FLOAT:
+                    strbuf_append_str(tp->code_buf, "0.0");
+                    break;
+                case LMD_TYPE_BOOL:
+                    strbuf_append_str(tp->code_buf, "0");
+                    break;
+                default:
+                    strbuf_append_str(tp->code_buf, "ITEM_NULL");
+                    break;
+                }
+            } else {
+                strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            }
         }
         return;
     }
@@ -3532,7 +3872,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 transpile_expr(tp, value);
             }
             else if (value->type->type_id == LMD_TYPE_INT64 || value->type->type_id == LMD_TYPE_FLOAT) {
-                strbuf_append_str(tp->code_buf, "((int32_t)");
+                strbuf_append_str(tp->code_buf, "((int64_t)");
                 transpile_expr(tp, value);
                 strbuf_append_char(tp->code_buf, ')');
             }
@@ -3616,7 +3956,34 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         if (!param_type || param_type->type_id == LMD_TYPE_ANY) {
             transpile_box_item(tp, arg);
         } else {
-            transpile_expr(tp, arg);
+            // For typed parameters, check if the argument's type is Item/ANY
+            // and needs unboxing to match the parameter's native type
+            TypeId arg_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId param_tid = param_type->type_id;
+            if (arg_tid != param_tid && (arg_tid == LMD_TYPE_ANY || arg_tid == LMD_TYPE_NULL)) {
+                // argument is Item but parameter is typed — unbox
+                if (param_tid == LMD_TYPE_INT) {
+                    strbuf_append_str(tp->code_buf, "it2i(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (param_tid == LMD_TYPE_INT64) {
+                    strbuf_append_str(tp->code_buf, "it2l(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (param_tid == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "it2d(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (param_tid == LMD_TYPE_BOOL) {
+                    strbuf_append_str(tp->code_buf, "it2b(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else {
+                    transpile_expr(tp, arg);
+                }
+            } else {
+                transpile_expr(tp, arg);
+            }
         }
         strbuf_append_str(tp->code_buf, "; ");
 
@@ -4585,6 +4952,10 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     // functions that can raise errors must also return Item
     if (is_closure || fn_type->can_raise) {
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (fn_node->param && !has_typed_params(fn_node)) {
+        // Functions with ALL untyped params use Item-level runtime ops internally
+        // Force Item return so fn_call* and direct calls work correctly
+        strbuf_append_str(tp->code_buf, "Item");
     } else {
         Type *ret_type = fn_type->returned ? fn_type->returned : (fn_node->body ? fn_node->body->type : &TYPE_ANY);
         if (!ret_type) {
@@ -4649,6 +5020,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     if (is_closure || fn_type_check->can_raise) {
         // Functions that can raise errors must return Item
         // (since they can return either the success value or an error)
+        strbuf_append_str(tp->code_buf, "Item");
+    } else if (fn_node->param && !has_typed_params(fn_node)) {
+        // Functions with ALL untyped params use Item-level runtime ops internally
+        // Force Item return so fn_call* and direct calls work correctly
         strbuf_append_str(tp->code_buf, "Item");
     } else {
         write_type(tp->code_buf, ret_type);
@@ -4738,6 +5113,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         tp->in_tail_position = true;  // Function body is in tail position
     }
 
+    // set current function context for proc return type checking
+    AstFuncNode* prev_func_node = tp->current_func_node;
+    tp->current_func_node = fn_node;
+
     // for procedures, use procedural content transpilation
     bool is_proc = (fn_node->node_type == AST_NODE_PROC);
     if (is_proc && fn_node->body->node_type == AST_NODE_CONTENT) {
@@ -4756,7 +5135,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, " return ");
         // Check if we need to box the return value
         // Box if: (1) it's a closure, OR (2) can_raise is true, OR (3) return type is Item but body type is a scalar
-        bool needs_boxing = is_closure || fn_type_check->can_raise;
+        // OR (4) function has ALL untyped params (returns Item, body may produce native values)
+        bool needs_boxing = is_closure || fn_type_check->can_raise ||
+                           (fn_node->param && !has_typed_params(fn_node));
         if (!needs_boxing && ret_type->type_id == LMD_TYPE_ANY && fn_node->body->type) {
             TypeId body_type_id = fn_node->body->type->type_id;
             // Box scalar types when returning as Item
@@ -4765,6 +5146,11 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                            body_type_id == LMD_TYPE_STRING || body_type_id == LMD_TYPE_SYMBOL ||
                            body_type_id == LMD_TYPE_BINARY || body_type_id == LMD_TYPE_DECIMAL ||
                            body_type_id == LMD_TYPE_DTIME);
+            // Also box for CONTENT blocks — our single-value optimization may produce
+            // raw scalars even when body type says LIST
+            if (!needs_boxing && fn_node->body->node_type == AST_NODE_CONTENT) {
+                needs_boxing = true;
+            }
         }
 
         if (needs_boxing) {
@@ -4782,10 +5168,18 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // restore previous closure context
     tp->current_closure = prev_closure;
 
+    // restore current function context
+    tp->current_func_node = prev_func_node;
+
     // For typed functions (non-closure, non-proc), generate an unboxed version
     // The unboxed version uses native types for params AND return (no boxing overhead)
     if (!is_closure && !is_proc && !as_pointer && has_typed_params(fn_node)) {
         define_func_unboxed(tp, fn_node);
+    }
+    // Generate fn_call*-compatible wrapper for functions with non-Item ABI
+    // This covers typed params AND/OR native return types
+    if (!is_closure && !is_proc && !as_pointer && needs_fn_call_wrapper(fn_node)) {
+        define_func_call_wrapper(tp, fn_node);
     }
 }
 
@@ -4877,6 +5271,128 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
 
     tp->in_unboxed_body = prev_in_unboxed;
 }
+
+// Generate fn_call*-compatible wrapper for typed functions.
+// fn_call0..3() cast function pointers to Item(*)(Item,...) and pass boxed Items as args.
+// If the original function has native-typed params (int64_t, double, etc.), the wrapper
+// accepts Items, unboxes them, calls the original, and boxes the return if needed.
+// Named with _w suffix: _square_w15
+void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
+    bool is_closure = (fn_node->captures != nullptr);
+    if (is_closure) return;  // closures already use Item params
+
+    if (!needs_fn_call_wrapper(fn_node)) return;  // already matches fn_call* ABI
+
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+    Type *ret_type = fn_type->returned;
+    if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
+    if (!ret_type) ret_type = &TYPE_ANY;
+
+    // Determine the boxed version's return type to know if we need to box the result
+    TypeId boxed_ret_tid;
+    if (fn_type->can_raise) {
+        boxed_ret_tid = LMD_TYPE_ANY;  // returns Item
+    } else {
+        boxed_ret_tid = ret_type->type_id;
+    }
+
+    strbuf_append_char(tp->code_buf, '\n');
+    // wrapper always returns Item
+    strbuf_append_str(tp->code_buf, "Item ");
+    write_fn_name_ex(tp->code_buf, fn_node, NULL, "_w");
+    strbuf_append_char(tp->code_buf, '(');
+
+    // all params are Item in the wrapper
+    bool has_params = false;
+    AstNamedNode *param = fn_node->param;
+    while (param) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_str(tp->code_buf, "Item _");
+        strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+        param = (AstNamedNode*)param->next;
+        has_params = true;
+    }
+    if (fn_type->is_variadic) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_str(tp->code_buf, "List* _vargs");
+    }
+    strbuf_append_str(tp->code_buf, "){\n return ");
+
+    // box the return value if the original function returns a native type
+    const char* box_prefix = NULL;
+    const char* box_suffix = ")";
+    switch (boxed_ret_tid) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+        box_prefix = "i2it("; break;
+    case LMD_TYPE_FLOAT:
+        box_prefix = "push_d("; break;
+    case LMD_TYPE_BOOL:
+        box_prefix = "b2it("; break;
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_BINARY:
+        box_prefix = "s2it("; break;
+    case LMD_TYPE_SYMBOL:
+        box_prefix = "y2it("; break;
+    case LMD_TYPE_DTIME:
+        box_prefix = "push_k("; break;
+    case LMD_TYPE_DECIMAL:
+        box_prefix = "c2it("; break;
+    default:
+        break;  // returns Item, no boxing needed
+    }
+    if (box_prefix) strbuf_append_str(tp->code_buf, box_prefix);
+
+    // call the original (boxed) function
+    write_fn_name(tp->code_buf, fn_node, NULL);
+    strbuf_append_char(tp->code_buf, '(');
+
+    // unbox each param from Item to native type
+    has_params = false;
+    param = fn_node->param;
+    while (param) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        TypeParam* param_type = (TypeParam*)param->type;
+        if (param_type->is_optional || param_type->type_id == LMD_TYPE_ANY) {
+            // pass Item through (already the right type)
+            strbuf_append_char(tp->code_buf, '_');
+            strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+        } else {
+            // unbox based on declared type
+            const char* unbox_fn = NULL;
+            switch (param_type->type_id) {
+            case LMD_TYPE_INT:    unbox_fn = "it2i("; break;
+            case LMD_TYPE_INT64:  unbox_fn = "it2l("; break;
+            case LMD_TYPE_FLOAT:  unbox_fn = "it2d("; break;
+            case LMD_TYPE_BOOL:   unbox_fn = "it2b("; break;
+            case LMD_TYPE_STRING:
+            case LMD_TYPE_BINARY: unbox_fn = "it2s("; break;
+            default:
+                // pointer types: cast from Item
+                strbuf_append_str(tp->code_buf, "(void*)_");
+                strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+                param = (AstNamedNode*)param->next;
+                has_params = true;
+                continue;
+            }
+            strbuf_append_str(tp->code_buf, unbox_fn);
+            strbuf_append_char(tp->code_buf, '_');
+            strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        param = (AstNamedNode*)param->next;
+        has_params = true;
+    }
+    if (fn_type->is_variadic) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_str(tp->code_buf, "_vargs");
+    }
+    strbuf_append_char(tp->code_buf, ')');
+
+    if (box_prefix) strbuf_append_str(tp->code_buf, box_suffix);
+    strbuf_append_str(tp->code_buf, ";\n}\n");
+}
+
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env) {
     Type* type = cap->entry && cap->entry->node ? cap->entry->node->type : nullptr;
     TypeId type_id = type ? type->type_id : LMD_TYPE_ANY;
@@ -4985,7 +5501,12 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
     } else {
         // regular function without captures - use to_fn_named for stack traces
         strbuf_append_format(tp->code_buf, "to_fn_named(");
-        write_fn_name(tp->code_buf, fn_node, NULL);
+        // use _w wrapper for functions with non-Item ABI so fn_call* works correctly
+        if (needs_fn_call_wrapper(fn_node)) {
+            write_fn_name_ex(tp->code_buf, fn_node, NULL, "_w");
+        } else {
+            write_fn_name(tp->code_buf, fn_node, NULL);
+        }
         strbuf_append_format(tp->code_buf, ",%d,", arity);
         // pass function name as string literal for stack traces
         if (fn_node->name && fn_node->name->chars) {
@@ -5222,6 +5743,26 @@ void write_mod_struct_fields(Transpiler* tp, AstNode *ast_root) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
+                // also add _w wrapper function pointer if this function needs fn_call* wrapper
+                if (node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(func_node)) {
+                    strbuf_append_str(tp->code_buf, "Item (*");
+                    write_fn_name_ex(tp->code_buf, func_node, NULL, "_w");
+                    strbuf_append_str(tp->code_buf, ")(");
+                    bool has_w_params = false;
+                    AstNamedNode *param = func_node->param;
+                    while (param) {
+                        if (has_w_params) strbuf_append_str(tp->code_buf, ",");
+                        strbuf_append_str(tp->code_buf, "Item");
+                        param = (AstNamedNode*)param->next;
+                        has_w_params = true;
+                    }
+                    TypeFunc* fn_type = (TypeFunc*)func_node->type;
+                    if (fn_type && fn_type->is_variadic) {
+                        if (has_w_params) strbuf_append_str(tp->code_buf, ",");
+                        strbuf_append_str(tp->code_buf, "List*");
+                    }
+                    strbuf_append_str(tp->code_buf, ");\n");
+                }
             }
         }
         node = node->next;

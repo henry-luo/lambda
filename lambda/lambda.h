@@ -656,9 +656,15 @@ typedef struct Context {
     int64_t it2l(Item item);
     double it2d(Item item);
     bool it2b(Item item);
-    int it2i(Item item);
+    int64_t it2i(Item item);
     String* it2s(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
+
+    // MIR JIT workaround: opaque store functions prevent SSA optimizer from
+    // reordering swap-pattern assignments inside while loops.
+    // Since these are external functions, MIR can't inline or reorder them.
+    void _store_i64(int64_t* dst, int64_t val);
+    void _store_f64(double* dst, double val);
 
     // generic field access function
     Item fn_index(Item item, Item index);

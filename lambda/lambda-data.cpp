@@ -227,16 +227,15 @@ bool it2b(Item itm) {
     return true;
 }
 
-int it2i(Item itm) {
+int64_t it2i(Item itm) {
     if (itm._type_id == LMD_TYPE_INT) {
-        // extract int56 sign-extended to int64, truncate to int32 for legacy compatibility
-        return (int)itm.get_int56();
+        return itm.get_int56();
     }
     else if (itm._type_id == LMD_TYPE_INT64) {
-        return (int)itm.get_int64();
+        return itm.get_int64();
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
-        return (int)itm.get_double();
+        return (int64_t)itm.get_double();
     }
     else if (itm._type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
@@ -246,6 +245,11 @@ int it2i(Item itm) {
     }
     return 0;  // unrecognized type
 }
+
+// MIR JIT workaround: opaque store functions to prevent SSA optimizer from
+// reordering swap-pattern assignments inside while loops.
+void _store_i64(int64_t* dst, int64_t val) { *dst = val; }
+void _store_f64(double* dst, double val) { *dst = val; }
 
 // extract int56 as int64 (full precision)
 int64_t it2l(Item itm) {
