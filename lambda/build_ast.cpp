@@ -1227,7 +1227,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 ident_node->name = qualified_entry->name;
                 ident_node->entry = qualified_entry;
                 ident_node->type = qualified_entry->node->type;
-                ast_node->function = (AstNode*)ident_node;
+                // Wrap in a primary_expr for consistency with transpiler expectations
+                AstPrimaryNode* primary_node = (AstPrimaryNode*)alloc_ast_node(
+                    tp, AST_NODE_PRIMARY, function_node, sizeof(AstPrimaryNode));
+                primary_node->expr = (AstNode*)ident_node;
+                primary_node->type = ident_node->type;
+                ast_node->function = (AstNode*)primary_node;
                 if (ident_node->type && ident_node->type->type_id == LMD_TYPE_FUNC) {
                     TypeFunc* func_type = (TypeFunc*)ident_node->type;
                     if (func_type->is_proc && !tp->current_scope->is_proc) {
@@ -1334,7 +1339,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             log_debug("method_call prepended object as first arg, type=%d", obj_type_id);
         }
     }
-    else {
+    else if (!is_aliased_import_call) {
         if (is_method_call) {
             // Not a sys func method call - could be a user-defined method on the object
             // For now, fall back to building as a regular member expression call
