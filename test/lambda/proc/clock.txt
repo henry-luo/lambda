@@ -1,0 +1,4 @@
+positive
+monotonic
+elapsed_ok
+arithmetic_ok
