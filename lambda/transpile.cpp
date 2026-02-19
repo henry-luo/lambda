@@ -1860,7 +1860,15 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     // Determine if branches have incompatible types that need coercion
     bool need_boxing = true;
     if (then_type && else_type && (then_type->type_id == else_type->type_id) && then_type->type_id != LMD_TYPE_ANY) {
-        need_boxing = false;
+        // Fast path (no boxing) is only safe for scalar types where the C representation
+        // is guaranteed consistent (e.g., both sides produce int32_t, double, bool, etc.).
+        // For STRING/SYMBOL/BINARY/containers, different functions may return String* vs Item
+        // at the C level (e.g., fn_string() returns String* but fn_str_join() returns Item),
+        // causing "incompatible types in cond-expression" errors in C2MIR.
+        TypeId tid = then_type->type_id;
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {
+            need_boxing = false;
+        }
     }
     if (need_boxing) {
         log_debug("transpile if expr with boxing");
@@ -1950,6 +1958,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
         else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
         else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
+        else if (var_tid == LMD_TYPE_STRING || var_tid == LMD_TYPE_BINARY) unbox_fn = "it2s(";
     }
     if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
     transpile_expr(tp, asn_node->as);
@@ -3831,7 +3840,10 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
     }
     // boxing based on arg type and fn definition type
     else if (param_type) {
-        if (param_type->type_id == value->type->type_id) {
+        if (param_type->type_id == value->type->type_id &&
+            param_type->type_id != LMD_TYPE_STRING &&
+            param_type->type_id != LMD_TYPE_BINARY) {
+            // Fast path: same type, not STRING/BINARY (which may have Item vs String* mismatch)
             transpile_expr(tp, value);
         }
         else if (param_type->type_id == LMD_TYPE_FLOAT) {
@@ -3884,6 +3896,28 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
             else {
                 log_error("Error: incompatible argument type for int parameter");
                 strbuf_append_str(tp->code_buf, "null");
+            }
+        }
+        // STRING/BINARY param: always extract String* through boxing to handle both
+        // native String* and Item-returning expressions uniformly
+        // (Issue #16: `: string` annotation makes C param `String*`, but callers may pass `Item`,
+        //  or the arg may be a sys func returning Item despite STRING semantic type)
+        else if (param_type->type_id == LMD_TYPE_STRING || param_type->type_id == LMD_TYPE_BINARY) {
+            strbuf_append_str(tp->code_buf, "it2s(");
+            transpile_box_item(tp, value);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        else if (param_type->type_id == LMD_TYPE_BOOL) {
+            if (value->type->type_id == LMD_TYPE_BOOL) {
+                transpile_expr(tp, value);
+            }
+            else if (value->type->type_id == LMD_TYPE_ANY) {
+                strbuf_append_str(tp->code_buf, "it2b(");
+                transpile_expr(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else {
+                transpile_box_item(tp, value);
             }
         }
         else {
@@ -5222,6 +5256,13 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
         return;
     }
 
+    // Only generate unboxed version for types where can_use_unboxed_call would use it.
+    // Currently only INT is used. STRING/SYMBOL/BINARY return types would produce
+    // broken _u functions (body returns Item but signature says String*).
+    if (ret_type->type_id != LMD_TYPE_INT && ret_type->type_id != LMD_TYPE_INT64) {
+        return;
+    }
+
     strbuf_append_char(tp->code_buf, '\n');
     write_type(tp->code_buf, ret_type);
     strbuf_append_char(tp->code_buf, ' ');
@@ -6064,6 +6105,12 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
             strbuf_append_char(tp->code_buf, ' ');
             write_var_name(tp->code_buf, asn_node, NULL);
             strbuf_append_str(tp->code_buf, ";\n");
+            // also declare the error variable for ^err destructuring
+            if (asn_node->error_name) {
+                strbuf_append_str(tp->code_buf, "Item _");
+                strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                strbuf_append_str(tp->code_buf, ";\n");
+            }
         }
         decl = decl->next;
     }
@@ -6098,11 +6145,16 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
             strbuf_append_str(tp->code_buf, "}");  // close nested scope
         } else {
             AstNamedNode *asn_node = (AstNamedNode*)decl;
-            strbuf_append_str(tp->code_buf, "\n  ");
-            write_var_name(tp->code_buf, asn_node, NULL);
-            strbuf_append_char(tp->code_buf, '=');
-            transpile_expr(tp, asn_node->as);
-            strbuf_append_char(tp->code_buf, ';');
+            // handle ^err destructuring at global level
+            if (asn_node->error_name) {
+                transpile_assign_expr(tp, asn_node, true);
+            } else {
+                strbuf_append_str(tp->code_buf, "\n  ");
+                write_var_name(tp->code_buf, asn_node, NULL);
+                strbuf_append_char(tp->code_buf, '=');
+                transpile_expr(tp, asn_node->as);
+                strbuf_append_char(tp->code_buf, ';');
+            }
         }
         decl = decl->next;
     }
