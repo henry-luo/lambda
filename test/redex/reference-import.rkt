@@ -479,19 +479,24 @@
                                         (cdr-or-false 'font-family inline-alist))]
                             [fw-val (or (cdr-or-false 'font-weight matching-before)
                                         (cdr-or-false 'font-weight inline-alist))]
-                            [is-bold? (and fw-val (or (equal? fw-val "bold") (equal? fw-val "700")))]
+                            [is-bold? (or (and fw-val (or (equal? fw-val "bold") (equal? fw-val "700")
+                                                         (equal? fw-val "800") (equal? fw-val "900")))
+                                          ;; UA stylesheet bold for heading/strong/th tags
+                                          (and (not fw-val)
+                                               (member tag '("h1" "h2" "h3" "h4" "h5" "h6" "strong" "b" "th"))))]
                             [is-sans? (and ff-val
                                            (or (regexp-match? #rx"(?i:sans-serif)" ff-val)
                                                (regexp-match? #rx"(?i:arial)" ff-val)))]
-                            ;; Distinguish Arial-native from generic sans-serif
+                            ;; Distinguish Arial-native from generic sans-serif.
+                            ;; Only use arial-native when Arial is standalone (no sans-serif/Helvetica fallback).
                             [is-arial-native?
                              (and is-sans? ff-val
                                   (let ([ap (regexp-match-positions #rx"(?i:arial)" ff-val)]
                                         [hp (regexp-match-positions #rx"(?i:helvetica)" ff-val)]
                                         [sp (regexp-match-positions #rx"(?i:sans-serif)" ff-val)])
                                     (and ap
-                                         (or (not hp) (< (caar ap) (caar hp)))
-                                         (or (not sp) (< (caar ap) (caar sp))))))]
+                                         (not hp)
+                                         (not sp))))]
                             [fm (cond
                                   [(and is-bold? is-arial-native?) 'arial-native-bold]
                                   [(and is-bold? is-sans?) 'arial-bold]
@@ -990,6 +995,10 @@
         ;; for replaced elements like iframe, img, video
         (define width-attr-val (html-attr attrs-str "width"))
         (define height-attr-val (html-attr attrs-str "height"))
+        ;; HTML <table border="N"> → CSS border on table element
+        (define border-attr-val
+          (and (equal? tag-name "table")
+               (html-attr attrs-str "border")))
         (define html-attrs-as-css
           (append
            (if (and width-attr-val (not (cdr-or-false 'width inline-style-raw)))
@@ -997,6 +1006,12 @@
                '())
            (if (and height-attr-val (not (cdr-or-false 'height inline-style-raw)))
                (list (cons 'height height-attr-val))
+               '())
+           ;; HTML border attribute on <table> → add border CSS to table
+           (if (and border-attr-val (not (cdr-or-false 'border inline-style-raw)))
+               (let ([bw (or (string->number border-attr-val) 1)])
+                 (list (cons 'border (format "~apx outset" bw))
+                       (cons '__html-table-border (number->string bw))))
                '())))
         (define inline-style (append inline-style-raw html-attrs-as-css))
 
@@ -1153,6 +1168,10 @@
          ;; parse HTML presentational attributes (width, height) → CSS equivalents
          (define width-attr-val (html-attr attrs-str "width"))
          (define height-attr-val (html-attr attrs-str "height"))
+         ;; HTML <table border="N"> → CSS border on table element
+         (define border-attr-val
+           (and (equal? child-tag "table")
+                (html-attr attrs-str "border")))
          (define html-attrs-as-css
            (append
             (if (and width-attr-val (not (cdr-or-false 'width inline-style-raw)))
@@ -1160,6 +1179,12 @@
                 '())
             (if (and height-attr-val (not (cdr-or-false 'height inline-style-raw)))
                 (list (cons 'height height-attr-val))
+                '())
+            ;; HTML border attribute on <table> → add border CSS to table
+            (if (and border-attr-val (not (cdr-or-false 'border inline-style-raw)))
+                (let ([bw (or (string->number border-attr-val) 1)])
+                  (list (cons 'border (format "~apx outset" bw))
+                        (cons '__html-table-border (number->string bw))))
                 '())))
          (define inline-style (append inline-style-raw html-attrs-as-css))
 
@@ -1740,6 +1765,8 @@
 (define current-em-size (make-parameter 16))  ;; default browser font-size
 ;; ex ratio: for Ahem font 0.8, for default serif ~0.5
 (define current-ex-ratio (make-parameter 0.5))
+;; HTML <table border="N"> → propagate border to child td/th cells
+(define current-table-border (make-parameter 0))
 
 (define (css-unit->px val unit)
   (define factor
@@ -2481,6 +2508,7 @@
      ;; and padding: 1px. These are from the HTML UA stylesheet.
      ;; Only apply if not already set by author/inline styles.
      ;; CSS UA default: <table> has border-spacing: 2px.
+     ;; HTML <table border="N"> propagates border to cells via current-table-border.
      (define styles
        (let* ([s1 (if (and (member tag '("td" "th"))
                            (not (get-style-prop base-styles 'vertical-align #f)))
@@ -2493,13 +2521,20 @@
                            (not (get-style-prop s1 'padding-left #f)))
                       (append s1 `((padding-top 1) (padding-right 1) (padding-bottom 1) (padding-left 1)))
                       s1)]
+              ;; HTML <table border="N"> → propagate cell border
+              [s2b (if (and (member tag '("td" "th"))
+                            (> (current-table-border) 0)
+                            (not (get-style-prop s2 'border-width #f)))
+                       (let ([bw (current-table-border)])
+                         (append s2 `((border-width (edges ,bw ,bw ,bw ,bw)))))
+                       s2)]
               ;; HTML UA stylesheet: <table> { border-spacing: 2px; }
               ;; Only for actual <table> HTML elements, not CSS display:table divs.
               [s3 (if (and (equal? tag "table")
-                           (not (get-style-prop s2 'border-spacing-h #f))
-                           (not (get-style-prop s2 'border-spacing-v #f)))
-                      (append s2 `((border-spacing-h 2) (border-spacing-v 2)))
-                      s2)])
+                           (not (get-style-prop s2b 'border-spacing-h #f))
+                           (not (get-style-prop s2b 'border-spacing-v #f)))
+                      (append s2b `((border-spacing-h 2) (border-spacing-v 2)))
+                      s2b)])
          s3))
 
      ;; determine display type from inline styles, tag default, or base default
@@ -2638,7 +2673,16 @@
      (define effective-children
        (filter (lambda (c) (not (memq c whitespace-to-strip))) children))
 
+     ;; HTML <table border="N"> → set current-table-border parameter for children
+     (define html-table-border-val
+       (let ([v (cdr-or-false '__html-table-border inline-alist)])
+         (if v (or (string->number v) 0) 0)))
+
      (define child-boxes
+       (parameterize ([current-table-border
+                       (if (> html-table-border-val 0)
+                           html-table-border-val
+                           (current-table-border))])
        (filter-map
         (lambda (c)
           ;; scope em/ex context per child so siblings don't leak to each other
@@ -2663,11 +2707,14 @@
                            [else (current-em-size)]))
                    (define text-box-sizing (if (uses-taffy-base?) 'border-box 'content-box))
                    (define parent-line-height (get-style-prop styles 'line-height #f))
+                   ;; detect font-weight: check inline CSS, then UA stylesheet defaults
+                   ;; HTML UA: h1-h6, strong, b, th are bold by default
                    (define font-weight-val
                      (let ([fw (cdr-or-false 'font-weight inline-alist)])
                        (cond
-                         [(not fw) 'normal]
-                         [(or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900")) 'bold]
+                         [(and fw (or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900"))) 'bold]
+                         [(and fw (or (equal? fw "normal") (equal? fw "400"))) 'normal]
+                         [(member tag '("h1" "h2" "h3" "h4" "h5" "h6" "strong" "b" "th")) 'bold]
                          [else 'normal])))
                    (define use-mono-metrics?
                      (and font-family-val
@@ -2680,10 +2727,10 @@
                               (regexp-match? #rx"(?i:arial)" font-family-val)
                               (regexp-match? #rx"(?i:helvetica)" font-family-val))))
                    ;; Distinguish explicit Arial.ttf (hhea metrics) from generic
-                   ;; sans-serif/Helvetica.  On macOS, when "Arial" appears before
-                   ;; "Helvetica" and before "sans-serif" in the computed
-                   ;; font-family, Chrome uses Arial.ttf's own hhea line-height
-                   ;; metrics (separate rounding, no 15% boost).
+                   ;; sans-serif/Helvetica.  On macOS, when "sans-serif" is in the
+                   ;; font-family fallback chain, Chrome resolves to Helvetica and
+                   ;; applies the 15% ascent boost.  Only use Arial-native metrics
+                   ;; when Arial is specified WITHOUT sans-serif or Helvetica.
                    (define use-arial-native?
                      (and use-arial-metrics?
                           font-family-val
@@ -2691,10 +2738,8 @@
                                 [helv-pos  (regexp-match-positions #rx"(?i:helvetica)" font-family-val)]
                                 [sans-pos  (regexp-match-positions #rx"(?i:sans-serif)" font-family-val)])
                             (and arial-pos
-                                 (or (not helv-pos)
-                                     (< (caar arial-pos) (caar helv-pos)))
-                                 (or (not sans-pos)
-                                     (< (caar arial-pos) (caar sans-pos)))))))
+                                 (not helv-pos)
+                                 (not sans-pos)))))
                    (define font-metrics-sym
                      (let ([base (cond [use-mono-metrics? 'mono]
                                        [use-arial-native? 'arial-native]
@@ -2753,12 +2798,14 @@
              (define text-box-sizing (if (uses-taffy-base?) 'border-box 'content-box))
              ;; inherit line-height from parent styles
              (define parent-line-height (get-style-prop styles 'line-height #f))
-             ;; detect font-weight from parent element's styles
+             ;; detect font-weight: check inline CSS, then UA stylesheet defaults
+             ;; HTML UA: h1-h6, strong, b, th are bold by default
              (define font-weight-val
                (let ([fw (cdr-or-false 'font-weight inline-alist)])
                  (cond
-                   [(not fw) 'normal]
-                   [(or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900")) 'bold]
+                   [(and fw (or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900"))) 'bold]
+                   [(and fw (or (equal? fw "normal") (equal? fw "400"))) 'normal]
+                   [(member tag '("h1" "h2" "h3" "h4" "h5" "h6" "strong" "b" "th")) 'bold]
                    [else 'normal])))
              ;; determine which font metrics to use:
              ;; - 'mono if font-family is explicitly monospace/courier
@@ -2774,7 +2821,10 @@
                     (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
                         (regexp-match? #rx"(?i:arial)" font-family-val)
                         (regexp-match? #rx"(?i:helvetica)" font-family-val))))
-             ;; Distinguish explicit Arial.ttf from generic sans-serif/Helvetica
+             ;; Distinguish explicit Arial.ttf from generic sans-serif/Helvetica.
+             ;; On macOS, when sans-serif is in the fallback chain, Chrome uses
+             ;; Helvetica metrics with 15% boost.  Arial-native only applies when
+             ;; Arial is specified alone without sans-serif or Helvetica fallback.
              (define use-arial-native?
                (and use-arial-metrics?
                     font-family-val
@@ -2782,10 +2832,8 @@
                           [helv-pos  (regexp-match-positions #rx"(?i:helvetica)" font-family-val)]
                           [sans-pos  (regexp-match-positions #rx"(?i:sans-serif)" font-family-val)])
                       (and arial-pos
-                           (or (not helv-pos)
-                               (< (caar arial-pos) (caar helv-pos)))
-                           (or (not sans-pos)
-                               (< (caar arial-pos) (caar sans-pos)))))))
+                           (not helv-pos)
+                           (not sans-pos)))))
              (define font-metrics-sym
                (let ([base (cond [use-mono-metrics? 'mono]
                                  [use-arial-native? 'arial-native]
@@ -2872,7 +2920,7 @@
                  #f
                  (element->box-tree c counter #f this-w))]
             [_ (element->box-tree c counter #f this-w)])))
-        effective-children))
+        effective-children)))  ;; close parameterize for current-table-border
 
      (define display-sym (string->symbol display-str))
 
@@ -3545,9 +3593,12 @@
     (define box-tree (reference->box-tree html-path))
     (define expected (reference->expected-layout ref-json))
     (define viewport-info (hash-ref ref-json 'browser_info (hash)))
-    (define vp (hash-ref viewport-info 'viewport (hash 'width 1200 'height 800)))
-    (define vp-w (hash-ref vp 'width 1200))
-    (define vp-h (hash-ref vp 'height 800))
+    (define default-viewport-w 1200)  ;; CSS 2.1 test suite assumes ~1200px viewport
+    (define default-viewport-h 800)
+    (define vp (hash-ref viewport-info 'viewport
+                        (hash 'width default-viewport-w 'height default-viewport-h)))
+    (define vp-w (hash-ref vp 'width default-viewport-w))
+    (define vp-h (hash-ref vp 'height default-viewport-h))
     (define name (hash-ref ref-json 'test_file "unknown"))
 
     ;; for non-Taffy tests, subtract body margin from viewport dimensions.
@@ -3567,8 +3618,8 @@
                  [body-layout (if body-node (hash-ref body-node 'layout (hash)) (hash))]
                  [body-x (hash-ref body-layout 'x 0)]
                  ;; extract body margins from computed styles (CSS may set them asymmetrically)
-                 [margin-left (hash-ref body-computed 'marginLeft 8)]
-                 [margin-right (hash-ref body-computed 'marginRight 8)]
+                 [margin-left (hash-ref body-computed 'marginLeft UA-BODY-MARGIN)]
+                 [margin-right (hash-ref body-computed 'marginRight UA-BODY-MARGIN)]
                  ;; extract body padding from computed styles
                  [pad-left (hash-ref body-computed 'paddingLeft 0)]
                  [pad-right (hash-ref body-computed 'paddingRight 0)]

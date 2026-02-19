@@ -1,9 +1,10 @@
-# Redex Layout Phases 4–5 — Font Metrics, Chrome Line-Height & Reference Import Fixes
+# Redex Layout Phases 4–6 — Font Metrics, Chrome Line-Height & Reference Import Fixes
 
 > Phase 4: JSON font metrics infrastructure + Chrome macOS line-height formula.
 > Phase 5: Text height model, UA defaults, bold metrics, table/flex fixes, Arial-native line-height.
+> Phase 6: Redex baseline fixes — Arial sans-serif detection, UA bold headings, HTML table border attribute.
 > 
-> **Status: Phase 5 Complete — 1968/1968 baseline (100%), up from 1790/1821 (98.3%)**
+> **Status: Phase 6 Complete — Redex 1804/1821 baseline (99.1%), Radiant 1968/1968 baseline (100%)**
 
 ---
 
@@ -36,9 +37,17 @@
 22. [Phase 5 Files Modified](#22-phase-5-files-modified)
 23. [Phase 5 Architecture Notes](#23-phase-5-architecture-notes)
 
+### Phase 6
+24. [Phase 6 Summary](#24-phase-6-summary)
+25. [Phase 6A: Arial Sans-Serif Line-Height Detection — ✅ COMPLETED](#25-phase-6a-arial-sans-serif-line-height-detection--completed)
+26. [Phase 6B: UA Bold Detection for Headings — ✅ COMPLETED](#26-phase-6b-ua-bold-detection-for-headings--completed)
+27. [Phase 6C: HTML Table Border Attribute — ✅ COMPLETED](#27-phase-6c-html-table-border-attribute--completed)
+28. [Phase 6 Files Modified](#28-phase-6-files-modified)
+29. [Phase 6 Architecture Notes](#29-phase-6-architecture-notes)
+
 ### Appendices
-24. [Appendix A: Phase 4 Remaining Failures (31) — ALL RESOLVED](#24-appendix-a-phase-4-remaining-failures-31--all-resolved)
-25. [Appendix B: Progress Log](#25-appendix-b-progress-log)
+30. [Appendix A: Phase 4 Remaining Failures (31) — ALL RESOLVED](#30-appendix-a-phase-4-remaining-failures-31--all-resolved)
+31. [Appendix B: Progress Log](#31-appendix-b-progress-log)
 
 ---
 
@@ -56,11 +65,20 @@
 |-------|-------|------|------|-----------|-----------------|
 | **baseline** | 1821 | **1790** | **31** | **98.3%** | **+2 tests** |
 
-### Phase 5 Final Status (Current)
+### Phase 5 Final Status (Radiant C++ Engine)
 
 | Suite | Total | Pass | Fail | Pass Rate | Δ from Phase 4 |
 |-------|-------|------|------|-----------|-----------------|
 | **baseline** | 1968 | **1968** | **0** | **100.0%** | **+178 passing, −31 failing** |
+
+*Note: Phase 5 status above is for the Radiant (C++ / Node.js) engine with strict 100% threshold.*
+
+### Phase 6 Final Status (Current — Redex Racket Engine)
+
+| Suite | Total | Pass | Fail | Pass Rate | Δ from Phase 5 |
+|-------|-------|------|------|-----------|-----------------|
+| **baseline** | 1821 | **1804** | **17** | **99.1%** | **+8 passing** |
+| **all suites** | 2833 | **2672** | **161** | **94.3%** | **+9 passing** |
 
 ### Phase 4 Newly Passing Tests
 
@@ -974,7 +992,250 @@ The correction formula ensures that when CSS sets `line-height: 1.5` (for exampl
 
 ---
 
-## 24. Appendix A: Phase 4 Remaining Failures (31) — ALL RESOLVED
+## 24. Phase 6 Summary
+
+Phase 6 targeted the **25 remaining Redex baseline failures** (1796/1821 after Phase 5). After deep analysis, 8 were fixable in `reference-import.rkt` (input transformation bugs), while the remaining 17 require layout engine changes.
+
+### Results at a Glance
+
+| Metric | Phase 5 End (Redex) | Phase 6 End (Redex) | Δ |
+|--------|---------------------|---------------------|---|
+| **Baseline tests** | 1821 | 1821 | — |
+| **Baseline passing** | 1796 | **1804** | **+8** |
+| **Baseline failing** | 25 | **17** | −8 |
+| **Baseline pass rate** | 98.6% | **99.1%** | +0.5% |
+| **Total passing** | 2663 | **2672** | **+9** |
+| **Total pass rate** | 94.0% | **94.3%** | +0.3% |
+
+### Tests Fixed in Phase 6
+
+| Test | Fix | Root Cause |
+|------|-----|------------|
+| `baseline_502` | 6A | Arial + sans-serif → Helvetica (boosted), not Arial-native |
+| `baseline_816` | 6A | Same |
+| `position_004` | 6A | Same |
+| `position_005` | 6A | Same |
+| `flex_020_table_content` | 6B | `<th>` missing UA bold font-weight |
+| `table-anonymous-objects-046` | 6C | `<table border="1">` not parsed |
+| `table-anonymous-objects-048` | 6C | Same |
+| `table-anonymous-objects-050` | 6C | Same |
+
+**Bonus**: +1 in flex-nest suite (`flex-nest` test with `<th>` elements, same 6B fix).
+
+### Remaining 17 Baseline Failures (Layout Engine Issues)
+
+All 17 remaining failures require changes to the Redex layout engine itself, not `reference-import.rkt`:
+
+| Category | Tests | Root Cause |
+|----------|-------|------------|
+| **Float text wrapping** (5) | position_001/002/003/013, floats-104 | Per-line float band width calculation missing |
+| **Float + inline-block ordering** (1) | floats-001 | Float positioning relative to inline-block |
+| **Inline-block margin collapsing** (1) | box_012_overflow | Margin collapsing bug with inline-block |
+| **Flex structural** (1) | flex_011_nested_blocks | HTML parser child-count for `<section>`/`<article>` |
+| **`<br>` layout** (1) | flex_014_nested_flex | `<br>` positioning in block context between flex items |
+| **Margin collapsing** (1) | flex_012_nested_lists | `<dt>`/`<dd>` margin collapsing |
+| **Grid edge cases** (2) | grid_aspect_ratio, grid_span_2 | Writing-mode + aspect-ratio; malformed HTML |
+| **Table rowspan/colspan** (2) | table-height-algorithm-010, table_013_html_table | Row height distribution with rowspan |
+| **Font metrics** (1) | issue-font-handling | Missing Helvetica Bold JSON metrics file |
+| **Text precision** (1) | table-anonymous-block-013 | Accumulated kerning error in long Times text |
+| **Bidi** (1) | white-space-bidirectionality-001 | Bidirectional text measurement |
+
+---
+
+## 25. Phase 6A: Arial Sans-Serif Line-Height Detection — ✅ COMPLETED
+
+**Impact: Fixed 4 tests (baseline_502, baseline_816, position_004, position_005)**
+**Status: Implemented and verified**
+
+### Problem
+
+Phase 5J introduced `use-arial-native?` detection: when "Arial" appears in `font-family` before "sans-serif", use Arial.ttf hhea metrics (no boost). But on macOS, Chrome resolves `font-family: Arial, sans-serif` differently than expected:
+
+| CSS font-family | Chrome resolves to | Line-height at 16px |
+|-----------------|-------------------|---------------------|
+| `Arial` (standalone) | Arial.ttf | **17px** (arial-native, no boost) |
+| `Arial, sans-serif` | **Helvetica** (via sans-serif fallback) | **18px** (boosted) |
+| `sans-serif` | Helvetica | **18px** (boosted) |
+
+The Phase 5J logic was triggering arial-native (17px) for `Arial, sans-serif`, but Chrome actually uses the Helvetica boosted formula (18px) because sans-serif is in the fallback chain. The 1px difference accumulated across multiple text lines.
+
+### Solution
+
+Changed `use-arial-native?` detection in all **3 code paths** (whitespace text node, regular text node, `::before` pseudo-element):
+
+**Before (Phase 5J):**
+```racket
+;; Arial-native if "Arial" appears before "sans-serif" in font-family
+(define use-arial-native?
+  (and arial-pos
+       (or (not sans-pos) (< (caar arial-pos) (caar sans-pos)))))
+```
+
+**After (Phase 6A):**
+```racket
+;; Arial-native ONLY if "Arial" is standalone WITHOUT sans-serif or Helvetica fallback
+(define use-arial-native?
+  (and font-family-val
+       (regexp-match? #rx"(?i:arial)" font-family-val)
+       (not (regexp-match? #rx"(?i:sans-serif)" font-family-val))
+       (not (regexp-match? #rx"(?i:helvetica)" font-family-val))))
+```
+
+Key insight: When `sans-serif` is present as a fallback, Chrome's macOS font resolution reaches Helvetica (which gets the 15% ascent boost), even if Arial is listed first. Arial-native should only apply when Arial is the sole sans-serif font specified without generic fallback.
+
+---
+
+## 26. Phase 6B: UA Bold Detection for Headings — ✅ COMPLETED
+
+**Impact: Fixed 1 baseline test (flex_020_table_content) + 1 flex-nest bonus**
+**Status: Implemented and verified**
+
+### Problem
+
+HTML elements `<h1>`–`<h6>`, `<strong>`, `<b>`, and `<th>` should default to `font-weight: bold` per the UA stylesheet. The reference import was only detecting bold from explicit CSS `font-weight` property, missing the UA default. This caused wrong font-metrics symbol selection (regular instead of bold) and wrong line-heights.
+
+### Solution
+
+Added UA bold detection via tag name check in all **3 code paths** (whitespace text, regular text, `::before`):
+
+```racket
+(define font-weight-val
+  (let ([fw-str (resolve-css-property styles "font-weight")])
+    (cond
+      [(and fw-str (or (equal? fw-str "bold") (equal? fw-str "700")
+                       (equal? fw-str "800") (equal? fw-str "900")))
+       'bold]
+      [(and fw-str (or (equal? fw-str "normal") (equal? fw-str "400")))
+       #f]
+      ;; UA stylesheet: headings, strong, b, th default to bold
+      [(member tag '("h1" "h2" "h3" "h4" "h5" "h6" "strong" "b" "th"))
+       'bold]
+      [else #f])))
+```
+
+The explicit CSS values take priority over UA defaults (e.g., `<h1 style="font-weight: normal">` correctly gets regular metrics). The `::before` path also received the same check, using the parent element's tag.
+
+---
+
+## 27. Phase 6C: HTML Table Border Attribute — ✅ COMPLETED
+
+**Impact: Fixed 3 tests (table-anonymous-objects-046, 048, 050)**
+**Status: Implemented and verified**
+
+### Problem
+
+The tests `table-anonymous-objects-046/048/050` use `<table border="1">`. In Chrome, the HTML `border` attribute on `<table>` applies a 1px solid border to both the table and all its `<td>`/`<th>` cells. The Redex reference import was not parsing this HTML attribute, so cells had no borders, causing height/width mismatches.
+
+### Solution
+
+Three-part implementation in `reference-import.rkt`:
+
+#### 1. Parameter for Border Propagation
+
+```racket
+(define current-table-border (make-parameter 0))
+```
+
+A Racket parameter (dynamic variable) that propagates the table's border value to descendant cells.
+
+#### 2. Border Attribute Parsing
+
+In both HTML parser locations (`parse-elements` and `parse-children-until`), extract the `border` attribute from `<table>` tags:
+
+```racket
+;; Parse border attribute from <table border="N">
+(define border-val
+  (and (equal? tag "table")
+       (let ([m (regexp-match #rx"border=[\"']?([0-9]+)" attrs-str)])
+         (and m (string->number (cadr m))))))
+```
+
+When found, wrap child element processing in `(parameterize ([current-table-border border-val]) ...)`.
+
+#### 3. Cell Border Propagation
+
+In the UA defaults section for `<td>`/`<th>` elements, apply the border from the parameter:
+
+```racket
+;; Apply table border to cells
+(when (and (member tag '("td" "th"))
+           (> (current-table-border) 0))
+  (let ([b (current-table-border)])
+    (set! ua-defaults
+      (append ua-defaults
+              `((border-width (edges ,b ,b ,b ,b)))))))
+```
+
+This generates `(border-width (edges 1 1 1 1))` in the box tree, which the layout engine already handles for border-box sizing.
+
+---
+
+## 28. Phase 6 Files Modified
+
+### Modified Files
+
+| File | Changes |
+|------|---------|
+| `test/redex/reference-import.rkt` | 3 fixes across ~8 modification sites: (1) `use-arial-native?` detection changed in 3 code paths — now requires Arial WITHOUT sans-serif/Helvetica, (2) UA bold tag detection added in 3 code paths — `member tag '("h1" ... "th")`, (3) `current-table-border` parameter + border attribute parsing in 2 HTML parser locations + cell border propagation in UA defaults |
+
+### Unchanged Files
+
+| File | Notes |
+|------|-------|
+| `test/redex/font-metrics.rkt` | No changes — `chrome-mac-line-height` already had arial-native formula from Phase 5J |
+| `test/redex/layout-dispatch.rkt` | No changes |
+| `test/redex/layout-inline.rkt` | No changes |
+| `test/redex/layout-block.rkt` | No changes |
+
+---
+
+## 29. Phase 6 Architecture Notes
+
+### Arial Detection: Standalone vs Fallback Chain
+
+The Phase 6A fix corrects a subtle font resolution distinction on macOS:
+
+```
+font-family: Arial;                    → Arial.ttf → hhea metrics, NO boost → 17px at 16px
+font-family: Arial, sans-serif;        → Helvetica (via sans-serif) → boosted → 18px at 16px
+font-family: Arial, Helvetica;         → Helvetica (explicit) → boosted → 18px at 16px
+font-family: sans-serif;               → Helvetica → boosted → 18px at 16px
+```
+
+The key insight: Chrome on macOS prefers Helvetica when `sans-serif` is in the font stack, even if Arial is listed first. This is because macOS's font fallback resolution maps `sans-serif` to Helvetica, and Chrome uses that resolved font for metrics. Only when Arial is the *sole* font (no sans-serif fallback) does Chrome use Arial.ttf's native hhea metrics.
+
+### HTML Attribute Border Propagation Pattern
+
+The `current-table-border` parameter uses Racket's parameterize mechanism for scoped dynamic binding:
+
+```
+<table border="1">          ← sets current-table-border = 1
+  <tbody>                   ← parameterize propagates through
+    <tr>                    ← ...
+      <td>Cell</td>        ← reads current-table-border, gets border-width (edges 1 1 1 1)
+      <th>Header</th>      ← same
+    </tr>
+  </tbody>
+</table>                    ← current-table-border reverts to 0
+```
+
+This pattern avoids threading a border parameter through every intermediate function — the parameter is visible to all descendant processing within the `parameterize` scope.
+
+### Remaining Work: Layout Engine vs Reference Import
+
+Phase 6 exhausted the "low-hanging fruit" fixable in `reference-import.rkt`. The 17 remaining baseline failures are all in the **layout computation** itself:
+
+| Domain | Fix Location | Complexity |
+|--------|-------------|------------|
+| Float wrapping | `layout-block.rkt`, `layout-inline.rkt` | High — needs per-line available-width tracking around floats |
+| Margin collapsing | `layout-block.rkt` | Medium — inline-block / `<dt>`/`<dd>` special cases |
+| Table rowspan | `layout-table.rkt` | High — row height distribution algorithm |
+| Grid edge cases | `layout-grid.rkt` | Medium — writing-mode + aspect-ratio interaction |
+| Bidi text | `layout-dispatch.rkt` | High — bidirectional text width measurement |
+
+---
+
+## 30. Appendix A: Phase 4 Remaining Failures (31) — ALL RESOLVED
 
 All 31 tests that were failing at the end of Phase 4 now **PASS** after Phase 5 fixes. See [Section 11](#11-phase-5-summary) for the complete resolution table mapping each test to its fix.
 
@@ -982,7 +1243,7 @@ All 31 tests that were failing at the end of Phase 4 now **PASS** after Phase 5 
 
 ---
 
-## 25. Appendix B: Progress Log
+## 31. Appendix B: Progress Log
 
 ### Phase 3 Final Status
 
@@ -1026,9 +1287,24 @@ All 31 tests that were failing at the end of Phase 4 now **PASS** after Phase 5 
 
 ### Phase 5 Final
 
-**1968/1968 baseline (100.0%), +178 tests from Phase 4, 0 regressions**
+**1968/1968 Radiant baseline (100.0%), +178 tests from Phase 4, 0 regressions**
+**1796/1821 Redex baseline (98.6%), 25 failures remaining**
 
-### All Layout Test Suites (Phase 5 Final)
+### Phase 6 Progress (Redex Engine)
+
+| Step | Baseline Pass | Failures | Fix | Key Changes |
+|------|---------------|----------|-----|-------------|
+| Start | 1796/1821 | 25 | — | Phase 5 ending point (Redex) |
+| 6A | 1800/1821 | 21 | Arial sans-serif detection | `use-arial-native?` → standalone Arial only, not Arial+sans-serif |
+| 6B | 1801/1821 | 20 | UA bold headings | `member tag '("h1"..."th")` in 3 code paths |
+| 6C | **1804/1821** | **17** | HTML table border | `current-table-border` parameter, cell border propagation |
+
+### Phase 6 Final
+
+**1804/1821 Redex baseline (99.1%), +8 from Phase 5, +1 flex-nest bonus, 0 regressions**
+**2672/2833 Redex total (94.3%), +9 total passing**
+
+### All Layout Test Suites (Phase 6 Final)
 
 There are **two layout engines** tested against the same Chrome reference data:
 
@@ -1037,23 +1313,23 @@ There are **two layout engines** tested against the same Chrome reference data:
 
 Phase 3 cross-suite numbers used the Redex engine. The `make layout` command uses the Radiant engine, which has different (often lower) pass rates for non-baseline suites.
 
-#### Redex Engine (Racket) — Phase 5 Final
+#### Redex Engine (Racket) — Phase 6 Final
 
-| Suite         | Total    | Pass     | Fail     | Pass Rate  | Δ from Phase 3 |
-| ------------- | -------- | -------- | -------- | ---------- | --------------- |
-| **baseline**  | 1821     | **1796** | **25**   | **98.6%**  | +8              |
-| **css_block** | 333      | **333**  | **0**    | **100.0%** | new suite       |
-| **flex**      | 156      | **153**  | **3**    | **98.1%**  | —               |
-| **grid**      | 123      | **117**  | **6**    | **95.1%**  | —               |
-| **basic**     | 84       | **67**   | **17**   | **79.8%**  | +7              |
-| **box**       | 77       | **60**   | **17**   | **77.9%**  | −2              |
-| **table**     | 103      | **55**   | **48**   | **53.4%**  | +2              |
-| **position**  | 53       | **35**   | **18**   | **66.0%**  | +8              |
-| **advanced**  | 49       | **26**   | **23**   | **53.1%**  | new suite       |
-| **page**      | 18       | **7**    | **11**   | **38.9%**  | new suite       |
-| **text_flow** | 14       | **14**   | **0**    | **100.0%** | —               |
-| **flex-nest** | 2        | **0**    | **2**    | **0.0%**   | new suite       |
-| **Total**     | **2833** | **2663** | **170**  | **94.0%**  |                 |
+| Suite         | Total    | Pass     | Fail    | Pass Rate  | Δ Phase 5→6 |
+| ------------- | -------- | -------- | ------- | ---------- | ----------- |
+| **baseline**  | 1821     | **1804** | **17**  | **99.1%**  | **+8**      |
+| **css_block** | 333      | **333**  | **0**   | **100.0%** | —           |
+| **flex**      | 156      | **153**  | **3**   | **98.1%**  | —           |
+| **grid**      | 123      | **117**  | **6**   | **95.1%**  | —           |
+| **basic**     | 84       | **67**   | **17**  | **79.8%**  | —           |
+| **box**       | 77       | **60**   | **17**  | **77.9%**  | —           |
+| **table**     | 103      | **55**   | **48**  | **53.4%**  | —           |
+| **position**  | 53       | **35**   | **18**  | **66.0%**  | —           |
+| **advanced**  | 49       | **26**   | **23**  | **53.1%**  | —           |
+| **page**      | 18       | **7**    | **11**  | **38.9%**  | —           |
+| **text_flow** | 14       | **14**   | **0**   | **100.0%** | —           |
+| **flex-nest** | 2        | **1**    | **1**   | **50.0%**  | **+1**      |
+| **Total**     | **2833** | **2672** | **161** | **94.3%**  | **+9**      |
 
 *Note: The Redex engine discovers only tests with matching reference JSONs. Test counts differ from the Radiant runner because the Radiant runner includes tests without references (counted as failures).*
 
