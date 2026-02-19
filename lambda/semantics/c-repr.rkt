@@ -8,10 +8,15 @@
 ;;
 ;; The transpiler maps:
 ;;   Lambda type τ  →  C type (via write_type() in print.cpp)
-;;   Lambda value v →  C representation (Item, String*, int32_t, etc.)
+;;   Lambda value v →  C representation (Item, String*, int64_t, etc.)
 ;;
 ;; Boxing: converting native C values to the universal Item type
 ;; Unboxing: extracting native C values from Item
+;;
+;; KEY: Lambda's int type is int56 (56-bit signed, inline-packed in Item).
+;; Both int and int64 map to int64_t in C code (via write_type()).
+;; The difference is storage: int uses inline packing (i2it), int64 uses
+;; num_stack allocation (push_l). But their C-level type is the same.
 ;;
 ;; Verified against: lambda/transpile.cpp, lambda/lambda-data.hpp,
 ;;                   lambda/print.cpp (write_type), lambda/mir.c
@@ -29,8 +34,7 @@
 
 ;; C-type is one of:
 ;; - 'Item         : 64-bit tagged union (universal type, uint64_t)
-;; - 'int32_t      : unboxed 32-bit signed integer
-;; - 'int64_t      : unboxed 64-bit signed integer
+;; - 'int64_t      : unboxed 64-bit signed integer (used for BOTH int and int64)
 ;; - 'double       : unboxed 64-bit IEEE 754
 ;; - 'bool         : unboxed boolean (C++ bool / uint8_t)
 ;; - 'String*      : pointer to String struct (refcounted)
@@ -42,6 +46,10 @@
 ;; - 'DateTime     : inline DateTime struct
 ;; - 'Decimal*     : pointer to Decimal struct
 ;; - 'void         : no return value (procedures)
+;;
+;; NOTE: There is NO int32_t. Lambda int is int56 (56-bit signed),
+;; stored inline in Item via i2it(). write_type() emits "int64_t" for
+;; both LMD_TYPE_INT and LMD_TYPE_INT64. it2i() returns int64_t.
 
 
 ;; ────────────────────────────────────────────────────────────────────────────
@@ -53,8 +61,8 @@
 
 (define (lambda-type->c-type τ)
   (match τ
-    ['int-type      'int32_t]
-    ['int64-type    'int64_t]
+    ['int-type      'int64_t]   ; int56 → int64_t (write_type emits "int64_t")
+    ['int64-type    'int64_t]   ; int64 → int64_t
     ['float-type    'double]
     ['bool-type     'bool]
     ['string-type   'String*]
@@ -113,7 +121,7 @@
 
 ;; Is this an inline scalar type? (packed in registers, not pointers)
 (define (scalar-c-type? ct)
-  (and (member ct '(int32_t int64_t double bool)) #t))
+  (and (member ct '(int64_t double bool)) #t))
 
 ;; Is this the universal Item type?
 (define (item-c-type? ct)
@@ -126,16 +134,25 @@
 ;; Boxing: converting a typed C value to Item
 ;; These correspond to the C macros/functions in lambda.h / lambda.hpp
 ;;
-;; i2it(int32_t)    → Item   (inline: pack value + type tag)
+;; i2it(int64_t)    → Item   (range-check to int56, inline pack value + type tag)
 ;; push_l(int64_t)  → Item   (store in num_stack, return tagged pointer)
 ;; push_d(double)   → Item   (store in num_stack, return tagged pointer)
 ;; b2it(bool)       → Item   (inline: BoolTrue or BoolFalse constant)
 ;; s2it(String*)    → Item   (tag pointer with STRING type_id)
-;; sym2it(Symbol*)  → Item   (tag pointer with SYMBOL type_id)
+;; y2it(Symbol*)    → Item   (tag pointer with SYMBOL type_id)
+;;
+;; NOTE: i2it and push_l both take int64_t. The difference:
+;;   i2it: packs inline (int56 range check, overflow → ITEM_ERROR)
+;;   push_l: allocates on num_stack (full int64 range)
+;; Both are valid boxing for int64_t C-type. The transpiler uses i2it
+;; for int-type and push_l for int64-type based on the semantic type.
 
 (define (boxing-function c-type)
   (match c-type
-    ['int32_t   'i2it]
+    ;; NOTE: int64_t maps to push_l as the general boxing function.
+    ;; The transpiler chooses i2it vs push_l based on semantic type,
+    ;; but at the C-type level, the boxing function is push_l.
+    ['int64_t   'push_l]
     ['int64_t   'push_l]
     ['double    'push_d]
     ['bool      'b2it]
@@ -157,6 +174,39 @@
     ['Item      #f]       ; already Item, no boxing needed
     [_          #f]))
 
+;; Semantic-level boxing: uses Lambda type (not just C type) to choose
+;; the correct boxing function. This is needed because int-type and
+;; int64-type both map to int64_t in C, but use different boxing:
+;;   int-type  → i2it (inline pack, int56 range check)
+;;   int64-type → push_l (num_stack allocation)
+(define (semantic-boxing-function λ-type)
+  (match λ-type
+    ['int-type    'i2it]     ; inline int56 packing
+    ['int64-type  'push_l]   ; num_stack allocation
+    ['float-type  'push_d]
+    ['bool-type   'b2it]
+    ['string-type 's2it]
+    ['binary-type 's2it]
+    ['symbol-type 'y2it]
+    ['datetime-type 'push_k]
+    ['decimal-type 'c2it]
+    [_ (boxing-function (lambda-type->c-type λ-type))]))
+
+;; Semantic-level unboxing: uses Lambda type to choose correct unboxing.
+;;   int-type  → it2i (extract int56 from inline tag)
+;;   int64-type → it2l (dereference num_stack pointer)
+(define (semantic-unboxing-function λ-type)
+  (match λ-type
+    ['int-type    'it2i]     ; inline int56 extraction
+    ['int64-type  'it2l]     ; num_stack dereference
+    ['float-type  'it2d]
+    ['bool-type   'it2b]
+    ['string-type 'it2s]
+    ['symbol-type 'it2sym]
+    ['datetime-type 'it2dt]
+    ['decimal-type 'it2dec]
+    [_ (unboxing-function (lambda-type->c-type λ-type))]))
+
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; 5. UNBOXING OPERATIONS
@@ -164,15 +214,24 @@
 ;; Unboxing: extracting a typed C value from Item
 ;; These correspond to the C functions in lambda.h / lambda.hpp
 ;;
-;; it2i(Item) → int32_t   (extract from inline tag)
-;; it2l(Item) → int64_t   (dereference num_stack pointer)
+;; it2i(Item) → int64_t   (extract int56 from inline tag, sign-extend to int64)
+;; it2l(Item) → int64_t   (dereference num_stack pointer for int64 values)
 ;; it2d(Item) → double    (dereference num_stack pointer)
 ;; it2b(Item) → bool      (extract boolean)
 ;; it2s(Item) → String*   (untag pointer)
+;;
+;; NOTE: it2i and it2l both return int64_t. The difference:
+;;   it2i: extracts int56 from inline-packed Item (fast, no pointer deref)
+;;   it2l: dereferences num_stack pointer for full int64 range
+;; At the C-type level they're equivalent. The transpiler uses it2i for
+;; int-typed values and it2l for int64-typed values.
 
 (define (unboxing-function c-type)
   (match c-type
-    ['int32_t   'it2i]
+    ;; NOTE: it2i extracts int56 from inline Item, it2l dereferences num_stack.
+    ;; At the C-type level, both return int64_t. The unboxing function
+    ;; depends on the semantic type (int uses it2i, int64 uses it2l),
+    ;; but for C-type int64_t we use it2l as the general unboxing.
     ['int64_t   'it2l]
     ['double    'it2d]
     ['bool      'it2b]
@@ -225,20 +284,12 @@
      'type-error]
 
     ;; Source is scalar, target is different scalar → must box then unbox
-    ;; e.g., int32_t → double: use (it2d (i2it value))
+    ;; e.g., int64_t → double: use (double) cast
     ;; The transpiler may optimize this to a direct C cast
     [(and (scalar-c-type? source) (scalar-c-type? target))
      (match* (source target)
-       ;; int → double: use (double) cast
-       [('int32_t 'double) 'cast-int-to-double]
-       ;; int → int64: use (int64_t) cast
-       [('int32_t 'int64_t) 'cast-int-to-int64]
-       ;; double → int: use (int32_t) cast (truncate)
-       [('double 'int32_t) 'cast-double-to-int]
        ;; int64 → double: use (double) cast
        [('int64_t 'double) 'cast-int64-to-double]
-       ;; int64 → int: use (int32_t) cast (truncation)
-       [('int64_t 'int32_t) 'cast-int64-to-int]
        ;; double → int64: use (int64_t) cast (truncation)
        [('double 'int64_t) 'cast-double-to-int64]
        [(_ _) 'type-error])]
@@ -315,7 +366,7 @@
 ;; Rule: Only safe for types where the C type can represent all possible
 ;; return values, AND the function body actually produces that C type.
 ;;
-;; Currently safe: int (int32_t), int64 (int64_t)
+;; Currently safe: int (int64_t), int64 (int64_t)
 ;; NOT safe: string (String*), float (double via num_stack), etc.
 ;; because system functions may return Item even when the semantic type
 ;; is string/float.
@@ -579,6 +630,7 @@
 (provide lambda-type->c-type
          pointer-c-type? scalar-c-type? item-c-type?
          boxing-function unboxing-function
+         semantic-boxing-function semantic-unboxing-function
          required-conversion
          verify-call-args verify-if-branches
          safe-for-unboxed-variant?

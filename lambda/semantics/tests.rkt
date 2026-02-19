@@ -427,7 +427,8 @@
 ;; ════════════════════════════════════════════════════════════════════════════
 
 (test-case "Type mapping: Lambda type → C type"
-  (check-equal? (lambda-type->c-type 'int-type)    'int32_t)
+  ;; Both int and int64 map to int64_t (int is int56 stored inline)
+  (check-equal? (lambda-type->c-type 'int-type)    'int64_t)
   (check-equal? (lambda-type->c-type 'int64-type)  'int64_t)
   (check-equal? (lambda-type->c-type 'float-type)  'double)
   (check-equal? (lambda-type->c-type 'bool-type)   'bool)
@@ -440,13 +441,13 @@
   (check-equal? (lambda-type->c-type '(union int-type string-type)) 'Item))
 
 (test-case "Boxing functions"
-  (check-equal? (boxing-function 'int32_t) 'i2it)
+  (check-equal? (boxing-function 'int64_t) 'push_l)
   (check-equal? (boxing-function 'double)  'push_d)
   (check-equal? (boxing-function 'String*) 's2it)
   (check-equal? (boxing-function 'Item)    #f))  ; already Item
 
 (test-case "Unboxing functions"
-  (check-equal? (unboxing-function 'int32_t) 'it2i)
+  (check-equal? (unboxing-function 'int64_t) 'it2l)
   (check-equal? (unboxing-function 'double)  'it2d)
   (check-equal? (unboxing-function 'String*) 'it2s)
   (check-equal? (unboxing-function 'bool)    'it2b)
@@ -454,17 +455,17 @@
 
 (test-case "Required conversion: same type → no conversion"
   (check-equal? (required-conversion 'Item 'Item) #f)
-  (check-equal? (required-conversion 'int32_t 'int32_t) #f)
+  (check-equal? (required-conversion 'int64_t 'int64_t) #f)
   (check-equal? (required-conversion 'String* 'String*) #f))
 
 (test-case "Required conversion: Item → native (unboxing)"
-  (check-equal? (required-conversion 'Item 'int32_t) 'it2i)
+  (check-equal? (required-conversion 'Item 'int64_t) 'it2l)
   (check-equal? (required-conversion 'Item 'double)  'it2d)
   (check-equal? (required-conversion 'Item 'String*) 'it2s)
   (check-equal? (required-conversion 'Item 'bool)    'it2b))
 
 (test-case "Required conversion: native → Item (boxing)"
-  (check-equal? (required-conversion 'int32_t 'Item) 'i2it)
+  (check-equal? (required-conversion 'int64_t 'Item) 'push_l)
   (check-equal? (required-conversion 'double 'Item)  'push_d)
   (check-equal? (required-conversion 'String* 'Item) 's2it))
 
@@ -529,7 +530,7 @@
   (check-equal? (lambda-type->c-type '(list-of int-type))     'List*)
   (check-equal? (lambda-type->c-type '(map-of string-type))   'Map*)
   ;; Error-return → unwraps to inner type
-  (check-equal? (lambda-type->c-type '(error-ret int-type))   'int32_t)
+  (check-equal? (lambda-type->c-type '(error-ret int-type))   'int64_t)
   (check-equal? (lambda-type->c-type '(error-ret string-type)) 'String*)
   ;; fn-type → Item (closures are boxed)
   (check-equal? (lambda-type->c-type '(fn-type (int-type) int-type)) 'Item))
@@ -542,10 +543,9 @@
   (check-true (pointer-c-type? 'Range*))
   (check-true (pointer-c-type? 'Type*))
   (check-true (pointer-c-type? 'ArrayInt*))
-  (check-false (pointer-c-type? 'int32_t))
+  (check-false (pointer-c-type? 'int64_t))
   (check-false (pointer-c-type? 'Item))
-  ;; Scalar types
-  (check-true (scalar-c-type? 'int32_t))
+  ;; Scalar types (no int32_t in Lambda runtime)
   (check-true (scalar-c-type? 'int64_t))
   (check-true (scalar-c-type? 'double))
   (check-true (scalar-c-type? 'bool))
@@ -553,10 +553,10 @@
   (check-false (scalar-c-type? 'Item))
   ;; Item type
   (check-true (item-c-type? 'Item))
-  (check-false (item-c-type? 'int32_t)))
+  (check-false (item-c-type? 'int64_t)))
 
 (test-case "Boxing: all scalar types"
-  (check-equal? (boxing-function 'int32_t)  'i2it)
+  ;; int64_t uses push_l at C-type level
   (check-equal? (boxing-function 'int64_t)  'push_l)
   (check-equal? (boxing-function 'double)   'push_d)
   (check-equal? (boxing-function 'bool)     'b2it)
@@ -575,7 +575,7 @@
   (check-equal? (boxing-function 'List*) #f))
 
 (test-case "Unboxing: all scalar types"
-  (check-equal? (unboxing-function 'int32_t)  'it2i)
+  ;; int64_t uses it2l at C-type level
   (check-equal? (unboxing-function 'int64_t)  'it2l)
   (check-equal? (unboxing-function 'double)   'it2d)
   (check-equal? (unboxing-function 'bool)     'it2b)
@@ -591,14 +591,13 @@
                   (format "~a should unbox via cast-from-Item" ct))))
 
 (test-case "Conversion: scalar promotions"
-  (check-equal? (required-conversion 'int32_t 'double) 'cast-int-to-double)
-  (check-equal? (required-conversion 'int32_t 'int64_t) 'cast-int-to-int64)
-  (check-equal? (required-conversion 'double 'int32_t) 'cast-double-to-int)
-  (check-equal? (required-conversion 'int64_t 'double) 'cast-int64-to-double))
+  ;; Only int64 ↔ double conversions remain (no int32_t in Lambda)
+  (check-equal? (required-conversion 'int64_t 'double) 'cast-int64-to-double)
+  (check-equal? (required-conversion 'double 'int64_t) 'cast-double-to-int64))
 
 (test-case "Conversion: incompatible scalars → type-error"
-  (check-equal? (required-conversion 'bool 'int32_t) 'type-error)
-  (check-equal? (required-conversion 'int32_t 'bool) 'type-error))
+  (check-equal? (required-conversion 'bool 'int64_t) 'type-error)
+  (check-equal? (required-conversion 'int64_t 'bool) 'type-error))
 
 (test-case "Conversion: pointer to Item is compatible"
   ;; Pointers can be cast to Item directly (high bits contain type_id)
@@ -642,11 +641,9 @@
   ;; len returns int64_t, if param expects int64_t, no conversion
   (check-false (sys-func-needs-conversion? 'len 'int64-type)
                "len → int64 param needs no conversion")
-  ;; len returns int64_t, if param expects int (int32_t), type-error
-  ;; because int64 → int32 would truncate
-  (define len-conv (sys-func-needs-conversion? 'len 'int-type))
-  ;; int64_t → int32_t is not in the scalar conversion table → type-error
-  (check-not-false len-conv "len → int param should need conversion"))
+  ;; len returns int64_t, int-type also maps to int64_t → no conversion needed
+  (check-false (sys-func-needs-conversion? 'len 'int-type)
+               "len → int param needs no conversion (both int64_t)"))
 
 (test-case "verify-function: basic check"
   (define result (verify-function 'test-fn
@@ -746,7 +743,7 @@
 
 (test-case "Property: C-type roundtrip (box then unbox)"
   ;; ∀ scalar C-types: unbox(box(v)) should recover original type
-  (for ([ct '(int32_t int64_t double bool String*)])
+  (for ([ct '(int64_t double bool String*)])
     (define box-fn (boxing-function ct))
     (define unbox-fn (unboxing-function ct))
     (check-not-false box-fn (format "~a should have boxing fn" ct))
@@ -771,7 +768,7 @@
 
 (test-case "Property: every scalar C-type has boxing AND unboxing"
   ;; ∀ scalar C-types: both boxing and unboxing must exist
-  (for ([ct '(int32_t int64_t double bool)])
+  (for ([ct '(int64_t double bool)])
     (check-not-false (boxing-function ct)
                      (format "~a must have boxing fn" ct))
     (check-not-false (unboxing-function ct)
@@ -789,7 +786,7 @@
   ;; ∀ scalar c-type ct:
   ;;   unboxing-fn(ct) == required-conversion(Item, ct)
   ;; i.e., the unboxing function IS what required-conversion returns
-  (for ([ct '(int32_t int64_t double bool String*)])
+  (for ([ct '(int64_t double bool String*)])
     (define uf (unboxing-function ct))
     (define conv (required-conversion 'Item ct))
     (check-equal? conv uf
@@ -797,7 +794,7 @@
 
 (test-case "Property: same-type conversion is always #f"
   ;; ∀ C-type ct: required-conversion(ct, ct) == #f
-  (for ([ct '(Item int32_t int64_t double bool String* Symbol*
+  (for ([ct '(Item int64_t double bool String* Symbol*
               Array* List* Map* Element* Decimal* DateTime
               Range* Path* Function* Type*)])
     (check-false (required-conversion ct ct)
@@ -840,6 +837,35 @@
     (when (not (eq? ct1 ct2))
       (check-equal? (required-conversion ct1 ct2) 'type-error
                     (format "~a → ~a should be type-error" ct1 ct2)))))
+
+(test-case "Semantic boxing: int uses i2it, int64 uses push_l"
+  ;; The key int56 distinction: both map to int64_t in C,
+  ;; but use different boxing functions
+  (check-equal? (semantic-boxing-function 'int-type)   'i2it)
+  (check-equal? (semantic-boxing-function 'int64-type) 'push_l)
+  (check-equal? (semantic-boxing-function 'float-type) 'push_d)
+  (check-equal? (semantic-boxing-function 'bool-type)  'b2it)
+  (check-equal? (semantic-boxing-function 'string-type) 's2it))
+
+(test-case "Semantic unboxing: int uses it2i, int64 uses it2l"
+  (check-equal? (semantic-unboxing-function 'int-type)   'it2i)
+  (check-equal? (semantic-unboxing-function 'int64-type) 'it2l)
+  (check-equal? (semantic-unboxing-function 'float-type) 'it2d)
+  (check-equal? (semantic-unboxing-function 'bool-type)  'it2b)
+  (check-equal? (semantic-unboxing-function 'string-type) 'it2s))
+
+(test-case "int and int64 share C-type but differ semantically"
+  ;; Both map to int64_t
+  (check-equal? (lambda-type->c-type 'int-type) 'int64_t)
+  (check-equal? (lambda-type->c-type 'int64-type) 'int64_t)
+  ;; Same C-type → no conversion needed at C level
+  (check-false (required-conversion 'int64_t 'int64_t))
+  ;; But semantic boxing differs
+  (check-not-equal? (semantic-boxing-function 'int-type)
+                    (semantic-boxing-function 'int64-type))
+  ;; If-else between int and int64 → ok (same C-type)
+  (define result (verify-if-branches 'int-type 'int64-type))
+  (check-equal? (car result) 'ok))
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
