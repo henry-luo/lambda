@@ -3593,9 +3593,12 @@
     (define box-tree (reference->box-tree html-path))
     (define expected (reference->expected-layout ref-json))
     (define viewport-info (hash-ref ref-json 'browser_info (hash)))
-    (define vp (hash-ref viewport-info 'viewport (hash 'width 1200 'height 800)))
-    (define vp-w (hash-ref vp 'width 1200))
-    (define vp-h (hash-ref vp 'height 800))
+    (define default-viewport-w 1200)  ;; CSS 2.1 test suite assumes ~1200px viewport
+    (define default-viewport-h 800)
+    (define vp (hash-ref viewport-info 'viewport
+                        (hash 'width default-viewport-w 'height default-viewport-h)))
+    (define vp-w (hash-ref vp 'width default-viewport-w))
+    (define vp-h (hash-ref vp 'height default-viewport-h))
     (define name (hash-ref ref-json 'test_file "unknown"))
 
     ;; for non-Taffy tests, subtract body margin from viewport dimensions.
@@ -3615,8 +3618,8 @@
                  [body-layout (if body-node (hash-ref body-node 'layout (hash)) (hash))]
                  [body-x (hash-ref body-layout 'x 0)]
                  ;; extract body margins from computed styles (CSS may set them asymmetrically)
-                 [margin-left (hash-ref body-computed 'marginLeft 8)]
-                 [margin-right (hash-ref body-computed 'marginRight 8)]
+                 [margin-left (hash-ref body-computed 'marginLeft UA-BODY-MARGIN)]
+                 [margin-right (hash-ref body-computed 'marginRight UA-BODY-MARGIN)]
                  ;; extract body padding from computed styles
                  [pad-left (hash-ref body-computed 'paddingLeft 0)]
                  [pad-right (hash-ref body-computed 'paddingRight 0)]
