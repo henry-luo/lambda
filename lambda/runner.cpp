@@ -214,6 +214,18 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         strbuf_free(func_name);
                         *(main_func_t*) mod_def = (main_func_t)fn_ptr;
                         mod_def += sizeof(main_func_t);
+
+                        // also populate _w wrapper pointer if this function needs fn_call* wrapper
+                        if (node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(func_node)) {
+                            StrBuf *wrapper_name = strbuf_new();
+                            write_fn_name_ex(wrapper_name, func_node, NULL, "_w");
+                            log_debug("loading wrapper fn: %s", wrapper_name->str);
+                            void* w_ptr = find_func(import->script->jit_context, wrapper_name->str);
+                            log_debug("got wrapper fn: %s, ptr: %p", wrapper_name->str, w_ptr);
+                            strbuf_free(wrapper_name);
+                            *(main_func_t*) mod_def = (main_func_t)w_ptr;
+                            mod_def += sizeof(main_func_t);
+                        }
                     }
                 }
                 // pub var fields are populated at runtime by _init_mod_vars, skip pointer arithmetic

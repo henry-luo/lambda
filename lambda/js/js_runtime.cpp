@@ -1,6 +1,6 @@
 /**
  * JavaScript Runtime Functions for Lambda v2
- * 
+ *
  * Implements JavaScript semantics on top of Lambda's type system.
  * All functions are callable from MIR JIT compiled code.
  */
@@ -20,7 +20,7 @@
 
 extern "C" Item js_to_number(Item value) {
     TypeId type = get_type_id(value);
-    
+
     switch (type) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_UNDEFINED:
@@ -31,19 +31,19 @@ extern "C" Item js_to_number(Item value) {
             return (Item){.item = d2it(nan_ptr)};
         }
         return (Item){.item = i2it(0)};
-        
+
     case LMD_TYPE_BOOL: {
         int val = it2b(value) ? 1 : 0;
         return (Item){.item = i2it(val)};
     }
-    
+
     case LMD_TYPE_INT:
         // Already a number (int), convert to float for consistency
         return value;
-        
+
     case LMD_TYPE_FLOAT:
         return value;
-        
+
     case LMD_TYPE_STRING: {
         String* str = it2s(value);
         if (!str || str->len == 0) {
@@ -61,7 +61,7 @@ extern "C" Item js_to_number(Item value) {
         *result = num;
         return (Item){.item = d2it(result)};
     }
-    
+
     default:
         // Objects, arrays, etc. -> NaN
         double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -72,23 +72,23 @@ extern "C" Item js_to_number(Item value) {
 
 extern "C" Item js_to_string(Item value) {
     TypeId type = get_type_id(value);
-    
+
     switch (type) {
     case LMD_TYPE_NULL:
         return (Item){.item = s2it(heap_create_name("null"))};
-        
+
     case LMD_TYPE_UNDEFINED:
         return (Item){.item = s2it(heap_create_name("undefined"))};
-        
+
     case LMD_TYPE_BOOL:
         return (Item){.item = s2it(heap_create_name(it2b(value) ? "true" : "false"))};
-        
+
     case LMD_TYPE_INT: {
         char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%d", it2i(value));
+        snprintf(buffer, sizeof(buffer), "%lld", (long long)it2i(value));
         return (Item){.item = s2it(heap_create_name(buffer))};
     }
-    
+
     case LMD_TYPE_FLOAT: {
         double d = it2d(value);
         if (isnan(d)) {
@@ -102,20 +102,20 @@ extern "C" Item js_to_string(Item value) {
             return (Item){.item = s2it(heap_create_name(buffer))};
         }
     }
-    
+
     case LMD_TYPE_STRING:
         return value;
-        
+
     case LMD_TYPE_ARRAY:
         // TODO: Implement array toString
         return (Item){.item = s2it(heap_create_name("[object Array]"))};
-        
+
     case LMD_TYPE_MAP:
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
-        
+
     case LMD_TYPE_FUNC:
         return (Item){.item = s2it(heap_create_name("[object Function]"))};
-        
+
     default:
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
@@ -127,28 +127,28 @@ extern "C" Item js_to_boolean(Item value) {
 
 extern "C" bool js_is_truthy(Item value) {
     TypeId type = get_type_id(value);
-    
+
     switch (type) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_UNDEFINED:
         return false;
-        
+
     case LMD_TYPE_BOOL:
         return it2b(value);
-        
+
     case LMD_TYPE_INT:
         return it2i(value) != 0;
-        
+
     case LMD_TYPE_FLOAT: {
         double d = it2d(value);
         return !isnan(d) && d != 0.0;
     }
-    
+
     case LMD_TYPE_STRING: {
         String* str = it2s(value);
         return str && str->len > 0;
     }
-    
+
     default:
         // Objects, arrays, functions are all truthy
         return value.item != 0;
@@ -161,7 +161,7 @@ extern "C" bool js_is_truthy(Item value) {
 
 static double js_get_number(Item value) {
     TypeId type = get_type_id(value);
-    
+
     switch (type) {
     case LMD_TYPE_INT:
         return (double)it2i(value);
@@ -188,8 +188,8 @@ static double js_get_number(Item value) {
 
 static Item js_make_number(double d) {
     // Check if it can be represented as an integer
-    if (d == (double)(int)d && d >= INT56_MIN && d <= INT56_MAX) {
-        return (Item){.item = i2it((int)d)};
+    if (d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX) {
+        return (Item){.item = i2it((int64_t)d)};
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = d;
@@ -203,14 +203,14 @@ static Item js_make_number(double d) {
 extern "C" Item js_add(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
-    
+
     // String concatenation if either operand is a string
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         Item left_str = js_to_string(left);
         Item right_str = js_to_string(right);
         return fn_join(left_str, right_str);
     }
-    
+
     // Numeric addition
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -254,18 +254,18 @@ extern "C" Item js_power(Item left, Item right) {
 extern "C" Item js_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
-    
+
     // Same type: use strict equality
     if (left_type == right_type) {
         return js_strict_equal(left, right);
     }
-    
+
     // null == undefined
     if ((left_type == LMD_TYPE_NULL && right_type == LMD_TYPE_UNDEFINED) ||
         (left_type == LMD_TYPE_UNDEFINED && right_type == LMD_TYPE_NULL)) {
         return (Item){.item = b2it(true)};
     }
-    
+
     // Number comparisons
     if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
         (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
@@ -273,7 +273,7 @@ extern "C" Item js_equal(Item left, Item right) {
         double r = js_get_number(right);
         return (Item){.item = b2it(l == r)};
     }
-    
+
     // String to number
     if ((left_type == LMD_TYPE_STRING && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) ||
         ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_type == LMD_TYPE_STRING)) {
@@ -281,7 +281,7 @@ extern "C" Item js_equal(Item left, Item right) {
         double r = js_get_number(right);
         return (Item){.item = b2it(l == r)};
     }
-    
+
     // Boolean to number
     if (left_type == LMD_TYPE_BOOL) {
         return js_equal(js_to_number(left), right);
@@ -289,7 +289,7 @@ extern "C" Item js_equal(Item left, Item right) {
     if (right_type == LMD_TYPE_BOOL) {
         return js_equal(left, js_to_number(right));
     }
-    
+
     return (Item){.item = b2it(false)};
 }
 
@@ -301,23 +301,23 @@ extern "C" Item js_not_equal(Item left, Item right) {
 extern "C" Item js_strict_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
-    
+
     // Different types are never strictly equal
     if (left_type != right_type) {
         return (Item){.item = b2it(false)};
     }
-    
+
     switch (left_type) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_UNDEFINED:
         return (Item){.item = b2it(true)};
-        
+
     case LMD_TYPE_BOOL:
         return (Item){.item = b2it(it2b(left) == it2b(right))};
-        
+
     case LMD_TYPE_INT:
         return (Item){.item = b2it(it2i(left) == it2i(right))};
-        
+
     case LMD_TYPE_FLOAT: {
         double l = it2d(left);
         double r = it2d(right);
@@ -327,7 +327,7 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         }
         return (Item){.item = b2it(l == r)};
     }
-    
+
     case LMD_TYPE_STRING: {
         String* l_str = it2s(left);
         String* r_str = it2s(right);
@@ -336,7 +336,7 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         }
         return (Item){.item = b2it(memcmp(l_str->chars, r_str->chars, l_str->len) == 0)};
     }
-    
+
     default:
         // Object identity comparison
         return (Item){.item = b2it(left.item == right.item)};
@@ -351,19 +351,19 @@ extern "C" Item js_strict_not_equal(Item left, Item right) {
 extern "C" Item js_less_than(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
-    
+
     // String comparison
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
         String* l_str = it2s(left);
         String* r_str = it2s(right);
-        int cmp = memcmp(l_str->chars, r_str->chars, 
+        int cmp = memcmp(l_str->chars, r_str->chars,
                         l_str->len < r_str->len ? l_str->len : r_str->len);
         if (cmp == 0) {
             return (Item){.item = b2it(l_str->len < r_str->len)};
         }
         return (Item){.item = b2it(cmp < 0)};
     }
-    
+
     // Numeric comparison
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -471,7 +471,7 @@ extern "C" Item js_unary_minus(Item operand) {
 
 extern "C" Item js_typeof(Item value) {
     TypeId type = get_type_id(value);
-    
+
     const char* result;
     switch (type) {
     case LMD_TYPE_UNDEFINED:
@@ -500,7 +500,7 @@ extern "C" Item js_typeof(Item value) {
         result = "object";
         break;
     }
-    
+
     return (Item){.item = s2it(heap_create_name(result))};
 }
 
@@ -531,7 +531,7 @@ static int js_object_compare(const void *a, const void *b, void *udata) {
 // Create a new JS object using hashmap
 extern "C" Item js_new_object() {
     // Create a hashmap to store object properties
-    HashMap* obj = hashmap_new(sizeof(JsObjectEntry), 4, 0, 0, 
+    HashMap* obj = hashmap_new(sizeof(JsObjectEntry), 4, 0, 0,
         js_object_hash, js_object_compare, NULL, NULL);
     // Store as pointer with LMD_TYPE_MAP type (we'll use type_id to differentiate)
     // Actually we need a way to store this - let's use a wrapper struct
@@ -545,7 +545,7 @@ extern "C" Item js_new_object() {
 
 extern "C" Item js_property_get(Item object, Item key) {
     TypeId type = get_type_id(object);
-    
+
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
         // Check if this is a JS object (indicated by NULL type)
@@ -553,7 +553,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             // This is a JS object using hashmap
             HashMap* hm = (HashMap*)m->data;
             String* str_key = NULL;
-            
+
             TypeId key_type = get_type_id(key);
             if (key_type == LMD_TYPE_STRING) {
                 str_key = it2s(key);
@@ -563,7 +563,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // Convert to string for property access
                 return ItemNull;
             }
-            
+
             JsObjectEntry lookup = {.key = str_key, .value = ItemNull};
             const JsObjectEntry* found = (const JsObjectEntry*)hashmap_get(hm, &lookup);
             if (found) {
@@ -591,13 +591,13 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         return ItemNull;
     }
-    
+
     return ItemNull;
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     TypeId type = get_type_id(object);
-    
+
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
         // Check if this is a JS object (indicated by NULL type)
@@ -605,7 +605,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             // This is a JS object using hashmap
             HashMap* hm = (HashMap*)m->data;
             String* str_key = NULL;
-            
+
             TypeId key_type = get_type_id(key);
             if (key_type == LMD_TYPE_STRING) {
                 str_key = it2s(key);
@@ -615,7 +615,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // Can't set non-string key
                 return value;
             }
-            
+
             JsObjectEntry entry = {.key = str_key, .value = value};
             hashmap_set(hm, &entry);
             return value;
@@ -624,7 +624,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         log_debug("js_property_set: Setting property on Lambda map (not supported)");
         return value;
     }
-    
+
     return value;
 }
 
@@ -664,14 +664,14 @@ extern "C" Item js_array_get(Item array, Item index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return ItemNull;
     }
-    
+
     int idx = (int)js_get_number(index);
     Array* arr = array.array;
-    
+
     if (idx >= 0 && idx < arr->length) {
         return arr->items[idx];
     }
-    
+
     return ItemNull;
 }
 
@@ -679,15 +679,15 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return value;
     }
-    
+
     int idx = (int)js_get_number(index);
     Array* arr = array.array;
-    
+
     if (idx >= 0 && idx < arr->length) {
         arr->items[idx] = value;
     }
     // TODO: Expand array if idx >= length
-    
+
     return value;
 }
 
@@ -702,7 +702,7 @@ extern "C" Item js_array_push(Item array, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return (Item){.item = i2it(0)};
     }
-    
+
     Array* arr = array.array;
     list_push(arr, value);
     return (Item){.item = i2it(arr->length)};
@@ -745,13 +745,13 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         log_error("js_call_function: not a function");
         return ItemNull;
     }
-    
+
     JsFunction* fn = (JsFunction*)func_item.function;
     if (!fn || !fn->func_ptr) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
     }
-    
+
     // Cast function pointer and call based on argument count
     // Note: This is a simplified version that handles common cases
     typedef Item (*FnPtr0)();
@@ -759,7 +759,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     typedef Item (*FnPtr2)(Item, Item);
     typedef Item (*FnPtr3)(Item, Item, Item);
     typedef Item (*FnPtr4)(Item, Item, Item, Item);
-    
+
     switch (arg_count) {
         case 0:
             return ((FnPtr0)fn->func_ptr)();

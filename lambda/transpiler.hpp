@@ -72,7 +72,9 @@ void write_node_source(Transpiler* tp, TSNode node);
 void write_type(StrBuf* code_buf, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
+void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
+bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);

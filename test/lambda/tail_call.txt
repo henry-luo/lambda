@@ -7,6 +7,6 @@
   factorial_non_tail_10: 3628800,
   count_evens_100: 50,
   deep_count: 0,
-  deep_sum: 705082704,
+  deep_sum: 5000050000,
   deep_gcd: 1
 }

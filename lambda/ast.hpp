@@ -621,6 +621,9 @@ typedef struct Transpiler : Script {
     // Pipe injection context (for data | func(args) -> func(data, args))
     int pipe_inject_args;      // extra args to add when looking up sys_func (0 normally, 1 in pipe context)
 
+    // Current function being transpiled (for proc return type checking)
+    AstFuncNode* current_func_node;
+
     // MIR JIT workaround: track while loop nesting depth
     // When > 0, native variable assignments use *(&x)=v pattern to prevent
     // MIR optimizer from mishandling SSA destruction of swap patterns

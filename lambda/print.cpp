@@ -77,7 +77,7 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "bool");
         break;
     case LMD_TYPE_INT:
-        strbuf_append_str(code_buf, "int32_t");
+        strbuf_append_str(code_buf, "int64_t");
         break;
     case LMD_TYPE_INT64:
         strbuf_append_str(code_buf, "int64_t");
