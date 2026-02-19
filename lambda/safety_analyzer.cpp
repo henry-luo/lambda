@@ -144,9 +144,35 @@ bool has_tail_call(AstNode* expr, AstFuncNode* func_node) {
     }
 
     case AST_NODE_CONTENT: {
-        // Content expression (procedural) - last statement's return value
-        // For now, don't optimize procedural code
+        // Procedural content - check for return statements with tail calls
+        // and if statements that may contain tail calls in their branches
+        AstListNode* list = (AstListNode*)expr;
+        AstNode* item = list->item;
+        while (item) {
+            if (item->node_type == AST_NODE_RETURN_STAM) {
+                AstReturnNode* ret = (AstReturnNode*)item;
+                if (ret->value && has_tail_call(ret->value, func_node)) return true;
+            }
+            else if (item->node_type == AST_NODE_IF_STAM) {
+                if (has_tail_call(item, func_node)) return true;
+            }
+            item = item->next;
+        }
         return false;
+    }
+
+    case AST_NODE_RETURN_STAM: {
+        // Return statement - the return value is in tail position
+        AstReturnNode* ret = (AstReturnNode*)expr;
+        return ret->value ? has_tail_call(ret->value, func_node) : false;
+    }
+
+    case AST_NODE_IF_STAM: {
+        // Procedural if statement - both branches are in tail position
+        AstIfNode* if_node = (AstIfNode*)expr;
+        bool then_tail = if_node->then ? has_tail_call(if_node->then, func_node) : false;
+        bool else_tail = if_node->otherwise ? has_tail_call(if_node->otherwise, func_node) : false;
+        return then_tail || else_tail;
     }
 
     default:
@@ -178,12 +204,8 @@ bool should_use_tco(AstFuncNode* func_node) {
         return false;
     }
 
-    // Don't optimize procedures (procedural code has different control flow)
-    if (func_node->node_type == AST_NODE_PROC) {
-        log_debug("TCO: skip procedure '%.*s'",
-            (int)func_node->name->len, func_node->name->chars);
-        return false;
-    }
+    // Procedures are now supported for TCO — return statements with tail calls
+    // are converted to goto jumps
 
     // Check if body has tail call
     if (!func_node->body) return false;
@@ -412,6 +434,47 @@ static bool has_non_tail_recursive_call(AstNode* expr, AstFuncNode* func_node, b
         // The assigned expression is not in tail position
         AstNamedNode* asn = (AstNamedNode*)expr;
         return has_non_tail_recursive_call(asn->as, func_node, false);
+    }
+
+    case AST_NODE_CONTENT: {
+        // Procedural content - statements are not in tail position
+        // except for return statement values and if-statement branches
+        AstListNode* list = (AstListNode*)expr;
+        AstNode* item = list->item;
+        while (item) {
+            if (item->node_type == AST_NODE_RETURN_STAM) {
+                // Return value is in tail position
+                AstReturnNode* ret = (AstReturnNode*)item;
+                if (ret->value && has_non_tail_recursive_call(ret->value, func_node, true)) return true;
+            }
+            else if (item->node_type == AST_NODE_IF_STAM) {
+                // If statement branches inherit tail position
+                if (has_non_tail_recursive_call(item, func_node, in_tail_position)) return true;
+            }
+            else {
+                // All other statements are not in tail position
+                if (has_non_tail_recursive_call(item, func_node, false)) return true;
+            }
+            item = item->next;
+        }
+        return false;
+    }
+
+    case AST_NODE_RETURN_STAM: {
+        // Return value is in tail position
+        AstReturnNode* ret = (AstReturnNode*)expr;
+        return ret->value ? has_non_tail_recursive_call(ret->value, func_node, true) : false;
+    }
+
+    case AST_NODE_IF_STAM: {
+        // Procedural if statement
+        AstIfNode* if_node = (AstIfNode*)expr;
+        // Condition is NOT in tail position
+        if (has_non_tail_recursive_call(if_node->cond, func_node, false)) return true;
+        // Both branches inherit tail position from parent
+        if (if_node->then && has_non_tail_recursive_call(if_node->then, func_node, in_tail_position)) return true;
+        if (if_node->otherwise && has_non_tail_recursive_call(if_node->otherwise, func_node, in_tail_position)) return true;
+        return false;
     }
 
     default:

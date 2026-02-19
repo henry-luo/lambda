@@ -211,13 +211,25 @@ std::vector<TranspileTestInfo> discover_transpile_tests(const char* directory) {
 //==============================================================================
 
 // Execute lambda.exe to transpile a script and return the generated C code
-std::string transpile_and_get_code(const std::string& script_path) {
-    // Build command to execute lambda.exe
-    char command[512];
+// Uses --transpile-dir to write output to a unique per-test file under test_output/
+// to avoid race conditions when tests run in parallel.
+std::string transpile_and_get_code(const std::string& script_path, const std::string& test_name) {
+    // Create output directory
+    std::string output_dir = "test_output/transpile_" + test_name;
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>&1", script_path.c_str());
+    _mkdir(output_dir.c_str());
 #else
-    snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>&1", script_path.c_str());
+    mkdir(output_dir.c_str(), 0755);
+#endif
+
+    // Build command to execute lambda.exe with --transpile-dir
+    char command[1024];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe --transpile-dir \"%s\" \"%s\" 2>&1",
+             output_dir.c_str(), script_path.c_str());
+#else
+    snprintf(command, sizeof(command), "./lambda.exe --transpile-dir \"%s\" \"%s\" 2>&1",
+             output_dir.c_str(), script_path.c_str());
 #endif
 
     // Execute the script (this triggers transpilation)
@@ -229,8 +241,9 @@ std::string transpile_and_get_code(const std::string& script_path) {
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {}
     pclose(pipe);
 
-    // Read the generated C code from _transpiled_0.c
-    std::ifstream transpiled("_transpiled_0.c");
+    // Read the generated C code from the per-test output directory
+    std::string transpiled_path = output_dir + "/_transpiled_0.c";
+    std::ifstream transpiled(transpiled_path);
     if (!transpiled.is_open()) {
         return "";
     }
@@ -267,6 +280,7 @@ int count_pattern(const std::string& code, const std::string& pattern) {
 // Test directories to scan for .transpile fixtures
 static const char* TRANSPILE_TEST_DIRECTORIES[] = {
     "test/lambda",
+    "test/lambda/proc",
     // Add more directories as needed
 };
 static const size_t NUM_TRANSPILE_TEST_DIRECTORIES =
@@ -315,7 +329,7 @@ TEST_P(TranspilePatternTest, VerifyPatterns) {
     }
 
     // Transpile the script and get generated code
-    std::string code = transpile_and_get_code(info.script_path);
+    std::string code = transpile_and_get_code(info.script_path, info.test_name);
     ASSERT_FALSE(code.empty())
         << "Failed to transpile script or read generated code: " << info.script_path;
 
