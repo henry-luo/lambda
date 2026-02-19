@@ -949,7 +949,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     ast_node->object = build_expr(tp, object_node);
 
     TSNode field_node = ts_node_child_by_field_id(array_node, FIELD_FIELD);
-    if (node_type == AST_NODE_MEMBER_EXPR && ts_node_symbol(field_node) == SYM_IDENT) {
+    if (node_type == AST_NODE_MEMBER_EXPR && (ts_node_symbol(field_node) == SYM_IDENT || ts_node_symbol(field_node) == SYM_BASE_TYPE)) {
         // handle id node directly without name lookup
         AstIdentNode* id_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, field_node, sizeof(AstIdentNode));
         StrView var_name = ts_node_source(tp, field_node);
@@ -3177,7 +3177,8 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         int end_byte = ts_node_end_byte(key_node) - 1; // skip the last quote
         return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
     }
-    case SYM_IDENT: {
+    case SYM_IDENT:
+    case SYM_BASE_TYPE: {
         return (StrView)ts_node_source(tp, key_node);
     }
     default:

@@ -332,7 +332,7 @@ module.exports = grammar({
     ),
 
     map_item: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)),
+      field('name', choice($.string, $.symbol, $.identifier, $.base_type)),
       ':',
       field('as', $._expr),
     ),
@@ -369,6 +369,7 @@ module.exports = grammar({
       $.string,
       $.symbol,
       $.identifier,
+      $.base_type,
     ),
 
     attr: $ => seq(
@@ -480,13 +481,13 @@ module.exports = grammar({
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
       choice($.path_root, $.path_self, $.path_parent),
-      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive)))
+      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
     )),
 
     // Member access
     member_expr: $ => seq(
       field('object', $.primary_expr), ".",
-      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive))
+      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type))
     ),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent
