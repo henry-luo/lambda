@@ -40,15 +40,16 @@
 
 ;; All C types in the domain
 (define all-c-types
-  '(Item int32_t int64_t double bool
+  '(Item int64_t double bool
     String* Symbol* Decimal* DateTime
     Array* List* Map* Element*
     Range* Path* Function* Type*
     ArrayInt* ArrayInt64* ArrayFloat*))
 
 ;; Scalar C-types that support direct boxing/unboxing roundtrip
+;; NOTE: No int32_t — Lambda int is int56, mapped to int64_t in C
 (define scalar-roundtrip-types
-  '(int32_t int64_t double bool String*))
+  '(int64_t double bool String*))
 
 ;; All scalar + pointer C-types (not Item)
 (define non-item-c-types
@@ -61,7 +62,8 @@
 ;; For every scalar C-type that has BOTH boxing and unboxing:
 ;;   unbox(box(v, τ), τ) recovers the original value
 ;;
-;; In C terms: it2i(i2it(x)) == x for int32_t, etc.
+;; In C terms: it2l(push_l(x)) == x for int64_t, etc.
+;; Also: it2i(i2it(x)) == x for int (int56) values.
 ;; The model verifies the FUNCTION NAMES are correct; the actual
 ;; C implementation correctness is verified by unit tests in test/*.cpp.
 
@@ -110,7 +112,7 @@
 ;;   if C-type(τ₁) ≠ C-type(τ₂), then verify-if-branches reports must-box-both
 ;;   if C-type(τ₁) = C-type(τ₂), then verify-if-branches reports ok
 ;;
-;; This catches Issue #15: C ternary with String* vs int32_t
+;; This catches Issue #15: C ternary with String* vs int64_t
 
 (define (check-if-else-consistency)
   (printf "  Rule 2: If-else C-type consistency\n")
@@ -364,7 +366,7 @@
   (printf "  Rule 8: Conversion symmetry for scalar types\n")
   (define failures '())
 
-  (for ([ct '(int32_t int64_t double bool String* Symbol* DateTime Decimal*)])
+  (for ([ct '(int64_t double bool String* Symbol* DateTime Decimal*)])
     (define box-fn (boxing-function ct))
     (define unbox-fn (unboxing-function ct))
 
@@ -524,11 +526,11 @@
   (printf "  Issue regressions\n")
   (define all-ok #t)
 
-  ;; Issue #15: if-else with String* vs int32_t
+  ;; Issue #15: if-else with String* vs int64_t (was int32_t before int56 correction)
   ;; The transpiler was emitting raw ternary with mismatched types
   (let ([result (verify-if-branches 'string-type 'int-type)])
     (unless (eq? (car result) 'must-box-both)
-      (printf "  FAIL: Issue #15 regression — String* vs int32_t not caught\n")
+      (printf "  FAIL: Issue #15 regression — String* vs int64_t not caught\n")
       (set! all-ok #f)))
 
   ;; Issue #16: Item passed where String* expected
