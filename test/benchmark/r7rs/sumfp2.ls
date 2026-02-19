@@ -18,14 +18,18 @@ pn benchmark() {
 }
 
 pn main() {
+    let t0 = clock()
     let result = benchmark()
+    let elapsed = (clock() - t0) * 1000.0
     let expected = 5000050000.0
     let diff = abs(result - expected)
     if (diff < 1.0) {
-        print("sumfp: PASS\n")
+        print("sumfp: PASS  ")
     } else {
         print("sumfp: FAIL result=")
         print(result)
-        print("\n")
+        print(" ")
     }
+    print(elapsed)
+    print(" ms\n")
 }

@@ -2146,6 +2146,14 @@ int main(int argc, char *argv[]) {
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--mir") == 0) {
                 use_mir = true;
+            } else if (strcmp(argv[i], "--transpile-dir") == 0) {
+                if (i + 1 < argc) {
+                    runtime.transpile_dir = argv[++i];
+                } else {
+                    printf("Error: --transpile-dir requires a directory argument\n");
+                    log_finish();
+                    return 1;
+                }
             } else if (argv[i][0] != '-') {
                 if (script_file == NULL) {
                     script_file = argv[i];
@@ -2202,6 +2210,15 @@ int main(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
+        }
+        else if (strcmp(argv[i], "--transpile-dir") == 0) {
+            if (i + 1 < argc) {
+                runtime.transpile_dir = argv[++i];
+            } else {
+                printf("Error: --transpile-dir requires a directory argument\n");
+                help_only = true;
+                ret_code = 1;
+            }
         }
         else if (strcmp(argv[i], "--max-errors") == 0) {
             if (i + 1 < argc) {

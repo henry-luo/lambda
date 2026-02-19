@@ -332,8 +332,12 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // compile user code to MIR
     log_debug("compiling to MIR...");
     // Write transpiled code for debugging (module index as suffix)
-    char transpiled_filename[64];
-    snprintf(transpiled_filename, sizeof(transpiled_filename), "_transpiled_%d.c", script->index);
+    char transpiled_filename[256];
+    if (tp->runtime->transpile_dir) {
+        snprintf(transpiled_filename, sizeof(transpiled_filename), "%s/_transpiled_%d.c", tp->runtime->transpile_dir, script->index);
+    } else {
+        snprintf(transpiled_filename, sizeof(transpiled_filename), "_transpiled_%d.c", script->index);
+    }
     write_text_file(transpiled_filename, tp->code_buf->str);
     char* code = tp->code_buf->str + lambda_lambda_h_len;
     // printf("code len: %d\n", (int)strlen(code));
@@ -687,6 +691,7 @@ void runtime_init(Runtime* runtime) {
     runtime->scripts = arraylist_new(16);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
+    runtime->transpile_dir = NULL;  // default: write to current directory
 }
 
 void runtime_cleanup(Runtime* runtime) {

@@ -258,7 +258,7 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     if (fn_node->node_type == AST_NODE_PROC) return false;
 
     // Don't use unboxed for TCO functions - they need the goto-based implementation
-    if (should_use_tco(fn_node) && is_tco_function_safe(fn_node)) {
+    if (should_use_tco(fn_node)) {
         return false;
     }
 
@@ -1225,6 +1225,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
 void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
     log_debug("transpile unary expr");
+    // TCO: unary operand is NOT in tail position
+    bool prev_in_tail = tp->in_tail_position;
+    tp->in_tail_position = false;
+
     if (unary_node->op == OPERATOR_NOT) {
         TypeId operand_type = unary_node->operand->type->type_id;
         if (operand_type == LMD_TYPE_BOOL) {
@@ -1280,6 +1284,8 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
         log_error("Error: transpile_unary_expr unknown operator %d", unary_node->op);
         strbuf_append_str(tp->code_buf, "null");
     }
+
+    tp->in_tail_position = prev_in_tail;
 }
 
 // transpile spread expression: *expr
@@ -1292,6 +1298,10 @@ void transpile_spread_expr(Transpiler* tp, AstUnaryNode *spread_node) {
 }
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
+    // TCO: operands of binary expressions are NOT in tail position
+    bool prev_in_tail = tp->in_tail_position;
+    tp->in_tail_position = false;
+
     TypeId left_type = bi_node->left->type->type_id;
     TypeId right_type = bi_node->right->type->type_id;
     if (bi_node->op == OPERATOR_AND || bi_node->op == OPERATOR_OR) {
@@ -1629,6 +1639,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         log_error("Error: unknown binary operator %d", bi_node->op);
         strbuf_append_str(tp->code_buf, "null");  // should be error
     }
+
+    tp->in_tail_position = prev_in_tail;
 }
 
 // for both if_expr and if_stam
@@ -1640,11 +1652,15 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     Type* then_type = if_node->then ? if_node->then->type : nullptr;
     Type* else_type = if_node->otherwise ? if_node->otherwise->type : nullptr;
 
+    // TCO: condition is NOT in tail position, branches inherit tail position
+    bool prev_in_tail = tp->in_tail_position;
+
     strbuf_append_str(tp->code_buf, "(");
     // For boolean-typed conditions (comparisons, etc.), use expression directly since
     // comparison functions like fn_le return Bool which can be used as C boolean.
     // For non-boolean expressions, use is_truthy() to extract boolean from Item
     // (Direct Item booleans would fail because Item(false) = 0x200000000000000 is non-zero in C)
+    tp->in_tail_position = false;  // condition is not tail
     if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL) {
         transpile_expr(tp, if_node->cond);
     }
@@ -1653,6 +1669,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         transpile_box_item(tp, if_node->cond);
         strbuf_append_str(tp->code_buf, ")");
     }
+    tp->in_tail_position = prev_in_tail;  // restore for branches
     strbuf_append_str(tp->code_buf, " ? ");
 
     // Determine if branches have incompatible types that need coercion
@@ -2532,6 +2549,10 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
         return;
     }
 
+    // TCO: condition is NOT in tail position
+    bool prev_in_tail = tp->in_tail_position;
+    tp->in_tail_position = false;
+
     strbuf_append_str(tp->code_buf, "if (");
     // For boolean-typed conditions (comparisons, etc.), use expression directly since
     // comparison functions like fn_le return Bool which can be used as C boolean.
@@ -2543,6 +2564,9 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
         transpile_box_item(tp, if_node->cond);
         strbuf_append_char(tp->code_buf, ')');
     }
+
+    // Restore tail position for branches (they inherit from parent)
+    tp->in_tail_position = prev_in_tail;
     strbuf_append_str(tp->code_buf, ") {");
 
     // transpile then branch as procedural statements (no wrapper needed)
@@ -2793,6 +2817,14 @@ void transpile_match_stam(Transpiler* tp, AstMatchNode *match_node) {
 // return statement (procedural only)
 void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
     log_debug("transpile return stam");
+
+    // TCO: return value is in tail position — if this is a recursive call,
+    // it can be converted to a goto jump instead of a function call.
+    bool prev_in_tail = tp->in_tail_position;
+    if (tp->tco_func) {
+        tp->in_tail_position = true;
+    }
+
     strbuf_append_str(tp->code_buf, "\nreturn ");
     if (return_node->value) {
         transpile_box_item(tp, return_node->value);
@@ -2800,6 +2832,8 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
     strbuf_append_char(tp->code_buf, ';');
+
+    tp->in_tail_position = prev_in_tail;
 }
 
 // raise statement - returns an error value from function
@@ -3158,6 +3192,11 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile proc content");
     if (!list_node) { log_error("Error: missing list_node");  return; }
 
+    // TCO: procedural content is NOT in tail position by default.
+    // Only return statement values are in tail position.
+    bool prev_in_tail = tp->in_tail_position;
+    tp->in_tail_position = false;
+
     AstNode *item = list_node->item;
     AstNode *last_item = NULL;
 
@@ -3258,6 +3297,8 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
     }
 
     strbuf_append_str(tp->code_buf, "\n result;})" );
+
+    tp->in_tail_position = prev_in_tail;
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
@@ -3546,6 +3587,10 @@ AstNamedNode* get_param_at_index(AstFuncNode* fn_node, int index) {
 void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tco_func) {
     log_debug("transpile_tail_call: converting recursive call to goto");
 
+    // Arguments are NOT in tail position (they're evaluated before the goto)
+    bool prev_in_tail = tp->in_tail_position;
+    tp->in_tail_position = false;
+
     // Generate: ({ temp assignments; param = temp; ...; goto _tco_start; ITEM_NULL; })
     // The ITEM_NULL at end is never reached but satisfies the expression type
     strbuf_append_str(tp->code_buf, "({ ");
@@ -3566,7 +3611,13 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         Type* param_type = param->type;
         write_type(tp->code_buf, param_type);
         strbuf_append_format(tp->code_buf, " _tco_tmp%d = ", arg_idx);
-        transpile_expr(tp, arg);
+        // For Item (untyped) parameters, use box_item to ensure proper boxing
+        // (e.g., literal 1 must become i2it(1) for Item parameters)
+        if (!param_type || param_type->type_id == LMD_TYPE_ANY) {
+            transpile_box_item(tp, arg);
+        } else {
+            transpile_expr(tp, arg);
+        }
         strbuf_append_str(tp->code_buf, "; ");
 
         arg = arg->next;
@@ -3583,6 +3634,9 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         strbuf_append_format(tp->code_buf, " = _tco_tmp%d; ", i);
         param = (AstNamedNode*)param->next;
     }
+
+    // Restore tail position before generating the goto
+    tp->in_tail_position = prev_in_tail;
 
     // Jump back to function start
     strbuf_append_str(tp->code_buf, "goto _tco_start; ");
@@ -3630,6 +3684,10 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         transpile_tail_call(tp, call_node, tp->tco_func);
         return;
     }
+
+    // For non-TCO calls, arguments are NOT in tail position
+    bool prev_in_tail = tp->in_tail_position;
+    tp->in_tail_position = false;
 
     // write the function name/ptr
     TypeFunc *fn_type = NULL;
@@ -4217,6 +4275,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         // close the statement expression: check error, return if error, else yield value
         strbuf_append_format(tp->code_buf, "; if(item_type_id(_ep%d)==LMD_TYPE_ERROR) return _ep%d; _ep%d;})", prop_id, prop_id, prop_id);
     }
+
+    tp->in_tail_position = prev_in_tail;
 }
 
 void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
@@ -4648,9 +4708,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     }
 
     // Check if this function should use Tail Call Optimization
-    // A function can only use TCO if ALL recursive calls are in tail position
-    // (otherwise, transforming just the tail calls would break the function)
-    bool use_tco = should_use_tco(fn_node) && is_tco_function_safe(fn_node);
+    // TCO converts tail-recursive calls to goto jumps, eliminating stack growth.
+    // Non-tail recursive calls within the same function remain as normal calls.
+    bool use_tco = should_use_tco(fn_node);
 
     // Phase 2: No per-function stack check — signal handler catches overflow at OS level
 
