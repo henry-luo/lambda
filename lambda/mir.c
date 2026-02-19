@@ -225,6 +225,7 @@ func_obj_t func_list[] = {
     {"it2d", (fn_ptr) it2d},
     {"it2i", (fn_ptr) it2i},
     {"it2s", (fn_ptr) it2s},
+    {"it2b", (fn_ptr) it2b},
     {"fn_to_cstr", (fn_ptr) fn_to_cstr},
     {"to_fn", (fn_ptr) to_fn},
     {"to_fn_n", (fn_ptr) to_fn_n},
