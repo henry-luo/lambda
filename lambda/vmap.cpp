@@ -26,6 +26,7 @@ struct HashMapEntry {
 struct HashMapData {
     HashMap* table;              // lib/hashmap.h instance
     ArrayList* key_order;        // insertion-order list of Item keys
+    ArrayList* num_values;       // heap-allocated numeric value storage (survives frame_end)
     int64_t count;
 };
 
@@ -95,6 +96,7 @@ static HashMapData* hashmap_data_new() {
     hd->table = hashmap_new(sizeof(HashMapEntry), 8, 0, 0,
                             vmap_hash_item, vmap_compare_item, NULL, NULL);
     hd->key_order = arraylist_new(8);
+    hd->num_values = NULL;  // lazily allocated when needed
     hd->count = 0;
     return hd;
 }
@@ -103,19 +105,53 @@ static void hashmap_data_free(HashMapData* hd) {
     if (!hd) return;
     if (hd->table) hashmap_free(hd->table);
     if (hd->key_order) arraylist_free(hd->key_order);
+    // free heap-allocated numeric value storage
+    if (hd->num_values) {
+        for (int i = 0; i < hd->num_values->length; i++) {
+            free(hd->num_values->data[i]);
+        }
+        arraylist_free(hd->num_values);
+    }
     free(hd);
+}
+
+// Stabilize numeric values: float/int64/datetime use tagged pointers into num_stack,
+// which gets invalidated by frame_end(). Copy them to heap-owned storage so they survive.
+static Item stabilize_value(HashMapData* hd, Item value) {
+    TypeId vtype = get_type_id(value);
+    if (vtype == LMD_TYPE_FLOAT) {
+        double* dval = (double*)malloc(sizeof(double));
+        *dval = value.get_double();
+        value = {.item = d2it(dval)};
+        if (!hd->num_values) hd->num_values = arraylist_new(4);
+        arraylist_append(hd->num_values, (void*)dval);
+    } else if (vtype == LMD_TYPE_INT64) {
+        int64_t* ival = (int64_t*)malloc(sizeof(int64_t));
+        *ival = value.get_int64();
+        value = {.item = l2it(ival)};
+        if (!hd->num_values) hd->num_values = arraylist_new(4);
+        arraylist_append(hd->num_values, (void*)ival);
+    } else if (vtype == LMD_TYPE_DTIME) {
+        DateTime* dtval = (DateTime*)malloc(sizeof(DateTime));
+        *dtval = value.get_datetime();
+        value = {.item = k2it(dtval)};
+        if (!hd->num_values) hd->num_values = arraylist_new(4);
+        arraylist_append(hd->num_values, (void*)dtval);
+    }
+    return value;
 }
 
 // deep copy: creates a new HashMapData with the same entries
 static HashMapData* hashmap_data_copy(HashMapData* src) {
     HashMapData* dst = hashmap_data_new();
-    // iterate through entries in insertion order
+    // iterate through entries in insertion order, stabilizing numeric values
     for (int i = 0; i < src->key_order->length; i++) {
         Item key = *(Item*)&src->key_order->data[i];
         HashMapEntry probe = { .key = key };
         const HashMapEntry* found = (const HashMapEntry*)hashmap_get(src->table, &probe);
         if (found) {
-            HashMapEntry entry = { .key = found->key, .value = found->value };
+            Item value = stabilize_value(dst, found->value);
+            HashMapEntry entry = { .key = found->key, .value = value };
             hashmap_set(dst->table, &entry);
             arraylist_append(dst->key_order, (void*)key.item);
             dst->count++;
@@ -126,6 +162,7 @@ static HashMapData* hashmap_data_copy(HashMapData* src) {
 
 // insert or update an entry (in-place mutation)
 static void hashmap_data_set(HashMapData* hd, Item key, Item value) {
+    value = stabilize_value(hd, value);
     HashMapEntry probe = { .key = key };
     const HashMapEntry* existing = (const HashMapEntry*)hashmap_get(hd->table, &probe);
     HashMapEntry entry = { .key = key, .value = value };
