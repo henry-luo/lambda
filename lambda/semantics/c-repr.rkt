@@ -66,14 +66,18 @@
     ['list-type     'List*]
     ['map-type      'Map*]
     ['element-type  'Element*]
-    ['func-type     'Item]        ; functions are always boxed as Item
-    ['type-type     'Item]        ; type values are always Item
+    ['func-type     'Function*]   ; write_type → "Function*"
+    ['type-type     'Type*]       ; write_type → "Type*"
     ['null-type     'Item]        ; null is represented as Item
     ['error-type    'Item]        ; errors are always Item
     ['any-type      'Item]        ; any/unknown → Item (universal)
     ['number-type   'Item]        ; abstract number → Item
-    ['range-type    'Item]        ; ranges are Item (Container*)
-    ['path-type     'Item]        ; paths are Item
+    ['range-type    'Range*]      ; write_type → "Range*"
+    ['path-type     'Path*]       ; write_type → "Path*"
+    ['vmap-type     'Item]        ; vmap is always Item
+    ['array-int-type   'ArrayInt*]   ; specialized int array
+    ['array-int64-type 'ArrayInt64*] ; specialized int64 array
+    ['array-float-type 'ArrayFloat*] ; specialized float array
 
     ;; nullable → Item (can't be unboxed since it might be null)
     [`(nullable ,_) 'Item]
@@ -103,11 +107,13 @@
 
 ;; Is this a pointer type? (vs inline/scalar)
 (define (pointer-c-type? ct)
-  (member ct '(String* Symbol* Array* List* Map* Element* Decimal*)))
+  (and (member ct '(String* Symbol* Array* List* Map* Element* Decimal*
+                    Range* Path* Function* Type*
+                    ArrayInt* ArrayInt64* ArrayFloat*)) #t))
 
 ;; Is this an inline scalar type? (packed in registers, not pointers)
 (define (scalar-c-type? ct)
-  (member ct '(int32_t int64_t double bool)))
+  (and (member ct '(int32_t int64_t double bool)) #t))
 
 ;; Is this the universal Item type?
 (define (item-c-type? ct)
@@ -134,13 +140,20 @@
     ['double    'push_d]
     ['bool      'b2it]
     ['String*   's2it]
-    ['Symbol*   'sym2it]
-    ['Array*    #f]       ; containers are already pointer-compatible with Item
-    ['List*     #f]
-    ['Map*      #f]
-    ['Element*  #f]
-    ['DateTime  'dt2it]
-    ['Decimal*  'dec2it]
+    ['Symbol*   'y2it]
+    ['Array*    'cast-to-Item]   ; (Item)(ptr) — pointer cast
+    ['List*     #f]              ; list_end() already returns Item
+    ['Map*      'cast-to-Item]
+    ['Element*  'cast-to-Item]
+    ['Range*    'cast-to-Item]
+    ['Path*     'cast-to-Item]
+    ['Function* 'cast-to-Item]
+    ['Type*     'cast-to-Item]
+    ['DateTime  'push_k]
+    ['Decimal*  'c2it]
+    ['ArrayInt*    'cast-to-Item]
+    ['ArrayInt64*  'cast-to-Item]
+    ['ArrayFloat*  'cast-to-Item]
     ['Item      #f]       ; already Item, no boxing needed
     [_          #f]))
 
@@ -167,6 +180,18 @@
     ['Symbol*   'it2sym]
     ['DateTime  'it2dt]
     ['Decimal*  'it2dec]
+    ;; Container pointers: cast from Item (uint64_t → ptr)
+    ['Array*    'cast-from-Item]
+    ['List*     'cast-from-Item]
+    ['Map*      'cast-from-Item]
+    ['Element*  'cast-from-Item]
+    ['Range*    'cast-from-Item]
+    ['Path*     'cast-from-Item]
+    ['Function* 'cast-from-Item]
+    ['Type*     'cast-from-Item]
+    ['ArrayInt*    'cast-from-Item]
+    ['ArrayInt64*  'cast-from-Item]
+    ['ArrayFloat*  'cast-from-Item]
     ['Item      #f]       ; already Item, no unboxing needed
     [_          #f]))
 
@@ -212,6 +237,10 @@
        [('double 'int32_t) 'cast-double-to-int]
        ;; int64 → double: use (double) cast
        [('int64_t 'double) 'cast-int64-to-double]
+       ;; int64 → int: use (int32_t) cast (truncation)
+       [('int64_t 'int32_t) 'cast-int64-to-int]
+       ;; double → int64: use (int64_t) cast (truncation)
+       [('double 'int64_t) 'cast-double-to-int64]
        [(_ _) 'type-error])]
 
     ;; Pointer to Item: containers are pointer-compatible
@@ -298,75 +327,218 @@
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; 10. SYSTEM FUNCTION C-TYPE CATALOG
 ;; ────────────────────────────────────────────────────────────────────────────
-;; Maps system function names to their ACTUAL C return types.
-;; This may differ from the semantic return type!
+;; Maps system function names to (semantic-return-type . actual-C-return-type).
+;; When these differ, the transpiler may need boxing/unboxing conversions.
 ;;
-;; Known discrepancies (the root cause of Issue #16):
-;;   fn_string()    → String*  (matches STRING semantic type)
-;;   fn_trim()      → Item     (MISMATCHES STRING semantic type)
-;;   fn_lower()     → Item     (MISMATCHES STRING semantic type)
-;;   fn_upper()     → Item     (MISMATCHES STRING semantic type)
-;;   fn_str_join()  → Item     (MISMATCHES STRING semantic type)
-;;   fn_replace()   → Item     (MISMATCHES STRING semantic type)
+;; Source: build_ast.cpp (sys_funcs[]) for semantic types,
+;;         lambda.h declarations for actual C return types.
 ;;
-;; The transpiler must use the ACTUAL C return type, not the semantic type,
-;; when determining whether boxing/unboxing is needed.
+;; CRITICAL: Entries where semantic ≠ C return are potential bug sources.
 
-(define sys-func-c-returns
-  (hash
-   ;; String functions with matching C returns
-   'fn_string    'String*
-   'fn_symbol    'Symbol*
+;; Struct: (name semantic-type c-return-type discrepancy?)
+(struct sys-func-entry (name semantic-type c-return-type discrepancy?) #:transparent)
 
-   ;; String functions with Item return (semantic type is string but C returns Item)
-   'fn_trim      'Item
-   'fn_lower     'Item
-   'fn_upper     'Item
-   'fn_str_join  'Item
-   'fn_replace   'Item
-   'fn_substr    'Item
-   'fn_normalize 'Item
+(define sys-func-catalog
+  (list
+   ;; ── Type conversion ──
+   ;; string() has matching types: semantic=STRING, C=String*
+   (sys-func-entry 'string    'string-type  'String*    #f)
+   ;; int() returns TYPE_ANY semantically but Item in C → both are "untyped"
+   (sys-func-entry 'int       'any-type     'Item       #f)
+   ;; int64() returns TYPE_INT64 semantically and int64_t in C → match
+   (sys-func-entry 'int64     'int64-type   'int64_t    #f)
+   ;; float() returns TYPE_ANY semantically and Item in C
+   (sys-func-entry 'float     'any-type     'Item       #f)
+   ;; decimal() returns TYPE_ANY semantically and Item in C
+   (sys-func-entry 'decimal   'any-type     'Item       #f)
+   ;; binary() returns TYPE_ANY semantically and Item in C
+   (sys-func-entry 'binary    'any-type     'Item       #f)
+   ;; symbol() returns TYPE_SYMBOL and Symbol* → match
+   (sys-func-entry 'symbol    'symbol-type  'Symbol*    #f)
 
-   ;; Numeric functions
-   'fn_int       'int32_t    ; sometimes Item
-   'fn_float     'double     ; sometimes Item
-   'fn_abs       'Item
-   'fn_round     'Item
-   'fn_floor     'Item
-   'fn_ceil      'Item
+   ;; ── String operations ── (CRITICAL: many are TYPE_ANY → Item despite working on strings)
+   ;; trim: semantic=ANY, C=Item → matches (but semantically should be STRING)
+   (sys-func-entry 'trim      'any-type     'Item       #f)
+   (sys-func-entry 'trim_start 'any-type    'Item       #f)
+   (sys-func-entry 'trim_end  'any-type     'Item       #f)
+   ;; lower/upper: semantic=ANY, C=Item
+   (sys-func-entry 'lower     'any-type     'Item       #f)
+   (sys-func-entry 'upper     'any-type     'Item       #f)
+   ;; normalize: semantic=STRING, C=Item → DISCREPANCY
+   (sys-func-entry 'normalize 'string-type  'Item       #t)
+   ;; str_join: semantic=STRING, C=Item → DISCREPANCY
+   (sys-func-entry 'str_join  'string-type  'Item       #t)
+   ;; replace: semantic=ANY, C=Item
+   (sys-func-entry 'replace   'any-type     'Item       #f)
+   ;; split: semantic=ANY, C=Item
+   (sys-func-entry 'split     'any-type     'Item       #f)
+   ;; chars: semantic=ANY, C=Item
+   (sys-func-entry 'chars     'any-type     'Item       #f)
+   ;; contains: semantic=BOOL, C=Bool → match
+   (sys-func-entry 'contains  'bool-type    'bool       #f)
+   ;; starts_with: semantic=BOOL, C=Bool → match
+   (sys-func-entry 'starts_with 'bool-type  'bool       #f)
+   (sys-func-entry 'ends_with 'bool-type    'bool       #f)
+   ;; index_of: semantic=INT64, C=int64_t → match
+   (sys-func-entry 'index_of  'int64-type   'int64_t    #f)
+   (sys-func-entry 'last_index_of 'int64-type 'int64_t  #f)
+   ;; substring: semantic type not listed (ANY), C=Item
+   (sys-func-entry 'substring 'any-type     'Item       #f)
+   ;; url_resolve: semantic=STRING, C=Item → DISCREPANCY
+   (sys-func-entry 'url_resolve 'string-type 'Item      #t)
+   ;; strcat (++ operator): C=String*
+   (sys-func-entry 'strcat    'string-type  'String*    #f)
 
-   ;; Collection functions
-   'fn_len       'int32_t
-   'fn_sum       'Item
-   'fn_sort      'Item
-   'fn_reverse   'Item
-   'fn_unique    'Item
-   'fn_take      'Item
-   'fn_drop      'Item
+   ;; ── Format/IO ──
+   ;; format: semantic=STRING, C=String* → match
+   (sys-func-entry 'format    'string-type  'String*    #f)
+   ;; error: semantic=ERROR, C=Item → match
+   (sys-func-entry 'error     'error-type   'Item       #f)
+   ;; input: semantic=ANY, C=Item, can_raise=true
+   (sys-func-entry 'input     'any-type     'Item       #f)
 
-   ;; Arithmetic operators
-   'fn_add       'Item
-   'fn_sub       'Item
-   'fn_mul       'Item
-   'fn_div       'Item
-   'fn_mod       'Item
-   'fn_pow       'Item
+   ;; ── Length ──
+   ;; len: semantic=INT64, C=int64_t → match
+   (sys-func-entry 'len       'int64-type   'int64_t    #f)
 
-   ;; Comparison
-   'fn_eq        'bool       ; returns Bool (3-state, but bool in C)
-   'fn_lt        'bool
-   'fn_gt        'bool
-   'fn_le        'bool
-   'fn_ge        'bool
+   ;; ── Type introspection ──
+   ;; type: semantic=TYPE, C=Type* → match
+   (sys-func-entry 'type      'type-type    'Type*      #f)
+   ;; name: semantic=SYMBOL, C=Symbol* → match
+   (sys-func-entry 'name      'symbol-type  'Symbol*    #f)
+   ;; is: semantic=BOOL (operator), C=Bool
+   (sys-func-entry 'is        'bool-type    'bool       #f)
+   ;; in: semantic=BOOL (operator), C=Bool
+   (sys-func-entry 'in        'bool-type    'bool       #f)
+   ;; exists: semantic=BOOL, C=Bool
+   (sys-func-entry 'exists    'bool-type    'bool       #f)
 
-   ;; Logical
-   'fn_and       'Item       ; returns operand value, not bool
-   'fn_or        'Item
+   ;; ── Arithmetic ── (all semantic=ANY, C=Item)
+   (sys-func-entry 'add       'any-type     'Item       #f)
+   (sys-func-entry 'sub       'any-type     'Item       #f)   ; not in sys_funcs
+   (sys-func-entry 'mul       'any-type     'Item       #f)   ; operators
+   (sys-func-entry 'div       'any-type     'Item       #f)
+   (sys-func-entry 'idiv      'any-type     'Item       #f)
+   (sys-func-entry 'pow       'any-type     'Item       #f)
+   (sys-func-entry 'mod       'any-type     'Item       #f)
+   (sys-func-entry 'abs       'any-type     'Item       #f)
+   (sys-func-entry 'round     'any-type     'Item       #f)
+   (sys-func-entry 'floor     'any-type     'Item       #f)
+   (sys-func-entry 'ceil      'any-type     'Item       #f)
+   (sys-func-entry 'neg       'any-type     'Item       #f)
+   (sys-func-entry 'pos       'any-type     'Item       #f)
 
-   ;; Type checking
-   'fn_is        'bool
-   'fn_type      'Item       ; returns type value as Item
+   ;; ── Comparison ── (all semantic implied BOOL, C=Bool)
+   (sys-func-entry 'eq        'bool-type    'bool       #f)
+   (sys-func-entry 'ne        'bool-type    'bool       #f)
+   (sys-func-entry 'lt        'bool-type    'bool       #f)
+   (sys-func-entry 'gt        'bool-type    'bool       #f)
+   (sys-func-entry 'le        'bool-type    'bool       #f)
+   (sys-func-entry 'ge        'bool-type    'bool       #f)
+   (sys-func-entry 'not       'bool-type    'bool       #f)
+
+   ;; ── Logical (short-circuit) ── return operand value, not bool
+   ;; and/or: semantic=Item (returns operand), C=Item
+   (sys-func-entry 'and       'any-type     'Item       #f)
+   (sys-func-entry 'or        'any-type     'Item       #f)
+
+   ;; ── Aggregation ── (all semantic=ANY, C=Item)
+   (sys-func-entry 'sum       'any-type     'Item       #f)
+   (sys-func-entry 'avg       'any-type     'Item       #f)
+   (sys-func-entry 'min       'any-type     'Item       #f)
+   (sys-func-entry 'max       'any-type     'Item       #f)
+   (sys-func-entry 'prod      'any-type     'Item       #f)
+   (sys-func-entry 'mean      'any-type     'Item       #f)
+   (sys-func-entry 'median    'any-type     'Item       #f)
+   (sys-func-entry 'variance  'any-type     'Item       #f)
+   (sys-func-entry 'deviation 'any-type     'Item       #f)
+   (sys-func-entry 'quantile  'any-type     'Item       #f)
+
+   ;; ── Collection operations ── (all semantic=ANY, C=Item)
+   (sys-func-entry 'reverse   'any-type     'Item       #f)
+   (sys-func-entry 'sort      'any-type     'Item       #f)
+   (sys-func-entry 'unique    'any-type     'Item       #f)
+   (sys-func-entry 'concat    'any-type     'Item       #f)
+   (sys-func-entry 'take      'any-type     'Item       #f)
+   (sys-func-entry 'drop      'any-type     'Item       #f)
+   (sys-func-entry 'slice     'any-type     'Item       #f)
+   (sys-func-entry 'zip       'any-type     'Item       #f)
+   (sys-func-entry 'fill      'any-type     'Item       #f)
+   (sys-func-entry 'range     'any-type     'Item       #f)
+   (sys-func-entry 'cumsum    'any-type     'Item       #f)
+   (sys-func-entry 'cumprod   'any-type     'Item       #f)
+   (sys-func-entry 'argmin    'any-type     'Item       #f)
+   (sys-func-entry 'argmax    'any-type     'Item       #f)
+   (sys-func-entry 'dot       'any-type     'Item       #f)
+   (sys-func-entry 'norm      'any-type     'Item       #f)
+   (sys-func-entry 'join      'any-type     'Item       #f)  ; fn_join (different from str_join)
+
+   ;; ── Math (element-wise) ── (all semantic=ANY, C=Item)
+   (sys-func-entry 'sqrt      'any-type     'Item       #f)
+   (sys-func-entry 'log       'any-type     'Item       #f)
+   (sys-func-entry 'log10     'any-type     'Item       #f)
+   (sys-func-entry 'exp       'any-type     'Item       #f)
+   (sys-func-entry 'sin       'any-type     'Item       #f)
+   (sys-func-entry 'cos       'any-type     'Item       #f)
+   (sys-func-entry 'tan       'any-type     'Item       #f)
+   (sys-func-entry 'sign      'any-type     'Item       #f)
+
+   ;; ── Boolean predicates ──
+   (sys-func-entry 'all       'bool-type    'bool       #f)
+   (sys-func-entry 'any_pred  'bool-type    'bool       #f)
+
+   ;; ── Datetime ── (all semantic=DTIME, C=DateTime)
+   (sys-func-entry 'datetime  'datetime-type 'DateTime  #f)
+   (sys-func-entry 'date      'datetime-type 'DateTime  #f)
+   (sys-func-entry 'time      'datetime-type 'DateTime  #f)
+   (sys-func-entry 'justnow   'datetime-type 'DateTime  #f)
+
+   ;; ── Range constructor ──
+   (sys-func-entry 'to        'range-type   'Range*     #f)
+
+   ;; ── Pipe operations ── (all C=Item)
+   (sys-func-entry 'pipe_map  'any-type     'Item       #f)
+   (sys-func-entry 'pipe_where 'any-type    'Item       #f)
+   (sys-func-entry 'pipe_call 'any-type     'Item       #f)
+
+   ;; ── Member/index ── (all C=Item)
+   (sys-func-entry 'member    'any-type     'Item       #f)
+   (sys-func-entry 'index     'any-type     'Item       #f)
+
+   ;; ── Bitwise ── (semantic=INT64, C=int64_t)
+   ;; Bitwise ops work on int64_t in C; semantic type is int64 (not int)
+   (sys-func-entry 'band      'int64-type   'int64_t    #f)
+   (sys-func-entry 'bor       'int64-type   'int64_t    #f)
+   (sys-func-entry 'bxor      'int64-type   'int64_t    #f)
+   (sys-func-entry 'bnot      'int64-type   'int64_t    #f)
+   (sys-func-entry 'shl       'int64-type   'int64_t    #f)
+   (sys-func-entry 'shr       'int64-type   'int64_t    #f)
    ))
+
+;; Lookup a system function by name
+(define (sys-func-lookup name)
+  (findf (λ (e) (eq? (sys-func-entry-name e) name)) sys-func-catalog))
+
+;; Get the ACTUAL C return type for a system function
+(define (sys-func-c-return name)
+  (define entry (sys-func-lookup name))
+  (if entry (sys-func-entry-c-return-type entry) 'Item))
+
+;; Find all system functions with semantic/C type discrepancies
+(define (sys-func-discrepancies)
+  (filter sys-func-entry-discrepancy? sys-func-catalog))
+
+;; Check if a sys func's semantic return type could cause a boxing mismatch
+;; when used as an argument to a typed parameter
+(define (sys-func-needs-conversion? func-name param-type)
+  (define entry (sys-func-lookup func-name))
+  (cond
+    [(not entry) #f]
+    [else
+     (define c-ret (sys-func-entry-c-return-type entry))
+     (define param-ct (lambda-type->c-type param-type))
+     (and (not (eq? c-ret param-ct))
+          (required-conversion c-ret param-ct))]))
 
 
 ;; ────────────────────────────────────────────────────────────────────────────
@@ -410,5 +582,8 @@
          required-conversion
          verify-call-args verify-if-branches
          safe-for-unboxed-variant?
-         sys-func-c-returns
+         sys-func-entry sys-func-entry-name sys-func-entry-semantic-type
+         sys-func-entry-c-return-type sys-func-entry-discrepancy?
+         sys-func-catalog sys-func-lookup sys-func-c-return
+         sys-func-discrepancies sys-func-needs-conversion?
          verify-function)
