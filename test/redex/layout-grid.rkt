@@ -22,19 +22,8 @@
 
 (provide layout-grid)
 
-;; ============================================================
-;; Baseline Computation
-;; ============================================================
-
-;; compute the first baseline of a view recursively
-;; if no children, synthesized baseline = bottom of box
-(define (compute-view-baseline view)
-  (define h (view-height view))
-  (define children (view-children view))
-  (if (or (null? children) (not (pair? children)))
-      h  ;; synthesized baseline: bottom of box
-      (let ([first-child (car children)])
-        (+ (view-y first-child) (compute-view-baseline first-child)))))
+;; compute-view-baseline, resolve-gap, get-box-styles, set-view-pos
+;; — imported from layout-common.rkt
 
 ;; ============================================================
 ;; Grid Item — internal representation
@@ -912,19 +901,6 @@
           [`(none ,_) (void)]
           [_ (set! flow (cons (cons dom-idx child) flow))])))
   (values (reverse flow) (reverse absolute)))
-
-;; ============================================================
-;; Gap Resolution
-;; ============================================================
-
-(define (resolve-gap gap-val avail)
-  (cond
-    [(number? gap-val) gap-val]
-    [(and (pair? gap-val) (eq? (car gap-val) '%))
-     (if (and avail (number? avail) (not (infinite? avail)))
-         (* (/ (cadr gap-val) 100) avail)
-         0)]
-    [else 0]))
 
 ;; ============================================================
 ;; Track Creation
@@ -2117,31 +2093,8 @@
      (* gap (max 0 (sub1 (length span-tracks))))))
 
 ;; ============================================================
-;; Helpers
+;; Helpers — get-box-styles, set-view-pos imported from layout-common.rkt
 ;; ============================================================
-
-(define (get-box-styles box)
-  (match box
-    [`(block ,_ ,styles ,_) styles]
-    [`(inline ,_ ,styles ,_) styles]
-    [`(inline-block ,_ ,styles ,_) styles]
-    [`(flex ,_ ,styles ,_) styles]
-    [`(grid ,_ ,styles ,_ ,_) styles]
-    [`(table ,_ ,styles ,_) styles]
-    [`(text ,_ ,styles ,_ ,_) styles]
-    [`(replaced ,_ ,styles ,_ ,_) styles]
-    [`(none ,_) '(style)]
-    [_ '(style)]))
-
-(define (set-view-pos view x y)
-  (match view
-    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,_ ,_ ,w ,h ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,_ ,_ ,w ,h ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
 
 ;; check if styles have an explicit (non-auto) width or height
 (define (has-explicit-size? styles prop-name)

@@ -455,7 +455,7 @@
         (define strut-descent
           (if (and has-inline-block? (not has-text-children?)
                    all-baseline-aligned? has-bottom-baseline-ib? parent-styles)
-              (let* ([fs (get-style-prop parent-styles 'font-size 16)]
+              (let* ([fs (get-style-prop parent-styles 'font-size CSS-DEFAULT-FONT-SIZE)]
                      [font-type (get-style-prop parent-styles 'font-type #f)]
                      [font-metrics-sym (get-style-prop parent-styles 'font-metrics 'times)]
                      [lh-prop (get-style-prop parent-styles 'line-height #f)]
@@ -657,7 +657,7 @@
                (+ offset-x left-edge (box-model-margin-left child-bm))]))
           ;; CSS 2.2 §9.5: float margins don't collapse — add margin-top
           (define float-y (+ offset-y fitted-float-y (box-model-margin-top child-bm)))
-          (define positioned-float (set-view-position child-view float-x float-y))
+          (define positioned-float (set-view-pos child-view float-x float-y))
           ;; record float position for band-based stacking
           ;; store margin-box dimensions: y = margin-top edge, h = full margin-box height
           ;; this ensures both overlap checks and clear calculations use the full extent
@@ -746,7 +746,7 @@
             (if (and has-floats? (not creates-bfc?) avail-w)
                 (let* ([est-h (if is-text-child? 
                                   ;; estimate text height as at least one line
-                                  (let ([fs (get-style-prop child-styles-pre 'font-size 16)])
+                                  (let ([fs (get-style-prop child-styles-pre 'font-size CSS-DEFAULT-FONT-SIZE)])
                                     (max fs 1))
                                   50)]
                        [left-intr (float-left-edge-at cleared-y est-h)]
@@ -1006,7 +1006,7 @@
                 child-y))
 
           ;; update the view with computed position
-          (define positioned-view (set-view-position child-view child-x effective-child-y))
+          (define positioned-view (set-view-pos child-view child-x effective-child-y))
 
           ;; apply relative positioning offset after block positioning
           ;; pass containing block dimensions for percentage resolution
@@ -1051,7 +1051,7 @@
                (let* ([ib-h (+ (view-height child-view) (box-model-margin-bottom child-bm))]
                       ;; compute parent's strut descent:
                       ;; the amount below the baseline from the parent font's line-height
-                      [parent-fs (if parent-styles (get-style-prop parent-styles 'font-size 16) 16)]
+                      [parent-fs (if parent-styles (get-style-prop parent-styles 'font-size CSS-DEFAULT-FONT-SIZE) CSS-DEFAULT-FONT-SIZE)]
                       [parent-font-metrics-sym (if parent-styles (get-style-prop parent-styles 'font-metrics 'times) 'times)]
                       [is-proportional? (if parent-styles
                                             (let ([ft (get-style-prop parent-styles 'font-type #f)])
@@ -1102,33 +1102,4 @@
                     column-ids))])])))
   ) ;; close (if all-inline-children? ...)
 
-;; ============================================================
-;; Helper: Extract styles from any box type
-;; ============================================================
-
-(define (get-box-styles box)
-  (match box
-    [`(block ,_ ,styles ,_) styles]
-    [`(inline ,_ ,styles ,_) styles]
-    [`(inline-block ,_ ,styles ,_) styles]
-    [`(flex ,_ ,styles ,_) styles]
-    [`(grid ,_ ,styles ,_ ,_) styles]
-    [`(table ,_ ,styles ,_) styles]
-    [`(text ,_ ,styles ,_ ,_) styles]
-    [`(replaced ,_ ,styles ,_ ,_) styles]
-    [`(none ,_) '(style)]
-    [_ '(style)]))
-
-;; ============================================================
-;; Helper: Set view position (x, y)
-;; ============================================================
-
-(define (set-view-position view x y)
-  (match view
-    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,_ ,_ ,w ,h ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,_ ,_ ,w ,h ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
+;; get-box-styles, set-view-pos — imported from layout-common.rkt
