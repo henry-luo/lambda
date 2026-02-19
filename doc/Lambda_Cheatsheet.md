@@ -407,7 +407,7 @@ fun()?                        // propagate error, discard value
 **`let a^err` — destructure value and error:**
 ```lambda
 let result^err = divide(10, x)
-if (^err) print("Err: " ++ err.message)  // ^err to check if err is error
+if (^err) print("Err: " ++ err.message)  // ^err to check error
 else result * 2
 ```
 
