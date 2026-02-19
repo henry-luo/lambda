@@ -38,6 +38,19 @@ Item pn_print(Item item) {
     return ItemNull;
 }
 
+double pn_clock() {
+    struct timespec ts;
+#ifdef __APPLE__
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#elif defined(_WIN32)
+    // Windows: use QueryPerformanceCounter via timespec_get
+    timespec_get(&ts, TIME_UTC);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
 // Helper: Create parent directories recursively for a file path
 static int create_parent_dirs(const char* file_path) {
     char* path_copy = strdup(file_path);

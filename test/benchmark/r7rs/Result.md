@@ -14,7 +14,7 @@
 
 ## Timing Methodology
 
-- **Lambda**: External wall-clock minus ~10ms startup overhead (Lambda has no internal timer API)
+- **Lambda**: Internal `clock()` system function (monotonic, high-resolution). Benchmarks use `let t0 = clock()` / `let elapsed = (clock() - t0) * 1000.0` for pure computation timing, excluding startup and JIT compilation overhead.
 - **Racket**: Internal timing via `current-inexact-milliseconds`
 - **Guile**: Internal timing via `get-internal-real-time`
 - All three use identical benchmark parameters and algorithms
@@ -139,7 +139,7 @@ Based on typed vs untyped results, the highest-impact optimization targets are:
 2. **Tail-call optimization**: Convert tail-recursive calls to jumps (critical for all recursive benchmarks)
 3. **Type inference for untyped code**: Automatically infer types where possible, bringing untyped performance closer to typed
 4. **Array element type specialization**: Allow typed arrays (`Array<int>`, `Array<float>`) to eliminate boxing on element access (would help `nqueens`, `fft`)
-5. **Add `clock()` system function**: Enable internal timing for accurate Lambda benchmarking
+5. ~~**Add `clock()` system function**~~ ✅ **Done** — `clock()` now available as a procedural system function returning high-resolution monotonic time in seconds. All benchmarks updated to use internal `clock()` timing.
 
 ## Files
 
@@ -283,3 +283,62 @@ The speed benefit of TCO is most pronounced for **purely tail-recursive** functi
 - All 20 R7RS benchmark scripts produce correct results
 - TCO correctly applied to `tak`, `ack`, `cpstak` (both typed and untyped)
 - TCO correctly skipped for `fib`, `fibfp`, `sum`, `sumfp`, `nqueens`, `fft`, `mbrot`
+
+---
+
+## Enhancement: `clock()` System Function and Internal Benchmark Timing
+
+**Date**: 2025-02-19
+
+### Background
+
+The original benchmark methodology used external wall-clock timing minus an estimated ~10ms startup overhead. This was imprecise because:
+- Lambda startup time varies (JIT compilation, imports, runtime initialization)
+- External timing includes process spawn/teardown
+- No parity with Racket and Guile, which both use internal timing APIs
+
+### Changes
+
+1. **Added `clock()` procedural system function** — returns high-resolution monotonic time in seconds as a `float`
+   - Uses `clock_gettime(CLOCK_MONOTONIC)` on macOS/Linux, `timespec_get(TIME_UTC)` on Windows
+   - Registered across the 5-file pattern: enum (`SYSPROC_CLOCK`), AST table, C declaration, implementation, MIR registration
+   - Returns `double` directly (matching transpiler expectations for `TYPE_FLOAT` return type)
+
+2. **Updated all 10 typed benchmark scripts** (`*2.ls`) — each `main()` now wraps `benchmark()` with:
+   ```lambda
+   let t0 = clock()
+   let result = benchmark()
+   let elapsed = (clock() - t0) * 1000.0
+   ```
+   Output format: `name: PASS  12.345 ms`
+
+3. **Fixed duplicate test name collision** — `get_test_name()` in `test_lambda_helpers.hpp` now includes parent directory as prefix (e.g., `proc_vmap` vs `vmap`) to prevent GTest abort from duplicate parameterized test names when scanning multiple test directories
+
+4. **Added clock() unit test** — `test/lambda/proc/clock.ls` validates:
+   - `clock()` returns a positive value
+   - Consecutive calls are monotonically non-decreasing
+   - Difference measures elapsed time correctly
+   - Float arithmetic works with clock values
+
+### Internal Timing Results (Typed Benchmarks)
+
+Median of 3 runs, pure computation time (excludes startup/JIT):
+
+| Benchmark | Internal `clock()` (ms) |
+|-----------|------------------------:|
+| ack       | 8.2                     |
+| cpstak    | 0.37                    |
+| fft       | 1,412                   |
+| fib       | 1,123                   |
+| fibfp     | 2,245                   |
+| mbrot     | 139                     |
+| nqueens   | 1,069                   |
+| sum       | 0.54                    |
+| sumfp     | 0.07                    |
+| tak       | 0.19                    |
+
+### Validation
+
+- All 239 baseline tests pass (238 prior + 1 new clock test)
+- All 10 typed benchmarks produce correct PASS results with timing
+- Internal timing is consistent across multiple runs (< 10% variance)

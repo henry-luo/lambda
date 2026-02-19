@@ -388,6 +388,7 @@ typedef enum SysFunc {
     // vmap functions
     SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
     SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
+    SYSPROC_CLOCK,           // clock() - high-resolution monotonic time in seconds (float)
 } SysFunc;
 
 typedef struct TypeBinary : Type {
