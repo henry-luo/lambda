@@ -1197,38 +1197,38 @@ Single-view charts with basic marks and auto-scales.
 
 ---
 
-## Implementation Progress (as of 2025-02-17)
+## Implementation Progress (as of 2025-02-19)
 
 ### Status Summary
 
-The chart library is **functional end-to-end** for Phase 1 (Core MVP) chart types. All 12 modules are implemented, compile via MIR JIT, and produce correct SVG output. A Vega-Lite JSON converter module (`vega.ls`) has been added to enable ingestion of Vega-Lite specifications. Three automated tests (bar, line, scatter) are registered in the baseline test suite and passing.
+The chart library is **functional end-to-end** for Phase 1 (Core MVP) chart types. All 12 modules are implemented, compile via MIR JIT, and produce correct SVG output. A Vega-Lite JSON converter module (`vega.ls`) has been added to enable ingestion of Vega-Lite specifications. Three automated tests (bar, line, scatter) are registered in the baseline test suite and passing (239/239).
 
 | Phase | Status | Notes |
 |-------|--------|-------|
 | **Phase 1 — Core (MVP)** | ✅ Complete | Bar, line, point marks; auto-axes; linear/band/point scales; SVG assembly |
-| **Phase 2 — Extended Marks** | 🔶 Partial | Area, arc, text, rule, tick marks implemented. Legends implemented (color + gradient). Size/opacity encoding not yet wired. |
-| **Phase 3 — Transforms & Scales** | 🔶 Partial | Filter and sort transforms working. Log/sqrt scales implemented. Aggregate, calculate, bin, fold, flatten transforms **stubbed** (return data unchanged). Stacking not implemented. |
+| **Phase 2 — Extended Marks** | 🔶 Partial | Area, arc, text, rule, tick marks implemented. Legends implemented (color + gradient). Opacity encoding wired for bar and point marks. Size encoding not yet wired. |
+| **Phase 3 — Transforms & Scales** | ✅ Complete | All 7 transforms implemented and tested: filter, sort, aggregate, calculate, bin, fold, flatten. Log/sqrt scales implemented. Stacking not implemented. |
 | **Phase 4 — Composition** | 🔶 Partial | Layer composition working. Facet, concat, repeat not implemented. Config/theming not implemented. Grid lines working. |
 | **Phase 5 — Advanced** | ❌ Not started | — |
 
 ### Module Inventory
 
-12 modules, ~2,180 lines of Lambda Script, 57 public functions, 18 public values.
+12 modules, ~2,350 lines of Lambda Script, 59 public functions, 18 public values.
 
 | Module | Lines | Public API | Status |
 |--------|-------|------------|--------|
-| `chart.ls` | 379 | `render(chart_el)`, `render_spec(spec)` | ✅ Working — main entry points |
-| `parse.ls` | 159 | `parse_chart`, `get_channel`, `has_channel` | ✅ Working — element tree → spec map |
-| `mark.ls` | 328 | `bar`, `bar_horizontal`, `line_mark`, `area_mark`, `point_mark`, `arc_mark`, `text_mark`, `rule_mark`, `tick_mark` | ✅ 9 mark types implemented |
+| `chart.ls` | 388 | `render(chart_el)`, `render_spec(spec)` | ✅ Working — main entry points; opacity scale in mark context |
+| `parse.ls` | 164 | `parse_chart`, `get_channel`, `has_channel` | ✅ Working — element tree → spec map; opacity/stroke/theta/text channels |
+| `mark.ls` | 337 | `bar`, `bar_horizontal`, `line_mark`, `area_mark`, `point_mark`, `arc_mark`, `text_mark`, `rule_mark`, `tick_mark` | ✅ 9 mark types; opacity encoding wired for bar + point |
 | `scale.ls` | 190 | `linear_scale`, `linear_scale_nice`, `log_scale`, `sqrt_scale`, `band_scale`, `point_scale`, `ordinal_scale`, `scale_apply`, `scale_ticks`, `scale_invert`, `infer_scale`, `infer_color_scale` | ✅ 7 scale types |
 | `axis.ls` | 189 | `x_axis`, `y_axis`, `x_axis_grid`, `y_axis_grid`, `estimate_y_axis_width`, `estimate_x_axis_height` | ✅ Working |
 | `legend.ls` | 141 | `color_legend`, `gradient_legend`, `legend_width`, `legend_height` | ✅ Working |
 | `layout.ls` | 114 | `compute_layout`, `compute_arc_layout` | ✅ Working |
 | `color.ls` | 103 | `get_scheme`, `pick_color`, `sequential_color` + 13 palette constants | ✅ 13 palettes |
 | `svg.ls` | 159 | 19 SVG helper functions (elements, path commands, transforms) | ✅ Working |
-| `transform.ls` | 82 | `apply_transforms`, `compute_agg` | 🔶 Only filter + sort; aggregate/calculate/bin/fold/flatten stubbed |
-| `util.ls` | 163 | 15 math/collection utilities | ✅ Working (with `unique_vals` workaround) |
-| `vega.ls` | 174 | `convert(vl)` | ✅ Vega-Lite JSON → Lambda chart spec |
+| `transform.ls` | 225 | `apply_transforms`, `compute_agg` | ✅ All 7 transforms: filter, sort, aggregate, calculate, bin, fold, flatten |
+| `util.ls` | 164 | 15 math/collection utilities | ✅ Working (with `unique_vals` workaround) |
+| `vega.ls` | 176 | `convert(vl)` | ✅ Vega-Lite JSON → Lambda chart spec; opacity/stroke encoding |
 
 ### Vega-Lite Converter (`vega.ls`)
 
@@ -1280,13 +1280,15 @@ Tests are registered in `test/test_lambda_gtest.cpp` via the `"test/lambda/chart
 | 10  | **Computed map keys not supported**                                    | `{[key_var]: val}` syntax does not exist in Lambda                                                                                                                       | Cannot dynamically construct maps with variable keys; must use spread `{*base, field: val}` with known field names                             | Workaround.<br><br>The other way is to use new map(\[k1, v1, k2, v2, ...]) function.                                                                                                                                    |
 | 11  | **Map spread segfault**                                                | `{...m}` causes a segfault                                                                                                                                               | Use `{*m}` instead                                                                                                                             | No longer exists. `{...m}` is invalid syntax but no longer crashes — produces a clear error message instead.                                                                                                            |
 | 12  | **Functions limited to 8 parameters**                                  | MIR JIT fails for functions with >8 parameters                                                                                                                           | Restructured functions to use context maps (`ctx`) instead of many individual parameters                                                       | No longer exists. Tested with 9, 10, 12, and 15 parameters — all work correctly, including cross-module calls.                                                                                                          |
+| 13  | **VMap values corrupted across module boundaries**                     | `sum()`, `avg()` and other computed numeric values stored in VMap produce garbage when VMap is returned from a module function                                            | N/A                                                                                                                                            | ✅ **Engine fixed** — `fn_sum` returns via `push_d()` onto `num_stack`; `frame_end()` resets `num_stack`, invalidating pointers. Fixed `hashmap_data_set` in `vmap.cpp` to stabilize float/int64/datetime values by copying to heap-owned storage. |
+| 14  | **`sort(data, comparator)` destroys map items**                        | `fn_sort2` treats 2nd argument as direction string ("asc"/"desc"), not as a comparator lambda — all map values replaced with NaN                                         | Use `for (d in data order by d[field]) d` instead of `sort(data, comparator_fn)`                                                               | Expected. The `for...order by` syntax correctly uses `fn_sort_by_keys` which preserves original Item types.                                                                                                             |
+| 15  | **C2MIR ternary type mismatch in `group_key_str`**                     | `if-else` returning `String*` (from `fn_string`) vs `Item` (from `fn_str_join`) fails C2MIR type checker                                                                | Rewrote to avoid ternary: `let parts = for (f in fields) string(row[f]); str_join(parts, "|||")`                                               | Expected. C2MIR requires matching types in both branches of conditional expressions.                                                                                                                                    |
+| 16  | **C2MIR implicit pointer cast with `: string` annotation**             | `compute_agg(data, op: string, field)` — `: string` makes C parameter `String*` but callers pass `Item`, causing implicit cast error                                     | Removed `: string` type annotation: `compute_agg(data, op, field)`                                                                             | Expected. Type annotations in Lambda function signatures create typed C parameters that must match caller argument types exactly.                                                                                        |
 
 #### Remaining / Known Limitations
 
 | #   | Issue                                                                            | Impact                                                              | Workaround                                                                                                                  | Status                                       |
 | --- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| 1   | **5 transform types not implemented** (aggregate, calculate, bin, fold, flatten) | Cannot do in-chart data aggregation, computed fields, or histograms | Pre-process data in user scripts before passing to chart; transforms return data unchanged                                  |                                              |
-| 2   | **No computed key support in Lambda**                                            | Cannot dynamically construct maps with variable field names         | Limits transform implementation; `calculate` and `aggregate` transforms require building maps with dynamic `as` field names | Can use the new map() constructing function. |
 | 5   | **No stacking support**                                                          | Cannot render stacked bar or stacked area charts                    | Not yet implemented in the mark/scale pipeline                                                                              |                                              |
 | 6   | **No facet / concat / repeat composition**                                       | Only single-view and layer compositions work                        | Multi-view dashboards not yet possible                                                                                      |                                              |
 | 7   | **No temporal (time) scale**                                                     | Date/time axes not supported                                        | Temporal data must be converted to numeric values manually                                                                  |                                              |

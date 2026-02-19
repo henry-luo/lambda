@@ -54,6 +54,7 @@ fn render_single(spec) {
     let y_ch = parse.get_channel(enc, "y");
     let color_ch = parse.get_channel(enc, "color");
     let size_ch = parse.get_channel(enc, "size");
+    let opacity_ch = parse.get_channel(enc, "opacity");
     let text_ch = parse.get_channel(enc, "text");
 
     let x_field = if (x_ch) x_ch.field else null;
@@ -86,6 +87,12 @@ fn render_single(spec) {
          scale.linear_scale_nice(size_values, 20.0, 200.0, false))
     else null;
 
+    // build opacity scale if needed
+    let opacity_scale = if (opacity_ch and opacity_ch.field)
+        (let op_values = data | float(~[opacity_ch.field]),
+         scale.linear_scale_nice(op_values, 0.2, 1.0, false))
+    else null;
+
     // render marks
     let mark_ctx = {
         x_scale: x_scale, y_scale: y_scale,
@@ -93,6 +100,8 @@ fn render_single(spec) {
         color_scale: color_scale, color_field: color_field,
         size_scale: size_scale,
         size_field: if (size_ch) size_ch.field else null,
+        opacity_scale: opacity_scale,
+        opacity_field: if (opacity_ch) opacity_ch.field else null,
         x_field: x_field, y_field: y_field,
         text_field: if (text_ch) text_ch.field else null
     };

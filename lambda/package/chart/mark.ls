@@ -17,10 +17,12 @@ pub fn bar(data, ctx, mark_config) {
     let plot_h = ctx.plot_h;
     let color_scale = ctx.color_scale;
     let color_field = ctx.color_field;
+    let opacity_scale = ctx.opacity_scale;
+    let opacity_field = ctx.opacity_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
     let fill = if (mark_config and mark_config.color) mark_config.color else color.default_color;
-    let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
+    let base_opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let rx = if (mark_config and mark_config.corner_radius) mark_config.corner_radius else 0;
 
     let bars = (for (d in data) (
@@ -31,10 +33,13 @@ pub fn bar(data, ctx, mark_config) {
         let bar_fill = if (color_scale and color_field)
             scale.scale_apply(color_scale, d[color_field])
         else fill,
+        let bar_opacity = if (opacity_scale and opacity_field)
+            float(scale.scale_apply(opacity_scale, float(d[opacity_field])))
+        else base_opacity,
         let bar_w = if (x_scale.bandwidth) x_scale.bandwidth else 20.0,
         let bar_h = plot_h - y_pos,
         <rect x: x_pos, y: y_pos, width: bar_w, height: bar_h,
-              fill: bar_fill, opacity: opacity, rx: rx>
+              fill: bar_fill, opacity: bar_opacity, rx: rx>
     ));
 
     svg.group_class("marks bars", bars)
@@ -167,10 +172,12 @@ pub fn point_mark(data, ctx, mark_config) {
     let color_field = ctx.color_field;
     let size_scale = ctx.size_scale;
     let size_field = ctx.size_field;
+    let opacity_scale = ctx.opacity_scale;
+    let opacity_field = ctx.opacity_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
-    let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
+    let base_opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let base_size = if (mark_config and mark_config.size) mark_config.size else 30;
     let base_r = sqrt(float(base_size) / util.PI);
 
@@ -186,8 +193,11 @@ pub fn point_mark(data, ctx, mark_config) {
             (let sv = float(d[size_field]),
             sqrt(float(scale.scale_apply(size_scale, sv)) / util.PI))
         else base_r,
+        let pt_opacity = if (opacity_scale and opacity_field)
+            float(scale.scale_apply(opacity_scale, float(d[opacity_field])))
+        else base_opacity,
         <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
-                fill: pt_fill, opacity: opacity,
+                fill: pt_fill, opacity: pt_opacity,
                 stroke: "white", "stroke-width": 0.5>
     ));
 
