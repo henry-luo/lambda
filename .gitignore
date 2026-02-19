@@ -595,3 +595,4 @@ test/layout/reference/text-transform-bicameral-004.json
 test/layout/data/css2.1/html4/text-transform-bicameral-004.htm
 test/layout/data/css2.1/xhtml1/text-transform-bicameral-004.xht
 test/layout/data/css2.1/xhtml1print/text-transform-bicameral-004.xht
+lambda/tree-sitter-latex/src/parser.c
