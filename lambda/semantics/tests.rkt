@@ -505,6 +505,156 @@
   (check-false (safe-for-unboxed-variant? 'string-type))
   (check-false (safe-for-unboxed-variant? 'bool-type)))
 
+(test-case "Type mapping: container and special types"
+  (check-equal? (lambda-type->c-type 'array-type)    'Array*)
+  (check-equal? (lambda-type->c-type 'list-type)     'List*)
+  (check-equal? (lambda-type->c-type 'map-type)      'Map*)
+  (check-equal? (lambda-type->c-type 'element-type)  'Element*)
+  (check-equal? (lambda-type->c-type 'func-type)     'Function*)
+  (check-equal? (lambda-type->c-type 'type-type)     'Type*)
+  (check-equal? (lambda-type->c-type 'range-type)    'Range*)
+  (check-equal? (lambda-type->c-type 'path-type)     'Path*)
+  (check-equal? (lambda-type->c-type 'symbol-type)   'Symbol*)
+  (check-equal? (lambda-type->c-type 'decimal-type)  'Decimal*)
+  (check-equal? (lambda-type->c-type 'datetime-type) 'DateTime)
+  (check-equal? (lambda-type->c-type 'binary-type)   'String*)
+  ;; Specialized arrays
+  (check-equal? (lambda-type->c-type 'array-int-type)   'ArrayInt*)
+  (check-equal? (lambda-type->c-type 'array-int64-type) 'ArrayInt64*)
+  (check-equal? (lambda-type->c-type 'array-float-type) 'ArrayFloat*))
+
+(test-case "Type mapping: composite types"
+  ;; Typed containers → still pointers
+  (check-equal? (lambda-type->c-type '(array-of int-type))    'Array*)
+  (check-equal? (lambda-type->c-type '(list-of int-type))     'List*)
+  (check-equal? (lambda-type->c-type '(map-of string-type))   'Map*)
+  ;; Error-return → unwraps to inner type
+  (check-equal? (lambda-type->c-type '(error-ret int-type))   'int32_t)
+  (check-equal? (lambda-type->c-type '(error-ret string-type)) 'String*)
+  ;; fn-type → Item (closures are boxed)
+  (check-equal? (lambda-type->c-type '(fn-type (int-type) int-type)) 'Item))
+
+(test-case "C-type predicates"
+  ;; Pointer types
+  (check-true (pointer-c-type? 'String*))
+  (check-true (pointer-c-type? 'Array*))
+  (check-true (pointer-c-type? 'Function*))
+  (check-true (pointer-c-type? 'Range*))
+  (check-true (pointer-c-type? 'Type*))
+  (check-true (pointer-c-type? 'ArrayInt*))
+  (check-false (pointer-c-type? 'int32_t))
+  (check-false (pointer-c-type? 'Item))
+  ;; Scalar types
+  (check-true (scalar-c-type? 'int32_t))
+  (check-true (scalar-c-type? 'int64_t))
+  (check-true (scalar-c-type? 'double))
+  (check-true (scalar-c-type? 'bool))
+  (check-false (scalar-c-type? 'String*))
+  (check-false (scalar-c-type? 'Item))
+  ;; Item type
+  (check-true (item-c-type? 'Item))
+  (check-false (item-c-type? 'int32_t)))
+
+(test-case "Boxing: all scalar types"
+  (check-equal? (boxing-function 'int32_t)  'i2it)
+  (check-equal? (boxing-function 'int64_t)  'push_l)
+  (check-equal? (boxing-function 'double)   'push_d)
+  (check-equal? (boxing-function 'bool)     'b2it)
+  (check-equal? (boxing-function 'String*)  's2it)
+  (check-equal? (boxing-function 'Symbol*)  'y2it)
+  (check-equal? (boxing-function 'DateTime) 'push_k)
+  (check-equal? (boxing-function 'Decimal*) 'c2it)
+  (check-equal? (boxing-function 'Item)     #f))
+
+(test-case "Boxing: container types use cast-to-Item"
+  (for ([ct '(Array* Map* Element* Range* Path* Function* Type*
+              ArrayInt* ArrayInt64* ArrayFloat*)])
+    (check-equal? (boxing-function ct) 'cast-to-Item
+                  (format "~a should box via cast-to-Item" ct)))
+  ;; List boxing is special (#f — list_end() returns Item)
+  (check-equal? (boxing-function 'List*) #f))
+
+(test-case "Unboxing: all scalar types"
+  (check-equal? (unboxing-function 'int32_t)  'it2i)
+  (check-equal? (unboxing-function 'int64_t)  'it2l)
+  (check-equal? (unboxing-function 'double)   'it2d)
+  (check-equal? (unboxing-function 'bool)     'it2b)
+  (check-equal? (unboxing-function 'String*)  'it2s)
+  (check-equal? (unboxing-function 'Symbol*)  'it2sym)
+  (check-equal? (unboxing-function 'DateTime) 'it2dt)
+  (check-equal? (unboxing-function 'Decimal*) 'it2dec))
+
+(test-case "Unboxing: container types use cast-from-Item"
+  (for ([ct '(Array* List* Map* Element* Range* Path* Function* Type*
+              ArrayInt* ArrayInt64* ArrayFloat*)])
+    (check-equal? (unboxing-function ct) 'cast-from-Item
+                  (format "~a should unbox via cast-from-Item" ct))))
+
+(test-case "Conversion: scalar promotions"
+  (check-equal? (required-conversion 'int32_t 'double) 'cast-int-to-double)
+  (check-equal? (required-conversion 'int32_t 'int64_t) 'cast-int-to-int64)
+  (check-equal? (required-conversion 'double 'int32_t) 'cast-double-to-int)
+  (check-equal? (required-conversion 'int64_t 'double) 'cast-int64-to-double))
+
+(test-case "Conversion: incompatible scalars → type-error"
+  (check-equal? (required-conversion 'bool 'int32_t) 'type-error)
+  (check-equal? (required-conversion 'int32_t 'bool) 'type-error))
+
+(test-case "Conversion: pointer to Item is compatible"
+  ;; Pointers can be cast to Item directly (high bits contain type_id)
+  (for ([ct '(String* Array* Map* Element* Range* Function* Type*)])
+    (check-equal? (required-conversion ct 'Item) (boxing-function ct)
+                  (format "~a → Item should use boxing fn" ct))))
+
+(test-case "Sys-func catalog: lookup"
+  (check-not-false (sys-func-lookup 'len)   "len should be in catalog")
+  (check-not-false (sys-func-lookup 'type)  "type should be in catalog")
+  (check-not-false (sys-func-lookup 'trim)  "trim should be in catalog")
+  (check-false (sys-func-lookup 'nonexistent_func)
+               "missing func should return #f"))
+
+(test-case "Sys-func catalog: C return types"
+  (check-equal? (sys-func-c-return 'len)      'int64_t)
+  (check-equal? (sys-func-c-return 'type)     'Type*)
+  (check-equal? (sys-func-c-return 'name)     'Symbol*)
+  (check-equal? (sys-func-c-return 'contains) 'bool)
+  (check-equal? (sys-func-c-return 'trim)     'Item)
+  (check-equal? (sys-func-c-return 'string)   'String*)
+  ;; Unknown func defaults to Item
+  (check-equal? (sys-func-c-return 'unknown_func) 'Item))
+
+(test-case "Sys-func catalog: discrepancies"
+  ;; Functions where semantic type ≠ C return type
+  (define discreps (sys-func-discrepancies))
+  (check-true (> (length discreps) 0) "should have at least one discrepancy")
+  ;; normalize: semantic=STRING but C=Item
+  (define norm-entry (sys-func-lookup 'normalize))
+  (check-true (sys-func-entry-discrepancy? norm-entry)
+              "normalize should be flagged as discrepancy")
+  (check-equal? (sys-func-entry-semantic-type norm-entry) 'string-type)
+  (check-equal? (sys-func-entry-c-return-type norm-entry) 'Item))
+
+(test-case "Sys-func catalog: needs-conversion?"
+  ;; normalize returns Item, but if param expects String*, needs it2s
+  (define conv (sys-func-needs-conversion? 'normalize 'string-type))
+  (check-equal? conv 'it2s
+                "normalize → string param needs it2s conversion")
+  ;; len returns int64_t, if param expects int64_t, no conversion
+  (check-false (sys-func-needs-conversion? 'len 'int64-type)
+               "len → int64 param needs no conversion")
+  ;; len returns int64_t, if param expects int (int32_t), type-error
+  ;; because int64 → int32 would truncate
+  (define len-conv (sys-func-needs-conversion? 'len 'int-type))
+  ;; int64_t → int32_t is not in the scalar conversion table → type-error
+  (check-not-false len-conv "len → int param should need conversion"))
+
+(test-case "verify-function: basic check"
+  (define result (verify-function 'test-fn
+                                  (list (list 'x 'int-type) (list 'y 'string-type))
+                                  'int-type
+                                  '()))
+  (check-equal? (second result) 'ok))
+
 
 ;; ════════════════════════════════════════════════════════════════════════════
 ;; PART 4: SUBTYPE RELATION TESTS
@@ -618,6 +768,78 @@
       (check-equal? (car result) 'must-box-both
                     (format "~a (~a) vs ~a (~a) must box both"
                             t1 ct1 t2 ct2)))))
+
+(test-case "Property: every scalar C-type has boxing AND unboxing"
+  ;; ∀ scalar C-types: both boxing and unboxing must exist
+  (for ([ct '(int32_t int64_t double bool)])
+    (check-not-false (boxing-function ct)
+                     (format "~a must have boxing fn" ct))
+    (check-not-false (unboxing-function ct)
+                     (format "~a must have unboxing fn" ct))))
+
+(test-case "Property: every pointer C-type has unboxing"
+  ;; All pointer types must be recoverable from Item
+  (for ([ct '(String* Symbol* Array* List* Map* Element* Decimal*
+              Range* Path* Function* Type*
+              ArrayInt* ArrayInt64* ArrayFloat*)])
+    (check-not-false (unboxing-function ct)
+                     (format "~a must have unboxing fn" ct))))
+
+(test-case "Property: boxing roundtrip for all scalars"
+  ;; ∀ scalar c-type ct:
+  ;;   unboxing-fn(ct) == required-conversion(Item, ct)
+  ;; i.e., the unboxing function IS what required-conversion returns
+  (for ([ct '(int32_t int64_t double bool String*)])
+    (define uf (unboxing-function ct))
+    (define conv (required-conversion 'Item ct))
+    (check-equal? conv uf
+                  (format "roundtrip: Item → ~a should use ~a" ct uf))))
+
+(test-case "Property: same-type conversion is always #f"
+  ;; ∀ C-type ct: required-conversion(ct, ct) == #f
+  (for ([ct '(Item int32_t int64_t double bool String* Symbol*
+              Array* List* Map* Element* Decimal* DateTime
+              Range* Path* Function* Type*)])
+    (check-false (required-conversion ct ct)
+                 (format "~a → ~a should need no conversion" ct ct))))
+
+(test-case "Property: sys-func catalog entries are well-formed"
+  ;; Every entry has valid C-return type (listed in our type domain)
+  (for ([entry sys-func-catalog])
+    (define crt (sys-func-entry-c-return-type entry))
+    (check-true (or (item-c-type? crt)
+                    (scalar-c-type? crt)
+                    (pointer-c-type? crt)
+                    (eq? crt 'DateTime))
+                (format "~a has invalid C return type ~a"
+                        (sys-func-entry-name entry) crt))))
+
+(test-case "Property: discrepancy flag consistency"
+  ;; An entry is a discrepancy iff semantic-type maps to a different C-type
+  ;; than the actual C-return-type
+  (for ([entry sys-func-catalog])
+    (define name (sys-func-entry-name entry))
+    (define sem-τ (sys-func-entry-semantic-type entry))
+    (define c-ret (sys-func-entry-c-return-type entry))
+    (define expected-ct (lambda-type->c-type sem-τ))
+    (when (sys-func-entry-discrepancy? entry)
+      (check-not-equal? expected-ct c-ret
+                        (format "~a is flagged as discrepancy but semantic→C matches"
+                                name)))))
+
+(test-case "Property: all container types map to pointer C-types"
+  (for ([τ '(array-type list-type map-type element-type)])
+    (define ct (lambda-type->c-type τ))
+    (check-true (pointer-c-type? ct)
+                (format "~a should map to pointer type, got ~a" τ ct))))
+
+(test-case "Property: conversion between different pointer types is type-error"
+  ;; Different pointer types can't be directly converted (must go through Item)
+  (for* ([ct1 '(String* Array* Map* Element*)]
+         [ct2 '(String* Array* Map* Element*)])
+    (when (not (eq? ct1 ct2))
+      (check-equal? (required-conversion ct1 ct2) 'type-error
+                    (format "~a → ~a should be type-error" ct1 ct2)))))
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
