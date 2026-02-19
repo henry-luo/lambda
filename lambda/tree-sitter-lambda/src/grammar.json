@@ -1555,6 +1555,10 @@
               {
                 "type": "SYMBOL",
                 "name": "identifier"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "base_type"
               }
             ]
           }
@@ -3202,6 +3206,10 @@
         {
           "type": "SYMBOL",
           "name": "identifier"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "base_type"
         }
       ]
     },
@@ -3846,6 +3854,10 @@
                     {
                       "type": "SYMBOL",
                       "name": "path_wildcard_recursive"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "base_type"
                     }
                   ]
                 }
@@ -3898,6 +3910,10 @@
               {
                 "type": "SYMBOL",
                 "name": "path_wildcard_recursive"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "base_type"
               }
             ]
           }
