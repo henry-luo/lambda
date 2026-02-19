@@ -856,6 +856,7 @@ typedef struct Context {
 
     // procedural functions
     Item pn_print(Item item);
+    double pn_clock();        // clock() - high-resolution monotonic time in seconds
     Item pn_cmd1(Item cmd);
     Item pn_cmd2(Item cmd, Item args);
     Item pn_fetch(Item url, Item options);

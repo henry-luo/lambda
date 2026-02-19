@@ -23,12 +23,16 @@ pn benchmark() {
 }
 
 pn main() {
+    let t0 = clock()
     let result = benchmark()
+    let elapsed = (clock() - t0) * 1000.0
     if (result == 50005000) {
-        print("sum: PASS\n")
+        print("sum: PASS  ")
     } else {
         print("sum: FAIL result=")
         print(result)
-        print("\n")
+        print(" ")
     }
+    print(elapsed)
+    print(" ms\n")
 }
