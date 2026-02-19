@@ -1,0 +1,1 @@
+"1. literalHello, world2. untyped relayHello, Lambda3. str_joinHello, a-b-c4. multi-paramx+y5. mixed paramscount=426. bool paramonoff7. bool relayon"
