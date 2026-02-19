@@ -76,12 +76,16 @@ pn benchmark() {
 }
 
 pn main() {
+    let t0 = clock()
     let result = benchmark()
+    let elapsed = (clock() - t0) * 1000.0
     if (result == 5) {
-        print("mbrot: PASS\n")
+        print("mbrot: PASS  ")
     } else {
         print("mbrot: FAIL result=")
         print(result)
-        print("\n")
+        print(" ")
     }
+    print(elapsed)
+    print(" ms\n")
 }

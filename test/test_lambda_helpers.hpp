@@ -42,7 +42,7 @@ struct LambdaTestInfo {
     std::string expected_path;
     std::string test_name;
     bool is_procedural;  // true for procedural scripts (run with "lambda.exe run")
-    
+
     // For Google Test parameterized test naming
     friend std::ostream& operator<<(std::ostream& os, const LambdaTestInfo& info) {
         return os << info.test_name;
@@ -140,49 +140,65 @@ inline bool file_exists(const std::string& path) {
 }
 
 // Helper function to get test name from script path
+// Includes parent directory prefix to avoid name collisions across directories
 inline std::string get_test_name(const std::string& script_path) {
-    // Extract filename without extension
+    // Extract directory name and filename
     size_t last_slash = script_path.find_last_of("/\\");
-    std::string filename = (last_slash != std::string::npos) 
-        ? script_path.substr(last_slash + 1) 
+    std::string filename = (last_slash != std::string::npos)
+        ? script_path.substr(last_slash + 1)
         : script_path;
-    
+
+    // Check if there's a parent directory to use as prefix
+    std::string prefix;
+    if (last_slash != std::string::npos && last_slash > 0) {
+        size_t prev_slash = script_path.find_last_of("/\\", last_slash - 1);
+        std::string dir_name = (prev_slash != std::string::npos)
+            ? script_path.substr(prev_slash + 1, last_slash - prev_slash - 1)
+            : script_path.substr(0, last_slash);
+        // Only add prefix for subdirectories (not for the base "lambda" directory)
+        if (dir_name != "lambda") {
+            prefix = dir_name + "_";
+        }
+    }
+
     size_t dot_pos = filename.find_last_of('.');
     if (dot_pos != std::string::npos) {
         filename = filename.substr(0, dot_pos);
     }
-    
+
+    std::string test_name = prefix + filename;
+
     // Replace invalid characters for test names
-    for (char& c : filename) {
+    for (char& c : test_name) {
         if (!isalnum(c) && c != '_') {
             c = '_';
         }
     }
-    
-    return filename;
+
+    return test_name;
 }
 
 // Discover all .ls files with matching .txt files in a directory
 inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_path, bool is_procedural = false) {
     std::vector<LambdaTestInfo> tests;
-    
+
 #ifdef _WIN32
     std::string search_path = std::string(dir_path) + "\\*.ls";
     WIN32_FIND_DATAA find_data;
     HANDLE find_handle = FindFirstFileA(search_path.c_str(), &find_data);
-    
+
     if (find_handle != INVALID_HANDLE_VALUE) {
         do {
             std::string filename = find_data.cFileName;
             std::string script_path = std::string(dir_path) + "/" + filename;
-            
+
             // Build expected output path (.ls -> .txt)
             std::string expected_path = script_path;
             size_t dot_pos = expected_path.find_last_of('.');
             if (dot_pos != std::string::npos) {
                 expected_path = expected_path.substr(0, dot_pos) + ".txt";
             }
-            
+
             // Only add if matching .txt file exists
             if (file_exists(expected_path)) {
                 LambdaTestInfo info;
@@ -200,22 +216,22 @@ inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_p
     if (!dir) {
         return tests;
     }
-    
+
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         std::string filename = entry->d_name;
-        
+
         // Check if it's a .ls file
         if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".ls") {
             std::string script_path = std::string(dir_path) + "/" + filename;
-            
+
             // Build expected output path (.ls -> .txt)
             std::string expected_path = script_path;
             size_t dot_pos = expected_path.find_last_of('.');
             if (dot_pos != std::string::npos) {
                 expected_path = expected_path.substr(0, dot_pos) + ".txt";
             }
-            
+
             // Only add if matching .txt file exists
             if (file_exists(expected_path)) {
                 LambdaTestInfo info;
@@ -229,12 +245,12 @@ inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_p
     }
     closedir(dir);
 #endif
-    
+
     // Sort tests by name for consistent ordering
     std::sort(tests.begin(), tests.end(), [](const LambdaTestInfo& a, const LambdaTestInfo& b) {
         return a.test_name < b.test_name;
     });
-    
+
     return tests;
 }
 
