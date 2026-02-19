@@ -1623,12 +1623,6 @@ class RadiantLayoutTester {
      * Test all files in a category
      */
     async testCategory(category) {
-        // Skip css2.1 suite
-        if (category === 'css2.1') {
-            console.log(`\n⚠️  Skipping css2.1 suite (excluded from testing)`);
-            return [];
-        }
-
         if (!this.json) {
             console.log(`\n📂 Testing category: ${category}`);
             console.log('=' .repeat(50));
@@ -1637,8 +1631,24 @@ class RadiantLayoutTester {
         const categoryDir = path.join(this.testDataDir, category);
 
         try {
-            const files = await fs.readdir(categoryDir);
-            const htmlFiles = files.filter(file => file.endsWith('.html') || file.endsWith('.htm'));
+            const entries = await fs.readdir(categoryDir, { withFileTypes: true });
+            let htmlFiles = entries
+                .filter(entry => entry.isFile() && (entry.name.endsWith('.html') || entry.name.endsWith('.htm')))
+                .map(entry => entry.name);
+
+            // Also scan subdirectories for HTML files (e.g., css2.1 has html4/, xhtml1/)
+            const subDirs = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.'));
+            for (const subDir of subDirs) {
+                const subDirPath = path.join(categoryDir, subDir.name);
+                try {
+                    const subFiles = await fs.readdir(subDirPath);
+                    const subHtmlFiles = subFiles.filter(file => file.endsWith('.html') || file.endsWith('.htm'));
+                    // Include subdirectory HTML files with relative path for proper resolution
+                    htmlFiles = htmlFiles.concat(subHtmlFiles.map(f => path.join(subDir.name, f)));
+                } catch (error) {
+                    // Skip unreadable subdirectories
+                }
+            }
 
             if (htmlFiles.length === 0) {
                 console.log(`No HTML files found in ${category}/`);
@@ -1740,7 +1750,6 @@ class RadiantLayoutTester {
                 .filter(item => item.isDirectory())
                 .map(item => item.name)
                 .filter(name => !name.startsWith('.'))
-                .filter(name => name !== 'css2.1') // Skip css2.1 suite
                 .sort();
         } catch (error) {
             console.error(`Error scanning test categories: ${error.message}`);
@@ -1774,10 +1783,24 @@ class RadiantLayoutTester {
             const categoryDir = path.join(this.testDataDir, category);
 
             try {
-                const files = await fs.readdir(categoryDir);
-                const matchingFiles = files.filter(file =>
-                    (file.endsWith('.html') || file.endsWith('.htm')) && file.includes(pattern)
-                );
+                const entries = await fs.readdir(categoryDir, { withFileTypes: true });
+                let matchingFiles = entries
+                    .filter(entry => entry.isFile() && (entry.name.endsWith('.html') || entry.name.endsWith('.htm')) && entry.name.includes(pattern))
+                    .map(entry => entry.name);
+
+                // Also scan subdirectories for matching HTML files
+                const subDirs = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.'));
+                for (const subDir of subDirs) {
+                    const subDirPath = path.join(categoryDir, subDir.name);
+                    try {
+                        const subFiles = await fs.readdir(subDirPath);
+                        const subMatching = subFiles
+                            .filter(file => (file.endsWith('.html') || file.endsWith('.htm')) && file.includes(pattern));
+                        matchingFiles = matchingFiles.concat(subMatching.map(f => path.join(subDir.name, f)));
+                    } catch (error) {
+                        // Skip unreadable subdirectories
+                    }
+                }
 
                 if (matchingFiles.length > 0) {
                     console.log(`\n📂 Found ${matchingFiles.length} matching files in ${category}:`);
