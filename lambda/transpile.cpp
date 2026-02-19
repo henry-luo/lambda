@@ -5523,6 +5523,12 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
             strbuf_append_char(tp->code_buf, ' ');
             write_var_name(tp->code_buf, asn_node, NULL);
             strbuf_append_str(tp->code_buf, ";\n");
+            // also declare the error variable for ^err destructuring
+            if (asn_node->error_name) {
+                strbuf_append_str(tp->code_buf, "Item _");
+                strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                strbuf_append_str(tp->code_buf, ";\n");
+            }
         }
         decl = decl->next;
     }
@@ -5557,11 +5563,16 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
             strbuf_append_str(tp->code_buf, "}");  // close nested scope
         } else {
             AstNamedNode *asn_node = (AstNamedNode*)decl;
-            strbuf_append_str(tp->code_buf, "\n  ");
-            write_var_name(tp->code_buf, asn_node, NULL);
-            strbuf_append_char(tp->code_buf, '=');
-            transpile_expr(tp, asn_node->as);
-            strbuf_append_char(tp->code_buf, ';');
+            // handle ^err destructuring at global level
+            if (asn_node->error_name) {
+                transpile_assign_expr(tp, asn_node, true);
+            } else {
+                strbuf_append_str(tp->code_buf, "\n  ");
+                write_var_name(tp->code_buf, asn_node, NULL);
+                strbuf_append_char(tp->code_buf, '=');
+                transpile_expr(tp, asn_node->as);
+                strbuf_append_char(tp->code_buf, ';');
+            }
         }
         decl = decl->next;
     }
