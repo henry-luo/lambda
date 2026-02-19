@@ -152,6 +152,8 @@ module.exports = grammar({
     $.parent_expr,
     $.primary_expr,
     $.unary_expr,
+    // statement end: linebreak terminates statement before binary operators can continue
+    'statement_end',
     // binary operators
     'binary_pow',
     'binary_times',
@@ -194,14 +196,14 @@ module.exports = grammar({
       $.content
     )),
 
-    comment: _ => token(choice(
+    comment: _ => token(prec(1, choice(
       seq('//', /[^\r\n\u2028\u2029]*/),
       seq(
         '/*',
         /[^*]*\*+([^/*][^*]*\*+)*/,
         '/',
       ),
-    )),
+    ))),
 
     // Literal Values
 
@@ -305,7 +307,7 @@ module.exports = grammar({
       $.raise_stam,
       $.var_stam,
       $.assign_stam,
-      seq($._content_expr, choice(linebreak, ';')),
+      prec.right('statement_end', seq($._content_expr, choice(token(prec(10, /\r\n|\n/)), ';'))),
     ),
 
     content: $ => choice(
