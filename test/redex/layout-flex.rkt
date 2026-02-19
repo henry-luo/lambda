@@ -61,25 +61,8 @@
   #:transparent #:mutable)
 
 ;; ============================================================
-;; Baseline Computation
+;; Baseline Computation — imported from layout-common.rkt
 ;; ============================================================
-
-;; compute the first baseline of a view, measured from the top of the view's
-;; border box. for containers, the baseline is the first child's baseline
-;; plus its y offset. for leaf nodes, the synthesized baseline is the bottom.
-;; if the view has a stored baseline (e.g. from flex layout with baseline-aligned items),
-;; use that instead.
-(define (compute-view-baseline view)
-  (define stored (view-baseline view))
-  (if stored
-      stored
-      (let ([h (view-height view)]
-            [children (view-children view)])
-        (if (or (null? children) (not (pair? children)))
-            h  ;; synthesized baseline: bottom of box
-            ;; find first child's baseline and add its y offset
-            (let ([first-child (car children)])
-              (+ (view-y first-child) (compute-view-baseline first-child)))))))
 
 ;; ============================================================
 ;; Flex Layout — Main Entry Point
@@ -129,13 +112,6 @@
      ;; per CSS spec, percentage row-gap resolves against the container's block size (height),
      ;; and percentage column-gap resolves against the container's inline size (width).
      ;; if the reference size is indefinite, the percentage resolves to 0.
-     (define (resolve-gap v ref-size)
-       (match v
-         [`(% ,pct)
-          (if (and ref-size (not (infinite? ref-size)))
-              (* (/ pct 100) ref-size)
-              0)]
-         [_ v]))
      (define row-gap (resolve-gap row-gap-raw explicit-h))
      (define col-gap (resolve-gap col-gap-raw (if avail-w content-w #f)))
 
@@ -567,7 +543,7 @@
                              (or (eq? pos 'absolute) (eq? pos 'fixed)))))
          (define view (layout-positioned child containing-w containing-h dispatch-fn))
          ;; offset the view position from padding-box to border-box coordinates
-         (define raw-view (offset-view* view abs-offset-x abs-offset-y))
+         (define raw-view (offset-view view abs-offset-x abs-offset-y))
          ;; check if insets are all auto (static position case)
          (define child-styles (get-box-styles child))
          (define css-top (get-style-prop child-styles 'top 'auto))
@@ -2020,20 +1996,8 @@
           total-cross
           first-line-baseline))
 
-;; ============================================================
-;; Helpers
-;; ============================================================
-
-;; offset a view's position by (dx, dy)
-(define (offset-view* view dx dy)
-  (match view
-    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
-     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children ,baseline)]
-    [`(view ,id ,x ,y ,w ,h ,children)
-     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children)]
-    [`(view-text ,id ,x ,y ,w ,h ,text)
-     `(view-text ,id ,(+ x dx) ,(+ y dy) ,w ,h ,text)]
-    [_ view]))
+;; offset-view, get-box-styles, set-view-pos, set-view-size,
+;; compute-view-baseline, resolve-gap — imported from layout-common.rkt
 
 ;; count the number of auto margins on the main axis across all items in a line
 (define (count-auto-main-margins items is-row?)
@@ -2041,39 +2005,6 @@
     (define-values (mt mr mb ml) (get-raw-margins (flex-item-styles item)))
     (+ (if (eq? (if is-row? ml mt) 'auto) 1 0)
        (if (eq? (if is-row? mr mb) 'auto) 1 0))))
-
-(define (get-box-styles box)
-  (match box
-    [`(block ,_ ,styles ,_) styles]
-    [`(inline ,_ ,styles ,_) styles]
-    [`(inline-block ,_ ,styles ,_) styles]
-    [`(flex ,_ ,styles ,_) styles]
-    [`(grid ,_ ,styles ,_ ,_) styles]
-    [`(table ,_ ,styles ,_) styles]
-    [`(text ,_ ,styles ,_ ,_) styles]
-    [`(replaced ,_ ,styles ,_ ,_) styles]
-    [`(none ,_) '(style)]
-    [_ '(style)]))
-
-(define (set-view-pos view x y)
-  (match view
-    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,_ ,_ ,w ,h ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,_ ,_ ,w ,h ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
-
-(define (set-view-size view w h)
-  (match view
-    [`(view ,id ,x ,y ,_ ,_ ,children ,baseline)
-     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
-    [`(view ,id ,x ,y ,_ ,_ ,children)
-     `(view ,id ,x ,y ,w ,h ,children)]
-    [`(view-text ,id ,x ,y ,_ ,_ ,text)
-     `(view-text ,id ,x ,y ,w ,h ,text)]
-    [_ view]))
 
 (define (get-box-id box)
   (match box
