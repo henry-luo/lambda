@@ -105,12 +105,16 @@ pn benchmark() {
 }
 
 pn main() {
+    let t0 = clock()
     let result = benchmark()
+    let elapsed = (clock() - t0) * 1000.0
     if (result == 92) {
-        print("nqueens: PASS\n")
+        print("nqueens: PASS  ")
     } else {
         print("nqueens: FAIL result=")
         print(result)
-        print("\n")
+        print(" ")
     }
+    print(elapsed)
+    print(" ms\n")
 }
