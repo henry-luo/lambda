@@ -50,6 +50,7 @@ struct Runtime {
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
     unsigned int optimize_level;  // MIR JIT optimization level (0-2, default: 2)
+    const char* transpile_dir;   // directory for transpiled C output files (NULL = current dir)
 };
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
