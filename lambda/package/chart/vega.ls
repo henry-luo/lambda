@@ -103,8 +103,10 @@ fn convert_encoding(enc) {
         y: if (enc.y) convert_channel(enc.y) else null,
         color: if (enc.color) convert_channel(enc.color) else null,
         size: if (enc.size) convert_channel(enc.size) else null,
+        opacity: if (enc.opacity) convert_channel(enc.opacity) else null,
         theta: if (enc.theta) convert_channel(enc.theta) else null,
-        text: if (enc.text) convert_channel(enc.text) else null
+        text: if (enc.text) convert_channel(enc.text) else null,
+        stroke: if (enc.stroke) convert_channel(enc.stroke) else null
     }
 }
 

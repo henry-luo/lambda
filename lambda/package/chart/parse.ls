@@ -103,15 +103,19 @@ fn parse_encoding(encoding_el) {
     let y_el = find_child(encoding_el, 'y', count);
     let color_el = find_child(encoding_el, 'color', count);
     let size_el = find_child(encoding_el, 'size', count);
+    let opacity_el = find_child(encoding_el, 'opacity', count);
     let theta_el = find_child(encoding_el, 'theta', count);
     let text_el = find_child(encoding_el, 'text', count);
+    let stroke_el = find_child(encoding_el, 'stroke', count);
     {
         x: if (x_el) parse_channel(x_el) else null,
         y: if (y_el) parse_channel(y_el) else null,
         color: if (color_el) parse_channel(color_el) else null,
         size: if (size_el) parse_channel(size_el) else null,
+        opacity: if (opacity_el) parse_channel(opacity_el) else null,
         theta: if (theta_el) parse_channel(theta_el) else null,
-        text: if (text_el) parse_channel(text_el) else null
+        text: if (text_el) parse_channel(text_el) else null,
+        stroke: if (stroke_el) parse_channel(stroke_el) else null
     }
 }
 
