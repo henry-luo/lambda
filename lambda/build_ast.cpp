@@ -949,7 +949,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     ast_node->object = build_expr(tp, object_node);
 
     TSNode field_node = ts_node_child_by_field_id(array_node, FIELD_FIELD);
-    if (node_type == AST_NODE_MEMBER_EXPR && ts_node_symbol(field_node) == SYM_IDENT) {
+    if (node_type == AST_NODE_MEMBER_EXPR && (ts_node_symbol(field_node) == SYM_IDENT || ts_node_symbol(field_node) == SYM_BASE_TYPE)) {
         // handle id node directly without name lookup
         AstIdentNode* id_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, field_node, sizeof(AstIdentNode));
         StrView var_name = ts_node_source(tp, field_node);
@@ -1227,7 +1227,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 ident_node->name = qualified_entry->name;
                 ident_node->entry = qualified_entry;
                 ident_node->type = qualified_entry->node->type;
-                ast_node->function = (AstNode*)ident_node;
+                // Wrap in a primary_expr for consistency with transpiler expectations
+                AstPrimaryNode* primary_node = (AstPrimaryNode*)alloc_ast_node(
+                    tp, AST_NODE_PRIMARY, function_node, sizeof(AstPrimaryNode));
+                primary_node->expr = (AstNode*)ident_node;
+                primary_node->type = ident_node->type;
+                ast_node->function = (AstNode*)primary_node;
                 if (ident_node->type && ident_node->type->type_id == LMD_TYPE_FUNC) {
                     TypeFunc* func_type = (TypeFunc*)ident_node->type;
                     if (func_type->is_proc && !tp->current_scope->is_proc) {
@@ -1334,7 +1339,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             log_debug("method_call prepended object as first arg, type=%d", obj_type_id);
         }
     }
-    else {
+    else if (!is_aliased_import_call) {
         if (is_method_call) {
             // Not a sys func method call - could be a user-defined method on the object
             // For now, fall back to building as a regular member expression call
@@ -2319,6 +2324,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
     StrView op = ts_node_source(tp, op_node);
+    strview_trim(&op);
     ast_node->op_str = op;
     if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
     else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
@@ -3172,7 +3178,8 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         int end_byte = ts_node_end_byte(key_node) - 1; // skip the last quote
         return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
     }
-    case SYM_IDENT: {
+    case SYM_IDENT:
+    case SYM_BASE_TYPE: {
         return (StrView)ts_node_source(tp, key_node);
     }
     default:

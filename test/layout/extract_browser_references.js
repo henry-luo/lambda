@@ -646,14 +646,41 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
     for (const cat of categories) {
         const categoryDir = path.join(dataDir, cat);
         try {
-            const files = await fs.readdir(categoryDir);
+            const files = await fs.readdir(categoryDir, { withFileTypes: true });
             const htmlFiles = files
-                .filter(file => file.endsWith('.html') || file.endsWith('.htm'))
-                .map(file => ({
-                    category: cat,
-                    file: file,
-                    path: path.join(categoryDir, file)
-                }));
+                .filter(entry => (typeof entry === 'string' ? entry : entry.name).endsWith('.html') || (typeof entry === 'string' ? entry : entry.name).endsWith('.htm'))
+                .filter(entry => typeof entry === 'string' || entry.isFile())
+                .map(entry => {
+                    const name = typeof entry === 'string' ? entry : entry.name;
+                    return {
+                        category: cat,
+                        file: name,
+                        path: path.join(categoryDir, name)
+                    };
+                });
+
+            // For suites with nested subdirectories (e.g., css2.1 has html4/, xhtml1/, etc.),
+            // also scan subdirectories for HTML files
+            const subDirs = files.filter(entry => typeof entry !== 'string' && entry.isDirectory() && !entry.name.startsWith('.'));
+            for (const subDir of subDirs) {
+                const subDirPath = path.join(categoryDir, subDir.name);
+                try {
+                    const subFiles = await fs.readdir(subDirPath);
+                    const subHtmlFiles = subFiles
+                        .filter(file => file.endsWith('.html') || file.endsWith('.htm'))
+                        .map(file => ({
+                            category: cat,
+                            file: file,
+                            path: path.join(subDirPath, file)
+                        }));
+                    htmlFiles.push(...subHtmlFiles);
+                    if (subHtmlFiles.length > 0) {
+                        console.log(`   📁 Found ${subHtmlFiles.length} HTML files in ${cat}/${subDir.name}/`);
+                    }
+                } catch (error) {
+                    // Skip unreadable subdirectories
+                }
+            }
 
             allFiles = allFiles.concat(htmlFiles);
             totalFiles += htmlFiles.length;

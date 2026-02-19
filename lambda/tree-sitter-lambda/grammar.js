@@ -152,6 +152,8 @@ module.exports = grammar({
     $.parent_expr,
     $.primary_expr,
     $.unary_expr,
+    // statement end: linebreak terminates statement before binary operators can continue
+    'statement_end',
     // binary operators
     'binary_pow',
     'binary_times',
@@ -194,14 +196,14 @@ module.exports = grammar({
       $.content
     )),
 
-    comment: _ => token(choice(
+    comment: _ => token(prec(1, choice(
       seq('//', /[^\r\n\u2028\u2029]*/),
       seq(
         '/*',
         /[^*]*\*+([^/*][^*]*\*+)*/,
         '/',
       ),
-    )),
+    ))),
 
     // Literal Values
 
@@ -305,7 +307,7 @@ module.exports = grammar({
       $.raise_stam,
       $.var_stam,
       $.assign_stam,
-      seq($._content_expr, choice(linebreak, ';')),
+      prec.right('statement_end', seq($._content_expr, choice(token(prec(10, /\r\n|\n/)), ';'))),
     ),
 
     content: $ => choice(
@@ -332,7 +334,7 @@ module.exports = grammar({
     ),
 
     map_item: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)),
+      field('name', choice($.string, $.symbol, $.identifier, $.base_type)),
       ':',
       field('as', $._expr),
     ),
@@ -369,6 +371,7 @@ module.exports = grammar({
       $.string,
       $.symbol,
       $.identifier,
+      $.base_type,
     ),
 
     attr: $ => seq(
@@ -480,13 +483,13 @@ module.exports = grammar({
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
       choice($.path_root, $.path_self, $.path_parent),
-      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive)))
+      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
     )),
 
     // Member access
     member_expr: $ => seq(
       field('object', $.primary_expr), ".",
-      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive))
+      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type))
     ),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent

@@ -1,5 +1,9 @@
 {
+<<<<<<<< HEAD:test/layout/reference/at-charset-061.json
+  "test_file": "at-charset-061.htm",
+========
   "test_file": "white-space-control-characters-001.htm",
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/white-space-control-characters-001.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +20,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 112,
+      "height": 127,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -216,11 +220,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 83,
+          "height": 98,
           "contentWidth": 1184,
-          "contentHeight": 83,
+          "contentHeight": 98,
           "scrollWidth": 1184,
-          "scrollHeight": 83
+          "scrollHeight": 98
         },
         "computed": {
           "display": "block",
@@ -328,14 +332,28 @@
             "children": [
               {
                 "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/at-charset-061.json
+                "text": "The XHTML file contributors/microsoft/submitted/Chapter_4/at-charset-061.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
+                "length": 164,
+========
                 "text": "The XHTML file contributors/microsoft/submitted/Chapter_16/white-space-control-characters-001.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
                 "length": 185,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/white-space-control-characters-001.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
+<<<<<<<< HEAD:test/layout/reference/at-charset-061.json
+                      "width": 1022.69,
+                      "height": 18,
+                      "right": 1030.69,
+                      "bottom": 34,
+                      "text": "The XHTML file contributors/microsoft/submitted/Chapter_4/at-charset-061.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
+                      "startIndex": 0,
+                      "endIndex": 164
+========
                       "width": 1165.72,
                       "height": 18,
                       "right": 1173.72,
@@ -343,6 +361,7 @@
                       "text": "The XHTML file contributors/microsoft/submitted/Chapter_16/white-space-control-characters-001.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
                       "startIndex": 0,
                       "endIndex": 185
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/white-space-control-characters-001.json
                     }
                   ],
                   "hasLayout": true,
@@ -456,11 +475,11 @@
               "x": 8,
               "y": 84,
               "width": 1184,
-              "height": 15,
+              "height": 30,
               "contentWidth": 1184,
-              "contentHeight": 15,
+              "contentHeight": 30,
               "scrollWidth": 1184,
-              "scrollHeight": 15
+              "scrollHeight": 30
             },
             "computed": {
               "display": "block",
@@ -508,14 +527,56 @@
             "children": [
               {
                 "nodeType": "text",
+<<<<<<<< HEAD:test/layout/reference/at-charset-061.json
+                "text": "Input is not proper UTF-8, indicate encoding !\n",
+                "length": 47,
+========
                 "text": "xmlParseCharRef: invalid xmlChar value 22, line 25, column 24",
                 "length": 61,
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/white-space-control-characters-001.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 84,
+<<<<<<<< HEAD:test/layout/reference/at-charset-061.json
+                      "width": 360.03,
+                      "height": 15,
+                      "right": 368.03,
+                      "bottom": 99,
+                      "text": "Input is not proper UTF-8, indicate encoding !\n",
+                      "startIndex": 0,
+                      "endIndex": 47
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "Bytes: 0x90 0xAF 0x8A 0xFA, line 11, column 14",
+                "length": 46,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 368.03,
+                      "y": 84,
+                      "width": 0,
+                      "height": 15,
+                      "right": 368.03,
+                      "bottom": 99,
+                      "text": "Bytes: 0x90 0xAF 0x8A 0xFA, line 11, column 14",
+                      "startIndex": 0,
+                      "endIndex": 46
+========
                       "width": 477.44,
                       "height": 15,
                       "right": 485.44,
@@ -523,6 +584,7 @@
                       "text": "xmlParseCharRef: invalid xmlChar value 22, line 25, column 24",
                       "startIndex": 0,
                       "endIndex": 61
+>>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/white-space-control-characters-001.json
                     }
                   ],
                   "hasLayout": true,
