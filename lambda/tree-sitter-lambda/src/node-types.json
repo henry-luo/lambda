@@ -385,6 +385,10 @@
       "required": true,
       "types": [
         {
+          "type": "base_type",
+          "named": true
+        },
+        {
           "type": "identifier",
           "named": true
         },
@@ -2579,6 +2583,10 @@
         "required": true,
         "types": [
           {
+            "type": "base_type",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -2925,6 +2933,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "base_type",
+            "named": true
+          },
           {
             "type": "identifier",
             "named": true
@@ -3398,6 +3410,10 @@
         "multiple": false,
         "required": false,
         "types": [
+          {
+            "type": "base_type",
+            "named": true
+          },
           {
             "type": "identifier",
             "named": true
