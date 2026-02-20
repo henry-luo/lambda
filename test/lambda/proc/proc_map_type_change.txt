@@ -1,0 +1,10 @@
+hello 20
+3.14
+999 30
+3 ok
+null 2
+1 two 3
+1 42 true
+2
+42 test
+yes 5
