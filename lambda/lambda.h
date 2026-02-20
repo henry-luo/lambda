@@ -646,6 +646,7 @@ typedef struct Context {
 
     Item push_d(double dval);
     Item push_l(int64_t lval);
+    Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
     Item push_k(DateTime dtval);
     Item push_c(int64_t cval);
 
