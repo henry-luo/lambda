@@ -203,6 +203,7 @@ void print_help() {
     printf("  --transpile-only             - Transpile to C code without execution\n");
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
+    printf("  --dry-run                    - Skip real IO; return fabricated results for network/filesystem ops\n");
     printf("\nScript Commands:\n");
     printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
     printf("                               - This automatically runs the main function if defined\n");
