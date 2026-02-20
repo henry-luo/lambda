@@ -624,6 +624,8 @@ typedef struct Context {
     ArrayInt64* array_int64_new(int length);
     ArrayFloat* array_float_new(int length);
 
+    void array_float_set(ArrayFloat *arr, int index, double value);
+
     Map* map(int type_index);
     Element* elmt(int type_index);
 

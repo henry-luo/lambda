@@ -24,6 +24,9 @@ void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
 
+// Forward declare has_current_item_ref from build_ast.cpp
+bool has_current_item_ref(AstNode* node);
+
 // Forward declare import resolver from mir.c
 extern "C" {
     void *import_resolver(const char *name);
@@ -516,6 +519,13 @@ static MIR_reg_t emit_call_3(MirTranspiler* mt, const char* fn_name,
 }
 
 // Call with no return value
+static void emit_call_void_0(MirTranspiler* mt, const char* fn_name) {
+    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 0, nullptr, 0);
+    emit_insn(mt, MIR_new_call_insn(mt->ctx, 2,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import)));
+}
+
 static void emit_call_void_1(MirTranspiler* mt, const char* fn_name,
     MIR_type_t arg1_type, MIR_op_t arg1) {
     MIR_var_t args[1] = {{arg1_type, "a", 0}};
@@ -698,10 +708,6 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
         return emit_box_float(mt, val_reg);
     case LMD_TYPE_BOOL:
         return emit_box_bool(mt, val_reg);
-    case LMD_TYPE_INT64:
-        return emit_box_int64(mt, val_reg);
-    case LMD_TYPE_DTIME:
-        return emit_box_dtime(mt, val_reg);
     case LMD_TYPE_STRING:
         return emit_box_string(mt, val_reg);
     case LMD_TYPE_SYMBOL:
@@ -711,6 +717,14 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
     case LMD_TYPE_ELEMENT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
     case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
         return emit_box_container(mt, val_reg);
+    // DTIME, INT64, DECIMAL, BINARY values from transpile_expr are always
+    // already boxed Items (tagged pointers). emit_load_const_boxed uses inline
+    // OR tagging, and function calls return tagged Items. Do NOT re-box via
+    // push_k/push_l/push_dc which would double-box and corrupt the value.
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_DTIME:
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_BINARY:
     case LMD_TYPE_NULL:
     case LMD_TYPE_ANY:
     case LMD_TYPE_ERROR:
@@ -981,24 +995,19 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
         }
         case LMD_TYPE_INT64: {
             TypeConst* tc = (TypeConst*)node->type;
-            MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
-            // Dereference to get int64_t value
-            MIR_reg_t r = new_reg(mt, "i64", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
-            return r;
+            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_INT64);
         }
         case LMD_TYPE_DTIME: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_DTIME);
         }
         case LMD_TYPE_DECIMAL: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_DECIMAL);
         }
         case LMD_TYPE_BINARY: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_BINARY);
         }
         default: {
             log_error("mir: unhandled literal type %d", tid);
@@ -1079,6 +1088,17 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     TypeId right_tid = bi->right->type ? bi->right->type->type_id : LMD_TYPE_ANY;
     TypeId result_tid = ((AstNode*)bi)->type ? ((AstNode*)bi)->type->type_id : LMD_TYPE_ANY;
 
+    // IDIV and MOD always go through runtime for correct error handling
+    // (div-by-zero → error, float operands → error, etc.)
+    if (bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD) {
+        MIR_reg_t boxl = transpile_box_item(mt, bi->left);
+        MIR_reg_t boxr = transpile_box_item(mt, bi->right);
+        const char* fn_name = (bi->op == OPERATOR_IDIV) ? "fn_idiv" : "fn_mod";
+        return emit_call_2(mt, fn_name, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+    }
+
     // Type-dispatch: if both sides are native types, use native MIR ops
     bool left_int = (left_tid == LMD_TYPE_INT);
     bool right_int = (right_tid == LMD_TYPE_INT);
@@ -1133,42 +1153,24 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             return r;
         }
         case OPERATOR_DIV: {
+            // int/int division promotes to float
             if (both_int) {
-                // int / int -> float in Lambda
-                MIR_reg_t fl2 = new_reg(mt, "i2d", MIR_T_D);
-                MIR_reg_t fr2 = new_reg(mt, "i2d", MIR_T_D);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, fl2),
+                MIR_reg_t dl = new_reg(mt, "i2d_l", MIR_T_D);
+                MIR_reg_t dr = new_reg(mt, "i2d_r", MIR_T_D);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dl),
                     MIR_new_reg_op(mt->ctx, left)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, fr2),
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dr),
                     MIR_new_reg_op(mt->ctx, right)));
                 MIR_reg_t r = new_reg(mt, "div", MIR_T_D);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DDIV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_reg_op(mt->ctx, fl2), MIR_new_reg_op(mt->ctx, fr2)));
+                    MIR_new_reg_op(mt->ctx, dl), MIR_new_reg_op(mt->ctx, dr)));
+                return r;
+            } else {
+                MIR_reg_t r = new_reg(mt, "div", MIR_T_D);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DDIV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
                 return r;
             }
-            MIR_reg_t r = new_reg(mt, "div", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DDIV, MIR_new_reg_op(mt->ctx, r),
-                MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-        case OPERATOR_IDIV: {
-            if (both_int) {
-                MIR_reg_t r = new_reg(mt, "idiv", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DIV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
-                return r;
-            }
-            // Boxed fallback
-            break;
-        }
-        case OPERATOR_MOD: {
-            if (both_int) {
-                MIR_reg_t r = new_reg(mt, "mod", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOD, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
-                return r;
-            }
-            break;
         }
         case OPERATOR_POW:
             // POW has AST type ANY (not FLOAT/INT), so native handling would
@@ -1316,6 +1318,88 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
 
     // Type operators
     if (bi->op == OPERATOR_IS) {
+        // Check if right operand is a constrained type for inline constraint evaluation
+        AstNode* right_node = bi->right;
+        // Unwrap primary node
+        if (right_node->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)right_node;
+            if (pri->expr) right_node = pri->expr;
+        }
+
+        AstConstrainedTypeNode* constrained_node = nullptr;
+        if (right_node->node_type == AST_NODE_CONSTRAINED_TYPE) {
+            constrained_node = (AstConstrainedTypeNode*)right_node;
+        } else if (right_node->type && right_node->type->kind == TYPE_KIND_CONSTRAINED) {
+            if (right_node->node_type == AST_NODE_IDENT) {
+                AstIdentNode* ident = (AstIdentNode*)right_node;
+                if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
+                    AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
+                    if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
+                        constrained_node = (AstConstrainedTypeNode*)type_def->as;
+                    }
+                }
+            }
+        } else if (right_node->type && right_node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* type_type = (TypeType*)right_node->type;
+            if (type_type->type && type_type->type->kind == TYPE_KIND_CONSTRAINED) {
+                if (right_node->node_type == AST_NODE_IDENT) {
+                    AstIdentNode* ident = (AstIdentNode*)right_node;
+                    if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
+                        AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
+                        if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
+                            constrained_node = (AstConstrainedTypeNode*)type_def->as;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (constrained_node) {
+            // Inline constrained type check: base_type_check && constraint_check
+            TypeConstrained* constrained = (TypeConstrained*)constrained_node->type;
+
+            MIR_reg_t ct_value = transpile_box_item(mt, bi->left);
+            MIR_reg_t result = new_reg(mt, "ct_res", MIR_T_I64);
+
+            // Check base type: item_type_id(ct_value) == constrained->base->type_id
+            MIR_reg_t tid_reg = emit_call_1(mt, "item_type_id", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ct_value));
+            MIR_reg_t base_match = new_reg(mt, "base_eq", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, base_match),
+                MIR_new_reg_op(mt->ctx, tid_reg),
+                MIR_new_int_op(mt->ctx, constrained->base->type_id)));
+
+            // If base doesn't match, result = false
+            MIR_label_t lbl_check = new_label(mt);
+            MIR_label_t lbl_end = new_label(mt);
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, 0)));  // default false
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, lbl_check),
+                MIR_new_reg_op(mt->ctx, base_match)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, lbl_end)));
+
+            // Base type matches — evaluate constraint with ~ bound to ct_value
+            emit_label(mt, lbl_check);
+            MIR_reg_t old_pipe_item = mt->pipe_item_reg;
+            bool old_in_pipe = mt->in_pipe;
+            mt->pipe_item_reg = ct_value;
+            mt->in_pipe = true;
+
+            MIR_reg_t constraint_val = transpile_box_item(mt, constrained_node->constraint);
+            MIR_reg_t truthy = emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, truthy)));
+
+            mt->pipe_item_reg = old_pipe_item;
+            mt->in_pipe = old_in_pipe;
+
+            emit_label(mt, lbl_end);
+            return result;
+        }
+
+        // Standard fn_is call for non-constrained types
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
         return emit_call_2(mt, "fn_is", MIR_T_I64,
@@ -1399,8 +1483,14 @@ static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
         return emit_call_1(mt, "fn_not", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
     }
     case OPERATOR_POS: {
-        MIR_reg_t operand = transpile_expr(mt, un->operand);
-        return operand;
+        if (operand_tid == LMD_TYPE_INT || operand_tid == LMD_TYPE_INT64 || operand_tid == LMD_TYPE_FLOAT) {
+            // No-op for numeric types
+            MIR_reg_t operand = transpile_expr(mt, un->operand);
+            return operand;
+        }
+        // Runtime fn_pos for string-to-number casting etc.
+        MIR_reg_t boxed = transpile_box_item(mt, un->operand);
+        return emit_call_1(mt, "fn_pos", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
     }
     case OPERATOR_IS_ERROR: {
         // ^expr: check if Item type is LMD_TYPE_ERROR
@@ -1438,9 +1528,18 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 
     MIR_reg_t cond = transpile_expr(mt, if_node->cond);
 
-    // For non-bool condition, use is_truthy
+    // For non-bool condition, check truthiness
+    // Lambda semantics: only null, error, and false are falsy.
+    // Int (even 0), Float (even 0.0), strings, lists, etc. are all truthy.
     MIR_reg_t cond_val = cond;
-    if (cond_tid != LMD_TYPE_BOOL) {
+    if (cond_tid == LMD_TYPE_INT || cond_tid == LMD_TYPE_INT64 || cond_tid == LMD_TYPE_FLOAT ||
+        cond_tid == LMD_TYPE_STRING || cond_tid == LMD_TYPE_SYMBOL) {
+        // These types are always truthy in Lambda — no comparison needed
+        MIR_reg_t always_true = new_reg(mt, "true", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, always_true),
+            MIR_new_int_op(mt->ctx, 1)));
+        cond_val = always_true;
+    } else if (cond_tid != LMD_TYPE_BOOL) {
         MIR_reg_t boxed = emit_box(mt, cond, cond_tid);
         cond_val = emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
     }
@@ -1515,55 +1614,122 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 // Match expression
 // ============================================================================
 
+// Emit a single pattern test (fn_is/fn_in/fn_eq) and branch to l_fail on mismatch
+static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_reg_t boxed_scrut, MIR_label_t l_fail) {
+    // Handle constrained type patterns: case int that (~ > 0)
+    if (pattern->node_type == AST_NODE_CONSTRAINED_TYPE) {
+        AstConstrainedTypeNode* ct = (AstConstrainedTypeNode*)pattern;
+        TypeConstrained* constrained = (TypeConstrained*)ct->type;
+        if (constrained) {
+            // Check base type
+            MIR_reg_t tid_reg = emit_call_1(mt, "item_type_id", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut));
+            MIR_reg_t base_match = new_reg(mt, "base_eq", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, base_match),
+                MIR_new_reg_op(mt->ctx, tid_reg),
+                MIR_new_int_op(mt->ctx, constrained->base->type_id)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fail),
+                MIR_new_reg_op(mt->ctx, base_match)));
+
+            // Base type matches — evaluate constraint with ~ bound to scrutinee
+            MIR_reg_t old_pipe_item = mt->pipe_item_reg;
+            bool old_in_pipe = mt->in_pipe;
+            mt->pipe_item_reg = boxed_scrut;
+            mt->in_pipe = true;
+
+            MIR_reg_t constraint_val = transpile_box_item(mt, ct->constraint);
+            MIR_reg_t truthy = emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val));
+
+            mt->pipe_item_reg = old_pipe_item;
+            mt->in_pipe = old_in_pipe;
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fail),
+                MIR_new_reg_op(mt->ctx, truthy)));
+            return;
+        }
+    }
+
+    MIR_reg_t pat = transpile_expr(mt, pattern);
+    TypeId pat_tid = pattern->type ? pattern->type->type_id : LMD_TYPE_ANY;
+    MIR_reg_t boxed_pat = emit_box(mt, pat, pat_tid);
+
+    MIR_reg_t match_test;
+    if (pat_tid == LMD_TYPE_TYPE) {
+        match_test = emit_call_2(mt, "fn_is", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
+    } else if (pat_tid == LMD_TYPE_RANGE) {
+        match_test = emit_call_2(mt, "fn_in", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
+    } else {
+        match_test = emit_call_2(mt, "fn_eq", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
+    }
+
+    MIR_reg_t is_match = new_reg(mt, "ismatch", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_match),
+        MIR_new_reg_op(mt->ctx, match_test), MIR_new_int_op(mt->ctx, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fail),
+        MIR_new_reg_op(mt->ctx, is_match)));
+}
+
+// Emit pattern test handling union (or-) patterns: branches to l_fail only if ALL alternatives fail
+static void emit_match_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_reg_t boxed_scrut, MIR_label_t l_fail) {
+    // Handle union patterns (A | B): try left, if matches jump to success, else try right
+    if (pattern->node_type == AST_NODE_BINARY_TYPE) {
+        AstBinaryNode* bi = (AstBinaryNode*)pattern;
+        if (bi->op == OPERATOR_UNION) {
+            MIR_label_t l_success = new_label(mt);
+            MIR_label_t l_try_right = new_label(mt);
+
+            // Try left alternative
+            emit_match_pattern_test(mt, bi->left, boxed_scrut, l_try_right);
+            // Left matched - jump to success
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_success)));
+
+            // Try right alternative
+            emit_label(mt, l_try_right);
+            emit_match_pattern_test(mt, bi->right, boxed_scrut, l_fail);
+            // Right matched - fall through to success
+
+            emit_label(mt, l_success);
+            return;
+        }
+    }
+
+    // Simple pattern test
+    emit_single_pattern_test(mt, pattern, boxed_scrut, l_fail);
+}
+
 static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     MIR_reg_t scrutinee = transpile_expr(mt, match_node->scrutinee);
     TypeId scrut_tid = match_node->scrutinee->type ? match_node->scrutinee->type->type_id : LMD_TYPE_ANY;
     MIR_reg_t boxed_scrut = emit_box(mt, scrutinee, scrut_tid);
 
+    // Set ~ (current item) to the scrutinee value for match bodies
+    bool old_in_pipe = mt->in_pipe;
+    MIR_reg_t old_pipe_item = mt->pipe_item_reg;
+    MIR_reg_t old_pipe_index = mt->pipe_index_reg;
+    mt->in_pipe = true;
+    mt->pipe_item_reg = boxed_scrut;
+
     MIR_reg_t result = new_reg(mt, "match", MIR_T_I64);
     MIR_label_t l_end = new_label(mt);
 
-    AstMatchArm* arm = match_node->first_arm;
+    AstNode* arm = (AstNode*)match_node->first_arm;
     while (arm) {
-        if (arm->pattern) {
-            // Evaluate pattern
-            MIR_reg_t pattern = transpile_expr(mt, arm->pattern);
-            TypeId pat_tid = arm->pattern->type ? arm->pattern->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_pat = emit_box(mt, pattern, pat_tid);
-
-            // Dispatch based on pattern type:
-            // - TYPE patterns: fn_is (type membership check)
-            // - RANGE patterns: fn_in (containment check)
-            // - Value patterns (int, string, symbol, etc.): fn_eq (equality check)
-            MIR_reg_t match_test;
-            if (pat_tid == LMD_TYPE_TYPE) {
-                // fn_is returns Bool (uint8_t)
-                match_test = emit_call_2(mt, "fn_is", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
-            } else if (pat_tid == LMD_TYPE_RANGE) {
-                // fn_in returns Bool (uint8_t)
-                match_test = emit_call_2(mt, "fn_in", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
-            } else {
-                // fn_eq returns Bool (uint8_t)
-                match_test = emit_call_2(mt, "fn_eq", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
-            }
-
+        AstMatchArm* match_arm = (AstMatchArm*)arm;
+        if (match_arm->pattern) {
             MIR_label_t l_next = new_label(mt);
-            // fn_is/fn_in/fn_eq return Bool: 0=false, 1=true, 2=error
-            // Must check == BOOL_TRUE (1), not just non-zero, to avoid treating BOOL_ERROR as match
-            MIR_reg_t is_match = new_reg(mt, "ismatch", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_match),
-                MIR_new_reg_op(mt->ctx, match_test), MIR_new_int_op(mt->ctx, 1)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_next),
-                MIR_new_reg_op(mt->ctx, is_match)));
+
+            // Emit pattern test (handles union/or-patterns recursively)
+            emit_match_pattern_test(mt, match_arm->pattern, boxed_scrut, l_next);
 
             // Body
-            MIR_reg_t body = transpile_box_item(mt, arm->body);
+            MIR_reg_t body = transpile_box_item(mt, match_arm->body);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
@@ -1571,12 +1737,12 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
             emit_label(mt, l_next);
         } else {
             // Default arm
-            MIR_reg_t body = transpile_box_item(mt, arm->body);
+            MIR_reg_t body = transpile_box_item(mt, match_arm->body);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
         }
-        arm = (AstMatchArm*)arm->next;
+        arm = arm->next;
     }
 
     // No match - return ITEM_NULL
@@ -1585,6 +1751,12 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
         MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
 
     emit_label(mt, l_end);
+
+    // Restore old pipe state
+    mt->in_pipe = old_in_pipe;
+    mt->pipe_item_reg = old_pipe_item;
+    mt->pipe_index_reg = old_pipe_index;
+
     return result;
 }
 
@@ -1613,8 +1785,50 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     // Box the collection for fn_len / item_at
     MIR_reg_t boxed_coll = emit_box(mt, collection, coll_tid);
 
-    // Get length
-    MIR_reg_t len = emit_call_1(mt, "fn_len", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+    // Check for map type at runtime (maps and vmaps need special iteration via item_keys)
+    MIR_reg_t coll_type_id = emit_call_1(mt, "item_type_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+    MIR_reg_t is_map_coll = new_reg(mt, "is_map_coll", MIR_T_I64);
+    MIR_reg_t is_map_t = new_reg(mt, "is_map_t", MIR_T_I64);
+    MIR_reg_t is_vmap_t = new_reg(mt, "is_vmap_t", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_map_t),
+        MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_vmap_t),
+        MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_VMAP)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_coll),
+        MIR_new_reg_op(mt->ctx, is_map_t), MIR_new_reg_op(mt->ctx, is_vmap_t)));
+
+    // Get length (branching for map vs non-map)
+    MIR_reg_t len = new_reg(mt, "for_len", MIR_T_I64);
+    MIR_reg_t keys_al = new_reg(mt, "for_keys", MIR_T_P);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_new_int_op(mt->ctx, 0)));
+
+    MIR_label_t l_non_map_for = new_label(mt);
+    MIR_label_t l_start_for = new_label(mt);
+
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_non_map_for),
+        MIR_new_reg_op(mt->ctx, is_map_coll)));
+
+    // MAP path
+    MIR_reg_t keys_res = emit_call_1(mt, "item_keys", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_new_reg_op(mt->ctx, keys_res)));
+    MIR_reg_t map_len_v = emit_call_1(mt, "pipe_map_len", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+        MIR_new_reg_op(mt->ctx, map_len_v)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_start_for)));
+
+    // NON-MAP path
+    emit_label(mt, l_non_map_for);
+    MIR_reg_t arr_len_v = emit_call_1(mt, "fn_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+        MIR_new_reg_op(mt->ctx, arr_len_v)));
+
+    emit_label(mt, l_start_for);
 
     // Create spreadable output array (for-expressions produce spreadable arrays)
     MIR_reg_t output = emit_call_0(mt, "array_spreadable", MIR_T_P);
@@ -1643,32 +1857,71 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, cmp)));
 
-    // Get current item: item_at(collection, idx)
-    MIR_reg_t current_item = emit_call_2(mt, "item_at", MIR_T_I64,
+    // Get current item (branching for map vs non-map)
+    MIR_reg_t current_item = new_reg(mt, "cur_item", MIR_T_I64);
+    MIR_label_t l_arr_get = new_label(mt);
+    MIR_label_t l_got_cur = new_label(mt);
+
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_arr_get),
+        MIR_new_reg_op(mt->ctx, is_map_coll)));
+
+    // MAP path: get value via pipe_map_val
+    MIR_reg_t map_v = emit_call_3(mt, "pipe_map_val", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, current_item),
+        MIR_new_reg_op(mt->ctx, map_v)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_got_cur)));
+
+    // NON-MAP path: use item_at
+    emit_label(mt, l_arr_get);
+    MIR_reg_t arr_v = emit_call_2(mt, "item_at", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, current_item),
+        MIR_new_reg_op(mt->ctx, arr_v)));
+    emit_label(mt, l_got_cur);
 
     // Bind loop variable
     char var_name[128];
     snprintf(var_name, sizeof(var_name), "%.*s", (int)loop->name->len, loop->name->chars);
     TypeId var_tid = loop->type ? loop->type->type_id : LMD_TYPE_ANY;
 
-    // The item_at returns Item, unbox if needed
-    MIR_reg_t var_reg;
-    if (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL || var_tid == LMD_TYPE_STRING) {
-        var_reg = emit_unbox(mt, current_item, var_tid);
+    if (loop->is_named && !loop->index_name) {
+        // Single-variable 'at' form: for k at map → k is the key name
+        MIR_reg_t key_item = emit_call_2(mt, "pipe_map_key", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+        set_var(mt, var_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
     } else {
-        var_reg = current_item;
-        var_tid = LMD_TYPE_ANY;
-    }
-    MIR_type_t var_mir = type_to_mir(var_tid);
-    set_var(mt, var_name, var_reg, var_mir, var_tid);
+        // Normal case: name = current value
+        MIR_reg_t var_reg;
+        if (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL || var_tid == LMD_TYPE_STRING) {
+            var_reg = emit_unbox(mt, current_item, var_tid);
+        } else {
+            var_reg = current_item;
+            var_tid = LMD_TYPE_ANY;
+        }
+        MIR_type_t var_mir = type_to_mir(var_tid);
+        set_var(mt, var_name, var_reg, var_mir, var_tid);
 
-    // Bind index variable if present
-    if (loop->index_name) {
-        char idx_name[128];
-        snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
-        set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
+        // Bind index variable if present
+        if (loop->index_name) {
+            char idx_name[128];
+            snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
+            if (coll_tid == LMD_TYPE_RANGE) {
+                set_var(mt, idx_name, var_reg, var_mir, var_tid);
+            } else if (loop->is_named) {
+                // Two-variable 'at' form: for k, v at map → index_name = key
+                MIR_reg_t key_item = emit_call_2(mt, "pipe_map_key", MIR_T_I64,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+                set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
+            } else {
+                set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
+            }
+        }
     }
 
     // Process let clauses (additional variable bindings)
@@ -1890,24 +2143,25 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 // ============================================================================
 
 static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
-    // Determine array type
-    TypeId elem_tid = LMD_TYPE_ANY;
-    if (arr_node->type && arr_node->type->type_id == LMD_TYPE_ARRAY_INT) {
-        elem_tid = LMD_TYPE_INT;
-    }
-
     // Check if any child is a for-expression or spread (needs spread path)
     bool has_spreadable = false;
     AstNode* scan = arr_node->item;
     while (scan) {
         if (scan->node_type == AST_NODE_FOR_EXPR || scan->node_type == AST_NODE_SPREAD) {
             has_spreadable = true;
-            break;
         }
         scan = scan->next;
     }
 
+    // Generic array path
     MIR_reg_t arr = emit_call_0(mt, "array", MIR_T_P);
+
+    // Handle empty arrays without array_end() which returns ITEM_NULL_SPREADABLE
+    if (!arr_node->item) {
+        emit_call_void_0(mt, "frame_end");
+        // Array* pointer is already a valid Item (container pointer)
+        return arr;
+    }
 
     AstNode* item = arr_node->item;
     while (item) {
@@ -2347,6 +2601,43 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         int arg_count = 0;
         while (arg) { arg_count++; arg = arg->next; }
 
+        // ==== VMap: map() and map(arr) ====
+        if (info->fn == SYSFUNC_VMAP_NEW) {
+            if (arg_count == 0) {
+                // map() -> vmap_new()
+                return emit_call_0(mt, "vmap_new", MIR_T_I64);
+            } else {
+                // map([k1, v1, ...]) -> vmap_from_array(arr)
+                arg = call_node->argument;
+                MIR_reg_t a1 = transpile_expr(mt, arg);
+                TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+                MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
+                return emit_call_1(mt, "vmap_from_array", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+            }
+        }
+        // ==== VMap: m.set(k, v) -> vmap_set(m, k, v) ====
+        if (info->fn == SYSPROC_VMAP_SET) {
+            arg = call_node->argument;
+            MIR_reg_t a1 = transpile_expr(mt, arg);
+            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
+
+            arg = arg->next;
+            MIR_reg_t a2 = transpile_expr(mt, arg);
+            TypeId a2_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            MIR_reg_t boxed_a2 = emit_box(mt, a2, a2_tid);
+
+            arg = arg->next;
+            MIR_reg_t a3 = transpile_expr(mt, arg);
+            TypeId a3_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            MIR_reg_t boxed_a3 = emit_box(mt, a3, a3_tid);
+
+            return emit_call_3(mt, "vmap_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
+        }
+
         // Build runtime function name: "fn_" or "pn_" + name + optional arg count for overloaded
         char sys_fn_name[128];
         if (info->is_overloaded) {
@@ -2520,26 +2811,99 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
         if (fn_mangled && (local_func || entry_node)) {
 
-            // Count args and build arg list
+            // Get function definition for param info (defaults, named args)
+            AstFuncNode* fn_def = NULL;
+            if (entry_node && (entry_node->node_type == AST_NODE_FUNC ||
+                entry_node->node_type == AST_NODE_FUNC_EXPR ||
+                entry_node->node_type == AST_NODE_PROC)) {
+                fn_def = (AstFuncNode*)entry_node;
+            }
+
+            // Get expected param count
+            int expected_params = 0;
+            if (fn_def && fn_def->type && fn_def->type->type_id == LMD_TYPE_FUNC) {
+                TypeFunc* ft = (TypeFunc*)fn_def->type;
+                expected_params = ft->param_count;
+            }
+
+            // Check if any arguments are named
+            bool has_named_args = false;
             AstNode* arg = call_node->argument;
             int arg_count = 0;
-            while (arg) { arg_count++; arg = arg->next; }
+            while (arg) {
+                if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
+                arg_count++;
+                arg = arg->next;
+            }
+            if (expected_params == 0) expected_params = arg_count;
 
-            // Evaluate arguments - always box for user functions (all params are Item)
+            // Build resolved_args array: maps each parameter position to its argument expression
+            AstNode* resolved_args[16] = {0};
+
+            if (has_named_args && fn_def) {
+                // Reorder: named args go to their param positions, positional fill sequentially
+                int positional_idx = 0;
+                arg = call_node->argument;
+                while (arg) {
+                    if (arg->node_type == AST_NODE_NAMED_ARG) {
+                        AstNamedNode* named_arg = (AstNamedNode*)arg;
+                        // Find param index by name
+                        int param_idx = 0;
+                        AstNamedNode* param = fn_def->param;
+                        while (param) {
+                            if (param->name && named_arg->name &&
+                                param->name->len == named_arg->name->len &&
+                                memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
+                                if (param_idx < 16) resolved_args[param_idx] = named_arg->as;
+                                break;
+                            }
+                            param_idx++;
+                            param = (AstNamedNode*)((AstNode*)param)->next;
+                        }
+                    } else {
+                        // Skip positional slots already filled by named args
+                        while (positional_idx < 16 && resolved_args[positional_idx]) positional_idx++;
+                        if (positional_idx < 16) resolved_args[positional_idx++] = arg;
+                    }
+                    arg = arg->next;
+                }
+            } else {
+                // Simple positional: fill in order
+                arg = call_node->argument;
+                for (int i = 0; i < arg_count && i < 16; i++) {
+                    resolved_args[i] = arg;
+                    arg = arg->next;
+                }
+            }
+
+            // Emit args in parameter order, filling defaults for missing slots
             MIR_op_t arg_ops[16];
             MIR_var_t arg_vars[16];
             int ai = 0;
-            arg = call_node->argument;
-            while (arg && ai < 16) {
-                // Use transpile_box_item to correctly box sub-expressions
-                // (transpile_expr + emit_box fails for BINARY ops that return native
-                // values but have AST type ANY, e.g., a % b with typed int params)
-                MIR_reg_t val = transpile_box_item(mt, arg);
-                arg_ops[ai] = MIR_new_reg_op(mt->ctx, val);
-                arg_vars[ai] = {MIR_T_I64, "p", 0};
-                ai++;
-                arg = arg->next;
+            AstNamedNode* param_iter = fn_def ? fn_def->param : NULL;
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            for (int i = 0; i < expected_params && i < 16; i++) {
+                if (resolved_args[i]) {
+                    MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
+                    arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                } else {
+                    // Check for default value in TypeParam
+                    TypeParam* tp = param_iter ? (TypeParam*)((AstNode*)param_iter)->type : NULL;
+                    if (tp && tp->default_value) {
+                        MIR_reg_t val = transpile_box_item(mt, tp->default_value);
+                        arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                    } else {
+                        MIR_reg_t null_reg = new_reg(mt, "pad", MIR_T_I64);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, null_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                        arg_ops[i] = MIR_new_reg_op(mt->ctx, null_reg);
+                    }
+                }
+                arg_vars[i] = {MIR_T_I64, "p", 0};
+                if (param_iter) param_iter = (AstNamedNode*)((AstNode*)param_iter)->next;
             }
+            ai = expected_params;
 
             // Return type is always Item (MIR_T_I64) for user functions
             MIR_type_t ret_type = MIR_T_I64;
@@ -2662,34 +3026,180 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     TypeId left_tid = pipe_node->left->type ? pipe_node->left->type->type_id : LMD_TYPE_ANY;
     MIR_reg_t boxed_left = emit_box(mt, left, left_tid);
 
-    // Check if right side is a simple function call that should get data injected
-    if (pipe_node->op == OPERATOR_PIPE) {
-        // Aggregate pipe: data | func  ->  func(data)
+    bool uses_current_item = has_current_item_ref(pipe_node->right);
+
+    // Simple aggregate pipe without ~ : data | func -> func(data)
+    if (!uses_current_item && pipe_node->op == OPERATOR_PIPE) {
         MIR_reg_t right = transpile_expr(mt, pipe_node->right);
         TypeId right_tid = pipe_node->right->type ? pipe_node->right->type->type_id : LMD_TYPE_ANY;
         MIR_reg_t boxed_right = emit_box(mt, right, right_tid);
-
-        // Use fn_pipe_call(data, func)
         return emit_call_2(mt, "fn_pipe_call", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right));
     }
 
-    if (pipe_node->op == OPERATOR_WHERE) {
-        // where filter: data where predicate
-        MIR_reg_t right = transpile_expr(mt, pipe_node->right);
-        TypeId right_tid = pipe_node->right->type ? pipe_node->right->type->type_id : LMD_TYPE_ANY;
-        MIR_reg_t boxed_right = emit_box(mt, right, right_tid);
+    // Iterating pipe (uses ~ or WHERE/THAT) - generate inline loop
+    // Create result array
+    MIR_reg_t result_arr = emit_call_0(mt, "array", MIR_T_P);
 
-        return emit_call_2(mt, "fn_pipe_where", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
+    // Check if collection is a MAP or VMAP (maps need key-based iteration)
+    MIR_reg_t type_id_reg = emit_call_1(mt, "item_type_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+
+    MIR_reg_t is_map = new_reg(mt, "is_map", MIR_T_I64);
+    MIR_reg_t is_map_t2 = new_reg(mt, "is_map_t2", MIR_T_I64);
+    MIR_reg_t is_vmap_t2 = new_reg(mt, "is_vmap_t2", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_map_t2),
+        MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_vmap_t2),
+        MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_VMAP)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map),
+        MIR_new_reg_op(mt->ctx, is_map_t2), MIR_new_reg_op(mt->ctx, is_vmap_t2)));
+
+    // Pre-declare len, keys_al registers
+    MIR_reg_t len = new_reg(mt, "pipe_len", MIR_T_I64);
+    MIR_reg_t keys_al = new_reg(mt, "pipe_keys", MIR_T_P);
+
+    // Initialize keys_al to NULL
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_new_int_op(mt->ctx, 0)));
+
+    MIR_label_t l_non_map = new_label(mt);
+    MIR_label_t l_start_loop = new_label(mt);
+
+    // Branch: if not map, use normal fn_len path
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_non_map),
+        MIR_new_reg_op(mt->ctx, is_map)));
+
+    // MAP path: get keys and length from keys
+    MIR_reg_t keys_result = emit_call_1(mt, "item_keys", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_new_reg_op(mt->ctx, keys_result)));
+    MIR_reg_t map_len = emit_call_1(mt, "pipe_map_len", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+        MIR_new_reg_op(mt->ctx, map_len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_start_loop)));
+
+    // NON-MAP path: use fn_len
+    emit_label(mt, l_non_map);
+    MIR_reg_t arr_len = emit_call_1(mt, "fn_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+        MIR_new_reg_op(mt->ctx, arr_len)));
+
+    emit_label(mt, l_start_loop);
+
+    // Index counter
+    MIR_reg_t idx = new_reg(mt, "pipe_i", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
+        MIR_new_int_op(mt->ctx, 0)));
+
+    MIR_label_t l_loop = new_label(mt);
+    MIR_label_t l_continue = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+
+    emit_label(mt, l_loop);
+    // Exit when idx >= len
+    MIR_reg_t cmp = new_reg(mt, "pipe_cmp", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp),
+        MIR_new_reg_op(mt->ctx, idx), MIR_new_reg_op(mt->ctx, len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+        MIR_new_reg_op(mt->ctx, cmp)));
+
+    // Get pipe_item and pipe_index based on collection type
+    MIR_reg_t pipe_item = new_reg(mt, "pipe_item", MIR_T_I64);
+    MIR_reg_t pipe_index = new_reg(mt, "pipe_idx_item", MIR_T_I64);
+
+    MIR_label_t l_arr_item = new_label(mt);
+    MIR_label_t l_got_item = new_label(mt);
+
+    // Branch: if not map, use item_at
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_arr_item),
+        MIR_new_reg_op(mt->ctx, is_map)));
+
+    // MAP path: get value and key from map using keys ArrayList
+    MIR_reg_t map_val = emit_call_3(mt, "pipe_map_val", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_item),
+        MIR_new_reg_op(mt->ctx, map_val)));
+    MIR_reg_t map_key = emit_call_2(mt, "pipe_map_key", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_index),
+        MIR_new_reg_op(mt->ctx, map_key)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_got_item)));
+
+    // ARRAY/LIST/RANGE path: use item_at
+    emit_label(mt, l_arr_item);
+    MIR_reg_t arr_item = emit_call_2(mt, "item_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_item),
+        MIR_new_reg_op(mt->ctx, arr_item)));
+    MIR_reg_t arr_idx = emit_box_int(mt, idx);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_index),
+        MIR_new_reg_op(mt->ctx, arr_idx)));
+
+    emit_label(mt, l_got_item);
+
+    // Save old pipe state and set new
+    bool old_in_pipe = mt->in_pipe;
+    MIR_reg_t old_pipe_item = mt->pipe_item_reg;
+    MIR_reg_t old_pipe_index = mt->pipe_index_reg;
+    mt->in_pipe = true;
+    mt->pipe_item_reg = pipe_item;
+    mt->pipe_index_reg = pipe_index;
+
+    // Evaluate right-side expression
+    MIR_reg_t right_val = transpile_expr(mt, pipe_node->right);
+    TypeId right_tid = pipe_node->right->type ? pipe_node->right->type->type_id : LMD_TYPE_ANY;
+    MIR_reg_t boxed_right = emit_box(mt, right_val, right_tid);
+
+    // Restore old pipe state
+    mt->in_pipe = old_in_pipe;
+    mt->pipe_item_reg = old_pipe_item;
+    mt->pipe_index_reg = old_pipe_index;
+
+    if (pipe_node->op == OPERATOR_WHERE) {
+        // Filter: only push original item if predicate is truthy
+        MIR_reg_t truthy;
+        if (right_tid == LMD_TYPE_BOOL) {
+            // right_val is already native Bool (0/1), use directly
+            truthy = right_val;
+        } else {
+            // Need to box and check truthiness
+            truthy = emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right));
+        }
+        MIR_label_t l_skip = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_skip),
+            MIR_new_reg_op(mt->ctx, truthy)));
+        // Push original item
+        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, result_arr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pipe_item));
+        emit_label(mt, l_skip);
+    } else {
+        // Map: push transformed result
+        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, result_arr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right));
     }
 
-    // Default
-    MIR_reg_t right = transpile_expr(mt, pipe_node->right);
-    TypeId right_tid = pipe_node->right->type ? pipe_node->right->type->type_id : LMD_TYPE_ANY;
-    return emit_box(mt, right, right_tid);
+    // Continue: increment index
+    emit_label(mt, l_continue);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
+        MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
+
+    emit_label(mt, l_end);
+
+    // Finalize array — array_end returns Item
+    MIR_reg_t final = emit_call_1(mt, "array_end", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, result_arr));
+    return final;
 }
 
 // ============================================================================
@@ -2698,16 +3208,24 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
 
 static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
     if (raise_node->value) {
+        // Evaluate the raise value and return it directly (like C transpiler)
+        // The value is typically already an error from error() call
         MIR_reg_t val = transpile_expr(mt, raise_node->value);
         TypeId val_tid = raise_node->value->type ? raise_node->value->type->type_id : LMD_TYPE_ANY;
         MIR_reg_t boxed = emit_box(mt, val, val_tid);
-        // Convert to error
-        return emit_call_1(mt, "fn_error", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        // Return the error value from the function
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
+        // Dummy register for unreachable code after return
+        MIR_reg_t r = new_reg(mt, "raise_dummy", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, 0)));
+        return r;
     }
     MIR_reg_t r = new_reg(mt, "err", MIR_T_I64);
     uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
+    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, r)));
     return r;
 }
 
@@ -2871,41 +3389,41 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_box_bool(mt, val);
         }
 
-        // 3. both_int arithmetic: ADD,SUB,MUL,IDIV,MOD → native int; DIV → native float
+        // 3. both_int arithmetic: ADD,SUB,MUL → native int; DIV → native float
+        //    IDIV,MOD always go through boxed runtime (handled before native block)
         //    POW falls through to boxed runtime (AST type is ANY)
         if (both_int) {
             switch (op) {
             case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
-            case OPERATOR_IDIV: case OPERATOR_MOD:
                 return emit_box_int(mt, val);
             case OPERATOR_DIV:
                 return emit_box_float(mt, val);
             default:
-                return val; // POW, JOIN, etc. → boxed fallback
+                return val; // POW, IDIV, MOD, JOIN, etc. → boxed fallback
             }
         }
 
         // 4. both_float: ADD,SUB,MUL,DIV → native float
-        //    POW falls through to boxed runtime (AST type is ANY)
+        //    IDIV,MOD,POW fall through to boxed runtime
         if (both_float) {
             switch (op) {
             case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
             case OPERATOR_DIV:
                 return emit_box_float(mt, val);
             default:
-                return val; // POW,IDIV,MOD with float → boxed fallback
+                return val; // IDIV,MOD,POW with float → boxed fallback
             }
         }
 
         // 5. int_float: ADD,SUB,MUL,DIV → native float
-        //    POW falls through to boxed runtime (AST type is ANY)
+        //    IDIV,MOD,POW fall through to boxed runtime
         if (int_float) {
             switch (op) {
             case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
             case OPERATOR_DIV:
                 return emit_box_float(mt, val);
             default:
-                return val; // POW,IDIV,MOD with int_float → boxed fallback
+                return val; // IDIV,MOD,POW with int_float → boxed fallback
             }
         }
 
@@ -2932,9 +3450,13 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         if (uop == OPERATOR_NOT) {
             return emit_box_bool(mt, val);
         }
-        // POS: returns operand unchanged (native type)
+        // POS: for native numeric types, box as that type; otherwise fn_pos already returns boxed Item
         if (uop == OPERATOR_POS) {
-            return emit_box(mt, val, ct);
+            if (ct == LMD_TYPE_INT) return emit_box_int(mt, val);
+            if (ct == LMD_TYPE_FLOAT) return emit_box_float(mt, val);
+            // INT64, DTIME, DECIMAL: POS returns the operand directly from
+            // transpile_expr, which is already a boxed Item. No re-boxing needed.
+            return val;
         }
         // IS_ERROR: always returns native bool regardless of operand type
         if (uop == OPERATOR_IS_ERROR) {
@@ -2966,15 +3488,27 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
     // base_type(type_id) returns a Type* for runtime type checking
     TypeId tid = type_node->type ? type_node->type->type_id : LMD_TYPE_ANY;
 
-    // If this is a TypeType, get the actual type
+    // If this is a TypeType, get the actual type and check for special cases
     if (type_node->type && type_node->type->type_id == LMD_TYPE_TYPE) {
         TypeType* tt = (TypeType*)type_node->type;
         if (tt->type) {
+            // For datetime sub-types (date, time), use const_type to preserve the specific Type pointer
+            extern Type TYPE_DATE, TYPE_TIME;
+            if (tt->type == &TYPE_DATE || tt->type == &TYPE_TIME) {
+                // Cannot use base_type because date/time/dtime share the same type_id
+                // Must use the original Type* pointer via type_list
+                // Fall through to base_type for now - this will be improved when type_list is accessible
+            }
             tid = tt->type->type_id;
         }
     }
 
     return emit_call_1(mt, "base_type", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, tid));
+}
+
+// Emit const_type(type_index) for complex types that need runtime type_index lookup
+static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index) {
+    return emit_call_1(mt, "const_type", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
 }
 
 // ============================================================================
@@ -3130,15 +3664,79 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         }
         return transpile_base_type(mt, (AstTypeNode*)node);
     }
-    case AST_NODE_UNARY_TYPE:
-    case AST_NODE_CONTENT_TYPE:
-    case AST_NODE_LIST_TYPE:
-    case AST_NODE_ARRAY_TYPE:
-    case AST_NODE_MAP_TYPE:
-    case AST_NODE_ELMT_TYPE:
-    case AST_NODE_FUNC_TYPE:
-    case AST_NODE_CONSTRAINED_TYPE:
+    case AST_NODE_UNARY_TYPE: {
+        // Unary type (e.g. int?, int+, int[2]): use const_type(type_index)
+        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)node->type;
+            if (tt->type) {
+                TypeUnary* ut = (TypeUnary*)tt->type;
+                return transpile_const_type(mt, ut->type_index);
+            }
+        }
         return transpile_base_type(mt, (AstTypeNode*)node);
+    }
+    case AST_NODE_CONTENT_TYPE:
+    case AST_NODE_LIST_TYPE: {
+        // List type: use const_type(type_index)
+        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)node->type;
+            if (tt->type) {
+                TypeList* lt = (TypeList*)tt->type;
+                return transpile_const_type(mt, lt->type_index);
+            }
+        }
+        return transpile_base_type(mt, (AstTypeNode*)node);
+    }
+    case AST_NODE_ARRAY_TYPE: {
+        // Array type (e.g. [int], int[2]): use const_type(type_index)
+        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)node->type;
+            if (tt->type) {
+                TypeArray* at = (TypeArray*)tt->type;
+                return transpile_const_type(mt, at->type_index);
+            }
+        }
+        return transpile_base_type(mt, (AstTypeNode*)node);
+    }
+    case AST_NODE_MAP_TYPE: {
+        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)node->type;
+            if (tt->type) {
+                TypeMap* mp = (TypeMap*)tt->type;
+                return transpile_const_type(mt, mp->type_index);
+            }
+        }
+        return transpile_base_type(mt, (AstTypeNode*)node);
+    }
+    case AST_NODE_ELMT_TYPE: {
+        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)node->type;
+            if (tt->type) {
+                TypeElmt* et = (TypeElmt*)tt->type;
+                return transpile_const_type(mt, et->type_index);
+            }
+        }
+        return transpile_base_type(mt, (AstTypeNode*)node);
+    }
+    case AST_NODE_FUNC_TYPE: {
+        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)node->type;
+            if (tt->type) {
+                TypeFunc* ft = (TypeFunc*)tt->type;
+                return transpile_const_type(mt, ft->type_index);
+            }
+        }
+        return transpile_base_type(mt, (AstTypeNode*)node);
+    }
+    case AST_NODE_CONSTRAINED_TYPE: {
+        // Constrained type (e.g. int where (~ > 0)): use const_type(type_index)
+        AstConstrainedTypeNode* ct = (AstConstrainedTypeNode*)node;
+        TypeConstrained* constrained = (TypeConstrained*)ct->type;
+        if (constrained) {
+            return transpile_const_type(mt, constrained->type_index);
+        }
+        return transpile_base_type(mt, (AstTypeNode*)node);
+    }
     case AST_NODE_NAMED_ARG: {
         // Named argument: transpile the value expression
         AstNamedNode* named = (AstNamedNode*)node;
