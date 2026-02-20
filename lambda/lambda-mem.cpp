@@ -110,6 +110,31 @@ Item push_l(int64_t lval) {
     return {.item = l2it(lptr)};
 }
 
+// Safe version of push_l that detects already-boxed INT64 Items.
+// When the MIR JIT passes a value that's already a boxed INT64 Item
+// (from a runtime function return), this prevents double-boxing.
+// Also handles boxed INT Items by extracting and re-boxing as INT64.
+Item push_l_safe(int64_t val) {
+    uint8_t tag = (uint64_t)val >> 56;
+    if (tag == LMD_TYPE_INT64) {
+        // Already a boxed INT64 Item — return as-is
+        log_debug("push_l_safe: already boxed INT64");
+        Item result;
+        result.item = (uint64_t)val;
+        return result;
+    }
+    if (tag == LMD_TYPE_INT) {
+        // This is a boxed INT Item — extract the int value and re-box as INT64
+        log_debug("push_l_safe: converting boxed INT to INT64");
+        Item itm;
+        itm.item = (uint64_t)val;
+        int64_t real_val = (int64_t)itm.get_int56();
+        return push_l(real_val);
+    }
+    // Raw int64 value — box normally
+    return push_l(val);
+}
+
 Item push_k(DateTime val) {
     // Check for DateTime error sentinel before pushing
     if (DATETIME_IS_ERROR(val)) {
