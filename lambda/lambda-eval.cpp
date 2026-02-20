@@ -1090,6 +1090,24 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         for (int64_t i = 0; i < arr->length; i++) {
             query_collect(arr->items[i], type_val, true, result, depth + 1);
         }
+    } else if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr = data.array_int;
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item val = array_int_get(arr, (int)i);
+            query_collect(val, type_val, true, result, depth + 1);
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = data.array_int64;
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item val = array_int64_get(arr, (int)i);
+            query_collect(val, type_val, true, result, depth + 1);
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = data.array_float;
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item val = array_float_get(arr, (int)i);
+            query_collect(val, type_val, true, result, depth + 1);
+        }
     }
 }
 
@@ -1105,6 +1123,104 @@ Item fn_query(Item data, Item type_val, int direct) {
     result->is_spreadable = true;
     // direct=1 means .? (self-inclusive), direct=0 means ? (not self-inclusive)
     query_collect(data, type_val, direct != 0, result, 0);
+    return {.array = result};
+}
+
+// child-level query: collect direct attributes + children matching type_val (one level only)
+static void child_query_collect(Item data, Item type_val, Array* result) {
+    if (!data.item) return;
+
+    TypeId type_id = get_type_id(data);
+    if (type_id == LMD_TYPE_ELEMENT) {
+        Element* elmt = data.element;
+        // check attribute values
+        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+        ShapeEntry* field = elmt_type->shape;
+        while (field) {
+            if (field->name) {
+                Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
+                if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
+                    array_push(result, val);
+                }
+            }
+            field = field->next;
+        }
+        // check direct children
+        for (int64_t i = 0; i < elmt->length; i++) {
+            Item child = elmt->items[i];
+            if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
+                array_push(result, child);
+            }
+        }
+    } else if (type_id == LMD_TYPE_MAP) {
+        Map* map = data.map;
+        TypeMap* map_type = (TypeMap*)map->type;
+        ShapeEntry* field = map_type->shape;
+        while (field) {
+            if (field->name) {
+                Item val = _map_field_value(map_type, map->data, field);
+                if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
+                    array_push(result, val);
+                }
+            }
+            field = field->next;
+        }
+    } else if (type_id == LMD_TYPE_ARRAY) {
+        Array* arr = (Array*)data.array;
+        if (arr->is_spreadable) {
+            // spreadable array (from previous query): distribute child query to each item
+            for (int64_t i = 0; i < arr->length; i++) {
+                child_query_collect(arr->items[i], type_val, result);
+            }
+        } else {
+            for (int64_t i = 0; i < arr->length; i++) {
+                Item child = arr->items[i];
+                if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
+                    array_push(result, child);
+                }
+            }
+        }
+    } else if (type_id == LMD_TYPE_LIST) {
+        List* lst = data.list;
+        for (int64_t i = 0; i < lst->length; i++) {
+            Item child = lst->items[i];
+            if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
+                array_push(result, child);
+            }
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr = data.array_int;
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item val = array_int_get(arr, (int)i);
+            if (fn_is(val, type_val) == BOOL_TRUE) {
+                array_push(result, val);
+            }
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = data.array_int64;
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item val = array_int64_get(arr, (int)i);
+            if (fn_is(val, type_val) == BOOL_TRUE) {
+                array_push(result, val);
+            }
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = data.array_float;
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item val = array_float_get(arr, (int)i);
+            if (fn_is(val, type_val) == BOOL_TRUE) {
+                array_push(result, val);
+            }
+        }
+    }
+}
+
+// child-level query: expr[T] where T is a type
+Item fn_child_query(Item data, Item type_val) {
+    log_debug("fn_child_query");
+    Array* result = array_plain();
+    result->is_spreadable = true;
+    child_query_collect(data, type_val, result);
     return {.array = result};
 }
 
@@ -1697,6 +1813,11 @@ Item fn_index(Item item, Item index_item) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:
         return fn_member(item, index_item);
     default: {
+        // check for type value (pointer-based, so _type_id is 0)
+        TypeId index_type = get_type_id(index_item);
+        if (index_type == LMD_TYPE_TYPE) {
+            return fn_child_query(item, index_item);
+        }
         // for VMap, support arbitrary key types (int, float, etc.)
         TypeId item_type = get_type_id(item);
         if (item_type == LMD_TYPE_VMAP) {
