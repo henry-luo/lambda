@@ -179,9 +179,10 @@ and  or  not
 is  in  to  |  &  !
 ```
 
-**Query:** type-based descendant search
+**Query:** type-based search
 ```lambda
-?   .?
+?   .?           // recursive descendant search
+expr[T]          // child-level query (direct only)
 ```
 
 **Vector Arithmetic:** scalar broadcast, element-wise ops
@@ -206,11 +207,11 @@ users where ~.age >= 18 | ~.name // filter then map
 [1,2,3] | ~ ** 2 where ~ > 5 | sum // 13 (4+9)
 ```
 
-**Pipe to File (procedural only):**
-
 ## Query Expressions
 
-**Query `?` — recursive descendant search (not self-inclusive):**
+**Results in document order** (depth-first, pre-order).
+
+**Query `?` — attributes + all descendants:**
 ```lambda
 html?<img>                // all <img> at any depth
 html?<div class: string>  // <div> with class attr
@@ -224,10 +225,16 @@ data?{status: "ok"}       // maps where status == "ok"
 ```lambda
 div.?<div>     // includes div itself if it matches
 el.?int        // self + all int values in subtree
-42.?int        // (42) — trivial self-match
+42.?int        // [42] — trivial self-match
 ```
 
-**Results in document order** (depth-first, pre-order). Both `?` and `.?` recurse into attributes (including complex values), children, and map/array items. The only difference is whether the root value itself is included.
+**Child-level query `[T]` — direct attributes + children only (no recursion):**
+```lambda
+[1, "a", 3, true][int]   // [1, 3] — int items
+{name: "Alice", age: 30}[string]  // ["Alice"]
+el[element]     // direct child elements only
+el[string]      // attr values + text children
+```
 
 ## Pipe to File (procedural only)
 ```lambda
@@ -235,15 +242,13 @@ el.?int        // self + all int values in subtree
 data |> 'output.txt'        // file under CWD
 data |> /tmp.'output.txt'   // output at full path
 data |>> "output.txt"       // append to file
-
-// Data type determines output format:
-// - String: raw text (no formatting)
-// - Binary: raw binary data
-// - Other types: Lambda/Mark format
-
-// Output in specific formats:
 data | format('json') |> "output.json"
 ```
+Data type determines output format:
+
+- String: raw text (no formatting)
+- Binary: raw binary data
+- Other types: Lambda/Mark format
 
 ## Control Flow
 
