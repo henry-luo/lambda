@@ -17,6 +17,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include <utf8proc.h>
 #include <chrono>
 #include <cfloat>
 using namespace std::chrono;
@@ -350,6 +351,224 @@ static void layout_pseudo_element(LayoutContext* lycon, DomElement* pseudo_elem)
 
 // ============================================================================
 // End of Pseudo-element Layout Support
+// ============================================================================
+
+// ============================================================================
+// ::first-letter Pseudo-element Support (CSS 2.1 §5.12.2)
+// ============================================================================
+
+/**
+ * Check if a Unicode codepoint is in the punctuation classes that should be
+ * included in ::first-letter (CSS 2.1 §5.12.2):
+ * Ps (open), Pe (close), Pi (initial quote), Pf (final quote), Po (other)
+ */
+static bool is_first_letter_punctuation(utf8proc_int32_t codepoint) {
+    utf8proc_category_t cat = utf8proc_category(codepoint);
+    return cat == UTF8PROC_CATEGORY_PS ||  // open punctuation: ( [ {
+           cat == UTF8PROC_CATEGORY_PE ||  // close punctuation: ) ] }
+           cat == UTF8PROC_CATEGORY_PI ||  // initial quote: « " '
+           cat == UTF8PROC_CATEGORY_PF ||  // final quote: » " '
+           cat == UTF8PROC_CATEGORY_PO;    // other punctuation: ! @ # % & * , . / : ; ? \ etc.
+}
+
+/**
+ * Find the byte length of the ::first-letter content in a UTF-8 string.
+ * CSS 2.1 §5.12.2: first letter plus any preceding/following punctuation.
+ * Returns 0 if no letter is found.
+ */
+static int find_first_letter_boundary(const unsigned char* text, int text_len) {
+    if (!text || text_len <= 0) return 0;
+
+    const unsigned char* p = text;
+    const unsigned char* end = text + text_len;
+    bool found_letter = false;
+    const unsigned char* after_letter = nullptr;
+
+    // Phase 1: skip leading whitespace (not part of first-letter)
+    while (p < end) {
+        unsigned char ch = *p;
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+            p++;
+        } else {
+            break;
+        }
+    }
+    const unsigned char* content_start = p;
+
+    // Phase 2: consume leading punctuation + first letter + trailing punctuation
+    while (p < end) {
+        utf8proc_int32_t codepoint;
+        utf8proc_ssize_t bytes = utf8proc_iterate(p, end - p, &codepoint);
+        if (bytes <= 0) break;
+
+        if (!found_letter) {
+            // Before the letter: accept punctuation, looking for the first letter
+            if (is_first_letter_punctuation(codepoint)) {
+                p += bytes;  // include leading punctuation
+            } else {
+                // This should be the first letter
+                p += bytes;
+                found_letter = true;
+                after_letter = p;
+            }
+        } else {
+            // After the letter: include trailing punctuation
+            if (is_first_letter_punctuation(codepoint)) {
+                p += bytes;
+                after_letter = p;
+            } else {
+                break;  // non-punctuation after letter — done
+            }
+        }
+    }
+
+    if (!found_letter) return 0;
+    return (int)(after_letter - content_start);
+}
+
+/**
+ * Find the first text node descendant of an element that contains letter content.
+ * Walks depth-first, following inline elements.
+ * Returns NULL if no text content is found.
+ */
+static DomText* find_first_text_node(DomNode* node) {
+    if (!node) return nullptr;
+
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        // Check if text has any letter content (not just whitespace)
+        unsigned char* data = node->text_data();
+        if (data && *data) {
+            return text;
+        }
+        return nullptr;
+    }
+
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        // Only descend into inline-level elements, not blocks
+        // (::first-letter of a block is the first letter of its first inline content)
+        if (elem->display.outer != CSS_VALUE_INLINE &&
+            elem->display.outer != CSS_VALUE_NONE &&
+            elem != (DomElement*)node) {
+            // It's a block-level child — first-letter comes from first formed line
+            // For simplicity, skip block children (browser does too for nested blocks)
+        }
+        DomNode* child = elem->first_child;
+        while (child) {
+            DomText* result = find_first_text_node(child);
+            if (result) return result;
+            child = child->next_sibling;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * Create and insert a ::first-letter pseudo-element for a block element.
+ * This extracts the first letter (+ punctuation) from the first text node,
+ * wraps it in an inline pseudo-element with the first-letter styles,
+ * and adjusts the original text node to skip those characters.
+ */
+static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
+    DomElement* elem = (DomElement*)block;
+    if (!elem->first_letter_styles) return;
+
+    // Find the first text node with content
+    DomText* text_node = find_first_text_node(elem);
+    if (!text_node) {
+        log_debug("[FIRST-LETTER] No text node found in <%s>", elem->tag_name ? elem->tag_name : "?");
+        return;
+    }
+
+    unsigned char* text_data = text_node->text_data();
+    if (!text_data || !*text_data) return;
+
+    int text_len = (int)strlen((const char*)text_data);
+
+    // Skip leading whitespace to find content start
+    const unsigned char* p = text_data;
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (!*p) return;
+
+    int ws_offset = (int)(p - text_data);
+    int boundary = find_first_letter_boundary(p, text_len - ws_offset);
+    if (boundary <= 0) {
+        log_debug("[FIRST-LETTER] No letter found in text");
+        return;
+    }
+
+    log_debug("[FIRST-LETTER] Found boundary=%d bytes in '%.*s'", boundary, text_len, text_data);
+
+    Pool* pool = lycon->doc->view_tree->pool;
+    if (!pool) return;
+
+    // Create the ::first-letter pseudo-element
+    DomElement* fl_elem = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    if (!fl_elem) return;
+
+    fl_elem->node_type = DOM_NODE_ELEMENT;
+    fl_elem->tag_name = "::first-letter";
+    fl_elem->doc = elem->doc;
+    fl_elem->parent = text_node->parent;  // same parent as the text node
+    fl_elem->first_child = nullptr;
+    fl_elem->next_sibling = nullptr;
+    fl_elem->prev_sibling = nullptr;
+    fl_elem->font = nullptr;  // will be allocated during style resolution
+    fl_elem->bound = nullptr;
+    fl_elem->in_line = nullptr;
+
+    // Set display to inline
+    fl_elem->display.outer = CSS_VALUE_INLINE;
+    fl_elem->display.inner = CSS_VALUE_FLOW;
+
+    // Assign the first-letter styles for CSS resolution
+    fl_elem->specified_style = elem->first_letter_styles;
+
+    // Create text content for the first-letter pseudo-element
+    char* fl_text = (char*)pool_calloc(pool, boundary + 1);
+    if (!fl_text) return;
+    memcpy(fl_text, p, boundary);
+    fl_text[boundary] = '\0';
+
+    DomText* fl_text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
+    if (!fl_text_node) return;
+    fl_text_node->node_type = DOM_NODE_TEXT;
+    fl_text_node->parent = fl_elem;
+    fl_text_node->text = fl_text;
+    fl_text_node->length = boundary;
+    fl_text_node->native_string = nullptr;
+    fl_text_node->content_type = DOM_TEXT_STRING;
+    fl_text_node->next_sibling = nullptr;
+    fl_text_node->prev_sibling = nullptr;
+
+    fl_elem->first_child = fl_text_node;
+
+    // Adjust the original text node to skip the first-letter characters
+    int skip = ws_offset + boundary;
+    text_node->text = text_node->text + skip;
+    text_node->length = text_node->length > (size_t)skip ? text_node->length - skip : 0;
+
+    // Insert the ::first-letter pseudo-element before the original text node
+    DomNode* text_parent = text_node->parent;
+    fl_elem->parent = text_parent;
+    fl_elem->next_sibling = text_node;
+    fl_elem->prev_sibling = text_node->prev_sibling;
+    if (text_node->prev_sibling) {
+        text_node->prev_sibling->next_sibling = fl_elem;
+    } else if (text_parent && text_parent->is_element()) {
+        // text_node was the first child
+        ((DomElement*)text_parent)->first_child = fl_elem;
+    }
+    text_node->prev_sibling = fl_elem;
+
+    log_debug("[FIRST-LETTER] Created ::first-letter pseudo for <%s> with content '%s', remaining='%s'",
+              elem->tag_name ? elem->tag_name : "?", fl_text,
+              text_node->text ? text_node->text : "(null)");
+}
+
+// ============================================================================
+// End of ::first-letter Pseudo-element Support
 // ============================================================================
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
@@ -1221,6 +1440,13 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             if (block->pseudo->after) {
                 insert_pseudo_into_dom((DomElement*)block, block->pseudo->after, false);
             }
+        }
+
+        // Handle ::first-letter pseudo-element (CSS 2.1 §5.12.2)
+        // Must be done AFTER ::before insertion so ::before content is already in the tree
+        // (::first-letter applies to the first letter of the element including ::before content)
+        if (((DomElement*)block)->first_letter_styles) {
+            create_first_letter_pseudo(lycon, block);
         }
     }
 
@@ -2848,6 +3074,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             log_debug("inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d",
                 block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
+            lycon->line.has_replaced_content = true;  // inline-block contributes to line box
             // update baseline
             if (block->in_line && block->in_line->vertical_align != CSS_VALUE_BASELINE) {
                 float block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
