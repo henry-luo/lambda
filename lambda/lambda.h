@@ -35,6 +35,12 @@ extern double ceil(double x);
 extern double round(double x);
 #endif
 
+// Dry-run mode: when enabled, IO functions return fabricated results
+// instead of performing actual network/filesystem operations
+#if !defined(__cplusplus)
+extern bool g_dry_run;
+#endif
+
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
 

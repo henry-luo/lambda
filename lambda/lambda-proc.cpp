@@ -28,6 +28,101 @@
 
 extern __thread EvalContext* context;
 
+// Global dry-run flag: when true, IO operations return fabricated results
+bool g_dry_run = false;
+
+// ============================================================================
+// Dry-run fabricated results
+// These return realistic mock data so code paths that process IO results
+// are still exercised during fuzzy testing.
+// ============================================================================
+
+// Fabricated JSON content for input() in dry-run mode
+static const char* DRY_RUN_JSON = "{\"name\": \"dry-run\", \"version\": \"1.0\", \"items\": [1, 2, 3], \"active\": true}";
+// Fabricated text content for file reads
+static const char* DRY_RUN_TEXT = "Dry-run fabricated content.\nLine 2 of mock data.\nLine 3 with numbers: 42, 3.14\n";
+// Fabricated HTML content
+static const char* DRY_RUN_HTML = "<html><head><title>Mock</title></head><body><p>Dry-run content</p></body></html>";
+// Fabricated HTTP response body
+static const char* DRY_RUN_HTTP_BODY = "{\"status\": \"ok\", \"data\": {\"id\": 1, \"message\": \"dry-run response\"}, \"timestamp\": 1700000000}";
+// Fabricated command output
+static const char* DRY_RUN_CMD_OUTPUT = "dry-run-output";
+
+static Item dry_run_fabricated_input(Item target_item, Item type) {
+    log_debug("dry-run: fabricated input() call");
+
+    // determine what kind of data to fabricate based on type hint or file extension
+    const char* content = DRY_RUN_JSON;
+    const char* type_hint = NULL;
+
+    TypeId type_id = get_type_id(type);
+    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        String* ts = fn_string(type);
+        if (ts) type_hint = ts->chars;
+    }
+
+    // choose content based on type hint
+    if (type_hint) {
+        if (strcmp(type_hint, "html") == 0) content = DRY_RUN_HTML;
+        else if (strcmp(type_hint, "text") == 0 || strcmp(type_hint, "txt") == 0) content = DRY_RUN_TEXT;
+        else if (strcmp(type_hint, "json") == 0) content = DRY_RUN_JSON;
+        else if (strcmp(type_hint, "csv") == 0) content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
+        else if (strcmp(type_hint, "yaml") == 0 || strcmp(type_hint, "yml") == 0) content = "name: dry-run\nversion: 1\nitems:\n  - one\n  - two\n";
+        else if (strcmp(type_hint, "xml") == 0) content = "<root><item id=\"1\">mock</item><item id=\"2\">data</item></root>";
+        else if (strcmp(type_hint, "markdown") == 0 || strcmp(type_hint, "md") == 0) content = "# Mock\n\nDry-run content.\n\n- item 1\n- item 2\n";
+        else if (strcmp(type_hint, "toml") == 0) content = "[package]\nname = \"mock\"\nversion = \"1.0\"\n";
+        else if (strcmp(type_hint, "ini") == 0) content = "[section]\nkey1 = value1\nkey2 = value2\n";
+    } else {
+        // try to infer from file extension
+        TypeId target_type_id = get_type_id(target_item);
+        if (target_type_id == LMD_TYPE_STRING || target_type_id == LMD_TYPE_SYMBOL) {
+            const char* path = target_item.get_chars();
+            if (path) {
+                const char* dot = strrchr(path, '.');
+                if (dot) {
+                    const char* ext = dot + 1;
+                    if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) content = DRY_RUN_HTML;
+                    else if (strcmp(ext, "txt") == 0) content = DRY_RUN_TEXT;
+                    else if (strcmp(ext, "csv") == 0) content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
+                    else if (strcmp(ext, "yaml") == 0 || strcmp(ext, "yml") == 0) content = "name: dry-run\nversion: 1\n";
+                    else if (strcmp(ext, "xml") == 0) content = "<root><item>mock</item></root>";
+                    else if (strcmp(ext, "md") == 0) content = "# Mock\n\nDry-run.\n";
+                    // json is default anyway
+                }
+            }
+        }
+    }
+
+    // parse the fabricated content through the actual input pipeline
+    // so downstream code gets properly typed Lambda data structures
+    String* content_str = heap_strcpy((char*)content, strlen(content));
+    return {.item = s2it(content_str)};
+}
+
+static Item dry_run_fabricated_output() {
+    log_debug("dry-run: fabricated output() call");
+    // return fabricated bytes-written count
+    return {.item = i2it(42)};
+}
+
+static Item dry_run_fabricated_fetch() {
+    log_debug("dry-run: fabricated fetch() call");
+    String* body = heap_strcpy((char*)DRY_RUN_HTTP_BODY, strlen(DRY_RUN_HTTP_BODY));
+    return {.item = s2it(body)};
+}
+
+static Item dry_run_fabricated_cmd() {
+    log_debug("dry-run: fabricated cmd() call");
+    String* output = heap_strcpy((char*)DRY_RUN_CMD_OUTPUT, strlen(DRY_RUN_CMD_OUTPUT));
+    return {.item = s2it(output)};
+}
+
+static Bool dry_run_fabricated_exists() {
+    log_debug("dry-run: fabricated exists() call");
+    return BOOL_FALSE;
+}
+// ============================================================================
+
 Item pn_print(Item item) {
     TypeId type_id = get_type_id(item);
     log_debug("pn_print: %d", type_id);
@@ -142,6 +237,7 @@ static int atomic_rename(const char* temp_path, const char* final_path) {
 // atomic: if true, write to temp file first then rename (only for write mode, not append)
 // Returns: bytes written on success, ItemError on failure
 static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic) {
+    if (g_dry_run) return dry_run_fabricated_output();
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
 
@@ -571,6 +667,7 @@ Item fetch_response_to_item(FetchResponse* response) {
 }
 
 Item pn_fetch(Item url, Item options) {
+    if (g_dry_run) return dry_run_fabricated_fetch();
     log_debug("pn_fetch called");
     // Validate URL parameter
     String* url_str;
@@ -812,10 +909,12 @@ String* format_cmd_args(String* cmd, Item args) {
 Item pn_cmd2(Item cmd, Item args);
 
 Item pn_cmd1(Item cmd) {
+    if (g_dry_run) return dry_run_fabricated_cmd();
     return pn_cmd2(cmd, ItemNull);
 }
 
 Item pn_cmd2(Item cmd, Item args) {
+    if (g_dry_run) return dry_run_fabricated_cmd();
     log_debug("pn_cmd called");
     if (get_type_id(cmd) != LMD_TYPE_STRING) {
         log_debug("pn_cmd: command must be a string");
@@ -945,6 +1044,7 @@ static int remove_callback(const char* path, const struct stat* sb, int typeflag
 // src can be local path or remote URL (http/https)
 // dst must be a local path
 Item pn_io_copy(Item src_item, Item dst_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.copy()"); return ItemNull; }
     // First, check if source is remote
     Target* src_target = item_to_target(src_item.item, NULL);
     if (!src_target) {
@@ -1056,6 +1156,7 @@ Item pn_io_copy(Item src_item, Item dst_item) {
 
 // io.move(src, dst) - Move/rename file or directory
 Item pn_io_move(Item src_item, Item dst_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.move()"); return ItemNull; }
     StrBuf* src_buf = get_local_path_from_item(src_item);
     StrBuf* dst_buf = get_local_path_from_item(dst_item);
 
@@ -1110,6 +1211,7 @@ Item pn_io_move(Item src_item, Item dst_item) {
 
 // io.delete(path) - Delete file or directory
 Item pn_io_delete(Item path_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.delete()"); return ItemNull; }
     StrBuf* path_buf = get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1154,6 +1256,7 @@ Item pn_io_delete(Item path_item) {
 
 // io.mkdir(path) - Create directory (recursive)
 Item pn_io_mkdir(Item path_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.mkdir()"); return ItemNull; }
     StrBuf* path_buf = get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1213,6 +1316,7 @@ Item pn_io_mkdir(Item path_item) {
 
 // io.touch(path) - Create file or update modification time
 Item pn_io_touch(Item path_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.touch()"); return ItemNull; }
     StrBuf* path_buf = get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1259,6 +1363,7 @@ Item pn_io_touch(Item path_item) {
 
 // io.symlink(target, link) - Create symbolic link
 Item pn_io_symlink(Item target_item, Item link_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.symlink()"); return ItemNull; }
     StrBuf* target_buf = get_local_path_from_item(target_item);
     StrBuf* link_buf = get_local_path_from_item(link_item);
 
@@ -1303,6 +1408,7 @@ Item pn_io_symlink(Item target_item, Item link_item) {
 // io.chmod(path, mode) - Change file permissions
 // mode can be string like "755" or int like 0755
 Item pn_io_chmod(Item path_item, Item mode_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.chmod()"); return ItemNull; }
     StrBuf* path_buf = get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1350,6 +1456,7 @@ Item pn_io_chmod(Item path_item, Item mode_item) {
 
 // io.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
 Item pn_io_rename(Item old_item, Item new_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.rename()"); return ItemNull; }
     StrBuf* old_buf = get_local_path_from_item(old_item);
     StrBuf* new_buf = get_local_path_from_item(new_item);
 

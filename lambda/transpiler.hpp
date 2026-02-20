@@ -51,7 +51,11 @@ struct Runtime {
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
     unsigned int optimize_level;  // MIR JIT optimization level (0-2, default: 2)
     const char* transpile_dir;   // directory for transpiled C output files (NULL = current dir)
+    bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
 };
+
+// global dry-run flag (set from Runtime, accessible from C code via lambda.h)
+extern bool g_dry_run;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
