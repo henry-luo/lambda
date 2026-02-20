@@ -378,10 +378,38 @@ let counter = make_counter(5)
 counter(3)   // 13 (5*2 + 3)
 ```
 
-### Closure Limitations
+### Mutable Captures in Procedural Closures
 
-- **Immutable captures only**: Closures capture values, not references
-- **No mutable state**: Use `pn` functions for mutable state
+When a closure defined inside a `pn` function assigns to a captured `var`, the captured variable becomes a **writable copy**. Each closure instance gets its own independent mutable copy in its environment — writes persist across calls to that closure but do not affect the outer scope or other closures.
+
+```lambda
+pn main() {
+    var count = 0
+    let counter = fn() {
+        count = count + 1    // writes to closure's own copy
+        count
+    }
+    print(counter())   // 1
+    print(counter())   // 2
+    print(count)       // 0 — outer variable unchanged
+}
+```
+
+```lambda
+pn main() {
+    var x = 0
+    let inc1 = fn() { x = x + 1; x }
+    let inc10 = fn() { x = x + 10; x }
+    print(inc1())    // 1  — inc1's copy: 0 → 1
+    print(inc10())   // 10 — inc10's copy: 0 → 10 (independent)
+}
+```
+
+**Capture semantics:**
+- Captures are **by value** — each closure gets a snapshot at creation time
+- `var` captures are mutable (writable copy); `let` captures are read-only
+- Writes inside a closure do **not** propagate back to the outer scope
+- Named closures must be called through a variable (`let f = name; f()`) to pass the environment
 
 ---
 
@@ -464,6 +492,64 @@ pn counter() {
 | Early return      | No                | Yes (`return`)                  |
 | File output       | No                | Yes (`output()`, `\|>`, `\|>>`) |
 | Side effects      | No                | Allowed                         |
+
+### Assignment
+
+Assignment is available in `pn` functions. Only `var` variables can be reassigned — `let` bindings and function parameters are immutable.
+
+#### Variable Assignment
+
+```lambda
+pn example() {
+    var x = 42
+    x = 3.14       // OK: type widening (int → float)
+    x = "hello"    // OK: type widening (float → string)
+
+    var y: int = 10
+    y = 20         // OK: same type
+    y = "oops"     // ERROR E201: type mismatch (int expected)
+}
+```
+
+Variables declared with `var` (without a type annotation) support **type widening** — the variable's runtime type changes automatically to accommodate the new value. Variables with explicit type annotations (`var x: int`) enforce the declared type.
+
+#### Array Element Assignment
+
+```lambda
+pn example() {
+    let arr = [1, 2, 3]    // typed as int array
+    arr[1] = 99            // OK: same type
+    arr[0] = 3.14          // OK: auto-converts array to generic
+    arr[-1] = "hello"      // OK: negative indexing supported
+}
+```
+
+When a value of a different type is assigned to a typed array (e.g., float into an int array), the array is automatically converted to a generic array that can hold any type.
+
+#### Map Field Assignment
+
+```lambda
+pn example() {
+    let obj = {name: "Alice", age: 30}
+    obj.age = 31           // OK: same type
+    obj.age = "thirty"     // OK: field type changes, shape rebuilt
+    obj.name = null        // OK: any type transition
+}
+```
+
+Map field assignment automatically rebuilds the map's shape metadata when the value type changes, ensuring structural consistency.
+
+#### Element Mutation
+
+```lambda
+pn example() {
+    let elem = <div class: "main"; "Hello">
+    elem.class = "updated"       // attribute assignment
+    elem[0] = "Goodbye"          // child assignment by index
+}
+```
+
+Elements support both attribute mutation (via dot notation) and child mutation (via index).
 
 ### Implicit Return
 
