@@ -722,6 +722,9 @@ typedef struct Context {
     Bool fn_is(Item a, Item b);
     Bool fn_in(Item a, Item b);
 
+    // query operations: search data for items matching a type
+    Item fn_query(Item data, Item type_val, int direct);
+
     // vector arithmetic operations (element-wise)
     Item vec_add(Item a, Item b);
     Item vec_sub(Item a, Item b);

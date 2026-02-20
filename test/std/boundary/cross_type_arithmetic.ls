@@ -92,19 +92,19 @@ null % 2
 
 // ===== Exponentiation (^) =====
 // Works across numeric types
-2 ^ 10
-2 ^ 3.5
-2.0 ^ 3
-2.0 ^ 3.0
-0 ^ 0
-1 ^ 100
+2 ** 10
+2 ** 3.5
+2.0 ** 3
+2.0 ** 3.0
+0 ** 0
+1 ** 100
 // Invalid exponent combinations
-2 ^ "hello"
-2 ^ true
-2 ^ null
-"hello" ^ 2
-true ^ 2
-null ^ 2
+2 ** "hello"
+2 ** true
+2 ** null
+"hello" ** 2
+true ** 2
+null ** 2
 
 // ===== Integer Division (div) =====
 // Only int × int works

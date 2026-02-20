@@ -2242,7 +2242,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "^"
+                  "value": "**"
                 }
               },
               {
@@ -3594,6 +3594,14 @@
           },
           {
             "type": "SYMBOL",
+            "name": "query_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "direct_query_expr"
+          },
+          {
+            "type": "SYMBOL",
             "name": "_parenthesized_expr"
           },
           {
@@ -3762,7 +3770,7 @@
                 "name": "propagate",
                 "content": {
                   "type": "STRING",
-                  "value": "?"
+                  "value": "^"
                 }
               },
               {
@@ -3805,6 +3813,56 @@
           }
         ]
       }
+    },
+    "query_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "object",
+          "content": {
+            "type": "SYMBOL",
+            "name": "primary_expr"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "?"
+        },
+        {
+          "type": "FIELD",
+          "name": "query",
+          "content": {
+            "type": "SYMBOL",
+            "name": "primary_type"
+          }
+        }
+      ]
+    },
+    "direct_query_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "object",
+          "content": {
+            "type": "SYMBOL",
+            "name": "primary_expr"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ".?"
+        },
+        {
+          "type": "FIELD",
+          "name": "query",
+          "content": {
+            "type": "SYMBOL",
+            "name": "primary_type"
+          }
+        }
+      ]
     },
     "path_root": {
       "type": "STRING",
@@ -4235,7 +4293,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "^"
+                  "value": "**"
                 }
               },
               {
@@ -8457,6 +8515,14 @@
       "parent_expr"
     ],
     [
+      "_expr",
+      "query_expr"
+    ],
+    [
+      "_expr",
+      "direct_query_expr"
+    ],
+    [
       "list",
       "if_expr"
     ],
@@ -8471,6 +8537,10 @@
     [
       "_compound_type",
       "constrained_type"
+    ],
+    [
+      "range_type",
+      "primary_type"
     ]
   ],
   "precedences": [

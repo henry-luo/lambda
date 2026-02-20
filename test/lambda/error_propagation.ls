@@ -106,7 +106,7 @@ test_div_error()
 
 fn test_pow_error() {
     let a^err = fail()
-    type(err ^ 2)
+    type(err ** 2)
 }
 test_pow_error()
 
@@ -329,10 +329,10 @@ test_len_error()
 // ============================================
 
 fn test_propagate_success() int^ {
-    let x = succeed()?
+    let x = succeed()^
     x + 8
 }
-test_propagate_success()?
+test_propagate_success()^
 
 // ============================================
 // Section 10: Chained error propagation
@@ -343,7 +343,7 @@ fn step1() int^ {
 }
 
 fn step2() int^ {
-    let val = step1()?
+    let val = step1()^
     val + 10
 }
 
@@ -354,12 +354,12 @@ fn test_chain_error() {
 test_chain_error()
 
 fn step3() int^ {
-    let val = succeed()?
+    let val = succeed()^
     val * 2
 }
 
 fn step4() int^ {
-    let val = step3()?
+    let val = step3()^
     val + 1
 }
 

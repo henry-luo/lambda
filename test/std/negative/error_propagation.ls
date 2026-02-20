@@ -18,8 +18,8 @@ type(err3)
 fn step1() int^ { raise error("step1 failed") }
 fn step2(x: int) int^ { x + 1 }
 fn chain() int^ {
-    let v = step1()?
-    step2(v)?
+    let v = step1()^
+    step2(v)^
 }
 let result^err4 = chain()
 ^err4

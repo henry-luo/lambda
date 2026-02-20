@@ -21,6 +21,7 @@ void transpile_index_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
+void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 
 // hashmap comparison and hashing functions for func_name_map
 static int func_name_cmp(const void *a, const void *b, void *udata) {
@@ -4783,6 +4784,21 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     tp->in_tail_position = prev_in_tail;
 }
 
+void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node) {
+    log_debug("transpile query expr (direct=%d)", query_node->direct);
+    if (!query_node || !query_node->object || !query_node->query) {
+        log_error("Error: invalid query node");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        return;
+    }
+    // fn_query(data, type_val, direct)
+    strbuf_append_str(tp->code_buf, "fn_query(");
+    transpile_box_item(tp, query_node->object);
+    strbuf_append_char(tp->code_buf, ',');
+    transpile_box_item(tp, query_node->query);
+    strbuf_append_format(tp->code_buf, ",%d)", query_node->direct ? 1 : 0);
+}
+
 void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // Defensive validation: ensure all required pointers and types are valid
     if (!field_node) {
@@ -5808,6 +5824,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
+        break;
+    case AST_NODE_QUERY_EXPR:
+        transpile_query_expr(tp, (AstQueryNode*)expr_node);
         break;
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
     case AST_NODE_FUNC:  case AST_NODE_PROC:

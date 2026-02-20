@@ -46,7 +46,7 @@ pn test_multi_word() {
 
 // Test 7: error propagation with ?
 pn test_propagate() {
-    var r = cmd("echo", "prop")?
+    var r = cmd("echo", "prop")^
     r
 }
 

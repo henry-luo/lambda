@@ -155,7 +155,7 @@ y = "oops"                // ERROR E201: annotated type enforced
 
 **Arithmetic:** addition, subtraction, multiplication, division, integer division, modulo, exponentiation
 ```lambda
-+  -  *  /  div  %  ^
++  -  *  /  div  %  **
 ```
 
 **Spread:** *
@@ -198,7 +198,7 @@ users | ~.age            // [12,20,62] - extract field
 ```lambda
 [1,2,3,4,5] where ~ > 3         // [4,5]
 users where ~.age >= 18 | ~.name // filter then map
-[1,2,3] | ~ ^ 2 where ~ > 5 | sum // 13 (4+9)
+[1,2,3] | ~ ** 2 where ~ > 5 | sum // 13 (4+9)
 ```
 
 **Pipe to File (procedural only):**
@@ -240,7 +240,7 @@ match value {
     case string: "text"           // case type
     case int | float: "numnber"   // case type union
     case Circle {                 // mixed stam arm
-        let area = 3.14 * ~.r ^ 2
+        let area = 3.14 * ~.r ** 2
         "area: " ++ area
     }
     default: "other"
@@ -412,15 +412,15 @@ fn divide(a, b) int ^ DivisionError { ... }    // Specific error type
 fn load(p) Config ^ ParseError|IOError { ... } // Multiple error types
 ```
 
-**`raise` error , or propagate error with `?`**
+**`raise` error , or propagate error with `^`**
 ```lambda
 fn compute(x: int) int^ {
     if (b == 0) raise error("div by zero")  // raise error
-    let a = parse(input)?    // error → return immediately
-    let b = divide(a, x)?    // error → return immediately
+    let a = parse(input)^    // error → return immediately
+    let b = divide(a, x)^    // error → return immediately
     a + b
 }
-fun()?                        // propagate error, discard value
+fun()^                        // propagate error, discard value
 ```
 
 **`let a^err` — destructure value and error:**
@@ -433,7 +433,7 @@ else result * 2
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` - Primary expressions
 2. `-` `+` `not` - Unary operators
-3. `^` - Exponentiation
+3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
 6. `<` `<=` `>` `>=` - Relational
