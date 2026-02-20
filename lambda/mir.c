@@ -30,6 +30,25 @@ extern Symbol* fn_name(Item item);
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
 
+// Helper functions for map pipe iteration in JIT
+// item_keys allocates per call, so we call it once and pass the ArrayList*
+static int64_t pipe_map_len(void* keys_ptr) {
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    return keys ? (int64_t)keys->length : 0;
+}
+static Item pipe_map_val(Item data, void* keys_ptr, int64_t index) {
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
+    String* key_str = (String*)keys->data[index];
+    return item_attr(data, key_str->chars);
+}
+static Item pipe_map_key(void* keys_ptr, int64_t index) {
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
+    String* key_str = (String*)keys->data[index];
+    return s2it(key_str);
+}
+
 typedef struct jit_item {
     const char *code;
     size_t code_size;
@@ -108,6 +127,9 @@ func_obj_t func_list[] = {
     {"item_attr", (fn_ptr) item_attr},
     {"item_type_id", (fn_ptr) item_type_id},
     {"item_at", (fn_ptr) item_at},
+    {"pipe_map_len", (fn_ptr) pipe_map_len},
+    {"pipe_map_val", (fn_ptr) pipe_map_val},
+    {"pipe_map_key", (fn_ptr) pipe_map_key},
 
     {"fn_int", (fn_ptr) fn_int},
     {"fn_int64", (fn_ptr) fn_int64},
@@ -372,6 +394,10 @@ func_obj_t func_list[] = {
     {"vmap_new", (fn_ptr) vmap_new},
     {"vmap_from_array", (fn_ptr) vmap_from_array},
     {"vmap_set", (fn_ptr) vmap_set},
+    // typed array functions
+    {"array_float_new", (fn_ptr) array_float_new},
+    {"array_float_set", (fn_ptr) array_float_set},
+    {"array_int_new", (fn_ptr) array_int_new},
 };
 
 void *import_resolver(const char *name) {
