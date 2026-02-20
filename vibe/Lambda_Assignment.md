@@ -309,75 +309,59 @@ This provides a clear compile-time error (error code 211), closing BUG-5 and BUG
 
 ### 4.3 Specialized Array Assignment
 
-#### 4.3.1 Type-Check and Convert
+> **Status: IMPLEMENTED** — merged into `lambda-eval.cpp`, `lambda-data-runtime.cpp`
 
-When assigning to a specialized array, `fn_array_set` must validate the value type. If incompatible, **convert the array to a generic `Array`** in-place:
+#### 4.3.1 Strategy: In-Place Conversion with Runtime Type Check
 
-```
-fn_array_set(arr, index, value):
-    if arr is ArrayInt:
-        if value is Int:
-            store directly → ai->items[index] = value.get_int56()
-        else if value is Int64:
-            convert ArrayInt → ArrayInt64, then store
-        else if value is Float:
-            widen: convert ArrayInt → ArrayFloat, store (double)int_val for existing, store new
-            // OR: convert ArrayInt → generic Array
-        else:
-            convert ArrayInt → generic Array, store value as Item
+Rather than changing the `fn_array_set` signature (which would require transpiler and MIR changes), the solution converts specialized arrays **in place**. All array types share the same struct layout (`Container + items_ptr + length + extra + capacity`), so we can safely change `type_id` and swap the items buffer without changing the struct pointer. The caller's variable still points to the same allocation.
 
-    if arr is ArrayFloat:
-        if value is Float:
-            store directly
-        else if value is Int:
-            convert value: store (double)value.get_int56()
-        else:
-            convert ArrayFloat → generic Array, store value as Item
-```
+**Type compatibility rules in `fn_array_set`:**
 
-#### 4.3.2 In-Place Conversion: Specialized → Generic Array
+| Array Type | Value Type | Action |
+|-|-|-|
+| `ArrayInt` | INT | Store directly (fast path) |
+| `ArrayInt` | INT64 (fits int56) | Store directly |
+| `ArrayInt` | INT64 (overflow) | Convert → generic, then `array_set` |
+| `ArrayInt` | FLOAT/STRING/other | Convert → generic, then `array_set` |
+| `ArrayInt64` | INT or INT64 | Store directly (widen int → int64) |
+| `ArrayInt64` | other | Convert → generic, then `array_set` |
+| `ArrayFloat` | FLOAT | Store directly |
+| `ArrayFloat` | INT or INT64 | Store as double (widen) |
+| `ArrayFloat` | other | Convert → generic, then `array_set` |
+| `Array` | any | `array_set` (already generic) |
+| `List`/`Element` | any | `array_set` (already generic `Item*`) |
+
+#### 4.3.2 In-Place Conversion: `convert_specialized_to_generic()`
 
 ```cpp
-Array* convert_to_generic_array(void* specialized_arr, TypeId from_type) {
-    // 1. Read length, capacity from the specialized array
-    // 2. Allocate generic Array with same capacity
-    // 3. Convert each element to Item:
-    //    ArrayInt:   items[i] = i2it(ai->items[i])
-    //    ArrayInt64: items[i] = push_l(ai64->items[i])
-    //    ArrayFloat: items[i] = push_d(af->items[i])
-    // 4. Copy container metadata (ref_cnt, flags)
-    // 5. Update type_id to LMD_TYPE_ARRAY
-    // 6. Replace the pointer in the parent variable/container
-    return new_array;
+static void convert_specialized_to_generic(Array* arr) {
+    // 1. Allocate new Item buffer with capacity = len*2 + 4
+    //    (extra room for float/int64 values stored at end of buffer)
+    // 2. Convert each element based on old type:
+    //    ArrayInt:   new_items[i] = i2it(old_items[i])  (packs into Item directly)
+    //    ArrayInt64: store int64 in extra area, pointer in main slot
+    //    ArrayFloat: store double in extra area, pointer in main slot
+    // 3. Free old items buffer (all specialized arrays use malloc)
+    // 4. Set arr->type_id = LMD_TYPE_ARRAY
+    // 5. arr->items = new_items (same struct pointer, new buffer)
 }
 ```
 
-**Critical issue:** The parent (variable or container field) holds a pointer to the old specialized array. After conversion, the parent's pointer must be updated. For variables, this means the transpiler must pass a `pointer-to-pointer` (or the variable being an `Item` which wraps the pointer). For container fields, the container's stored pointer must be updated.
+No signature change needed. No transpiler changes needed. No MIR registration changes needed.
 
-#### 4.3.3 Proposed `fn_array_set` Signature Change
+#### 4.3.3 Specialized Getter Fallback
 
-To support in-place conversion, the function needs to be able to update the caller's pointer:
+After runtime conversion, the transpiler's statically-emitted `array_int_get()` / `array_float_get()` calls would read the generic `Item*` buffer as a specialized type — producing garbage. Fix: each specialized getter checks `type_id` at the top and falls back to `array_get()`:
 
-```c
-// Old:
-void fn_array_set(Array* arr, int index, Item value);
-
-// New:
-void fn_array_set(Item* arr_ref, int index, Item value);
+```cpp
+Item array_int_get(ArrayInt *array, int index) {
+    if (array->type_id != LMD_TYPE_ARRAY_INT)
+        return array_get((Array*)array, index);  // converted to generic
+    // ... existing specialized path
+}
 ```
 
-With `arr_ref` being a pointer to the `Item` variable holding the array, `fn_array_set` can: (a) extract the array, (b) perform conversion if needed, (c) update `*arr_ref` to point to the new generic array.
-
-The transpiler changes from:
-```c
-fn_array_set((Array*)_arr, idx, val);
-```
-To:
-```c
-fn_array_set(&_arr, idx, val);
-```
-
-This is compatible with §4.1's proposal to emit all `var` as `Item`.
+This adds a single comparison per access — negligible cost — and correctly handles arrays that were converted at runtime.
 
 ### 4.4 Map Field Assignment with Type Change
 
@@ -534,8 +518,8 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 | 1.3 | Set `is_mutable` and `has_type_annotation` in `build_var_stam` | build_ast.cpp | ✅ Done |
 | 1.4 | Validate mutability in `build_assign_stam` (reject `let` and param targets) | build_ast.cpp | ✅ Done |
 | 1.5 | Type analysis in `build_assign_stam` (widening for non-annotated, type checking for annotated) | build_ast.cpp | ✅ Done |
-| 1.6 | Add type validation to `fn_array_set` for specialized arrays (reject with error instead of corrupt) | lambda-eval.cpp | Not started |
-| 1.7 | Add `LMD_TYPE_ELEMENT` case to `fn_array_set` | lambda-eval.cpp | Not started |
+| 1.6 | Add type validation to `fn_array_set` for specialized arrays (reject with error instead of corrupt) | lambda-eval.cpp | ✅ Done (Phase 3) |
+| 1.7 | Add `LMD_TYPE_ELEMENT` case to `fn_array_set` | lambda-eval.cpp | ✅ Done (Phase 3) |
 
 ### Phase 2: `var` Type Flexibility — ✅ DONE
 
@@ -547,14 +531,17 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 | 2.4 | Update `transpile_box_item` to skip boxing for widened var references | transpile.cpp | ✅ Done |
 | 2.5 | Non-widened vars keep concrete C types (zero overhead) | transpile.cpp | ✅ Done (default behavior) |
 
-### Phase 3: Array Type Conversion
+### Phase 3: Array Type Conversion — ✅ DONE
 
-| # | Task | Files | Priority |
+| # | Task | Files | Status |
 |-|-|-|-|
-| 3.1 | Implement `convert_to_generic_array()` | lambda-eval.cpp or lambda-data.cpp | High |
-| 3.2 | Change `fn_array_set` signature to `(Item*, int, Item)` | lambda-eval.cpp, lambda.h | High |
-| 3.3 | Update transpiler to emit `&_arr` for array set calls | transpile.cpp | High |
-| 3.4 | Wire conversion into `fn_array_set` — convert specialized → generic on type mismatch | lambda-eval.cpp | High |
+| 3.1 | Implement `convert_specialized_to_generic()` in-place conversion | lambda-eval.cpp | ✅ Done |
+| 3.2 | Wire type checking into `fn_array_set` — check value type, convert on mismatch | lambda-eval.cpp | ✅ Done |
+| 3.3 | Add `LMD_TYPE_LIST` and `LMD_TYPE_ELEMENT` cases to `fn_array_set` | lambda-eval.cpp | ✅ Done |
+| 3.4 | Add runtime type fallback to `array_int_get`, `array_int64_get`, `array_float_get` | lambda-data-runtime.cpp | ✅ Done |
+| 3.5 | Test: `proc_array_type_convert.ls` (8 test cases) | test/lambda/proc/ | ✅ Done |
+
+**Key insight:** No signature change was needed. Since all array types share the same struct layout, conversion happens in place — the struct pointer stays the same, only `type_id` and items buffer change. Specialized getters check `type_id` at runtime to handle converted arrays.
 
 ### Phase 4: Map Shape Rebuild
 
@@ -599,19 +586,19 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 
 ## 6. Detailed Bug Catalog
 
-### BUG-1: `fn_array_set` Silent Data Corruption on Type Mismatch
+### BUG-1: `fn_array_set` Silent Data Corruption on Type Mismatch — ✅ FIXED
 
 **File:** lambda-eval.cpp:3139–3157  
 **Trigger:** Assign float to `ArrayInt`, string to `ArrayInt`, int to `ArrayFloat`, etc.  
 **Effect:** `get_int56()`/`get_double()` extract raw tagged-pointer bits — stores garbage.  
-**Fix:** Phase 1.4 (immediate type check) + Phase 3 (convert specialized → generic).
+**Fix:** Phase 3 — `fn_array_set` now checks value type. On mismatch, `convert_specialized_to_generic()` converts the array in place, then stores via `array_set()`.
 
-### BUG-2: `fn_array_set` Rejects Element Children
+### BUG-2: `fn_array_set` Rejects Element Children — ✅ FIXED
 
 **File:** lambda-eval.cpp:3159 (default case)  
 **Trigger:** `elem[i] = val` in procedural code.  
 **Effect:** Logs error, silently returns. Assignment is lost.  
-**Fix:** Phase 1.5 (add `LMD_TYPE_ELEMENT` case).
+**Fix:** Phase 3 — added `LMD_TYPE_LIST` and `LMD_TYPE_ELEMENT` cases that use `array_set()` directly (both have `Item* items`).
 
 ### BUG-3: `fn_map_set` NULL↔Container Shape Inconsistency
 
@@ -788,9 +775,9 @@ The current mutation support in Lambda's procedural code has **8 identified bugs
 2. **No type-change support in the transpiler** — `var` variables are emitted as fixed C types
 3. **MarkEditor not connected to assignment syntax** — the full mutation engine exists but is only used by input parsers
 
-### Implemented (Phase 1 & 2)
+### Implemented (Phase 1, 2, & 3)
 
-The following are now implemented and passing all 242 baseline tests:
+The following are now implemented and passing all 243 baseline tests:
 
 - **Smart type analysis for `var` assignment** (§4.1): The transpiler analyzes all assignments to each `var` during AST building. If types are consistent, the variable uses its concrete C type (zero overhead). If types are inconsistent, the variable is widened to `Item` storage. Type-annotated vars enforce their declared type with static error reporting. Numeric coercion (int↔float↔int64↔decimal) is allowed for annotated vars.
 
@@ -798,7 +785,9 @@ The following are now implemented and passing all 242 baseline tests:
 
 - **NameEntry tracking** (§4.1.2): Three new fields (`is_mutable`, `has_type_annotation`, `type_widened`) on `NameEntry` enable the type analysis without modifying AST types in place. Back-pointers (`AstNamedNode::entry`, `AstAssignStamNode::target_entry`) give the transpiler access to the analysis results.
 
-### Remaining (Phase 3–7)
+- **Array type conversion** (§4.3): `fn_array_set` now validates value types before storing. When assigning an incompatible type to a specialized array (e.g., float to `ArrayInt`), the array is converted to a generic `Array` in place — the struct pointer stays the same, only `type_id` and the items buffer change. Specialized getters (`array_int_get`, etc.) check `type_id` at runtime to handle converted arrays. Element and List children are also supported.
+
+### Remaining (Phase 4–7)
 
 The remaining phases address deeper mutation scenarios:
 - **Specialized array → generic conversion** on type-incompatible element assignment
