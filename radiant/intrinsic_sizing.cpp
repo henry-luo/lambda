@@ -122,6 +122,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             if (lycon->font.style && lycon->font.style->space_width > 0) {
                 space_width = lycon->font.style->space_width;
             }
+            // Apply word-spacing to space characters (matching layout_text.cpp)
+            if (lycon->font.style) {
+                space_width += lycon->font.style->word_spacing;
+            }
             // Apply letter-spacing to spaces as well (matching layout_text.cpp)
             // letter-spacing is applied after each character including spaces, except the last
             if (i + 1 < length && lycon->font.style) {

@@ -655,6 +655,14 @@ TEST_F(NegativeScriptTest, SemanticError_DuplicateMixed) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_mixed.ls");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ImmutableAssignment) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/immutable_assignment.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/var_type_mismatch.ls");
+}
+
 // --- Runtime Error Tests (3xx) ---
 
 TEST_F(NegativeScriptTest, RuntimeError_NullReference) {

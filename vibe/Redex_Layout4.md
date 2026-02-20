@@ -1333,25 +1333,7 @@ Phase 3 cross-suite numbers used the Redex engine. The `make layout` command use
 
 *Note: The Redex engine discovers only tests with matching reference JSONs. Test counts differ from the Radiant runner because the Radiant runner includes tests without references (counted as failures).*
 
-#### Radiant Engine (C++, `make layout`) — Phase 5 Final
+Note: vs. Radiant Engine (C++, `make layout`)
 
 Strict threshold (100% match required):
-
-| Suite         | Total    | Pass     | Fail     | Pass Rate  |
-| ------------- | -------- | -------- | -------- | ---------- |
-| **baseline**  | 1968     | **1968** | **0**    | **100.0%** |
-| **css_block** | 335      | 320      | 15       | 95.5%      |
-| **table**     | 284      | 6        | 278      | 2.1%       |
-| **box**       | 185      | 0        | 185      | 0.0%       |
-| **flex**      | 156      | 0        | 156      | 0.0%       |
-| **basic**     | 153      | 0        | 153      | 0.0%       |
-| **grid**      | 123      | 0        | 123      | 0.0%       |
-| **position**  | 104      | 0        | 104      | 0.0%       |
-| **advanced**  | 72       | 8        | 64       | 11.1%      |
-| **js**        | 51       | 1        | 50       | 2.0%       |
-| **page**      | 42       | 0        | 42       | 0.0%       |
-| **text_flow** | 14       | 1        | 13       | 7.1%       |
-| **flex-nest** | 8        | 0        | 8        | 0.0%       |
-| **Total**     | **3495** | **2304** | **1191** | **65.9%**  |
-
-*The Radiant C++ engine has full baseline coverage (1968/1968) but lower pass rates on non-baseline suites. Many non-baseline suites have expanded test counts (box: 77→185, basic: 84→153, position: 53→104, table: 103→284) with tests that were not part of the original Redex development. The Radiant engine uses a stricter 100% threshold vs the Redex engine's tolerance-based comparison.*
+*The Radiant C++ engine has full baseline coverage (1968/1968) but lower pass rates on non-baseline suites. The Radiant engine uses a stricter 100% threshold vs the Redex engine's tolerance-based comparison.*

@@ -434,6 +434,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         // 'normal' line height
         lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
+        lycon->block.line_height_is_normal = true;
         log_debug("normal lineHeight: %f", lycon->block.line_height);
     } else {
         // Resolve var() if present
@@ -441,6 +442,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         if (!resolved_value) {
             // var() couldn't be resolved, use normal
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
+            lycon->block.line_height_is_normal = true;
             log_debug("line-height var() unresolved, using normal: %f", lycon->block.line_height);
             return;
         }
@@ -451,13 +453,15 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
             resolved_value->data.number.value * lycon->font.current_font_size :
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, resolved_value);
 
-        // CSS 2.1: "Negative values are not allowed" for line-height
-        // If negative or zero/NaN, fall back to 'normal' (use default line height)
-        if (resolved_height <= 0 || std::isnan(resolved_height)) {
+        // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
+        // Zero is a valid computed value; only negative/NaN falls back to 'normal'
+        if (resolved_height < 0 || std::isnan(resolved_height)) {
             log_debug("invalid line-height: %f, falling back to normal", resolved_height);
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
+            lycon->block.line_height_is_normal = true;
         } else {
             lycon->block.line_height = resolved_height;
+            lycon->block.line_height_is_normal = false;
             log_debug("resolved line height: %f", lycon->block.line_height);
         }
     }
@@ -1130,7 +1134,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.max_width = lycon->block.content_width = physical_width;
     // Set root element height to viewport to enable scrollbars when content overflows
     lycon->block.content_height = physical_height;
-    lycon->block.advance_y = 0;  lycon->block.line_height = -1;
+    lycon->block.advance_y = 0;  lycon->block.line_height = -1;  lycon->block.line_height_is_normal = true;
     lycon->block.text_align = CSS_VALUE_LEFT;
 
     // Set available space to viewport dimensions (physical pixels for layout)

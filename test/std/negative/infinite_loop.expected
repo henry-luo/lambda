@@ -1,9 +1,0 @@
-09:15:53 [NOTICE] Start transpiling test/std/negative/infinite_loop.ls...
-09:15:53 [ERROR] Syntax tree has errors.
-09:15:53 [ERROR] Syntax error at Ln 8, Col 1 - 8, Col 11: ERROR
-09:15:53 [ERROR] ERROR node at Ln 8, Col 1 - 8, Col 11
-09:15:53 [ERROR] Syntax error at Ln 9, Col 5 - 9, Col 8: ERROR
-09:15:53 [ERROR] ERROR node at Ln 9, Col 5 - 9, Col 8
-09:15:53 [ERROR] Error: Failed to compile the function.
-##### Script 'test/std/negative/infinite_loop.ls' executed: #####
-null

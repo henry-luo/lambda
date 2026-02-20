@@ -15,6 +15,9 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global);
 void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
+void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
+void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *node);
+void transpile_index_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
@@ -856,6 +859,30 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         return;
     }
 
+    // Check if this is a reference to a widened var — already stored as Item, skip boxing
+    if (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)pri->expr;
+            if (ident->entry && ident->entry->type_widened) {
+                // check if this is a captured variable in the current closure
+                if (tp->current_closure) {
+                    CaptureInfo* cap = find_capture(tp->current_closure, ident->name);
+                    if (cap) {
+                        // captured widened var — read from env (already Item)
+                        strbuf_append_str(tp->code_buf, "_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        return;
+                    }
+                }
+                // variable is stored as Item — emit name directly without boxing wrapper
+                write_var_name(tp->code_buf, (AstNamedNode*)ident->entry->node,
+                    (AstImportNode*)ident->entry->import);
+                return;
+            }
+        }
+    }
+
     // Handle single-value CONTENT blocks: emit declarations + box last value.
     // Must be done before the type switch because a CONTENT node's type_id can be
     // LIST, ANY, BOOL, etc. — all need the same "declarations; box(last_val)" pattern.
@@ -1324,8 +1351,44 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         (int)ident_node->name->len, ident_node->name->chars,
                         ident_node->entry->node->type->type_id);
 
+                    // check if this is a widened var (stored as Item but identifier has concrete type)
+                    if (ident_node->entry->type_widened) {
+                        TypeId expected_tid = pri_node->type->type_id;
+                        // unbox Item to the expected native type
+                        if (expected_tid == LMD_TYPE_INT) {
+                            strbuf_append_str(tp->code_buf, "it2i(");
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                            strbuf_append_char(tp->code_buf, ')');
+                        } else if (expected_tid == LMD_TYPE_INT64) {
+                            strbuf_append_str(tp->code_buf, "it2l(");
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                            strbuf_append_char(tp->code_buf, ')');
+                        } else if (expected_tid == LMD_TYPE_FLOAT) {
+                            strbuf_append_str(tp->code_buf, "it2d(");
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                            strbuf_append_char(tp->code_buf, ')');
+                        } else if (expected_tid == LMD_TYPE_BOOL) {
+                            strbuf_append_str(tp->code_buf, "it2b(");
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                            strbuf_append_char(tp->code_buf, ')');
+                        } else if (expected_tid == LMD_TYPE_STRING || expected_tid == LMD_TYPE_SYMBOL ||
+                                   expected_tid == LMD_TYPE_BINARY) {
+                            strbuf_append_str(tp->code_buf, "it2s(");
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                            strbuf_append_char(tp->code_buf, ')');
+                        } else {
+                            // for Item, container, or other types: emit directly (already Item)
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                        }
+                    }
                     // For decimal identifiers, we need to convert the pointer to an Item
-                    if (ident_node->entry->node->type->type_id == LMD_TYPE_DECIMAL) {
+                    else if (ident_node->entry->node->type->type_id == LMD_TYPE_DECIMAL) {
                         strbuf_append_str(tp->code_buf, "c2it(");
                         write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
                             (AstImportNode*)ident_node->entry->import);
@@ -1939,31 +2002,42 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         return;
     }
 
+    // check if this var declaration was widened to Item due to type-inconsistent assignments
+    bool is_widened_var = asn_node->entry && asn_node->entry->type_widened;
+
     // declare the variable type
     Type *var_type = asn_node->type;
     strbuf_append_str(tp->code_buf, "\n ");
     if (!is_global) {
-        write_type(tp->code_buf, var_type);
+        if (is_widened_var) {
+            strbuf_append_str(tp->code_buf, "Item");  // widened var is always Item
+        } else {
+            write_type(tp->code_buf, var_type);
+        }
         strbuf_append_char(tp->code_buf, ' ');
     }
     write_var_name(tp->code_buf, asn_node, NULL);
     strbuf_append_char(tp->code_buf, '=');
 
-    // coerce Item → native scalar when variable type is scalar but RHS returns Item
-    TypeId var_tid = var_type->type_id;
-    TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
-    const char* unbox_fn = NULL;
-    if (var_tid != rhs_tid && (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL)) {
-        if (var_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
-        else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
-        else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
-        else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
-        else if (var_tid == LMD_TYPE_STRING || var_tid == LMD_TYPE_BINARY) unbox_fn = "it2s(";
+    if (is_widened_var) {
+        // widened var: RHS must be boxed to Item
+        transpile_box_item(tp, asn_node->as);
+    } else {
+        // coerce Item → native scalar when variable type is scalar but RHS returns Item
+        TypeId var_tid = var_type->type_id;
+        TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
+        const char* unbox_fn = NULL;
+        if (var_tid != rhs_tid && (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL)) {
+            if (var_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
+            else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
+            else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
+            else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
+            else if (var_tid == LMD_TYPE_STRING || var_tid == LMD_TYPE_BINARY) unbox_fn = "it2s(";
+        }
+        if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
+        transpile_expr(tp, asn_node->as);
+        if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
     }
-    if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
-    transpile_expr(tp, asn_node->as);
-    if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
-
     // restore previous context
     tp->current_assign_name = prev_assign_name;
 
@@ -2771,6 +2845,12 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
             // nested if in then branch
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            transpile_member_assign_stam(tp, (AstCompoundAssignNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_ASSIGN_STAM) {
+            transpile_assign_stam(tp, (AstAssignStamNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+            transpile_index_assign_stam(tp, (AstCompoundAssignNode*)if_node->then);
         } else {
             // single expression - just execute it
             strbuf_append_str(tp->code_buf, "\n ");
@@ -2789,6 +2869,12 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
             // else if chain
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            transpile_member_assign_stam(tp, (AstCompoundAssignNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_ASSIGN_STAM) {
+            transpile_assign_stam(tp, (AstAssignStamNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+            transpile_index_assign_stam(tp, (AstCompoundAssignNode*)if_node->otherwise);
         } else {
             // single expression
             strbuf_append_str(tp->code_buf, "\n ");
@@ -3095,12 +3181,39 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         return;
     }
 
+    // check if the target is a captured variable in the current closure
+    // if so, write to the env struct instead of a local variable
+    if (tp->current_closure) {
+        CaptureInfo* cap = find_capture(tp->current_closure, assign_node->target);
+        if (cap) {
+            // captured variable: emit _env->varname = boxed_value
+            // env stores Item, so value must be boxed
+            strbuf_append_str(tp->code_buf, "\n _env->");
+            strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+            strbuf_append_str(tp->code_buf, " = ");
+            transpile_box_item(tp, assign_node->value);
+            strbuf_append_str(tp->code_buf, ";");
+            return;
+        }
+    }
+
+    // check if the target var was widened to Item due to type-inconsistent assignments
+    bool is_widened = assign_node->target_entry && assign_node->target_entry->type_widened;
+
+    // determine if the target variable is Item-typed (NULL, ANY, or widened)
+    bool target_is_item = is_widened;
+    if (!target_is_item && assign_node->target_node && assign_node->target_node->type) {
+        TypeId target_type = assign_node->target_node->type->type_id;
+        target_is_item = (target_type == LMD_TYPE_NULL || target_type == LMD_TYPE_ANY);
+    }
+
     // MIR JIT workaround: inside while loops, use _store_i64(&_var, value) or
     // _store_f64(&_var, value) for native scalar types. These are external runtime
     // functions that MIR can't inline or reorder, preventing the lost-copy SSA bug.
+    // Only applies to non-widened scalar vars.
     bool use_store_func = false;
     const char* store_fn = NULL;
-    if (tp->while_depth > 0 && assign_node->target_node && assign_node->target_node->type) {
+    if (!is_widened && tp->while_depth > 0 && assign_node->target_node && assign_node->target_node->type) {
         TypeId tid = assign_node->target_node->type->type_id;
         if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) {
             use_store_func = true;
@@ -3121,18 +3234,8 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         strbuf_append_char(tp->code_buf, '=');
     }
 
-    // If target variable has Item type (e.g., was declared with var x = null),
-    // we need to box the value properly
-    bool needs_boxing = false;
-    if (assign_node->target_node && assign_node->target_node->type) {
-        TypeId target_type = assign_node->target_node->type->type_id;
-        // NULL type variables become Item type in C, so need to box values assigned to them
-        if (target_type == LMD_TYPE_NULL || target_type == LMD_TYPE_ANY) {
-            needs_boxing = true;
-        }
-    }
-
-    if (needs_boxing) {
+    if (target_is_item) {
+        // target is Item — box the value
         transpile_box_item(tp, assign_node->value);
     } else {
         // coerce Item → native scalar when target type is scalar but value returns Item
@@ -5441,6 +5544,13 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
     if (from_outer_env) {
         // already boxed in outer env, just copy
         strbuf_append_str(tp->code_buf, "_env->");
+        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        return;
+    }
+
+    // if the variable was widened to Item, it's already boxed — emit directly
+    if (cap->entry && cap->entry->type_widened) {
+        strbuf_append_char(tp->code_buf, '_');
         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
         return;
     }

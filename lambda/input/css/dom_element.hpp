@@ -161,6 +161,7 @@ struct DomElement : DomNode {
     // Pseudo-element styles (::before and ::after)
     StyleTree* before_styles;    // Styles for ::before pseudo-element
     StyleTree* after_styles;     // Styles for ::after pseudo-element
+    StyleTree* first_letter_styles;  // Styles for ::first-letter pseudo-element
     // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
@@ -233,7 +234,7 @@ struct DomElement : DomNode {
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
-        before_styles(nullptr), after_styles(nullptr),
+        before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         pseudo_state(0), doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         font(nullptr), bound(nullptr), in_line(nullptr),
