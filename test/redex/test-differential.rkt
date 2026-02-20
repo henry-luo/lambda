@@ -52,12 +52,13 @@
         "page"     "page"
         "flex-nest" "flex-nest"
         "text_flow" "text_flow"
-        "css_block" "css_block"))
+        "css_block" "css_block"
+        "css21"    "css2.1/html4"))
 
 ;; all suite names in default order
 (define all-suite-names
   '("baseline" "flex" "grid" "position" "table" "basic" "box" "advanced"
-    "page" "flex-nest" "text_flow" "css_block"))
+    "page" "flex-nest" "text_flow" "css_block" "css21"))
 
 ;; ============================================================
 ;; Test Discovery
@@ -104,7 +105,7 @@
 ;; the importer fully handles CSS style blocks with selector matching
 (define style-block-suites '("css_block" "box" "advanced" "flex" "grid"
                               "baseline" "position" "table" "basic"
-                              "page" "flex-nest" "text_flow"))
+                              "page" "flex-nest" "text_flow" "css21"))
 
 ;; find all test pairs: (html-path . ref-path) for simple tests across suites
 (define (discover-tests #:filter-pattern [pattern #f]

@@ -1306,10 +1306,7 @@ All 31 tests that were failing at the end of Phase 4 now **PASS** after Phase 5 
 
 ### All Layout Test Suites (Phase 6 Final)
 
-There are **two layout engines** tested against the same Chrome reference data:
-
-1. **Redex engine** (Racket, `test/redex/test-differential.rkt`) — the PLT Redex specification, used for Phases 1–5 development. Tolerance: 3px base, 3% proportional, 10px max.
-2. **Radiant engine** (C++, `make layout` / `test_radiant_layout.js`) — the production C++ implementation. Threshold: 100% element + 100% text match (strict).
+**Redex engine** (Racket, `test/redex/test-differential.rkt`) — the PLT Redex specification, used for Phases 1–5 development. Tolerance: 3px base, 3% proportional, 10px max.
 
 Phase 3 cross-suite numbers used the Redex engine. The `make layout` command uses the Radiant engine, which has different (often lower) pass rates for non-baseline suites.
 
@@ -1333,7 +1330,5 @@ Phase 3 cross-suite numbers used the Redex engine. The `make layout` command use
 
 *Note: The Redex engine discovers only tests with matching reference JSONs. Test counts differ from the Radiant runner because the Radiant runner includes tests without references (counted as failures).*
 
-Note: vs. Radiant Engine (C++, `make layout`)
-
-Strict threshold (100% match required):
+Note:  Redex engine vs. Radiant engine (C++, `make layout`)
 *The Radiant C++ engine has full baseline coverage (1968/1968) but lower pass rates on non-baseline suites. The Radiant engine uses a stricter 100% threshold vs the Redex engine's tolerance-based comparison.*

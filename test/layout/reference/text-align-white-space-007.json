@@ -1,15 +1,4 @@
 {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-  "test_file": "bidi-005.htm",
-========
-  "test_file": "text-align-white-space-007.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-  "browser_info": {
-    "viewport": {
-      "width": 1200,
-      "height": 800
-    }
-  },
   "layout_tree": {
     "nodeType": "element",
     "selector": "html",
@@ -20,11 +9,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-      "height": 290,
-========
       "height": 50,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -131,29 +116,92 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "depth": 1,
+        "depth": 0,
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
+            "selector": "style:nth-of-type(1)",
+            "tag": "style",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Times",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 0,
+            "elementIndex": 0,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n                        @font-face {\n                            font-family: 'Ahem';\n                            src: url('file:///Users/jane/Projects/Lambda/test/layout/data/css2.1/html4/support/ah",
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                }
+              }
+            ]
+          },
+          {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
-            "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 0,
-            "children": []
+            }
           },
           {
             "nodeType": "element",
@@ -212,52 +260,32 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 1,
+            "depth": 0,
+            "elementIndex": 0,
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                "text": "CSS Test: The bidi algorithm and inlines in CSS: embed levels and white-space: pre; ",
-                "length": 84,
-========
                 "text": "CSS Test: Text-align set to 'justify' with 'white-space' set to 'pre-wrap' and 'direction' set to 'rtl'",
-                "length": 103,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
+                }
               }
             ]
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
-            "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 2,
-            "children": []
+            }
           },
           {
             "nodeType": "element",
@@ -316,30 +344,20 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 3,
+            "depth": 0,
+            "elementIndex": 0,
             "children": []
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
-            "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 4,
-            "children": []
+            }
           },
           {
             "nodeType": "element",
@@ -398,40 +416,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 5,
+            "depth": 0,
+            "elementIndex": 0,
             "children": []
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
-            "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 6,
-            "children": []
+            }
           },
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "selector": "link:nth-of-type(3)",
-            "tag": "link",
-========
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
             "id": null,
             "classes": [],
             "layout": {
@@ -485,40 +488,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 7,
+            "depth": 0,
+            "elementIndex": 0,
             "children": []
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
-            "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 8,
-            "children": []
+            }
           },
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "selector": "link:nth-of-type(4)",
-            "tag": "link",
-========
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
             "id": null,
             "classes": [],
             "layout": {
@@ -572,114 +560,24 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 9,
+            "depth": 0,
+            "elementIndex": 0,
             "children": []
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
-            "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 10,
-            "children": []
+            }
           },
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "selector": "link:nth-of-type(5)",
-            "tag": "link",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 11,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n  ",
-            "length": 3,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 12,
-            "children": []
-          },
-          {
-            "nodeType": "element",
-========
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "selector": "style",
+            "selector": "style:nth-of-type(2)",
             "tag": "style",
             "id": null,
             "classes": [],
@@ -734,62 +632,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "elementIndex": 13,
+            "depth": 0,
+            "elementIndex": 0,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   div p { white-space: pre; margin: 1em; padding: 0.75em; background: black; color: yellow; font: 2em/1 serif; letter-spacing: 1em; }\n   .one, .c, .j, .e { color: aqua; }\n   .two, .i, .d, .k, .b { color: fuchsia; }\n   .one, .two { border: solid; padding: 0.1em 0 0.1em 0; margin: 0 0.5em 0 0.5em; }\n   .c, .b { border-style: solid none solid solid; padding: 0.1em 0 0.1em 0; margin: 0 0 0 0.5em; }\n   .j, .k { border-style: solid solid solid none; padding: 0.1em 0 0.1em 0; margin: 0 0.5em 0 0; }\n   .e, .i, .d { border-style: solid none solid none; padding: 0.1em 0 0.1em 0; margin: 0 0 0 0; }\n  ",
-                "length": 599,
-========
-            "elementIndex": 11,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "\n            div\n            {\n                direction: rtl;\n                font: 1em/1 ahem;\n                position: relative;\n                width: 9em;\n            }\n            div div\n            {\n                position: absolute;\n            }\n            #test\n            {\n                color: green;\n                text-align: justify;\n                white-space: pre-wrap;\n            }\n            .red\n            {\n                color: red;\n            }\n            .green\n            {\n                color: green;\n            }\n        ",
-                "length": 569,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                "isWhitespaceOnly": false,
+                "text": "\n            div\n            {\n                direction: rtl;\n                font: 1em/1 ahem;\n                position: relative;\n                width: 9em;\n            }\n            div div\n     ",
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
+                }
               }
             ]
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "text": "\n ",
-            "length": 2,
-========
             "text": "\n    ",
-            "length": 5,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            },
-            "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-            "nodeIndex": 14,
-========
-            "nodeIndex": 12,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-            "children": []
+            }
           }
         ]
+      },
+      {
+        "nodeType": "text",
+        "text": "\n    ",
+        "layout": {
+          "rects": [],
+          "hasLayout": false,
+          "parentVisible": true,
+          "parentDisplay": "block",
+          "parentVisibility": "visible"
+        }
       },
       {
         "nodeType": "element",
@@ -801,19 +682,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-          "height": 242,
-          "contentWidth": 1184,
-          "contentHeight": 242,
-          "scrollWidth": 1184,
-          "scrollHeight": 242
-========
           "height": 18,
           "contentWidth": 1184,
           "contentHeight": 18,
           "scrollWidth": 1184,
-          "scrollHeight": 99
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
+          "scrollHeight": 98
         },
         "computed": {
           "display": "block",
@@ -856,9 +729,20 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "depth": 1,
-        "elementIndex": 2,
+        "depth": 0,
+        "elementIndex": 0,
         "children": [
+          {
+            "nodeType": "text",
+            "text": "\n        ",
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": true,
+              "parentDisplay": "block",
+              "parentVisibility": "visible"
+            }
+          },
           {
             "nodeType": "element",
             "selector": "p",
@@ -916,53 +800,44 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 1,
+            "depth": 0,
+            "elementIndex": 0,
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                "text": " The following two blocks should be identical, including overflow. (Force bidi: א) ",
-                "length": 83,
-========
                 "text": "Test passes if there is no red visible on the page.",
-                "length": 51,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "width": 505.11,
+                      "width": 308.578125,
                       "height": 18,
-                      "right": 513.11,
-                      "bottom": 34,
-                      "text": " The following two blocks should be identical, including overflow. (Force bidi: א) ",
-                      "startIndex": 0,
-                      "endIndex": 83
-========
-                      "width": 308.58,
-                      "height": 18,
-                      "right": 316.58,
+                      "right": 316.578125,
                       "bottom": 34,
                       "text": "Test passes if there is no red visible on the page.",
                       "startIndex": 0,
                       "endIndex": 51
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
+                }
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n        ",
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": true,
+              "parentDisplay": "block",
+              "parentVisibility": "visible"
+            }
           },
           {
             "nodeType": "element",
@@ -972,31 +847,17 @@
             "classes": [],
             "layout": {
               "x": 8,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-              "y": 66,
-              "width": 1184,
-              "height": 192,
-              "contentWidth": 1184,
-              "contentHeight": 192,
-              "scrollWidth": 1184,
-              "scrollHeight": 192
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-========
               "y": 50,
               "width": 144,
               "height": 0,
               "contentWidth": 144,
               "contentHeight": 0,
               "scrollWidth": 144,
-              "scrollHeight": 65
+              "scrollHeight": 64
             },
             "computed": {
               "display": "block",
               "position": "relative",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
               "marginTop": 0,
               "marginRight": 0,
               "marginBottom": 0,
@@ -1021,13 +882,8 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 16,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-========
-              "lineHeight": "16px",
+              "lineHeight": 16,
               "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
               "fontWeight": "400",
               "textAlign": "start",
               "verticalAlign": "baseline",
@@ -1040,40 +896,22 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 2,
-            "elementIndex": 3,
+            "depth": 0,
+            "elementIndex": 0,
             "children": [
               {
-                "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                "selector": "p.reference:nth-of-type(1)",
-                "tag": "p",
-                "id": null,
-                "classes": [
-                  "reference"
-                ],
+                "nodeType": "text",
+                "text": "\n            ",
                 "layout": {
-                  "x": 40,
-                  "y": 66,
-                  "width": 1120,
-                  "height": 80,
-                  "contentWidth": 1120,
-                  "contentHeight": 80,
-                  "scrollWidth": 1120,
-                  "scrollHeight": 80
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 32,
-                  "marginRight": 32,
-                  "marginBottom": 32,
-                  "marginLeft": 32,
-                  "paddingTop": 24,
-                  "paddingRight": 24,
-                  "paddingBottom": 24,
-                  "paddingLeft": 24,
-========
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                }
+              },
+              {
+                "nodeType": "element",
                 "selector": "div:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -1086,7 +924,7 @@
                   "contentWidth": 144,
                   "contentHeight": 64,
                   "scrollWidth": 144,
-                  "scrollHeight": 65
+                  "scrollHeight": 64
                 },
                 "computed": {
                   "display": "block",
@@ -1099,7 +937,6 @@
                   "paddingRight": 0,
                   "paddingBottom": 0,
                   "paddingLeft": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                   "borderTopWidth": 0,
                   "borderRightWidth": 0,
                   "borderBottomWidth": 0,
@@ -1115,20 +952,8 @@
                   "alignSelf": "auto",
                   "order": 0,
                   "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                  "fontSize": 32,
-                  "lineHeight": "32px",
-                  "fontFamily": "serif",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-========
                   "fontSize": 16,
-                  "lineHeight": "16px",
+                  "lineHeight": 16,
                   "fontFamily": "ahem",
                   "fontWeight": "400",
                   "textAlign": "start",
@@ -1137,42 +962,27 @@
                   "right": "0px",
                   "bottom": "-64px",
                   "left": "0px",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                   "zIndex": "auto",
                   "overflow": "visible",
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "depth": 3,
-                "elementIndex": 1,
+                "depth": 0,
+                "elementIndex": 0,
                 "children": [
                   {
                     "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.a:nth-of-type(1)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "a"
-                    ],
-                    "layout": {
-                      "x": 64,
-                      "y": 87,
-                      "width": 46.2,
-                      "height": 37,
-========
-                    "selector": "span.green:nth-of-type(1)",
+                    "selector": "span:nth-of-type(1)",
                     "tag": "span",
                     "id": null,
                     "classes": [
                       "green"
                     ],
                     "layout": {
-                      "x": 80,
-                      "y": 49,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
+                      "x": 8,
+                      "y": 50,
+                      "width": 16,
+                      "height": 16,
                       "contentWidth": 0,
                       "contentHeight": 0,
                       "scrollWidth": 0,
@@ -1204,15 +1014,9 @@
                       "alignSelf": "auto",
                       "order": 0,
                       "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
                       "fontSize": 16,
-                      "lineHeight": "16px",
+                      "lineHeight": 16,
                       "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                       "fontWeight": "400",
                       "textAlign": "start",
                       "verticalAlign": "baseline",
@@ -1225,38 +1029,22 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 4,
+                    "depth": 0,
                     "elementIndex": 0,
                     "children": [
                       {
                         "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "a",
-========
                         "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 64,
-                              "y": 87,
-                              "width": 46.2,
-                              "height": 37,
-                              "right": 110.2,
-                              "bottom": 124,
-                              "text": "a",
-========
-                              "x": 80,
-                              "y": 49,
-                              "width": 8,
-                              "height": 18,
-                              "right": 88,
-                              "bottom": 67,
+                              "x": 8,
+                              "y": 50,
+                              "width": 16,
+                              "height": 16,
+                              "right": 24,
+                              "bottom": 66,
                               "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                               "startIndex": 0,
                               "endIndex": 1
                             }
@@ -1265,319 +1053,23 @@
                           "parentVisible": true,
                           "parentDisplay": "inline",
                           "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
+                        }
                       }
                     ]
                   },
                   {
                     "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.b:nth-of-type(2)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "b"
-                    ],
-                    "layout": {
-                      "x": 126.2,
-                      "y": 80.81,
-                      "width": 51,
-                      "height": 49.38,
-========
-                    "selector": "span.red:nth-of-type(2)",
+                    "selector": "span:nth-of-type(2)",
                     "tag": "span",
                     "id": null,
                     "classes": [
                       "red"
                     ],
                     "layout": {
-                      "x": 88,
-                      "y": 49,
-                      "width": 24,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "marginLeft": 16,
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 3,
-                      "borderLeftWidth": 3,
-========
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 1,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "b",
-                        "length": 1,
-========
-                        "text": "xxx",
-                        "length": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 129.2,
-                              "y": 87,
-                              "width": 48,
-                              "height": 37,
-                              "right": 177.2,
-                              "bottom": 124,
-                              "text": "b",
-                              "startIndex": 0,
-                              "endIndex": 1
-========
-                              "x": 88,
-                              "y": 49,
-                              "width": 24,
-                              "height": 18,
-                              "right": 112,
-                              "bottom": 67,
-                              "text": "xxx",
-                              "startIndex": 0,
-                              "endIndex": 3
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.c:nth-of-type(3)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "c"
-                    ],
-                    "layout": {
-                      "x": 193.2,
-                      "y": 80.81,
-                      "width": 49.2,
-                      "height": 49.38,
-========
-                    "selector": "span.green:nth-of-type(3)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 112,
-                      "y": 49,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "marginLeft": 16,
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 3,
-                      "borderLeftWidth": 3,
-========
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 2,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "c",
-========
-                        "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 196.2,
-                              "y": 87,
-                              "width": 46.2,
-                              "height": 37,
-                              "right": 242.41,
-                              "bottom": 124,
-                              "text": "c",
-========
-                              "x": 112,
-                              "y": 49,
-                              "width": 8,
-                              "height": 18,
-                              "right": 120,
-                              "bottom": 67,
-                              "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.d:nth-of-type(4)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "d"
-                    ],
-                    "layout": {
-                      "x": 242.41,
-                      "y": 80.81,
+                      "x": 24,
+                      "y": 50,
                       "width": 48,
-                      "height": 49.38,
-========
-                    "selector": "span.red:nth-of-type(4)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "red"
-                    ],
-                    "layout": {
-                      "x": 120,
-                      "y": 49,
-                      "width": 24,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
+                      "height": 16,
                       "contentWidth": 0,
                       "contentHeight": 0,
                       "scrollWidth": 0,
@@ -1590,15 +1082,6 @@
                       "marginRight": 0,
                       "marginBottom": 0,
                       "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 3,
-========
                       "paddingTop": 0,
                       "paddingRight": 0,
                       "paddingBottom": 0,
@@ -1606,7 +1089,6 @@
                       "borderTopWidth": 0,
                       "borderRightWidth": 0,
                       "borderBottomWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                       "borderLeftWidth": 0,
                       "flexDirection": "row",
                       "flexWrap": "nowrap",
@@ -1619,15 +1101,9 @@
                       "alignSelf": "auto",
                       "order": 0,
                       "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
                       "fontSize": 16,
-                      "lineHeight": "16px",
+                      "lineHeight": 16,
                       "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                       "fontWeight": "400",
                       "textAlign": "start",
                       "verticalAlign": "baseline",
@@ -1640,1252 +1116,21 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 4,
-                    "elementIndex": 3,
+                    "depth": 0,
+                    "elementIndex": 0,
                     "children": [
                       {
                         "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "d",
-                        "length": 1,
-========
                         "text": "xxx",
-                        "length": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 242.41,
-                              "y": 87,
+                              "x": 24,
+                              "y": 50,
                               "width": 48,
-                              "height": 37,
-                              "right": 290.41,
-                              "bottom": 124,
-                              "text": "d",
-                              "startIndex": 0,
-                              "endIndex": 1
-========
-                              "x": 120,
-                              "y": 49,
-                              "width": 24,
-                              "height": 18,
-                              "right": 144,
-                              "bottom": 67,
-                              "text": "xxx",
-                              "startIndex": 0,
-                              "endIndex": 3
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.e:nth-of-type(5)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "e"
-                    ],
-                    "layout": {
-                      "x": 290.41,
-                      "y": 80.81,
-                      "width": 46.2,
-                      "height": 49.38,
-========
-                    "selector": "span.green:nth-of-type(5)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 144,
-                      "y": 49,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 3,
-========
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 4,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "e",
-========
-                        "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 290.41,
-                              "y": 87,
-                              "width": 46.2,
-                              "height": 37,
-                              "right": 336.61,
-                              "bottom": 124,
-                              "text": "e",
-========
-                              "x": 144,
-                              "y": 49,
-                              "width": 8,
-                              "height": 18,
-                              "right": 152,
-                              "bottom": 67,
-                              "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.f:nth-of-type(6)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "f"
-                    ],
-                    "layout": {
-                      "x": 336.61,
-                      "y": 87,
-                      "width": 42.66,
-                      "height": 37,
-========
-                    "selector": "span.green:nth-of-type(6)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 80,
-                      "y": 65,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 5,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "f",
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 336.61,
-                              "y": 87,
-                              "width": 42.66,
-                              "height": 37,
-                              "right": 379.27,
-                              "bottom": 124,
-                              "text": "f",
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.g:nth-of-type(7)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "g"
-                    ],
-                    "layout": {
-                      "x": 379.27,
-                      "y": 87,
-                      "width": 48,
-                      "height": 37,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 6,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "g",
-========
-                        "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 379.27,
-                              "y": 87,
-                              "width": 48,
-                              "height": 37,
-                              "right": 427.27,
-                              "bottom": 124,
-                              "text": "g",
-========
-                              "x": 80,
-                              "y": 65,
-                              "width": 8,
-                              "height": 18,
-                              "right": 88,
-                              "bottom": 83,
-                              "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.h:nth-of-type(8)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "h"
-                    ],
-                    "layout": {
-                      "x": 427.27,
-                      "y": 87,
-                      "width": 48,
-                      "height": 37,
-========
-                    "selector": "span.red:nth-of-type(7)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "red"
-                    ],
-                    "layout": {
-                      "x": 88,
-                      "y": 65,
-                      "width": 24,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 7,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "h",
-                        "length": 1,
-========
-                        "text": "xxx",
-                        "length": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 427.27,
-                              "y": 87,
-                              "width": 48,
-                              "height": 37,
-                              "right": 475.27,
-                              "bottom": 124,
-                              "text": "h",
-                              "startIndex": 0,
-                              "endIndex": 1
-========
-                              "x": 88,
-                              "y": 65,
-                              "width": 24,
-                              "height": 18,
-                              "right": 112,
-                              "bottom": 83,
-                              "text": "xxx",
-                              "startIndex": 0,
-                              "endIndex": 3
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.i:nth-of-type(9)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "i"
-                    ],
-                    "layout": {
-                      "x": 475.27,
-                      "y": 80.81,
-                      "width": 40.89,
-                      "height": 49.38,
-========
-                    "selector": "span.green:nth-of-type(8)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 112,
-                      "y": 65,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 3,
-========
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 8,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "i",
-========
-                        "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 475.27,
-                              "y": 87,
-                              "width": 40.89,
-                              "height": 37,
-                              "right": 516.16,
-                              "bottom": 124,
-                              "text": "i",
-========
-                              "x": 112,
-                              "y": 65,
-                              "width": 8,
-                              "height": 18,
-                              "right": 120,
-                              "bottom": 83,
-                              "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.j:nth-of-type(10)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "j"
-                    ],
-                    "layout": {
-                      "x": 516.16,
-                      "y": 80.81,
-                      "width": 43.89,
-                      "height": 49.38,
-========
-                    "selector": "span.red:nth-of-type(9)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "red"
-                    ],
-                    "layout": {
-                      "x": 120,
-                      "y": 65,
-                      "width": 24,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "marginRight": 16,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 3,
-                      "borderBottomWidth": 3,
-========
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 9,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "j",
-                        "length": 1,
-========
-                        "text": "xxx",
-                        "length": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 516.16,
-                              "y": 87,
-                              "width": 40.89,
-                              "height": 37,
-                              "right": 557.05,
-                              "bottom": 124,
-                              "text": "j",
-                              "startIndex": 0,
-                              "endIndex": 1
-========
-                              "x": 120,
-                              "y": 65,
-                              "width": 24,
-                              "height": 18,
-                              "right": 144,
-                              "bottom": 83,
-                              "text": "xxx",
-                              "startIndex": 0,
-                              "endIndex": 3
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.k:nth-of-type(11)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "k"
-                    ],
-                    "layout": {
-                      "x": 576.05,
-                      "y": 80.81,
-                      "width": 51,
-                      "height": 49.38,
-========
-                    "selector": "span.green:nth-of-type(10)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 144,
-                      "y": 65,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "marginRight": 16,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 3,
-                      "borderBottomWidth": 3,
-========
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 10,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "k",
-========
-                        "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 576.05,
-                              "y": 87,
-                              "width": 48,
-                              "height": 37,
-                              "right": 624.05,
-                              "bottom": 124,
-                              "text": "k",
-========
-                              "x": 144,
-                              "y": 65,
-                              "width": 8,
-                              "height": 18,
-                              "right": 152,
-                              "bottom": 83,
-                              "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "selector": "span.l:nth-of-type(12)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "l"
-                    ],
-                    "layout": {
-                      "x": 643.05,
-                      "y": 87,
-                      "width": 40.89,
-                      "height": 37,
-========
-                    "selector": "span.green:nth-of-type(11)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 80,
-                      "y": 81,
-                      "width": 8,
-                      "height": 18,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 11,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "l",
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 643.05,
-                              "y": 87,
-                              "width": 40.89,
-                              "height": 37,
-                              "right": 683.94,
-                              "bottom": 124,
-                              "text": "l",
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.m:nth-of-type(13)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "m"
-                    ],
-                    "layout": {
-                      "x": 683.94,
-                      "y": 87,
-                      "width": 56.89,
-                      "height": 37,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-========
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 12,
-                    "children": [
-                      {
-                        "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                        "text": "m",
-========
-                        "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                              "x": 683.94,
-                              "y": 87,
-                              "width": 56.89,
-                              "height": 37,
-                              "right": 740.83,
-                              "bottom": 124,
-                              "text": "m",
-========
-                              "x": 80,
-                              "y": 81,
-                              "width": 8,
-                              "height": 18,
-                              "right": 88,
-                              "bottom": 99,
-                              "text": "x",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-========
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.red:nth-of-type(12)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "red"
-                    ],
-                    "layout": {
-                      "x": 88,
-                      "y": 81,
-                      "width": 24,
-                      "height": 18,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 13,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "xxx",
-                        "length": 3,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 88,
-                              "y": 81,
-                              "width": 24,
-                              "height": 18,
-                              "right": 112,
-                              "bottom": 99,
+                              "height": 16,
+                              "right": 72,
+                              "bottom": 66,
                               "text": "xxx",
                               "startIndex": 0,
                               "endIndex": 3
@@ -2895,302 +1140,23 @@
                           "parentVisible": true,
                           "parentDisplay": "inline",
                           "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
+                        }
                       }
                     ]
                   },
                   {
                     "nodeType": "element",
-                    "selector": "span.green:nth-of-type(13)",
+                    "selector": "span:nth-of-type(3)",
                     "tag": "span",
                     "id": null,
                     "classes": [
                       "green"
                     ],
                     "layout": {
-                      "x": 112,
-                      "y": 81,
-                      "width": 8,
-                      "height": 18,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 14,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "x",
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 112,
-                              "y": 81,
-                              "width": 8,
-                              "height": 18,
-                              "right": 120,
-                              "bottom": 99,
-                              "text": "x",
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.red:nth-of-type(14)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "red"
-                    ],
-                    "layout": {
-                      "x": 120,
-                      "y": 81,
-                      "width": 24,
-                      "height": 18,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 15,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "xxx",
-                        "length": 3,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 120,
-                              "y": 81,
-                              "width": 24,
-                              "height": 18,
-                              "right": 144,
-                              "bottom": 99,
-                              "text": "xxx",
-                              "startIndex": 0,
-                              "endIndex": 3
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.green:nth-of-type(15)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 144,
-                      "y": 81,
-                      "width": 8,
-                      "height": 18,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "16px",
-                      "fontFamily": "ahem",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 16,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "x",
-                        "length": 1,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 144,
-                              "y": 81,
-                              "width": 8,
-                              "height": 18,
-                              "right": 152,
-                              "bottom": 99,
-                              "text": "x",
-                              "startIndex": 0,
-                              "endIndex": 1
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.green:nth-of-type(16)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "green"
-                    ],
-                    "layout": {
-                      "x": 80,
-                      "y": 97,
+                      "x": 72,
+                      "y": 50,
                       "width": 16,
-                      "height": 18,
+                      "height": 16,
                       "contentWidth": 0,
                       "contentHeight": 0,
                       "scrollWidth": 0,
@@ -3223,7 +1189,7 @@
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 16,
-                      "lineHeight": "16px",
+                      "lineHeight": 16,
                       "fontFamily": "ahem",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -3237,23 +1203,1185 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 4,
-                    "elementIndex": 18,
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 72,
+                              "y": 50,
+                              "width": 16,
+                              "height": 16,
+                              "right": 88,
+                              "bottom": 66,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(4)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "red"
+                    ],
+                    "layout": {
+                      "x": 88,
+                      "y": 50,
+                      "width": 48,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "xxx",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 88,
+                              "y": 50,
+                              "width": 48,
+                              "height": 16,
+                              "right": 136,
+                              "bottom": 66,
+                              "text": "xxx",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(5)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 136,
+                      "y": 50,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 136,
+                              "y": 50,
+                              "width": 16,
+                              "height": 16,
+                              "right": 152,
+                              "bottom": 66,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "layout": {
+                      "rects": [],
+                      "hasLayout": false,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    }
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(6)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 8,
+                      "y": 66,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 8,
+                              "y": 66,
+                              "width": 16,
+                              "height": 16,
+                              "right": 24,
+                              "bottom": 82,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(7)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "red"
+                    ],
+                    "layout": {
+                      "x": 24,
+                      "y": 66,
+                      "width": 48,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "xxx",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 24,
+                              "y": 66,
+                              "width": 48,
+                              "height": 16,
+                              "right": 72,
+                              "bottom": 82,
+                              "text": "xxx",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(8)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 72,
+                      "y": 66,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 72,
+                              "y": 66,
+                              "width": 16,
+                              "height": 16,
+                              "right": 88,
+                              "bottom": 82,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(9)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "red"
+                    ],
+                    "layout": {
+                      "x": 88,
+                      "y": 66,
+                      "width": 48,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "xxx",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 88,
+                              "y": 66,
+                              "width": 48,
+                              "height": 16,
+                              "right": 136,
+                              "bottom": 82,
+                              "text": "xxx",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(10)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 136,
+                      "y": 66,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 136,
+                              "y": 66,
+                              "width": 16,
+                              "height": 16,
+                              "right": 152,
+                              "bottom": 82,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "layout": {
+                      "rects": [],
+                      "hasLayout": false,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    }
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(11)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 8,
+                      "y": 82,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 8,
+                              "y": 82,
+                              "width": 16,
+                              "height": 16,
+                              "right": 24,
+                              "bottom": 98,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(12)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "red"
+                    ],
+                    "layout": {
+                      "x": 24,
+                      "y": 82,
+                      "width": 48,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "xxx",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 24,
+                              "y": 82,
+                              "width": 48,
+                              "height": 16,
+                              "right": 72,
+                              "bottom": 98,
+                              "text": "xxx",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(13)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 72,
+                      "y": 82,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 72,
+                              "y": 82,
+                              "width": 16,
+                              "height": 16,
+                              "right": 88,
+                              "bottom": 98,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(14)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "red"
+                    ],
+                    "layout": {
+                      "x": 88,
+                      "y": 82,
+                      "width": 48,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "xxx",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 88,
+                              "y": 82,
+                              "width": 48,
+                              "height": 16,
+                              "right": 136,
+                              "bottom": 98,
+                              "text": "xxx",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(15)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 136,
+                      "y": 82,
+                      "width": 16,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "x",
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 136,
+                              "y": 82,
+                              "width": 16,
+                              "height": 16,
+                              "right": 152,
+                              "bottom": 98,
+                              "text": "x",
+                              "startIndex": 0,
+                              "endIndex": 1
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "layout": {
+                      "rects": [],
+                      "hasLayout": false,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    }
+                  },
+                  {
+                    "nodeType": "element",
+                    "selector": "span:nth-of-type(16)",
+                    "tag": "span",
+                    "id": null,
+                    "classes": [
+                      "green"
+                    ],
+                    "layout": {
+                      "x": 8,
+                      "y": 98,
+                      "width": 32,
+                      "height": 16,
+                      "contentWidth": 0,
+                      "contentHeight": 0,
+                      "scrollWidth": 0,
+                      "scrollHeight": 0
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "position": "static",
+                      "marginTop": 0,
+                      "marginRight": 0,
+                      "marginBottom": 0,
+                      "marginLeft": 0,
+                      "paddingTop": 0,
+                      "paddingRight": 0,
+                      "paddingBottom": 0,
+                      "paddingLeft": 0,
+                      "borderTopWidth": 0,
+                      "borderRightWidth": 0,
+                      "borderBottomWidth": 0,
+                      "borderLeftWidth": 0,
+                      "flexDirection": "row",
+                      "flexWrap": "nowrap",
+                      "justifyContent": "normal",
+                      "alignItems": "normal",
+                      "alignContent": "normal",
+                      "flexGrow": 0,
+                      "flexShrink": 1,
+                      "flexBasis": "auto",
+                      "alignSelf": "auto",
+                      "order": 0,
+                      "gap": "normal",
+                      "fontSize": 16,
+                      "lineHeight": 16,
+                      "fontFamily": "ahem",
+                      "fontWeight": "400",
+                      "textAlign": "start",
+                      "verticalAlign": "baseline",
+                      "top": "auto",
+                      "right": "auto",
+                      "bottom": "auto",
+                      "left": "auto",
+                      "zIndex": "auto",
+                      "overflow": "visible",
+                      "overflowX": "visible",
+                      "overflowY": "visible"
+                    },
+                    "depth": 0,
+                    "elementIndex": 0,
                     "children": [
                       {
                         "nodeType": "text",
                         "text": "xx",
-                        "length": 2,
-                        "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-                              "x": 80,
-                              "y": 97,
-                              "width": 16,
-                              "height": 18,
-                              "right": 96,
-                              "bottom": 115,
+                              "x": 8,
+                              "y": 98,
+                              "width": 32,
+                              "height": 16,
+                              "right": 40,
+                              "bottom": 114,
                               "text": "xx",
                               "startIndex": 0,
                               "endIndex": 2
@@ -3263,26 +2391,23 @@
                           "parentVisible": true,
                           "parentDisplay": "inline",
                           "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
+                        }
                       }
                     ]
                   },
                   {
                     "nodeType": "element",
-                    "selector": "span.red:nth-of-type(17)",
+                    "selector": "span:nth-of-type(17)",
                     "tag": "span",
                     "id": null,
                     "classes": [
                       "red"
                     ],
                     "layout": {
-                      "x": 96,
-                      "y": 97,
-                      "width": 24,
-                      "height": 18,
+                      "x": 40,
+                      "y": 98,
+                      "width": 48,
+                      "height": 16,
                       "contentWidth": 0,
                       "contentHeight": 0,
                       "scrollWidth": 0,
@@ -3315,7 +2440,7 @@
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 16,
-                      "lineHeight": "16px",
+                      "lineHeight": 16,
                       "fontFamily": "ahem",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -3329,23 +2454,21 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 4,
-                    "elementIndex": 19,
+                    "depth": 0,
+                    "elementIndex": 0,
                     "children": [
                       {
                         "nodeType": "text",
                         "text": "xxx",
-                        "length": 3,
-                        "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-                              "x": 96,
-                              "y": 97,
-                              "width": 24,
-                              "height": 18,
-                              "right": 120,
-                              "bottom": 115,
+                              "x": 40,
+                              "y": 98,
+                              "width": 48,
+                              "height": 16,
+                              "right": 88,
+                              "bottom": 114,
                               "text": "xxx",
                               "startIndex": 0,
                               "endIndex": 3
@@ -3355,26 +2478,23 @@
                           "parentVisible": true,
                           "parentDisplay": "inline",
                           "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
+                        }
                       }
                     ]
                   },
                   {
                     "nodeType": "element",
-                    "selector": "span.green:nth-of-type(18)",
+                    "selector": "span:nth-of-type(18)",
                     "tag": "span",
                     "id": null,
                     "classes": [
                       "green"
                     ],
                     "layout": {
-                      "x": 120,
-                      "y": 97,
-                      "width": 8,
-                      "height": 18,
+                      "x": 88,
+                      "y": 98,
+                      "width": 16,
+                      "height": 16,
                       "contentWidth": 0,
                       "contentHeight": 0,
                       "scrollWidth": 0,
@@ -3407,7 +2527,7 @@
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 16,
-                      "lineHeight": "16px",
+                      "lineHeight": 16,
                       "fontFamily": "ahem",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -3421,23 +2541,21 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 4,
-                    "elementIndex": 20,
+                    "depth": 0,
+                    "elementIndex": 0,
                     "children": [
                       {
                         "nodeType": "text",
                         "text": "x",
-                        "length": 1,
-                        "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-                              "x": 120,
-                              "y": 97,
-                              "width": 8,
-                              "height": 18,
-                              "right": 128,
-                              "bottom": 115,
+                              "x": 88,
+                              "y": 98,
+                              "width": 16,
+                              "height": 16,
+                              "right": 104,
+                              "bottom": 114,
                               "text": "x",
                               "startIndex": 0,
                               "endIndex": 1
@@ -3447,26 +2565,23 @@
                           "parentVisible": true,
                           "parentDisplay": "inline",
                           "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
+                        }
                       }
                     ]
                   },
                   {
                     "nodeType": "element",
-                    "selector": "span.red:nth-of-type(19)",
+                    "selector": "span:nth-of-type(19)",
                     "tag": "span",
                     "id": null,
                     "classes": [
                       "red"
                     ],
                     "layout": {
-                      "x": 128,
-                      "y": 97,
-                      "width": 24,
-                      "height": 18,
+                      "x": 104,
+                      "y": 98,
+                      "width": 48,
+                      "height": 16,
                       "contentWidth": 0,
                       "contentHeight": 0,
                       "scrollWidth": 0,
@@ -3499,7 +2614,7 @@
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 16,
-                      "lineHeight": "16px",
+                      "lineHeight": 16,
                       "fontFamily": "ahem",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -3513,23 +2628,21 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 4,
-                    "elementIndex": 21,
+                    "depth": 0,
+                    "elementIndex": 0,
                     "children": [
                       {
                         "nodeType": "text",
                         "text": "xxx",
-                        "length": 3,
-                        "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-                              "x": 128,
-                              "y": 97,
-                              "width": 24,
-                              "height": 18,
+                              "x": 104,
+                              "y": 98,
+                              "width": 48,
+                              "height": 16,
                               "right": 152,
-                              "bottom": 115,
+                              "bottom": 114,
                               "text": "xxx",
                               "startIndex": 0,
                               "endIndex": 3
@@ -3539,47 +2652,25 @@
                           "parentVisible": true,
                           "parentDisplay": "inline",
                           "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
+                        }
                       }
                     ]
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                   }
                 ]
               },
               {
-                "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                "selector": "p.test:nth-of-type(2)",
-                "tag": "p",
-                "id": null,
-                "classes": [
-                  "test"
-                ],
+                "nodeType": "text",
+                "text": "\n            ",
                 "layout": {
-                  "x": 40,
-                  "y": 178,
-                  "width": 1120,
-                  "height": 80,
-                  "contentWidth": 1120,
-                  "contentHeight": 80,
-                  "scrollWidth": 1120,
-                  "scrollHeight": 80
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 32,
-                  "marginRight": 32,
-                  "marginBottom": 32,
-                  "marginLeft": 32,
-                  "paddingTop": 24,
-                  "paddingRight": 24,
-                  "paddingBottom": 24,
-                  "paddingLeft": 24,
-========
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                }
+              },
+              {
+                "nodeType": "element",
                 "selector": "#test",
                 "tag": "div",
                 "id": "test",
@@ -3588,11 +2679,11 @@
                   "x": 8,
                   "y": 50,
                   "width": 144,
-                  "height": 48,
+                  "height": 64,
                   "contentWidth": 144,
-                  "contentHeight": 48,
+                  "contentHeight": 64,
                   "scrollWidth": 144,
-                  "scrollHeight": 49
+                  "scrollHeight": 64
                 },
                 "computed": {
                   "display": "block",
@@ -3605,7 +2696,6 @@
                   "paddingRight": 0,
                   "paddingBottom": 0,
                   "paddingLeft": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                   "borderTopWidth": 0,
                   "borderRightWidth": 0,
                   "borderBottomWidth": 0,
@@ -3621,373 +2711,145 @@
                   "alignSelf": "auto",
                   "order": 0,
                   "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                  "fontSize": 32,
-                  "lineHeight": "32px",
-                  "fontFamily": "serif",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-========
                   "fontSize": 16,
-                  "lineHeight": "16px",
+                  "lineHeight": 16,
                   "fontFamily": "ahem",
                   "fontWeight": "400",
                   "textAlign": "justify",
                   "verticalAlign": "baseline",
                   "top": "0px",
                   "right": "0px",
-                  "bottom": "-48px",
+                  "bottom": "-64px",
                   "left": "0px",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
                   "zIndex": "auto",
                   "overflow": "visible",
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "depth": 3,
-                "elementIndex": 3,
+                "depth": 0,
+                "elementIndex": 0,
                 "children": [
                   {
                     "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "text": "a‮l‭",
-                    "length": 4,
-========
-                    "text": "XXX XXX XXX ",
-                    "length": 12,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                    "isWhitespaceOnly": false,
+                    "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
                     "layout": {
                       "rects": [
                         {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                          "x": 64,
-                          "y": 199,
-                          "width": 46.2,
-                          "height": 37,
-                          "right": 110.2,
-                          "bottom": 236,
-                          "text": "a‮l‭",
-                          "startIndex": 0,
-                          "endIndex": 4
-========
-                          "x": 4,
-                          "y": 49,
-                          "width": 4,
-                          "height": 18,
+                          "x": -8,
+                          "y": 50,
+                          "width": 16,
+                          "height": 16,
                           "right": 8,
-                          "bottom": 67,
-                          "text": "XXX XXX XXX ",
+                          "bottom": 66,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
                           "startIndex": 0,
-                          "endIndex": 12
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 0,
-                    "children": []
-                  },
-                  {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "nodeType": "element",
-                    "selector": "span.one:nth-of-type(1)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "one"
-                    ],
-                    "layout": {
-                      "x": 193.2,
-                      "y": 192.81,
-                      "width": 366.84,
-                      "height": 49.38,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 16,
-                      "marginBottom": 0,
-                      "marginLeft": 16,
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 3,
-                      "borderBottomWidth": 3,
-                      "borderLeftWidth": 3,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 1,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "c‮j‭e‮",
-                        "length": 6,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 196.2,
-                              "y": 199,
-                              "width": 46.2,
-                              "height": 37,
-                              "right": 242.41,
-                              "bottom": 236,
-                              "text": "c‮j‭e‮",
-                              "startIndex": 0,
-                              "endIndex": 6
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
+                          "endIndex": 31
                         },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "text",
-                    "text": "h‭g‬f",
-                    "length": 5,
-========
-                    "nodeType": "text",
-                    "text": "XXX XXX XXX ",
-                    "length": 12,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
                         {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                          "x": 336.61,
-                          "y": 199,
-                          "width": 42.66,
-                          "height": 37,
-                          "right": 379.27,
-                          "bottom": 236,
-                          "text": "h‭g‬f",
-                          "startIndex": 0,
-                          "endIndex": 5
-========
                           "x": 8,
-                          "y": 49,
+                          "y": 50,
                           "width": 144,
-                          "height": 18,
+                          "height": 16,
                           "right": 152,
-                          "bottom": 67,
-                          "text": "XXX XXX XXX ",
+                          "bottom": 66,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
                           "startIndex": 0,
-                          "endIndex": 12
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "nodeIndex": 2,
-                    "children": []
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "span.two:nth-of-type(2)",
-                    "tag": "span",
-                    "id": null,
-                    "classes": [
-                      "two"
-                    ],
-                    "layout": {
-                      "x": 126.2,
-                      "y": 192.81,
-                      "width": 500.84,
-                      "height": 49.38,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 16,
-                      "marginBottom": 0,
-                      "marginLeft": 16,
-                      "paddingTop": 3.2,
-                      "paddingRight": 0,
-                      "paddingBottom": 3.2,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 3,
-                      "borderRightWidth": 3,
-                      "borderBottomWidth": 3,
-                      "borderLeftWidth": 3,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 32,
-                      "lineHeight": "32px",
-                      "fontFamily": "serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 3,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "‬i‬d‬k‬b",
-                        "length": 8,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 129.2,
-                              "y": 199,
-                              "width": 48,
-                              "height": 37,
-                              "right": 177.2,
-                              "bottom": 236,
-                              "text": "‬i‬d‬k‬b",
-                              "startIndex": 0,
-                              "endIndex": 8
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
+                          "endIndex": 31
                         },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "text",
-                    "text": "‬m",
-                    "length": 2,
-========
-                    "nodeIndex": 0,
-                    "children": []
-                  },
-                  {
-                    "nodeType": "text",
-                    "text": "XXX XXX",
-                    "length": 7,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
                         {
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                          "x": 683.94,
-                          "y": 199,
-                          "width": 56.89,
-                          "height": 37,
-                          "right": 740.83,
-                          "bottom": 236,
-                          "text": "‬m",
-                          "startIndex": 0,
-                          "endIndex": 2
-========
-                          "x": 4,
-                          "y": 65,
-                          "width": 4,
-                          "height": 18,
+                          "x": -8,
+                          "y": 66,
+                          "width": 16,
+                          "height": 16,
                           "right": 8,
-                          "bottom": 83,
-                          "text": "XXX XXX",
+                          "bottom": 82,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
                           "startIndex": 0,
-                          "endIndex": 7
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
+                          "endIndex": 31
+                        },
+                        {
+                          "x": 8,
+                          "y": 66,
+                          "width": 144,
+                          "height": 16,
+                          "right": 152,
+                          "bottom": 82,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
+                          "startIndex": 0,
+                          "endIndex": 31
+                        },
+                        {
+                          "x": -8,
+                          "y": 82,
+                          "width": 16,
+                          "height": 16,
+                          "right": 8,
+                          "bottom": 98,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
+                          "startIndex": 0,
+                          "endIndex": 31
+                        },
+                        {
+                          "x": 8,
+                          "y": 82,
+                          "width": 144,
+                          "height": 16,
+                          "right": 152,
+                          "bottom": 98,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
+                          "startIndex": 0,
+                          "endIndex": 31
+                        },
+                        {
+                          "x": 40,
+                          "y": 98,
+                          "width": 112,
+                          "height": 16,
+                          "right": 152,
+                          "bottom": 114,
+                          "text": "XXX XXX XXX XXX XXX XXX XXX XXX",
+                          "startIndex": 0,
+                          "endIndex": 31
                         }
                       ],
                       "hasLayout": true,
                       "parentVisible": true,
                       "parentDisplay": "block",
                       "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-<<<<<<<< HEAD:test/layout/reference/bidi-005.json
-                    "nodeIndex": 4,
-========
-                    "nodeIndex": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-align-white-space-007.json
-                    "children": []
+                    }
                   }
                 ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                }
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    \n",
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": true,
+              "parentDisplay": "block",
+              "parentVisibility": "visible"
+            }
           }
         ]
       }
-    ],
+    ]
+  },
+  "test_file": "text-align-white-space-007.htm",
+  "browser_info": {
     "viewport": {
       "width": 1200,
       "height": 800

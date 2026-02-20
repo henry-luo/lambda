@@ -1352,10 +1352,19 @@
       (add! 'direction 'rtl)))
 
   ;; width/height
+  ;; CSS 2.2: negative values for min-width/min-height/max-width/max-height are
+  ;; invalid and must be ignored (browser discards them, using initial value).
   (for ([prop '(width height min-width min-height max-width max-height)])
     (define val (cdr-or-false prop inline-alist))
     (when val
-      (add! prop (parse-css-length val))))
+      (define parsed (parse-css-length val))
+      (define negative-invalid?
+        (and (member prop '(min-width min-height max-width max-height))
+             (list? parsed)
+             (eq? (car parsed) 'px)
+             (negative? (cadr parsed))))
+      (unless negative-invalid?
+        (add! prop parsed))))
 
   ;; expand CSS logical property shorthands before edge parsing:
   ;; margin-block → margin-block-start + margin-block-end

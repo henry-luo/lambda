@@ -104,8 +104,55 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
         // Load HTML file using file:// URL to preserve relative paths for @font-face
         console.log('📄 Loading HTML file...');
         const fileUrl = `file://${htmlFilePath}`;
-        await page.goto(fileUrl, { waitUntil: 'networkidle0' });
 
+        // Inject @font-face for Ahem test font if the test requires it.
+        // CSS 2.1 tests reference Ahem by name (font-family: ahem) and expect it
+        // to be installed as a system font. Without it, Chrome falls back to a
+        // proportional font, producing incorrect reference measurements.
+        const htmlContent = await fs.readFile(htmlFilePath, 'utf8');
+        const needsAhem = /\bahem\b/i.test(htmlContent);
+
+        if (needsAhem) {
+            // Find the Ahem font file relative to the HTML file's support/ directory
+            const htmlDir = path.dirname(htmlFilePath);
+            const possiblePaths = [
+                path.join(htmlDir, 'support', 'ahem3.ttf'),
+                path.join(htmlDir, '..', 'support', 'ahem3.ttf'),
+                path.join(htmlDir, 'support', 'AHEM_default.TTF'),
+                path.join(htmlDir, '..', 'support', 'AHEM_default.TTF'),
+            ];
+            let ahemPath = null;
+            for (const p of possiblePaths) {
+                try {
+                    await fs.access(p);
+                    ahemPath = p;
+                    break;
+                } catch {}
+            }
+            if (ahemPath) {
+                const ahemUrl = `file://${path.resolve(ahemPath)}`;
+                // Inject @font-face before page loads so the font is available during layout
+                await page.evaluateOnNewDocument((fontUrl) => {
+                    document.addEventListener('DOMContentLoaded', () => {
+                        const style = document.createElement('style');
+                        style.textContent = `
+                            @font-face {
+                                font-family: 'Ahem';
+                                src: url('${fontUrl}') format('truetype');
+                                font-weight: normal;
+                                font-style: normal;
+                            }
+                        `;
+                        document.head.insertBefore(style, document.head.firstChild);
+                    });
+                }, ahemUrl);
+                console.log(`🔤 Ahem @font-face will be injected from ${path.basename(ahemPath)}`);
+            } else {
+                console.log('⚠️  Test requires Ahem font but no TTF found in support/');
+            }
+        }
+
+        await page.goto(fileUrl, { waitUntil: 'networkidle0' });
         // Wait for fonts and layout to stabilize
         await page.evaluate(() => document.fonts.ready);
         await new Promise(resolve => setTimeout(resolve, 200));
