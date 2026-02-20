@@ -865,6 +865,16 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)pri->expr;
             if (ident->entry && ident->entry->type_widened) {
+                // check if this is a captured variable in the current closure
+                if (tp->current_closure) {
+                    CaptureInfo* cap = find_capture(tp->current_closure, ident->name);
+                    if (cap) {
+                        // captured widened var — read from env (already Item)
+                        strbuf_append_str(tp->code_buf, "_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        return;
+                    }
+                }
                 // variable is stored as Item — emit name directly without boxing wrapper
                 write_var_name(tp->code_buf, (AstNamedNode*)ident->entry->node,
                     (AstImportNode*)ident->entry->import);
@@ -3169,6 +3179,22 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     if (!assign_node || !assign_node->target || !assign_node->value) {
         log_error("Error: invalid assign_node");
         return;
+    }
+
+    // check if the target is a captured variable in the current closure
+    // if so, write to the env struct instead of a local variable
+    if (tp->current_closure) {
+        CaptureInfo* cap = find_capture(tp->current_closure, assign_node->target);
+        if (cap) {
+            // captured variable: emit _env->varname = boxed_value
+            // env stores Item, so value must be boxed
+            strbuf_append_str(tp->code_buf, "\n _env->");
+            strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+            strbuf_append_str(tp->code_buf, " = ");
+            transpile_box_item(tp, assign_node->value);
+            strbuf_append_str(tp->code_buf, ";");
+            return;
+        }
     }
 
     // check if the target var was widened to Item due to type-inconsistent assignments
@@ -5518,6 +5544,13 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
     if (from_outer_env) {
         // already boxed in outer env, just copy
         strbuf_append_str(tp->code_buf, "_env->");
+        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        return;
+    }
+
+    // if the variable was widened to Item, it's already boxed — emit directly
+    if (cap->entry && cap->entry->type_widened) {
+        strbuf_append_char(tp->code_buf, '_');
         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
         return;
     }

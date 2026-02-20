@@ -448,10 +448,25 @@ void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry
     CaptureInfo* capture = (CaptureInfo*)pool_calloc(tp->pool, sizeof(CaptureInfo));
     capture->name = name;
     capture->entry = entry;
-    capture->is_mutable = false; // TODO: detect mutations
+    capture->is_mutable = false;
     capture->next = *captures;
     *captures = capture;
     log_debug("capture added: %.*s", (int)name->len, name->chars);
+}
+
+// Mark an existing capture as mutable (called when assignment to captured var is detected)
+void mark_capture_mutable(CaptureInfo** captures, String* name) {
+    CaptureInfo* c = *captures;
+    while (c) {
+        if (c->name == name || (c->name && name &&
+            c->name->len == name->len &&
+            memcmp(c->name->chars, name->chars, name->len) == 0)) {
+            c->is_mutable = true;
+            log_debug("capture marked mutable: %.*s", (int)name->len, name->chars);
+            return;
+        }
+        c = c->next;
+    }
 }
 
 // Recursively collect captures from an AST node
@@ -572,6 +587,19 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_LOOP: {
         AstNamedNode* named = (AstNamedNode*)node;
         collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        // check if the assignment target is a captured variable from an enclosing scope
+        if (assign->target_entry && !assign->target_entry->import &&
+            !is_local_to_scope(assign->target_entry, fn_scope) &&
+            !is_global_entry(assign->target_entry, global_scope)) {
+            add_capture(tp, captures, assign->target, assign->target_entry);
+            mark_capture_mutable(captures, assign->target);
+        }
+        // also collect captures from the value expression
+        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
         break;
     }
     case AST_NODE_RETURN_STAM: {

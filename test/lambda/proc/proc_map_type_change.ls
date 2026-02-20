@@ -90,6 +90,26 @@ pn test_type_change_in_loop() {
     print("\n")
 }
 
+// Test 9: null → int (scalar)
+pn test_null_to_int() {
+    let obj = {val: null, name: "test"}
+    obj.val = 42
+    print(obj.val)
+    print(" ")
+    print(obj.name)
+    print("\n")
+}
+
+// Test 10: bool → string
+pn test_bool_to_string() {
+    let obj = {flag: true, count: 5}
+    obj.flag = "yes"
+    print(obj.flag)
+    print(" ")
+    print(obj.count)
+    print("\n")
+}
+
 pn main() {
     test_int_to_string()
     test_int_to_float()
@@ -99,4 +119,6 @@ pn main() {
     test_multiple_type_changes()
     test_preserves_fields()
     test_type_change_in_loop()
+    test_null_to_int()
+    test_bool_to_string()
 }

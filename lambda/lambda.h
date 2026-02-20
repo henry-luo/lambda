@@ -199,7 +199,8 @@ struct Container {
             uint8_t is_content:1;    // whether it is a content list, or value list
             uint8_t is_spreadable:1; // whether this array should be spread when added to collections
             uint8_t is_heap:1;       // whether allocated from runtime heap (vs arena for input docs)
-            uint8_t reserved:5;
+            uint8_t is_data_migrated:1; // data buffer migrated from input pool to runtime pool (for mutated markup containers)
+            uint8_t reserved:4;
         };
     };
     uint16_t ref_cnt;  // reference count

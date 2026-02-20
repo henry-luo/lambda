@@ -439,44 +439,140 @@ case LMD_TYPE_ELEMENT: {
 
 Since Element extends List and children are generic Items, no type conversion is needed — just store the Item.
 
-#### 4.5.2 Markup-Sourced Elements (From Input Parsers)
+#### 4.5.2 Markup-Sourced Containers (From Input Parsers)
 
-Elements parsed from markup (JSON, XML, HTML, etc.) live in the markup buffer and may have specific memory layout requirements. For these, mutation should go through **MarkEditor in inline mode**:
+Elements and maps parsed from markup (JSON, XML, HTML, etc.) are arena-allocated (`is_heap=0`) with data buffers in the input pool. When procedural code mutates these containers with a type-changing assignment, the runtime must allocate a new data buffer — but cannot use `calloc`/`free` (which would corrupt the input pool's memory) and cannot delegate to MarkEditor (which requires an `Input*` pointer the runtime doesn't have).
 
-**Detection:** Markup-sourced elements have a flag or memory region indicator. Check `Container::flags` for a markup-origin bit.
+##### Why Not MarkEditor?
 
-**Attribute assignment:**
-```
-fn_map_set(elem_item, key, value):
-    if is_markup_element(elem):
-        use MarkEditor::elmt_update_attr(elem, key, value)
-    else:
-        use standard map-set path (§4.4)
-```
-
-**Child assignment:**
-```
-fn_array_set(elem_ref, index, value):
-    if is_markup_element(elem):
-        use MarkEditor::elmt_replace_child(elem, index, value)
-    else:
-        direct items[index] store
-```
-
-#### 4.5.3 MarkEditor Integration
-
-MarkEditor operates in two modes. For procedural assignment:
-
-- **Default to inline mode** (in-place mutation) — procedural code expects mutation side effects
-- MarkEditor is already thread-safe for single-writer scenarios
-- Immutable mode (COW) is reserved for functional transformations, not relevant for procedural assignment
-
-The runtime needs a **global or per-context MarkEditor instance** accessible from `fn_map_set`/`fn_array_set`:
+MarkEditor (`mark_editor.hpp`) is the full-featured mutation engine used by input parsers. It handles shape rebuilds, COW versioning, arena/pool allocation — everything needed for correct markup mutation. However, it has a hard dependency on `Input*`:
 
 ```cpp
-// In lambda runtime context
-MarkEditor* get_inline_editor();  // lazily initialized, inline mode
+// MarkEditor constructor — requires Input*
+explicit MarkEditor(Input* input, EditMode mode = EDIT_MODE_INLINE);
+
+// Internally caches from Input:
+//   pool_       = input->pool
+//   arena_      = input->arena
+//   name_pool_  = input->name_pool
+//   shape_pool_ = input->shape_pool
+//   type_list_  = input->type_list
+//   builder_    = new MarkBuilder(input)
 ```
+
+The runtime functions `fn_map_set` and `fn_array_set` are called from JIT-compiled code via the C ABI. They only have access to the global `EvalContext* context` — not the `Input*` that originally produced the container. The `Input*` is transient: it's created during `input()` / `fn_input2()`, its root Item is extracted and returned to the script, and the `Input*` itself is not stored on the container (doing so would add 8 bytes to every container struct).
+
+Alternative approaches considered and rejected:
+
+| Approach | Why rejected |
+|-|-|
+| Store `Input*` on each Container | +8 bytes per container; Input lifecycle doesn't match container lifetime |
+| Global/per-context MarkEditor | Still needs `Input*` for its MarkBuilder; each input() call creates a different Input with different pool/arena |
+| Lazy MarkEditor with synthetic Input | Would need to synthesize pool/arena/name_pool/shape_pool/type_list — effectively reimplementing what we already have in context |
+
+##### Chosen Approach: Allocation-Aware Data Migration
+
+Instead of routing through MarkEditor, `map_rebuild_for_type_change` directly handles the allocator difference by checking `Container::is_heap`. The `is_data_migrated` flag (bit 3 of Container flags, added to `lambda.h`) tracks when a markup container's data buffer has been migrated from the input pool to the runtime pool.
+
+**Container flags layout** (lambda.h):
+```c
+struct Container {
+    TypeId type_id;
+    union {
+        uint8_t flags;
+        struct {
+            uint8_t is_content:1;        // bit 0: content list vs value list
+            uint8_t is_spreadable:1;     // bit 1: auto-spread in collections
+            uint8_t is_heap:1;           // bit 2: heap (script) vs arena (input)
+            uint8_t is_data_migrated:1;  // bit 3: data buffer migrated to runtime pool
+            uint8_t reserved:4;          // bits 4-7: available
+        };
+    };
+    uint16_t ref_cnt;
+};
+```
+
+**Detection:** `is_heap` (already set by `heap_calloc` for script containers, `0` for arena containers from input parsers) is the discriminator. No new flag needed for detection — only `is_data_migrated` was added to track the migration state.
+
+**Attribute assignment (same type):** No allocation needed — writes value at existing offset in the data buffer. Works identically for `is_heap` and `!is_heap` containers. The data buffer pointer doesn't change.
+
+**Attribute assignment (type change):** `map_rebuild_for_type_change` uses three-way routing:
+
+```cpp
+bool use_pool = !container->is_heap;
+void* new_data;
+if (use_pool) {
+    // Markup container: allocate from runtime pool (context->pool = context->heap->pool)
+    new_data = pool_calloc(context->pool, new_byte_size);
+} else {
+    // Script container: calloc (consistent with map_fill, freed by free_container)
+    new_data = calloc(1, new_byte_size);
+}
+
+// ... copy fields, store new value ...
+
+// Free old data buffer with correct allocator:
+if (old_data) {
+    if (container->is_heap) {
+        free(old_data);                          // script: standard free
+    } else if (container->is_data_migrated) {
+        pool_free(context->pool, old_data);      // previously migrated: runtime pool
+    }
+    // else: first migration — old data is in input pool, don't free
+}
+
+// Track migration for future mutations
+if (use_pool) container->is_data_migrated = 1;
+```
+
+**State transitions for a markup container's data buffer:**
+
+```
+┌─────────────────────┐    type change     ┌─────────────────────┐
+│  Input Pool          │  ─────────────►   │  Runtime Pool        │
+│  (pool_calloc from   │  is_data_migrated │  (pool_calloc from   │
+│   input->pool)       │  set to 1         │   context->pool)     │
+│  NOT freed           │                   │                      │
+└─────────────────────┘                    └──────────┬───────────┘
+                                                      │ type change
+                                                      ▼
+                                           ┌─────────────────────┐
+                                           │  Runtime Pool (new)  │
+                                           │  old buffer freed    │
+                                           │  via pool_free       │
+                                           └─────────────────────┘
+```
+
+**Child assignment** (`elem[i] = val`): No allocation — writes Item directly to `items[index]` in the items array. Works for both heap and arena elements without migration.
+
+**Shape entries and TypeMap/TypeElmt:** Always allocated from `context->pool` (runtime pool) regardless of container origin. This is safe because shapes are never individually freed — they live until the runtime pool is destroyed.
+
+##### Why This Works
+
+The key insight is that `map_rebuild_for_type_change` already allocates new shapes and types from `context->pool`. The only allocation that was wrong was the **data buffer** — it used `calloc`/`free` unconditionally, which would:
+1. `free()` a buffer that was `pool_calloc()`'d from the input pool → **undefined behavior** (pool allocator manages its own free lists)
+2. `calloc()` a buffer that outlives the runtime pool → inconsistent lifecycle
+
+By switching the data buffer allocation to `pool_calloc(context->pool)` for markup containers, all allocations (shape, type, data) live in the same pool and are cleaned up together during `runner_cleanup` → `heap_destroy` → `pool_destroy`.
+
+#### 4.5.3 Memory Lifecycle
+
+After data migration, ownership is split across two memory regions:
+
+| Component | Location | Freed by |
+|-|-|-|
+| Container struct (Map/Element) | Input arena | `arena_destroy()` when Input is cleaned up |
+| Original data buffer | Input pool | `pool_destroy()` of input pool |
+| Migrated data buffer | Runtime pool (`context->heap->pool`) | `pool_destroy()` during `runner_cleanup` |
+| New ShapeEntry chain | Runtime pool | Same as above |
+| New TypeMap/TypeElmt | Runtime pool | Same as above |
+| Items array (children) | Input arena (if not migrated) | `arena_destroy()` |
+
+The container struct itself stays in the input arena — we never move it. Only the `data` pointer (packed attribute values) and `type` pointer (shape metadata) are swapped to point into runtime pool allocations. This is safe because:
+
+1. The container struct has the same binary layout regardless of where `data` points.
+2. `free_container()` in lambda-mem.cpp checks `is_heap` and returns early for arena containers — so the arena-allocated struct is never double-freed.
+3. The migrated data buffer in the runtime pool has the same lifetime as the script execution (freed at `runner_cleanup`), which is always shorter than or equal to the input's arena lifetime.
 
 ### 4.6 Capture Mutability
 
@@ -557,35 +653,79 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 | 4.6 | INT→FLOAT assignment now rebuilds shape (preserves float value instead of truncating) | lambda-eval.cpp | ✅ Done |
 | 4.7 | Test: `proc_map_type_change.ls` (8 test cases) | test/lambda/proc/ | ✅ Done |
 
-### Phase 5: Element Testing & Markup Integration
+### Phase 5: Element Testing & Markup Integration — ✅ DONE
+
+| # | Task | Files | Status |
+|-|-|-|-|
+| 5.1 | Test: element attribute mutation (same type, type change, null→container, loop) | test/lambda/proc/ | ✅ Done |
+| 5.2 | Test: element child assignment (child elements, preserves attrs) | test/lambda/proc/ | ✅ Done |
+| 5.3 | Test: `proc_element_mutation.ls` (8 test cases) | test/lambda/proc/ | ✅ Done |
+| 5.4 | Add `is_data_migrated` flag to Container (bit 3) | lambda.h | ✅ Done |
+| 5.5 | Allocation-aware routing in `map_rebuild_for_type_change` for `!is_heap` containers | lambda-eval.cpp | ✅ Done |
+| 5.6 | Test: `proc_markup_mutation.ls` (8 test cases — JSON map + XML element mutation) | test/lambda/proc/ | ✅ Done |
+
+**Key findings:** Element mutation works end-to-end without additional code changes. Phase 3 (`fn_array_set` with `LMD_TYPE_ELEMENT`) handles children, Phase 4 (`fn_map_set` with `LMD_TYPE_ELEMENT`) handles attributes. The transpiler already emits `fn_map_set()` for any member assignment regardless of target type. Markup-sourced container routing uses allocation-aware `map_rebuild_for_type_change`: `!is_heap` containers use `pool_calloc(context->pool)` for new data, skip `free()` on first migration, and `pool_free()` on subsequent migrations. The `is_data_migrated` flag (bit 3 of Container flags) tracks this transition. No MarkEditor is needed — direct pool management avoids the `Input*` dependency.
+
+### Phase 6: Closure Capture Mutability — ✅ DONE
+
+Closures (`fn`/`pn` nested inside `pn`) capture variables from enclosing scopes. Currently, all captures are **by value** — the closure receives a snapshot of the variable at creation time, stored as `Item` in a heap-allocated `Env_fXXX` struct. When the closure body **assigns** to a captured `var`, the transpiler incorrectly emits `_varname = value` (a nonexistent local), instead of writing to `_env->varname`. This is BUG-7.
+
+**Semantics:** Capture-by-value with **writable copy**. Each closure gets its own mutable `Item` slot in its env struct. Writes inside the closure update the env copy (persisting across calls), while the outer scope's variable remains independent. This is the standard closure-counter pattern:
+
+```lambda
+pn main() {
+    var count = 0
+    let counter = fn() {
+        count = count + 1   // writes to _env->count, not outer _count
+        count
+    }
+    print(counter())   // 1
+    print(counter())   // 2
+}
+```
 
 | # | Task | Files | Priority |
 |-|-|-|-|
-| 5.1 | Add markup-origin detection flag to Container | lambda.hpp | Medium |
-| 5.2 | Route markup-element attribute sets through MarkEditor | lambda-eval.cpp | Medium |
-| 5.3 | Route markup-element child sets through MarkEditor | lambda-eval.cpp | Medium |
-| 5.4 | Test: element attribute and child mutation in procedural code | test/lambda/proc/ | High |
+| 6.1 | Add `AST_NODE_ASSIGN_STAM` handling in `collect_captures_from_node` (detect assignment targets as captured variables) | build_ast.cpp | ✅ Done |
+| 6.2 | Set `CaptureInfo::is_mutable = true` when captured variable is assigned to | build_ast.cpp | ✅ Done |
+| 6.3 | Emit `_env->varname = boxed_value` for captured variable assignments in `transpile_assign_stam` | transpile.cpp | ✅ Done |
+| 6.4 | Fix `transpile_box_item` and `transpile_box_capture` to handle widened captures (avoid double-boxing) | transpile.cpp | ✅ Done |
+| 6.5 | Test: closure counter pattern, multiple mutable captures, string concat, accumulator | test/lambda/proc/ | ✅ Done |
 
-### Phase 6: Capture Mutability
+**Key findings:** Three changes were required beyond the core `is_mutable` detection:
+1. **`transpile_assign_stam`**: Added early check — if target is a captured variable, emit `_env->varname = boxed_value` instead of `_varname = value`.
+2. **`transpile_box_item`**: The "widened var" fast-path used `write_var_name` directly, bypassing capture detection. Added capture check before the fast-path to emit `_env->varname` for widened captured vars.
+3. **`transpile_box_capture`**: When a captured variable was widened to `Item`, the boxing function still applied type-specific boxing (e.g., `i2it(_total)` on an `Item` value = double-boxing). Added an early exit for widened vars since they're already `Item`.
 
-| # | Task | Files | Priority |
+Calling convention note: Named inner closures must be referenced as values (`let f = name`) and called through the variable (`f()`) to use `fn_call` dispatch, which passes the env pointer. Direct calls to named closures (`name()`) don't pass the env and would fail.
+
+### Phase 7: Testing — ✅ DONE
+
+| # | Task | Files | Status |
 |-|-|-|-|
-| 6.1 | Detect mutable captures in `build_assign_stam` | build_ast.cpp | Medium |
-| 6.2 | Set `CaptureInfo::is_mutable` flag | build_ast.cpp | Medium |
-| 6.3 | Emit pointer indirection for mutable captures in transpiler | transpile.cpp | Medium |
+| 7.1 | Test: var type change (int→string, int→float, etc.) | test/lambda/proc/proc_var_type_widen.ls (10 cases) | ✅ Done |
+| 7.2 | Test: let/param reassignment rejected | test/lambda/negative/semantic/immutable_assignment.ls (2 cases) | ✅ Done |
+| 7.3 | Test: ArrayInt assignment with float/string → conversion | test/lambda/proc/proc_array_type_convert.ls (8 cases) | ✅ Done |
+| 7.4 | Test: map field type change | test/lambda/proc/proc_map_type_change.ls (10 cases) | ✅ Done |
+| 7.5 | Test: element attribute mutation | test/lambda/proc/proc_element_mutation.ls (8 cases) | ✅ Done |
+| 7.6 | Test: element child assignment | test/lambda/proc/proc_element_mutation.ls (included) | ✅ Done |
+| 7.7 | Test: NULL↔container map field transitions | test/lambda/proc/proc_map_type_change.ls (Test 4-5, 9) | ✅ Done |
+| 7.8 | Test: markup-sourced container mutation | test/lambda/proc/proc_markup_mutation.ls (8 cases) | ✅ Done |
+| 7.9 | Test: annotated var type mismatch rejected | test/lambda/negative/semantic/var_type_mismatch.ls | ✅ Done |
+| 7.10 | Test: closure capture mutation (nested, multi) | test/lambda/proc/proc_closure_mutation.ls (8 cases) | ✅ Done |
 
-### Phase 7: Testing
+**Gap analysis methodology:** Audited all 8 proc/negative test files against Phases 1-6 feature lists. Identified Phase 1 (immutability) at 0% coverage and Phase 2 (type widening) at ~20% coverage as critical gaps. Created 3 new test files and extended 2 existing files.
 
-| # | Task | Files | Priority |
-|-|-|-|-|
-| 7.1 | Test: var type change (int→string, int→float, etc.) | test/lambda/proc/ | High |
-| 7.2 | Test: let/param reassignment rejected | test/lambda/proc/ | High |
-| 7.3 | Test: ArrayInt assignment with float/string → conversion | test/lambda/proc/ | High |
-| 7.4 | Test: map field type change | test/lambda/proc/ | High |
-| 7.5 | Test: element attribute mutation | test/lambda/proc/ | High |
-| 7.6 | Test: element child assignment | test/lambda/proc/ | High |
-| 7.7 | Test: NULL↔container map field transitions | test/lambda/proc/ | Medium |
-| 7.8 | Test: markup-sourced element mutation via MarkEditor | test/lambda/proc/ | Medium |
+**New test files created:**
+- `proc_var_type_widen.ls` — 10 cases: int→float, int→string, string→int, bool→int, chain widening, null cycle, int→bool, float→string, widened arithmetic, annotated coercion
+- `immutable_assignment.ls` — 2 negative cases: let reassignment (E211), param reassignment (E211)
+- `var_type_mismatch.ls` — 1 negative case: annotated var wrong type (E201)
+
+**Extended test files:**
+- `proc_map_type_change.ls` — Added Tests 9-10: null→int scalar, bool→string
+- `proc_closure_mutation.ls` — Added Tests 7-8: two independent closures, capture type widening
+
+**Final test count:** 250 Lambda baseline + 1968 Radiant baseline = 2218 total, all passing.
 
 ---
 
@@ -633,12 +773,13 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 **Effect:** No error; parameter is mutated (may cause downstream issues).  
 **Fix:** Phase 1.4 (validate mutability in `build_assign_stam`). Now reports error E211.
 
-### BUG-7: Capture `is_mutable` Never Set
+### BUG-7: Closure Capture `is_mutable` Never Set — ✅ FIXED
 
 **File:** build_ast.cpp:451  
-**Trigger:** `var x = 0; fn() { x = 1 }` — closure captures `x` as immutable.  
-**Effect:** Mutations to captured `var` may not propagate correctly.  
-**Fix:** Phase 6.1–6.2 (detect and flag mutable captures).
+**Trigger:** `var x = 0; fn() { x = 1 }` — closure captures `x` but `is_mutable` is hardcoded `false`.  
+**Effect:** Inside the closure, `transpile_assign_stam` emits `_x = value` (nonexistent local) instead of `_env->x = boxed_value`. Assignment either fails at C compilation or writes to wrong memory.  
+**Root cause:** `collect_captures_from_node` does not handle `AST_NODE_ASSIGN_STAM` — assignment targets are never detected as captured variables. Also, `add_capture` hardcodes `is_mutable = false`.  
+**Fix:** Phase 6.1–6.4 (detect assignment targets as captures, flag mutable, emit env write in transpiler, fix widened var boxing).
 
 ### BUG-8: `var` With Scalar Type Cannot Be Reassigned to Different Type — ✅ FIXED
 
@@ -780,9 +921,9 @@ The current mutation support in Lambda's procedural code has **8 identified bugs
 2. **No type-change support in the transpiler** — `var` variables are emitted as fixed C types
 3. **MarkEditor not connected to assignment syntax** — the full mutation engine exists but is only used by input parsers
 
-### Implemented (Phase 1, 2, 3, & 4)
+### Implemented (Phase 1, 2, 3, 4, 5, & 6)
 
-The following are now implemented and passing all 244 baseline tests:
+The following are now implemented and passing all 247 baseline tests:
 
 - **Smart type analysis for `var` assignment** (§4.1): The transpiler analyzes all assignments to each `var` during AST building. If types are consistent, the variable uses its concrete C type (zero overhead). If types are inconsistent, the variable is widened to `Item` storage. Type-annotated vars enforce their declared type with static error reporting. Numeric coercion (int↔float↔int64↔decimal) is allowed for annotated vars.
 
@@ -796,14 +937,14 @@ The following are now implemented and passing all 244 baseline tests:
 
 - **Element attribute mutation** (§4.5): `fn_map_set` now accepts `LMD_TYPE_ELEMENT` in addition to `LMD_TYPE_MAP`. Slot pointers (`type_slot`, `data_slot`, `cap_slot`) abstract over the different struct layouts. For element shape rebuilds, a new `TypeElmt` is created preserving element-specific fields (name, content_length, ns).
 
-- **Transpiler fix** (§4.4): Single-statement if/else branches now correctly emit `AST_NODE_MEMBER_ASSIGN_STAM`, `AST_NODE_ASSIGN_STAM`, and `AST_NODE_INDEX_ASSIGN_STAM` nodes (previously silently dropped).
+- **Element mutation testing** (§4.5, Phase 5): `proc_element_mutation.ls` covers 8 test cases: same-type attribute update, attribute type change (int→string), child assignment with child elements, null→container attribute, multiple attribute updates, attribute update preserving children, child update preserving attributes, and attribute mutation in a loop. All tests pass with no additional runtime changes needed.
 
-### Remaining (Phase 5–7)
+- **Markup-sourced container mutation** (§4.5.2, Phase 5): `proc_markup_mutation.ls` covers 8 test cases: JSON map and XML element mutation with type changes on arena-allocated containers. The `is_data_migrated` flag (Container bit 3) enables allocation-aware routing in `map_rebuild_for_type_change` — `!is_heap` containers use `pool_calloc`/`pool_free` from the runtime pool instead of `calloc`/`free`, preventing input pool memory corruption. First migration skips freeing old data (input pool owns it); subsequent migrations properly `pool_free` from the runtime pool.
 
-The remaining phases address deeper mutation scenarios:
-- **Markup-sourced element mutation** via MarkEditor for arena-allocated elements
-- **Mutable capture** support for closures
-- **Additional testing** for edge cases
+- **Closure capture mutability** (§4.6, Phase 6): Closures can now assign to captured `var` variables. Three changes in the transpiler: (1) `transpile_assign_stam` checks if the target is a captured variable and emits `_env->varname = boxed_value` instead of the incorrect `_varname = value`. (2) `transpile_box_item`'s "widened var" fast-path now checks for captures before using `write_var_name`. (3) `transpile_box_capture` skips boxing for widened vars (already `Item`). In the AST builder, `collect_captures_from_node` now handles `AST_NODE_ASSIGN_STAM` to detect assignment targets as captures and `mark_capture_mutable` sets `CaptureInfo::is_mutable = true`. Semantics are capture-by-value with writable copy — mutations inside the closure update the closure's own env copy while the outer scope's variable remains independent. Test: `proc_closure_mutation.ls` (6 cases: counter, independent outer var, multi-capture swap, string concat, read-only, accumulator).
 
-These are deferred for a separate implementation cycle.
+### Remaining (Phase 7)
+
+The remaining phase addresses edge-case testing:
+- **Phase 7: Additional testing** — edge cases for type changes, immutability, arrays, maps, elements, closures
 
