@@ -365,9 +365,11 @@ This adds a single comparison per access — negligible cost — and correctly h
 
 ### 4.4 Map Field Assignment with Type Change
 
-#### 4.4.1 Strategy: Leverage MarkEditor for Shape Rebuild
+> **Status: IMPLEMENTED** — merged into `lambda-eval.cpp`, `transpile.cpp`
 
-Rather than duplicating MarkEditor's shape-rebuild logic in `fn_map_set`, the runtime should delegate to MarkEditor when a type change or new-field scenario is detected:
+#### 4.4.1 Strategy: Direct Shape Rebuild in `fn_map_set`
+
+Rather than delegating to MarkEditor (which requires an `Input*` context unavailable in the eval runtime), type-changing assignments are handled directly in `fn_map_set` using the ShapeBuilder algorithm. Three static helper functions were added:
 
 ```
 fn_map_set(map_item, key, value):
@@ -399,15 +401,15 @@ When MarkEditor rebuilds a shape for type change:
    - Container → scalar: decrement old ref count, store new scalar
 8. Free old data buffer, update map's `type` and `data` pointers
 
-#### 4.4.3 Fix NULL↔Container Shape Inconsistency
+#### 4.4.3 Fix NULL↔Container Shape Inconsistency — ✅ FIXED
 
-The current `fn_map_set` allows NULL↔container transitions without updating the shape. This creates metadata inconsistency. With the MarkEditor delegation approach, this case is handled correctly: the shape is rebuilt with the field's actual type.
+NULL↔container transitions now go through the shape rebuild path, producing a correct shape that reflects the actual stored type. Both NULL→container and container→NULL transitions rebuild the shape (both are 8-byte pointer types, so the data layout doesn't change, but the metadata is now consistent).
 
-For performance, a narrower fix: treat NULL fields as "polymorphic slots" that always store as `void*` (8 bytes), which is compatible with both NULL (null pointer) and container types (pointer). The shape entry's type stays `LMD_TYPE_NULL` but the byte size is `sizeof(void*)`. This avoids shape rebuild for the common NULL→container pattern but requires careful handling in readers.
-
-**Recommendation:** Use the MarkEditor delegation approach for correctness. Optimize the NULL↔container fast path later if profiling shows it matters.
+The `FLOAT field + INT value` case uses a fast-path coercion (widen int to double), while `INT field + FLOAT value` triggers a shape rebuild to preserve the float value without truncation.
 
 ### 4.5 Element Mutation
+
+> **Status: IMPLEMENTED** — `fn_map_set` now accepts `LMD_TYPE_ELEMENT` for attribute mutation, `fn_array_set` supports `LMD_TYPE_ELEMENT` for child mutation
 
 Elements have dual nature: **attributes** (map-like, accessed via shape) and **children** (list-like, accessed via items array).
 
@@ -417,8 +419,8 @@ For elements created in procedural code (heap-allocated), follow the same patter
 
 **Attribute assignment** (`elem.attr = val`):
 - Same as map field assignment (§4.4)
-- `fn_map_set` already handles `LMD_TYPE_ELEMENT` for same-type attributes
-- With MarkEditor delegation, type-changing attribute assignment works too
+- `fn_map_set` now accepts `LMD_TYPE_ELEMENT` — uses slot pointers to abstract over Map vs Element struct layouts
+- Type-changing attribute assignment works through shape rebuild (creates new `TypeElmt` preserving element name, content_length, ns)
 
 **Child assignment** (`elem[i] = val`):
 - Extend `fn_array_set` to handle `LMD_TYPE_ELEMENT`:
@@ -543,23 +545,26 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 
 **Key insight:** No signature change was needed. Since all array types share the same struct layout, conversion happens in place — the struct pointer stays the same, only `type_id` and items buffer change. Specialized getters check `type_id` at runtime to handle converted arrays.
 
-### Phase 4: Map Shape Rebuild
+### Phase 4: Map Shape Rebuild — ✅ DONE
 
-| # | Task | Files | Priority |
+| # | Task | Files | Status |
 |-|-|-|-|
-| 4.1 | Create runtime accessor for MarkEditor (inline mode) | lambda-eval.cpp | High |
-| 4.2 | Delegate type-changing `fn_map_set` to MarkEditor::map_update | lambda-eval.cpp | High |
-| 4.3 | Fix MarkEditor `map_rebuild_with_new_shape` to convert values instead of zeroing | mark_editor.cpp | High |
-| 4.4 | Fix NULL↔container shape inconsistency (route through MarkEditor) | lambda-eval.cpp | Medium |
+| 4.1 | Add `map_field_decrement_ref`, `map_field_store`, `map_rebuild_for_type_change` helpers | lambda-eval.cpp | ✅ Done |
+| 4.2 | Rewrite `fn_map_set` to support shape rebuild on type change | lambda-eval.cpp | ✅ Done |
+| 4.3 | Support `LMD_TYPE_ELEMENT` in `fn_map_set` (attribute mutation via slot pointers) | lambda-eval.cpp | ✅ Done |
+| 4.4 | Fix NULL↔container shape inconsistency (rebuild instead of store-without-reshape) | lambda-eval.cpp | ✅ Done |
+| 4.5 | Fix single-statement if/else missing member/index/assign statements | transpile.cpp | ✅ Done |
+| 4.6 | INT→FLOAT assignment now rebuilds shape (preserves float value instead of truncating) | lambda-eval.cpp | ✅ Done |
+| 4.7 | Test: `proc_map_type_change.ls` (8 test cases) | test/lambda/proc/ | ✅ Done |
 
-### Phase 5: Element Mutation
+### Phase 5: Element Testing & Markup Integration
 
 | # | Task | Files | Priority |
 |-|-|-|-|
 | 5.1 | Add markup-origin detection flag to Container | lambda.hpp | Medium |
 | 5.2 | Route markup-element attribute sets through MarkEditor | lambda-eval.cpp | Medium |
 | 5.3 | Route markup-element child sets through MarkEditor | lambda-eval.cpp | Medium |
-| 5.4 | Handle heap-element child assignment directly (List-based store) | lambda-eval.cpp | High |
+| 5.4 | Test: element attribute and child mutation in procedural code | test/lambda/proc/ | High |
 
 ### Phase 6: Capture Mutability
 
@@ -600,19 +605,19 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 **Effect:** Logs error, silently returns. Assignment is lost.  
 **Fix:** Phase 3 — added `LMD_TYPE_LIST` and `LMD_TYPE_ELEMENT` cases that use `array_set()` directly (both have `Item* items`).
 
-### BUG-3: `fn_map_set` NULL↔Container Shape Inconsistency
+### BUG-3: `fn_map_set` NULL↔Container Shape Inconsistency — ✅ FIXED
 
-**File:** lambda-eval.cpp:3247  
+**File:** lambda-eval.cpp  
 **Trigger:** Assign container to a field whose shape says `LMD_TYPE_NULL`.  
-**Effect:** Shape metadata says NULL but actual data is a container pointer. Readers using shape type will misinterpret.  
-**Fix:** Phase 4.4 (route through MarkEditor for shape rebuild).
+**Effect:** Shape metadata says NULL but actual data is a container pointer.  
+**Fix:** Phase 4 — all type changes (including NULL↔container) now trigger `map_rebuild_for_type_change`, which creates a new shape chain with the correct type.
 
 ### BUG-4: MarkEditor Zeroes Values on Type Change
 
 **File:** mark_editor.cpp:496  
 **Trigger:** `map_rebuild_with_new_shape` when a field changes type.  
 **Effect:** Old value is silently zeroed instead of converted.  
-**Fix:** Phase 4.3 (add value conversion logic during rebuild).
+**Fix:** Not applicable to Phase 4's direct rebuild approach — `map_rebuild_for_type_change` in lambda-eval.cpp explicitly stores the new value (with proper ref counting) and copies all unchanged fields. MarkEditor's behavior remains unchanged for input parser use cases.
 
 ### BUG-5: `let` Variables Can Be Reassigned in `pn` — ✅ FIXED
 
@@ -775,9 +780,9 @@ The current mutation support in Lambda's procedural code has **8 identified bugs
 2. **No type-change support in the transpiler** — `var` variables are emitted as fixed C types
 3. **MarkEditor not connected to assignment syntax** — the full mutation engine exists but is only used by input parsers
 
-### Implemented (Phase 1, 2, & 3)
+### Implemented (Phase 1, 2, 3, & 4)
 
-The following are now implemented and passing all 243 baseline tests:
+The following are now implemented and passing all 244 baseline tests:
 
 - **Smart type analysis for `var` assignment** (§4.1): The transpiler analyzes all assignments to each `var` during AST building. If types are consistent, the variable uses its concrete C type (zero overhead). If types are inconsistent, the variable is widened to `Item` storage. Type-annotated vars enforce their declared type with static error reporting. Numeric coercion (int↔float↔int64↔decimal) is allowed for annotated vars.
 
@@ -787,13 +792,18 @@ The following are now implemented and passing all 243 baseline tests:
 
 - **Array type conversion** (§4.3): `fn_array_set` now validates value types before storing. When assigning an incompatible type to a specialized array (e.g., float to `ArrayInt`), the array is converted to a generic `Array` in place — the struct pointer stays the same, only `type_id` and the items buffer change. Specialized getters (`array_int_get`, etc.) check `type_id` at runtime to handle converted arrays. Element and List children are also supported.
 
-### Remaining (Phase 4–7)
+- **Map shape rebuild** (§4.4): `fn_map_set` now handles type-changing field assignments by rebuilding the shape chain directly. Three helper functions (`map_field_decrement_ref`, `map_field_store`, `map_rebuild_for_type_change`) build a new ShapeEntry chain via `pool_calloc`, create a new TypeMap/TypeElmt, allocate a new data buffer, copy compatible fields, store the new value with proper ref counting, and free the old buffer. Fast paths are preserved: same-type (in-place), FLOAT+INT (widen to double), INT↔INT64 (same byte size). INT→FLOAT now triggers rebuild to preserve float precision.
+
+- **Element attribute mutation** (§4.5): `fn_map_set` now accepts `LMD_TYPE_ELEMENT` in addition to `LMD_TYPE_MAP`. Slot pointers (`type_slot`, `data_slot`, `cap_slot`) abstract over the different struct layouts. For element shape rebuilds, a new `TypeElmt` is created preserving element-specific fields (name, content_length, ns).
+
+- **Transpiler fix** (§4.4): Single-statement if/else branches now correctly emit `AST_NODE_MEMBER_ASSIGN_STAM`, `AST_NODE_ASSIGN_STAM`, and `AST_NODE_INDEX_ASSIGN_STAM` nodes (previously silently dropped).
+
+### Remaining (Phase 5–7)
 
 The remaining phases address deeper mutation scenarios:
-- **Specialized array → generic conversion** on type-incompatible element assignment
-- **Map shape rebuild via MarkEditor** for field type changes
-- **Element mutation** for both heap-allocated and markup-sourced elements
+- **Markup-sourced element mutation** via MarkEditor for arena-allocated elements
 - **Mutable capture** support for closures
+- **Additional testing** for edge cases
 
 These are deferred for a separate implementation cycle.
 
