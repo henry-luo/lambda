@@ -1322,8 +1322,9 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
 
-    // Get letter-spacing from font style (same as used in layout)
+    // Get letter-spacing and word-spacing from font style (same as used in layout)
     float letter_spacing = evcon->font.style ? evcon->font.style->letter_spacing : 0.0f;
+    float word_spacing = evcon->font.style ? evcon->font.style->word_spacing : 0.0f;
 
     bool has_space = false;
     float prev_x = x;
@@ -1355,7 +1356,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
                 continue;
             }
             has_space = true;
-            wd = evcon->font.style->space_width;
+            wd = evcon->font.style->space_width + word_spacing;
             bytes = 1;  // spaces are always single byte
         } else {
             has_space = false;

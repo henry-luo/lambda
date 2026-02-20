@@ -959,6 +959,43 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
         return str;
     }
 
+    // Handle attr() function: content: attr(attribute-name)
+    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        CssFunction* func = value->data.function;
+        if (func && func->name && strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
+            // extract the attribute name from the first argument
+            const char* attr_name = NULL;
+            CssValue* arg0 = func->args[0];
+            if (arg0) {
+                if (arg0->type == CSS_VALUE_TYPE_STRING) {
+                    attr_name = arg0->data.string;
+                } else if (arg0->type == CSS_VALUE_TYPE_KEYWORD) {
+                    // known keyword used as attribute name (e.g., "class")
+                    const CssEnumInfo* info = css_enum_info(arg0->data.keyword);
+                    attr_name = info ? info->name : NULL;
+                } else if (arg0->type == CSS_VALUE_TYPE_CUSTOM) {
+                    // unknown ident parsed as custom property (e.g., "data-val")
+                    attr_name = arg0->data.custom_property.name;
+                }
+            }
+            if (attr_name) {
+                const char* attr_value = dom_element_get_attribute(element, attr_name);
+                log_info("[PSEUDO CONTENT] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
+                return attr_value ? attr_value : "";
+            }
+        }
+    }
+
+    // Handle attr() via CSS_VALUE_TYPE_ATTR (parsed by CSS value parser)
+    if (value->type == CSS_VALUE_TYPE_ATTR) {
+        CSSAttrRef* attr_ref = value->data.attr_ref;
+        if (attr_ref && attr_ref->name) {
+            const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+            log_info("[PSEUDO CONTENT] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
+            return attr_value ? attr_value : "";
+        }
+    }
+
     // Handle list of values (for content with multiple parts)
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
         // For now, return the first string value
@@ -1023,6 +1060,16 @@ const char* dom_element_get_pseudo_element_content_with_counters(
         log_info("[PSEUDO CONTENT WITH COUNTERS] STRING content, len=%zu, bytes=[%02x %02x %02x]",
             len, len > 0 ? (unsigned char)str[0] : 0, len > 1 ? (unsigned char)str[1] : 0, len > 2 ? (unsigned char)str[2] : 0);
         return str;
+    }
+
+    // Handle attr() via CSS_VALUE_TYPE_ATTR
+    if (value->type == CSS_VALUE_TYPE_ATTR) {
+        CSSAttrRef* attr_ref = value->data.attr_ref;
+        if (attr_ref && attr_ref->name) {
+            const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+            log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
+            return attr_value ? attr_value : "";
+        }
     }
 
     // Handle counter() or counters() function
@@ -1096,6 +1143,25 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                                 counter_name, separator ? separator : ".", buffer);
                         return buffer;
                     }
+                }
+            } else if (strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
+                // attr(attribute-name) in content property
+                const char* attr_name = NULL;
+                CssValue* arg0 = func->args[0];
+                if (arg0) {
+                    if (arg0->type == CSS_VALUE_TYPE_STRING) {
+                        attr_name = arg0->data.string;
+                    } else if (arg0->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(arg0->data.keyword);
+                        attr_name = info ? info->name : NULL;
+                    } else if (arg0->type == CSS_VALUE_TYPE_CUSTOM) {
+                        attr_name = arg0->data.custom_property.name;
+                    }
+                }
+                if (attr_name) {
+                    const char* attr_value = dom_element_get_attribute(element, attr_name);
+                    log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
+                    return attr_value ? attr_value : "";
                 }
             }
         }
@@ -1194,6 +1260,46 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                             log_debug("[Counter] counters(%s, '%s', style=%u) = '%s'",
                                     counter_name, separator ? separator : ".", style_type, temp_buffer);
                         }
+                    }
+                }
+                if (func && func->name && strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
+                    // Handle attr() function in list
+                    const char* attr_name = NULL;
+                    CssValue* arg0 = func->args[0];
+                    if (arg0) {
+                        if (arg0->type == CSS_VALUE_TYPE_STRING) attr_name = arg0->data.string;
+                        else if (arg0->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(arg0->data.keyword);
+                            attr_name = info ? info->name : NULL;
+                        }
+                        else if (arg0->type == CSS_VALUE_TYPE_CUSTOM) attr_name = arg0->data.custom_property.name;
+                    }
+                    if (attr_name) {
+                        const char* attr_value = dom_element_get_attribute(element, attr_name);
+                        if (attr_value) {
+                            int attr_len = strlen(attr_value);
+                            if (result_len + attr_len < (int)sizeof(result_buffer) - 1) {
+                                memcpy(result_buffer + result_len, attr_value, attr_len);
+                                result_len += attr_len;
+                                result_buffer[result_len] = '\0';
+                            }
+                            log_debug("[Counter] Appended attr(%s) = '%s'", attr_name, attr_value);
+                        }
+                    }
+                }
+            } else if (item->type == CSS_VALUE_TYPE_ATTR) {
+                // Handle attr() in list: content: "text" attr(class) "more text"
+                CSSAttrRef* attr_ref = item->data.attr_ref;
+                if (attr_ref && attr_ref->name) {
+                    const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+                    if (attr_value) {
+                        int attr_len = strlen(attr_value);
+                        if (result_len + attr_len < (int)sizeof(result_buffer) - 1) {
+                            memcpy(result_buffer + result_len, attr_value, attr_len);
+                            result_len += attr_len;
+                            result_buffer[result_len] = '\0';
+                        }
+                        log_debug("[Counter] Appended attr(%s) = '%s'", attr_ref->name, attr_value);
                     }
                 }
             }

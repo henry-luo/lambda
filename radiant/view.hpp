@@ -370,6 +370,7 @@ struct FontProp {
     CssEnum font_weight;
     CssEnum text_deco; // CSS text decoration
     float letter_spacing;  // letter spacing in pixels (default 0)
+    float word_spacing;  // word spacing in pixels (default 0)
     // derived font properties
     float space_width;  // width of a space character of the current font
     float ascender;    // font ascender in pixels

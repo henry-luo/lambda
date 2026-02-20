@@ -74,6 +74,7 @@ typedef struct BlockContext {
     float max_width;            // Maximum content width encountered
     float max_height;           // Maximum content height encountered
     float line_height;          // Current line height
+    bool  line_height_is_normal; // true when line-height is 'normal', false when explicitly set
     float init_ascender;        // Initial ascender at line start
     float init_descender;       // Initial descender at line start
     float lead_y;               // Leading space when line_height > font size
