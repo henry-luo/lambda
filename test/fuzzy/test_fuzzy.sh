@@ -11,6 +11,7 @@ CORPUS_DIR="$SCRIPT_DIR/corpus"
 LAMBDA_TEST_DIR="$PROJECT_ROOT/test/lambda"
 STD_TEST_DIR="$PROJECT_ROOT/test/std"
 CRASH_DIR="$SCRIPT_DIR/crashes"
+TIMEOUT_LOG="$SCRIPT_DIR/timeouts.log"
 TIMEOUT_SEC=5
 DURATION_SEC=300
 VERBOSE=0
@@ -63,6 +64,8 @@ fi
 
 # Create crash directory
 mkdir -p "$CRASH_DIR"
+# Clear timeout log
+: > "$TIMEOUT_LOG"
 
 # Statistics
 TESTS_RUN=0
@@ -80,6 +83,7 @@ log_verbose() {
 # Run a single test case
 run_test() {
     local test_file="$1"
+    local seed_name="${2:-unknown}"
     local test_name=$(basename "$test_file")
     
     TESTS_RUN=$((TESTS_RUN + 1))
@@ -106,6 +110,10 @@ run_test() {
         124)
             TESTS_TIMEOUT=$((TESTS_TIMEOUT + 1))
             log_verbose "    ${YELLOW}TIMEOUT${NC}"
+            echo "TIMEOUT: $test_file (seed: ${seed_name:-random})" >> "$TIMEOUT_LOG"
+            # Save the timed-out script for later analysis
+            local timeout_file="$CRASH_DIR/timeout_$(date +%Y%m%d_%H%M%S)_${TESTS_TIMEOUT}.ls"
+            cp "$test_file" "$timeout_file" 2>/dev/null
             ;;
         134|136|137|138|139|141)
             # SIGABRT=134, SIGFPE=136, SIGKILL=137, SIGBUS=138, SIGSEGV=139, SIGPIPE=141
@@ -391,7 +399,7 @@ if [ -d "$CORPUS_DIR" ]; then
             echo "  Category: $category"
             for test_file in "$CORPUS_DIR/$category"/*.ls; do
                 if [ -f "$test_file" ]; then
-                    run_test "$test_file"
+                    run_test "$test_file" "corpus/$category/$(basename "$test_file")"
                 fi
             done
         fi
@@ -471,10 +479,11 @@ while [ $(($(date +%s))) -lt "$MUTATION_END_TIME" ]; do
     program="${SEED_PROGRAMS[$seed_idx]}"
     
     # Apply mutation
+    seed_source="$(basename "${SEED_FILES[$seed_idx]}")"
     mutated=$(mutate_program "$program")
     echo "$mutated" > "$TEMP_FILE"
     
-    run_test "$TEMP_FILE"
+    run_test "$TEMP_FILE" "mutated:$seed_source"
     MUTATION_TESTS=$((MUTATION_TESTS + 1))
     
     # Progress every 100 tests
@@ -495,7 +504,7 @@ while [ $(($(date +%s))) -lt "$RANDOM_END_TIME" ]; do
     code=$(generate_random_code $length)
     echo "$code" > "$TEMP_FILE"
     
-    run_test "$TEMP_FILE"
+    run_test "$TEMP_FILE" "random_gen"
     RANDOM_TESTS=$((RANDOM_TESTS + 1))
     
     # Progress every 100 tests
@@ -521,6 +530,12 @@ echo "Timeouts:      $TESTS_TIMEOUT"
 echo "Duration:      ${TOTAL_TIME}s"
 echo "Tests/sec:     $((TESTS_RUN / (TOTAL_TIME + 1)))"
 echo ""
+
+if [ "$TESTS_TIMEOUT" -gt 0 ]; then
+    echo -e "${YELLOW}⏱  $TESTS_TIMEOUT timeout(s) detected:${NC}"
+    cat "$TIMEOUT_LOG"
+    echo ""
+fi
 
 if [ "$TESTS_CRASHED" -gt 0 ]; then
     echo -e "${RED}⚠️  $TESTS_CRASHED crash(es) detected!${NC}"
