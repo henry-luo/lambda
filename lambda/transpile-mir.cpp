@@ -638,12 +638,36 @@ static MIR_reg_t emit_load_string_literal(MirTranspiler* mt, const char* str) {
 }
 
 // Box int64 -> Item via push_l runtime call
+// Note: push_l takes int64_t by value, which maps correctly to MIR_T_I64
 static MIR_reg_t emit_box_int64(MirTranspiler* mt, MIR_reg_t val_reg) {
     return emit_call_1(mt, "push_l", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
 
-// Box DateTime -> Item via push_k runtime call
+// Box DateTime* pointer -> Item (inline k2it)
+// val_reg is a POINTER to DateTime (on num_stack or consts), not the DateTime value itself.
+// Use inline OR tagging: result = DTIME_TAG | ptr
 static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg) {
+    MIR_reg_t result = new_reg(mt, "boxk", MIR_T_I64);
+    uint64_t DTIME_TAG = (uint64_t)LMD_TYPE_DTIME << 56;
+    uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+    MIR_label_t l_nn = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
+        MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    emit_label(mt, l_nn);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)DTIME_TAG), MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_label(mt, l_end);
+    return result;
+}
+
+// Box raw DateTime VALUE -> Item via push_k
+// val_reg is the raw DateTime uint64_t value (NOT a pointer).
+// push_k allocates on num_stack and returns a properly tagged Item.
+static MIR_reg_t emit_box_dtime_value(MirTranspiler* mt, MIR_reg_t val_reg) {
     return emit_call_1(mt, "push_k", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
 
@@ -699,6 +723,45 @@ static MIR_reg_t emit_box_container(MirTranspiler* mt, MIR_reg_t ptr_reg) {
     return result;
 }
 
+// Box Decimal* pointer -> Item (inline dc2it)
+// Cannot use push_dc because it takes Decimal struct by value.
+static MIR_reg_t emit_box_decimal(MirTranspiler* mt, MIR_reg_t val_reg) {
+    MIR_reg_t result = new_reg(mt, "boxdc", MIR_T_I64);
+    uint64_t DEC_TAG = (uint64_t)LMD_TYPE_DECIMAL << 56;
+    uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+    MIR_label_t l_nn = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
+        MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    emit_label(mt, l_nn);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)DEC_TAG), MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_label(mt, l_end);
+    return result;
+}
+
+// Box Binary* pointer -> Item (inline)
+static MIR_reg_t emit_box_binary(MirTranspiler* mt, MIR_reg_t val_reg) {
+    MIR_reg_t result = new_reg(mt, "boxx", MIR_T_I64);
+    uint64_t BIN_TAG = (uint64_t)LMD_TYPE_BINARY << 56;
+    uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+    MIR_label_t l_nn = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
+        MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    emit_label(mt, l_nn);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)BIN_TAG), MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_label(mt, l_end);
+    return result;
+}
+
 // Generic box: given a value register and its TypeId, emit the appropriate boxing
 static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) {
     switch (type_id) {
@@ -708,6 +771,10 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
         return emit_box_float(mt, val_reg);
     case LMD_TYPE_BOOL:
         return emit_box_bool(mt, val_reg);
+    case LMD_TYPE_INT64:
+        return emit_box_int64(mt, val_reg);
+    case LMD_TYPE_DTIME:
+        return emit_box_dtime(mt, val_reg);
     case LMD_TYPE_STRING:
         return emit_box_string(mt, val_reg);
     case LMD_TYPE_SYMBOL:
@@ -715,16 +782,12 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_LIST: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
+    case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
         return emit_box_container(mt, val_reg);
-    // DTIME, INT64, DECIMAL, BINARY values from transpile_expr are always
-    // already boxed Items (tagged pointers). emit_load_const_boxed uses inline
-    // OR tagging, and function calls return tagged Items. Do NOT re-box via
-    // push_k/push_l/push_dc which would double-box and corrupt the value.
-    case LMD_TYPE_INT64:
-    case LMD_TYPE_DTIME:
     case LMD_TYPE_DECIMAL:
+        return emit_box_decimal(mt, val_reg);
     case LMD_TYPE_BINARY:
+        return emit_box_binary(mt, val_reg);
     case LMD_TYPE_NULL:
     case LMD_TYPE_ANY:
     case LMD_TYPE_ERROR:
@@ -995,19 +1058,24 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
         }
         case LMD_TYPE_INT64: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_INT64);
+            MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
+            // Dereference to get int64_t value
+            MIR_reg_t r = new_reg(mt, "i64", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
+            return r;
         }
         case LMD_TYPE_DTIME: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_DTIME);
+            return emit_load_const(mt, tc->const_index, MIR_T_P);
         }
         case LMD_TYPE_DECIMAL: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_DECIMAL);
+            return emit_load_const(mt, tc->const_index, MIR_T_P);
         }
         case LMD_TYPE_BINARY: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_BINARY);
+            return emit_load_const(mt, tc->const_index, MIR_T_P);
         }
         default: {
             log_error("mir: unhandled literal type %d", tid);
@@ -2545,9 +2613,12 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 // ============================================================================
 
 static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
-    MIR_reg_t obj = transpile_expr(mt, field_node->object);
-    TypeId obj_tid = field_node->object->type ? field_node->object->type->type_id : LMD_TYPE_ANY;
-    MIR_reg_t boxed_obj = emit_box(mt, obj, obj_tid);
+    // Use transpile_box_item for the object to ensure proper boxing.
+    // This is critical for types like DTIME/INT64/DECIMAL where transpile_expr
+    // returns raw unboxed values from transpile_primary, but variables may hold
+    // values that were previously boxed via transpile_box_item. Using
+    // transpile_box_item here ensures consistent boxing at the call site.
+    MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
 
     // Field name for member access: extract name from ident and create boxed string Item
     AstNode* field = field_node->field;
@@ -2571,9 +2642,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
-    MIR_reg_t obj = transpile_expr(mt, field_node->object);
-    TypeId obj_tid = field_node->object->type ? field_node->object->type->type_id : LMD_TYPE_ANY;
-    MIR_reg_t boxed_obj = emit_box(mt, obj, obj_tid);
+    MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
 
     MIR_reg_t idx = transpile_expr(mt, field_node->field);
     TypeId idx_tid = field_node->field->type ? field_node->field->type->type_id : LMD_TYPE_ANY;
@@ -2686,58 +2755,60 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         }
         MIR_type_t mir_ret_type = (c_ret_tid == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
 
+        // Helper lambda: post-process DateTime returns via push_k so variables store
+        // DateTime* pointers (consistent with literals from emit_load_const).
+        // DateTime C functions return raw uint64_t values, not pointers.
+        #define POST_PROCESS_DTIME(result) \
+            if (c_ret_tid == LMD_TYPE_DTIME) { result = emit_box_dtime_value(mt, result); }
+
         // For 0-arg functions like datetime(), date() etc
         if (arg_count == 0) {
-            return emit_call_0(mt, sys_fn_name, mir_ret_type);
+            MIR_reg_t result = emit_call_0(mt, sys_fn_name, mir_ret_type);
+            POST_PROCESS_DTIME(result);
+            return result;
         }
 
         // For 1-arg system functions
         if (arg_count == 1) {
             arg = call_node->argument;
-            MIR_reg_t a1 = transpile_expr(mt, arg);
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
-            return emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+            MIR_reg_t result = emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+            POST_PROCESS_DTIME(result);
+            return result;
         }
 
         // For 2-arg system functions
         if (arg_count == 2) {
             arg = call_node->argument;
-            MIR_reg_t a1 = transpile_expr(mt, arg);
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
+            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
 
             arg = arg->next;
-            MIR_reg_t a2 = transpile_expr(mt, arg);
-            TypeId a2_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_a2 = emit_box(mt, a2, a2_tid);
+            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
 
-            return emit_call_2(mt, sys_fn_name, mir_ret_type,
+            MIR_reg_t result = emit_call_2(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+            POST_PROCESS_DTIME(result);
+            return result;
         }
 
         // 3-arg system functions
         if (arg_count == 3) {
             arg = call_node->argument;
-            MIR_reg_t a1 = transpile_expr(mt, arg);
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
+            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
 
             arg = arg->next;
-            MIR_reg_t a2 = transpile_expr(mt, arg);
-            TypeId a2_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_a2 = emit_box(mt, a2, a2_tid);
+            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
 
             arg = arg->next;
-            MIR_reg_t a3 = transpile_expr(mt, arg);
-            TypeId a3_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            MIR_reg_t boxed_a3 = emit_box(mt, a3, a3_tid);
+            MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
 
-            return emit_call_3(mt, sys_fn_name, mir_ret_type,
+            MIR_reg_t result = emit_call_3(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
+            POST_PROCESS_DTIME(result);
+            return result;
         }
 
         // Fallback for more args: use vararg call
@@ -2746,9 +2817,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_op_t arg_ops[16];
             int ai = 0;
             while (arg && ai < 16) {
-                MIR_reg_t v = transpile_expr(mt, arg);
-                TypeId tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-                MIR_reg_t boxed = emit_box(mt, v, tid);
+                MIR_reg_t boxed = transpile_box_item(mt, arg);
                 arg_ops[ai++] = MIR_new_reg_op(mt->ctx, boxed);
                 arg = arg->next;
             }
@@ -2772,6 +2841,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
 
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            POST_PROCESS_DTIME(result);
             return result;
         }
     }
@@ -3453,10 +3523,9 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         // POS: for native numeric types, box as that type; otherwise fn_pos already returns boxed Item
         if (uop == OPERATOR_POS) {
             if (ct == LMD_TYPE_INT) return emit_box_int(mt, val);
+            if (ct == LMD_TYPE_INT64) return emit_box_int64(mt, val);
             if (ct == LMD_TYPE_FLOAT) return emit_box_float(mt, val);
-            // INT64, DTIME, DECIMAL: POS returns the operand directly from
-            // transpile_expr, which is already a boxed Item. No re-boxing needed.
-            return val;
+            return val; // fn_pos returns boxed Item for non-numeric operands
         }
         // IS_ERROR: always returns native bool regardless of operand type
         if (uop == OPERATOR_IS_ERROR) {
@@ -3492,12 +3561,21 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
     if (type_node->type && type_node->type->type_id == LMD_TYPE_TYPE) {
         TypeType* tt = (TypeType*)type_node->type;
         if (tt->type) {
-            // For datetime sub-types (date, time), use const_type to preserve the specific Type pointer
+            // For datetime sub-types (date, time), load the specific LIT_TYPE_DATE/TIME pointer
+            // because date/time/dtime share the same type_id (LMD_TYPE_DTIME)
             extern Type TYPE_DATE, TYPE_TIME;
-            if (tt->type == &TYPE_DATE || tt->type == &TYPE_TIME) {
-                // Cannot use base_type because date/time/dtime share the same type_id
-                // Must use the original Type* pointer via type_list
-                // Fall through to base_type for now - this will be improved when type_list is accessible
+            extern TypeType LIT_TYPE_DATE, LIT_TYPE_TIME;
+            if (tt->type == &TYPE_DATE) {
+                MIR_reg_t r = new_reg(mt, "tdate", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_DATE)));
+                return r;
+            }
+            if (tt->type == &TYPE_TIME) {
+                MIR_reg_t r = new_reg(mt, "ttime", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_TIME)));
+                return r;
             }
             tid = tt->type->type_id;
         }
