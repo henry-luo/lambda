@@ -59,7 +59,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, identifiers, names, symbols, namespaces |
 | **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, lists, maps, elements, ranges, and data composition expressions |
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
-| **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?`), control flow, and operators |
+| **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, `let a^err` destructuring, compile-time enforcement |
 
@@ -122,6 +122,12 @@ html?<img>                       // all <img> at any depth
 html?<div class: string>         // <div> with class attribute
 data?int                         // all int values in tree
 div.?<div>                       // self-inclusive query
+
+// Child-level query — direct children only (no recursion)
+type body = <body>
+el[element]                      // direct child elements
+el[string]                       // attr values + text children
+html[body]?<p>                   // child then recursive
 
 // For expressions
 (for (x in [1,2,3] where x > 1 order by x desc) x * 2)
@@ -441,7 +447,7 @@ Concise syntax for complex operations:
 
 1. **Collection Comprehensions**: Powerful for-expressions for data processing
 2. **Pipe Expressions**: Fluent data transformation pipelines
-3. **Query Expressions**: jQuery-style search with `?` (descendants) and `.?` (self-inclusive)
+3. **Query Expressions**: jQuery-style search with `?` (descendants), `.?` (self-inclusive), and `[T]` (child-level)
 4. **Pattern Matching**: Type-based pattern matching with `is`
 5. **Document Processing**: Built-in support for markup and data formats
 
