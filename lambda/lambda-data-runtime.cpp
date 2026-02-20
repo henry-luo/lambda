@@ -674,7 +674,7 @@ Item item_at(Item data, int index) {
         return list_get(data.list, index);
     case LMD_TYPE_RANGE: {
         Range *range = data.range;
-        if (index < range->start || index > range->end) { return ItemNull; }
+        if (index < 0 || index >= range->length) { return ItemNull; }
         int64_t value = range->start + index;
         return {.item = i2it(value)};
     }
