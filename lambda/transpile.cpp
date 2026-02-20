@@ -15,6 +15,9 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global);
 void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
+void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
+void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *node);
+void transpile_index_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
@@ -2832,6 +2835,12 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
             // nested if in then branch
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            transpile_member_assign_stam(tp, (AstCompoundAssignNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_ASSIGN_STAM) {
+            transpile_assign_stam(tp, (AstAssignStamNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+            transpile_index_assign_stam(tp, (AstCompoundAssignNode*)if_node->then);
         } else {
             // single expression - just execute it
             strbuf_append_str(tp->code_buf, "\n ");
@@ -2850,6 +2859,12 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
             // else if chain
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            transpile_member_assign_stam(tp, (AstCompoundAssignNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_ASSIGN_STAM) {
+            transpile_assign_stam(tp, (AstAssignStamNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+            transpile_index_assign_stam(tp, (AstCompoundAssignNode*)if_node->otherwise);
         } else {
             // single expression
             strbuf_append_str(tp->code_buf, "\n ");
