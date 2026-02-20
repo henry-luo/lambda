@@ -676,6 +676,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // Get text-transform property
     CssEnum text_transform = get_text_transform(lycon);
     bool is_word_start = true;  // Track word boundaries for capitalize
+    int layout_text_iterations = 0;  // guard against infinite goto loops
 
     log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
               white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
@@ -694,6 +695,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     LAYOUT_TEXT:
+    // Guard against infinite loop from extreme negative margins or degenerate layouts
+    if (++layout_text_iterations > 500) {
+        log_error("layout_text: exceeded 500 iterations, aborting text layout");
+        return;
+    }
     // Check if we're already past the line end before starting new text
     // This can happen after an inline-block that's wider than the container
     {
