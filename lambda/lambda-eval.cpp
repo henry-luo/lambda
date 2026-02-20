@@ -3117,6 +3117,67 @@ Item fn_varg1(Item index_item) {
 // COMPOUND ASSIGNMENT SUPPORT (procedural only)
 // ============================================================================
 
+// Convert a specialized array (ArrayInt, ArrayInt64, ArrayFloat) to a generic Array in place.
+// The struct pointer stays the same — only the type_id and items buffer change.
+// All specialized array types share the same struct layout (Container + items_ptr + length + extra + capacity),
+// so this in-place conversion is safe.
+static void convert_specialized_to_generic(Array* arr) {
+    TypeId old_type = arr->type_id;
+    int64_t len = arr->length;
+
+    // need room for items + extras (float/int64 values stored at end of buffer)
+    int64_t new_capacity = len * 2 + 4;
+    if (new_capacity < 8) new_capacity = 8;
+
+    Item* new_items = (Item*)calloc(new_capacity, sizeof(Item));
+    if (!new_items) {
+        log_error("convert_specialized_to_generic: allocation failed");
+        return;
+    }
+
+    if (old_type == LMD_TYPE_ARRAY_INT) {
+        int64_t* old_items = ((ArrayInt*)arr)->items;
+        // int56 values pack directly into Item — no extra area needed
+        for (int64_t i = 0; i < len; i++) {
+            new_items[i] = {.item = i2it(old_items[i])};
+        }
+        free(old_items);
+    } else if (old_type == LMD_TYPE_ARRAY_INT64) {
+        int64_t* old_items = ((ArrayInt64*)arr)->items;
+        // int64 values need to be stored in the extra area (end of buffer)
+        int64_t extra_count = 0;
+        for (int64_t i = 0; i < len; i++) {
+            int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
+            *slot = old_items[i];
+            new_items[i] = {.item = l2it(slot)};
+            extra_count++;
+        }
+        arr->extra = extra_count;
+        free(old_items);
+    } else if (old_type == LMD_TYPE_ARRAY_FLOAT) {
+        double* old_items = ((ArrayFloat*)arr)->items;
+        // double values need to be stored in the extra area (end of buffer)
+        int64_t extra_count = 0;
+        for (int64_t i = 0; i < len; i++) {
+            double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
+            *slot = old_items[i];
+            new_items[i] = {.item = d2it(slot)};
+            extra_count++;
+        }
+        arr->extra = extra_count;
+        free(old_items);
+    } else {
+        // shouldn't happen — caller should only call for specialized types
+        free(new_items);
+        return;
+    }
+
+    arr->items = new_items;
+    arr->capacity = new_capacity;
+    arr->type_id = LMD_TYPE_ARRAY;
+    log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
+}
+
 // array indexed assignment: arr[i] = val
 // Handles Array, ArrayInt, ArrayInt64, ArrayFloat
 void fn_array_set(Array* arr, int index, Item value) {
@@ -3141,18 +3202,66 @@ void fn_array_set(Array* arr, int index, Item value) {
         break;
     }
     case LMD_TYPE_ARRAY_INT: {
-        ArrayInt* ai = (ArrayInt*)arr;
-        ai->items[index] = (int64_t)value.get_int56();
+        TypeId val_type = get_type_id(value);
+        if (val_type == LMD_TYPE_INT) {
+            // compatible: store int56 directly
+            ArrayInt* ai = (ArrayInt*)arr;
+            ai->items[index] = (int64_t)value.get_int56();
+        } else if (val_type == LMD_TYPE_INT64) {
+            // int64 might fit in int56 — try, else convert
+            int64_t lval = value.get_int64();
+            if (lval >= INT56_MIN && lval <= INT56_MAX) {
+                ArrayInt* ai = (ArrayInt*)arr;
+                ai->items[index] = lval;
+            } else {
+                convert_specialized_to_generic(arr);
+                array_set(arr, index, value);
+            }
+        } else {
+            // incompatible type — convert to generic array first
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+        }
         break;
     }
     case LMD_TYPE_ARRAY_INT64: {
-        ArrayInt64* ai64 = (ArrayInt64*)arr;
-        ai64->items[index] = value.get_int64();
+        TypeId val_type = get_type_id(value);
+        if (val_type == LMD_TYPE_INT64) {
+            ArrayInt64* ai64 = (ArrayInt64*)arr;
+            ai64->items[index] = value.get_int64();
+        } else if (val_type == LMD_TYPE_INT) {
+            // widen int56 to int64
+            ArrayInt64* ai64 = (ArrayInt64*)arr;
+            ai64->items[index] = (int64_t)value.get_int56();
+        } else {
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+        }
         break;
     }
     case LMD_TYPE_ARRAY_FLOAT: {
-        ArrayFloat* af = (ArrayFloat*)arr;
-        af->items[index] = value.get_double();
+        TypeId val_type = get_type_id(value);
+        if (val_type == LMD_TYPE_FLOAT) {
+            ArrayFloat* af = (ArrayFloat*)arr;
+            af->items[index] = value.get_double();
+        } else if (val_type == LMD_TYPE_INT) {
+            // widen int to double
+            ArrayFloat* af = (ArrayFloat*)arr;
+            af->items[index] = (double)value.get_int56();
+        } else if (val_type == LMD_TYPE_INT64) {
+            // widen int64 to double (may lose precision)
+            ArrayFloat* af = (ArrayFloat*)arr;
+            af->items[index] = (double)value.get_int64();
+        } else {
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+        }
+        break;
+    }
+    case LMD_TYPE_LIST:
+    case LMD_TYPE_ELEMENT: {
+        // List and Element have Item* items — use array_set directly
+        array_set(arr, index, value);
         break;
     }
     default:
@@ -3161,9 +3270,211 @@ void fn_array_set(Array* arr, int index, Item value) {
     }
 }
 
-// map field assignment: obj.field = val
-// For P1 AWFY benchmark support: in-place update of existing fields with same type.
-// If the field does not exist or type changes, logs an error.
+// helper: decrement ref count of the value stored at a field pointer
+static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
+    switch (field_type) {
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
+        String* old_str = *(String**)field_ptr;
+        if (old_str && old_str->ref_cnt > 0) old_str->ref_cnt--;
+        break;
+    }
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
+        Container* old_c = *(Container**)field_ptr;
+        if (old_c && old_c->ref_cnt > 0) old_c->ref_cnt--;
+        break;
+    }
+    case LMD_TYPE_NULL: {
+        // a container might have been stored via a prior transition
+        void* old_ptr = *(void**)field_ptr;
+        if (old_ptr) {
+            Container* old_c = (Container*)old_ptr;
+            if (old_c->ref_cnt > 0) old_c->ref_cnt--;
+        }
+        break;
+    }
+    default: break;
+    }
+}
+
+// helper: store a value at a field pointer, incrementing ref count as needed
+static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
+    switch (value_type) {
+    case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
+    case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
+    case LMD_TYPE_INT:   *(int64_t*)field_ptr = value.get_int56(); break;
+    case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
+    case LMD_TYPE_FLOAT: *(double*)field_ptr = value.get_double(); break;
+    case LMD_TYPE_DTIME: *(DateTime*)field_ptr = value.get_datetime(); break;
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
+        String* s = value.get_string();
+        *(String**)field_ptr = s;
+        if (s) s->ref_cnt++;
+        break;
+    }
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
+        Container* c = value.container;
+        *(Container**)field_ptr = c;
+        if (c) c->ref_cnt++;
+        break;
+    }
+    default:
+        log_error("map_field_store: unsupported type %d", value_type);
+        break;
+    }
+}
+
+// rebuild a map/element shape when a field's type changes
+// creates new ShapeEntry chain + TypeMap/TypeElmt, allocates new data buffer, copies fields
+// For markup containers (!is_heap), uses runtime pool instead of calloc/free to avoid
+// corrupting input pool memory. The is_data_migrated flag tracks this transition.
+static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int* cap_slot,
+                                        TypeId container_type_id,
+                                        Container* container,
+                                        ShapeEntry* changed_entry,
+                                        TypeId new_value_type, Item new_value) {
+    TypeMap* old_map_type = (TypeMap*)*type_slot;
+    void* old_data = *data_slot;
+
+    // count existing fields
+    int field_count = 0;
+    ShapeEntry* e = old_map_type->shape;
+    while (e) { field_count++; e = e->next; }
+    if (field_count <= 0 || field_count > 64) {
+        log_error("map_rebuild: invalid field count %d", field_count);
+        return;
+    }
+
+    // build new shape chain with updated type for the changed field
+    ShapeEntry* first = NULL;
+    ShapeEntry* prev = NULL;
+    ShapeEntry* last = NULL;
+    int64_t byte_offset = 0;
+
+    e = old_map_type->shape;
+    while (e) {
+        TypeId ft = (e == changed_entry) ? new_value_type : e->type->type_id;
+
+        // allocate ShapeEntry + embedded StrView
+        ShapeEntry* ne = (ShapeEntry*)pool_calloc(context->pool,
+            sizeof(ShapeEntry) + sizeof(StrView));
+        if (!ne) {
+            log_error("map_rebuild: ShapeEntry allocation failed");
+            return;
+        }
+        StrView* nv = (StrView*)((char*)ne + sizeof(ShapeEntry));
+        nv->str = e->name->str;
+        nv->length = e->name->length;
+        ne->name = nv;
+        ne->type = type_info[ft].type;
+        ne->byte_offset = byte_offset;
+        ne->next = NULL;
+        ne->ns = e->ns;
+
+        if (!first) first = ne;
+        if (prev) prev->next = ne;
+        last = ne;
+        prev = ne;
+        byte_offset += type_info[ft].byte_size;
+        e = e->next;
+    }
+    int64_t new_byte_size = byte_offset;
+
+    // allocate new data buffer
+    // For heap containers: calloc (consistent with map_fill, freed by free_container)
+    // For markup containers: pool_calloc from runtime pool (data migrated from input pool)
+    bool use_pool = !container->is_heap;
+    void* new_data;
+    if (use_pool) {
+        new_data = pool_calloc(context->pool, new_byte_size > 0 ? new_byte_size : 1);
+    } else {
+        new_data = calloc(1, new_byte_size > 0 ? new_byte_size : 1);
+    }
+    if (!new_data) {
+        log_error("map_rebuild: data allocation failed");
+        return;
+    }
+
+    // copy field values from old buffer to new buffer
+    ShapeEntry* old_e = old_map_type->shape;
+    ShapeEntry* new_e = first;
+    while (old_e && new_e) {
+        void* old_field = (char*)old_data + old_e->byte_offset;
+        void* new_field = (char*)new_data + new_e->byte_offset;
+
+        if (old_e == changed_entry) {
+            // decrement old value's ref count
+            map_field_decrement_ref(old_field, old_e->type->type_id);
+            // store the new value (with ref count increment)
+            map_field_store(new_field, new_value, new_value_type);
+        } else {
+            // unchanged field — copy bytes (ref count unchanged, same pointers)
+            int sz = type_info[old_e->type->type_id].byte_size;
+            memcpy(new_field, old_field, sz);
+        }
+        old_e = old_e->next;
+        new_e = new_e->next;
+    }
+
+    // create new TypeMap or TypeElmt (never mutate shared types)
+    ArrayList* tl = (ArrayList*)context->type_list;
+
+    if (container_type_id == LMD_TYPE_ELEMENT) {
+        TypeElmt* old_et = (TypeElmt*)old_map_type;
+        TypeElmt* new_et = (TypeElmt*)alloc_type(context->pool,
+            LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        new_et->shape = first;
+        new_et->last = last;
+        new_et->length = field_count;
+        new_et->byte_size = new_byte_size;
+        new_et->name = old_et->name;
+        new_et->content_length = old_et->content_length;
+        new_et->ns = old_et->ns;
+        new_et->type_index = tl->length;
+        arraylist_append(tl, new_et);
+        *type_slot = new_et;
+    } else {
+        TypeMap* new_mt = (TypeMap*)alloc_type(context->pool,
+            LMD_TYPE_MAP, sizeof(TypeMap));
+        new_mt->shape = first;
+        new_mt->last = last;
+        new_mt->length = field_count;
+        new_mt->byte_size = new_byte_size;
+        new_mt->type_index = tl->length;
+        arraylist_append(tl, new_mt);
+        *type_slot = new_mt;
+    }
+
+    // replace data
+    *data_slot = new_data;
+    *cap_slot = (int)new_byte_size;
+
+    // free old data buffer with correct allocator
+    if (old_data) {
+        if (container->is_heap) {
+            free(old_data);
+        } else if (container->is_data_migrated) {
+            // previous mutation already migrated data to runtime pool
+            pool_free(context->pool, old_data);
+        }
+        // else: old data is in input pool — don't free (managed by input lifecycle)
+    }
+
+    // mark data as migrated for future mutations
+    if (use_pool) {
+        container->is_data_migrated = 1;
+    }
+
+    log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld, migrated=%d",
+              field_count, new_byte_size, container->is_data_migrated);
+}
+
+// map/element field assignment: obj.field = val
+// Supports in-place update (same type), numeric coercion (INT↔FLOAT, INT↔INT64),
+// and shape rebuild for type changes (e.g. int→string, null→container).
 void fn_map_set(Item map_item, Item key, Item value) {
     TypeId map_type_id = get_type_id(map_item);
 
@@ -3178,11 +3489,34 @@ void fn_map_set(Item map_item, Item key, Item value) {
         return;
     }
 
-    if (map_type_id != LMD_TYPE_MAP || !map_item.map) {
-        log_error("fn_map_set: not a map (type=%d)", map_type_id);
+    // support both Map and Element (Element has map-like attributes)
+    TypeMap* map_type = NULL;
+    void** type_slot = NULL;
+    void** data_slot = NULL;
+    int* cap_slot = NULL;
+
+    if (map_type_id == LMD_TYPE_MAP) {
+        Map* mp = map_item.map;
+        if (!mp) { log_error("fn_map_set: null map"); return; }
+        type_slot = &mp->type;
+        data_slot = &mp->data;
+        cap_slot = &mp->data_cap;
+    } else if (map_type_id == LMD_TYPE_ELEMENT) {
+        Element* el = (Element*)map_item.container;
+        if (!el) { log_error("fn_map_set: null element"); return; }
+        type_slot = &el->type;
+        data_slot = &el->data;
+        cap_slot = &el->data_cap;
+    } else {
+        log_error("fn_map_set: not a map or element (type=%d)", map_type_id);
         return;
     }
-    Map* mp = map_item.map;
+
+    map_type = (TypeMap*)*type_slot;
+    if (!map_type || !map_type->shape) {
+        log_error("fn_map_set: no shape");
+        return;
+    }
 
     // get key as C string
     const char* key_cstr = NULL;
@@ -3202,135 +3536,44 @@ void fn_map_set(Item map_item, Item key, Item value) {
         return;
     }
 
-    // find field in map shape
-    TypeMap* map_type = (TypeMap*)mp->type;
-    if (!map_type || !map_type->shape) {
-        log_error("fn_map_set: map has no shape");
-        return;
-    }
-
+    // find field in shape
     TypeId value_type = get_type_id(value);
     ShapeEntry* entry = map_type->shape;
     while (entry) {
         if (strcmp(entry->name->str, key_cstr) == 0) {
             TypeId field_type = entry->type->type_id;
-            void* field_ptr = (char*)mp->data + entry->byte_offset;
+            void* field_ptr = (char*)*data_slot + entry->byte_offset;
 
-            // Allow compatible type transitions:
-            // - NULL can be set to any container/string type (and vice versa)
-            // - INT <-> INT64 promotion
-            // - Same type always ok
-            bool type_compatible = (field_type == value_type);
-            if (!type_compatible) {
-                bool is_null_transition = false;
-                // NULL field can accept any container/string type
-                if (field_type == LMD_TYPE_NULL) {
-                    switch (value_type) {
-                    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-                    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-                    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
-                    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
-                        is_null_transition = true;
-                        break;
-                    default: break;
-                    }
-                }
-                // Container/string field can be set to NULL
-                if (value_type == LMD_TYPE_NULL) {
-                    switch (field_type) {
-                    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-                    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-                    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
-                    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
-                        is_null_transition = true;
-                        break;
-                    default: break;
-                    }
-                }
-                if (is_null_transition) {
-                    type_compatible = true;
-                    // Don't update shared shape - just handle the store directly
-                }
-                // INT <-> INT64 promotion
-                if ((field_type == LMD_TYPE_INT && value_type == LMD_TYPE_INT64) ||
-                    (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT)) {
-                    type_compatible = true;
-                }
-                // INT <-> FLOAT coercion (store by converting the value)
-                if ((field_type == LMD_TYPE_INT && value_type == LMD_TYPE_FLOAT) ||
-                    (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT)) {
-                    type_compatible = true;
-                }
-            }
-            if (!type_compatible) {
-                log_error("fn_map_set: type mismatch for field '%s' (existing=%d, new=%d)",
-                          key_cstr, field_type, value_type);
+            if (field_type == value_type) {
+                // same type — fast path: in-place update
+                map_field_decrement_ref(field_ptr, field_type);
+                map_field_store(field_ptr, value, value_type);
                 return;
             }
 
-            // decrement ref count for old value
-            // For NULL↔container transitions, the stored value may differ from field_type
-            // Always try to decrement if a non-null pointer-sized value is stored
-            switch (field_type) {
-            case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
-                String* old_str = *(String**)field_ptr;
-                if (old_str && old_str->ref_cnt > 0) old_str->ref_cnt--;
-                break;
-            }
-            case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-            case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
-            case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
-                Container* old_c = *(Container**)field_ptr;
-                if (old_c && old_c->ref_cnt > 0) old_c->ref_cnt--;
-                break;
-            }
-            case LMD_TYPE_NULL: {
-                // A container might have been stored via NULL→container transition
-                void* old_ptr = *(void**)field_ptr;
-                if (old_ptr) {
-                    Container* old_c = (Container*)old_ptr;
-                    if (old_c->ref_cnt > 0) old_c->ref_cnt--;
-                }
-                break;
-            }
-            default: break;
+            // FLOAT field + INT value → widen int to double (lossless, no reshape)
+            if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
+                *(double*)field_ptr = (double)value.get_int56();
+                return;
             }
 
-            // store new value — use field_type for storage format, coerce value if needed
-            if (field_type == LMD_TYPE_INT && value_type == LMD_TYPE_FLOAT) {
-                // FLOAT → INT coercion: truncate to integer
-                *(int64_t*)field_ptr = (int64_t)value.get_double();
-            } else if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-                // INT → FLOAT coercion: widen to double
-                *(double*)field_ptr = (double)value.get_int56();
-            } else switch (value_type) {
-            case LMD_TYPE_NULL: *(void**)field_ptr = NULL; break;
-            case LMD_TYPE_BOOL: *(bool*)field_ptr = value.bool_val; break;
-            case LMD_TYPE_INT:  *(int64_t*)field_ptr = value.get_int56(); break;
-            case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
-            case LMD_TYPE_FLOAT: *(double*)field_ptr = value.get_double(); break;
-            case LMD_TYPE_DTIME: *(DateTime*)field_ptr = value.get_datetime(); break;
-            case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
-                String* s = value.get_string();
-                *(String**)field_ptr = s;
-                if (s) s->ref_cnt++;
-                break;
+            // INT ↔ INT64 promotion — fast path (same byte size)
+            if ((field_type == LMD_TYPE_INT && value_type == LMD_TYPE_INT64) ||
+                (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT)) {
+                map_field_store(field_ptr, value, value_type);
+                return;
             }
-            case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-            case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
-            case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
-                Container* c = value.container;
-                *(Container**)field_ptr = c;
-                if (c) c->ref_cnt++;
-                break;
-            }
-            default:
-                log_error("fn_map_set: unsupported value type %d", value_type);
-                break;
-            }
+
+            // type change — rebuild shape with new field type
+            log_debug("fn_map_set: type change for '%s' (%d → %d), rebuilding shape",
+                      key_cstr, field_type, value_type);
+            Container* cont = map_item.container;
+            map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
+                                        map_type_id, cont, entry,
+                                        value_type, value);
             return;
         }
         entry = entry->next;
     }
-    log_error("fn_map_set: field '%s' not found in map", key_cstr);
+    log_error("fn_map_set: field '%s' not found", key_cstr);
 }

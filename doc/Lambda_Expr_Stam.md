@@ -789,6 +789,73 @@ pn example() {
 }
 ```
 
+### Assignment Statement
+
+Assignment (`=`) is only available inside `pn` functions. The left-hand side can be a variable, array element, map field, or element attribute/child.
+
+#### Immutability Rules
+
+- **`let` bindings** are immutable — reassignment produces error E211
+- **Function parameters** are immutable — reassignment produces error E211
+- **`var` variables** are mutable — reassignment is allowed
+
+```lambda
+pn example() {
+    let x = 42
+    x = 10           // ERROR E211: cannot reassign immutable binding
+}
+
+pn foo(x) {
+    x = 10           // ERROR E211: cannot reassign parameter
+}
+```
+
+#### Type Widening
+
+`var` variables without a type annotation support **type widening** — the variable's storage automatically adapts when assigned a value of a different type:
+
+```lambda
+pn example() {
+    var x = 42       // int
+    x = 3.14         // OK → float (type widened)
+    x = "hello"      // OK → string (type widened)
+
+    var y: int = 42  // annotated type
+    y = "hello"      // ERROR E201: type mismatch
+}
+```
+
+#### Structural Assignment
+
+Assignment targets can be array elements, map fields, and element attributes/children:
+
+```lambda
+pn example() {
+    // Array element assignment
+    let arr = [1, 2, 3]
+    arr[0] = 99              // same-type assignment
+    arr[1] = 3.14            // type mismatch → array auto-converts to generic
+
+    // Map field assignment
+    let obj = {name: "Alice", age: 30}
+    obj.age = 31             // same-type update
+    obj.age = "thirty-one"   // type change → shape auto-rebuilt
+
+    // Element mutation
+    let elem = <div class: "main"; "Hello">
+    elem.class = "updated"   // attribute assignment
+    elem[0] = "Goodbye"      // child assignment
+}
+```
+
+| Target | Syntax | Behavior on Type Change |
+|--------|--------|------------------------|
+| Variable | `x = val` | Type widens (unannotated `var`) or error (annotated) |
+| Array element | `arr[i] = val` | Array auto-converts from typed to generic |
+| Map field | `obj.key = val` | Shape metadata auto-rebuilt |
+| Element attr | `elem.attr = val` | Attribute updated in shape |
+| Element child | `elem[i] = val` | Child replaced at index |
+
 ---
 
 ## Operators

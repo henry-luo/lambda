@@ -1,9 +1,0 @@
-09:15:42 [NOTICE] Start transpiling test/std/core/datatypes/integer_edge_cases.ls...
-09:15:42 [ERROR] Syntax tree has errors.
-09:15:42 [ERROR] Syntax error at Ln 21, Col 23 - 21, Col 24: ERROR
-09:15:42 [ERROR] ERROR node at Ln 21, Col 23 - 21, Col 24
-09:15:42 [ERROR] Syntax error at Ln 22, Col 22 - 22, Col 23: ERROR
-09:15:42 [ERROR] ERROR node at Ln 22, Col 22 - 22, Col 23
-09:15:42 [ERROR] Error: Failed to compile the function.
-##### Script 'test/std/core/datatypes/integer_edge_cases.ls' executed: #####
-null

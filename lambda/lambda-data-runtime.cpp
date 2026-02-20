@@ -121,6 +121,9 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
 
 Item array_int_get(ArrayInt *array, int index) {
     log_debug("array_int_get: index: %d, length: %ld", index, array->length);
+    // runtime type check: array may have been converted to generic by fn_array_set
+    if (array->type_id != LMD_TYPE_ARRAY_INT)
+        return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
         log_warn("array_int_get: index out of bounds: %d", index);
         return ItemNull;  // return null instead of error
@@ -164,6 +167,9 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
 }
 
 Item array_int64_get(ArrayInt64* array, int index) {
+    // runtime type check: array may have been converted to generic by fn_array_set
+    if (array->type_id != LMD_TYPE_ARRAY_INT64)
+        return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
         log_warn("array_int64_get: index out of bounds: %d", index);
         return ItemNull;
@@ -206,6 +212,9 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
 }
 
 Item array_float_get(ArrayFloat* array, int index) {
+    // runtime type check: array may have been converted to generic by fn_array_set
+    if (array->type_id != LMD_TYPE_ARRAY_FLOAT)
+        return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
         log_warn("array_float_get: index out of bounds: %d", index);
         return ItemNull;

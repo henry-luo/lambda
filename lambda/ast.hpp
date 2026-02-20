@@ -199,6 +199,9 @@ typedef struct NameEntry {
     struct NameEntry* next;
     AstImportNode* import;      // the module that the name is imported from, if any
     struct NameScope* scope;    // the scope where this entry was defined
+    bool is_mutable;            // true for var declarations, false for let/param
+    bool has_type_annotation;   // true if explicit type annotation was provided
+    bool type_widened;          // true if type was widened to Item due to inconsistent assignments
 } NameEntry;
 
 // name_scope
@@ -375,6 +378,7 @@ typedef struct AstNamedNode : AstNode {
     String* name;               // Changed from StrView to String* (from name pool)
     AstNode *as;
     String* error_name;         // for error destructuring: let a^err = expr (NULL if not used)
+    struct NameEntry* entry;    // back-pointer to NameEntry (set for var declarations)
 } AstNamedNode;
 
 // for AST_NODE_LOOP - extended with index variable and named flag
@@ -475,6 +479,7 @@ typedef struct AstAssignStamNode : AstNode {
     String* target;       // variable name to assign to
     AstNode *target_node; // AST node of the target variable (for type info)
     AstNode *value;       // value expression
+    struct NameEntry* target_entry;  // name entry for the target variable
 } AstAssignStamNode;
 
 // compound assignment statement: arr[i] = val or obj.field = val (procedural only)

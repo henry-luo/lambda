@@ -74,6 +74,7 @@ typedef struct BlockContext {
     float max_width;            // Maximum content width encountered
     float max_height;           // Maximum content height encountered
     float line_height;          // Current line height
+    bool  line_height_is_normal; // true when line-height is 'normal', false when explicitly set
     float init_ascender;        // Initial ascender at line start
     float init_descender;       // Initial descender at line start
     float lead_y;               // Leading space when line_height > font size
@@ -139,6 +140,8 @@ typedef struct Linebox {
     bool is_line_start;
     bool has_space;                 // whether last layout character is a space
     bool has_float_intrusion;       // true if floats affect this line
+    bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
+    float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
 

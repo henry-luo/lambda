@@ -202,7 +202,7 @@ FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     // inherit parent font styles
     *prop = *lycon->font.style;  // including font family, size, weight, style, etc.
-    assert(prop->font_size > 0);
+    assert(prop->font_size >= 0);  // CSS allows font-size: 0
     return prop;
 }
 

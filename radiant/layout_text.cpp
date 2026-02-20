@@ -380,6 +380,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = false;
+    lycon->line.has_replaced_content = false;
+    lycon->line.max_normal_line_height = 0;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
@@ -451,25 +453,36 @@ void line_break(LayoutContext* lycon) {
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.line_height;
 
-    // If css_line_height is not set (0 or negative), use font-based line height
-    // This ensures text in elements without explicit line-height gets proper spacing
-    if (css_line_height <= 0) {
+    // Only fall back to font-based line height when line-height is unset/invalid
+    // CSS 2.1: line-height: 0 is a valid explicit value (not a fallback case)
+    if (lycon->block.line_height_is_normal && css_line_height <= 0) {
         css_line_height = font_line_height;
     }
 
-    // Check if we have mixed font sizes by comparing font height to CSS height
-    // Only expand for mixed fonts when the larger font significantly exceeds line-height
+    // CSS 2.1 10.8.1 half-leading model:
+    // When line-height is explicitly set, the inline box height equals line-height,
+    // but inline-blocks and other replaced elements may extend the line box further.
+    // Use max(css_line_height, font_line_height) to accommodate all inline content.
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
     float used_line_height;
 
     if (has_mixed_fonts) {
-        // Mixed font sizes - use max to accommodate larger fonts
-        // CSS 2.1: "The height of a line box is determined by the rules given in the section on line height calculations"
-        used_line_height = max(css_line_height, font_line_height);
+        // Mixed content: expand to fit inline replaced elements (images, inline-blocks)
+        // but not for text-only lines where the inflation comes from max_descender clamping
+        if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal) {
+            used_line_height = max(css_line_height, font_line_height);
+            // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box
+            // contributes its own font's normal line-height (including lineGap).
+            // Use the maximum normal LH tracked across all inline boxes on this line.
+            if (lycon->block.line_height_is_normal && lycon->line.max_normal_line_height > used_line_height) {
+                used_line_height = lycon->line.max_normal_line_height;
+            }
+        } else {
+            // Text-only with explicit line-height smaller than font: trust css_line_height
+            used_line_height = css_line_height;
+        }
     } else {
-        // Uniform font size - use CSS line height exactly as specified
-        // CSS 2.1: The computed line-height is used for line box spacing
-        // Even if lines overlap (line-height < font metrics), this is correct CSS behavior
+        // Uniform text-only content - use CSS line height as specified
         used_line_height = css_line_height;
     }
 
@@ -593,16 +606,36 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     lycon->line.advance_x += text_width;
-    // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
+    // CSS 2.1 10.8.1: Half-leading model for text inline boxes
+    // When line-height is explicitly set, the inline box height equals line-height.
+    // Leading = line-height - content_height is split half above and half below.
+    // When line-height is 'normal', use raw font metrics directly.
     TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+    float ascender = 0, descender = 0;
     if (typo.valid && typo.use_typo_metrics) {
-        lycon->line.max_ascender = max(lycon->line.max_ascender, typo.ascender);
-        lycon->line.max_descender = max(lycon->line.max_descender, typo.descender);
+        ascender = typo.ascender;
+        descender = typo.descender;
     } else if (lycon->font.font_handle) {
         const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
         if (m) {
-            lycon->line.max_ascender = max(lycon->line.max_ascender, m->hhea_ascender);
-            lycon->line.max_descender = max(lycon->line.max_descender, -(m->hhea_descender));
+            ascender = m->hhea_ascender;
+            descender = -(m->hhea_descender);
+        }
+    }
+    if (ascender > 0 || descender > 0) {
+        if (!lycon->block.line_height_is_normal) {
+            // Half-leading model: adjust ascender/descender so their sum equals line-height
+            float content_height = ascender + descender;
+            float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+            ascender += half_leading;
+            descender += half_leading;
+        }
+        lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+        lycon->line.max_descender = max(lycon->line.max_descender, descender);
+        // Track each inline box's normal line-height for mixed-font lines
+        if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
+            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+            lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
         }
     }
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
@@ -676,6 +709,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // Get text-transform property
     CssEnum text_transform = get_text_transform(lycon);
     bool is_word_start = true;  // Track word boundaries for capitalize
+    int layout_text_iterations = 0;  // guard against infinite goto loops
 
     log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
               white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
@@ -694,6 +728,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     LAYOUT_TEXT:
+    // Guard against infinite loop from extreme negative margins or degenerate layouts
+    if (++layout_text_iterations > 500) {
+        log_error("layout_text: exceeded 500 iterations, aborting text layout");
+        return;
+    }
     // Check if we're already past the line end before starting new text
     // This can happen after an inline-block that's wider than the container
     {
@@ -825,6 +864,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
+            // Apply word-spacing to space characters
+            wd += lycon->font.style->word_spacing;
             // Apply letter-spacing to spaces as well (but not if it's the last character)
             if (str[1]) {  // Check if there's a next character
                 wd += lycon->font.style->letter_spacing;
