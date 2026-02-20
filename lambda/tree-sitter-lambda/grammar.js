@@ -47,7 +47,7 @@ function binary_expr($, in_attr) {
     ['/', 'binary_times'],
     ['div', 'binary_times'],
     ['%', 'binary_times'],
-    ['^', 'binary_pow', 'right'],
+    ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],
     // Relational operators - excluded in attr to avoid element tag conflicts
@@ -138,10 +138,13 @@ module.exports = grammar({
   conflicts: $ => [
     [$._expr, $.member_expr],
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
+    [$._expr, $.query_expr],                       // expr ? could end expr or start query
+    [$._expr, $.direct_query_expr],                // expr .? could end expr or start direct query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
     [$._quantified_type, $.occurrence_type],       // unary_type + [n] could be occurrence or end of type
     [$._compound_type, $.concat_type],             // _quantified_type could be complete or start of concat
     [$._compound_type, $.constrained_type],        // _quantified_type could be complete or base of constrained
+    [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
   ],
 
   precedences: $ => [[
@@ -444,6 +447,8 @@ module.exports = grammar({
       $.member_expr,
       $.parent_expr,  // expr.. for parent access shorthand
       $.call_expr,
+      $.query_expr,         // expr?T - descendant query by type
+      $.direct_query_expr,  // expr.?T - self + attrs/content query
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_item,   // ~ for pipe context
@@ -462,13 +467,28 @@ module.exports = grammar({
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, $.import)),
       $._arguments,
-      optional(field('propagate', '?')),
+      optional(field('propagate', '^')),
     )),
 
     index_expr: $ => prec.right(100, seq(
       field('object', $.primary_expr),
       '[', field('field', $._expr), ']',
     )),
+
+    // Query expression: expr?T — recursive descendant search by type
+    // Returns a list of all matching values in the subtree
+    query_expr: $ => seq(
+      field('object', $.primary_expr),
+      '?',
+      field('query', $.primary_type),
+    ),
+
+    // Direct query: expr.?T — search self + attributes + direct content only
+    direct_query_expr: $ => seq(
+      field('object', $.primary_expr),
+      '.?',
+      field('query', $.primary_type),
+    ),
 
     // Path root: / for absolute file paths
     path_root: _ => '/',

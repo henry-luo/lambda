@@ -11,8 +11,8 @@ pub fn perform_statistical_analysis(datasets: [{name: string, data: [float], met
         let data = dataset.data;
         let n = len(data);
         let mean_val = avg(data);
-        let variance = avg(for (x in data) (x - mean_val) ^ 2);
-        let std_dev = variance ^ 0.5;
+        let variance = avg(for (x in data) (x - mean_val) ** 2);
+        let std_dev = variance ** 0.5;
         
         // Calculate percentiles (simplified)
         let sorted_data = data;  // would sort in real implementation
@@ -22,12 +22,12 @@ pub fn perform_statistical_analysis(datasets: [{name: string, data: [float], met
         
         // Calculate skewness and kurtosis (simplified formulas)
         let skewness = {
-            let sum_cubed = sum(for (x in data) ((x - mean_val) / std_dev) ^ 3);
+            let sum_cubed = sum(for (x in data) ((x - mean_val) / std_dev) ** 3);
             sum_cubed / float(n)
         };
         
         let kurtosis = {
-            let sum_fourth = sum(for (x in data) ((x - mean_val) / std_dev) ^ 4);
+            let sum_fourth = sum(for (x in data) ((x - mean_val) / std_dev) ** 4);
             (sum_fourth / float(n)) - 3.0  // excess kurtosis
         };
         
@@ -86,18 +86,18 @@ pub fn perform_statistical_analysis(datasets: [{name: string, data: [float], met
             let data2 = datasets[j].data;
             let mean1 = avg(data1);
             let mean2 = avg(data2);
-            let var1 = avg(for (x in data1) (x - mean1) ^ 2);
-            let var2 = avg(for (x in data2) (x - mean2) ^ 2);
+            let var1 = avg(for (x in data1) (x - mean1) ** 2);
+            let var2 = avg(for (x in data2) (x - mean2) ** 2);
             
             // Two-sample t-test (simplified)
             let pooled_variance = ((float(len(data1)-1) * var1) + (float(len(data2)-1) * var2)) / 
                                  float(len(data1) + len(data2) - 2);
-            let standard_error = (pooled_variance * (1.0/float(len(data1)) + 1.0/float(len(data2)))) ^ 0.5;
+            let standard_error = (pooled_variance * (1.0/float(len(data1)) + 1.0/float(len(data2)))) ** 0.5;
             let t_statistic = if (standard_error > 0.0) (mean1 - mean2) / standard_error else 0.0;
             let degrees_freedom = len(data1) + len(data2) - 2;
             
             // Effect size (Cohen's d)
-            let cohens_d = if (pooled_variance > 0.0) (mean1 - mean2) / (pooled_variance ^ 0.5) else 0.0;
+            let cohens_d = if (pooled_variance > 0.0) (mean1 - mean2) / (pooled_variance ** 0.5) else 0.0;
             
             {
                 comparison: datasets[i].name + " vs " + datasets[j].name,
@@ -126,11 +126,11 @@ pub fn perform_statistical_analysis(datasets: [{name: string, data: [float], met
             overall_heterogeneity: {
                 let all_means = for (dataset in datasets) avg(dataset.data);
                 let grand_mean = avg(all_means);
-                let between_group_variance = avg(for (mean_val in all_means) (mean_val - grand_mean) ^ 2);
+                let between_group_variance = avg(for (mean_val in all_means) (mean_val - grand_mean) ** 2);
                 let avg_within_group_variance = avg(for (dataset in datasets) {
                     let data = dataset.data;
                     let mean_val = avg(data);
-                    avg(for (x in data) (x - mean_val) ^ 2)
+                    avg(for (x in data) (x - mean_val) ** 2)
                 });
                 {
                     f_statistic: if (avg_within_group_variance > 0.0) between_group_variance / avg_within_group_variance else 0.0,
@@ -171,19 +171,19 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
         let y_mean = avg(y_vals);
         
         let numerator = sum(for (i in 0 to n_observations-1) (x_vals[i] - x_mean) * (y_vals[i] - y_mean));
-        let denominator = sum(for (x in x_vals) (x - x_mean) ^ 2);
+        let denominator = sum(for (x in x_vals) (x - x_mean) ** 2);
         let slope = if (denominator > 0.0) numerator / denominator else 0.0;
         let intercept = y_mean - slope * x_mean;
         
         // Calculate R-squared
         let y_pred = for (x in x_vals) intercept + slope * x;
-        let ss_res = sum(for (i in 0 to n_observations-1) (y_vals[i] - y_pred[i]) ^ 2);
-        let ss_tot = sum(for (y in y_vals) (y - y_mean) ^ 2);
+        let ss_res = sum(for (i in 0 to n_observations-1) (y_vals[i] - y_pred[i]) ** 2);
+        let ss_tot = sum(for (y in y_vals) (y - y_mean) ** 2);
         let r_squared = if (ss_tot > 0.0) 1.0 - (ss_res / ss_tot) else 0.0;
         
         // Standard error of the slope
         let mse = ss_res / float(n_observations - 2);
-        let se_slope = if (denominator > 0.0) (mse / denominator) ^ 0.5 else 0.0;
+        let se_slope = if (denominator > 0.0) (mse / denominator) ** 0.5 else 0.0;
         let t_stat_slope = if (se_slope > 0.0) slope / se_slope else 0.0;
         
         {
@@ -197,7 +197,7 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
             model_fit: {
                 r_squared: r_squared,
                 adjusted_r_squared: 1.0 - ((1.0 - r_squared) * float(n_observations - 1) / float(n_observations - 2)),
-                residual_standard_error: mse ^ 0.5,
+                residual_standard_error: mse ** 0.5,
                 degrees_freedom: n_observations - 2
             },
             predictions: y_pred,
@@ -217,7 +217,7 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
             let x_vals = for (obs in predictors) obs[j];
             let x_mean = predictor_means[j];
             let numerator = sum(for (i in 0 to n_observations-1) (x_vals[i] - x_mean) * (response[i] - response_mean));
-            let denominator = sum(for (x in x_vals) (x - x_mean) ^ 2);
+            let denominator = sum(for (x in x_vals) (x - x_mean) ** 2);
             if (denominator > 0.0) numerator / denominator else 0.0
         };
         
@@ -228,8 +228,8 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
             intercept + sum(for (j in 0 to n_predictors-1) coefficients[j] * obs[j]);
         
         // Model fit statistics
-        let ss_res = sum(for (i in 0 to n_observations-1) (response[i] - y_pred[i]) ^ 2);
-        let ss_tot = sum(for (y in response) (y - response_mean) ^ 2);
+        let ss_res = sum(for (i in 0 to n_observations-1) (response[i] - y_pred[i]) ** 2);
+        let ss_tot = sum(for (y in response) (y - response_mean) ** 2);
         let r_squared = if (ss_tot > 0.0) 1.0 - (ss_res / ss_tot) else 0.0;
         let adjusted_r_squared = 1.0 - ((1.0 - r_squared) * float(n_observations - 1) / float(n_observations - n_predictors - 1));
         
@@ -243,7 +243,7 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
             model_fit: {
                 r_squared: r_squared,
                 adjusted_r_squared: adjusted_r_squared,
-                residual_standard_error: (ss_res / float(n_observations - n_predictors - 1)) ^ 0.5,
+                residual_standard_error: (ss_res / float(n_observations - n_predictors - 1)) ** 0.5,
                 degrees_freedom: n_observations - n_predictors - 1
             },
             predictions: y_pred,
@@ -266,8 +266,8 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
                 mean_residual: avg(residuals),
                 residual_std: {
                     let mean_resid = avg(residuals);
-                    let variance = avg(for (r in residuals) (r - mean_resid) ^ 2);
-                    variance ^ 0.5
+                    let variance = avg(for (r in residuals) (r - mean_resid) ** 2);
+                    variance ** 0.5
                 },
                 residual_range: max(residuals) - min(residuals),
                 normality_check: {
@@ -277,7 +277,7 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
                     let q1 = sorted_residuals[n_resid/4];
                     let q3 = sorted_residuals[3*n_resid/4];
                     let iqr = q3 - q1;
-                    let expected_range = 2.68 * (avg(for (r in residuals) r ^ 2) ^ 0.5);  // ~99% of normal distribution
+                    let expected_range = 2.68 * (avg(for (r in residuals) r ** 2) ** 0.5);  // ~99% of normal distribution
                     let actual_range = max(residuals) - min(residuals);
                     {
                         normality_score: if (actual_range <= expected_range * 1.2) 0.90 else 0.70,
@@ -288,8 +288,8 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
             outlier_detection: {
                 let residual_std = {
                     let mean_resid = avg(residuals);
-                    let variance = avg(for (r in residuals) (r - mean_resid) ^ 2);
-                    variance ^ 0.5
+                    let variance = avg(for (r in residuals) (r - mean_resid) ** 2);
+                    variance ** 0.5
                 };
                 let standardized_residuals = for (r in residuals) if (residual_std > 0.0) r / residual_std else 0.0;
                 let outliers = for (i in 0 to len(standardized_residuals)-1) 
@@ -308,9 +308,9 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
                     let mean_abs_resid = avg(abs_residuals);
                     let mean_fitted = avg(predictions);
                     let numerator = sum(for (i in 0 to n_observations-1) (abs_residuals[i] - mean_abs_resid) * (predictions[i] - mean_fitted));
-                    let denom1 = sum(for (r in abs_residuals) (r - mean_abs_resid) ^ 2);
-                    let denom2 = sum(for (p in predictions) (p - mean_fitted) ^ 2);
-                    if (denom1 > 0.0 and denom2 > 0.0) numerator / ((denom1 * denom2) ^ 0.5) else 0.0
+                    let denom1 = sum(for (r in abs_residuals) (r - mean_abs_resid) ** 2);
+                    let denom2 = sum(for (p in predictions) (p - mean_fitted) ** 2);
+                    if (denom1 > 0.0 and denom2 > 0.0) numerator / ((denom1 * denom2) ** 0.5) else 0.0
                 };
                 {
                     correlation_abs_resid_fitted: bp_correlation,
@@ -342,7 +342,7 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
                 for (obs in test_predictors) 
                     intercept + sum(for (j in 0 to len(coeffs)-1) coeffs[j] * obs[j])
             };
-            avg(for (i in 0 to len(test_response)-1) (test_response[i] - test_predictions[i]) ^ 2)
+            avg(for (i in 0 to len(test_response)-1) (test_response[i] - test_predictions[i]) ** 2)
         } else 0.0;
         
         {
@@ -350,8 +350,8 @@ pub fn perform_regression_analysis(predictors: [[float]], response: [float], mod
             train_size: train_size,
             test_size: len(test_response),
             validation_mse: validation_mse,
-            validation_rmse: validation_mse ^ 0.5,
-            generalization_assessment: if (validation_mse <= regression_results.model_fit.residual_standard_error ^ 2 * 1.5) 
+            validation_rmse: validation_mse ** 0.5,
+            generalization_assessment: if (validation_mse <= regression_results.model_fit.residual_standard_error ** 2 * 1.5) 
                                       "good_generalization" else "potential_overfitting"
         }
     } else null;
@@ -394,7 +394,7 @@ pub fn analyze_time_series(time_series_data: [{timestamp: datetime, value: float
         let mean_time = avg(time_indices);
         let mean_value = avg(values);
         let numerator = sum(for (i in 0 to n-1) (time_indices[i] - mean_time) * (values[i] - mean_value));
-        let denominator = sum(for (t in time_indices) (t - mean_time) ^ 2);
+        let denominator = sum(for (t in time_indices) (t - mean_time) ** 2);
         let slope = if (denominator > 0.0) numerator / denominator else 0.0;
         let intercept = mean_value - slope * mean_time;
         
@@ -423,8 +423,8 @@ pub fn analyze_time_series(time_series_data: [{timestamp: datetime, value: float
         };
         
         let seasonal_strength = {
-            let seasonal_variance = avg(for (avg_val in seasonal_averages) avg_val ^ 2);
-            let detrended_variance = avg(for (val in detrended_values) val ^ 2);
+            let seasonal_variance = avg(for (avg_val in seasonal_averages) avg_val ** 2);
+            let detrended_variance = avg(for (val in detrended_values) val ** 2);
             if (detrended_variance > 0.0) seasonal_variance / detrended_variance else 0.0
         };
         
@@ -455,8 +455,8 @@ pub fn analyze_time_series(time_series_data: [{timestamp: datetime, value: float
         mean_residual: avg(residuals),
         residual_std: {
             let mean_resid = avg(residuals);
-            let variance = avg(for (r in residuals) (r - mean_resid) ^ 2);
-            variance ^ 0.5
+            let variance = avg(for (r in residuals) (r - mean_resid) ** 2);
+            variance ** 0.5
         },
         autocorrelation: {
             // Lag-1 autocorrelation
@@ -465,7 +465,7 @@ pub fn analyze_time_series(time_series_data: [{timestamp: datetime, value: float
                 let lag0_vals = slice(residuals, 0, n-1);
                 let lag1_vals = slice(residuals, 1, n);
                 let numerator = sum(for (i in 0 to len(lag0_vals)-1) (lag0_vals[i] - mean_resid) * (lag1_vals[i] - mean_resid));
-                let denominator = sum(for (r in residuals) (r - mean_resid) ^ 2);
+                let denominator = sum(for (r in residuals) (r - mean_resid) ** 2);
                 if (denominator > 0.0) numerator / denominator else 0.0
             } else 0.0;
             
@@ -503,8 +503,8 @@ pub fn analyze_time_series(time_series_data: [{timestamp: datetime, value: float
     // Model quality assessment
     let model_quality = {
         decomposition_r_squared: {
-            let original_variance = avg(for (val in values) val ^ 2) - (avg(values) ^ 2);
-            let residual_variance = avg(for (r in residuals) r ^ 2);
+            let original_variance = avg(for (val in values) val ** 2) - (avg(values) ** 2);
+            let residual_variance = avg(for (r in residuals) r ** 2);
             if (original_variance > 0.0) 1.0 - (residual_variance / original_variance) else 0.0
         },
         forecast_accuracy_indicators: {

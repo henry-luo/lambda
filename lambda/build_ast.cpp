@@ -25,6 +25,9 @@ AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 AstNode* build_current_item(Transpiler* tp, TSNode node);
 AstNode* build_current_index(Transpiler* tp, TSNode node);
 
+// Forward declaration for type building (used by query expressions)
+AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
+
 // System function definitions with method call support
 // Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
 // is_method_eligible: true if can be called as obj.method() style
@@ -1451,17 +1454,17 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
-    // check for '?' propagation operator on the call
+    // check for '^' propagation operator on the call
     TSNode propagate_node = ts_node_child_by_field_id(call_node, FIELD_PROPAGATE);
     if (!ts_node_is_null(propagate_node)) {
         ast_node->propagate = true;
-        log_debug("call has '?' propagation operator");
-        // '?' is only valid on can_raise calls
+        log_debug("call has '^' propagation operator");
+        // '^' is only valid on can_raise calls
         if (!ast_node->can_raise) {
             const char* fn_name = is_method_call ? method_name.str : func_name.str;
             int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
             record_semantic_error(tp, call_node, ERR_SEMANTIC_ERROR,
-                "'?' used on '%.*s' which does not return errors",
+                "'^' used on '%.*s' which does not return errors",
                 fn_name_len, fn_name);
         }
     }
@@ -2201,6 +2204,20 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
+    else if (symbol == SYM_QUERY_EXPR || symbol == SYM_DIRECT_QUERY_EXPR) {
+        // query expression: expr?T (recursive) or expr.?T (direct)
+        AstQueryNode* query_node = (AstQueryNode*)alloc_ast_node(tp, AST_NODE_QUERY_EXPR, child, sizeof(AstQueryNode));
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        query_node->object = build_expr(tp, object_node);
+        TSNode query_type_node = ts_node_child_by_field_id(child, FIELD_QUERY);
+        query_node->query = build_primary_type(tp, query_type_node);
+        query_node->direct = (symbol == SYM_DIRECT_QUERY_EXPR);
+        // query always returns a list of matches
+        query_node->type = alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+        log_debug("build query_expr: direct=%d", query_node->direct);
+        ast_node->expr = (AstNode*)query_node;
+        ast_node->type = query_node->type;
+    }
     else if (symbol == SYM_PARENT_EXPR) {
         // parent access: expr.. for .parent, expr.._.. for .parent.parent
         TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
@@ -2360,7 +2377,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "++")) { ast_node->op = OPERATOR_JOIN; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
     else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
-    else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_POW; }
+    else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
     else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
     else if (strview_equal(&op, "div")) { ast_node->op = OPERATOR_IDIV; }
     else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }

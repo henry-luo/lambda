@@ -89,7 +89,7 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 10 / 3             // Division: 3.333...
 10 div 3           // Integer division: 3
 17 % 5             // Modulo: 2
-2 ^ 3              // Exponentiation: 8
+2 ** 3              // Exponentiation: 8
 ```
 
 ### Unary Operators
@@ -129,7 +129,7 @@ Lambda supports NumPy-style element-wise operations on arrays:
 1 + [2, 3, 4]              // [3, 4, 5]
 10 - [1, 2, 3]             // [9, 8, 7]
 3 * [1, 2, 3]              // [3, 6, 9]
-2 ^ [1, 2, 3]              // [2, 4, 8]
+2 ** [1, 2, 3]              // [2, 4, 8]
 
 // Vector-vector operations
 [1, 2, 3] + [4, 5, 6]      // [5, 7, 9]
@@ -333,7 +333,7 @@ When the left side is a scalar, `~` binds to the whole value:
 
 ```lambda
 [1, 2, 3, 4, 5]
-    | ~ ^ 2           // square: [1, 4, 9, 16, 25]
+    | ~ ** 2           // square: [1, 4, 9, 16, 25]
     | ~ + 1           // add 1: [2, 5, 10, 17, 26]
 // Result: [2, 5, 10, 17, 26]
 ```
@@ -633,7 +633,7 @@ Expression arms (`case T: expr`) and statement arms (`case T { stmts }`) can be 
 ```lambda
 fn describe(shape) => match shape.tag {
     case 'circle' {
-        let area = 3.14159 * shape.r ^ 2;
+        let area = 3.14159 * shape.r ** 2;
         "circle with area " ++ string(area)
     }
     case 'rect' {
@@ -868,7 +868,7 @@ From highest to lowest:
 | ---------- | -------------------- | --------------- |
 | 1          | `()`, `[]`, `.`      | Primary         |
 | 2          | `-`, `+`, `not`, `*` | Unary           |
-| 3          | `^`                  | Exponentiation  |
+| 3          | `**`                 | Exponentiation  |
 | 4          | `*`, `/`, `div`, `%` | Multiplicative  |
 | 5          | `+`, `-`             | Additive        |
 | 6          | `<`, `<=`, `>`, `>=` | Relational      |
@@ -889,7 +889,7 @@ From highest to lowest:
 | `/` | Division | `10 / 3` | `3.333...` |
 | `div` | Integer division | `10 div 3` | `3` |
 | `%` | Modulo | `17 % 5` | `2` |
-| `^` | Exponentiation | `2 ^ 3` | `8` |
+| `**` | Exponentiation | `2 ** 3` | `8` |
 
 ### Comparison Operators
 

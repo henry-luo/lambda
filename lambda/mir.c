@@ -270,6 +270,7 @@ func_obj_t func_list[] = {
     {"fn_call3", (fn_ptr) fn_call3},
     {"fn_is", (fn_ptr) fn_is},
     {"fn_in", (fn_ptr) fn_in},
+    {"fn_query", (fn_ptr) fn_query},
     {"fn_to", (fn_ptr) fn_to},
     {"base_type", (fn_ptr) base_type},
     {"const_type", (fn_ptr) const_type},
