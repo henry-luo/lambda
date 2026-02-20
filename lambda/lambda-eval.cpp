@@ -3117,6 +3117,67 @@ Item fn_varg1(Item index_item) {
 // COMPOUND ASSIGNMENT SUPPORT (procedural only)
 // ============================================================================
 
+// Convert a specialized array (ArrayInt, ArrayInt64, ArrayFloat) to a generic Array in place.
+// The struct pointer stays the same — only the type_id and items buffer change.
+// All specialized array types share the same struct layout (Container + items_ptr + length + extra + capacity),
+// so this in-place conversion is safe.
+static void convert_specialized_to_generic(Array* arr) {
+    TypeId old_type = arr->type_id;
+    int64_t len = arr->length;
+
+    // need room for items + extras (float/int64 values stored at end of buffer)
+    int64_t new_capacity = len * 2 + 4;
+    if (new_capacity < 8) new_capacity = 8;
+
+    Item* new_items = (Item*)calloc(new_capacity, sizeof(Item));
+    if (!new_items) {
+        log_error("convert_specialized_to_generic: allocation failed");
+        return;
+    }
+
+    if (old_type == LMD_TYPE_ARRAY_INT) {
+        int64_t* old_items = ((ArrayInt*)arr)->items;
+        // int56 values pack directly into Item — no extra area needed
+        for (int64_t i = 0; i < len; i++) {
+            new_items[i] = {.item = i2it(old_items[i])};
+        }
+        free(old_items);
+    } else if (old_type == LMD_TYPE_ARRAY_INT64) {
+        int64_t* old_items = ((ArrayInt64*)arr)->items;
+        // int64 values need to be stored in the extra area (end of buffer)
+        int64_t extra_count = 0;
+        for (int64_t i = 0; i < len; i++) {
+            int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
+            *slot = old_items[i];
+            new_items[i] = {.item = l2it(slot)};
+            extra_count++;
+        }
+        arr->extra = extra_count;
+        free(old_items);
+    } else if (old_type == LMD_TYPE_ARRAY_FLOAT) {
+        double* old_items = ((ArrayFloat*)arr)->items;
+        // double values need to be stored in the extra area (end of buffer)
+        int64_t extra_count = 0;
+        for (int64_t i = 0; i < len; i++) {
+            double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
+            *slot = old_items[i];
+            new_items[i] = {.item = d2it(slot)};
+            extra_count++;
+        }
+        arr->extra = extra_count;
+        free(old_items);
+    } else {
+        // shouldn't happen — caller should only call for specialized types
+        free(new_items);
+        return;
+    }
+
+    arr->items = new_items;
+    arr->capacity = new_capacity;
+    arr->type_id = LMD_TYPE_ARRAY;
+    log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
+}
+
 // array indexed assignment: arr[i] = val
 // Handles Array, ArrayInt, ArrayInt64, ArrayFloat
 void fn_array_set(Array* arr, int index, Item value) {
@@ -3141,18 +3202,66 @@ void fn_array_set(Array* arr, int index, Item value) {
         break;
     }
     case LMD_TYPE_ARRAY_INT: {
-        ArrayInt* ai = (ArrayInt*)arr;
-        ai->items[index] = (int64_t)value.get_int56();
+        TypeId val_type = get_type_id(value);
+        if (val_type == LMD_TYPE_INT) {
+            // compatible: store int56 directly
+            ArrayInt* ai = (ArrayInt*)arr;
+            ai->items[index] = (int64_t)value.get_int56();
+        } else if (val_type == LMD_TYPE_INT64) {
+            // int64 might fit in int56 — try, else convert
+            int64_t lval = value.get_int64();
+            if (lval >= INT56_MIN && lval <= INT56_MAX) {
+                ArrayInt* ai = (ArrayInt*)arr;
+                ai->items[index] = lval;
+            } else {
+                convert_specialized_to_generic(arr);
+                array_set(arr, index, value);
+            }
+        } else {
+            // incompatible type — convert to generic array first
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+        }
         break;
     }
     case LMD_TYPE_ARRAY_INT64: {
-        ArrayInt64* ai64 = (ArrayInt64*)arr;
-        ai64->items[index] = value.get_int64();
+        TypeId val_type = get_type_id(value);
+        if (val_type == LMD_TYPE_INT64) {
+            ArrayInt64* ai64 = (ArrayInt64*)arr;
+            ai64->items[index] = value.get_int64();
+        } else if (val_type == LMD_TYPE_INT) {
+            // widen int56 to int64
+            ArrayInt64* ai64 = (ArrayInt64*)arr;
+            ai64->items[index] = (int64_t)value.get_int56();
+        } else {
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+        }
         break;
     }
     case LMD_TYPE_ARRAY_FLOAT: {
-        ArrayFloat* af = (ArrayFloat*)arr;
-        af->items[index] = value.get_double();
+        TypeId val_type = get_type_id(value);
+        if (val_type == LMD_TYPE_FLOAT) {
+            ArrayFloat* af = (ArrayFloat*)arr;
+            af->items[index] = value.get_double();
+        } else if (val_type == LMD_TYPE_INT) {
+            // widen int to double
+            ArrayFloat* af = (ArrayFloat*)arr;
+            af->items[index] = (double)value.get_int56();
+        } else if (val_type == LMD_TYPE_INT64) {
+            // widen int64 to double (may lose precision)
+            ArrayFloat* af = (ArrayFloat*)arr;
+            af->items[index] = (double)value.get_int64();
+        } else {
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+        }
+        break;
+    }
+    case LMD_TYPE_LIST:
+    case LMD_TYPE_ELEMENT: {
+        // List and Element have Item* items — use array_set directly
+        array_set(arr, index, value);
         break;
     }
     default:
