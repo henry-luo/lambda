@@ -2,8 +2,8 @@
 // Verifies that typed arguments use optimized unboxed function versions
 
 // Section 1: Power operator with typed args
-fn pow_float(x: float, y: float) { x ^ y }
-fn pow_int(x: int, y: int) { x ^ y }
+fn pow_float(x: float, y: float) { x ** y }
+fn pow_int(x: int, y: int) { x ** y }
 
 "1. Power operator (fn_pow_u)"
 [

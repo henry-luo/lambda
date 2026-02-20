@@ -61,7 +61,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
-| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `?` propagation, `let a^err` destructuring, compile-time enforcement |
+| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, `let a^err` destructuring, compile-time enforcement |
 
 ### Reference Documentation
 
@@ -274,7 +274,7 @@ pn export_data(data) {
 
 ## Error Handling
 
-Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors using the `?` propagation operator or `let a^err` destructuring. Ignoring an error is a **compile-time error**.
+Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors using the `^` propagation operator or `let a^err` destructuring. Ignoring an error is a **compile-time error**.
 
 ```lambda
 // Function that may fail
@@ -284,7 +284,7 @@ fn divide(a, b) int^ {
 }
 
 // Propagate error with ?
-let result = divide(10, x)?
+let result = divide(10, x)^
 
 // Or destructure to handle locally
 let result^err = divide(10, x)
@@ -293,7 +293,7 @@ if (err != null) {
 }
 ```
 
-> **Full documentation**: See **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** for the complete guide — error types, `raise`, `?` operator, destructuring, enforcement rules, error codes, and examples.
+> **Full documentation**: See **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** for the complete guide — error types, `raise`, `^` operator, destructuring, enforcement rules, error codes, and examples.
 
 ---
 

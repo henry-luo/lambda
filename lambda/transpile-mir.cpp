@@ -3841,6 +3841,20 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return transpile_index(mt, (AstFieldNode*)node);
     case AST_NODE_CALL_EXPR:
         return transpile_call(mt, (AstCallNode*)node);
+    case AST_NODE_QUERY_EXPR: {
+        // query expression: expr?T or expr.?T → fn_query(data, type_val, direct)
+        AstQueryNode* query = (AstQueryNode*)node;
+        MIR_reg_t obj = transpile_expr(mt, query->object);
+        TypeId obj_tid = query->object->type ? query->object->type->type_id : LMD_TYPE_ANY;
+        MIR_reg_t boxed_obj = emit_box(mt, obj, obj_tid);
+        MIR_reg_t type_reg = transpile_expr(mt, query->query);
+        TypeId type_tid = query->query->type ? query->query->type->type_id : LMD_TYPE_TYPE;
+        MIR_reg_t boxed_type = emit_box(mt, type_reg, type_tid);
+        return emit_call_3(mt, "fn_query", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_type),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, query->direct ? 1 : 0));
+    }
     case AST_NODE_PIPE:
         return transpile_pipe(mt, (AstPipeNode*)node);
     case AST_NODE_CURRENT_ITEM: {
