@@ -70,6 +70,13 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** | **System Functions** — Complete reference for all built-in functions (type, math, string, collection, I/O, date/time) |
 | **[Lambda_Validator_Guide.md](Lambda_Validator_Guide.md)** | **Validation** — Schema-based validation for data structures |
 
+### Developer Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
+| **[Lamdba_Runtime.md](dev/Lamdba_Runtime.md)** | **Lambda Runtime** — Runtime internals and architecture |
+
 ### Quick Reference
 
 #### Data Types (see [Lambda_Data.md](Lambda_Data.md))
@@ -442,5 +449,7 @@ Concise syntax for complex operations:
 - **[Lambda_Func.md](Lambda_Func.md)** — Function features and patterns
 - **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** — Error types, propagation, and enforcement
 - **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** — All system functions
+- **[dev/Developer_Guide.md](dev/Developer_Guide.md)** — Building from source, testing, grammar and MIR workflows
+- **[dev/Lamdba_Runtime.md](dev/Lamdba_Runtime.md)** — Runtime internals
 
 For the latest updates and examples, refer to the test files in the `test/lambda/` directory.

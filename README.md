@@ -42,7 +42,7 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
 - **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
 - **Unified interactive viewer** via `lambda view`:
-   - HTML / XML (treated as HTML with CSS styling) 
+   - HTML / XML (treated as HTML with CSS styling)
    - Markdown / Wiki (rendered with styling)
    - LaTeX (`.tex`) via conversion to HTML
    - Lambda script (`.ls`) evaluated to HTML and rendered (think of PHP)
@@ -264,6 +264,13 @@ for (row in csv) {
 | [Validator Guide](doc/Lambda_Validator_Guide.md) | Schema-based validation for data structures |
 | [Radiant Layout Design](doc/Radiant_Layout_Design.md) | HTML/CSS layout engine internals |
 | [Doc Schema](doc/Doc_Schema.md) | Schema for lightweight markup (Markdown, Wiki, RST) |
+
+### Developer Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Developer Guide](doc/dev/Developer_Guide.md) | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
+| [Lambda Runtime](doc/dev/Lamdba_Runtime.md) | Runtime internals and architecture |
 
 ## Platform Support
 
