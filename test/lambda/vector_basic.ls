@@ -117,20 +117,20 @@
 "=== Power Operations ==="
 
 // Scalar ^ Vector
-2 ^ [1, 2, 3]
+2 ** [1, 2, 3]
 
 // Vector ^ Scalar
-[2, 3, 4] ^ 2
+[2, 3, 4] ** 2
 
 // Vector ^ Vector
-[2, 3, 4] ^ [1, 2, 3]
+[2, 3, 4] ** [1, 2, 3]
 
 // Float powers
-2.5 ^ [1, 2]
+2.5 ** [1, 2]
 
 // Zero and one powers
-[5, 10] ^ 0
-[5, 10] ^ 1
+[5, 10] ** 0
+[5, 10] ** 1
 
 "=== Modulo Operations ==="
 

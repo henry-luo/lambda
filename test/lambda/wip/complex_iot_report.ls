@@ -266,8 +266,8 @@ pub fn analyze_energy_consumption(energy_data) { // [{meter_id: string, location
             avg_peak_demand: avg(for (data in energy_data) data.peak_demand_kw),
             demand_variability: (
                 let mean_demand = avg(for (data in energy_data) data.peak_demand_kw),
-                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ^ 2),
-                variance ^ 0.5
+                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ** 2),
+                variance ** 0.5
             )
         },
         

@@ -1,7 +1,7 @@
 // Test: JSON-LD parsing in HTML
 // Verifies that <script type="application/ld+json"> content is parsed as structured data
 
-let doc = input("test/input/test_jsonld.html", 'html')?
+let doc = input("test/input/test_jsonld.html", 'html')^
 
 // navigate to <html> -> <head>
 let html = doc[1]

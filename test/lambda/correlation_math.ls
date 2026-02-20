@@ -12,8 +12,8 @@ let diffs_y = for (y in test_y) (y - y_mean)
 let products = for (i in 0 to n-1) diffs_x[i] * diffs_y[i]
 let numerator = sum(products)
 
-let sq_diffs_x = for (x in test_x) (x - x_mean) ^ 2
-let sq_diffs_y = for (y in test_y) (y - y_mean) ^ 2
+let sq_diffs_x = for (x in test_x) (x - x_mean) ** 2
+let sq_diffs_y = for (y in test_y) (y - y_mean) ** 2
 let x_var = sum(sq_diffs_x)
 let y_var = sum(sq_diffs_y)
 let denominator = sqrt(x_var * y_var)

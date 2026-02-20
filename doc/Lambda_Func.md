@@ -76,7 +76,7 @@ fn process(data) {
 // Single expression body
 fn multiply(x: int, y: int) => x * y
 
-fn square(n: int) => n ^ 2
+fn square(n: int) => n ** 2
 ```
 
 ### Anonymous Functions
@@ -130,12 +130,12 @@ Parameters can have default values:
 
 ```lambda
 fn greet(name = "World") => "Hello, " ++ name ++ "!"
-fn power(base: int, exp: int = 2) => base ^ exp
+fn power(base: int, exp: int = 2) => base ** exp
 
 greet()              // "Hello, World!"
 greet("Lambda")      // "Hello, Lambda!"
-power(3)             // 9 (3^2)
-power(2, 10)         // 1024 (2^10)
+power(3)             // 9 (3**2)
+power(2, 10)         // 1024 (2**10)
 ```
 
 Default expressions can reference earlier parameters:
@@ -424,7 +424,7 @@ fn apply(f, x) => f(x)
 fn map_array(arr, f) => (for (x in arr) f(x))
 
 apply((x) => x * 2, 5)           // 10
-map_array([1, 2, 3], (x) => x ^ 2)  // [1, 4, 9]
+map_array([1, 2, 3], (x) => x ** 2)  // [1, 4, 9]
 ```
 
 ### Functions as Return Values

@@ -22,5 +22,5 @@ triple(5)  // Would crash: calling ItemError as function
 
 // Test 3: Power operator mutation
 fn add(x) => x + 1;
-let bad = add ^ 2;  // returns ItemError (can't power function)
+let bad = add ** 2;  // returns ItemError (can't power function)
 bad(5)  // Would crash: calling ItemError as function

@@ -1,4 +1,4 @@
-let ini = input("test/input/test.ini", 'ini')?
+let ini = input("test/input/test.ini", 'ini')^
 "Database:"
 ini.database
 "Full INI:"

@@ -6,8 +6,8 @@ pub fn descriptive_stats(data) {
     let sorted_data = data; // for (x in data, _ in 1 to len(data)) min(data);  // simplified sort
     let n = len(data);
     let mean_val = avg(data);
-    let variance = avg(for (x in data) (x - mean_val) ^ 2);
-    let std_dev = variance ^ 0.5;
+    let variance = avg(for (x in data) (x - mean_val) ** 2);
+    let std_dev = variance ** 0.5;
     
     // Quartiles (simplified calculation)
     let q1_idx = int(n * 0.25);
@@ -37,9 +37,9 @@ pub fn correlation(x_vals, y_vals) {
     let y_mean = avg(y_vals);
     
     let numerator = sum(for (i in 0 to n-1) (x_vals[i] - x_mean) * (y_vals[i] - y_mean));
-    let x_var = sum(for (x in x_vals) (x - x_mean) ^ 2);
-    let y_var = sum(for (y in y_vals) (y - y_mean) ^ 2);
-    let denominator = (x_var * y_var) ^ 0.5;
+    let x_var = sum(for (x in x_vals) (x - x_mean) ** 2);
+    let y_var = sum(for (y in y_vals) (y - y_mean) ** 2);
+    let denominator = (x_var * y_var) ** 0.5;
     
     if (denominator == 0.0) 0.0 else numerator / denominator
 }
@@ -103,8 +103,8 @@ pub fn engineer_features(dataset) {
             feature_mean: avg(base_features),
             feature_std: (
                 let mean_val = avg(base_features),
-                let variance = avg(for (x in base_features) (x - mean_val) ^ 2),
-                variance ^ 0.5
+                let variance = avg(for (x in base_features) (x - mean_val) ** 2),
+                variance ** 0.5
             )
         };
         
@@ -149,8 +149,8 @@ pub fn analyze_timeseries(data) { // [{timestamp: datetime, value: float}]
             avg_change: avg(differences),
             volatility: (
                 let mean_change = avg(differences),
-                let variance = avg(for (diff in differences) (diff - mean_change) ^ 2),
-                variance ^ 0.5
+                let variance = avg(for (diff in differences) (diff - mean_change) ** 2),
+                variance ** 0.5
             )
         },
         summary_stats: descriptive_stats(for (point in sorted_data) point.value)

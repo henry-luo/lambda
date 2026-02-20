@@ -253,8 +253,8 @@ pub fn analyze_energy_consumption(energy_data) {
             avg_peak_demand: avg(for (data in energy_data) data.peak_demand_kw),
             demand_variability: (
                 let mean_demand = avg(for (data in energy_data) data.peak_demand_kw),
-                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ^ 2),
-                variance ^ 0.5
+                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ** 2),
+                variance ** 0.5
             )
         },
         
@@ -371,7 +371,7 @@ pub fn analyze_energy_consumption(energy_data) {
 
 // HTML generation helper functions
 fn format_number(num, decimals) {
-    let rounded = round(num * (10.0 ^ decimals)) / (10.0 ^ decimals)
+    let rounded = round(num * (10.0 ** decimals)) / (10.0 ** decimals)
     string(rounded)
 }
 

@@ -52,13 +52,13 @@
 10 % 2.3n
 
 "===== DECIMAL POWER ====="
-2.71828n ^ 2
-(-1.5n) ^ 3
-3.14159n ^ 0
-2.71828n ^ 0.5n
-3.14159n ^ 0.0n
-2 ^ 2.71828n
-3.14159n ^ 1.5
+2.71828n ** 2
+(-1.5n) ** 3
+3.14159n ** 0
+2.71828n ** 0.5n
+3.14159n ** 0.0n
+2 ** 2.71828n
+3.14159n ** 1.5
 
 "===== MIXED TYPE OPERATIONS ====="
 let int_val = 42, float_val = 3.14, decimal_val = 2.718281828n
@@ -83,10 +83,10 @@ decimal_val / float_val
 (3.14159n + 2.71828n) * (3.14159n - 2.71828n)
 3.14159n * 3.14159n + 2.71828n * 2.71828n
 (3.14159n + 2.71828n) / (3.14159n * 2.71828n)
-3.14159n ^ 2 + 2 * 3.14159n * 2.71828n + 2.71828n ^ 2
+3.14159n ** 2 + 2 * 3.14159n * 2.71828n + 2.71828n ** 2
 (decimal_val + int_val) * float_val
 (float_val * decimal_val) / int_val
-int_val ^ 2 + decimal_val ^ 2 + float_val ^ 2
+int_val ** 2 + decimal_val ** 2 + float_val ** 2
 
 "===== PRECISION TEST ====="
 let precise_decimal = 0.1n + 0.2n, float_addition = 0.1 + 0.2
@@ -115,8 +115,8 @@ pi_approx
 e_approx
 golden_ratio
 pi_approx * 2
-e_approx ^ 2
-golden_ratio^2 - golden_ratio - 1
+e_approx ** 2
+golden_ratio**2 - golden_ratio - 1
 
 "===== BOUNDARY VALUES ====="
 let max_precision = 1.23456789012345678901234567890123456789n

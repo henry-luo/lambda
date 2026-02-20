@@ -502,6 +502,10 @@
             "named": false
           },
           {
+            "type": "**",
+            "named": false
+          },
+          {
             "type": "+",
             "named": false
           },
@@ -535,10 +539,6 @@
           },
           {
             "type": ">=",
-            "named": false
-          },
-          {
-            "type": "^",
             "named": false
           },
           {
@@ -789,7 +789,7 @@
         "required": false,
         "types": [
           {
-            "type": "?",
+            "type": "^",
             "named": false
           }
         ]
@@ -1035,6 +1035,32 @@
     "type": "continue_stam",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "direct_query_expr",
+    "named": true,
+    "fields": {
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      },
+      "query": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_type",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "document",
@@ -3472,6 +3498,11 @@
     "fields": {}
   },
   {
+    "type": "path_wildcard_recursive",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "primary_expr",
     "named": true,
     "fields": {},
@@ -3513,6 +3544,10 @@
         },
         {
           "type": "decimal",
+          "named": true
+        },
+        {
+          "type": "direct_query_expr",
           "named": true
         },
         {
@@ -3589,6 +3624,10 @@
         },
         {
           "type": "primary_expr",
+          "named": true
+        },
+        {
+          "type": "query_expr",
           "named": true
         },
         {
@@ -3723,6 +3762,32 @@
         "types": [
           {
             "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "query_expr",
+    "named": true,
+    "fields": {
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      },
+      "query": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_type",
             "named": true
           }
         ]
@@ -4457,6 +4522,10 @@
     "named": false
   },
   {
+    "type": "**",
+    "named": false
+  },
+  {
     "type": "+",
     "named": false
   },
@@ -4478,6 +4547,10 @@
   },
   {
     "type": "...",
+    "named": false
+  },
+  {
+    "type": ".?",
     "named": false
   },
   {
@@ -4618,11 +4691,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -4785,10 +4858,6 @@
     "named": true
   },
   {
-    "type": "path_wildcard_recursive",
-    "named": true
-  },
-  {
     "type": "pattern_any",
     "named": true
   },
@@ -4818,19 +4887,19 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
-  },
-  {
-    "type": "symbol",
     "named": true
   },
   {
     "type": "symbol",
     "named": false
+  },
+  {
+    "type": "symbol",
+    "named": true
   },
   {
     "type": "t'",

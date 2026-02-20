@@ -51,8 +51,8 @@ pub fn forecast_demand(historical_data: [{date: datetime, quantity: int, price: 
             trend_slope: trend_slope,
             demand_volatility: {
                 let mean_demand = avg(for (record in sorted_data) float(record.quantity));
-                let variance = avg(for (record in sorted_data) (float(record.quantity) - mean_demand) ^ 2);
-                variance ^ 0.5
+                let variance = avg(for (record in sorted_data) (float(record.quantity) - mean_demand) ** 2);
+                variance ** 0.5
             }
         },
         forecast: forecasted_demand,
@@ -83,8 +83,8 @@ pub fn evaluate_suppliers(suppliers: [{id: string, performance_data: {delivery_t
             },
             delivery_variability: {
                 let mean_time = avg(for (time in delivery_data) float(time));
-                let variance = avg(for (time in delivery_data) (float(time) - mean_time) ^ 2);
-                variance ^ 0.5
+                let variance = avg(for (time in delivery_data) (float(time) - mean_time) ** 2);
+                variance ** 0.5
             }
         };
         
@@ -92,8 +92,8 @@ pub fn evaluate_suppliers(suppliers: [{id: string, performance_data: {delivery_t
             avg_quality_score: avg(quality_data),
             quality_consistency: {
                 let mean_quality = avg(quality_data);
-                let variance = avg(for (score in quality_data) (score - mean_quality) ^ 2);
-                1.0 - (variance ^ 0.5)  // higher consistency = lower variance
+                let variance = avg(for (score in quality_data) (score - mean_quality) ** 2);
+                1.0 - (variance ** 0.5)  // higher consistency = lower variance
             },
             quality_trend: {
                 let half_point = len(quality_data) / 2;
@@ -107,7 +107,7 @@ pub fn evaluate_suppliers(suppliers: [{id: string, performance_data: {delivery_t
             avg_cost: avg(cost_data),
             cost_stability: {
                 let mean_cost = avg(cost_data);
-                let variance = avg(for (cost in cost_data) (cost - mean_cost) ^ 2);
+                let variance = avg(for (cost in cost_data) (cost - mean_cost) ** 2);
                 1.0 / (1.0 + variance)  // lower variance = higher stability
             },
             cost_competitiveness: {
