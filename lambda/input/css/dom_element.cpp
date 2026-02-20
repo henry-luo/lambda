@@ -802,6 +802,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         target_style = &element->after_styles;
         pseudo_name = "::after";
+    } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
+        target_style = &element->first_letter_styles;
+        pseudo_name = "::first-letter";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
@@ -914,6 +917,79 @@ bool dom_element_has_after_content(DomElement* element) {
     return true;
 }
 
+/**
+ * Resolve a CSS quote character (open-quote or close-quote) for an element.
+ * Walks up the DOM tree to find the 'quotes' property, parses quote pairs,
+ * and returns the appropriate character at the given depth.
+ * CSS 2.1 §12.3.2: Quotes are nested; depth determines which pair to use.
+ *
+ * @param element The element with the ::before/::after pseudo-element
+ * @param is_open_quote true for open-quote, false for close-quote
+ * @param depth Quote nesting depth (0 = outermost)
+ * @return The quote character string, or default quotes if none specified
+ */
+static const char* resolve_quote_char(DomElement* element, bool is_open_quote, int depth) {
+    // Walk up DOM tree to find the 'quotes' property (it's inherited)
+    DomElement* cur = element;
+    CssDeclaration* quotes_decl = NULL;
+    while (cur) {
+        quotes_decl = dom_element_get_specified_value(cur, CSS_PROPERTY_QUOTES);
+        if (quotes_decl && quotes_decl->value) break;
+        cur = dom_element_get_parent(cur);
+    }
+
+    if (!quotes_decl || !quotes_decl->value) {
+        // Default quotes per CSS 2.1: use typographic quotes
+        return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";  // U+201C / U+201D
+    }
+
+    CssValue* qval = quotes_decl->value;
+
+    // quotes: none
+    if (qval->type == CSS_VALUE_TYPE_KEYWORD && qval->data.keyword == CSS_VALUE_NONE) {
+        return "";
+    }
+
+    // quotes: "open1" "close1" "open2" "close2" ...
+    // Parsed as a CSS_VALUE_TYPE_LIST of strings
+    if (qval->type == CSS_VALUE_TYPE_LIST && qval->data.list.count >= 2) {
+        int pair_count = qval->data.list.count / 2;
+        int pair_index = depth < pair_count ? depth : pair_count - 1;  // CSS 2.1: use last pair for deeper nesting
+        int str_index = pair_index * 2 + (is_open_quote ? 0 : 1);
+        if (str_index < qval->data.list.count) {
+            CssValue* sv = qval->data.list.values[str_index];
+            if (sv && sv->type == CSS_VALUE_TYPE_STRING && sv->data.string) {
+                log_debug("[QUOTES] depth=%d, pair=%d, %s='%s'",
+                    depth, pair_index, is_open_quote ? "open" : "close", sv->data.string);
+                return sv->data.string;
+            }
+        }
+    }
+
+    // quotes: "open" "close" (single pair, may be stored as 2 strings in a list or other format)
+    if (qval->type == CSS_VALUE_TYPE_STRING && qval->data.string) {
+        // Single string — shouldn't normally happen for quotes, but handle gracefully
+        return qval->data.string;
+    }
+
+    return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";  // fallback
+}
+
+/**
+ * Check if a CssValue represents an open-quote or close-quote content value.
+ * Returns 1 for open-quote, 2 for close-quote, 0 for neither.
+ */
+static int check_quote_content(CssValue* value) {
+    if (!value) return 0;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        if (strcmp(value->data.custom_property.name, "open-quote") == 0) return 1;
+        if (strcmp(value->data.custom_property.name, "close-quote") == 0) return 2;
+        if (strcmp(value->data.custom_property.name, "no-open-quote") == 0) return 3;
+        if (strcmp(value->data.custom_property.name, "no-close-quote") == 0) return 4;
+    }
+    return 0;
+}
+
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element) {
     log_info("[PSEUDO CONTENT GET ENTRY] element=%p, pseudo=%d, tag=%s",
         (void*)element, pseudo_element,
@@ -996,6 +1072,15 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
         }
     }
 
+    // Handle open-quote / close-quote (CSS_VALUE_TYPE_CUSTOM with ident name)
+    int quote_type = check_quote_content(value);
+    if (quote_type == 1 || quote_type == 2) {
+        return resolve_quote_char(element, quote_type == 1, 0);
+    }
+    if (quote_type == 3 || quote_type == 4) {
+        return "";  // no-open-quote / no-close-quote: affect depth only, generate nothing
+    }
+
     // Handle list of values (for content with multiple parts)
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
         // For now, return the first string value
@@ -1069,6 +1154,17 @@ const char* dom_element_get_pseudo_element_content_with_counters(
             const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
             log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
             return attr_value ? attr_value : "";
+        }
+    }
+
+    // Handle open-quote / close-quote (CSS_VALUE_TYPE_CUSTOM with ident name)
+    {
+        int quote_type = check_quote_content(value);
+        if (quote_type == 1 || quote_type == 2) {
+            return resolve_quote_char(element, quote_type == 1, 0);
+        }
+        if (quote_type == 3 || quote_type == 4) {
+            return "";  // no-open-quote / no-close-quote
         }
     }
 
@@ -1302,6 +1398,28 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                         log_debug("[Counter] Appended attr(%s) = '%s'", attr_ref->name, attr_value);
                     }
                 }
+            } else {
+                // Handle open-quote / close-quote in list
+                int qt = check_quote_content(item);
+                if (qt == 1 || qt == 2) {
+                    // Track depth based on position of quote in the list
+                    int quote_depth = 0;
+                    for (int j = 0; j < i; j++) {
+                        int prev_qt = check_quote_content(value->data.list.values[j]);
+                        if (prev_qt == 1 || prev_qt == 3) quote_depth++;
+                    }
+                    const char* qc = resolve_quote_char(element, qt == 1, quote_depth);
+                    if (qc) {
+                        int qlen = strlen(qc);
+                        if (result_len + qlen < (int)sizeof(result_buffer) - 1) {
+                            memcpy(result_buffer + result_len, qc, qlen);
+                            result_len += qlen;
+                            result_buffer[result_len] = '\0';
+                        }
+                        log_debug("[Counter] Appended %s = '%s'", qt == 1 ? "open-quote" : "close-quote", qc);
+                    }
+                }
+                // no-open-quote / no-close-quote: generate nothing but affect depth
             }
         }
 

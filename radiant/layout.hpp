@@ -140,6 +140,8 @@ typedef struct Linebox {
     bool is_line_start;
     bool has_space;                 // whether last layout character is a space
     bool has_float_intrusion;       // true if floats affect this line
+    bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
+    float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
 
