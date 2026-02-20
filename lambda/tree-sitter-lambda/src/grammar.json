@@ -428,16 +428,8 @@
                 "value": "."
               },
               {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "PATTERN",
-                    "value": "\\d+"
-                  },
-                  {
-                    "type": "BLANK"
-                  }
-                ]
+                "type": "PATTERN",
+                "value": "\\d+"
               },
               {
                 "type": "CHOICE",
@@ -696,16 +688,8 @@
                         "value": "."
                       },
                       {
-                        "type": "CHOICE",
-                        "members": [
-                          {
-                            "type": "PATTERN",
-                            "value": "\\d+"
-                          },
-                          {
-                            "type": "BLANK"
-                          }
-                        ]
+                        "type": "PATTERN",
+                        "value": "\\d+"
                       }
                     ]
                   },

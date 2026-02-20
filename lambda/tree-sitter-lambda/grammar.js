@@ -22,12 +22,12 @@ const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
 const exponent_part = seq(choice('e', 'E'), optional(choice('+', '-')), decimal_digits);
 const float_literal = choice(
-  seq(integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
+  seq(integer_literal, '.', decimal_digits, optional(exponent_part)),
   seq('.', decimal_digits, optional(exponent_part)),
   seq(integer_literal, exponent_part),
 );
 const decimal_literal = choice(
-  seq(integer_literal, '.', optional(decimal_digits)),
+  seq(integer_literal, '.', decimal_digits),
   seq('.', decimal_digits),
 );
 

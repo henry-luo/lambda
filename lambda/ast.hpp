@@ -304,7 +304,7 @@ typedef struct AstFieldNode : AstNode {
 typedef struct AstQueryNode : AstNode {
     AstNode *object;     // the data to search
     AstNode *query;      // the type pattern to match (primary_type)
-    bool direct;         // true for .? (self + attrs/content only)
+    bool direct;         // true for .? (self-inclusive query)
 } AstQueryNode;
 
 typedef struct AstCallNode : AstNode {

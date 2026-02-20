@@ -139,16 +139,16 @@ symbol("href", 'xlink_url') // Create namespaced symbol
 let x = 42;               // Immutable binding
 let y : int = 100;        // With type annotation
 let a = 1, b = 2;         // Multiple bindings
-x = 10                    // ERROR E211: cannot reassign let binding
+x = 10       // ERROR E211: cannot reassign let binding
 ```
 
 **Var Statements (mutable, `pn` only):**
 ```lambda
-var x = 0;                // Mutable variable
-var y: int = 42;          // With type annotation
-x = x + 1                 // OK: reassignment
-x = "hello"               // OK: type widening (int → string)
-y = "oops"                // ERROR E201: annotated type enforced
+var x = 0;         // Mutable variable
+var y: int = 42;   // With type annotation
+x = x + 1          // OK: reassignment
+x = "hello"        // OK: type widening (int → string)
+y = "oops"      // ERROR E201: annotated type enforced
 ```
 
 ## Operators
@@ -179,6 +179,11 @@ and  or  not
 is  in  to  |  &  !
 ```
 
+**Query:** type-based descendant search
+```lambda
+?   .?
+```
+
 **Vector Arithmetic:** scalar broadcast, element-wise ops
 ```lambda
 1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]
@@ -202,6 +207,29 @@ users where ~.age >= 18 | ~.name // filter then map
 ```
 
 **Pipe to File (procedural only):**
+
+## Query Expressions
+
+**Query `?` — recursive descendant search (not self-inclusive):**
+```lambda
+html?<img>                // all <img> at any depth
+html?<div class: string>  // <div> with class attr
+data?int                  // all int values in tree
+data?(int | string)       // all int or string values
+data?{name: string}       // maps with string 'name'
+data?{status: "ok"}       // maps where status == "ok"
+```
+
+**Self-inclusive query `.?` — self + attributes + all descendants:**
+```lambda
+div.?<div>     // includes div itself if it matches
+el.?int        // self + all int values in subtree
+42.?int        // (42) — trivial self-match
+```
+
+**Results in document order** (depth-first, pre-order). Both `?` and `.?` recurse into attributes (including complex values), children, and map/array items. The only difference is whether the root value itself is included.
+
+## Pipe to File (procedural only)
 ```lambda
 // Target can be string, symbol, or path
 data |> 'output.txt'        // file under CWD
@@ -286,11 +314,11 @@ while(c) { break;  continue;  return x; }
 
 **Assignment Targets:**
 ```lambda
-x = 10                    // Variable reassignment (var only)
-arr[i] = val              // Array element (auto-converts type)
-obj.field = val           // Map field (auto-rebuilds shape)
-elem.attr = val           // Element attribute
-elem[i] = val             // Element child
+x = 10              // Variable reassignment (var only)
+arr[i] = val        // Array element reassignment
+obj.field = val     // Map field reassignment
+elem.attr = val     // Element attribute reassignment
+elem[i] = val       // Element child reassignment
 ```
 
 ## Functions
@@ -431,7 +459,7 @@ else result * 2
 ```
 
 ## Operator Precedence (High to Low)
-1. `()` `[]` `.` - Primary expressions
+1. `()` `[]` `.` `?` `.?` - Primary, query
 2. `-` `+` `not` - Unary operators
 3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
