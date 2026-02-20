@@ -1037,116 +1037,58 @@ static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
     }
 }
 
-// recursive helper: collect all items matching type_val into result list
-static void query_collect(Item data, Item type_val, bool direct, List* result, int depth) {
+// recursive helper: collect all items matching type_val into result array
+static void query_collect(Item data, Item type_val, bool self_inclusive, Array* result, int depth) {
     if (depth > 1000) return;  // prevent infinite recursion
     if (!data.item) return;
 
-    // check if this item matches the type
-    Bool match = fn_is(data, type_val);
-    if (match == BOOL_TRUE) {
-        list_push(result, data);
+    // check if this item matches the type (only at root level when self-inclusive)
+    if (self_inclusive) {
+        Bool match = fn_is(data, type_val);
+        if (match == BOOL_TRUE) {
+            array_push(result, data);
+        }
     }
 
-    if (direct) {
-        // direct mode (.?): search self (already done above) + attributes + direct content only
-        TypeId type_id = get_type_id(data);
-        if (type_id == LMD_TYPE_ELEMENT) {
-            Element* elmt = data.element;
-            // search attribute values
-            TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-            ShapeEntry* field = elmt_type->shape;
-            while (field) {
-                if (field->name) {
-                    Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
-                    if (val.item) {
-                        Bool m = fn_is(val, type_val);
-                        if (m == BOOL_TRUE) list_push(result, val);
-                    }
-                }
-                field = field->next;
+    // recurse into attributes and children (both ? and .? do this)
+    TypeId type_id = get_type_id(data);
+    if (type_id == LMD_TYPE_ELEMENT) {
+        Element* elmt = data.element;
+        // recurse into attributes
+        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+        ShapeEntry* field = elmt_type->shape;
+        while (field) {
+            if (field->name) {
+                Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
+                // always recurse with self_inclusive=true so descendants are fully searched
+                if (val.item) query_collect(val, type_val, true, result, depth + 1);
             }
-            // search direct content items (no recursion)
-            for (int64_t i = 0; i < elmt->length; i++) {
-                Item child = elmt->items[i];
-                if (child.item) {
-                    Bool m = fn_is(child, type_val);
-                    if (m == BOOL_TRUE) list_push(result, child);
-                }
-            }
-        } else if (type_id == LMD_TYPE_MAP) {
-            Map* map = data.map;
-            TypeMap* map_type = (TypeMap*)map->type;
-            ShapeEntry* field = map_type->shape;
-            while (field) {
-                if (field->name) {
-                    Item val = _map_field_value(map_type, map->data, field);
-                    if (val.item) {
-                        Bool m = fn_is(val, type_val);
-                        if (m == BOOL_TRUE) list_push(result, val);
-                    }
-                }
-                field = field->next;
-            }
-        } else if (type_id == LMD_TYPE_LIST) {
-            List* lst = data.list;
-            for (int64_t i = 0; i < lst->length; i++) {
-                Item child = lst->items[i];
-                if (child.item) {
-                    Bool m = fn_is(child, type_val);
-                    if (m == BOOL_TRUE) list_push(result, child);
-                }
-            }
-        } else if (type_id == LMD_TYPE_ARRAY) {
-            Array* arr = (Array*)data.array;
-            for (int64_t i = 0; i < arr->length; i++) {
-                Item child = arr->items[i];
-                if (child.item) {
-                    Bool m = fn_is(child, type_val);
-                    if (m == BOOL_TRUE) list_push(result, child);
-                }
-            }
+            field = field->next;
         }
-    } else {
-        // recursive mode (?): search self (already done above) + recurse into all children
-        TypeId type_id = get_type_id(data);
-        if (type_id == LMD_TYPE_ELEMENT) {
-            Element* elmt = data.element;
-            // recurse into attributes
-            TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-            ShapeEntry* field = elmt_type->shape;
-            while (field) {
-                if (field->name) {
-                    Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
-                    if (val.item) query_collect(val, type_val, false, result, depth + 1);
-                }
-                field = field->next;
+        // recurse into content items
+        for (int64_t i = 0; i < elmt->length; i++) {
+            query_collect(elmt->items[i], type_val, true, result, depth + 1);
+        }
+    } else if (type_id == LMD_TYPE_MAP) {
+        Map* map = data.map;
+        TypeMap* map_type = (TypeMap*)map->type;
+        ShapeEntry* field = map_type->shape;
+        while (field) {
+            if (field->name) {
+                Item val = _map_field_value(map_type, map->data, field);
+                if (val.item) query_collect(val, type_val, true, result, depth + 1);
             }
-            // recurse into content items
-            for (int64_t i = 0; i < elmt->length; i++) {
-                query_collect(elmt->items[i], type_val, false, result, depth + 1);
-            }
-        } else if (type_id == LMD_TYPE_MAP) {
-            Map* map = data.map;
-            TypeMap* map_type = (TypeMap*)map->type;
-            ShapeEntry* field = map_type->shape;
-            while (field) {
-                if (field->name) {
-                    Item val = _map_field_value(map_type, map->data, field);
-                    if (val.item) query_collect(val, type_val, false, result, depth + 1);
-                }
-                field = field->next;
-            }
-        } else if (type_id == LMD_TYPE_LIST) {
-            List* lst = data.list;
-            for (int64_t i = 0; i < lst->length; i++) {
-                query_collect(lst->items[i], type_val, false, result, depth + 1);
-            }
-        } else if (type_id == LMD_TYPE_ARRAY) {
-            Array* arr = (Array*)data.array;
-            for (int64_t i = 0; i < arr->length; i++) {
-                query_collect(arr->items[i], type_val, false, result, depth + 1);
-            }
+            field = field->next;
+        }
+    } else if (type_id == LMD_TYPE_LIST) {
+        List* lst = data.list;
+        for (int64_t i = 0; i < lst->length; i++) {
+            query_collect(lst->items[i], type_val, true, result, depth + 1);
+        }
+    } else if (type_id == LMD_TYPE_ARRAY) {
+        Array* arr = (Array*)data.array;
+        for (int64_t i = 0; i < arr->length; i++) {
+            query_collect(arr->items[i], type_val, true, result, depth + 1);
         }
     }
 }
@@ -1158,9 +1100,12 @@ Item fn_query(Item data, Item type_val, int direct) {
         log_error("query: 2nd argument must be a type, got: %s", get_type_name(type_tid));
         return ItemNull;
     }
-    List* result = list();
+    // use array (not list) to avoid automatic string merging
+    Array* result = array_plain();
+    result->is_spreadable = true;
+    // direct=1 means .? (self-inclusive), direct=0 means ? (not self-inclusive)
     query_collect(data, type_val, direct != 0, result, 0);
-    return list_end(result);
+    return {.array = result};
 }
 
 Bool fn_in(Item a_item, Item b_item) {

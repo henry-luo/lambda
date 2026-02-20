@@ -224,45 +224,38 @@ page?<div>         // finds the <div class:"main"> element
 
 ## 5. Query Scope & Traversal
 
-### 5.1 Default: Recursive Descendant Search
+### 5.1 Recursive Descendant Search: `?`
 
-By default, `?` performs a **depth-first recursive search** through the entire subtree, similar to jQuery's `$("selector")` or XPath's `//`:
+`?` performs a **depth-first recursive search** through attributes and all descendants, but does **not** include the root value itself:
 
 ```lambda
-html?<p>           // all <p> at any depth (like XPath //p)
+html?<p>           // all <p> at any depth
+let div = <div class: "main"; <p>>
+div?<div>          // () — does NOT include self
+div?<p>            // (<p>) — finds child
 ```
 
-### 5.2 Self + Direct Level: `.?`
+### 5.2 Self-Inclusive Query: `.?`
 
-The `.?` operator searches the **value itself**, its **attributes**, and its **immediate content/children** — but does **not** recurse into descendants:
+The `.?` operator includes the **value itself** in addition to everything `?` searches (attributes + all descendants):
 
 ```lambda
-el.?int             // int values in el's attributes and direct children
-body.?<p>           // only <p> directly under body (not nested deeper)
-map.?string         // string values at the top level of the map
+let div = <div class: "main"; <p>>
+div.?<div>         // (<div class:"main" ...>) — includes self
+div.?<p>           // (<p>) — finds child (same as ?)
+42.?int            // (42) — trivial self-match
 ```
 
 The key distinction:
 
-| Operator | Searches | Recurses? |
-|----------|----------|----------|
-| `?` | entire subtree (descendants) | yes, unlimited depth |
-| `.?` | self + attributes + direct content | no |
+| Operator | Includes self? | Searches |
+|----------|---------------|----------|
+| `?` | no | attributes + all descendants (recursively) |
+| `.?` | yes | self + attributes + all descendants (recursively) |
 
-This is analogous to XPath `/` (single step) vs. `//` (descendant-or-self).
+Both operators recurse to unlimited depth. The only difference is whether the root value itself is tested against the query type.
 
-### 5.3 Self-Inclusive
-
-The `?` operator **includes the root value itself** in the search. If `expr` itself matches `T`, it appears in the results:
-
-```lambda
-let div = <div class: "main"; <p>>
-div?<div>          // (<div class:"main" ...>) — includes self
-div?<p>            // (<p>)
-42?int             // (42) — trivial self-match
-```
-
-### 5.4 Traversal Order
+### 5.3 Traversal Order
 
 Results are returned in **document order** (depth-first, pre-order):
 
@@ -271,28 +264,29 @@ let doc = <root;
     <a; <b> <c>>
     <d; <e>>
 >
-doc?element        // (<root>, <a>, <b>, <c>, <d>, <e>)
+doc?element        // (<a>, <b>, <c>, <d>, <e>) — excludes <root> itself
+doc.?element       // (<root>, <a>, <b>, <c>, <d>, <e>) — includes self
 ```
 
-### 5.5 Traversal Targets
+### 5.4 Traversal Targets
 
 Lambda attributes can hold complex values (maps, arrays, elements), so the query descends into attribute values as well:
 
-| Data Type | `?` searches |
-|-----------|-------------|
-| Element | self + attributes (recursively) + children (recursively) |
-| Map | self + values (recursively) |
-| Array / List | self + items (recursively) |
-| Scalar | the value itself (base case) |
+| Data Type | `?` searches | `.?` searches |
+|-----------|-------------|---------------|
+| Element | attributes (recursively) + children (recursively) | self + same as `?` |
+| Map | values (recursively) | self + same as `?` |
+| Array / List | items (recursively) | self + same as `?` |
+| Scalar | (nothing — no children) | the value itself |
 
 ```lambda
 // Attribute values are complex — query descends into them
 let el = <widget config: {threshold: 42, items: [1, 2, 3]}; "text">
 el?int             // (42, 1, 2, 3) — found inside attribute map and array
-el.?int            // (42, 1, 2, 3) — same here: .? searches attrs + direct content
+el.?int            // (42, 1, 2, 3) — same (el itself is not int)
 ```
 
-### 5.6 Future: Result Limiting
+### 5.5 Future: Result Limiting
 
 In a future version, a `limit` clause may be added to stop traversal early:
 
@@ -369,7 +363,7 @@ let main = (html?<div id: "main">)[0]
 | Select by attribute | `$("[href]")` | `//*[@href]` | — | `?<element href: string>` |
 | Select by attr value | `$("[id='x']")` | `//*[@id='x']` | — | `?<element id: "x">` |
 | Descendant search | `$("div p")` | `//div//p` | `.. \| .p` | `?<div>?<p>` |
-| Self + direct | `$("div > p")` | `/div/p` | `.p` | `.?<p>` |
+| Self-inclusive | — | `self::div` | — | `.?<div>` |
 | By type | — | — | `numbers` | `?int` |
 | By shape | — | — | `select(.a)` | `?{a: any}` |
 | Union | `$("h1, h2")` | `//h1 \| //h2` | — | `?(<h1> \| <h2>)` |
@@ -443,7 +437,7 @@ Note: `query_expr` takes `primary_type` on the right, **not** `_type_expr`. This
 QueryExpr {
     object: Expr,        // the data to search
     query: PrimaryType,  // the type pattern to match (primary_type only)
-    direct: bool,        // true for .? (self + attrs/content only)
+    direct: bool,        // true for .? (self-inclusive query)
 }
 ```
 
@@ -602,3 +596,67 @@ let stats = {count: len(numbers), sum: sum(numbers), avg: avg(numbers)}
 
 format(stats, 'json')
 ```
+
+---
+
+## 11. Future: Auto Pipe/Map with Query (KIV)
+
+> **Status**: Keep In View — not yet implemented. Reserved for future consideration.
+
+### Motivation
+
+Currently, chaining member access or further expressions after a query requires an explicit pipe:
+
+```lambda
+html?<div> | ~.class          // explicit pipe to map .class over results
+html?<img> | ~.src            // explicit pipe to extract src
+```
+
+An **auto pipe/map** enhancement would allow post-query expressions to implicitly map over results, yielding more XPath-like conciseness:
+
+```lambda
+html?<div>.class              // auto-map: equivalent to html?<div> | ~.class
+html?<img>.src                // auto-map: equivalent to html?<img> | ~.src
+```
+
+### Proposed Semantics
+
+When a member access (`.`), index (`[]`), or further expression follows a query, the result would be **automatically mapped** over the query results:
+
+```lambda
+expr?T.field                  // → (expr?T) | ~.field
+expr?T[i]                     // → (expr?T) | ~[i]
+expr?T.field.subfield         // → (expr?T) | ~.field.subfield
+```
+
+### Concerns
+
+**1. Ambiguity with list properties**
+
+Since `?` returns a list, and lists have their own properties (e.g., `.length`), it becomes unclear which is intended:
+
+```lambda
+html?<div>.length             // list length (count of divs)?
+                              // or: map .length over each div's content?
+```
+
+**2. Breaks referential transparency**
+
+Extracting a query result into a variable changes behavior:
+
+```lambda
+html?<div>.class              // auto-maps → list of class strings
+let divs = html?<div>         // stores a list
+divs.class                    // null — list has no .class property
+```
+
+The same value produces different results depending on whether it's inlined or stored. This violates a core expectation in a functional language.
+
+**3. Not composable with existing semantics**
+
+Lambda's current model is clean: `?` finds (returns a list), `|` transforms. Two distinct, composable operations. Merging them into one overloaded operator reduces orthogonality.
+
+### Decision
+
+**Deferred.** The explicit pipe syntax `html?<div> | ~.class` is concise enough and avoids all ambiguity. If user demand or real-world usage patterns strongly favor the auto-map form, it can be revisited — potentially with a distinct operator or syntax to avoid the concerns above.
+

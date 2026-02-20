@@ -1,0 +1,32 @@
+"--- type query ---"
+2
+2
+3
+"--- self-inclusive scalar ---"
+0
+1
+42
+0
+1
+"--- element query ---"
+2
+1
+2
+1
+"--- .? recurses ---"
+1
+1
+2
+1
+"--- string in elements ---"
+5
+"--- map query ---"
+3
+1
+"--- array query ---"
+3
+2
+"--- chained ---"
+1
+"--- query + pipe ---"
+[1, 1]

@@ -59,7 +59,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, identifiers, names, symbols, namespaces |
 | **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, lists, maps, elements, ranges, and data composition expressions |
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
-| **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, control flow, and operators |
+| **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, `let a^err` destructuring, compile-time enforcement |
 
@@ -109,6 +109,12 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
 // Pipe expressions
 [1, 2, 3] | ~ * 2              // [2, 4, 6]
 users | ~.name where len(~) > 3  // Filter and transform
+
+// Query expressions — type-based search
+html?<img>                       // all <img> at any depth
+html?<div class: string>         // <div> with class attribute
+data?int                         // all int values in tree
+div.?<div>                       // self-inclusive query
 
 // For expressions
 (for (x in [1,2,3] where x > 1 order by x desc) x * 2)
@@ -321,8 +327,8 @@ print(format(report, 'json));
 // Parse Markdown document
 let doc = input("article.md", 'markdown);
 
-// Extract headings
-let headings = doc where ~.name == 'h1 or ~.name == 'h2 | ~.content;
+// Query for all headings using type-based search
+let headings = doc?(h1 | h2) | ~.content;
 
 // Generate table of contents
 let toc = <div class: "toc";
@@ -428,8 +434,9 @@ Concise syntax for complex operations:
 
 1. **Collection Comprehensions**: Powerful for-expressions for data processing
 2. **Pipe Expressions**: Fluent data transformation pipelines
-3. **Pattern Matching**: Type-based pattern matching with `is`
-4. **Document Processing**: Built-in support for markup and data formats
+3. **Query Expressions**: jQuery-style search with `?` (descendants) and `.?` (self-inclusive)
+4. **Pattern Matching**: Type-based pattern matching with `is`
+5. **Document Processing**: Built-in support for markup and data formats
 
 ---
 
