@@ -3329,8 +3329,11 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
 
 // rebuild a map/element shape when a field's type changes
 // creates new ShapeEntry chain + TypeMap/TypeElmt, allocates new data buffer, copies fields
+// For markup containers (!is_heap), uses runtime pool instead of calloc/free to avoid
+// corrupting input pool memory. The is_data_migrated flag tracks this transition.
 static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int* cap_slot,
                                         TypeId container_type_id,
+                                        Container* container,
                                         ShapeEntry* changed_entry,
                                         TypeId new_value_type, Item new_value) {
     TypeMap* old_map_type = (TypeMap*)*type_slot;
@@ -3380,8 +3383,16 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     }
     int64_t new_byte_size = byte_offset;
 
-    // allocate new data buffer (calloc — consistent with map_fill)
-    void* new_data = calloc(1, new_byte_size > 0 ? new_byte_size : 1);
+    // allocate new data buffer
+    // For heap containers: calloc (consistent with map_fill, freed by free_container)
+    // For markup containers: pool_calloc from runtime pool (data migrated from input pool)
+    bool use_pool = !container->is_heap;
+    void* new_data;
+    if (use_pool) {
+        new_data = pool_calloc(context->pool, new_byte_size > 0 ? new_byte_size : 1);
+    } else {
+        new_data = calloc(1, new_byte_size > 0 ? new_byte_size : 1);
+    }
     if (!new_data) {
         log_error("map_rebuild: data allocation failed");
         return;
@@ -3440,10 +3451,25 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // replace data
     *data_slot = new_data;
     *cap_slot = (int)new_byte_size;
-    if (old_data) free(old_data);
 
-    log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld",
-              field_count, new_byte_size);
+    // free old data buffer with correct allocator
+    if (old_data) {
+        if (container->is_heap) {
+            free(old_data);
+        } else if (container->is_data_migrated) {
+            // previous mutation already migrated data to runtime pool
+            pool_free(context->pool, old_data);
+        }
+        // else: old data is in input pool — don't free (managed by input lifecycle)
+    }
+
+    // mark data as migrated for future mutations
+    if (use_pool) {
+        container->is_data_migrated = 1;
+    }
+
+    log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld, migrated=%d",
+              field_count, new_byte_size, container->is_data_migrated);
 }
 
 // map/element field assignment: obj.field = val
@@ -3541,8 +3567,9 @@ void fn_map_set(Item map_item, Item key, Item value) {
             // type change — rebuild shape with new field type
             log_debug("fn_map_set: type change for '%s' (%d → %d), rebuilding shape",
                       key_cstr, field_type, value_type);
+            Container* cont = map_item.container;
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
-                                        map_type_id, entry,
+                                        map_type_id, cont, entry,
                                         value_type, value);
             return;
         }
