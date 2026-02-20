@@ -457,19 +457,18 @@ void line_break(LayoutContext* lycon) {
         css_line_height = font_line_height;
     }
 
-    // Check if we have mixed font sizes by comparing font height to CSS height
-    // Only expand for mixed fonts when the larger font significantly exceeds line-height
+    // CSS 2.1 10.8.1 half-leading model:
+    // When line-height is explicitly set, the inline box height equals line-height,
+    // but inline-blocks and other replaced elements may extend the line box further.
+    // Use max(css_line_height, font_line_height) to accommodate all inline content.
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
     float used_line_height;
 
     if (has_mixed_fonts) {
-        // Mixed font sizes - use max to accommodate larger fonts
-        // CSS 2.1: "The height of a line box is determined by the rules given in the section on line height calculations"
+        // Mixed content (inline-blocks, mixed fonts) - expand to fit
         used_line_height = max(css_line_height, font_line_height);
     } else {
         // Uniform font size - use CSS line height exactly as specified
-        // CSS 2.1: The computed line-height is used for line box spacing
-        // Even if lines overlap (line-height < font metrics), this is correct CSS behavior
         used_line_height = css_line_height;
     }
 
@@ -593,17 +592,32 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     lycon->line.advance_x += text_width;
-    // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
+    // CSS 2.1 10.8.1: Half-leading model for text inline boxes
+    // When line-height is explicitly set, the inline box height equals line-height.
+    // Leading = line-height - content_height is split half above and half below.
+    // When line-height is 'normal', use raw font metrics directly.
     TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+    float ascender = 0, descender = 0;
     if (typo.valid && typo.use_typo_metrics) {
-        lycon->line.max_ascender = max(lycon->line.max_ascender, typo.ascender);
-        lycon->line.max_descender = max(lycon->line.max_descender, typo.descender);
+        ascender = typo.ascender;
+        descender = typo.descender;
     } else if (lycon->font.font_handle) {
         const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
         if (m) {
-            lycon->line.max_ascender = max(lycon->line.max_ascender, m->hhea_ascender);
-            lycon->line.max_descender = max(lycon->line.max_descender, -(m->hhea_descender));
+            ascender = m->hhea_ascender;
+            descender = -(m->hhea_descender);
         }
+    }
+    if (ascender > 0 || descender > 0) {
+        if (!lycon->block.line_height_is_normal && lycon->block.line_height > 0) {
+            // Half-leading model: adjust ascender/descender so their sum equals line-height
+            float content_height = ascender + descender;
+            float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+            ascender += half_leading;
+            descender += half_leading;
+        }
+        lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+        lycon->line.max_descender = max(lycon->line.max_descender, descender);
     }
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
@@ -831,6 +845,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
+            // Apply word-spacing to space characters
+            wd += lycon->font.style->word_spacing;
             // Apply letter-spacing to spaces as well (but not if it's the last character)
             if (str[1]) {  // Check if there's a next character
                 wd += lycon->font.style->letter_spacing;
