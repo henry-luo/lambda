@@ -448,10 +448,25 @@ void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry
     CaptureInfo* capture = (CaptureInfo*)pool_calloc(tp->pool, sizeof(CaptureInfo));
     capture->name = name;
     capture->entry = entry;
-    capture->is_mutable = false; // TODO: detect mutations
+    capture->is_mutable = false;
     capture->next = *captures;
     *captures = capture;
     log_debug("capture added: %.*s", (int)name->len, name->chars);
+}
+
+// Mark an existing capture as mutable (called when assignment to captured var is detected)
+void mark_capture_mutable(CaptureInfo** captures, String* name) {
+    CaptureInfo* c = *captures;
+    while (c) {
+        if (c->name == name || (c->name && name &&
+            c->name->len == name->len &&
+            memcmp(c->name->chars, name->chars, name->len) == 0)) {
+            c->is_mutable = true;
+            log_debug("capture marked mutable: %.*s", (int)name->len, name->chars);
+            return;
+        }
+        c = c->next;
+    }
 }
 
 // Recursively collect captures from an AST node
@@ -572,6 +587,19 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_LOOP: {
         AstNamedNode* named = (AstNamedNode*)node;
         collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        // check if the assignment target is a captured variable from an enclosing scope
+        if (assign->target_entry && !assign->target_entry->import &&
+            !is_local_to_scope(assign->target_entry, fn_scope) &&
+            !is_global_entry(assign->target_entry, global_scope)) {
+            add_capture(tp, captures, assign->target, assign->target_entry);
+            mark_capture_mutable(captures, assign->target);
+        }
+        // also collect captures from the value expression
+        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
         break;
     }
     case AST_NODE_RETURN_STAM: {
@@ -4625,6 +4653,18 @@ AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
         if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode* assign = build_assign_expr(tp, child, false);
+            if (assign && assign->node_type == AST_NODE_ASSIGN) {
+                AstNamedNode* named = (AstNamedNode*)assign;
+                // mark the name entry as mutable (var)
+                NameEntry* entry = lookup_name_in_current_scope(tp, named->name);
+                if (entry) {
+                    entry->is_mutable = true;
+                    named->entry = entry;
+                    // check if type annotation was provided
+                    TSNode type_node = ts_node_child_by_field_id(child, FIELD_TYPE);
+                    entry->has_type_annotation = !ts_node_is_null(type_node);
+                }
+            }
             if (prev_declare == NULL) {
                 ast_node->declare = assign;
             } else {
@@ -4707,10 +4747,60 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // lookup target variable to get its type info
         NameEntry* entry = lookup_name(tp, target_str);
         ast_node->target_node = entry ? entry->node : NULL;
+        ast_node->target_entry = entry;
+
+        // check that the target is a mutable variable (declared with var)
+        if (entry && !entry->is_mutable) {
+            record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+                "cannot assign to '%.*s': %s bindings are immutable",
+                (int)target_str.length, target_str.str,
+                entry->node->node_type == AST_NODE_PARAM ? "parameter" : "let");
+        }
 
         // build value expression
         ast_node->value = build_expr(tp, value_node);
         ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+
+        // type analysis for var assignment
+        if (entry && entry->is_mutable && ast_node->value && ast_node->value->type && entry->node->type) {
+            TypeId var_tid = entry->node->type->type_id;
+            TypeId val_tid = ast_node->value->type->type_id;
+
+            if (var_tid != val_tid) {
+                if (entry->has_type_annotation) {
+                    // type-annotated var: assignment must follow declared type
+                    // allow ANY/NULL values (will use runtime cast)
+                    // allow numeric coercions: int <-> int64 <-> float (bidirectional)
+                    bool compatible = (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL);
+                    if (!compatible) compatible = types_compatible(ast_node->value->type, entry->node->type);
+                    // also allow numeric narrowing (e.g., float -> int) for var assignment
+                    if (!compatible) {
+                        bool var_numeric = (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64 ||
+                                            var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_DECIMAL);
+                        bool val_numeric = (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64 ||
+                                            val_tid == LMD_TYPE_FLOAT || val_tid == LMD_TYPE_DECIMAL);
+                        compatible = var_numeric && val_numeric;
+                    }
+                    if (!compatible) {
+                        int line = ts_node_start_point(assign_node).row + 1;
+                        record_type_error(tp, line,
+                            "cannot assign %s value to var '%.*s' of type %s",
+                            get_type_name(val_tid),
+                            (int)target_str.length, target_str.str,
+                            get_type_name(var_tid));
+                    }
+                } else if (!entry->type_widened) {
+                    // non-annotated var: widen to Item if types differ
+                    // skip if var is already Item-typed (NULL or ANY)
+                    if (var_tid != LMD_TYPE_NULL && var_tid != LMD_TYPE_ANY) {
+                        entry->type_widened = true;
+                        log_debug("var '%.*s' widened to Item (was %s, assigned %s)",
+                            (int)target_str.length, target_str.str,
+                            get_type_name(var_tid), get_type_name(val_tid));
+                    }
+                }
+            }
+        }
 
         return (AstNode*)ast_node;
     }
