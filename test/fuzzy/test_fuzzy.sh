@@ -9,11 +9,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LAMBDA_EXE="$PROJECT_ROOT/lambda.exe"
 CORPUS_DIR="$SCRIPT_DIR/corpus"
 LAMBDA_TEST_DIR="$PROJECT_ROOT/test/lambda"
+STD_TEST_DIR="$PROJECT_ROOT/test/std"
 CRASH_DIR="$SCRIPT_DIR/crashes"
 TIMEOUT_SEC=5
 DURATION_SEC=300
 VERBOSE=0
 USE_LAMBDA_TESTS=1
+USE_DRY_RUN=1
 
 # Colors for output
 RED='\033[0;31m'
@@ -40,9 +42,13 @@ while [[ $# -gt 0 ]]; do
             USE_LAMBDA_TESTS=0
             shift
             ;;
+        --no-dry-run)
+            USE_DRY_RUN=0
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--duration=SECONDS] [--timeout=SECONDS] [--verbose] [--no-lambda-tests]"
+            echo "Usage: $0 [--duration=SECONDS] [--timeout=SECONDS] [--verbose] [--no-lambda-tests] [--no-dry-run]"
             exit 1
             ;;
     esac
@@ -79,10 +85,14 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log_verbose "  Testing: $test_name"
     
-    # Run with timeout
+    # Run with timeout, optionally under --dry-run mode
     local result
     local exit_code
-    result=$(timeout "$TIMEOUT_SEC" "$LAMBDA_EXE" "$test_file" 2>&1) || exit_code=$?
+    if [ "$USE_DRY_RUN" -eq 1 ]; then
+        result=$(timeout "$TIMEOUT_SEC" "$LAMBDA_EXE" --dry-run "$test_file" 2>&1) || exit_code=$?
+    else
+        result=$(timeout "$TIMEOUT_SEC" "$LAMBDA_EXE" "$test_file" 2>&1) || exit_code=$?
+    fi
     
     if [ -z "$exit_code" ]; then
         exit_code=0
@@ -366,6 +376,11 @@ else
     echo "Lambda tests: disabled"
 fi
 echo "Crashes saved to: $CRASH_DIR"
+if [ "$USE_DRY_RUN" -eq 1 ]; then
+    echo "Dry-run mode: enabled (IO returns fabricated results)"
+else
+    echo "Dry-run mode: disabled (real IO)"
+fi
 echo ""
 
 # Phase 1: Run corpus tests
@@ -386,7 +401,8 @@ echo ""
 
 # Phase 2: Mutation testing (with real Lambda test scripts)
 echo "Phase 2: Mutation testing..."
-TEMP_FILE=$(mktemp /tmp/fuzzy_XXXXXX.ls)
+mkdir -p "$PROJECT_ROOT/temp"
+TEMP_FILE="$PROJECT_ROOT/temp/fuzzy_$$.ls"
 trap "rm -f $TEMP_FILE" EXIT
 
 # Get seed programs from corpus
@@ -401,22 +417,35 @@ if [ -d "$CORPUS_DIR/valid" ]; then
     done
 fi
 
-# Add Lambda test scripts as seeds
+# Add Lambda test scripts as seeds (including subdirectories)
 if [ "$USE_LAMBDA_TESTS" -eq 1 ] && [ -d "$LAMBDA_TEST_DIR" ]; then
     echo "  Loading Lambda test scripts as fuzzing seeds..."
     LAMBDA_SEEDS_COUNT=0
-    for f in "$LAMBDA_TEST_DIR"/*.ls; do
-        if [ -f "$f" ]; then
-            # Skip very large test files (>50KB) to keep mutations fast
-            size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
-            if [ "$size" -lt 51200 ]; then
-                SEED_PROGRAMS+=("$(cat "$f")")
-                SEED_FILES+=("$f")
-                LAMBDA_SEEDS_COUNT=$((LAMBDA_SEEDS_COUNT + 1))
-            fi
+    while IFS= read -r -d '' f; do
+        # Skip very large test files (>50KB) to keep mutations fast
+        size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+        if [ "$size" -lt 51200 ]; then
+            SEED_PROGRAMS+=("$(cat "$f")")
+            SEED_FILES+=("$f")
+            LAMBDA_SEEDS_COUNT=$((LAMBDA_SEEDS_COUNT + 1))
         fi
-    done
+    done < <(find "$LAMBDA_TEST_DIR" -name '*.ls' -print0)
     log_verbose "  Loaded $LAMBDA_SEEDS_COUNT Lambda test scripts"
+fi
+
+# Add structured test scripts (test/std) as seeds
+if [ -d "$STD_TEST_DIR" ]; then
+    echo "  Loading structured test scripts (test/std) as fuzzing seeds..."
+    STD_SEEDS_COUNT=0
+    while IFS= read -r -d '' f; do
+        size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+        if [ "$size" -lt 51200 ]; then
+            SEED_PROGRAMS+=("$(cat "$f")")
+            SEED_FILES+=("$f")
+            STD_SEEDS_COUNT=$((STD_SEEDS_COUNT + 1))
+        fi
+    done < <(find "$STD_TEST_DIR" -name '*.ls' -print0)
+    log_verbose "  Loaded $STD_SEEDS_COUNT structured test scripts"
 fi
 
 # Add some basic seeds if none found

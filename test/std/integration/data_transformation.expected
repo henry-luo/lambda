@@ -1,0 +1,24 @@
+["Alice", "Bob", "Carol", "Dave", "Eve"]
+["Alice", "Carol", "Eve"]
+5
+3
+30
+[{
+    person: "Alice",
+    years: 30
+  }, {
+    person: "Bob",
+    years: 25
+  }, {
+    person: "Carol",
+    years: 35
+  }, {
+    person: "Dave",
+    years: 28
+  }, {
+    person: "Eve",
+    years: 32
+  }]
+150
+25
+35

@@ -2444,6 +2444,17 @@
                             "rpmalloc"
                         ],
                         "icon": "\ud83d\udcd0"
+                    },
+                    {
+                        "source": "test/test_lambda_std_gtest.cpp",
+                        "name": "Lambda Structured Tests",
+                        "dependencies": [],
+                        "binary": "test_lambda_std_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "\ud83e\uddea"
                     }
                 ],
                 "type": "lambda",

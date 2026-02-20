@@ -704,6 +704,7 @@ void runtime_init(Runtime* runtime) {
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->transpile_dir = NULL;  // default: write to current directory
+    runtime->dry_run = false;  // default: real IO
 }
 
 void runtime_cleanup(Runtime* runtime) {
