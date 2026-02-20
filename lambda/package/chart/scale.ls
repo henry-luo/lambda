@@ -119,7 +119,7 @@ pub fn scale_ticks(sc, count) {
         let log_hi = log(sc.domain[1]) / log(sc.base);
         let lo_exp = int(floor(log_lo));
         let hi_exp = int(ceil(log_hi));
-        for (e in lo_exp to hi_exp) sc.base ^ float(e)
+        for (e in lo_exp to hi_exp) sc.base ** float(e)
     } else if sc.kind == "sqrt" {
         util.nice_ticks(sc.domain[0], sc.domain[1], count)
     } else if sc.kind == "band" {
