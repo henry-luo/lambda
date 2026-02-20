@@ -466,7 +466,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             else if (block->scroller->overflow_y == CSS_VALUE_SCROLL || block->scroller->overflow_y == CSS_VALUE_AUTO) {
                 block->scroller->has_vt_scroll = true;
             }
-            if (block->scroller->has_hz_scroll ||
+            if (block->scroller->has_vt_scroll ||
                 block->scroller->overflow_y == CSS_VALUE_CLIP ||
                 block->scroller->overflow_y == CSS_VALUE_HIDDEN) {
                 block->scroller->has_clip = true;
