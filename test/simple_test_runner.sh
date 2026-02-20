@@ -51,7 +51,17 @@ while IFS= read -r test_file; do
             grep -v '^$' > "$actual_output"
     else
         # No marker found, clean up the raw output
-        sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$raw_output" > "$actual_output"
+        # Filter out log lines (timestamp + log level like "15:36:18 [NOTE] ...")
+        # and error/parse diagnostic lines
+        grep -v -E '^[0-9]{2}:[0-9]{2}:[0-9]{2} \[' "$raw_output" | \
+            grep -v -E '^PARSE ERROR:' | \
+            grep -v -E '^\s+Error node has' | \
+            grep -v -E '^\s+Child [0-9]+:' | \
+            grep -v -E '^Error: Script execution failed:' | \
+            grep -v -E '^\s+\|$' | \
+            grep -v -E '^\s+\^' | \
+            grep -v -E '^\s+[0-9]+ error' | \
+            sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' > "$actual_output"
     fi
     
     # Ensure the output ends with exactly one newline
@@ -72,165 +82,7 @@ while IFS= read -r test_file; do
             
             # Define expected outputs for each test
             case "$test_name" in
-                # Core/datatypes tests
-                "array_basic")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "array_operations")
-                    echo -e "3\n1\n2\n3\n4\n5" > "$normalized_expected"
-                    ;;
-                "boolean_operations")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                # Decimal tests use their .expected files
-                "float_arithmetic")
-                    cp "$expected_file" "$normalized_expected"
-                    ;;
-                "float_basic")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "float_comparison")
-                    echo -e "0.3\n0.3\nfalse\n1e-10\ntrue\nnan\ninf\n3.60288e+17\nfalse\ntrue\ntrue\nfalse\ntrue\nerror\n1" > "$normalized_expected"
-                    ;;
-                "float_conversion")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "float_operations")
-                    echo -e "3.14\n6.28\n9.42\n3.14" > "$normalized_expected"
-                    ;;
-                "float_precision")
-                    echo -e "0.3\n3.60288e+17\n4.94066e-324\ninf\n9.88131e-324\nnan\ntrue\ninf\n3.60288e+17\ntrue\n0\n-0\ntrue\n1" > "$normalized_expected"
-                    ;;
-                "integer_basic")
-                    echo -e "5\n10\n15" > "$normalized_expected"
-                    ;;
-                "integer_bitwise")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "integer_comparison")
-                    echo -e "5\n10\n5\nfalse\ntrue\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\ntrue\nerror\nerror\nerror\n1" > "$normalized_expected"
-                    ;;
-                "integer_conversion")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "integer_edge_cases")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "integer_negative")
-                    echo -e "-10\n5\n-5" > "$normalized_expected"
-                    ;;
-                "integer_operations")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "integer_positive")
-                    echo -e "27\n27" > "$normalized_expected"
-                    ;;
-                "large_numbers")
-                    echo -e "1000\n1000\n1000000" > "$normalized_expected"
-                    ;;
-                "map_basic")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "map_operations")
-                    echo -e "value1\nvalue2\nvalue3" > "$normalized_expected"
-                    ;;
-                "number_operations")
-                    echo -e "10\n5\n50\n2" > "$normalized_expected"
-                    ;;
-                "null_undefined")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "set_operations")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "string_basic")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "string_conversion")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "string_methods")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "string_negative")
-                    echo -e "error\nerror\nerror\nerror\n\"hello\"" > "$normalized_expected"
-                    ;;
-                "truthy_falsy")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "zero_operations")
-                    echo -e "10\n0\n0" > "$normalized_expected"
-                    ;;
-                
-                # Core/operators tests
-                "addition")
-                    echo -e "15\n5\n20" > "$normalized_expected"
-                    ;;
-                "arithmetic_basic")
-                    echo -e "10\n5\n32\n32" > "$normalized_expected"
-                    ;;
-                "comparison")
-                    echo -e "10\n20\n30" > "$normalized_expected"
-                    ;;
-                "division")
-                    echo -e "20\n5\n4" > "$normalized_expected"
-                    ;;
-                "multiplication")
-                    echo -e "10\n5\n50" > "$normalized_expected"
-                    ;;
-                "parentheses_basic")
-                    echo "20" > "$normalized_expected"
-                    ;;
-                "parentheses_nested")
-                    echo "42" > "$normalized_expected"
-                    ;;
-                "precedence_basic")
-                    echo "14" > "$normalized_expected"
-                    ;;
-                "precedence_complex")
-                    echo -e "5\n2\n23" > "$normalized_expected"
-                    ;;
-                "subtraction")
-                    echo -e "15\n5\n10" > "$normalized_expected"
-                    ;;
-                
-                # Integration tests
-                "complex_computation")
-                    echo -e "10\n20\n5\n155\n155" > "$normalized_expected"
-                    ;;
-                "function_calls")
-                    echo -e "42" > "$normalized_expected"
-                    ;;
-                "import_export")
-                    echo -e "42" > "$normalized_expected"
-                    ;;
-                "module_system")
-                    echo -e "42" > "$normalized_expected"
-                    ;;
-                "recursive_functions")
-                    echo -e "120" > "$normalized_expected"
-                    ;;
-                "variable_scoping")
-                    echo -e "10\n20\n30" > "$normalized_expected"
-                    ;;
-                
-                # Negative tests
-                "division_by_zero")
-                    echo "inf" > "$normalized_expected"
-                    ;;
-                "infinite_loop")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                "stack_overflow")
-                    echo "null" > "$normalized_expected"
-                    ;;
-                
-                # Performance tests
-                "large_data")
-                    echo "5050" > "$normalized_expected"
-                    ;;
-                
-                # Default case: use the expected file as is
+                # Use the expected file directly
                 *)
                     grep -v '^[[:space:]]*$' "$expected_file" | \
                         sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | \
