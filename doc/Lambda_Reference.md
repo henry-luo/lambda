@@ -123,13 +123,20 @@ if (x > 0) "positive" else "negative"
 // Pure function
 fn add(a: int, b: int) => a + b
 
-// Procedural function
-pn save(data) {
-    data |> "/tmp/output.json"
+// Procedural function with mutation
+pn process() {
+    var x = 42
+    x = 3.14             // type widening (int → float)
+    let obj = {a: 1}
+    obj.a = "hello"       // map field type change
 }
 
-// Closures
-fn make_adder(n: int) => (x) => x + n
+// Closures with mutable captures
+pn main() {
+    var count = 0
+    let inc = fn() { count = count + 1; count }
+    print(inc())   // 1 (closure's own copy)
+}
 ```
 
 ---

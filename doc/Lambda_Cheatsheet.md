@@ -134,11 +134,21 @@ symbol("href", 'xlink_url') // Create namespaced symbol
 (let a = 1, b = 2, a + b)      // Multiple bindings
 ```
 
-**Let Statements:**
+**Let Statements (immutable):**
 ```lambda
-let x = 42;               // Variable declaration
+let x = 42;               // Immutable binding
 let y : int = 100;        // With type annotation
-let a = 1, b = 2;         // Multiple variables
+let a = 1, b = 2;         // Multiple bindings
+x = 10                    // ERROR E211: cannot reassign let binding
+```
+
+**Var Statements (mutable, `pn` only):**
+```lambda
+var x = 0;                // Mutable variable
+var y: int = 42;          // With type annotation
+x = x + 1                 // OK: reassignment
+x = "hello"               // OK: type widening (int → string)
+y = "oops"                // ERROR E201: annotated type enforced
 ```
 
 ## Operators
@@ -272,6 +282,15 @@ for item in collection { transform(item) }
 ```lambda
 var x=0;   // Mutable variable
 while(c) { break;  continue;  return x; }
+```
+
+**Assignment Targets:**
+```lambda
+x = 10                    // Variable reassignment (var only)
+arr[i] = val              // Array element (auto-converts type)
+obj.field = val           // Map field (auto-rebuilds shape)
+elem.attr = val           // Element attribute
+elem[i] = val             // Element child
 ```
 
 ## Functions
