@@ -74,6 +74,9 @@ struct MirTranspiler {
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
 
+    // Global variables: name -> GlobalVarEntry (BSS-backed module-level let bindings)
+    struct hashmap* global_vars;
+
     // Variable scopes: array of hashmaps, each mapping name -> MirVarEntry
     struct hashmap* var_scopes[64];
     int scope_depth;
@@ -104,6 +107,9 @@ struct MirTranspiler {
     // Closure
     AstFuncNode* current_closure;
     MIR_reg_t env_reg;
+
+    // Whether we're inside a user-defined function (not the main function)
+    bool in_user_func;
 };
 
 // ============================================================================
@@ -149,6 +155,23 @@ static int local_func_cmp(const void *a, const void *b, void *udata) {
 }
 static uint64_t local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const LocalFuncEntry* e = (const LocalFuncEntry*)item;
+    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
+}
+
+// Global variable entry (module-level let bindings stored in BSS)
+struct GlobalVarEntry {
+    char name[128];
+    MIR_item_t bss_item;
+    TypeId type_id;
+    MIR_type_t mir_type;
+};
+
+static int global_var_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(((GlobalVarEntry*)a)->name, ((GlobalVarEntry*)b)->name);
+}
+static uint64_t global_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const GlobalVarEntry* e = (const GlobalVarEntry*)item;
     return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
 }
 
@@ -234,6 +257,19 @@ static MirVarEntry* find_var(MirTranspiler* mt, const char* name) {
     }
     return NULL;
 }
+
+// Look up a global (module-level) variable
+static GlobalVarEntry* find_global_var(MirTranspiler* mt, const char* name) {
+    if (!mt->global_vars) return NULL;
+    GlobalVarEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    return (GlobalVarEntry*)hashmap_get(mt->global_vars, &key);
+}
+
+// Forward declarations (defined after emit_box/emit_unbox)
+static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar);
+static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t val, TypeId val_tid);
 
 // ============================================================================
 // Import management (lazy proto + import creation)
@@ -640,7 +676,10 @@ static MIR_reg_t emit_load_string_literal(MirTranspiler* mt, const char* str) {
 // Box int64 -> Item via push_l runtime call
 // Note: push_l takes int64_t by value, which maps correctly to MIR_T_I64
 static MIR_reg_t emit_box_int64(MirTranspiler* mt, MIR_reg_t val_reg) {
-    return emit_call_1(mt, "push_l", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+    // Use push_l_safe to handle both raw int64 and already-boxed INT64 Items.
+    // This prevents double-boxing when the value comes from a runtime function
+    // return (boxed Item) vs a native computation (raw int64).
+    return emit_call_1(mt, "push_l_safe", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
 
 // Box DateTime* pointer -> Item (inline k2it)
@@ -813,6 +852,46 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
     default:
         return item_reg;
     }
+}
+
+// ============================================================================
+// Global variable BSS access helpers
+// ============================================================================
+
+// Load a global variable from BSS storage into a register
+static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
+    // Get BSS address
+    MIR_reg_t addr = new_reg(mt, "gv_addr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, addr),
+        MIR_new_ref_op(mt->ctx, gvar->bss_item)));
+    // Load boxed Item from BSS
+    MIR_reg_t boxed = new_reg(mt, "gv_val", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, boxed),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1)));
+    // Unbox to native type if needed
+    TypeId tid = gvar->type_id;
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
+        tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT64) {
+        return emit_unbox(mt, boxed, tid);
+    }
+    return boxed;
+}
+
+// Store a value to a global variable's BSS storage
+static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t val, TypeId val_tid) {
+    // Box the value first
+    MIR_reg_t boxed = emit_box(mt, val, val_tid);
+    // Get BSS address
+    MIR_reg_t addr = new_reg(mt, "gv_addr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, addr),
+        MIR_new_ref_op(mt->ctx, gvar->bss_item)));
+    // Store boxed Item to BSS
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1),
+        MIR_new_reg_op(mt->ctx, boxed)));
 }
 
 // ============================================================================
@@ -1104,6 +1183,12 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
         return var->reg;
     }
 
+    // Check global (module-level) variables stored in BSS
+    GlobalVarEntry* gvar = find_global_var(mt, name_buf);
+    if (gvar) {
+        return load_global_var(mt, gvar);
+    }
+
     // Check if this is a reference to a function (for first-class function usage)
     if (ident->entry && ident->entry->node) {
         AstNode* entry_node = ident->entry->node;
@@ -1172,9 +1257,17 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     bool right_int = (right_tid == LMD_TYPE_INT);
     bool left_float = (left_tid == LMD_TYPE_FLOAT);
     bool right_float = (right_tid == LMD_TYPE_FLOAT);
+    bool left_int64 = (left_tid == LMD_TYPE_INT64);
+    bool right_int64 = (right_tid == LMD_TYPE_INT64);
     bool both_int = left_int && right_int;
     bool both_float = left_float && right_float;
     bool int_float = (left_int && right_float) || (left_float && right_int);
+
+    // Note: INT64 arithmetic is NOT handled natively because transpile_expr
+    // returns inconsistent values for INT64 (raw int64 from literals/fn_int64,
+    // but boxed Items from generic binary fallback). All INT64 ops go through
+    // the generic boxed path, and emit_box_int64 uses push_l_safe to handle
+    // both raw and already-boxed values safely.
 
     // Arithmetic ops with native types
     if (both_int || both_float || int_float) {
@@ -1508,9 +1601,11 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         return boxl;
     }
 
-    return emit_call_2(mt, fn_name, MIR_T_I64,
+    MIR_reg_t result = emit_call_2(mt, fn_name, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+
+    return result;
 }
 
 // ============================================================================
@@ -2128,6 +2223,15 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // Store in current scope
                 set_var(mt, name_buf, val, mtype, var_tid);
 
+                // If this is a module-level variable (not inside a user function),
+                // store to BSS so other functions can access it
+                if (!mt->in_user_func) {
+                    GlobalVarEntry* gvar = find_global_var(mt, name_buf);
+                    if (gvar) {
+                        store_global_var(mt, gvar, val, var_tid);
+                    }
+                }
+
                 // Handle error destructuring: let a^err = expr
                 if (asn->error_name) {
                     // Box the value for error checking
@@ -2195,6 +2299,14 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, i));
                     }
                     set_var(mt, name_buf, extracted, MIR_T_I64, LMD_TYPE_ANY);
+
+                    // Store to BSS if this is a module-level decomposed variable
+                    if (!mt->in_user_func) {
+                        GlobalVarEntry* gvar = find_global_var(mt, name_buf);
+                        if (gvar) {
+                            store_global_var(mt, gvar, extracted, LMD_TYPE_ANY);
+                        }
+                    }
                 }
             }
         } else if (declare->node_type == AST_NODE_FUNC || declare->node_type == AST_NODE_FUNC_EXPR ||
@@ -2761,10 +2873,20 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         #define POST_PROCESS_DTIME(result) \
             if (c_ret_tid == LMD_TYPE_DTIME) { result = emit_box_dtime_value(mt, result); }
 
+        // Helper: when a sys func returns a boxed Item (c_ret_tid=ANY) but the
+        // call expression type is INT64, unbox to raw int64 for consistent native handling.
+        // This prevents double-boxing when the result is used in subsequent INT64 operations.
+        TypeId call_expr_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+        #define POST_PROCESS_INT64(result) \
+            if (c_ret_tid == LMD_TYPE_ANY && call_expr_tid == LMD_TYPE_INT64) { \
+                result = emit_unbox(mt, result, LMD_TYPE_INT64); \
+            }
+
         // For 0-arg functions like datetime(), date() etc
         if (arg_count == 0) {
             MIR_reg_t result = emit_call_0(mt, sys_fn_name, mir_ret_type);
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_INT64(result);
             return result;
         }
 
@@ -2774,6 +2896,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
             MIR_reg_t result = emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_INT64(result);
             return result;
         }
 
@@ -2789,6 +2912,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_INT64(result);
             return result;
         }
 
@@ -2808,6 +2932,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_INT64(result);
             return result;
         }
 
@@ -2842,6 +2967,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_INT64(result);
             return result;
         }
     }
@@ -3439,6 +3565,10 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
                          (lt == LMD_TYPE_FLOAT && rt == LMD_TYPE_INT);
         bool both_bool = (lt == LMD_TYPE_BOOL) && (rt == LMD_TYPE_BOOL);
         bool both_string = (lt == LMD_TYPE_STRING) && (rt == LMD_TYPE_STRING);
+        bool left_int64 = (lt == LMD_TYPE_INT64);
+        bool right_int64 = (rt == LMD_TYPE_INT64);
+        bool both_int64 = left_int64 && right_int64;
+        bool int_int64 = ((lt == LMD_TYPE_INT) && right_int64) || (left_int64 && (rt == LMD_TYPE_INT));
         int op = bi->op;
 
         // Enumerate ALL cases where transpile_binary returns native values:
@@ -3471,6 +3601,16 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             default:
                 return val; // POW, IDIV, MOD, JOIN, etc. → boxed fallback
             }
+        }
+
+        // 3b. INT64 binary results: all INT64 ops go through the boxed fallback
+        //     (no native INT64 handling), so results are already boxed Items.
+        //     Comparisons already handled by is_cmp above.
+        bool left_int64_b = (lt == LMD_TYPE_INT64);
+        bool right_int64_b = (rt == LMD_TYPE_INT64);
+        bool has_int64_b = left_int64_b || right_int64_b;
+        if (has_int64_b) {
+            return val; // already a boxed Item from the generic fallback
         }
 
         // 4. both_float: ADD,SUB,MUL,DIV → native float
@@ -3952,6 +4092,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_item_t saved_func_item = mt->current_func_item;
     MIR_func_t saved_func = mt->current_func;
     MIR_reg_t saved_consts_reg = mt->consts_reg;
+    bool saved_in_user_func = mt->in_user_func;
+    mt->in_user_func = true;
 
     // Save original strdup pointers before MIR overwrites them
     char* param_name_copies[32];
@@ -4039,6 +4181,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_func_item = saved_func_item;
     mt->current_func = saved_func;
     mt->consts_reg = saved_consts_reg;
+    mt->in_user_func = saved_in_user_func;
 
     strbuf_free(name_buf);
 }
@@ -4224,6 +4367,73 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
         }
         default:
             break;
+        }
+        node = node->next;
+    }
+}
+
+// ============================================================================
+// Pre-pass: create BSS items for module-level let bindings
+// This allows user-defined functions to access module-level variables
+// through BSS memory instead of MIR registers (which are function-local).
+// Only scans TOP-LEVEL declarations (not nested in functions).
+// ============================================================================
+
+static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
+    while (node) {
+        if (node->node_type == AST_NODE_LET_STAM || node->node_type == AST_NODE_PUB_STAM ||
+            node->node_type == AST_NODE_VAR_STAM) {
+            AstLetNode* let_node = (AstLetNode*)node;
+            AstNode* decl = let_node->declare;
+            while (decl) {
+                if (decl->node_type == AST_NODE_ASSIGN) {
+                    AstNamedNode* asn = (AstNamedNode*)decl;
+                    char name[128];
+                    snprintf(name, sizeof(name), "%.*s", (int)asn->name->len, asn->name->chars);
+
+                    // Create BSS for this variable (8 bytes for boxed Item)
+                    char bss_name[140];
+                    snprintf(bss_name, sizeof(bss_name), "_gvar_%s", name);
+                    MIR_item_t bss = MIR_new_bss(mt->ctx, bss_name, 8);
+
+                    TypeId tid = decl->type ? decl->type->type_id : LMD_TYPE_ANY;
+                    if (tid == LMD_TYPE_ANY && asn->as && asn->as->type) {
+                        tid = asn->as->type->type_id;
+                    }
+
+                    GlobalVarEntry entry;
+                    memset(&entry, 0, sizeof(entry));
+                    snprintf(entry.name, sizeof(entry.name), "%s", name);
+                    entry.bss_item = bss;
+                    entry.type_id = tid;
+                    entry.mir_type = type_to_mir(tid);
+                    hashmap_set(mt->global_vars, &entry);
+                } else if (decl->node_type == AST_NODE_DECOMPOSE) {
+                    AstDecomposeNode* dec = (AstDecomposeNode*)decl;
+                    for (int i = 0; i < dec->name_count; i++) {
+                        String* name_str = dec->names[i];
+                        char name[128];
+                        snprintf(name, sizeof(name), "%.*s", (int)name_str->len, name_str->chars);
+                        char bss_name[140];
+                        snprintf(bss_name, sizeof(bss_name), "_gvar_%s", name);
+                        MIR_item_t bss = MIR_new_bss(mt->ctx, bss_name, 8);
+
+                        GlobalVarEntry entry;
+                        memset(&entry, 0, sizeof(entry));
+                        snprintf(entry.name, sizeof(entry.name), "%s", name);
+                        entry.bss_item = bss;
+                        entry.type_id = LMD_TYPE_ANY;
+                        entry.mir_type = MIR_T_I64;
+                        hashmap_set(mt->global_vars, &entry);
+                    }
+                }
+                decl = decl->next;
+            }
+        } else if (node->node_type == AST_NODE_CONTENT) {
+            // Recurse into content blocks to find nested let statements
+            AstListNode* list = (AstListNode*)node;
+            if (list->declare) prepass_create_global_vars(mt, list->declare);
+            prepass_create_global_vars(mt, list->item);
         }
         node = node->next;
     }
@@ -4419,12 +4629,17 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source)
         import_cache_hash, import_cache_cmp, NULL, NULL);
     mt.local_funcs = hashmap_new(sizeof(LocalFuncEntry), 32, 0, 0,
         local_func_hash, local_func_cmp, NULL, NULL);
+    mt.global_vars = hashmap_new(sizeof(GlobalVarEntry), 32, 0, 0,
+        global_var_hash, global_var_cmp, NULL, NULL);
 
     // Create module
     mt.module = MIR_new_module(ctx, "lambda_script");
 
     // Import _lambda_rt (shared context pointer)
     MIR_item_t rt_import = MIR_new_import(ctx, "_lambda_rt");
+
+    // Pre-pass: create BSS items for module-level variables
+    prepass_create_global_vars(&mt, script->child);
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);
@@ -4525,6 +4740,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source)
     // Cleanup
     hashmap_free(mt.import_cache);
     hashmap_free(mt.local_funcs);
+    hashmap_free(mt.global_vars);
 }
 
 // ============================================================================
