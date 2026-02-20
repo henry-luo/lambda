@@ -570,12 +570,12 @@ Examples:
 
 ### Phase 2: Functions & Constructs (Week 3-4) — ✅ COMPLETE
 
-| Task                                                                                | Effort | Impact                     | Status                                |
-| ----------------------------------------------------------------------------------- | ------ | -------------------------- | ------------------------------------- |
-| Create `test/std/core/functions/` tests for 15+ untested system functions           | 3 days | Fills function gaps        | ✅ Done (16 files)                     |
-| Create `test/std/core/statements/` tests for for-group/limit/offset, let, match, fn | 2 days | Tests grammar constructs   | ✅ Done (8 files)                      |
+| Task                                                                                | Effort | Impact                     | Status                                                              |
+| ----------------------------------------------------------------------------------- | ------ | -------------------------- | ------------------------------------------------------------------- |
+| Create `test/std/core/functions/` tests for 15+ untested system functions           | 3 days | Fills function gaps        | ✅ Done (16 files)                                                   |
+| Create `test/std/core/statements/` tests for for-group/limit/offset, let, match, fn | 2 days | Tests grammar constructs   | ✅ Done (8 files)                                                    |
 | Cross-type interaction tests (every type pair with every operator)                  | 2 days | Catches type-dispatch bugs | ✅ Done (5 files: arithmetic, comparison, concat, logical, equality) |
-| Enhance fuzzy corpus to 100+ scripts                                                | 1 day  | Better crash discovery     | ❌ Not started                         |
+| Enhance fuzzy corpus to 100+ scripts                                                | 1 day  | Better crash discovery     | ❌ Not started                                                       |
 
 ### Phase 3: Deep Robustness (Week 5-6) — Medium Priority
 

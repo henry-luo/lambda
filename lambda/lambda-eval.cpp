@@ -1337,6 +1337,26 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
 }
 
 Item fn_input2(Item target_item, Item type) {
+    // Dry-run mode: return fabricated input data
+    if (g_dry_run) {
+        log_debug("dry-run: fabricated input() call");
+        const char* content = "{\"name\": \"dry-run\", \"version\": \"1.0\", \"items\": [1, 2, 3], \"active\": true}";
+        // check type hint for more realistic fabrication
+        TypeId tid = get_type_id(type);
+        if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_SYMBOL) {
+            String* ts = fn_string(type);
+            if (ts && ts->chars) {
+                if (strcmp(ts->chars, "html") == 0) content = "<html><head><title>Mock</title></head><body><p>Dry-run</p></body></html>";
+                else if (strcmp(ts->chars, "text") == 0 || strcmp(ts->chars, "txt") == 0) content = "Dry-run fabricated content.\nLine 2.\nLine 3: 42, 3.14\n";
+                else if (strcmp(ts->chars, "csv") == 0) content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
+                else if (strcmp(ts->chars, "yaml") == 0 || strcmp(ts->chars, "yml") == 0) content = "name: dry-run\nversion: 1\n";
+                else if (strcmp(ts->chars, "xml") == 0) content = "<root><item id=\"1\">mock</item></root>";
+                else if (strcmp(ts->chars, "markdown") == 0 || strcmp(ts->chars, "md") == 0) content = "# Mock\n\nDry-run content.\n";
+            }
+        }
+        String* result_str = heap_strcpy((char*)content, strlen(content));
+        return {.item = s2it(result_str)};
+    }
     String *type_str = NULL, *flavor_str = NULL;
 
     // Validate target type: must be string, symbol, or path

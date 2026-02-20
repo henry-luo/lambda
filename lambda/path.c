@@ -708,6 +708,12 @@ extern String* heap_strcpy(char* src, int len);
  */
 Item path_resolve_for_iteration(Path* path) {
     if (!path) return ITEM_NULL;
+
+    // dry-run mode: return empty list for filesystem iteration
+    if (g_dry_run) {
+        log_debug("dry-run: fabricated path_resolve_for_iteration()");
+        return ITEM_NULL;
+    }
     
     // Already resolved?
     if (path->result != 0) {
@@ -979,6 +985,10 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
  * Returns: Bool (BOOL_TRUE/BOOL_FALSE) for direct use in C conditions
  */
 Bool fn_exists(Item path_item) {
+    if (g_dry_run) {
+        log_debug("dry-run: fabricated exists() call");
+        return BOOL_FALSE;
+    }
     log_debug("fn_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
     
     // Use unified Target API

@@ -2252,6 +2252,10 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "-O3") == 0) {
             optimize_level = 3;
         }
+        else if (strcmp(argv[i], "--dry-run") == 0) {
+            runtime.dry_run = true;
+            g_dry_run = true;
+        }
         else if (argv[i][0] != '-') {
             // This is a script file
             script_file = argv[i];
