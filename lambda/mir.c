@@ -1,4 +1,4 @@
-#include <stdio.h>
+ #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>  // for va_list
@@ -121,6 +121,7 @@ func_obj_t func_list[] = {
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
     {"push_l", (fn_ptr) push_l},
+    {"push_l_safe", (fn_ptr) push_l_safe},
     {"push_k", (fn_ptr) push_k},
     {"push_c", (fn_ptr) push_c},
     {"item_keys", (fn_ptr) item_keys},

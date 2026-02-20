@@ -1363,7 +1363,12 @@ Item fn_min1(Item item_a) {
             return push_d(min_val);
         }
         else {
-            return (Item) { .item = i2it((int64_t)min_val) };
+            int64_t ival = (int64_t)min_val;
+            if (ival > INT_MAX || ival < INT_MIN) {
+                return push_l(ival);
+            } else {
+                return {.item = i2it((int32_t)ival)};
+            }
         }
     }
     else if (type_id == LMD_TYPE_RANGE) {
@@ -1531,7 +1536,12 @@ Item fn_max1(Item item_a) {
             return push_d(max_val);
         }
         else {
-            return (Item) { .item = i2it((int64_t)max_val) };
+            int64_t ival = (int64_t)max_val;
+            if (ival > INT_MAX || ival < INT_MIN) {
+                return push_l(ival);
+            } else {
+                return {.item = i2it((int32_t)ival)};
+            }
         }
     }
     else if (type_id == LMD_TYPE_RANGE) {
@@ -1567,15 +1577,13 @@ Item fn_sum(Item item) {
             return (Item) { .item = i2it(0) };  // Empty array sums to 0
         }
         double sum = 0.0;
-        bool is_float = false;
+        bool has_float = false;
         for (size_t i = 0; i < arr->length; i++) {
             Item elem_item = array_get(arr, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();
                 log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
-                is_float = true;
-                // todo: keep as int if within range
             }
             else if (elem_item._type_id == LMD_TYPE_INT64) {
                 int64_t val = elem_item.get_int64();
@@ -1584,20 +1592,24 @@ Item fn_sum(Item item) {
             }
             else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 double val = elem_item.get_double();
-                log_error("DEBUG fn_sum: Adding float value: %f", val);
+                log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
-                is_float = true;
+                has_float = true;
             }
             else {
                 log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
-        if (is_float) {
+        if (has_float) {
             return push_d(sum);
         }
         else {
-            return push_l((int64_t)sum);
+            if (sum > INT_MAX || sum < INT_MIN) {
+                return push_l((int64_t)sum);
+            } else {
+                return {.item = i2it((int32_t)sum)};
+            }
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
