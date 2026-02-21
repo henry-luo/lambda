@@ -418,6 +418,7 @@ static const CssEnumInfo css_value_definitions[] = {
     {"dense", 5, CSS_VALUE_DENSE, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
     {"auto-fill", 9, CSS_VALUE_AUTO_FILL, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
     {"auto-fit", 8, CSS_VALUE_AUTO_FIT, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
+    {"small-caps", 10, CSS_VALUE_SMALL_CAPS, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

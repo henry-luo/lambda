@@ -1086,6 +1086,92 @@ static CollapsedBorder get_row_border(ViewTableRow* row, int side) {
     return border;
 }
 
+// Extract border info from a column or colgroup element (ViewBlock)
+// CSS 2.1 §17.6.2: columns and column groups participate in border conflict resolution
+static CollapsedBorder get_column_border(ViewBlock* col, int side) {
+    CollapsedBorder border;
+    if (!col || !col->bound || !col->bound->border) return border;
+
+    const BorderProp* bp = col->bound->border;
+    switch (side) {
+        case 0: // top
+            border.width = bp->width.top;
+            border.style = bp->top_style;
+            border.color = bp->top_color;
+            break;
+        case 1: // right
+            border.width = bp->width.right;
+            border.style = bp->right_style;
+            border.color = bp->right_color;
+            break;
+        case 2: // bottom
+            border.width = bp->width.bottom;
+            border.style = bp->bottom_style;
+            border.color = bp->bottom_color;
+            break;
+        case 3: // left
+            border.width = bp->width.left;
+            border.style = bp->left_style;
+            border.color = bp->left_color;
+            break;
+    }
+    border.priority = get_border_style_priority(border.style);
+    return border;
+}
+
+// Find column element at a given column index
+// Returns the ViewBlock for the <col> element, or NULL if not found
+static ViewBlock* find_column_element(ViewTable* table, int target_col) {
+    int current_col = 0;
+    for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
+                    if (current_col == target_col) return (ViewBlock*)col;
+                    current_col++;
+                }
+            }
+            // colgroup without col children
+            if (current_col <= target_col) {
+                const char* span_str = child->get_attribute("span");
+                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                if (span <= 0) span = 1;
+                current_col += span;
+            }
+        } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
+            if (current_col == target_col) return (ViewBlock*)child;
+            current_col++;
+        }
+    }
+    return nullptr;
+}
+
+// Find colgroup element that contains a given column index
+// Returns the ViewBlock for the <colgroup> element, or NULL if not found
+static ViewBlock* find_colgroup_element(ViewTable* table, int target_col) {
+    int current_col = 0;
+    for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+            int first_col = current_col;
+            int col_count = 0;
+            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                if (col->view_type == RDT_VIEW_TABLE_COLUMN) col_count++;
+            }
+            if (col_count == 0) {
+                const char* span_str = child->get_attribute("span");
+                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                if (col_count <= 0) col_count = 1;
+            }
+            int last_col = first_col + col_count - 1;
+            if (target_col >= first_col && target_col <= last_col) return (ViewBlock*)child;
+            current_col = last_col + 1;
+        } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
+            current_col++;
+        }
+    }
+    return nullptr;
+}
+
 // Find cell at specific grid position (handles rowspan/colspan)
 static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_col) {
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
@@ -1188,6 +1274,30 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
+            // Column/colgroup top/bottom borders at table edges (CSS 2.1 §17.6.2)
+            if (row == 0 || row == meta->row_count) {
+                ViewBlock* col_elem = find_column_element(table, col);
+                if (col_elem) {
+                    int side = (row == 0) ? 0 : 2; // top or bottom
+                    CollapsedBorder cb = get_column_border(col_elem, side);
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+                ViewBlock* cg = find_colgroup_element(table, col);
+                if (cg) {
+                    int side = (row == 0) ? 0 : 2;
+                    CollapsedBorder cb = get_column_border(cg, side);
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+            }
+
             // Select winner from all candidates
             if (candidates->length > 0) {
                 CollapsedBorder* winner = (CollapsedBorder*)candidates->data[0];
@@ -1278,8 +1388,72 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
-            // TODO: Add column and column group border support (CSS 2.1 §17.6.2)
-            // For now, we handle cell, table, and row borders which covers most cases
+            // Column borders (CSS 2.1 §17.6.2: columns participate in border conflict resolution)
+            // Column to the left of this vertical edge
+            if (col > 0) {
+                ViewBlock* col_elem = find_column_element(table, col - 1);
+                if (col_elem) {
+                    CollapsedBorder cb = get_column_border(col_elem, 1); // right border
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+            }
+            // Column to the right of this vertical edge
+            if (col < meta->column_count) {
+                ViewBlock* col_elem = find_column_element(table, col);
+                if (col_elem) {
+                    CollapsedBorder cb = get_column_border(col_elem, 3); // left border
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+            }
+
+            // Colgroup borders at column group edges (CSS 2.1 §17.6.2)
+            {
+                ViewBlock* cg_left = col > 0 ? find_colgroup_element(table, col - 1) : nullptr;
+                ViewBlock* cg_right = col < meta->column_count ? find_colgroup_element(table, col) : nullptr;
+                // Add right border of left colgroup if column is at the right edge of that group
+                if (cg_left && cg_left != cg_right) {
+                    CollapsedBorder cb = get_column_border(cg_left, 1); // right
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+                // Add left border of right colgroup if column is at the left edge of that group
+                if (cg_right && cg_right != cg_left) {
+                    CollapsedBorder cb = get_column_border(cg_right, 3); // left
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+                // At table edges, add the colgroup border at that edge
+                if (col == 0 && cg_right) {
+                    CollapsedBorder cb = get_column_border(cg_right, 3); // left edge
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+                if (col == meta->column_count && cg_left) {
+                    CollapsedBorder cb = get_column_border(cg_left, 1); // right edge
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+            }
 
             // Select winner from all candidates
             if (candidates->length > 0) {
