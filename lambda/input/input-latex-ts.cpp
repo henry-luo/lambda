@@ -269,10 +269,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
     if (strcmp(node_type, "subsup") == 0) {
         ElementBuilder elem = builder.element("subsup");
 
-        // Get fields: base, sub, sup
+        // Get fields: base, sub, sup, modifier, sub_modifier, sup_modifier
         TSNode base = ts_node_child_by_field_name(node, "base", 4);
         TSNode sub = ts_node_child_by_field_name(node, "sub", 3);
         TSNode sup = ts_node_child_by_field_name(node, "sup", 3);
+        TSNode modifier = ts_node_child_by_field_name(node, "modifier", 8);
+        TSNode sub_modifier = ts_node_child_by_field_name(node, "sub_modifier", 12);
+        TSNode sup_modifier = ts_node_child_by_field_name(node, "sup_modifier", 12);
 
         if (!ts_node_is_null(base)) {
             Item base_item = convert_math_node(ctx, base, source);
@@ -285,6 +288,15 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         if (!ts_node_is_null(sup)) {
             Item sup_item = convert_math_node(ctx, sup, source);
             elem.attr("sup", sup_item);
+        }
+        if (!ts_node_is_null(modifier)) {
+            elem.attr("modifier", convert_math_node(ctx, modifier, source));
+        }
+        if (!ts_node_is_null(sub_modifier)) {
+            elem.attr("sub_modifier", convert_math_node(ctx, sub_modifier, source));
+        }
+        if (!ts_node_is_null(sup_modifier)) {
+            elem.attr("sup_modifier", convert_math_node(ctx, sup_modifier, source));
         }
 
         return elem.final();
@@ -587,6 +599,397 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         ElementBuilder elem = builder.element("delimiter");
         elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
         return elem.final();
+    }
+
+    // Symbol command (\infty, \partial, \nabla, \forall, \exists, \cdots, \ldots, etc.)
+    if (strcmp(node_type, "symbol_command") == 0) {
+        ElementBuilder elem = builder.element("symbol_command");
+        // strip leading backslash for the command name
+        const char* cmd_name = source + start;
+        size_t cmd_len = len;
+        if (cmd_len > 1 && cmd_name[0] == '\\') {
+            cmd_name++;
+            cmd_len--;
+        }
+        elem.attr("name", {.item = s2it(builder.createString(cmd_name, cmd_len))});
+        return elem.final();
+    }
+
+    // Generalized fraction: \genfrac{left}{right}{thickness}{style}{numer}{denom}
+    if (strcmp(node_type, "genfrac") == 0) {
+        ElementBuilder elem = builder.element("genfrac");
+
+        TSNode left_delim = ts_node_child_by_field_name(node, "left_delim", 10);
+        TSNode right_delim = ts_node_child_by_field_name(node, "right_delim", 11);
+        TSNode thickness = ts_node_child_by_field_name(node, "thickness", 9);
+        TSNode style = ts_node_child_by_field_name(node, "style", 5);
+        TSNode numer = ts_node_child_by_field_name(node, "numer", 5);
+        TSNode denom = ts_node_child_by_field_name(node, "denom", 5);
+
+        if (!ts_node_is_null(left_delim)) {
+            elem.attr("left_delim", convert_math_node(ctx, left_delim, source));
+        }
+        if (!ts_node_is_null(right_delim)) {
+            elem.attr("right_delim", convert_math_node(ctx, right_delim, source));
+        }
+        if (!ts_node_is_null(thickness)) {
+            elem.attr("thickness", convert_math_node(ctx, thickness, source));
+        }
+        if (!ts_node_is_null(style)) {
+            elem.attr("style", convert_math_node(ctx, style, source));
+        }
+        if (!ts_node_is_null(numer)) {
+            elem.attr("numer", convert_math_node(ctx, numer, source));
+        }
+        if (!ts_node_is_null(denom)) {
+            elem.attr("denom", convert_math_node(ctx, denom, source));
+        }
+
+        return elem.final();
+    }
+
+    // Infix fraction: numer \over denom, n \choose k, etc.
+    if (strcmp(node_type, "infix_frac") == 0) {
+        ElementBuilder elem = builder.element("infix_frac");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+
+        // collect numer and denom children by field name
+        uint32_t child_count = ts_node_child_count(node);
+        ElementBuilder numer_elem = builder.element("group");
+        ElementBuilder denom_elem = builder.element("group");
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* field = ts_node_field_name_for_child(node, i);
+            if (field && strcmp(field, "numer") == 0) {
+                Item child_item = convert_math_node(ctx, child, source);
+                if (child_item.item != ITEM_NULL) {
+                    numer_elem.child(child_item);
+                }
+            } else if (field && strcmp(field, "denom") == 0) {
+                Item child_item = convert_math_node(ctx, child, source);
+                if (child_item.item != ITEM_NULL) {
+                    denom_elem.child(child_item);
+                }
+            }
+        }
+        elem.attr("numer", numer_elem.final());
+        elem.attr("denom", denom_elem.final());
+
+        return elem.final();
+    }
+
+    // Over/under set commands: \overset, \underset, \stackrel
+    if (strcmp(node_type, "overunder_command") == 0) {
+        ElementBuilder elem = builder.element("overunder_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode annotation = ts_node_child_by_field_name(node, "annotation", 10);
+        TSNode base = ts_node_child_by_field_name(node, "base", 4);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(annotation)) {
+            elem.attr("annotation", convert_math_node(ctx, annotation, source));
+        }
+        if (!ts_node_is_null(base)) {
+            elem.attr("base", convert_math_node(ctx, base, source));
+        }
+
+        return elem.final();
+    }
+
+    // Extensible arrows: \xrightarrow, \xleftarrow, etc.
+    if (strcmp(node_type, "extensible_arrow") == 0) {
+        ElementBuilder elem = builder.element("extensible_arrow");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode below = ts_node_child_by_field_name(node, "below", 5);
+        TSNode above = ts_node_child_by_field_name(node, "above", 5);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(below)) {
+            elem.attr("below", convert_math_node(ctx, below, source));
+        }
+        if (!ts_node_is_null(above)) {
+            elem.attr("above", convert_math_node(ctx, above, source));
+        }
+
+        return elem.final();
+    }
+
+    // Sized delimiters: \big, \Big, \bigg, \Bigg with delimiter
+    if (strcmp(node_type, "sized_delimiter") == 0) {
+        ElementBuilder elem = builder.element("sized_delimiter");
+
+        TSNode size = ts_node_child_by_field_name(node, "size", 4);
+        TSNode delim = ts_node_child_by_field_name(node, "delim", 5);
+
+        if (!ts_node_is_null(size)) {
+            uint32_t s_start = ts_node_start_byte(size);
+            uint32_t s_end = ts_node_end_byte(size);
+            // strip leading backslash
+            const char* size_str = source + s_start;
+            size_t size_len = s_end - s_start;
+            if (size_len > 1 && size_str[0] == '\\') {
+                size_str++;
+                size_len--;
+            }
+            elem.attr("size", {.item = s2it(builder.createString(size_str, size_len))});
+        }
+        if (!ts_node_is_null(delim)) {
+            uint32_t d_start = ts_node_start_byte(delim);
+            uint32_t d_end = ts_node_end_byte(delim);
+            elem.attr("delim", {.item = s2it(builder.createString(source + d_start, d_end - d_start))});
+        }
+
+        return elem.final();
+    }
+
+    // Color commands: \textcolor, \color, \colorbox
+    if (strcmp(node_type, "color_command") == 0) {
+        ElementBuilder elem = builder.element("color_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode color = ts_node_child_by_field_name(node, "color", 5);
+        TSNode content = ts_node_child_by_field_name(node, "content", 7);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(color)) {
+            elem.attr("color", convert_math_node(ctx, color, source));
+        }
+        if (!ts_node_is_null(content)) {
+            elem.attr("content", convert_math_node(ctx, content, source));
+        }
+
+        return elem.final();
+    }
+
+    // Box commands: \boxed, \fbox, \bbox, \llap, \rlap, \clap
+    if (strcmp(node_type, "box_command") == 0) {
+        ElementBuilder elem = builder.element("box_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode options = ts_node_child_by_field_name(node, "options", 7);
+        TSNode content = ts_node_child_by_field_name(node, "content", 7);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(options)) {
+            elem.attr("options", convert_math_node(ctx, options, source));
+        }
+        if (!ts_node_is_null(content)) {
+            elem.attr("content", convert_math_node(ctx, content, source));
+        }
+
+        return elem.final();
+    }
+
+    // Phantom commands: \phantom, \hphantom, \vphantom, \smash
+    if (strcmp(node_type, "phantom_command") == 0) {
+        ElementBuilder elem = builder.element("phantom_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode options = ts_node_child_by_field_name(node, "options", 7);
+        TSNode content = ts_node_child_by_field_name(node, "content", 7);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(options)) {
+            elem.attr("options", convert_math_node(ctx, options, source));
+        }
+        if (!ts_node_is_null(content)) {
+            elem.attr("content", convert_math_node(ctx, content, source));
+        }
+
+        return elem.final();
+    }
+
+    // Rule command: \rule[raise]{width}{height}
+    if (strcmp(node_type, "rule_command") == 0) {
+        ElementBuilder elem = builder.element("rule_command");
+
+        TSNode raise = ts_node_child_by_field_name(node, "raise", 5);
+        TSNode width = ts_node_child_by_field_name(node, "width", 5);
+        TSNode height = ts_node_child_by_field_name(node, "height", 6);
+
+        if (!ts_node_is_null(raise)) {
+            elem.attr("raise", convert_math_node(ctx, raise, source));
+        }
+        if (!ts_node_is_null(width)) {
+            elem.attr("width", convert_math_node(ctx, width, source));
+        }
+        if (!ts_node_is_null(height)) {
+            elem.attr("height", convert_math_node(ctx, height, source));
+        }
+
+        return elem.final();
+    }
+
+    // Mathop command: \mathop{...}
+    if (strcmp(node_type, "mathop_command") == 0) {
+        ElementBuilder elem = builder.element("mathop_command");
+
+        TSNode content = ts_node_child_by_field_name(node, "content", 7);
+        if (!ts_node_is_null(content)) {
+            elem.attr("content", convert_math_node(ctx, content, source));
+        }
+
+        return elem.final();
+    }
+
+    // Matrix command (plain TeX): \matrix{...}, \pmatrix{...}
+    if (strcmp(node_type, "matrix_command") == 0) {
+        ElementBuilder elem = builder.element("matrix_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(body)) {
+            elem.attr("body", convert_math_node(ctx, body, source));
+        }
+
+        return elem.final();
+    }
+
+    // Matrix body (children of plain TeX \matrix)
+    if (strcmp(node_type, "matrix_body") == 0) {
+        ElementBuilder elem = builder.element("matrix_body");
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+        return elem.final();
+    }
+
+    // Hspace command: \hspace{dim}, \hspace*{dim}
+    if (strcmp(node_type, "hspace_command") == 0) {
+        ElementBuilder elem = builder.element("hspace_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode sign = ts_node_child_by_field_name(node, "sign", 4);
+        TSNode value = ts_node_child_by_field_name(node, "value", 5);
+        TSNode unit = ts_node_child_by_field_name(node, "unit", 4);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(sign)) {
+            uint32_t s_start = ts_node_start_byte(sign);
+            uint32_t s_end = ts_node_end_byte(sign);
+            elem.attr("sign", {.item = s2it(builder.createString(source + s_start, s_end - s_start))});
+        }
+        if (!ts_node_is_null(value)) {
+            uint32_t v_start = ts_node_start_byte(value);
+            uint32_t v_end = ts_node_end_byte(value);
+            elem.attr("value", {.item = s2it(builder.createString(source + v_start, v_end - v_start))});
+        }
+        if (!ts_node_is_null(unit)) {
+            uint32_t u_start = ts_node_start_byte(unit);
+            uint32_t u_end = ts_node_end_byte(unit);
+            elem.attr("unit", {.item = s2it(builder.createString(source + u_start, u_end - u_start))});
+        }
+
+        return elem.final();
+    }
+
+    // Skip/kern commands: \hskip, \kern, \mskip, \mkern with dimensions
+    if (strcmp(node_type, "skip_command") == 0) {
+        ElementBuilder elem = builder.element("skip_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode sign = ts_node_child_by_field_name(node, "sign", 4);
+        TSNode value = ts_node_child_by_field_name(node, "value", 5);
+        TSNode unit = ts_node_child_by_field_name(node, "unit", 4);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(sign)) {
+            uint32_t s_start = ts_node_start_byte(sign);
+            uint32_t s_end = ts_node_end_byte(sign);
+            elem.attr("sign", {.item = s2it(builder.createString(source + s_start, s_end - s_start))});
+        }
+        if (!ts_node_is_null(value)) {
+            uint32_t v_start = ts_node_start_byte(value);
+            uint32_t v_end = ts_node_end_byte(value);
+            elem.attr("value", {.item = s2it(builder.createString(source + v_start, v_end - v_start))});
+        }
+        if (!ts_node_is_null(unit)) {
+            uint32_t u_start = ts_node_start_byte(unit);
+            uint32_t u_end = ts_node_end_byte(unit);
+            elem.attr("unit", {.item = s2it(builder.createString(source + u_start, u_end - u_start))});
+        }
+
+        return elem.final();
+    }
+
+    // Middle delimiter: \middle\| inside \left...\right
+    if (strcmp(node_type, "middle_delim") == 0) {
+        ElementBuilder elem = builder.element("middle_delim");
+
+        TSNode delim = ts_node_child_by_field_name(node, "delim", 5);
+        if (!ts_node_is_null(delim)) {
+            uint32_t d_start = ts_node_start_byte(delim);
+            uint32_t d_end = ts_node_end_byte(delim);
+            elem.attr("delim", {.item = s2it(builder.createString(source + d_start, d_end - d_start))});
+        }
+
+        return elem.final();
+    }
+
+    // Limits modifier: \limits, \nolimits
+    if (strcmp(node_type, "limits_modifier") == 0) {
+        ElementBuilder elem = builder.element("limits_modifier");
+        // strip leading backslash
+        const char* mod_str = source + start;
+        size_t mod_len = len;
+        if (mod_len > 1 && mod_str[0] == '\\') {
+            mod_str++;
+            mod_len--;
+        }
+        elem.attr("value", {.item = s2it(builder.createString(mod_str, mod_len))});
+        return elem.final();
+    }
+
+    // Digit (single digit for \frac57 shorthand)
+    if (strcmp(node_type, "digit") == 0) {
+        return {.item = s2it(builder.createString(source + start, len))};
     }
 
     // Default: for any unhandled node type, create an element with children
