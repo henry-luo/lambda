@@ -15,6 +15,7 @@ import style: .lambda.package.math.atoms.style
 import color: .lambda.package.math.atoms.color
 import arr_mod: .lambda.package.math.atoms.array
 import enclose: .lambda.package.math.atoms.enclose
+import delims: .lambda.package.math.atoms.delimiters
 
 // ============================================================
 // Main render dispatch
@@ -272,14 +273,10 @@ fn render_delimiter_group(node, context) {
 
     let children = render_children(node, context)
     let content = box.hbox(children)
+    let content_height = content.height + content.depth
 
-    let left_box = if (left_text != "" and left_text != ".")
-        box.text_box(left_text, css.SMALL_DELIM, "mopen")
-    else box.null_delim()
-
-    let right_box = if (right_text != "" and right_text != ".")
-        box.text_box(right_text, css.SMALL_DELIM, "mclose")
-    else box.null_delim()
+    let left_box = delims.render_stretchy(left_text, content_height, "mopen")
+    let right_box = delims.render_stretchy(right_text, content_height, "mclose")
 
     box.with_class(box.hbox([left_box, content, right_box]), css.LEFT_RIGHT)
 }
@@ -294,8 +291,7 @@ fn render_sized_delim(node, context) {
     let size_name = if (len(size_cmd) > 0 and slice(size_cmd, 0, 1) == "\\")
         slice(size_cmd, 1, len(size_cmd)) else size_cmd
     let scale = if (sym.get_delim_size(size_name) != null) sym.get_delim_size(size_name) else 1.0
-    let delim_box = box.text_box(delim_text, css.SMALL_DELIM, "mord")
-    box.with_scale(delim_box, scale)
+    delims.render_at_scale(delim_text, scale, "mord")
 }
 
 // ============================================================
