@@ -51,19 +51,21 @@ struct LambdaTestInfo {
 
 // Helper function to execute a lambda script and capture output
 // is_procedural: if true, uses "./lambda.exe run <script>" for procedural scripts
-inline char* execute_lambda_script(const char* script_path, bool is_procedural = false) {
+// use_mir: if true, adds "--mir" flag for direct MIR transpilation path
+inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
     char command[512];
+    const char* mir_flag = use_mir ? " --mir" : "";
 #ifdef _WIN32
     if (is_procedural) {
-        snprintf(command, sizeof(command), "lambda.exe run \"%s\"", script_path);
+        snprintf(command, sizeof(command), "lambda.exe run%s \"%s\"", mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "lambda.exe \"%s\"", script_path);
+        snprintf(command, sizeof(command), "lambda.exe%s \"%s\"", mir_flag, script_path);
     }
 #else
     if (is_procedural) {
-        snprintf(command, sizeof(command), "./lambda.exe run \"%s\"", script_path);
+        snprintf(command, sizeof(command), "./lambda.exe run%s \"%s\"", mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "./lambda.exe \"%s\"", script_path);
+        snprintf(command, sizeof(command), "./lambda.exe%s \"%s\"", mir_flag, script_path);
     }
 #endif
 
@@ -280,7 +282,7 @@ inline char* read_expected_output(const char* expected_file_path) {
 }
 
 // Helper function to test lambda script against expected output file
-inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural) {
+inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural, bool use_mir = false) {
     // Get script name for better error messages
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
@@ -288,7 +290,7 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     char* expected_output = read_expected_output(expected_file_path);
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
-    char* actual_output = execute_lambda_script(script_path, is_procedural);
+    char* actual_output = execute_lambda_script(script_path, is_procedural, use_mir);
     ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path;
 
     // Trim whitespace from actual output
