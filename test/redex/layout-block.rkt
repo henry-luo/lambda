@@ -149,7 +149,15 @@
        `(avail (definite ,content-w) ,(if explicit-h `(definite ,explicit-h) 'indefinite)))
 
      ;; text-align: inherited property for centering text within block
-     (define text-align (get-style-prop styles 'text-align 'left))
+     ;; CSS 2.2 §16.2: 'start' maps to 'left' in LTR, 'right' in RTL;
+     ;; 'end' maps to 'right' in LTR, 'left' in RTL.
+     (define direction (get-style-prop styles 'direction 'ltr))
+     (define raw-text-align (get-style-prop styles 'text-align 'start))
+     (define text-align
+       (case raw-text-align
+         [(start) (if (eq? direction 'rtl) 'right 'left)]
+         [(end)   (if (eq? direction 'rtl) 'left 'right)]
+         [else raw-text-align]))
 
      (define-values (child-views content-height)
        (layout-block-children children child-avail bm dispatch-fn text-align styles))
@@ -576,6 +584,21 @@
              (let ([descendant-fb (unbox descendant-float-box)])
                (max final-y max-float-bottom descendant-fb))
              final-y))
+       ;; CSS 2.2 §12.5: list-item elements generate a marker box which creates
+       ;; an inline formatting context. Even when empty, one strut line-height is
+       ;; needed (browsers give empty list-items height ≈ 1 line-height).
+       (define final-y-with-list-strut
+         (if (and parent-styles
+                  (eq? (get-style-prop parent-styles 'display #f) 'list-item)
+                  (< final-y-with-floats 1))  ;; essentially zero content
+             (let* ([fs (get-style-prop parent-styles 'font-size CSS-DEFAULT-FONT-SIZE)]
+                    [font-metrics-sym (get-style-prop parent-styles 'font-metrics 'times)]
+                    [lh-prop (get-style-prop parent-styles 'line-height #f)]
+                    [strut-lh (if (and lh-prop (number? lh-prop))
+                                  lh-prop
+                                  (chrome-mac-line-height font-metrics-sym fs))])
+               strut-lh)
+             final-y-with-floats))
        ;; CSS 2.2 §17.5.1: table-column and table-column-group don't generate visible boxes
        ;; but browsers report them with height matching the table's row area.
        ;; Post-process: set column/column-group view heights to the content height.
@@ -587,10 +610,10 @@
                (if (member (view-id v) column-ids)
                    (match v
                      [`(view ,vid ,vx ,vy ,vw ,vh ,vch . ,rest)
-                      `(view ,vid ,vx ,vy ,vw ,final-y-with-floats ,vch . ,rest)]
+                      `(view ,vid ,vx ,vy ,vw ,final-y-with-list-strut ,vch . ,rest)]
                      [_ v])
                    v))))
-       (values adjusted-views final-y-with-floats)]
+       (values adjusted-views final-y-with-list-strut)]
       [else
        (define child (car remaining))
 
@@ -718,16 +741,29 @@
           ;; and if there are active floats to avoid
           (define child-styles-pre (get-box-styles child))
           (define child-overflow (get-style-prop child-styles-pre 'overflow #f))
-          ;; CSS 2.2 §9.5.2: clear property pushes element below floats
-          (define clear-val (get-style-prop child-styles-pre 'clear #f))
+          ;; CSS 2.2 §9.5.2: clear applies only to block-level elements in a
+          ;; block formatting context, not to inline-level elements.
+          (define child-display (get-style-prop child-styles-pre 'display #f))
+          (define is-inline-for-clear?
+            (or (match child [`(inline-block . ,_) #t] [_ #f])
+                (and child-display (memq child-display '(inline-block inline-table inline)))))
+          (define clear-val
+            (if is-inline-for-clear?
+                #f  ;; clear does not apply to inline-level elements
+                (get-style-prop child-styles-pre 'clear #f)))
           (define cleared-y-initial (compute-clear-y clear-val current-y))
           ;; CSS 2.2 §17.2: tables always establish a block formatting context
           (define is-table-child?
             (match child [`(table . ,_) #t] [_ #f]))
+          ;; CSS 2.2 §9.4.1: inline-block and inline-table also establish a BFC
+          (define is-inline-bfc-child?
+            (or (match child [`(inline-block . ,_) #t] [_ #f])
+                (and child-display (memq child-display '(inline-block inline-table)))))
           (define creates-bfc?
             (or (and child-overflow
                      (memq child-overflow '(scroll auto hidden)))
-                is-table-child?))
+                is-table-child?
+                is-inline-bfc-child?))
           ;; CSS 2.2 §9.5: BFC boxes must not overlap float margin boxes.
           ;; Compute the x-offset to avoid left floats. If the BFC child's
           ;; outer width doesn't fit beside the floats, shift it down below
