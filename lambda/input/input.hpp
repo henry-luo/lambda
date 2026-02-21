@@ -64,6 +64,9 @@ Input* input_from_target(struct Target* target, String* type, String* flavor);
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
 void cleanup_math_parser();  // Call at program exit to free resources
 
+// Parse LaTeX math string to AST using tree-sitter-latex-math (from input-latex-ts.cpp)
+Item parse_math_latex_to_ast(Input* input, const char* math_source, size_t math_len);
+
 #ifdef __cplusplus
 } // extern "C"
 extern "C" {

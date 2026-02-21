@@ -180,6 +180,30 @@ static String* normalize_latex_text(InputContext& ctx, const char* text, size_t 
 
 // Forward declaration for recursive math node conversion
 static Item convert_math_node(InputContext& ctx, TSNode node, const char* source);
+// Forward declaration for math AST parsing
+static Item parse_math_to_ast(InputContext& ctx, const char* math_source, size_t math_len);
+
+/**
+ * Extract the leading \command from a node's source text.
+ * Returns the length of the command (including backslash), or 0 if not found.
+ * Works for anonymous token rules where ts_node_child_by_field_name fails.
+ */
+static size_t extract_leading_command(const char* source, uint32_t start, uint32_t end, char* out_cmd, size_t out_max) {
+    const char* text = source + start;
+    size_t len = end - start;
+    if (len < 2 || text[0] != '\\') return 0;
+    // scan the command: \backslash + letters (or a single non-letter like \, or \;)
+    size_t i = 1;
+    if (i < len && isalpha((unsigned char)text[i])) {
+        while (i < len && isalpha((unsigned char)text[i])) i++;
+    } else if (i < len) {
+        i++; // single non-letter command like \, \; \!
+    }
+    if (i > out_max - 1) i = out_max - 1;
+    memcpy(out_cmd, text, i);
+    out_cmd[i] = '\0';
+    return i;
+}
 
 /**
  * Convert a tree-sitter-latex-math node to Lambda Mark element.
@@ -314,6 +338,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(numer)) {
             elem.attr("numer", convert_math_node(ctx, numer, source));
@@ -354,6 +385,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(top)) {
             elem.attr("top", convert_math_node(ctx, top, source));
@@ -416,6 +454,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(base)) {
             elem.attr("base", convert_math_node(ctx, base, source));
@@ -436,6 +481,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t op_start = ts_node_start_byte(op);
             uint32_t op_end = ts_node_end_byte(op);
             elem.attr("op", {.item = s2it(builder.createString(source + op_start, op_end - op_start))});
+        } else {
+            // extract operator from node source text (anonymous token fallback)
+            char op_buf[64];
+            size_t op_len = extract_leading_command(source, start, end, op_buf, sizeof(op_buf));
+            if (op_len > 0) {
+                elem.attr("op", {.item = s2it(builder.createString(op_buf, op_len))});
+            }
         }
         if (!ts_node_is_null(lower)) {
             elem.attr("lower", convert_math_node(ctx, lower, source));
@@ -505,6 +557,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(content)) {
             uint32_t txt_start = ts_node_start_byte(content);
@@ -533,6 +592,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(arg)) {
             elem.attr("arg", convert_math_node(ctx, arg, source));
@@ -657,6 +723,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
 
         // collect numer and denom children by field name
@@ -696,6 +769,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(annotation)) {
             elem.attr("annotation", convert_math_node(ctx, annotation, source));
@@ -719,6 +799,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(below)) {
             elem.attr("below", convert_math_node(ctx, below, source));
@@ -770,6 +857,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(color)) {
             elem.attr("color", convert_math_node(ctx, color, source));
@@ -793,6 +887,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(options)) {
             elem.attr("options", convert_math_node(ctx, options, source));
@@ -816,6 +917,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(options)) {
             elem.attr("options", convert_math_node(ctx, options, source));
@@ -871,6 +979,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(body)) {
             elem.attr("body", convert_math_node(ctx, body, source));
@@ -906,6 +1021,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(sign)) {
             uint32_t s_start = ts_node_start_byte(sign);
@@ -939,6 +1061,13 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             uint32_t cmd_start = ts_node_start_byte(cmd);
             uint32_t cmd_end = ts_node_end_byte(cmd);
             elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        } else {
+            // extract command from node source text (anonymous token fallback)
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 0) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+            }
         }
         if (!ts_node_is_null(sign)) {
             uint32_t s_start = ts_node_start_byte(sign);
@@ -1012,6 +1141,18 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
     }
 
     return ItemNull;
+}
+
+/**
+ * Public entry point: Parse a standalone LaTeX math string to AST.
+ * Creates its own InputContext. Called from input-math.cpp for type:'math' flavor:'latex'.
+ */
+Item parse_math_latex_to_ast(Input* input, const char* math_source, size_t math_len) {
+    if (!math_source || math_len == 0) {
+        return ItemNull;
+    }
+    InputContext ctx(input, math_source, math_len);
+    return parse_math_to_ast(ctx, math_source, math_len);
 }
 
 /**

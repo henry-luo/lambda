@@ -245,12 +245,49 @@ fn render_overunder(node, context) {
 // ============================================================
 
 fn render_big_op(node, context) {
-    let cmd = if (node.cmd != null) string(node.cmd) else ""
+    let cmd = if (node.op != null) string(node.op) else ""
     let unicode = sym.lookup_symbol(cmd)
     let display_text = if (unicode != null) unicode else cmd
     let op_scale = if (ctx.is_display(context)) 1.5 else 1.0
     let op_box = box.text_box(display_text, css.CMR, "mop")
-    box.with_scale(op_box, op_scale)
+    let scaled_op = box.with_scale(op_box, op_scale)
+
+    let has_lower = node.lower != null
+    let has_upper = node.upper != null
+
+    if (not has_lower and not has_upper) scaled_op
+    else render_big_op_with_limits(node, context, scaled_op, has_lower, has_upper)
+}
+
+fn render_big_op_with_limits(node, context, scaled_op, has_lower, has_upper) {
+    let lower_box = if (has_lower)
+        render_node(node.lower, ctx.sub_context(context)) else null
+    let upper_box = if (has_upper)
+        render_node(node.upper, ctx.sup_context(context)) else null
+
+    if (ctx.is_display(context))
+        render_big_op_display(scaled_op, lower_box, upper_box, has_lower, has_upper)
+    else
+        render_big_op_inline(scaled_op, lower_box, upper_box, has_lower, has_upper)
+}
+
+fn render_big_op_display(scaled_op, lower_box, upper_box, has_lower, has_upper) {
+    let parts = [{box: scaled_op, shift: 0.0}]
+    let parts2 = if (has_upper)
+        [{box: upper_box, shift: 0.0 - scaled_op.height - 0.1}] ++ parts
+    else parts
+    let parts3 = if (has_lower)
+        parts2 ++ [{box: lower_box, shift: scaled_op.depth + 0.1}]
+    else parts2
+    box.vbox(parts3)
+}
+
+fn render_big_op_inline(scaled_op, lower_box, upper_box, has_lower, has_upper) {
+    let sub_parts = if (has_lower)
+        [box.with_class(lower_box, css.MSUBSUP)] else []
+    let sup_parts = if (has_upper)
+        [box.with_class(upper_box, css.MSUBSUP)] else []
+    box.hbox([scaled_op] ++ sub_parts ++ sup_parts)
 }
 
 // ============================================================
@@ -324,7 +361,7 @@ fn render_middle_delim(node, context) {
 // ============================================================
 
 fn render_radical(node, context) {
-    let body_box = if (node.body != null) render_node(node.body, context)
+    let body_box = if (node.radicand != null) render_node(node.radicand, context)
         else box.text_box("", null, "ord")
 
     let index_box = if (node.index != null)
