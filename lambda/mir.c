@@ -30,6 +30,11 @@ extern Symbol* fn_name(Item item);
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
 
+// Helper to access runtime pool from JIT code
+static Pool* get_runtime_pool() {
+    return _lambda_rt ? _lambda_rt->pool : NULL;
+}
+
 // Helper functions for map pipe iteration in JIT
 // item_keys allocates per call, so we call it once and pass the ArrayList*
 static int64_t pipe_map_len(void* keys_ptr) {
@@ -400,14 +405,42 @@ func_obj_t func_list[] = {
     {"array_float_new", (fn_ptr) array_float_new},
     {"array_float_set", (fn_ptr) array_float_set},
     {"array_int_new", (fn_ptr) array_int_new},
+    {"array_int_set", (fn_ptr) array_int_set},
+    {"get_runtime_pool", (fn_ptr) get_runtime_pool},
 };
+
+// Dynamic import table for cross-module function/variable resolution
+#define MAX_DYNAMIC_IMPORTS 256
+static func_obj_t dynamic_import_table[MAX_DYNAMIC_IMPORTS];
+static int dynamic_import_count = 0;
+
+void register_dynamic_import(const char *name, void *addr) {
+    if (dynamic_import_count >= MAX_DYNAMIC_IMPORTS) {
+        log_error("dynamic import table full (max %d)", MAX_DYNAMIC_IMPORTS);
+        return;
+    }
+    log_debug("register dynamic import: %s -> %p", name, addr);
+    dynamic_import_table[dynamic_import_count].name = name;
+    dynamic_import_table[dynamic_import_count].func = (fn_ptr)addr;
+    dynamic_import_count++;
+}
+
+void clear_dynamic_imports(void) {
+    dynamic_import_count = 0;
+}
 
 void *import_resolver(const char *name) {
     log_debug("resolving name: %s", name);
-    // Use explicit count since sizeof calculation may fail
+    // Check dynamic imports first (cross-module functions/variables)
+    for (int i = 0; i < dynamic_import_count; i++) {
+        if (strcmp(dynamic_import_table[i].name, name) == 0) {
+            log_debug("found dynamic import: %s at %p", name, dynamic_import_table[i].func);
+            return (void*)dynamic_import_table[i].func;
+        }
+    }
+    // Check static runtime function table
     const size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) {
-        // log_debug("checking fn: %s", func_list[i].name);
         if (strcmp(func_list[i].name, name) == 0) {
             log_debug("found function: %s at %p", name, func_list[i].func);
             return func_list[i].func;

@@ -88,6 +88,8 @@ MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_data(MIR_context_t ctx, const char *data_name);
 void jit_cleanup(MIR_context_t ctx);
+void register_dynamic_import(const char *name, void *addr);
+void clear_dynamic_imports(void);
 }
 
 // MIR transpiler functions
