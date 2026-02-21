@@ -39,15 +39,14 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
         return;
     }
 
-    // LaTeX math: store source for TeX pipeline rendering
-    // Actual typesetting happens when rendering via tex_math_bridge
-    log_debug("parse_math: LaTeX math - storing source for TeX pipeline rendering");
-
-    // Create a simple map with the math source for later rendering
-    MarkBuilder builder(input);
-    MapBuilder mb = builder.map();
-    mb.put("type", builder.createSymbol("latex-math"));
-    mb.put("source", builder.createString(math_string));
-    mb.put("display", builder.createBool(false));  // inline by default
-    input->root = mb.final();
+    // LaTeX math: parse to structured AST using tree-sitter-latex-math
+    log_debug("parse_math: LaTeX math - parsing to AST via tree-sitter");
+    size_t math_len = strlen(math_string);
+    Item ast = parse_math_latex_to_ast(input, math_string, math_len);
+    if (ast.item != ITEM_NULL) {
+        input->root = ast;
+    } else {
+        log_error("parse_math: failed to parse LaTeX math to AST");
+        input->root = ItemNull;
+    }
 }
