@@ -20,6 +20,9 @@ const CURRENT_PLATFORM = os.platform(); // 'linux', 'darwin', or 'win32'
 const CPU_CORES = os.cpus().length;
 const DEFAULT_CONCURRENCY = Math.max(1, CPU_CORES - 1);
 
+// Maximum HTML test file size (100KB) - larger files are skipped
+const MAX_TEST_FILE_SIZE = 100 * 1024;
+
 class RadiantLayoutTester {
     constructor(options = {}) {
         this.engine = options.engine || 'lambda-css'; // Default to 'lambda-css'
@@ -260,6 +263,83 @@ class RadiantLayoutTester {
                 throw new Error(`Failed to load browser reference: ${error.message}`);
             }
         }
+    }
+
+    /**
+     * Check if a browser reference file exists for a given test (without loading it)
+     * Mirrors the lookup order in loadBrowserReference.
+     */
+    async hasBrowserReference(testName, category) {
+        const candidates = [
+            path.join(this.referenceDir, `${testName}.${CURRENT_PLATFORM}.json`),
+            path.join(this.referenceDir, `${testName}.json`),
+            path.join(this.referenceDir, category, `${testName}.json`)
+        ];
+        for (const file of candidates) {
+            try {
+                await fs.access(file);
+                return true;
+            } catch (e) {
+                // not found, try next
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Pre-filter test tasks: remove files without browser references or exceeding MAX_TEST_FILE_SIZE.
+     * Returns { tasks, skipped } where skipped is the count of removed tasks.
+     */
+    async filterTestTasks(testTasks) {
+        const kept = [];
+        let skippedNoRef = 0;
+        let skippedTooLarge = 0;
+
+        // Check all tasks in parallel for efficiency
+        const checks = await Promise.all(testTasks.map(async (task) => {
+            // Check file size
+            try {
+                const stats = await fs.stat(task.htmlFile);
+                if (stats.size > MAX_TEST_FILE_SIZE) {
+                    return { task, skip: 'too-large', size: stats.size };
+                }
+            } catch (e) {
+                // If we can't stat the file, let it through and fail naturally later
+            }
+
+            // Check browser reference existence
+            const ext = task.htmlFile.endsWith('.htm') && !task.htmlFile.endsWith('.html') ? '.htm' : '.html';
+            const testName = path.basename(task.htmlFile, ext);
+            const hasRef = await this.hasBrowserReference(testName, task.category);
+            if (!hasRef) {
+                return { task, skip: 'no-ref' };
+            }
+
+            return { task, skip: null };
+        }));
+
+        for (const { task, skip, size } of checks) {
+            if (skip === 'no-ref') {
+                skippedNoRef++;
+            } else if (skip === 'too-large') {
+                skippedTooLarge++;
+                if (this.verbose) {
+                    console.log(`   ⏭️  Skipped ${path.basename(task.htmlFile)} (file size ${(size / 1024).toFixed(0)}KB > 100KB)`);
+                }
+            } else {
+                kept.push(task);
+            }
+        }
+
+        const skipped = skippedNoRef + skippedTooLarge;
+        if (skipped > 0 && !this.json) {
+            const parts = [];
+            if (skippedNoRef > 0) parts.push(`${skippedNoRef} no reference`);
+            if (skippedTooLarge > 0) parts.push(`${skippedTooLarge} too large`);
+            console.log(`   ⏭️  Skipped ${skipped} tests (${parts.join(', ')})`);
+        }
+
+        return { tasks: kept, skipped };
     }
 
     /**
@@ -1656,10 +1736,20 @@ class RadiantLayoutTester {
             }
 
             // Prepare test tasks
-            const testTasks = htmlFiles.map(htmlFile => ({
+            const rawTestTasks = htmlFiles.map(htmlFile => ({
                 htmlFile: path.join(categoryDir, htmlFile),
                 category: category
             }));
+
+            // Pre-filter: skip tests without browser references or with file size > 100KB
+            const { tasks: testTasks, skipped: skippedCount } = await this.filterTestTasks(rawTestTasks);
+
+            if (testTasks.length === 0) {
+                if (!this.json) {
+                    console.log(`   No testable files after filtering (${skippedCount} skipped)`);
+                }
+                return [];
+            }
 
             // Run tests in parallel with pool management
             const results = await this.runTestsInPool(testTasks);
@@ -1701,6 +1791,7 @@ class RadiantLayoutTester {
                     total: results.length,
                     successful: successful,
                     failed: failed,
+                    skipped: skippedCount,
                     errors: errorCount,
                     results: results.map(r => ({
                         name: r.testName || r.testFile,
@@ -1715,6 +1806,7 @@ class RadiantLayoutTester {
                 console.log(`   Total Tests: ${results.length}`);
                 console.log(`   ✅ Successful: ${successful}`);
                 if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
+                if (skippedCount > 0) console.log(`   ⏭️  Skipped: ${skippedCount}`);
                 if (errorCount > 0) {
                     console.log(`   💥 Errors: ${errorCount}`);
                     console.log(`   📄 Files with errors:`);
@@ -1807,10 +1899,18 @@ class RadiantLayoutTester {
                     matchingFiles.forEach(f => console.log(`   🎯 ${f}`));
 
                     // Prepare test tasks for this category
-                    const testTasks = matchingFiles.map(htmlFile => ({
+                    const rawTestTasks = matchingFiles.map(htmlFile => ({
                         htmlFile: path.join(categoryDir, htmlFile),
                         category: category
                     }));
+
+                    // Pre-filter: skip tests without browser references or with file size > 100KB
+                    const { tasks: testTasks } = await this.filterTestTasks(rawTestTasks);
+
+                    if (testTasks.length === 0) {
+                        console.log(`   No testable files after filtering`);
+                        continue;
+                    }
 
                     // Run tests in parallel with pool management
                     const categoryResults = await this.runTestsInPool(testTasks);

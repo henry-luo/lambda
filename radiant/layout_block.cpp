@@ -22,6 +22,16 @@
 #include <cfloat>
 using namespace std::chrono;
 
+// CSS 2.1 §8.3.1: Collapse two margins according to spec rules
+// - Both positive: max(a, b)
+// - Both negative: min(a, b) — most negative
+// - Mixed signs: a + b — algebraic sum
+static inline float collapse_margins(float a, float b) {
+    if (a >= 0 && b >= 0) return max(a, b);
+    if (a < 0 && b < 0) return min(a, b);
+    return a + b;
+}
+
 // DEBUG: Global for tracking table height between calls
 // WORKAROUND: Table height gets corrupted between layout_block_content return and caller
 // This is a mysterious issue that needs further investigation
@@ -518,9 +528,35 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     fl_elem->bound = nullptr;
     fl_elem->in_line = nullptr;
 
-    // Set display to inline
-    fl_elem->display.outer = CSS_VALUE_INLINE;
-    fl_elem->display.inner = CSS_VALUE_FLOW;
+    // Set display — default to inline, but check for float (CSS 2.1 §5.12.2)
+    // If ::first-letter has float:left/right specified, it should become a floated
+    // block-level box (CSS 2.1 §9.7 blockification)
+    CssEnum fl_float_value = CSS_VALUE_NONE;
+    if (elem->first_letter_styles && elem->first_letter_styles->tree) {
+        AvlNode* fl_float_node = avl_tree_search(elem->first_letter_styles->tree, CSS_PROPERTY_FLOAT);
+        if (fl_float_node) {
+            StyleNode* fl_sn = (StyleNode*)fl_float_node->declaration;
+            if (fl_sn && fl_sn->winning_decl && fl_sn->winning_decl->value &&
+                fl_sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                fl_float_value = fl_sn->winning_decl->value->data.keyword;
+            }
+        }
+    }
+
+    if (fl_float_value == CSS_VALUE_LEFT || fl_float_value == CSS_VALUE_RIGHT) {
+        // CSS 2.1 §9.7: floated elements are blockified
+        fl_elem->display.outer = CSS_VALUE_BLOCK;
+        fl_elem->display.inner = CSS_VALUE_FLOW;
+
+        // Allocate PositionProp so element_has_float() returns true
+        fl_elem->position = alloc_position_prop(lycon);
+        fl_elem->position->float_prop = fl_float_value;
+        log_debug("[FIRST-LETTER] Float %s applied to ::first-letter",
+                  fl_float_value == CSS_VALUE_LEFT ? "left" : "right");
+    } else {
+        fl_elem->display.outer = CSS_VALUE_INLINE;
+        fl_elem->display.inner = CSS_VALUE_FLOW;
+    }
 
     // Assign the first-letter styles for CSS resolution
     fl_elem->specified_style = elem->first_letter_styles;
@@ -1067,6 +1103,14 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
 
     // Handle different content types
     switch (content_type) {
+        case CONTENT_TYPE_COUNTER:
+        case CONTENT_TYPE_COUNTERS:
+            // Counter content already resolved to string by
+            // dom_element_get_pseudo_element_content_with_counters()
+            // in alloc_pseudo_content_prop(). Fall through to STRING handling.
+        case CONTENT_TYPE_ATTR:
+            // attr() content already resolved to string by the same path.
+            // Fall through to STRING handling.
         case CONTENT_TYPE_STRING: {
             // Create Lambda String for the content
             size_t content_len = strlen(content);
@@ -1087,17 +1131,6 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
             }
             break;
         }
-
-        case CONTENT_TYPE_COUNTER:
-        case CONTENT_TYPE_COUNTERS:
-            // TODO: Implement counter resolution (Phase 2)
-            log_debug("[Pseudo-Element] Counter content not yet implemented");
-            break;
-
-        case CONTENT_TYPE_ATTR:
-            // TODO: Implement attribute reading (Phase 5)
-            log_debug("[Pseudo-Element] attr() content not yet implemented");
-            break;
 
         case CONTENT_TYPE_URI:
             // TODO: Implement image content (Phase 5)
@@ -3215,7 +3248,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float original_margin_top = block->bound->margin.top;
 
                 if (first_in_flow_child == block) {  // first in-flow child
-                    if (block->bound->margin.top > 0) {
+                    if (block->bound->margin.top != 0) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                         // Check if parent creates a BFC - BFC prevents margin collapsing
                         // BFC is created by: overflow != visible, float, position absolute/fixed, etc.
@@ -3230,7 +3263,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         float parent_margin_top = parent && parent->bound ? parent->bound->margin.top : 0;
                         if (parent && parent->parent && !parent_creates_bfc &&
                             parent_padding_top == 0 && parent_border_top == 0) {
-                            float margin_top = max(block->bound->margin.top, parent_margin_top);
+                            // CSS 2.1 §8.3.1: collapse child and parent margins
+                            float margin_top = collapse_margins(block->bound->margin.top, parent_margin_top);
 
                             // CSS 8.3.1: When parent has no border/padding, child margin collapses through parent
                             // If parent had no margin (parent_margin_top == 0), we need to retroactively collapse
@@ -3249,8 +3283,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 }
                                 if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
                                     ViewBlock* prev_block = (ViewBlock*)prev_view;
-                                    if (prev_block->bound->margin.bottom > 0 && margin_top > 0) {
-                                        sibling_collapse = min(prev_block->bound->margin.bottom, margin_top);
+                                    float prev_mb = prev_block->bound->margin.bottom;
+                                    if (prev_mb != 0 && margin_top != 0) {
+                                        // CSS 2.1 §8.3.1: collapse sibling margins
+                                        float collapsed = collapse_margins(prev_mb, margin_top);
+                                        sibling_collapse = prev_mb + margin_top - collapsed;
                                         log_debug("retroactive sibling collapse for parent-child: sibling_collapse=%f", sibling_collapse);
                                     }
                                 }
@@ -3308,8 +3345,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         if (prev_view && prev_view->is_block() && prev_view->view_type != RDT_VIEW_INLINE_BLOCK
                             && ((ViewBlock*)prev_view)->bound) {
                             ViewBlock* prev_block = (ViewBlock*)prev_view;
-                            if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
-                                collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
+                            float prev_mb = prev_block->bound->margin.bottom;
+                            float cur_mt = block->bound->margin.top;
+                            if (prev_mb != 0 || cur_mt != 0) {
+                                // CSS 2.1 §8.3.1: collapse adjacent sibling margins
+                                float collapsed = collapse_margins(prev_mb, cur_mt);
+                                collapse = (prev_mb + cur_mt) - collapsed;
                                 block->y -= collapse;
                                 block->bound->margin.top -= collapse;
                                 log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
@@ -3376,7 +3417,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
                 if (is_self_collapsing) {
                     // self-collapsing: margins collapse through this element
-                    // The element's own margins merge: max(original_mt, mb)
+                    // CSS 2.1 §8.3.1: The element's own margins merge via collapse_margins
                     // This merged margin then participates in sibling collapsing
                     float prev_mb = 0;
                     {
@@ -3393,8 +3434,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         }
                     }
 
-                    float self_collapsed = max(original_margin_top, block->bound->margin.bottom);
-                    float new_pending = max(prev_mb, self_collapsed);
+                    float self_collapsed = collapse_margins(original_margin_top, block->bound->margin.bottom);
+                    float new_pending = collapse_margins(prev_mb, self_collapsed);
                     float contribution = max(0.f, new_pending - prev_mb);
                     lycon->block.advance_y += contribution;
                     // expose the merged margin to next sibling via margin.bottom

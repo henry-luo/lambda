@@ -403,6 +403,13 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
 static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int depth, bool raw_text_mode) {
     // safety check for null
     if (!ctx.output()) return;
+
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) {
+        stringbuf_append_str(ctx.output(), "<!-- max_depth -->");
+        return;
+    }
+
     if (item.isNull()) {
         stringbuf_append_str(ctx.output(), "null");
         return;

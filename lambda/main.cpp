@@ -1,5 +1,6 @@
 #include "input/input.hpp"
 #include "format/format.h"
+#include "format/format-markup.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
@@ -727,13 +728,13 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "latex") == 0) {
             formatted_output = format_latex(input->pool, input->root);
         } else if (strcmp(to_format, "rst") == 0) {
-            formatted_output = format_rst_string(input->pool, input->root);
+            formatted_output = format_markup_string(input->pool, input->root, &RST_RULES);
         } else if (strcmp(to_format, "org") == 0) {
-            formatted_output = format_org_string(input->pool, input->root);
+            formatted_output = format_markup_string(input->pool, input->root, &ORG_RULES);
         } else if (strcmp(to_format, "wiki") == 0) {
-            formatted_output = format_wiki_string(input->pool, input->root);
+            formatted_output = format_markup_string(input->pool, input->root, &WIKI_RULES);
         } else if (strcmp(to_format, "textile") == 0) {
-            formatted_output = format_textile_string(input->pool, input->root);
+            formatted_output = format_markup_string(input->pool, input->root, &TEXTILE_RULES);
         } else if (strcmp(to_format, "text") == 0) {
             formatted_output = format_text_string(input->pool, input->root);
         } else if (strcmp(to_format, "jsx") == 0) {
@@ -741,11 +742,7 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "mdx") == 0) {
             formatted_output = format_mdx(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
-            // Format as markdown using string buffer
-            StringBuf* sb = stringbuf_new(input->pool);
-            format_markdown(sb, input->root);
-            formatted_output = stringbuf_to_string(sb);
-            stringbuf_free(sb);
+            formatted_output = format_markup_string(input->pool, input->root, &MARKDOWN_RULES);
         } else if (strcmp(to_format, "math-ascii") == 0) {
             formatted_output = format_math_ascii(input->pool, input->root);
         } else if (strcmp(to_format, "math-latex") == 0) {

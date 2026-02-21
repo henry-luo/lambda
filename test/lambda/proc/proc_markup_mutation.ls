@@ -5,12 +5,12 @@
 
 pn main() {
     // T1: JSON map - read original values (arena-allocated map, is_heap=0)
-    let data^e1 = input("temp/test_data.json")
+    let data^e1 = input("test/input/test_data.json")
     print(data.name)
     print(data.count)
 
     // T2: JSON map - same-type mutation (string to string, in-place, no rebuild)
-    var obj^e2 = input("temp/test_data.json")
+    var obj^e2 = input("test/input/test_data.json")
     obj.name = "beta"
     print(obj.name)
 
@@ -33,7 +33,7 @@ pn main() {
     print(obj.active)
 
     // T7: XML element - type-changing attr mutation on markup element
-    let doc^e3 = input("temp/test_markup.xml")
+    let doc^e3 = input("test/input/test_markup.xml")
     var root = doc[0]
     var item = root[0]
     item.name = 999
