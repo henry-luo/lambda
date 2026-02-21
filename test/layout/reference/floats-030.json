@@ -948,7 +948,7 @@
                 "classes": [],
                 "layout": {
                   "x": 119,
-                  "y": 73,
+                  "y": 155,
                   "width": 78.59,
                   "height": 18,
                   "contentWidth": 0,
@@ -1009,11 +1009,11 @@
                       "rects": [
                         {
                           "x": 119,
-                          "y": 73,
+                          "y": 155,
                           "width": 78.59,
                           "height": 18,
                           "right": 197.59,
-                          "bottom": 91,
+                          "bottom": 173,
                           "text": "Filler Text 2",
                           "startIndex": 0,
                           "endIndex": 13
@@ -1039,11 +1039,11 @@
                   "rects": [
                     {
                       "x": 197.59,
-                      "y": 73,
+                      "y": 155,
                       "width": 4,
                       "height": 18,
                       "right": 201.59,
-                      "bottom": 91
+                      "bottom": 173
                     }
                   ],
                   "hasLayout": true,
@@ -1064,12 +1064,12 @@
                 "layout": {
                   "x": 201.59,
                   "y": 73,
-                  "width": 71.55,
-                  "height": 18,
-                  "contentWidth": 72,
-                  "contentHeight": 18,
-                  "scrollWidth": 72,
-                  "scrollHeight": 18
+                  "width": 96,
+                  "height": 96,
+                  "contentWidth": 96,
+                  "contentHeight": 96,
+                  "scrollWidth": 96,
+                  "scrollHeight": 96
                 },
                 "computed": {
                   "display": "inline",

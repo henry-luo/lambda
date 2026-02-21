@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/at-charset-003.json
-  "test_file": "at-charset-003.htm",
-========
   "test_file": "display-004.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/display-004.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -208,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/at-charset-003.json
-                "text": "CSS Test: HTTP charset over link charset",
-                "length": 40,
-========
                 "text": "CSS Test: Display set to 'run-in'",
                 "length": 33,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/display-004.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -401,8 +392,8 @@
           },
           {
             "nodeType": "element",
-            "selector": "meta:nth-of-type(1)",
-            "tag": "meta",
+            "selector": "link:nth-of-type(3)",
+            "tag": "link",
             "id": null,
             "classes": [],
             "layout": {
@@ -478,7 +469,7 @@
           },
           {
             "nodeType": "element",
-            "selector": "meta:nth-of-type(2)",
+            "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
             "classes": [],
@@ -555,8 +546,8 @@
           },
           {
             "nodeType": "element",
-            "selector": "link:nth-of-type(3)",
-            "tag": "link",
+            "selector": "meta:nth-of-type(2)",
+            "tag": "meta",
             "id": null,
             "classes": [],
             "layout": {
@@ -692,13 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/at-charset-003.json
-                "text": "\n            div\n            {\n                color: red;\n            }\n        ",
-                "length": 81,
-========
                 "text": "\n            #test\n            {\n                display: run-in;\n            }\n        ",
                 "length": 88,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/display-004.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -853,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if the \"Filler Text\" below is green.",
-                "length": 48,
+                "text": "Test passes if the \"Filler Text\" below is all on the same line.",
+                "length": 63,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 293.59,
+                      "width": 382.47,
                       "height": 18,
-                      "right": 301.59,
+                      "right": 390.47,
                       "bottom": 34,
-                      "text": "Test passes if the \"Filler Text\" below is green.",
+                      "text": "Test passes if the \"Filler Text\" below is all on the same line.",
                       "startIndex": 0,
-                      "endIndex": 48
+                      "endIndex": 63
                     }
                   ],
                   "hasLayout": true,
@@ -883,19 +869,10 @@
           },
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/at-charset-003.json
-            "selector": "div.平和:nth-of-type(1)",
-            "tag": "div",
-            "id": null,
-            "classes": [
-              "平和"
-            ],
-========
             "selector": "#test",
             "tag": "div",
             "id": "test",
             "classes": [],
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/display-004.json
             "layout": {
               "x": 8,
               "y": 50,
@@ -982,9 +959,9 @@
           },
           {
             "nodeType": "element",
-            "selector": "#div2",
+            "selector": "div:nth-of-type(2)",
             "tag": "div",
-            "id": "div2",
+            "id": null,
             "classes": [],
             "layout": {
               "x": 8,

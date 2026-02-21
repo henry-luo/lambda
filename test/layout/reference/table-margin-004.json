@@ -1,4 +1,11 @@
 {
+  "test_file": "table-margin-004.htm",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
   "layout_tree": {
     "nodeType": "element",
     "selector": "html",
@@ -116,7 +123,7 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "depth": 0,
+        "depth": 1,
         "elementIndex": 0,
         "children": [
           {
@@ -176,32 +183,42 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
+            "depth": 2,
             "elementIndex": 0,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n                        @font-face {\n                            font-family: 'Ahem';\n                            src: url('file:///Users/jane/Projects/Lambda/test/layout/data/css2.1/html4/support/ah",
+                "text": "\n                            @font-face {\n                                font-family: 'Ahem';\n                                src: url('file:///Users/jane/Projects/Lambda/test/layout/data/css2.1/html4/support/ahem3.ttf') format('truetype');\n                                font-weight: normal;\n                                font-style: normal;\n                            }\n                        ",
+                "length": 401,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
             "nodeType": "text",
             "text": "\n        ",
+            "length": 9,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 1,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -260,32 +277,42 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 2,
             "children": [
               {
                 "nodeType": "text",
                 "text": "CSS Test: CSS Tables: Margin Collapsing",
+                "length": 39,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
             "nodeType": "text",
             "text": "\n        ",
+            "length": 9,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 3,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -344,20 +371,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 4,
             "children": []
           },
           {
             "nodeType": "text",
             "text": "\n        ",
+            "length": 9,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 5,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -416,20 +448,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 6,
             "children": []
           },
           {
             "nodeType": "text",
             "text": "\n        ",
+            "length": 9,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 7,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -488,20 +525,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 8,
             "children": []
           },
           {
             "nodeType": "text",
             "text": "\n        ",
+            "length": 9,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 9,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -560,45 +602,44 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 10,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div#wrapper\n            {\n                border: blue solid medium;\n                height: 188px;\n                /*\n                20px (margin-top) + 1px + 20px (content) + 1px + max",
+                "text": "\n            div#wrapper\n            {\n                border: blue solid medium;\n                height: 188px;\n                /*\n                20px (margin-top) + 1px + 20px (content) + 1px + max(20px, 20px) 1st div table\n                + 1px + 20px (content) + 1px + max(20px, 20px)  2nd div table\n                + 1px + 20px (content) + 1px + max(20px, 20px)  1st p table\n                + 1px + 20px (content) + 1px + 20px 2nd p table\n                --------------------------------------------------------\n                188px\n                */\n            }\n            \n            .table\n            {\n                border: 1px solid silver;\n                border-spacing: 0;\n                display: table;\n                font: 20px/20px Ahem;\n                height: 1em;\n                margin: 1em;\n            }\n            \n            div.table-row\n            {\n                display: table-row;\n            }\n            \n            div.cell\n            {\n                display: table-cell;\n            }\n        ",
+                "length": 1048,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
             "nodeType": "text",
             "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 11,
+            "children": []
           }
         ]
-      },
-      {
-        "nodeType": "text",
-        "text": "\n    ",
-        "layout": {
-          "rects": [],
-          "hasLayout": false,
-          "parentVisible": true,
-          "parentDisplay": "block",
-          "parentVisibility": "visible"
-        }
       },
       {
         "nodeType": "element",
@@ -657,20 +698,9 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "depth": 0,
-        "elementIndex": 0,
+        "depth": 1,
+        "elementIndex": 2,
         "children": [
-          {
-            "nodeType": "text",
-            "text": "\n        ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
           {
             "nodeType": "element",
             "selector": "p:nth-of-type(1)",
@@ -728,20 +758,22 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
                 "nodeType": "text",
                 "text": "There should be four black bars below that do not overflow the blue box.",
+                "length": 72,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 466.5625,
+                      "width": 466.56,
                       "height": 18,
-                      "right": 474.5625,
+                      "right": 474.56,
                       "bottom": 34,
                       "text": "There should be four black bars below that do not overflow the blue box.",
                       "startIndex": 0,
@@ -752,20 +784,12 @@
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n        ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
           },
           {
             "nodeType": "element",
@@ -824,23 +848,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
-                "nodeType": "text",
-                "text": "\n            ",
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                }
-              },
-              {
                 "nodeType": "element",
-                "selector": "div:nth-of-type(1)",
+                "selector": "div.table:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
                 "classes": [
@@ -883,7 +896,7 @@
                   "order": 0,
                   "gap": "normal",
                   "fontSize": 20,
-                  "lineHeight": 20,
+                  "lineHeight": "20px",
                   "fontFamily": "Ahem",
                   "fontWeight": "400",
                   "textAlign": "start",
@@ -897,23 +910,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "depth": 0,
-                "elementIndex": 0,
+                "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
-                    "nodeType": "text",
-                    "text": "\n                ",
-                    "layout": {
-                      "rects": [],
-                      "hasLayout": false,
-                      "parentVisible": true,
-                      "parentDisplay": "table",
-                      "parentVisibility": "visible"
-                    }
-                  },
-                  {
                     "nodeType": "element",
-                    "selector": "div",
+                    "selector": "div.table-row",
                     "tag": "div",
                     "id": null,
                     "classes": [
@@ -956,7 +958,7 @@
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 20,
-                      "lineHeight": 20,
+                      "lineHeight": "20px",
                       "fontFamily": "Ahem",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -970,23 +972,12 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 0,
-                    "elementIndex": 0,
+                    "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
-                        "nodeType": "text",
-                        "text": "\n                    ",
-                        "layout": {
-                          "rects": [],
-                          "hasLayout": false,
-                          "parentVisible": true,
-                          "parentDisplay": "table-row",
-                          "parentVisibility": "visible"
-                        }
-                      },
-                      {
                         "nodeType": "element",
-                        "selector": "div",
+                        "selector": "div.cell",
                         "tag": "div",
                         "id": null,
                         "classes": [
@@ -1029,7 +1020,7 @@
                           "order": 0,
                           "gap": "normal",
                           "fontSize": 20,
-                          "lineHeight": 20,
+                          "lineHeight": "20px",
                           "fontFamily": "Ahem",
                           "fontWeight": "400",
                           "textAlign": "start",
@@ -1043,12 +1034,14 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "depth": 0,
-                        "elementIndex": 0,
+                        "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
                             "nodeType": "text",
                             "text": "Test",
+                            "length": 4,
+                            "isWhitespaceOnly": false,
                             "layout": {
                               "rects": [
                                 {
@@ -1067,50 +1060,20 @@
                               "parentVisible": true,
                               "parentDisplay": "table-cell",
                               "parentVisibility": "visible"
-                            }
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
                         ]
-                      },
-                      {
-                        "nodeType": "text",
-                        "text": "\n                ",
-                        "layout": {
-                          "rects": [],
-                          "hasLayout": false,
-                          "parentVisible": true,
-                          "parentDisplay": "table-row",
-                          "parentVisibility": "visible"
-                        }
                       }
                     ]
-                  },
-                  {
-                    "nodeType": "text",
-                    "text": "\n            ",
-                    "layout": {
-                      "rects": [],
-                      "hasLayout": false,
-                      "parentVisible": true,
-                      "parentDisplay": "table",
-                      "parentVisibility": "visible"
-                    }
                   }
                 ]
               },
               {
-                "nodeType": "text",
-                "text": "\n            ",
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                }
-              },
-              {
                 "nodeType": "element",
-                "selector": "div:nth-of-type(2)",
+                "selector": "div.table:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
                 "classes": [
@@ -1153,7 +1116,7 @@
                   "order": 0,
                   "gap": "normal",
                   "fontSize": 20,
-                  "lineHeight": 20,
+                  "lineHeight": "20px",
                   "fontFamily": "Ahem",
                   "fontWeight": "400",
                   "textAlign": "start",
@@ -1167,23 +1130,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "depth": 0,
-                "elementIndex": 0,
+                "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
-                    "nodeType": "text",
-                    "text": "\n                ",
-                    "layout": {
-                      "rects": [],
-                      "hasLayout": false,
-                      "parentVisible": true,
-                      "parentDisplay": "table",
-                      "parentVisibility": "visible"
-                    }
-                  },
-                  {
                     "nodeType": "element",
-                    "selector": "div",
+                    "selector": "div.table-row",
                     "tag": "div",
                     "id": null,
                     "classes": [
@@ -1226,7 +1178,7 @@
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 20,
-                      "lineHeight": 20,
+                      "lineHeight": "20px",
                       "fontFamily": "Ahem",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -1240,23 +1192,12 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "depth": 0,
-                    "elementIndex": 0,
+                    "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
-                        "nodeType": "text",
-                        "text": "\n                    ",
-                        "layout": {
-                          "rects": [],
-                          "hasLayout": false,
-                          "parentVisible": true,
-                          "parentDisplay": "table-row",
-                          "parentVisibility": "visible"
-                        }
-                      },
-                      {
                         "nodeType": "element",
-                        "selector": "div",
+                        "selector": "div.cell",
                         "tag": "div",
                         "id": null,
                         "classes": [
@@ -1299,7 +1240,7 @@
                           "order": 0,
                           "gap": "normal",
                           "fontSize": 20,
-                          "lineHeight": 20,
+                          "lineHeight": "20px",
                           "fontFamily": "Ahem",
                           "fontWeight": "400",
                           "textAlign": "start",
@@ -1313,12 +1254,14 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "depth": 0,
-                        "elementIndex": 0,
+                        "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
                             "nodeType": "text",
                             "text": "Test",
+                            "length": 4,
+                            "isWhitespaceOnly": false,
                             "layout": {
                               "rects": [
                                 {
@@ -1337,50 +1280,20 @@
                               "parentVisible": true,
                               "parentDisplay": "table-cell",
                               "parentVisibility": "visible"
-                            }
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
                         ]
-                      },
-                      {
-                        "nodeType": "text",
-                        "text": "\n                ",
-                        "layout": {
-                          "rects": [],
-                          "hasLayout": false,
-                          "parentVisible": true,
-                          "parentDisplay": "table-row",
-                          "parentVisibility": "visible"
-                        }
                       }
                     ]
-                  },
-                  {
-                    "nodeType": "text",
-                    "text": "\n            ",
-                    "layout": {
-                      "rects": [],
-                      "hasLayout": false,
-                      "parentVisible": true,
-                      "parentDisplay": "table",
-                      "parentVisibility": "visible"
-                    }
                   }
                 ]
               },
               {
-                "nodeType": "text",
-                "text": "\n            ",
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                }
-              },
-              {
                 "nodeType": "element",
-                "selector": "p:nth-of-type(1)",
+                "selector": "p.table:nth-of-type(1)",
                 "tag": "p",
                 "id": null,
                 "classes": [
@@ -1423,7 +1336,7 @@
                   "order": 0,
                   "gap": "normal",
                   "fontSize": 20,
-                  "lineHeight": 20,
+                  "lineHeight": "20px",
                   "fontFamily": "Ahem",
                   "fontWeight": "400",
                   "textAlign": "start",
@@ -1437,12 +1350,14 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "depth": 0,
-                "elementIndex": 0,
+                "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
                     "nodeType": "text",
                     "text": "Test",
+                    "length": 4,
+                    "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
                         {
@@ -1461,24 +1376,16 @@
                       "parentVisible": true,
                       "parentDisplay": "table",
                       "parentVisibility": "visible"
-                    }
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
                 ]
               },
               {
-                "nodeType": "text",
-                "text": "\n            ",
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                }
-              },
-              {
                 "nodeType": "element",
-                "selector": "p:nth-of-type(2)",
+                "selector": "p.table:nth-of-type(2)",
                 "tag": "p",
                 "id": null,
                 "classes": [
@@ -1521,7 +1428,7 @@
                   "order": 0,
                   "gap": "normal",
                   "fontSize": 20,
-                  "lineHeight": 20,
+                  "lineHeight": "20px",
                   "fontFamily": "Ahem",
                   "fontWeight": "400",
                   "textAlign": "start",
@@ -1535,12 +1442,14 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "depth": 0,
-                "elementIndex": 0,
+                "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
                     "nodeType": "text",
                     "text": "Test",
+                    "length": 4,
+                    "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
                         {
@@ -1559,33 +1468,14 @@
                       "parentVisible": true,
                       "parentDisplay": "table",
                       "parentVisibility": "visible"
-                    }
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
                 ]
-              },
-              {
-                "nodeType": "text",
-                "text": "\n        ",
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                }
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n        ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
           },
           {
             "nodeType": "element",
@@ -1644,62 +1534,70 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
                 "nodeType": "text",
-                "text": "This test has passed if the black bars are evenly distributed in the blue box. The gap between the blue border at the top and the first black bar should be equal to the gap between the 4th bar and the",
+                "text": "This test has passed if the black bars are evenly distributed in the blue box. The gap between the blue border at the top and the first black bar should be equal to the gap between the 4th ",
+                "length": 189,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 260,
-                      "width": 1176.265625,
+                      "width": 1176.27,
                       "height": 18,
-                      "right": 1184.265625,
+                      "right": 1184.27,
                       "bottom": 278,
-                      "text": "This test has passed if the black bars are evenly distributed in the blue box. The gap between the blue border at the top and the first black bar should be equal to the gap between the 4th bar and the",
+                      "text": "This test has passed if the black bars are evenly distributed in the blue box. The gap between the blue border at the top and the first black bar should be equal to the gap between the 4th ",
                       "startIndex": 0,
-                      "endIndex": 227
-                    },
-                    {
-                      "x": 8,
-                      "y": 278,
-                      "width": 240.8125,
-                      "height": 18,
-                      "right": 248.8125,
-                      "bottom": 296,
-                      "text": "This test has passed if the black bars are evenly distributed in the blue box. The gap between the blue border at the top and the first black bar should be equal to the gap between the 4th bar and the",
-                      "startIndex": 0,
-                      "endIndex": 227
+                      "endIndex": 189
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "bar and the blue border at the bottom.",
+                "length": 38,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 278,
+                      "width": 240.81,
+                      "height": 18,
+                      "right": 248.81,
+                      "bottom": 296,
+                      "text": "bar and the blue border at the bottom.",
+                      "startIndex": 0,
+                      "endIndex": 38
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n    \n",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
           }
         ]
       }
-    ]
-  },
-  "test_file": "table-margin-004.htm",
-  "browser_info": {
+    ],
     "viewport": {
       "width": 1200,
       "height": 800

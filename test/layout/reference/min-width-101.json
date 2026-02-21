@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/border-top-width-090.json
-  "test_file": "border-top-width-090.htm",
-========
   "test_file": "min-width-101.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/min-width-101.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -208,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-top-width-090.json
-                "text": "CSS Test: Border-top-width set to zero with no units, 0",
-                "length": 55,
-========
                 "text": "CSS Test: Min-width with a zero value and no units, 0",
                 "length": 53,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/min-width-101.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -692,13 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-top-width-090.json
-                "text": "\n            div\n            {\n                border-top-style: solid;\n                border-top-width: 0;\n                border-top-color: red;\n                height: 1in;\n            }\n        ",
-                "length": 199,
-========
                 "text": "\n            div\n            {\n                background: red;\n                height: 1in;\n                min-width: 0;\n                width: 0;\n            }\n        ",
                 "length": 171,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/min-width-101.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -890,11 +876,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 1184,
+              "width": 0,
               "height": 96,
-              "contentWidth": 1184,
+              "contentWidth": 0,
               "contentHeight": 96,
-              "scrollWidth": 1184,
+              "scrollWidth": 0,
               "scrollHeight": 96
             },
             "computed": {

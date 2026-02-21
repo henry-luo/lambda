@@ -860,11 +860,11 @@
                   "x": 11,
                   "y": 53,
                   "width": 96,
-                  "height": 16,
+                  "height": 96,
                   "contentWidth": 96,
-                  "contentHeight": 16,
+                  "contentHeight": 96,
                   "scrollWidth": 96,
-                  "scrollHeight": 16
+                  "scrollHeight": 96
                 },
                 "computed": {
                   "display": "block",

@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 72,
+      "height": 71,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -654,7 +654,7 @@
           "contentWidth": 1184,
           "contentHeight": 18,
           "scrollWidth": 1184,
-          "scrollHeight": 56
+          "scrollHeight": 55
         },
         "computed": {
           "display": "block",
@@ -800,11 +800,11 @@
               "x": 8,
               "y": 50,
               "width": 96,
-              "height": 22,
+              "height": 21,
               "contentWidth": 96,
-              "contentHeight": 16,
+              "contentHeight": 15,
               "scrollWidth": 96,
-              "scrollHeight": 16
+              "scrollHeight": 15
             },
             "computed": {
               "display": "block",
@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 8,
                   "y": 53,
-                  "width": 87.55,
-                  "height": 16,
-                  "contentWidth": 88,
-                  "contentHeight": 16,
-                  "scrollWidth": 88,
-                  "scrollHeight": 16
+                  "width": 15,
+                  "height": 15,
+                  "contentWidth": 15,
+                  "contentHeight": 15,
+                  "scrollWidth": 15,
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "block",

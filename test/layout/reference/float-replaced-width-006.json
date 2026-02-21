@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 11,
                   "y": 53,
-                  "width": 87.55,
-                  "height": 18,
-                  "contentWidth": 88,
-                  "contentHeight": 18,
-                  "scrollWidth": 88,
-                  "scrollHeight": 18
+                  "width": 15,
+                  "height": 15,
+                  "contentWidth": 15,
+                  "contentHeight": 15,
+                  "scrollWidth": 15,
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "block",

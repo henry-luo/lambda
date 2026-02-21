@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/font-size-101.json
-  "test_file": "font-size-101.htm",
-========
   "test_file": "min-height-024.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/min-height-024.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -208,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/font-size-101.json
-                "text": "CSS Test: Font-size with a zero value and no units, 0",
-                "length": 53,
-========
                 "text": "CSS Test: Min-height using picas with a minimum value, 0pc",
                 "length": 58,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/min-height-024.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -692,11 +683,7 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/font-size-101.json
-                "text": "\n            div\n            {\n                color: red;\n                font-family: ahem;\n                font-size: 0;\n            }\n        ",
-========
                 "text": "\n            div\n            {\n                background: red;\n                height: 0;\n                min-height: 0pc;\n            }\n        ",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/min-height-024.json
                 "length": 146,
                 "isWhitespaceOnly": false,
                 "layout": {
@@ -744,7 +731,7 @@
           "contentWidth": 1184,
           "contentHeight": 34,
           "scrollWidth": 1184,
-          "scrollHeight": 34
+          "scrollHeight": 52
         },
         "computed": {
           "display": "block",
@@ -894,7 +881,7 @@
               "contentWidth": 1184,
               "contentHeight": 0,
               "scrollWidth": 1184,
-              "scrollHeight": 0
+              "scrollHeight": 18
             },
             "computed": {
               "display": "block",
@@ -924,7 +911,7 @@
               "gap": "normal",
               "fontSize": 16,
               "lineHeight": "normal",
-              "fontFamily": "ahem",
+              "fontFamily": "Times",
               "fontWeight": "400",
               "textAlign": "start",
               "verticalAlign": "baseline",
@@ -950,10 +937,10 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 0,
-                      "height": 0,
-                      "right": 8,
-                      "bottom": 50,
+                      "width": 66.59,
+                      "height": 18,
+                      "right": 74.59,
+                      "bottom": 68,
                       "text": "Filler Text",
                       "startIndex": 0,
                       "endIndex": 11

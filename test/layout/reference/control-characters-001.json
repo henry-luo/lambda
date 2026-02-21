@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/white-space-control-characters-001.json
-  "test_file": "white-space-control-characters-001.htm",
-========
   "test_file": "control-characters-001.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/control-characters-001.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -332,28 +328,14 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/white-space-control-characters-001.json
-                "text": "The XHTML file contributors/microsoft/submitted/Chapter_16/white-space-control-characters-001.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
-                "length": 185,
-========
                 "text": "The XHTML file contributors/microsoft/submitted/Chapter_16/control-characters-001.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
                 "length": 173,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/control-characters-001.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-<<<<<<<< HEAD:test/layout/reference/white-space-control-characters-001.json
-                      "width": 1165.72,
-                      "height": 18,
-                      "right": 1173.72,
-                      "bottom": 34,
-                      "text": "The XHTML file contributors/microsoft/submitted/Chapter_16/white-space-control-characters-001.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
-                      "startIndex": 0,
-                      "endIndex": 185
-========
                       "width": 1083.98,
                       "height": 18,
                       "right": 1091.98,
@@ -361,7 +343,6 @@
                       "text": "The XHTML file contributors/microsoft/submitted/Chapter_16/control-characters-001.xht contains a syntax error and could not be parsed.\n      Please correct it and try again.",
                       "startIndex": 0,
                       "endIndex": 173
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/control-characters-001.json
                     }
                   ],
                   "hasLayout": true,
@@ -527,28 +508,14 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/white-space-control-characters-001.json
-                "text": "xmlParseCharRef: invalid xmlChar value 22, line 25, column 24",
-                "length": 61,
-========
                 "text": "xmlParseCharRef: invalid xmlChar value 0, line 21, column 20",
                 "length": 60,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/control-characters-001.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 84,
-<<<<<<<< HEAD:test/layout/reference/white-space-control-characters-001.json
-                      "width": 477.44,
-                      "height": 15,
-                      "right": 485.44,
-                      "bottom": 99,
-                      "text": "xmlParseCharRef: invalid xmlChar value 22, line 25, column 24",
-                      "startIndex": 0,
-                      "endIndex": 61
-========
                       "width": 469.61,
                       "height": 15,
                       "right": 477.61,
@@ -556,7 +523,6 @@
                       "text": "xmlParseCharRef: invalid xmlChar value 0, line 21, column 20",
                       "startIndex": 0,
                       "endIndex": 60
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/control-characters-001.json
                     }
                   ],
                   "hasLayout": true,

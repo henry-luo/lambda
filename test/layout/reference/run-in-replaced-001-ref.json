@@ -543,7 +543,7 @@
                   "contentWidth": 100,
                   "contentHeight": 100,
                   "scrollWidth": 100,
-                  "scrollHeight": 104
+                  "scrollHeight": 100
                 },
                 "computed": {
                   "display": "inline",

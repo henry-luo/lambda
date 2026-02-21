@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 170,
+      "height": 171,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -727,11 +727,11 @@
           "x": 50,
           "y": 50,
           "width": 1100,
-          "height": 70,
+          "height": 71,
           "contentWidth": 1100,
-          "contentHeight": 70,
+          "contentHeight": 71,
           "scrollWidth": 1100,
-          "scrollHeight": 70
+          "scrollHeight": 71
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 50,
               "y": 84,
               "width": 1100,
-              "height": 36,
+              "height": 37,
               "contentWidth": 1100,
-              "contentHeight": 36,
+              "contentHeight": 37,
               "scrollWidth": 1100,
-              "scrollHeight": 36
+              "scrollHeight": 37
             },
             "computed": {
               "display": "list-item",
@@ -936,11 +936,11 @@
                   "rects": [
                     {
                       "x": 50,
-                      "y": 84,
+                      "y": 85,
                       "width": 172.88,
                       "height": 18,
                       "right": 222.88,
-                      "bottom": 102,
+                      "bottom": 103,
                       "text": "\n            This is the first line of text.",
                       "startIndex": 0,
                       "endIndex": 44
@@ -963,7 +963,7 @@
                 "classes": [],
                 "layout": {
                   "x": 222.88,
-                  "y": 84,
+                  "y": 85,
                   "width": 0,
                   "height": 18,
                   "contentWidth": 0,
@@ -1025,11 +1025,11 @@
                   "rects": [
                     {
                       "x": 50,
-                      "y": 102,
+                      "y": 103,
                       "width": 192.41,
                       "height": 18,
                       "right": 242.41,
-                      "bottom": 120,
+                      "bottom": 121,
                       "text": "\n            This is the second line of text.\n        ",
                       "startIndex": 0,
                       "endIndex": 54

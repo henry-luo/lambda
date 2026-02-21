@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 171,
+      "height": 141,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -573,11 +573,11 @@
           "x": 8,
           "y": 13,
           "width": 1184,
-          "height": 150,
+          "height": 120,
           "contentWidth": 1184,
-          "contentHeight": 150,
+          "contentHeight": 120,
           "scrollWidth": 1184,
-          "scrollHeight": 150
+          "scrollHeight": 120
         },
         "computed": {
           "display": "block",
@@ -723,11 +723,11 @@
               "x": 8,
               "y": 41,
               "width": 1184,
-              "height": 122,
+              "height": 92,
               "contentWidth": 1184,
-              "contentHeight": 122,
+              "contentHeight": 92,
               "scrollWidth": 1184,
-              "scrollHeight": 122
+              "scrollHeight": 92
             },
             "computed": {
               "display": "block",
@@ -783,11 +783,11 @@
                   "x": 8,
                   "y": 41,
                   "width": 1184,
-                  "height": 122,
+                  "height": 92,
                   "contentWidth": 1184,
-                  "contentHeight": 122,
+                  "contentHeight": 92,
                   "scrollWidth": 1184,
-                  "scrollHeight": 122
+                  "scrollHeight": 92
                 },
                 "computed": {
                   "display": "block",
@@ -842,11 +842,11 @@
                     "layout": {
                       "x": 9,
                       "y": 42,
-                      "width": 594.84,
+                      "width": 657.47,
                       "height": 30,
-                      "contentWidth": 595,
+                      "contentWidth": 657,
                       "contentHeight": 30,
-                      "scrollWidth": 595,
+                      "scrollWidth": 657,
                       "scrollHeight": 30
                     },
                     "computed": {
@@ -902,11 +902,11 @@
                         "layout": {
                           "x": 9,
                           "y": 42,
-                          "width": 594.84,
+                          "width": 657.47,
                           "height": 30,
-                          "contentWidth": 595,
+                          "contentWidth": 657,
                           "contentHeight": 30,
-                          "scrollWidth": 595,
+                          "scrollWidth": 657,
                           "scrollHeight": 30
                         },
                         "computed": {
@@ -962,11 +962,11 @@
                             "layout": {
                               "x": 9,
                               "y": 42,
-                              "width": 203.5,
+                              "width": 219.16,
                               "height": 30,
-                              "contentWidth": 204,
+                              "contentWidth": 219,
                               "contentHeight": 30,
-                              "scrollWidth": 204,
+                              "scrollWidth": 219,
                               "scrollHeight": 30
                             },
                             "computed": {
@@ -1050,13 +1050,13 @@
                             "id": null,
                             "classes": [],
                             "layout": {
-                              "x": 212.5,
+                              "x": 228.16,
                               "y": 42,
-                              "width": 203.5,
+                              "width": 219.16,
                               "height": 30,
-                              "contentWidth": 204,
+                              "contentWidth": 219,
                               "contentHeight": 30,
-                              "scrollWidth": 204,
+                              "scrollWidth": 219,
                               "scrollHeight": 30
                             },
                             "computed": {
@@ -1111,11 +1111,11 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 212.5,
+                                      "x": 228.16,
                                       "y": 42,
                                       "width": 187.84,
                                       "height": 30,
-                                      "right": 400.34,
+                                      "right": 416,
                                       "bottom": 72,
                                       "text": "Row 1, Col 2",
                                       "startIndex": 0,
@@ -1140,13 +1140,13 @@
                             "id": null,
                             "classes": [],
                             "layout": {
-                              "x": 416,
+                              "x": 447.31,
                               "y": 42,
-                              "width": 187.84,
+                              "width": 219.16,
                               "height": 30,
-                              "contentWidth": 188,
+                              "contentWidth": 219,
                               "contentHeight": 30,
-                              "scrollWidth": 188,
+                              "scrollWidth": 219,
                               "scrollHeight": 30
                             },
                             "computed": {
@@ -1201,11 +1201,11 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 416,
+                                      "x": 447.31,
                                       "y": 42,
                                       "width": 187.84,
                                       "height": 30,
-                                      "right": 603.84,
+                                      "right": 635.16,
                                       "bottom": 72,
                                       "text": "Row 1, Col 3",
                                       "startIndex": 0,
@@ -1236,11 +1236,11 @@
                     "layout": {
                       "x": 9,
                       "y": 72,
-                      "width": 203.5,
+                      "width": 219.16,
                       "height": 30,
-                      "contentWidth": 204,
+                      "contentWidth": 219,
                       "contentHeight": 30,
-                      "scrollWidth": 204,
+                      "scrollWidth": 219,
                       "scrollHeight": 30
                     },
                     "computed": {
@@ -1324,13 +1324,13 @@
                     "id": null,
                     "classes": [],
                     "layout": {
-                      "x": 212.5,
+                      "x": 228.16,
                       "y": 72,
-                      "width": 203.5,
+                      "width": 219.16,
                       "height": 30,
-                      "contentWidth": 204,
+                      "contentWidth": 219,
                       "contentHeight": 30,
-                      "scrollWidth": 204,
+                      "scrollWidth": 219,
                       "scrollHeight": 30
                     },
                     "computed": {
@@ -1385,11 +1385,11 @@
                         "layout": {
                           "rects": [
                             {
-                              "x": 212.5,
+                              "x": 228.16,
                               "y": 72,
                               "width": 203.5,
                               "height": 30,
-                              "right": 416,
+                              "right": 431.66,
                               "bottom": 102,
                               "text": "Row 22, Col 2",
                               "startIndex": 0,
@@ -1414,8 +1414,8 @@
                     "id": null,
                     "classes": [],
                     "layout": {
-                      "x": 9,
-                      "y": 102,
+                      "x": 447.31,
+                      "y": 72,
                       "width": 219.16,
                       "height": 30,
                       "contentWidth": 219,
@@ -1475,12 +1475,12 @@
                         "layout": {
                           "rects": [
                             {
-                              "x": 9,
-                              "y": 102,
+                              "x": 447.31,
+                              "y": 72,
                               "width": 203.5,
                               "height": 30,
-                              "right": 212.5,
-                              "bottom": 132,
+                              "right": 650.81,
+                              "bottom": 102,
                               "text": "Row 22, Col 3",
                               "startIndex": 0,
                               "endIndex": 13
@@ -1505,7 +1505,7 @@
                     "classes": [],
                     "layout": {
                       "x": 9,
-                      "y": 132,
+                      "y": 102,
                       "width": 657.47,
                       "height": 30,
                       "contentWidth": 657,
@@ -1565,7 +1565,7 @@
                         "classes": [],
                         "layout": {
                           "x": 9,
-                          "y": 132,
+                          "y": 102,
                           "width": 657.47,
                           "height": 30,
                           "contentWidth": 657,
@@ -1625,7 +1625,7 @@
                             "classes": [],
                             "layout": {
                               "x": 9,
-                              "y": 132,
+                              "y": 102,
                               "width": 219.16,
                               "height": 30,
                               "contentWidth": 219,
@@ -1686,11 +1686,11 @@
                                   "rects": [
                                     {
                                       "x": 9,
-                                      "y": 132,
+                                      "y": 102,
                                       "width": 219.16,
                                       "height": 30,
                                       "right": 228.16,
-                                      "bottom": 162,
+                                      "bottom": 132,
                                       "text": "Row 333, Col 1",
                                       "startIndex": 0,
                                       "endIndex": 14
@@ -1715,7 +1715,7 @@
                             "classes": [],
                             "layout": {
                               "x": 228.16,
-                              "y": 132,
+                              "y": 102,
                               "width": 219.16,
                               "height": 30,
                               "contentWidth": 219,
@@ -1776,11 +1776,11 @@
                                   "rects": [
                                     {
                                       "x": 228.16,
-                                      "y": 132,
+                                      "y": 102,
                                       "width": 219.16,
                                       "height": 30,
                                       "right": 447.31,
-                                      "bottom": 162,
+                                      "bottom": 132,
                                       "text": "Row 333, Col 2",
                                       "startIndex": 0,
                                       "endIndex": 14
@@ -1805,7 +1805,7 @@
                             "classes": [],
                             "layout": {
                               "x": 447.31,
-                              "y": 132,
+                              "y": 102,
                               "width": 219.16,
                               "height": 30,
                               "contentWidth": 219,
@@ -1866,11 +1866,11 @@
                                   "rects": [
                                     {
                                       "x": 447.31,
-                                      "y": 132,
+                                      "y": 102,
                                       "width": 219.16,
                                       "height": 30,
                                       "right": 666.47,
-                                      "bottom": 162,
+                                      "bottom": 132,
                                       "text": "Row 333, Col 3",
                                       "startIndex": 0,
                                       "endIndex": 14
@@ -1943,7 +1943,7 @@
                   "verticalAlign": "baseline",
                   "top": "0px",
                   "right": "524.531px",
-                  "bottom": "30px",
+                  "bottom": "0px",
                   "left": "0px",
                   "zIndex": "2",
                   "overflow": "visible",
