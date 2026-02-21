@@ -528,9 +528,35 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     fl_elem->bound = nullptr;
     fl_elem->in_line = nullptr;
 
-    // Set display to inline
-    fl_elem->display.outer = CSS_VALUE_INLINE;
-    fl_elem->display.inner = CSS_VALUE_FLOW;
+    // Set display — default to inline, but check for float (CSS 2.1 §5.12.2)
+    // If ::first-letter has float:left/right specified, it should become a floated
+    // block-level box (CSS 2.1 §9.7 blockification)
+    CssEnum fl_float_value = CSS_VALUE_NONE;
+    if (elem->first_letter_styles && elem->first_letter_styles->tree) {
+        AvlNode* fl_float_node = avl_tree_search(elem->first_letter_styles->tree, CSS_PROPERTY_FLOAT);
+        if (fl_float_node) {
+            StyleNode* fl_sn = (StyleNode*)fl_float_node->declaration;
+            if (fl_sn && fl_sn->winning_decl && fl_sn->winning_decl->value &&
+                fl_sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                fl_float_value = fl_sn->winning_decl->value->data.keyword;
+            }
+        }
+    }
+
+    if (fl_float_value == CSS_VALUE_LEFT || fl_float_value == CSS_VALUE_RIGHT) {
+        // CSS 2.1 §9.7: floated elements are blockified
+        fl_elem->display.outer = CSS_VALUE_BLOCK;
+        fl_elem->display.inner = CSS_VALUE_FLOW;
+
+        // Allocate PositionProp so element_has_float() returns true
+        fl_elem->position = alloc_position_prop(lycon);
+        fl_elem->position->float_prop = fl_float_value;
+        log_debug("[FIRST-LETTER] Float %s applied to ::first-letter",
+                  fl_float_value == CSS_VALUE_LEFT ? "left" : "right");
+    } else {
+        fl_elem->display.outer = CSS_VALUE_INLINE;
+        fl_elem->display.inner = CSS_VALUE_FLOW;
+    }
 
     // Assign the first-letter styles for CSS resolution
     fl_elem->specified_style = elem->first_letter_styles;

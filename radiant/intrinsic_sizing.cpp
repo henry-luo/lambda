@@ -9,7 +9,7 @@
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "../lib/font/font.h"
-
+#include "../lib/strbuf.h"
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <cmath>
@@ -589,6 +589,82 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                       aspect_width, height, aspect_ratio);
             return sizes;
         }
+    }
+
+    // CSS 2.1 §10.3.2/§10.6.2: Replaced element intrinsic sizing
+    // For replaced elements (img, video, iframe, etc.), use intrinsic dimensions
+    // when no explicit CSS width is set
+    ViewBlock* view_block_replaced = (ViewBlock*)element;
+    if (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) {
+        uintptr_t elem_tag = element->tag();
+
+        if (elem_tag == HTM_TAG_IMG) {
+            // Try to get image dimensions - first check if already loaded
+            if (view_block_replaced->embed && view_block_replaced->embed->img) {
+                ImageSurface* img = view_block_replaced->embed->img;
+                sizes.min_content = img->width;
+                sizes.max_content = img->width;
+                log_debug("  -> replaced IMG intrinsic width: %d (from loaded image)", img->width);
+                return sizes;
+            }
+            // Try to load the image to get intrinsic dimensions
+            const char* src_value = element->get_attribute("src");
+            if (src_value && lycon->ui_context) {
+                if (!view_block_replaced->embed) {
+                    view_block_replaced->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                }
+                size_t src_len = strlen(src_value);
+                StrBuf* src_buf = strbuf_new_cap(src_len);
+                strbuf_append_str_n(src_buf, src_value, src_len);
+                view_block_replaced->embed->img = load_image(lycon->ui_context, src_buf->str);
+                strbuf_free(src_buf);
+                if (view_block_replaced->embed->img) {
+                    ImageSurface* img = view_block_replaced->embed->img;
+                    sizes.min_content = img->width;
+                    sizes.max_content = img->width;
+                    log_debug("  -> replaced IMG intrinsic width: %d (newly loaded)", img->width);
+                    return sizes;
+                }
+            }
+            // Fallback for unloadable images — use HTML width/height attributes if present
+            const char* attr_w = element->get_attribute("width");
+            if (attr_w) {
+                int w = atoi(attr_w);
+                if (w > 0) {
+                    sizes.min_content = w;
+                    sizes.max_content = w;
+                    log_debug("  -> replaced IMG width from HTML attribute: %d", w);
+                    return sizes;
+                }
+            }
+            // Ultimate fallback — placeholder size
+            sizes.min_content = 40;
+            sizes.max_content = 40;
+            log_debug("  -> replaced IMG fallback width: 40");
+            return sizes;
+        }
+        else if (elem_tag == HTM_TAG_IFRAME) {
+            // Default iframe size per CSS spec: 300x150
+            sizes.min_content = 300;
+            sizes.max_content = 300;
+            log_debug("  -> replaced IFRAME intrinsic width: 300");
+            return sizes;
+        }
+        else if (elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
+            // Default video/canvas size: 300x150
+            sizes.min_content = 300;
+            sizes.max_content = 300;
+            log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
+            return sizes;
+        }
+        else if (elem_tag == HTM_TAG_HR) {
+            // HR stretches to available width, min is 0
+            sizes.min_content = 0;
+            sizes.max_content = 0;
+            return sizes;
+        }
+        // Form controls (INPUT, SELECT, TEXTAREA, BUTTON) fall through to
+        // normal measurement — they already have intrinsic sizing via FormControlProp
     }
 
     // Track inline-level content separately
@@ -1242,6 +1318,53 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                           element->node_name(), explicit_height);
                 return explicit_height;
             }
+        }
+    }
+
+    // CSS 2.1 §10.6.2: Replaced element intrinsic height
+    if (view->display.inner == RDT_DISPLAY_REPLACED) {
+        uintptr_t elem_tag = element->tag();
+        if (elem_tag == HTM_TAG_IMG) {
+            if (view->embed && view->embed->img) {
+                ImageSurface* img = view->embed->img;
+                float img_height = (float)img->height;
+                // If width is constrained, scale height proportionally
+                if (width > 0 && width < img->width && img->width > 0) {
+                    img_height = width * img->height / img->width;
+                }
+                log_debug("calculate_max_content_height: IMG intrinsic height=%.1f", img_height);
+                return img_height;
+            }
+            // Try to load image
+            const char* src_value = element->get_attribute("src");
+            if (src_value && lycon->ui_context) {
+                if (!view->embed) {
+                    view->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                }
+                size_t src_len = strlen(src_value);
+                StrBuf* src_buf = strbuf_new_cap(src_len);
+                strbuf_append_str_n(src_buf, src_value, src_len);
+                view->embed->img = load_image(lycon->ui_context, src_buf->str);
+                strbuf_free(src_buf);
+                if (view->embed->img) {
+                    ImageSurface* img = view->embed->img;
+                    float img_height = (float)img->height;
+                    if (width > 0 && width < img->width && img->width > 0) {
+                        img_height = width * img->height / img->width;
+                    }
+                    log_debug("calculate_max_content_height: IMG intrinsic height=%.1f (loaded)", img_height);
+                    return img_height;
+                }
+            }
+            const char* attr_h = element->get_attribute("height");
+            if (attr_h) {
+                int h = atoi(attr_h);
+                if (h > 0) return (float)h;
+            }
+            return 30.0f;  // placeholder
+        }
+        else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
+            return 150.0f;  // CSS default 300x150
         }
     }
 
