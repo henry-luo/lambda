@@ -35,6 +35,8 @@ extern "C" {
 #define SYM_MEMBER_EXPR sym_member_expr
 #define SYM_INDEX_EXPR sym_index_expr
 #define SYM_CALL_EXPR sym_call_expr
+#define SYM_QUERY_EXPR sym_query_expr
+#define SYM_DIRECT_QUERY_EXPR sym_direct_query_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_UNARY_EXPR sym_unary_expr
 #define SYM_SPREAD_EXPR sym_spread_expr
@@ -170,6 +172,7 @@ extern "C" {
 #define FIELD_EXPR field_expr
 #define FIELD_ERROR field_error
 #define FIELD_PROPAGATE field_propagate
+#define FIELD_QUERY field_query
 #define FIELD_START field_start
 #define FIELD_END field_end
 
@@ -258,6 +261,7 @@ typedef enum AstNodeType {
     AST_NODE_PATH_INDEX_EXPR,   // path subscript expression - adds dynamic segment: path[expr]
     AST_NODE_PARENT_EXPR,        // parent access shorthand: expr.. for .parent
     AST_NODE_CALL_EXPR,
+    AST_NODE_QUERY_EXPR,     // query expression: expr?T or expr.?T
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
@@ -295,6 +299,13 @@ struct AstNode {
 typedef struct AstFieldNode : AstNode {
     AstNode *object, *field;
 } AstFieldNode;
+
+// Query expression: expr?T (recursive) or expr.?T (direct)
+typedef struct AstQueryNode : AstNode {
+    AstNode *object;     // the data to search
+    AstNode *query;      // the type pattern to match (primary_type)
+    bool direct;         // true for .? (self-inclusive query)
+} AstQueryNode;
 
 typedef struct AstCallNode : AstNode {
     AstNode *function;

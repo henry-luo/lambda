@@ -18,7 +18,7 @@ This document covers Lambda's error handling system — how errors are created, 
 4. [The `raise` Keyword](#the-raise-keyword)
 5. [Error Return Types (`T^E`)](#error-return-types-te)
 6. [Error Handling at Call Sites](#error-handling-at-call-sites)
-7. [Error Propagation (`?` Operator)](#error-propagation--operator)
+7. [Error Propagation (`^` Operator)](#error-propagation--operator)
 8. [Error Destructuring (`let a^err = expr`)](#error-destructuring-let-aerr--expr)
 9. [Compile-Time Enforcement](#compile-time-enforcement)
 10. [System Functions That Can Raise](#system-functions-that-can-raise)
@@ -170,37 +170,37 @@ When calling a function that returns `T^`, the caller **must** handle the error 
 
 | Pattern | Meaning | Allowed? |
 |---------|---------|----------|
-| `let a = F()?` | Propagate error, bind unwrapped value | ✅ |
+| `let a = F()^` | Propagate error, bind unwrapped value | ✅ |
 | `let a^err = F()` | Capture value and error explicitly | ✅ |
-| `F()?` | Propagate error, discard value | ✅ |
+| `F()^` | Propagate error, discard value | ✅ |
 | `let a = F()` | **Ignoring error** | ❌ Compile error |
 | `F()` | **Ignoring error and value** | ❌ Compile error |
 
 ---
 
-## Error Propagation (`?` Operator)
+## Error Propagation (`^` Operator)
 
-The `?` postfix operator on a call expression unwraps the success value or propagates the error to the caller:
+The `^` postfix operator on a call expression unwraps the success value or propagates the error to the caller:
 
 ```lambda
 fn compute(x: int) int^ {
-    let a = parse(input)?      // if error, return it immediately
-    let b = divide(a, x)?      // if error, return it immediately
+    let a = parse(input)^      // if error, return it immediately
+    let b = divide(a, x)^      // if error, return it immediately
     a + b                       // normal return
 }
 ```
 
 **Semantics:**
-- If the call returns an error, `?` immediately returns that error from the enclosing function.
+- If the call returns an error, `^` immediately returns that error from the enclosing function.
 - If the call succeeds, the expression evaluates to the unwrapped success value.
 
 **Rules:**
-- `?` is only valid on calls to functions that can raise errors.
-- Using `?` on a non-error-returning function is a compile error:
+- `^` is only valid on calls to functions that can raise errors.
+- Using `^` on a non-error-returning function is a compile error:
   ```lambda
-  let x = add(1, 2)?  // ❌ Compile error: 'add' does not return errors
+  let x = add(1, 2)^  // ❌ Compile error: 'add' does not return errors
   ```
-- The enclosing function must itself declare an error return type to use `?`.
+- The enclosing function must itself declare an error return type to use `^`.
 
 ---
 
@@ -250,9 +250,9 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
    }
    ```
 
-3. **`?` is only valid on error-returning calls**
+3. **`^` is only valid on error-returning calls**
    ```lambda
-   let x = add(1, 2)?  // ❌ compile error: 'add' does not return errors
+   let x = add(1, 2)^  // ❌ compile error: 'add' does not return errors
    ```
 
 ### Comparison Across Languages
@@ -260,7 +260,7 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
 | Aspect | **Go** | **Rust** | **Zig** | **Lambda** |
 |--------|--------|----------|---------|------------|
 | **Can ignore error?** | ✅ Yes | ⚠️ Warning (`#[must_use]`) | ❌ Compile error | ❌ Compile error |
-| **Propagation syntax** | Manual `if err != nil` | `f()?` | `try f()` | `f()?` |
+| **Propagation syntax** | Manual `if err != nil` | `f()?` | `try f()` | `f()^` |
 | **Destructure error** | `val, err := f()` | `match` on `Result` | `catch \|err\|` | `let val^err = f()` |
 | **Error type** | `(T, error)` tuple | `Result<T, E>` enum | `T!E` error union | `T^E` |
 | **Type preserved?** | ⚠️ Interface (erased) | ✅ Static | ✅ Static | ✅ Static |
@@ -301,10 +301,10 @@ The following built-in functions perform I/O and may fail. They enforce the same
 
 ```lambda
 // ❌ Compile error: unhandled error from 'input'
-let data = input("file.json")
+let data = input("file.json")^
 
 // ✅ Propagate error
-let data = input("file.json")?
+let data = input("file.json")^
 
 // ✅ Capture error explicitly
 let data^err = input("file.json")
@@ -313,7 +313,7 @@ let data^err = input("file.json")
 io.mkdir("output")
 
 // ✅ Propagate error
-io.mkdir("output")?
+io.mkdir("output")^
 ```
 
 ---
@@ -429,8 +429,8 @@ fn may_fail(x) int^ {
     else x * 2
 }
 
-// Propagate with ?
-may_fail(5)?
+// Propagate with ^
+may_fail(5)^
 
 // Destructure to handle locally
 let result^err = may_fail(-1)
@@ -439,24 +439,24 @@ if (^err) {
 }
 ```
 
-### Chaining Calls with `?`
+### Chaining Calls with `^`
 
 ```lambda
 fn compute(x) int^ {
-    let doubled = may_fail(x)?    // propagate if error
+    let doubled = may_fail(x)^    // propagate if error
     doubled + 10                   // normal return
 }
 
-compute(5)?   // 20
+compute(5)^   // 20
 ```
 
 ### File Processing
 
 ```lambda
 fn process_file(path: string) ProcessedData^ {
-    let content = input(path, 'text)?
+    let content = input(path, 'text)^
     let lines = split(content, "\n")
-    let parsed = (for line in lines parse_line(line)?)
+    let parsed = (for line in lines parse_line(line)^)
     aggregate(parsed)
 }
 ```
@@ -481,7 +481,7 @@ fn load_config(path: string) Config^ {
 
 ```lambda
 pn main() {
-    let config = input("config.json", 'json)?
+    let config = input("config.json", 'json)^
 
     for item in config.items {
         let result^err = process(item)
@@ -489,7 +489,7 @@ pn main() {
             print("Warning: " ++ err.message)
             continue
         }
-        output(result, "output/" ++ item.name ++ ".json")?
+        output(result, "output/" ++ item.name ++ ".json")^
     }
 
     print("Done")
@@ -505,9 +505,9 @@ pn main() {
 | Declare error return | `fn F() T^` or `fn F() T^E` | Function may fail |
 | Create error | `error("message")` | Construct error value |
 | Raise error | `raise error("...")` | Return error from function |
-| Propagate error | `F()?` | Unwrap or auto-return error |
+| Propagate error | `F()^` | Unwrap or auto-return error |
 | Capture error | `let val^err = F()` | Destructure into value + error |
 | Check for error | `^err` or `x is error` | Test if value is an error |
 | Default on error | `expr or default` | Errors are falsy, fall through to default |
 
-Lambda's error handling provides **Go's simplicity** (errors as values), **Rust's safety** (`?` propagation, type enforcement), and **Zig's strictness** (compiler-enforced handling) — with concise, readable syntax.
+Lambda's error handling provides **Go's simplicity** (errors as values), **Rust's safety** (`^` propagation, type enforcement), and **Zig's strictness** (compiler-enforced handling) — with concise, readable syntax.

@@ -624,6 +624,8 @@ typedef struct Context {
     ArrayInt64* array_int64_new(int length);
     ArrayFloat* array_float_new(int length);
 
+    void array_float_set(ArrayFloat *arr, int index, double value);
+
     Map* map(int type_index);
     Element* elmt(int type_index);
 
@@ -644,6 +646,7 @@ typedef struct Context {
 
     Item push_d(double dval);
     Item push_l(int64_t lval);
+    Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
     Item push_k(DateTime dtval);
     Item push_c(int64_t cval);
 
@@ -719,6 +722,9 @@ typedef struct Context {
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
     Bool fn_in(Item a, Item b);
+
+    // query operations: search data for items matching a type
+    Item fn_query(Item data, Item type_val, int direct);
 
     // vector arithmetic operations (element-wise)
     Item vec_add(Item a, Item b);

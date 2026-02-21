@@ -19,10 +19,11 @@ This document covers Lambda's expressions and statements, including control flow
 5. [Logical Expressions](#logical-expressions)
 6. [Member Access and Null Safety](#member-access-and-null-safety)
 7. [Pipe Expressions](#pipe-expressions)
-8. [Control Flow Expressions](#control-flow-expressions)
-9. [Match Expressions](#match-expressions)
-10. [Statements](#statements)
-11. [Operators](#operators)
+8. [Query Expressions](#query-expressions)
+9. [Control Flow Expressions](#control-flow-expressions)
+10. [Match Expressions](#match-expressions)
+11. [Statements](#statements)
+12. [Operators](#operators)
 
 ---
 
@@ -89,7 +90,7 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 10 / 3             // Division: 3.333...
 10 div 3           // Integer division: 3
 17 % 5             // Modulo: 2
-2 ^ 3              // Exponentiation: 8
+2 ** 3              // Exponentiation: 8
 ```
 
 ### Unary Operators
@@ -129,7 +130,7 @@ Lambda supports NumPy-style element-wise operations on arrays:
 1 + [2, 3, 4]              // [3, 4, 5]
 10 - [1, 2, 3]             // [9, 8, 7]
 3 * [1, 2, 3]              // [3, 6, 9]
-2 ^ [1, 2, 3]              // [2, 4, 8]
+2 ** [1, 2, 3]              // [2, 4, 8]
 
 // Vector-vector operations
 [1, 2, 3] + [4, 5, 6]      // [5, 7, 9]
@@ -333,7 +334,7 @@ When the left side is a scalar, `~` binds to the whole value:
 
 ```lambda
 [1, 2, 3, 4, 5]
-    | ~ ^ 2           // square: [1, 4, 9, 16, 25]
+    | ~ ** 2           // square: [1, 4, 9, 16, 25]
     | ~ + 1           // add 1: [2, 5, 10, 17, 26]
 // Result: [2, 5, 10, 17, 26]
 ```
@@ -384,6 +385,79 @@ data | ~.name where len(~) > 3 | ~.upper()
 | `1 to 10` (range) | Each number | Position (0-9) | Array of results |
 | `{a: 1, b: 2}` (map) | Each value | Key ('a', 'b') | Collection of results |
 | `42` (scalar) | The value itself | N/A | Single result |
+
+---
+
+## Query Expressions
+
+Lambda provides type-based query operators for searching nested data structures — elements, maps, arrays, and lists.
+
+### Recursive Query: `?` and `.?`
+
+The `?` operator performs a **recursive descendant search**, returning all values at any depth that match the given type:
+
+```lambda
+html?<img>                  // all <img> elements at any depth
+data?int                    // all int values in the tree
+data?(int | string)         // all int or string values
+html?<div class: string>    // <div> elements with a class attribute
+data?{name: string}         // maps with a string 'name' field
+data?{status: "ok"}         // maps where status == "ok"
+```
+
+The `.?` variant is **self-inclusive** — it also tests the root value itself:
+
+```lambda
+div.?<div>                  // includes div itself if it matches
+42.?int                     // (42) — trivial self-match
+el.?int                     // self + all int values in subtree
+```
+
+Both operators traverse attributes, children, map values, and array/list items in **document order** (depth-first, pre-order). Results are returned as a spreadable array.
+
+### Child-Level Query: `[T]`
+
+The `[T]` child-level query searches only **direct** attributes and children — one level deep, no recursion:
+
+```lambda
+[1, "hello", 3, true][int]        // (1, 3) — direct int items
+{name: "Alice", age: 30}[string]  // ("Alice") — map values matching type
+el[element]                       // direct child elements only
+el[string]                        // attribute values + text children
+```
+
+The `[T]` syntax reuses the index operator `expr[x]`. When `x` is a **type value**, a child-level query is performed instead of normal index access:
+
+| Index value `x` | Interpretation |
+|-----------------|----------------|
+| `int` value | Positional index access |
+| `string` or `symbol` value | Named field access |
+| Type | Child-level query |
+
+On **elements**, `[T]` searches both attribute values and direct children. On **maps**, it searches values only. On **arrays** and **lists**, it searches items.
+
+#### Chaining
+
+Child-level queries can be chained for multi-level traversal, and mixed with `?` for combined specific/recursive search:
+
+```lambda
+type body = <body>
+type div  = <div>
+
+html[body][div]                // direct <div> children of <body>
+html[body][div]?<a>            // then recursive search for <a>
+html?<table>[tr][td]           // all tables → direct rows → direct cells
+```
+
+#### Comparison
+
+| Feature | `expr?T` | `expr[T]` |
+|---------|----------|----------|
+| Scope | All descendants (recursive) | Direct attributes + children only |
+| Depth | Unlimited | One level |
+| Self-inclusive | `.?T` | N/A |
+| Analogy | XPath `//`, CSS descendant | XPath `/`, CSS `>` child |
+| Return type | Spreadable array | Spreadable array |
 
 ---
 
@@ -633,7 +707,7 @@ Expression arms (`case T: expr`) and statement arms (`case T { stmts }`) can be 
 ```lambda
 fn describe(shape) => match shape.tag {
     case 'circle' {
-        let area = 3.14159 * shape.r ^ 2;
+        let area = 3.14159 * shape.r ** 2;
         "circle with area " ++ string(area)
     }
     case 'rect' {
@@ -864,20 +938,20 @@ pn example() {
 
 From highest to lowest:
 
-| Precedence | Operators            | Description     |
-| ---------- | -------------------- | --------------- |
-| 1          | `()`, `[]`, `.`      | Primary         |
-| 2          | `-`, `+`, `not`, `*` | Unary           |
-| 3          | `^`                  | Exponentiation  |
-| 4          | `*`, `/`, `div`, `%` | Multiplicative  |
-| 5          | `+`, `-`             | Additive        |
-| 6          | `<`, `<=`, `>`, `>=` | Relational      |
-| 7          | `==`, `!=`           | Equality        |
-| 8          | `and`                | Logical AND     |
-| 9          | `or`                 | Logical OR      |
-| 10         | `to`                 | Range           |
-| 11         | `is`, `in`           | Type operations |
-| 12         | `\|`, `where`        | Pipe, Filter    |
+| Precedence | Operators                  | Description     |
+| ---------- | -------------------------- | --------------- |
+| 1          | `()`, `[]`, `[T]`, `.`, `?`, `.?` | Primary, query  |
+| 2          | `-`, `+`, `not`, `*`       | Unary           |
+| 3          | `**`                       | Exponentiation  |
+| 4          | `*`, `/`, `div`, `%`       | Multiplicative  |
+| 5          | `+`, `-`                   | Additive        |
+| 6          | `<`, `<=`, `>`, `>=`       | Relational      |
+| 7          | `==`, `!=`                 | Equality        |
+| 8          | `and`                      | Logical AND     |
+| 9          | `or`                       | Logical OR      |
+| 10         | `to`                       | Range           |
+| 11         | `is`, `in`                 | Type operations |
+| 12         | `\|`, `where`              | Pipe, Filter    |
 
 ### Arithmetic Operators
 
@@ -889,7 +963,7 @@ From highest to lowest:
 | `/` | Division | `10 / 3` | `3.333...` |
 | `div` | Integer division | `10 div 3` | `3` |
 | `%` | Modulo | `17 % 5` | `2` |
-| `^` | Exponentiation | `2 ^ 3` | `8` |
+| `**` | Exponentiation | `2 ** 3` | `8` |
 
 ### Comparison Operators
 

@@ -1,4 +1,4 @@
-#include <stdio.h>
+ #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>  // for va_list
@@ -29,6 +29,25 @@ extern Symbol* fn_name(Item item);
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
+
+// Helper functions for map pipe iteration in JIT
+// item_keys allocates per call, so we call it once and pass the ArrayList*
+static int64_t pipe_map_len(void* keys_ptr) {
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    return keys ? (int64_t)keys->length : 0;
+}
+static Item pipe_map_val(Item data, void* keys_ptr, int64_t index) {
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
+    String* key_str = (String*)keys->data[index];
+    return item_attr(data, key_str->chars);
+}
+static Item pipe_map_key(void* keys_ptr, int64_t index) {
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
+    String* key_str = (String*)keys->data[index];
+    return s2it(key_str);
+}
 
 typedef struct jit_item {
     const char *code;
@@ -102,12 +121,16 @@ func_obj_t func_list[] = {
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
     {"push_l", (fn_ptr) push_l},
+    {"push_l_safe", (fn_ptr) push_l_safe},
     {"push_k", (fn_ptr) push_k},
     {"push_c", (fn_ptr) push_c},
     {"item_keys", (fn_ptr) item_keys},
     {"item_attr", (fn_ptr) item_attr},
     {"item_type_id", (fn_ptr) item_type_id},
     {"item_at", (fn_ptr) item_at},
+    {"pipe_map_len", (fn_ptr) pipe_map_len},
+    {"pipe_map_val", (fn_ptr) pipe_map_val},
+    {"pipe_map_key", (fn_ptr) pipe_map_key},
 
     {"fn_int", (fn_ptr) fn_int},
     {"fn_int64", (fn_ptr) fn_int64},
@@ -247,6 +270,7 @@ func_obj_t func_list[] = {
     {"fn_call3", (fn_ptr) fn_call3},
     {"fn_is", (fn_ptr) fn_is},
     {"fn_in", (fn_ptr) fn_in},
+    {"fn_query", (fn_ptr) fn_query},
     {"fn_to", (fn_ptr) fn_to},
     {"base_type", (fn_ptr) base_type},
     {"const_type", (fn_ptr) const_type},
@@ -372,6 +396,10 @@ func_obj_t func_list[] = {
     {"vmap_new", (fn_ptr) vmap_new},
     {"vmap_from_array", (fn_ptr) vmap_from_array},
     {"vmap_set", (fn_ptr) vmap_set},
+    // typed array functions
+    {"array_float_new", (fn_ptr) array_float_new},
+    {"array_float_set", (fn_ptr) array_float_set},
+    {"array_int_new", (fn_ptr) array_int_new},
 };
 
 void *import_resolver(const char *name) {

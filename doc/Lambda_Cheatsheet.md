@@ -139,23 +139,23 @@ symbol("href", 'xlink_url') // Create namespaced symbol
 let x = 42;               // Immutable binding
 let y : int = 100;        // With type annotation
 let a = 1, b = 2;         // Multiple bindings
-x = 10                    // ERROR E211: cannot reassign let binding
+x = 10       // ERROR E211: cannot reassign let binding
 ```
 
 **Var Statements (mutable, `pn` only):**
 ```lambda
-var x = 0;                // Mutable variable
-var y: int = 42;          // With type annotation
-x = x + 1                 // OK: reassignment
-x = "hello"               // OK: type widening (int → string)
-y = "oops"                // ERROR E201: annotated type enforced
+var x = 0;         // Mutable variable
+var y: int = 42;   // With type annotation
+x = x + 1          // OK: reassignment
+x = "hello"        // OK: type widening (int → string)
+y = "oops"      // ERROR E201: annotated type enforced
 ```
 
 ## Operators
 
 **Arithmetic:** addition, subtraction, multiplication, division, integer division, modulo, exponentiation
 ```lambda
-+  -  *  /  div  %  ^
++  -  *  /  div  %  **
 ```
 
 **Spread:** *
@@ -179,6 +179,12 @@ and  or  not
 is  in  to  |  &  !
 ```
 
+**Query:** type-based search
+```lambda
+?   .?           // recursive descendant search
+expr[T]          // child-level query (direct only)
+```
+
 **Vector Arithmetic:** scalar broadcast, element-wise ops
 ```lambda
 1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]
@@ -198,24 +204,51 @@ users | ~.age            // [12,20,62] - extract field
 ```lambda
 [1,2,3,4,5] where ~ > 3         // [4,5]
 users where ~.age >= 18 | ~.name // filter then map
-[1,2,3] | ~ ^ 2 where ~ > 5 | sum // 13 (4+9)
+[1,2,3] | ~ ** 2 where ~ > 5 | sum // 13 (4+9)
 ```
 
-**Pipe to File (procedural only):**
+## Query Expressions
+
+**Results in document order** (depth-first, pre-order).
+
+**Query `?` — attributes + all descendants:**
+```lambda
+html?<img>                // all <img> at any depth
+html?<div class: string>  // <div> with class attr
+data?int                  // all int values in tree
+data?(int | string)       // all int or string values
+data?{name: string}       // maps with string 'name'
+data?{status: "ok"}       // maps where status == "ok"
+```
+
+**Self-inclusive query `.?` — self + attributes + all descendants:**
+```lambda
+div.?<div>     // includes div itself if it matches
+el.?int        // self + all int values in subtree
+42.?int        // [42] — trivial self-match
+```
+
+**Child-level query `[T]` — direct attributes + children only (no recursion):**
+```lambda
+[1, "a", 3, true][int]   // [1, 3] — int items
+{name: "Alice", age: 30}[string]  // ["Alice"]
+el[element]     // direct child elements only
+el[string]      // attr values + text children
+```
+
+## Pipe to File (procedural only)
 ```lambda
 // Target can be string, symbol, or path
 data |> 'output.txt'        // file under CWD
 data |> /tmp.'output.txt'   // output at full path
 data |>> "output.txt"       // append to file
-
-// Data type determines output format:
-// - String: raw text (no formatting)
-// - Binary: raw binary data
-// - Other types: Lambda/Mark format
-
-// Output in specific formats:
 data | format('json') |> "output.json"
 ```
+Data type determines output format:
+
+- String: raw text (no formatting)
+- Binary: raw binary data
+- Other types: Lambda/Mark format
 
 ## Control Flow
 
@@ -240,7 +273,7 @@ match value {
     case string: "text"           // case type
     case int | float: "numnber"   // case type union
     case Circle {                 // mixed stam arm
-        let area = 3.14 * ~.r ^ 2
+        let area = 3.14 * ~.r ** 2
         "area: " ++ area
     }
     default: "other"
@@ -286,11 +319,11 @@ while(c) { break;  continue;  return x; }
 
 **Assignment Targets:**
 ```lambda
-x = 10                    // Variable reassignment (var only)
-arr[i] = val              // Array element (auto-converts type)
-obj.field = val           // Map field (auto-rebuilds shape)
-elem.attr = val           // Element attribute
-elem[i] = val             // Element child
+x = 10              // Variable reassignment (var only)
+arr[i] = val        // Array element reassignment
+obj.field = val     // Map field reassignment
+elem.attr = val     // Element attribute reassignment
+elem[i] = val       // Element child reassignment
 ```
 
 ## Functions
@@ -412,15 +445,15 @@ fn divide(a, b) int ^ DivisionError { ... }    // Specific error type
 fn load(p) Config ^ ParseError|IOError { ... } // Multiple error types
 ```
 
-**`raise` error , or propagate error with `?`**
+**`raise` error , or propagate error with `^`**
 ```lambda
 fn compute(x: int) int^ {
     if (b == 0) raise error("div by zero")  // raise error
-    let a = parse(input)?    // error → return immediately
-    let b = divide(a, x)?    // error → return immediately
+    let a = parse(input)^    // error → return immediately
+    let b = divide(a, x)^    // error → return immediately
     a + b
 }
-fun()?                        // propagate error, discard value
+fun()^                        // propagate error, discard value
 ```
 
 **`let a^err` — destructure value and error:**
@@ -431,9 +464,9 @@ else result * 2
 ```
 
 ## Operator Precedence (High to Low)
-1. `()` `[]` `.` - Primary expressions
+1. `()` `[]` `.` `?` `.?` - Primary, query
 2. `-` `+` `not` - Unary operators
-3. `^` - Exponentiation
+3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
 6. `<` `<=` `>` `>=` - Relational

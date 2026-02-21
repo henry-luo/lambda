@@ -3,7 +3,7 @@
 
 "===== INPUT LARGE INTEGER JSON TEST ====="
 
-let data = input("test/input/large_int_test.json", 'json')?
+let data = input("test/input/large_int_test.json", 'json')^
 
 "Large integers section:"
 data.large_integers

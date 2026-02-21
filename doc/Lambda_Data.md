@@ -596,7 +596,7 @@ let report = {
     os: sys.os.name ++ " " ++ sys.os.version,
     cpu: sys.cpu.model,
     cores: sys.cpu.cores,
-    memory_gb: sys.memory.total / (1024 ^ 3),
+    memory_gb: sys.memory.total / (1024 ** 3),
     home: sys.home,
     user: sys.proc.self.env.USER
 }
@@ -872,7 +872,7 @@ users | ~.name              // ["Alice", "Bob", ...]
 
 // Chained transformations
 [1, 2, 3, 4, 5]
-    | ~ ^ 2                 // square each
+    | ~ ** 2                 // square each
     | ~ + 1                 // add 1
 // Result: [2, 5, 10, 17, 26]
 

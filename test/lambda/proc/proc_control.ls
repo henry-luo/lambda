@@ -53,14 +53,14 @@ pn test_multi_var() {
 // Test 6: output to file (json auto-detect)
 pn test_output_json() {
     let data = {name: "test", value: 42}
-    output(data, "/tmp/lambda_test_output.json")?
+    output(data, "/tmp/lambda_test_output.json")^
     1  // success
 }
 
 // Test 7: output to file with explicit format
 pn test_output_yaml() {
     let data = {items: [1, 2, 3], label: "numbers"}
-    output(data, "/tmp/lambda_test_output.yaml", 'yaml')?
+    output(data, "/tmp/lambda_test_output.yaml", 'yaml')^
     1  // success
 }
 
