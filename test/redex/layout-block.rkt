@@ -40,6 +40,19 @@
 ;; Used to translate local float positions to BFC-root coordinates.
 (define bfc-y-offset (make-parameter 0))
 
+;; CSS 2.2 §8.3.1: margin collapse-through propagation.
+;; When a block finishes layout and has no bottom barrier (no bottom border/padding),
+;; the last child's bottom margin "collapses through" and becomes the parent's
+;; effective bottom margin. This boxed value propagates it to the ancestor loop.
+;; Value: (box number) — last child's bottom margin when no bottom barrier, else 0
+(define effective-margin-bottom (make-parameter (box 0)))
+
+;; CSS 2.2 §8.3.1: first-child top-margin collapse-through propagation.
+;; When a block has no top barrier and the first child's top margin collapses
+;; through, the margin is propagated upward as the parent's effective top margin.
+;; Value: (box number) — first child's top margin when no top barrier, else 0
+(define effective-margin-top (make-parameter (box 0)))
+
 ;; ============================================================
 ;; Block Layout — Main Entry Point
 ;; ============================================================
@@ -538,11 +551,18 @@
     (cond
       [(null? remaining)
        ;; CSS 2.1 §8.3.1: the last child's bottom margin stays inside the parent
-       ;; when the parent has non-zero bottom border-width or bottom padding.
+       ;; when the parent has non-zero bottom border-width or bottom padding,
+       ;; or the parent establishes a BFC (CSS 2.2 §9.4.1).
        ;; Otherwise it collapses through to become the parent's bottom margin.
        (define parent-has-bottom-barrier?
          (or (> (box-model-padding-bottom parent-bm) 0)
-             (> (box-model-border-bottom parent-bm) 0)))
+             (> (box-model-border-bottom parent-bm) 0)
+             establishes-bfc?))
+       ;; CSS 2.2 §8.3.1: propagate effective bottom margin for collapse-through
+       ;; When this block has no bottom barrier, the last child's bottom margin
+       ;; passes through, becoming part of this block's effective bottom margin.
+       (when (not parent-has-bottom-barrier?)
+         (set-box! (effective-margin-bottom) prev-margin-bottom))
        (define final-y
          (+ (if parent-has-bottom-barrier?
                 (+ current-y prev-margin-bottom)
@@ -794,6 +814,10 @@
                (box-model-border-top child-bm-early)
                (box-model-padding-top child-bm-early)))
           (define child-bfc-y-offset (+ (bfc-y-offset) child-content-y-offset))
+          ;; CSS 2.2 §8.3.1: track effective margins for collapse-through
+          ;; Each child dispatch gets fresh boxes; after layout we read them.
+          (define child-emb-box (box 0))
+          (define child-emt-box (box 0))
           (define child-view-raw
             (if (and is-block-child? has-floats? (not creates-bfc?))
                 ;; non-BFC block child alongside floats: propagate float context
@@ -838,7 +862,9 @@
                                                 (list (- fx dx) (- fy dy) fw fh)])))])
                   (parameterize ([current-ancestor-floats (list all-lefts all-rights)]
                                 [bfc-max-float-bottom descendant-float-box]
-                                [bfc-y-offset child-bfc-y-offset])
+                                [bfc-y-offset child-bfc-y-offset]
+                                [effective-margin-bottom child-emb-box]
+                                [effective-margin-top child-emt-box])
                     (dispatch-fn child text-indent-avail)))
                 ;; non-block or BFC child: no float propagation needed
                 ;; still parameterize BFC float tracking for descendant floats
@@ -846,7 +872,9 @@
                 (if table-pre-view
                     table-pre-view
                     (parameterize ([bfc-max-float-bottom descendant-float-box]
-                                   [bfc-y-offset child-bfc-y-offset])
+                                   [bfc-y-offset child-bfc-y-offset]
+                                   [effective-margin-bottom child-emb-box]
+                                   [effective-margin-top child-emt-box])
                       (dispatch-fn child text-indent-avail)))))
 
           ;; CSS 2.2 §16.2: text-align:justify — justified text lines stretch to
@@ -870,10 +898,12 @@
           (define child-bm (extract-box-model child-styles avail-w))
 
           ;; CSS 2.1 §8.3.1: first child's top margin collapses with parent's
-          ;; top margin when the parent has no top border and no top padding.
+          ;; top margin when the parent has no top border and no top padding
+          ;; and the parent does NOT establish a BFC (CSS 2.2 §9.4.1).
           (define parent-has-top-barrier?
             (or (> (box-model-padding-top parent-bm) 0)
-                (> (box-model-border-top parent-bm) 0)))
+                (> (box-model-border-top parent-bm) 0)
+                establishes-bfc?))
 
           ;; collapse top margin with previous bottom margin
           ;; for the first child with no top barrier, the child's top margin
@@ -891,10 +921,16 @@
                (box-model-margin-top child-bm)]
               [(and is-first-child? (not parent-has-top-barrier?))
                ;; first child margin collapses through parent
+               ;; Actual propagation is deferred until after clearance check
+               ;; (see first-child-through-mt below)
                0]
               [else
-               (collapse-margins prev-margin-bottom
-                                (box-model-margin-top child-bm))]))
+               ;; CSS 2.2 §8.3.1: the child's effective top margin includes
+               ;; any first-grandchild margin that collapsed through (no top barrier)
+               (let* ([child-mt (box-model-margin-top child-bm)]
+                      [child-through-mt (unbox child-emt-box)]
+                      [effective-child-mt (collapse-margins child-mt child-through-mt)])
+                 (collapse-margins prev-margin-bottom effective-child-mt))]))
           (define indent-offset
             (if (and (not text-indent-applied?)
                      (not (= text-indent 0))
@@ -975,12 +1011,13 @@
                          ;; only right auto: left margin stays as resolved
                          (box-model-margin-left child-bm)]))]
                    ;; CSS 2.2 §10.3.3: over-constrained in RTL — remaining space goes to margin-left
+                   ;; margin-left can be negative when child is wider than container
                    [(and avail-w is-block-level? (eq? parent-direction 'rtl)
                          (not ml-auto?) (not mr-auto?))
                     (let* ([child-border-box-w (view-width child-view)]
                            [used-ml (- avail-w child-border-box-w
                                       (box-model-margin-right child-bm))])
-                      (max 0 used-ml))]
+                      used-ml)]
                    [else (box-model-margin-left child-bm)]))
                (+ offset-x bfc-float-offset auto-margin-left)]))
           ;; CSS 2.2 §9.5.2: when clearance is introduced (cleared-y > current-y),
@@ -992,6 +1029,14 @@
           (define has-clearance?
             (and clear-val (not (eq? clear-val 'clear-none))
                  (> cleared-y current-y)))
+          ;; CSS 2.2 §8.3.1: deferred first-child margin-top propagation
+          ;; Only propagate when there's no clearance breaking the adjoining relationship
+          (when (and is-first-child? (not parent-has-top-barrier?)
+                     (not is-inline-level-child?) (not has-clearance?))
+            (let* ([child-mt (box-model-margin-top child-bm)]
+                   [child-through-mt (unbox child-emt-box)]
+                   [effective-mt (collapse-margins child-mt child-through-mt)])
+              (set-box! (effective-margin-top) effective-mt)))
           (define effective-block-y
             (if has-clearance?
                 (max cleared-y (+ current-y collapsed-margin))
@@ -1078,6 +1123,19 @@
                      ib-h))]
               [_ (view-height child-view)]))
           (define new-y (+ effective-block-y child-h))
+          ;; CSS 2.2 §8.3.1: collapse-through detection for empty blocks.
+          ;; A block "collapses through" when it has zero height, zero border/padding
+          ;; top/bottom, and no clearance. Its top and bottom margins merge into a
+          ;; single margin that participates in the sibling collapsing chain.
+          ;; When this happens, the block doesn't advance current-y.
+          (define collapses-through?
+            (and (not is-inline-level-child?)
+                 (= child-h 0)
+                 (zero? (box-model-border-top child-bm))
+                 (zero? (box-model-border-bottom child-bm))
+                 (zero? (box-model-padding-top child-bm))
+                 (zero? (box-model-padding-bottom child-bm))
+                 (not has-clearance?)))
           ;; track table-column/column-group children for height post-processing
           (define child-display-pre (get-style-prop child-styles-pre 'display #f))
           (define is-table-column?
@@ -1091,10 +1149,30 @@
               [_ #f]))
 
           (loop (cdr remaining)
-                new-y
+                ;; CSS 2.2 §8.3.1: collapse-through blocks don't advance y
+                (if collapses-through? current-y new-y)
                 ;; CSS 2.2 §8.3.1: inline-block margins don't collapse — bottom margin
                 ;; is already included in child-h, so pass 0 to avoid double-counting
-                (if is-inline-level-child? 0 (box-model-margin-bottom child-bm))
+                ;; For collapse-through blocks: merge all participating margins
+                ;; (prev-margin-bottom, child-mt, child-mb) into one margin chain.
+                ;; For normal block children: use the effective bottom margin which includes
+                ;; any last-child margin that collapsed through (no bottom barrier).
+                (cond
+                  [is-inline-level-child? 0]
+                  [collapses-through?
+                   ;; merge prev-margin-bottom with child's collapsed-through margins
+                   (let* ([child-mt (box-model-margin-top child-bm)]
+                          [child-mb (box-model-margin-bottom child-bm)]
+                          [merged (collapse-margins
+                                   (collapse-margins prev-margin-bottom child-mt)
+                                   child-mb)])
+                     merged)]
+                  [else
+                   (let ([child-own-mb (box-model-margin-bottom child-bm)]
+                         [child-through-mb (unbox child-emb-box)])
+                     ;; CSS 2.2 §8.3.1: the child's own bottom margin collapses
+                     ;; with the last grandchild's margin that passed through
+                     (collapse-margins child-own-mb child-through-mb))])
                 (cons final-view views)
                 #f
                 (if (and is-table-column? child-box-id)
