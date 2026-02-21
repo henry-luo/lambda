@@ -2,7 +2,6 @@
 #define FORMAT_UTILS_H
 
 #include "../../lib/stringbuf.h"
-#include "../../lib/hashmap.h"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 
@@ -17,51 +16,7 @@ typedef struct {
 typedef void (*TextProcessor)(StringBuf* sb, String* str);
 typedef void (*ItemProcessor)(StringBuf* sb, const ItemReader& item);
 
-// function pointer type for element formatting
-typedef void (*ElementFormatterFunc)(StringBuf* sb, const ElementReader& elem);
 
-// ==============================================================================
-// Formatter Context - Shared State Management
-// ==============================================================================
-
-#define MAX_RECURSION_DEPTH 50
-
-typedef struct {
-    StringBuf* output;
-    Pool* pool;
-    int recursion_depth;
-    int indent_level;
-    bool compact_mode;
-    void* format_specific_state;  // opaque pointer for formatter-specific data
-} FormatterContext;
-
-// recursion control macros
-#define CHECK_RECURSION(ctx) \
-    if ((ctx)->recursion_depth >= MAX_RECURSION_DEPTH) return; \
-    (ctx)->recursion_depth++
-
-#define END_RECURSION(ctx) (ctx)->recursion_depth--
-
-// context lifecycle
-FormatterContext* formatter_context_create(Pool* pool, StringBuf* output);
-void formatter_context_destroy(FormatterContext* ctx);
-
-// ==============================================================================
-// Formatter Dispatcher - Hash-based Element Type Routing
-// ==============================================================================
-
-typedef struct FormatterDispatcher {
-    HashMap* type_handlers;  // HashMap storing HandlerEntry (type name → function)
-    ElementFormatterFunc default_handler;
-    Pool* pool;
-} FormatterDispatcher;
-
-// dispatcher lifecycle
-FormatterDispatcher* dispatcher_create(Pool* pool);
-void dispatcher_register(FormatterDispatcher* d, const char* type, ElementFormatterFunc fn);
-void dispatcher_set_default(FormatterDispatcher* d, ElementFormatterFunc fn);
-void dispatcher_format(FormatterDispatcher* d, StringBuf* sb, const ElementReader& elem);
-void dispatcher_destroy(FormatterDispatcher* d);
 
 // ==============================================================================
 // Common Text Processing

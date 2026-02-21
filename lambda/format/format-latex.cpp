@@ -16,6 +16,12 @@ static void format_latex_element(LaTeXContext& ctx, const ElementReader& elem, i
 static void format_latex_value(LaTeXContext& ctx, const ItemReader& value) {
     if (value.isNull()) return;
 
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) {
+        ctx.write_text("[max\\_depth]");
+        return;
+    }
+
     if (value.isElement()) {
         format_latex_element(ctx, value.asElement(), 0);
     } else if (value.isString()) {

@@ -13,7 +13,7 @@ Additional proposals: dispatcher table adoption, recursion guard standardization
 
 **Prior Art**: Phases 1–8.1 from the earlier `Input_Formatter.md` (now backed up as `.bak`) are complete. All 20 formatters are migrated to MarkReader API. `FormatterContextCpp` class hierarchy and `FormatterDispatcher` infrastructure are in place and tested. This proposal builds on that foundation.
 
-**Current Status (Phases A–C complete)**: Foundation utilities (`stringbuf_emit`, heading helpers, escape tables, logging cleanup), code deduplication (~2,200 lines removed), and the unified markup emitter (1,245-line shared emitter replacing ~3,950 lines across 5 per-format formatters) are all implemented and tested. Total formatter codebase reduced from ~9,149 to ~7,158 lines (22% reduction). 362/362 baseline tests + 43 markup-specific tests pass. Phase D (architecture polish) remains.
+**Current Status (All Phases A–D complete)**: Foundation utilities (`stringbuf_emit`, heading helpers, escape tables, logging cleanup), code deduplication (~2,200 lines removed), the unified markup emitter (1,245-line shared emitter replacing ~3,950 lines across 5 per-format formatters), and architecture polish (API unification, dispatch tables, RecursionGuard standardization, dead code removal) are all implemented and tested. Total formatter codebase reduced from ~9,149 to ~6,936 lines (24% reduction). 362/362 baseline tests + 43 markup-specific tests pass.
 
 ---
 
@@ -78,9 +78,11 @@ Several formatters contain **both** old `Element*`-based functions AND new MarkR
 
 | Mechanism | Files |
 |---|---|
-| `if (indent/depth > 10)` hard-coded | json, yaml, toml |
-| `FormatterContextCpp::RecursionGuard` (max 50) | md, rst, wiki, textile, text |
-| **None** | org, html, xml, latex, jsx, mdx, graph, ini, prop |
+| `if (indent/depth > 10)` hard-coded | ~~json, yaml,~~ toml |
+| `FormatterContextCpp::RecursionGuard` (max 50) | md, rst, wiki, textile, text, **json** ✅, **yaml** ✅, **html** ✅, **xml** ✅, **latex** ✅ |
+| **None** | org, ~~html, xml, latex,~~ jsx, mdx, graph, ~~ini, prop~~ kv |
+
+> **Phase D.3 update**: RecursionGuard standardized across all Tier 1 formatters (those with existing context classes). JSON and YAML ad-hoc depth checks replaced with RAII RecursionGuard. HTML, XML, LaTeX gained recursion protection. Tier 2 files (toml, jsx, kv, graph) without context classes retain existing guards or remain unguarded (shallow recursion patterns).
 
 ### 1.6. Logging Violations
 
@@ -94,7 +96,7 @@ Per coding rules, `printf`/`fprintf`/`std::cout` must not be used; use `log_debu
 
 ### 1.7. Dispatcher Adoption Gap
 
-The `FormatterDispatcher` (hashmap-based element routing) was built as general infrastructure in `format-utils.cpp`/`.h`, but **only `format-md.cpp` actually uses it**. All other formatters use plain `if/else` chains for element type routing.
+> **Phase D.4 update**: The `FormatterDispatcher` infrastructure (hashmap-based element routing) was dead code — no formatter used it after the Phase C markup unification. It has been **removed entirely** from `format-utils.h` and `format-utils.cpp` (~170 lines deleted), along with the unused C-level `FormatterContext` struct, `CHECK_RECURSION`/`END_RECURSION` macros, `ElementFormatterFunc` typedef, `formatter_context_create()`/`formatter_context_destroy()`, and the `hashmap.h` include. All formatters use plain `if/else` chains or the unified `MarkupEmitter` for element routing.
 
 ---
 
@@ -976,16 +978,19 @@ All Phase C tasks completed. 362/362 baseline tests + 43/43 markup tests pass.
 
 **New files created**: `format-markup.h`, `format-markup.cpp`, `test/test_format_markup_gtest.cpp`
 
-### Phase D: Architecture Polish
+### Phase D: Architecture Polish — ✅ COMPLETED
 
-| Task | Priority | Effort | Impact |
-|---|---|---|---|
-| D.1 Unify public API signatures (all return `String*`) | Medium | 2 hrs | Clean API |
-| D.2 Replace format_data() strcmp chain with dispatch table | Medium | 2 hrs | Cleaner, extensible |
-| D.3 Standardize RecursionGuard in all formatters | Medium | 2 hrs | Safety |
-| D.4 Adopt FormatterDispatcher in html, xml, latex, jsx | Low | 4 hrs | Performance + readability |
-| D.5 Move TextileContext to format-utils.hpp | Low | 15 min | Consistency |
-| D.6 Update Formatter.md developer guide | Low | 1 hr | Documentation |
+All Phase D tasks completed. 362/362 baseline tests + 43/43 markup tests pass.
+
+| Task | Status | Result |
+|---|---|---|
+| D.1 Unify public API signatures | ✅ Done | Added `format_markdown_string()` (was the only markup format missing a `String*` return variant). Reorganized `format.h` into "Canonical String* API" section + "Internal StringBuf variants" section. Updated callers: `format-mdx.cpp` switched from forward-declared `format_markdown()` to `#include "format-markup.h"` + `format_markup(sb, ..., &MARKDOWN_RULES)` (2 call sites). `lambda-proc.cpp` simplified from manual StringBuf wrapping to single `format_markdown_string()` call |
+| D.2 Dispatch table for format_data() | ✅ Done | Replaced ~130-line `strcmp` if/else chain in `format.cpp` with 3 static dispatch tables: `SIMPLE_FORMATS[]` (12 entries: json, xml, html, yaml, toml, ini, properties, css, jsx, mdx, latex, text), `MARKUP_FORMATS[]` (6 entries: markdown, md, rst, org, wiki, textile), `MATH_FLAVORS[]` (4 entries: latex, typst, ascii, mathml). Special handlers for graph (flavor→`format_graph_with_flavor`), markup (→`get_markup_rules()` lookup), math (table-driven). Legacy `math-latex`/`math-typst`/etc. combined strings supported via `LEGACY_MATH[]` table. `format.cpp` reduced from 216→188 lines |
+| D.3 Standardize RecursionGuard | ✅ Done | Added `FormatterContextCpp::RecursionGuard` to 5 Tier 1 formatters (files with existing context classes): **format-json.cpp** (replaced ad-hoc `indent > 10` in `format_map_reader_contents` with guard in `format_item_reader_with_indent`), **format-yaml.cpp** (replaced `indent_level > 10` with guard in `format_item_reader`), **format-html.cpp** (added guard to `format_item_reader`), **format-xml.cpp** (added guard to `format_item_reader`), **format-latex.cpp** (added guard to `format_latex_value`). Tier 2 files without context classes (toml, jsx, kv, graph) left with existing protection or unguarded |
+| D.4 Remove dead FormatterDispatcher | ✅ Done | Removed ~170 lines of dead code from `format-utils.h` and `format-utils.cpp`: `FormatterDispatcher` struct, `ElementFormatterFunc` typedef, `dispatcher_create/register/set_default/format/destroy` functions, C-level `FormatterContext` struct, `CHECK_RECURSION`/`END_RECURSION` macros, `formatter_context_create()`/`formatter_context_destroy()`, unused `hashmap.h` include. `format-utils.h`: 311→266 lines. `format-utils.cpp`: 1,131→1,008 lines |
+| D.5 TextileContext | ✅ N/A | `TextileContext` never existed — textile was always delegated to `MarkupEmitter` via `format_markup()`. No action needed |
+
+**Phase D cumulative impact**: Cleaner public API, table-driven dispatcher, RAII recursion safety in all major formatters, ~170 lines of dead infrastructure removed.
 
 ### Estimated Totals
 
@@ -994,8 +999,8 @@ All Phase C tasks completed. 362/362 baseline tests + 43/43 markup tests pass.
 | A: Foundation | ~6.5 hrs | ~60 + infrastructure | ✅ Done |
 | B: Deduplication | ~15 hrs | ~2,200 | ✅ Done |
 | C: Unified Markup | ~22 hrs | ~2,440 (net after emitter) | ✅ Done |
-| D: Architecture Polish | ~11 hrs | ~100 + quality | Not started |
-| **Total** | **~54.5 hrs** | **~4,800 lines net** | **A-C done** |
+| D: Architecture Polish | ~6 hrs | ~170 + quality | ✅ Done |
+| **Total** | **~49.5 hrs** | **~4,870 lines net** | **All phases complete** |
 
 ### Dependency Graph
 
@@ -1042,23 +1047,23 @@ Reference table for building `MarkupOutputRules`:
 | File | Lines | Role | Notes |
 |---|---|---|---|
 | format-markup.cpp | 1,245 | Unified markup emitter | **NEW** — handles all 5 markup formats via `MarkupOutputRules` |
-| format-utils.cpp | 1,131 | Shared infra + rule tables | Expanded: +5 rule tables, +7 link/image callbacks, +`get_markup_rules()` |
+| format-utils.cpp | 1,008 | Shared infra + rule tables | Expanded with rule tables; dead FormatterDispatcher/FormatterContext removed (D.4) |
 | format-utils.hpp | 848 | Context classes | All `XxxContext` subclasses of `FormatterContextCpp` |
 | format-math-ascii.cpp | 696 | ASCII math renderer | Unchanged |
-| format-html.cpp | 476 | HTML formatter | Gen 3 |
+| format-html.cpp | 483 | HTML formatter | Gen 3 + RecursionGuard (D.3) |
 | format-graph.cpp | 453 | Graph formatter (DOT/Mermaid/D2) | Reduced from 838 (Phase B.2) |
-| format-xml.cpp | 413 | XML formatter | Gen 3 |
-| format-yaml.cpp | 362 | YAML formatter | Gen 3 |
-| format-utils.h | 311 | C headers + `MarkupOutputRules` struct | Expanded: +`MarkupOutputRules`, +escape tables |
-| format-json.cpp | 293 | JSON formatter | Gen 3 |
+| format-xml.cpp | 419 | XML formatter | Gen 3 + RecursionGuard (D.3) |
+| format-yaml.cpp | 363 | YAML formatter | Gen 3 + RecursionGuard (D.3) |
+| format-utils.h | 266 | C headers + `MarkupOutputRules` struct | Dead FormatterDispatcher/FormatterContext/macros removed (D.4) |
+| format-json.cpp | 293 | JSON formatter | Gen 3 + RecursionGuard (D.3) |
 | format-toml.cpp | 272 | TOML formatter | Gen 2 |
 | format-kv.cpp | 259 | INI + Properties (unified) | **NEW** — replaced format-ini.cpp + format-prop.cpp (Phase B.1) |
-| format.cpp | 216 | Central dispatcher | Updated: uses `format_markup_string()` + `get_markup_rules()` |
-| format-latex.cpp | 208 | LaTeX formatter | Reduced from 375 (Phase B.5) |
+| format.cpp | 188 | Central dispatcher | Table-driven dispatch: 3 static tables replace strcmp chain (D.2) |
+| format-latex.cpp | 214 | LaTeX formatter | Reduced from 375 (B.5) + RecursionGuard (D.3) |
 | format-jsx.cpp | 205 | JSX formatter | Reduced from 386 (Phase B.5) |
 | format-text.cpp | 193 | Plain text formatter | Gen 3 |
-| format-mdx.cpp | 73 | MDX formatter | Reduced from 344 (Phase B.5) |
-| format.h | 56 | Public declarations | Unchanged (backward compat) |
+| format-mdx.cpp | 71 | MDX formatter | Reduced from 344 (B.5); uses format-markup.h (D.1) |
+| format.h | 58 | Public declarations | Reorganized: canonical String* API + internal StringBuf section (D.1) |
 | format-css.cpp | 53 | CSS formatter | Delegate |
 | format-math.cpp | 48 | Math dispatcher | Entry point |
 | format-markup.h | 35 | Markup emitter public API | **NEW** |
@@ -1066,5 +1071,5 @@ Reference table for building `MarkupOutputRules`:
 | format-textile.cpp | 14 | Textile thin wrapper | Reduced from 980 → delegates to `format_markup()` |
 | format-rst.cpp | 14 | RST thin wrapper | Reduced from 345 → delegates to `format_markup()` |
 | format-org.cpp | 14 | Org thin wrapper | Reduced from 992→429 (B.4) → 14 (C.5) |
-| format-md.cpp | 10 | Markdown thin wrapper | Reduced from 1,306 → delegates to `format_markup()` |
-| **Total** | **~7,158** | | **Down from ~9,149 (22% reduction)** |
+| format-md.cpp | 14 | Markdown thin wrapper | Reduced from 1,306 → delegates to `format_markup()` + added `format_markdown_string()` (D.1) |
+| **Total** | **~6,936** | | **Down from ~9,149 (24% reduction)** |

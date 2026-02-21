@@ -8,3 +8,7 @@
 void format_markdown(StringBuf* sb, Item root_item) {
     format_markup(sb, root_item, &MARKDOWN_RULES);
 }
+
+String* format_markdown_string(Pool* pool, Item root_item) {
+    return format_markup_string(pool, root_item, &MARKDOWN_RULES);
+}

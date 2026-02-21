@@ -171,6 +171,12 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name) {
     if (!tag_name) tag_name = "value";
 
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) {
+        stringbuf_append_format(ctx.output(), "<%s/><!-- max_depth -->", tag_name);
+        return;
+    }
+
     // Check if item is null
     if (item.isNull()) {
         stringbuf_append_format(ctx.output(), "<%s/>", tag_name);

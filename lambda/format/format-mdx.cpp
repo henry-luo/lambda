@@ -1,9 +1,7 @@
 #include "format.h"
+#include "format-markup.h"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
-
-// External formatters
-void format_markdown(StringBuf* sb, Item root_item);
 
 // Forward declarations
 static void format_mdx_item_reader(StringBuf* sb, const ItemReader& item);
@@ -29,7 +27,7 @@ static void format_mdx_element_reader(StringBuf* sb, const ElementReader& elem) 
         }
     } else {
         // Non-JSX, non-document element: delegate to markdown formatter
-        format_markdown(sb, (Item){.element = (Element*)elem.element()});
+        format_markup(sb, (Item){.element = (Element*)elem.element()}, &MARKDOWN_RULES);
     }
 }
 
@@ -63,7 +61,7 @@ String* format_mdx(Pool* pool, Item root_item) {
         if (tag && strcmp(tag, "mdx_document") == 0) {
             format_mdx_element_reader(sb, elem);
         } else {
-            format_markdown(sb, root_item);
+            format_markup(sb, root_item, &MARKDOWN_RULES);
         }
     } else {
         format_mdx_item_reader(sb, root);

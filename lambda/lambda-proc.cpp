@@ -457,10 +457,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     } else if (strcmp(effective_format, "html") == 0) {
         formatted = format_html(temp_pool, source);
     } else if (strcmp(effective_format, "markdown") == 0) {
-        StringBuf* sb = stringbuf_new(temp_pool);
-        format_markdown(sb, source);
-        formatted = stringbuf_to_string(sb);
-        stringbuf_free(sb);
+        formatted = format_markdown_string(temp_pool, source);
     } else if (strcmp(effective_format, "text") == 0) {
         formatted = format_text_string(temp_pool, source);
     } else if (strcmp(effective_format, "toml") == 0) {
