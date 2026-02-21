@@ -21,6 +21,37 @@ extern int64_t g_text_layout_count;
 // ============================================================================
 
 /**
+ * Apply CSS font-variant: small-caps transformation.
+ * Converts lowercase characters to uppercase. The actual size reduction
+ * is handled by using a smaller font size during glyph measurement.
+ */
+static inline uint32_t apply_small_caps(uint32_t codepoint) {
+    if (codepoint < 128) {
+        return std::toupper(codepoint);
+    } else {
+        return std::towupper(codepoint);
+    }
+}
+
+/**
+ * Check if font-variant: small-caps is active for the current element.
+ * Walks the DOM ancestor chain since font-variant is inherited.
+ */
+static inline bool has_small_caps(LayoutContext* lycon) {
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->font && elem->font->font_variant == CSS_VALUE_SMALL_CAPS) {
+                return true;
+            }
+        }
+        node = node->parent;
+    }
+    return false;
+}
+
+/**
  * Apply CSS text-transform to a single Unicode codepoint.
  * @param codepoint Input Unicode codepoint
  * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
@@ -519,6 +550,8 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             if (bytes <= 0) codepoint = *str;
         }
         codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        // CSS font-variant: small-caps — convert lowercase to uppercase
+        if (has_small_caps(lycon)) codepoint = apply_small_caps(codepoint);
         is_word_start = false;  // Only first char is word start in this context
 
         // Check for Unicode space characters with defined widths
@@ -884,6 +917,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             // Apply text-transform before loading glyph
             codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            // CSS font-variant: small-caps — convert lowercase to uppercase
+            if (has_small_caps(lycon)) codepoint = apply_small_caps(codepoint);
             is_word_start = false;  // No longer at word start
 
             // Check for Unicode space characters with defined widths
