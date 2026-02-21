@@ -492,8 +492,8 @@ void list_push(List *list, Item item) {
                 memcpy(merged_str->chars, prev_str->chars, prev_str->len);
                 memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
                 merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
-                merged_str->ref_cnt = prev_str->ref_cnt;
-                prev_str->ref_cnt = 0;  // to be freed later
+                merged_str->ref_cnt = 1;  // one reference: this list position
+                prev_str->ref_cnt--;  // remove the list reference (was incremented by list_push)
                 // replace previous string with new merged string, in the list directly,
                 // assuming the list is still being constructed/mutable
                 list->items[list->length - 1] = (Item){.item = s2it(merged_str)};

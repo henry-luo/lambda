@@ -767,7 +767,10 @@ bool str_to_double(const char* s, size_t len, double* out, const char** end) {
     char* ep = NULL;
     errno = 0;
     double val = strtod(buf, &ep);
-    bool ok = (ep != buf && errno != ERANGE);
+    // Accept the value if parsing consumed characters.
+    // ERANGE is set for both overflow (val=±HUGE_VAL) and underflow (subnormal/zero).
+    // Subnormal values are valid IEEE 754 doubles and should not be rejected.
+    bool ok = (ep != buf);
     if (ok) {
         *out = val;
         if (end) *end = s + (ep - buf);
