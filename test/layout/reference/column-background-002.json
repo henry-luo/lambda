@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-  "test_file": "border-collapse-applies-to-012.htm",
-========
   "test_file": "column-background-002.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -20,11 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-      "height": 278,
-========
       "height": 154,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -212,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                "text": "CSS Test: Border-collapse and 'display: table-column' elements",
-                "length": 62,
-========
                 "text": "CSS Test: Column-group background property",
                 "length": 42,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -405,8 +392,8 @@
           },
           {
             "nodeType": "element",
-            "selector": "link:nth-of-type(3)",
-            "tag": "link",
+            "selector": "meta:nth-of-type(1)",
+            "tag": "meta",
             "id": null,
             "classes": [],
             "layout": {
@@ -482,7 +469,7 @@
           },
           {
             "nodeType": "element",
-            "selector": "meta:nth-of-type(1)",
+            "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
             "classes": [],
@@ -559,83 +546,6 @@
           },
           {
             "nodeType": "element",
-            "selector": "meta:nth-of-type(2)",
-            "tag": "meta",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 11,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n        ",
-            "length": 9,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 12,
-            "children": []
-          },
-          {
-            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -692,17 +602,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-            "elementIndex": 13,
+            "elementIndex": 11,
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                "text": "\n            #table\n            {\n                display: table;\n            }\n            #test\n            {\n                border-collapse: collapse;\n                display: table-column;\n            }\n            .tr\n            {\n                display: table-row;\n            }\n            #top, #bottom\n            {\n                display: table-cell;\n                height: 100px;\n                width: 100px;\n            }\n            #top\n            {\n                border-bottom: 10px solid blue;\n            }\n            #bottom\n            {\n                border-top: 10px dotted orange;\n            }\n        ",
-                "length": 637,
-========
                 "text": "\n            #table\n            {\n                background: orange;\n                display: table;\n            }\n            #columngroup1, #columngroup2\n            {\n                display: table-column-group;\n            }\n            #columngroup2\n            {\n                background: blue;\n            }\n            .column\n            {\n                display: table-column;\n            }\n            #row\n            {\n                display: table-row;\n            }\n            .cell\n            {\n                display: table-cell;\n                height: 1in;\n                width: 1in;\n            }\n        ",
                 "length": 634,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -730,7 +635,7 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-            "nodeIndex": 14,
+            "nodeIndex": 12,
             "children": []
           }
         ]
@@ -745,19 +650,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-          "height": 254,
-          "contentWidth": 1184,
-          "contentHeight": 254,
-          "scrollWidth": 1184,
-          "scrollHeight": 254
-========
           "height": 130,
           "contentWidth": 1184,
           "contentHeight": 130,
           "scrollWidth": 1184,
           "scrollHeight": 130
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
         },
         "computed": {
           "display": "block",
@@ -865,28 +762,14 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                "text": "Test passes if there is a solid blue line and dotted orange line below.",
-                "length": 71,
-========
                 "text": "Test passes if the blue box is to the right of the orange box.",
                 "length": 62,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                      "width": 434.17,
-                      "height": 18,
-                      "right": 442.17,
-                      "bottom": 34,
-                      "text": "Test passes if there is a solid blue line and dotted orange line below.",
-                      "startIndex": 0,
-                      "endIndex": 71
-========
                       "width": 377.47,
                       "height": 18,
                       "right": 385.47,
@@ -894,7 +777,6 @@
                       "text": "Test passes if the blue box is to the right of the orange box.",
                       "startIndex": 0,
                       "endIndex": 62
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                     }
                   ],
                   "hasLayout": true,
@@ -917,21 +799,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-              "width": 100,
-              "height": 220,
-              "contentWidth": 100,
-              "contentHeight": 220,
-              "scrollWidth": 100,
-              "scrollHeight": 220
-========
               "width": 192,
               "height": 96,
               "contentWidth": 192,
               "contentHeight": 96,
               "scrollWidth": 192,
               "scrollHeight": 96
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
             },
             "computed": {
               "display": "table",
@@ -979,30 +852,13 @@
             "children": [
               {
                 "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                "selector": "#test",
-                "tag": "div",
-                "id": "test",
-========
                 "selector": "#columngroup1",
                 "tag": "div",
                 "id": "columngroup1",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                 "classes": [],
                 "layout": {
                   "x": 8,
                   "y": 50,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                  "width": 100,
-                  "height": 220,
-                  "contentWidth": 100,
-                  "contentHeight": 220,
-                  "scrollWidth": 100,
-                  "scrollHeight": 220
-                },
-                "computed": {
-                  "display": "table-column",
-========
                   "width": 96,
                   "height": 96,
                   "contentWidth": 96,
@@ -1012,7 +868,6 @@
                 },
                 "computed": {
                   "display": "table-column-group",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                   "position": "static",
                   "marginTop": 0,
                   "marginRight": 0,
@@ -1054,9 +909,6 @@
                 },
                 "depth": 3,
                 "elementIndex": 1,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                "children": []
-========
                 "children": [
                   {
                     "nodeType": "element",
@@ -1122,7 +974,6 @@
                     "children": []
                   }
                 ]
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
               },
               {
                 "nodeType": "element",
@@ -1131,16 +982,6 @@
                 "id": "columngroup2",
                 "classes": [],
                 "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                  "x": 8,
-                  "y": 50,
-                  "width": 100,
-                  "height": 110,
-                  "contentWidth": 100,
-                  "contentHeight": 110,
-                  "scrollWidth": 100,
-                  "scrollHeight": 110
-========
                   "x": 104,
                   "y": 50,
                   "width": 96,
@@ -1149,7 +990,6 @@
                   "contentHeight": 96,
                   "scrollWidth": 96,
                   "scrollHeight": 96
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                 },
                 "computed": {
                   "display": "table-column-group",
@@ -1197,21 +1037,6 @@
                 "children": [
                   {
                     "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-                    "selector": "#top",
-                    "tag": "div",
-                    "id": "top",
-                    "classes": [],
-                    "layout": {
-                      "x": 8,
-                      "y": 50,
-                      "width": 100,
-                      "height": 110,
-                      "contentWidth": 100,
-                      "contentHeight": 100,
-                      "scrollWidth": 100,
-                      "scrollHeight": 100
-========
                     "selector": "div.column",
                     "tag": "div",
                     "id": null,
@@ -1352,7 +1177,6 @@
                       "contentHeight": 96,
                       "scrollWidth": 96,
                       "scrollHeight": 96
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                     },
                     "computed": {
                       "display": "table-cell",
@@ -1366,131 +1190,6 @@
                       "paddingBottom": 0,
                       "paddingLeft": 0,
                       "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 10,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Times",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 1,
-                    "children": []
-                  }
-                ]
-              },
-              {
-                "nodeType": "element",
-                "selector": "div.tr:nth-of-type(3)",
-                "tag": "div",
-                "id": null,
-                "classes": [
-                  "tr"
-                ],
-                "layout": {
-                  "x": 8,
-                  "y": 160,
-                  "width": 100,
-                  "height": 110,
-                  "contentWidth": 100,
-                  "contentHeight": 110,
-                  "scrollWidth": 100,
-                  "scrollHeight": 110
-                },
-                "computed": {
-                  "display": "table-row",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 0,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "normal",
-                  "fontSize": 16,
-                  "lineHeight": "normal",
-                  "fontFamily": "Times",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 5,
-                "children": [
-                  {
-                    "nodeType": "element",
-                    "selector": "#bottom",
-                    "tag": "div",
-                    "id": "bottom",
-                    "classes": [],
-                    "layout": {
-                      "x": 8,
-                      "y": 160,
-                      "width": 100,
-                      "height": 110,
-                      "contentWidth": 100,
-                      "contentHeight": 100,
-                      "scrollWidth": 100,
-                      "scrollHeight": 100
-                    },
-                    "computed": {
-                      "display": "table-cell",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 10,
                       "borderRightWidth": 0,
                       "borderBottomWidth": 0,
                       "borderLeftWidth": 0,
@@ -1523,8 +1222,6 @@
                     "depth": 4,
                     "elementIndex": 1,
                     "children": []
-<<<<<<<< HEAD:test/layout/reference/border-collapse-applies-to-012.json
-========
                   },
                   {
                     "nodeType": "element",
@@ -1588,7 +1285,6 @@
                     "depth": 4,
                     "elementIndex": 3,
                     "children": []
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-background-002.json
                   }
                 ]
               }

@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 164,
+      "height": 266,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -650,11 +650,11 @@
           "x": 8,
           "y": 8,
           "width": 1184,
-          "height": 148,
+          "height": 250,
           "contentWidth": 1184,
-          "contentHeight": 148,
+          "contentHeight": 250,
           "scrollWidth": 1184,
-          "scrollHeight": 148
+          "scrollHeight": 250
         },
         "computed": {
           "display": "block",
@@ -1526,11 +1526,11 @@
               "x": 8,
               "y": 138,
               "width": 1184,
-              "height": 18,
+              "height": 120,
               "contentWidth": 1184,
-              "contentHeight": 18,
+              "contentHeight": 120,
               "scrollWidth": 1184,
-              "scrollHeight": 18
+              "scrollHeight": 120
             },
             "computed": {
               "display": "block",
@@ -1585,12 +1585,12 @@
                 "layout": {
                   "x": 8,
                   "y": 138,
-                  "width": 332.19,
-                  "height": 18,
-                  "contentWidth": 332,
-                  "contentHeight": 18,
-                  "scrollWidth": 332,
-                  "scrollHeight": 18
+                  "width": 390,
+                  "height": 116,
+                  "contentWidth": 390,
+                  "contentHeight": 116,
+                  "scrollWidth": 390,
+                  "scrollHeight": 116
                 },
                 "computed": {
                   "display": "inline",

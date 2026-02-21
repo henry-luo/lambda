@@ -791,7 +791,7 @@
               "contentWidth": 852,
               "contentHeight": 800,
               "scrollWidth": 848,
-              "scrollHeight": 805
+              "scrollHeight": 816
             },
             "computed": {
               "display": "table",
@@ -851,7 +851,7 @@
                   "contentWidth": 844,
                   "contentHeight": 792,
                   "scrollWidth": 844,
-                  "scrollHeight": 803
+                  "scrollHeight": 814
                 },
                 "computed": {
                   "display": "table-row-group",
@@ -911,7 +911,7 @@
                       "contentWidth": 844,
                       "contentHeight": 792,
                       "scrollWidth": 844,
-                      "scrollHeight": 803
+                      "scrollHeight": 814
                     },
                     "computed": {
                       "display": "table-row",
@@ -971,7 +971,7 @@
                           "contentWidth": 844,
                           "contentHeight": 792,
                           "scrollWidth": 844,
-                          "scrollHeight": 803
+                          "scrollHeight": 814
                         },
                         "computed": {
                           "display": "table-cell",
@@ -1025,7 +1025,7 @@
                             "classes": [],
                             "layout": {
                               "x": 4,
-                              "y": -7,
+                              "y": 4,
                               "width": 843.8,
                               "height": 792,
                               "contentWidth": 844,
@@ -1086,11 +1086,11 @@
                                   "rects": [
                                     {
                                       "x": 4,
-                                      "y": -7,
+                                      "y": 4,
                                       "width": 843.8,
                                       "height": 18,
                                       "right": 847.8,
-                                      "bottom": 11,
+                                      "bottom": 22,
                                       "text": "The letters 'a', 'b' and 'c' should appear below this line on the same page. A single blue outline should wrap around both lines of text.",
                                       "startIndex": 0,
                                       "endIndex": 137
@@ -1115,7 +1115,7 @@
                             "classes": [],
                             "layout": {
                               "x": 4,
-                              "y": 753,
+                              "y": 764,
                               "width": 0,
                               "height": 54,
                               "contentWidth": 0,
@@ -1176,11 +1176,11 @@
                                   "rects": [
                                     {
                                       "x": 4,
-                                      "y": 753,
+                                      "y": 764,
                                       "width": 7.11,
                                       "height": 18,
                                       "right": 11.11,
-                                      "bottom": 771,
+                                      "bottom": 782,
                                       "text": "a ",
                                       "startIndex": 0,
                                       "endIndex": 2
@@ -1204,11 +1204,11 @@
                                   "rects": [
                                     {
                                       "x": 4,
-                                      "y": 771,
+                                      "y": 782,
                                       "width": 8,
                                       "height": 18,
                                       "right": 12,
-                                      "bottom": 789,
+                                      "bottom": 800,
                                       "text": "b ",
                                       "startIndex": 0,
                                       "endIndex": 2
@@ -1232,11 +1232,11 @@
                                   "rects": [
                                     {
                                       "x": 4,
-                                      "y": 789,
+                                      "y": 800,
                                       "width": 7.11,
                                       "height": 18,
                                       "right": 11.11,
-                                      "bottom": 807,
+                                      "bottom": 818,
                                       "text": "c",
                                       "startIndex": 0,
                                       "endIndex": 1

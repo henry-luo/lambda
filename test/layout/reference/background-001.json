@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "background-001.htm",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n            }\n        ",
+                "length": 118,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -876,11 +876,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 260,
+              "width": 1184,
               "height": 50,
-              "contentWidth": 260,
+              "contentWidth": 1184,
               "contentHeight": 50,
-              "scrollWidth": 260,
+              "scrollWidth": 1184,
               "scrollHeight": 50
             },
             "computed": {

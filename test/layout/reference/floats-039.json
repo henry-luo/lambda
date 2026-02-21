@@ -925,7 +925,7 @@
                   "contentWidth": 48,
                   "contentHeight": 48,
                   "scrollWidth": 48,
-                  "scrollHeight": 52
+                  "scrollHeight": 48
                 },
                 "computed": {
                   "display": "block",

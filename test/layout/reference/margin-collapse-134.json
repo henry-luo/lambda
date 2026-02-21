@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-  "test_file": "border-collapse-dynamic-cell-005.htm",
-========
   "test_file": "margin-collapse-134.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -20,11 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-      "height": 160,
-========
       "height": 214,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -135,84 +127,6 @@
         "elementIndex": 0,
         "children": [
           {
-            "nodeType": "element",
-            "selector": "title",
-            "tag": "title",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 0,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "CSS Test: border collapse dynamic change to rowspan cell style ",
-                "length": 63,
-                "isWhitespaceOnly": false,
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": false,
-                  "parentDisplay": "none",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
-              }
-            ]
-          },
-          {
             "nodeType": "text",
             "text": "\n  ",
             "length": 3,
@@ -225,249 +139,13 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-            "nodeIndex": 1,
+            "nodeIndex": 0,
             "children": []
           },
           {
             "nodeType": "element",
-            "selector": "link:nth-of-type(1)",
-            "tag": "link",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 2,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n    ",
-            "length": 5,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 3,
-            "children": []
-          },
-          {
-            "nodeType": "element",
-            "selector": "link:nth-of-type(2)",
-            "tag": "link",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 4,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n    ",
-            "length": 5,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 5,
-            "children": []
-          },
-          {
-            "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-            "selector": "meta",
-            "tag": "meta",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 6,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n",
-            "length": 1,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 7,
-            "children": []
-          },
-          {
-            "nodeType": "element",
-            "selector": "script",
-            "tag": "script",
-========
             "selector": "title",
             "tag": "title",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
             "id": null,
             "classes": [],
             "layout": {
@@ -522,21 +200,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-            "elementIndex": 8,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "\nfunction doTest(){\n var t1 =document.getElementById('target');\n t1.style.borderStyle=\"solid\";\n}\n",
-                "length": 97,
-========
             "elementIndex": 1,
             "children": [
               {
                 "nodeType": "text",
                 "text": "CSS Test: Margin Collapsing: clear with no floats",
                 "length": 49,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -553,10 +222,6 @@
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-            "text": "\n",
-            "length": 1,
-========
             "text": "\n  ",
             "length": 3,
             "isWhitespaceOnly": true,
@@ -636,7 +301,6 @@
             "nodeType": "text",
             "text": "\n  ",
             "length": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
             "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
@@ -646,7 +310,7 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-            "nodeIndex": 9,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -861,21 +525,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-            "elementIndex": 10,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "\ntd { border: 10px green outset;}\ntable {margin: 30px}\n",
-                "length": 55,
-========
             "elementIndex": 9,
             "children": [
               {
                 "nodeType": "text",
                 "text": "\n   table, td { padding: 0; border-spacing: 0; }\n   .comparator { border-spacing: 1em; }\n   .test, .control { border: solid; background: red; }\n\n   .test .container { display: block; background: yellow; margin: 0; width: 8em; }\n   .test .block { display: block; border-top: 1em solid lime;  margin: 0 0 0 0; }\n   .test .clear { display: block; border-top: 1em solid green; margin: 1em 0 0 0; clear: right; }\n\n   .control .lime { background: lime; height: 1em; width: 8em; }\n   .control .yellow { background: yellow; height: 1em; width: 8em; }\n   .control .green { background: green; height: 1em; width: 8em; }\n\n  ",
                 "length": 613,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -903,11 +558,7 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-            "nodeIndex": 11,
-========
             "nodeIndex": 10,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
             "children": []
           }
         ]
@@ -920,15 +571,6 @@
         "classes": [],
         "layout": {
           "x": 8,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-          "y": 30,
-          "width": 1184,
-          "height": 100,
-          "contentWidth": 1184,
-          "contentHeight": 100,
-          "scrollWidth": 1184,
-          "scrollHeight": 100
-========
           "y": 16,
           "width": 1184,
           "height": 190,
@@ -936,7 +578,6 @@
           "contentHeight": 190,
           "scrollWidth": 1184,
           "scrollHeight": 190
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
         },
         "computed": {
           "display": "block",
@@ -989,16 +630,6 @@
             "id": null,
             "classes": [],
             "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-              "x": 38,
-              "y": 30,
-              "width": 115.33,
-              "height": 100,
-              "contentWidth": 115,
-              "contentHeight": 100,
-              "scrollWidth": 110,
-              "scrollHeight": 95
-========
               "x": 8,
               "y": 16,
               "width": 1184,
@@ -1007,22 +638,14 @@
               "contentHeight": 18,
               "scrollWidth": 1184,
               "scrollHeight": 18
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
             },
             "computed": {
               "display": "block",
               "position": "static",
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-              "marginTop": 30,
-              "marginRight": 30,
-              "marginBottom": 30,
-              "marginLeft": 30,
-========
               "marginTop": 16,
               "marginRight": 0,
               "marginBottom": 16,
               "marginLeft": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
               "paddingTop": 0,
               "paddingRight": 0,
               "paddingBottom": 0,
@@ -1159,16 +782,6 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                  "x": 43,
-                  "y": 35,
-                  "width": 105.33,
-                  "height": 90,
-                  "contentWidth": 105,
-                  "contentHeight": 90,
-                  "scrollWidth": 105,
-                  "scrollHeight": 90
-========
                   "x": 24,
                   "y": 66,
                   "width": 284,
@@ -1177,7 +790,6 @@
                   "contentHeight": 124,
                   "scrollWidth": 284,
                   "scrollHeight": 124
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                 },
                 "computed": {
                   "display": "table-row-group",
@@ -1230,16 +842,6 @@
                     "id": null,
                     "classes": [],
                     "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                      "x": 43,
-                      "y": 35,
-                      "width": 105.33,
-                      "height": 30,
-                      "contentWidth": 105,
-                      "contentHeight": 30,
-                      "scrollWidth": 105,
-                      "scrollHeight": 90
-========
                       "x": 24,
                       "y": 66,
                       "width": 284,
@@ -1248,7 +850,6 @@
                       "contentHeight": 54,
                       "scrollWidth": 284,
                       "scrollHeight": 54
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                     },
                     "computed": {
                       "display": "table-row",
@@ -1303,16 +904,6 @@
                           "test"
                         ],
                         "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                          "x": 43,
-                          "y": 35,
-                          "width": 35.11,
-                          "height": 30,
-                          "contentWidth": 25,
-                          "contentHeight": 20,
-                          "scrollWidth": 25,
-                          "scrollHeight": 20
-========
                           "x": 24,
                           "y": 66,
                           "width": 134,
@@ -1321,7 +912,6 @@
                           "contentHeight": 48,
                           "scrollWidth": 128,
                           "scrollHeight": 48
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                         },
                         "computed": {
                           "display": "table-cell",
@@ -1330,106 +920,6 @@
                           "marginRight": 0,
                           "marginBottom": 0,
                           "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-                          "flexDirection": "row",
-                          "flexWrap": "nowrap",
-                          "justifyContent": "normal",
-                          "alignItems": "normal",
-                          "alignContent": "normal",
-                          "flexGrow": 0,
-                          "flexShrink": 1,
-                          "flexBasis": "auto",
-                          "alignSelf": "auto",
-                          "order": 0,
-                          "gap": "normal",
-                          "fontSize": 16,
-                          "lineHeight": "normal",
-                          "fontFamily": "Times",
-                          "fontWeight": "400",
-                          "textAlign": "start",
-                          "verticalAlign": "middle",
-                          "top": "auto",
-                          "right": "auto",
-                          "bottom": "auto",
-                          "left": "auto",
-                          "zIndex": "auto",
-                          "overflow": "visible",
-                          "overflowX": "visible",
-                          "overflowY": "visible"
-                        },
-                        "depth": 5,
-                        "elementIndex": 0,
-                        "children": [
-                          {
-                            "nodeType": "text",
-                            "text": "c11",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 49,
-                                  "y": 41,
-                                  "width": 22.52,
-                                  "height": 18,
-                                  "right": 71.52,
-                                  "bottom": 59,
-                                  "text": "c11",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-                            "children": []
-                          }
-                        ]
-                      },
-                      {
-                        "nodeType": "element",
-                        "selector": "#target",
-                        "tag": "td",
-                        "id": "target",
-                        "classes": [],
-                        "layout": {
-                          "x": 78.11,
-                          "y": 35,
-                          "width": 35.11,
-                          "height": 90,
-                          "contentWidth": 25,
-                          "contentHeight": 80,
-                          "scrollWidth": 25,
-                          "scrollHeight": 80
-                        },
-                        "computed": {
-                          "display": "table-cell",
-                          "position": "static",
-                          "marginTop": 0,
-                          "marginRight": 0,
-                          "marginBottom": 0,
-                          "marginLeft": 0,
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-========
                           "paddingTop": 0,
                           "paddingRight": 0,
                           "paddingBottom": 0,
@@ -1438,7 +928,6 @@
                           "borderRightWidth": 3,
                           "borderBottomWidth": 3,
                           "borderLeftWidth": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                           "flexDirection": "row",
                           "flexWrap": "nowrap",
                           "justifyContent": "normal",
@@ -1469,123 +958,6 @@
                         "elementIndex": 1,
                         "children": [
                           {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                            "nodeType": "text",
-                            "text": "c12",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 84.11,
-                                  "y": 71,
-                                  "width": 23.11,
-                                  "height": 18,
-                                  "right": 107.22,
-                                  "bottom": 89,
-                                  "text": "c12",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-                            "children": []
-                          }
-                        ]
-                      },
-                      {
-                        "nodeType": "element",
-                        "selector": "td:nth-of-type(3)",
-                        "tag": "td",
-                        "id": null,
-                        "classes": [],
-                        "layout": {
-                          "x": 113.22,
-                          "y": 35,
-                          "width": 35.11,
-                          "height": 30,
-                          "contentWidth": 25,
-                          "contentHeight": 20,
-                          "scrollWidth": 25,
-                          "scrollHeight": 20
-                        },
-                        "computed": {
-                          "display": "table-cell",
-                          "position": "static",
-                          "marginTop": 0,
-                          "marginRight": 0,
-                          "marginBottom": 0,
-                          "marginLeft": 0,
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-                          "flexDirection": "row",
-                          "flexWrap": "nowrap",
-                          "justifyContent": "normal",
-                          "alignItems": "normal",
-                          "alignContent": "normal",
-                          "flexGrow": 0,
-                          "flexShrink": 1,
-                          "flexBasis": "auto",
-                          "alignSelf": "auto",
-                          "order": 0,
-                          "gap": "normal",
-                          "fontSize": 16,
-                          "lineHeight": "normal",
-                          "fontFamily": "Times",
-                          "fontWeight": "400",
-                          "textAlign": "start",
-                          "verticalAlign": "middle",
-                          "top": "auto",
-                          "right": "auto",
-                          "bottom": "auto",
-                          "left": "auto",
-                          "zIndex": "auto",
-                          "overflow": "visible",
-                          "overflowX": "visible",
-                          "overflowY": "visible"
-                        },
-                        "depth": 5,
-                        "elementIndex": 2,
-                        "children": [
-                          {
-                            "nodeType": "text",
-                            "text": "c13",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 119.22,
-                                  "y": 41,
-                                  "width": 23.11,
-                                  "height": 18,
-                                  "right": 142.33,
-                                  "bottom": 59,
-                                  "text": "c13",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-========
                             "nodeType": "element",
                             "selector": "div.container",
                             "tag": "div",
@@ -2026,7 +1398,6 @@
                             },
                             "depth": 6,
                             "elementIndex": 5,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                             "children": []
                           }
                         ]
@@ -2040,16 +1411,6 @@
                     "id": null,
                     "classes": [],
                     "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                      "x": 43,
-                      "y": 65,
-                      "width": 105.33,
-                      "height": 30,
-                      "contentWidth": 105,
-                      "contentHeight": 30,
-                      "scrollWidth": 105,
-                      "scrollHeight": 30
-========
                       "x": 24,
                       "y": 136,
                       "width": 284,
@@ -2058,7 +1419,6 @@
                       "contentHeight": 54,
                       "scrollWidth": 284,
                       "scrollHeight": 54
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                     },
                     "computed": {
                       "display": "table-row",
@@ -2113,16 +1473,6 @@
                           "control"
                         ],
                         "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                          "x": 43,
-                          "y": 65,
-                          "width": 35.11,
-                          "height": 30,
-                          "contentWidth": 25,
-                          "contentHeight": 20,
-                          "scrollWidth": 25,
-                          "scrollHeight": 20
-========
                           "x": 24,
                           "y": 136,
                           "width": 134,
@@ -2131,7 +1481,6 @@
                           "contentHeight": 48,
                           "scrollWidth": 128,
                           "scrollHeight": 48
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                         },
                         "computed": {
                           "display": "table-cell",
@@ -2140,106 +1489,6 @@
                           "marginRight": 0,
                           "marginBottom": 0,
                           "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-                          "flexDirection": "row",
-                          "flexWrap": "nowrap",
-                          "justifyContent": "normal",
-                          "alignItems": "normal",
-                          "alignContent": "normal",
-                          "flexGrow": 0,
-                          "flexShrink": 1,
-                          "flexBasis": "auto",
-                          "alignSelf": "auto",
-                          "order": 0,
-                          "gap": "normal",
-                          "fontSize": 16,
-                          "lineHeight": "normal",
-                          "fontFamily": "Times",
-                          "fontWeight": "400",
-                          "textAlign": "start",
-                          "verticalAlign": "middle",
-                          "top": "auto",
-                          "right": "auto",
-                          "bottom": "auto",
-                          "left": "auto",
-                          "zIndex": "auto",
-                          "overflow": "visible",
-                          "overflowX": "visible",
-                          "overflowY": "visible"
-                        },
-                        "depth": 5,
-                        "elementIndex": 0,
-                        "children": [
-                          {
-                            "nodeType": "text",
-                            "text": "c21",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 49,
-                                  "y": 71,
-                                  "width": 23.11,
-                                  "height": 18,
-                                  "right": 72.11,
-                                  "bottom": 89,
-                                  "text": "c21",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-                            "children": []
-                          }
-                        ]
-                      },
-                      {
-                        "nodeType": "element",
-                        "selector": "td:nth-of-type(2)",
-                        "tag": "td",
-                        "id": null,
-                        "classes": [],
-                        "layout": {
-                          "x": 113.22,
-                          "y": 65,
-                          "width": 35.11,
-                          "height": 30,
-                          "contentWidth": 25,
-                          "contentHeight": 20,
-                          "scrollWidth": 25,
-                          "scrollHeight": 20
-                        },
-                        "computed": {
-                          "display": "table-cell",
-                          "position": "static",
-                          "marginTop": 0,
-                          "marginRight": 0,
-                          "marginBottom": 0,
-                          "marginLeft": 0,
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-========
                           "paddingTop": 0,
                           "paddingRight": 0,
                           "paddingBottom": 0,
@@ -2248,7 +1497,6 @@
                           "borderRightWidth": 3,
                           "borderBottomWidth": 3,
                           "borderLeftWidth": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                           "flexDirection": "row",
                           "flexWrap": "nowrap",
                           "justifyContent": "normal",
@@ -2279,185 +1527,6 @@
                         "elementIndex": 1,
                         "children": [
                           {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                            "nodeType": "text",
-                            "text": "c23",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 119.22,
-                                  "y": 71,
-                                  "width": 23.11,
-                                  "height": 18,
-                                  "right": 142.33,
-                                  "bottom": 89,
-                                  "text": "c23",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-                            "children": []
-                          }
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "tr:nth-of-type(3)",
-                    "tag": "tr",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 43,
-                      "y": 95,
-                      "width": 105.33,
-                      "height": 30,
-                      "contentWidth": 105,
-                      "contentHeight": 30,
-                      "scrollWidth": 105,
-                      "scrollHeight": 30
-                    },
-                    "computed": {
-                      "display": "table-row",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Times",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "middle",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 4,
-                    "children": [
-                      {
-                        "nodeType": "element",
-                        "selector": "td:nth-of-type(1)",
-                        "tag": "td",
-                        "id": null,
-                        "classes": [],
-                        "layout": {
-                          "x": 43,
-                          "y": 95,
-                          "width": 35.11,
-                          "height": 30,
-                          "contentWidth": 25,
-                          "contentHeight": 20,
-                          "scrollWidth": 25,
-                          "scrollHeight": 20
-                        },
-                        "computed": {
-                          "display": "table-cell",
-                          "position": "static",
-                          "marginTop": 0,
-                          "marginRight": 0,
-                          "marginBottom": 0,
-                          "marginLeft": 0,
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-                          "flexDirection": "row",
-                          "flexWrap": "nowrap",
-                          "justifyContent": "normal",
-                          "alignItems": "normal",
-                          "alignContent": "normal",
-                          "flexGrow": 0,
-                          "flexShrink": 1,
-                          "flexBasis": "auto",
-                          "alignSelf": "auto",
-                          "order": 0,
-                          "gap": "normal",
-                          "fontSize": 16,
-                          "lineHeight": "normal",
-                          "fontFamily": "Times",
-                          "fontWeight": "400",
-                          "textAlign": "start",
-                          "verticalAlign": "middle",
-                          "top": "auto",
-                          "right": "auto",
-                          "bottom": "auto",
-                          "left": "auto",
-                          "zIndex": "auto",
-                          "overflow": "visible",
-                          "overflowX": "visible",
-                          "overflowY": "visible"
-                        },
-                        "depth": 5,
-                        "elementIndex": 0,
-                        "children": [
-                          {
-                            "nodeType": "text",
-                            "text": "c31",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 49,
-                                  "y": 101,
-                                  "width": 23.11,
-                                  "height": 18,
-                                  "right": 72.11,
-                                  "bottom": 119,
-                                  "text": "c31",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-========
                             "nodeType": "element",
                             "selector": "div.lime:nth-of-type(1)",
                             "tag": "div",
@@ -2644,7 +1713,6 @@
                             },
                             "depth": 6,
                             "elementIndex": 5,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                             "children": []
                           }
                         ]
@@ -2656,16 +1724,6 @@
                         "id": null,
                         "classes": [],
                         "layout": {
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                          "x": 113.22,
-                          "y": 95,
-                          "width": 35.11,
-                          "height": 30,
-                          "contentWidth": 25,
-                          "contentHeight": 20,
-                          "scrollWidth": 25,
-                          "scrollHeight": 20
-========
                           "x": 174,
                           "y": 136,
                           "width": 134,
@@ -2674,7 +1732,6 @@
                           "contentHeight": 54,
                           "scrollWidth": 134,
                           "scrollHeight": 54
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                         },
                         "computed": {
                           "display": "table-cell",
@@ -2683,16 +1740,6 @@
                           "marginRight": 0,
                           "marginBottom": 0,
                           "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                          "paddingTop": 1,
-                          "paddingRight": 1,
-                          "paddingBottom": 1,
-                          "paddingLeft": 1,
-                          "borderTopWidth": 10,
-                          "borderRightWidth": 10,
-                          "borderBottomWidth": 10,
-                          "borderLeftWidth": 10,
-========
                           "paddingTop": 0,
                           "paddingRight": 0,
                           "paddingBottom": 0,
@@ -2701,7 +1748,6 @@
                           "borderRightWidth": 0,
                           "borderBottomWidth": 0,
                           "borderLeftWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                           "flexDirection": "row",
                           "flexWrap": "nowrap",
                           "justifyContent": "normal",
@@ -2729,42 +1775,8 @@
                           "overflowY": "visible"
                         },
                         "depth": 5,
-<<<<<<<< HEAD:test/layout/reference/border-collapse-dynamic-cell-005.json
-                        "elementIndex": 1,
-                        "children": [
-                          {
-                            "nodeType": "text",
-                            "text": "c33",
-                            "length": 3,
-                            "isWhitespaceOnly": false,
-                            "layout": {
-                              "rects": [
-                                {
-                                  "x": 119.22,
-                                  "y": 101,
-                                  "width": 23.11,
-                                  "height": 18,
-                                  "right": 142.33,
-                                  "bottom": 119,
-                                  "text": "c33",
-                                  "startIndex": 0,
-                                  "endIndex": 3
-                                }
-                              ],
-                              "hasLayout": true,
-                              "parentVisible": true,
-                              "parentDisplay": "table-cell",
-                              "parentVisibility": "visible"
-                            },
-                            "depth": 6,
-                            "nodeIndex": 0,
-                            "children": []
-                          }
-                        ]
-========
                         "elementIndex": 3,
                         "children": []
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/margin-collapse-134.json
                       }
                     ]
                   }

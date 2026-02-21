@@ -770,13 +770,13 @@
                 ],
                 "layout": {
                   "x": 8,
-                  "y": 8,
+                  "y": 22,
                   "width": 0,
                   "height": 0,
                   "contentWidth": 0,
                   "contentHeight": 0,
-                  "scrollWidth": 4,
-                  "scrollHeight": 18
+                  "scrollWidth": 0,
+                  "scrollHeight": 0
                 },
                 "computed": {
                   "display": "inline",

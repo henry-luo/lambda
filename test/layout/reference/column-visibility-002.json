@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-  "test_file": "issue_flex_header_height_001.html",
-========
   "test_file": "column-visibility-002.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -20,11 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-      "height": 240,
-========
       "height": 94,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -136,13 +128,8 @@
         "children": [
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
             "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
             "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
@@ -157,86 +144,6 @@
           },
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "selector": "meta",
-            "tag": "meta",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 1,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n  ",
-            "length": 3,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 2,
-            "children": []
-          },
-          {
-            "nodeType": "element",
-========
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -293,21 +200,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "elementIndex": 3,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "Issue: Flex Header Height with Centered Items",
-                "length": 45,
-========
             "elementIndex": 1,
             "children": [
               {
                 "nodeType": "text",
                 "text": "CSS Test: Column group visibility property",
                 "length": 42,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -324,10 +222,6 @@
           },
           {
             "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "text": "\n  ",
-            "length": 3,
-========
             "text": "\n        ",
             "length": 9,
             "isWhitespaceOnly": true,
@@ -484,7 +378,6 @@
             "nodeType": "text",
             "text": "\n        ",
             "length": 9,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
             "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
@@ -494,7 +387,7 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-            "nodeIndex": 4,
+            "nodeIndex": 6,
             "children": []
           },
           {
@@ -709,21 +602,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "elementIndex": 5,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 16px; }\n\n    /* Test 1: Header with padding and centered items */\n    .header1 {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      background: #333;\n      color: white;\n      padding: 1rem 2rem;\n    }\n\n    .header1 h1 {\n      font-size: 1.5rem;\n    }\n\n    .header1 nav {\n      display: flex;\n      gap: 1.5rem;\n    }\n\n    /* Test 2: Header with min-height */\n    .header2 {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      background: #4a90d9;\n      color: white;\n      padding: 0 2rem;\n      min-height: 60px;\n      margin-top: 20px;\n    }\n\n    /* Test 3: Header with explicit height */\n    .header3 {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      background: #66bb6a;\n      color: white;\n      padding: 0 2rem;\n      height: 80px;\n      margin-top: 20px;\n    }\n  ",
-                "length": 1008,
-========
             "elementIndex": 11,
             "children": [
               {
                 "nodeType": "text",
                 "text": "\n           #table\n           {\n               display: table;\n           }\n           .cg1, .cg2\n           {\n               display: table-column-group;\n           }\n           .cg2\n           {\n               visibility: collapse;\n           }\n           .col\n           {\n               display: table-column;\n           }\n           .tr\n           {\n               display: table-row;\n           }\n           .td1, .td2\n           {\n               display: table-cell;\n           }\n           .td2\n           {\n               background: red;\n           }\n        ",
                 "length": 569,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -751,11 +635,7 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "nodeIndex": 6,
-========
             "nodeIndex": 12,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
             "children": []
           }
         ]
@@ -767,16 +647,6 @@
         "id": null,
         "classes": [],
         "layout": {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-          "x": 0,
-          "y": 0,
-          "width": 1200,
-          "height": 240,
-          "contentWidth": 1200,
-          "contentHeight": 240,
-          "scrollWidth": 1200,
-          "scrollHeight": 240
-========
           "x": 8,
           "y": 16,
           "width": 1184,
@@ -785,7 +655,6 @@
           "contentHeight": 70,
           "scrollWidth": 1184,
           "scrollHeight": 70
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
         },
         "computed": {
           "display": "block",
@@ -833,23 +702,6 @@
         "children": [
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "selector": "header.header1:nth-of-type(1)",
-            "tag": "header",
-            "id": null,
-            "classes": [
-              "header1"
-            ],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 1200,
-              "height": 60,
-              "contentWidth": 1200,
-              "contentHeight": 60,
-              "scrollWidth": 1200,
-              "scrollHeight": 60
-========
             "selector": "p",
             "tag": "p",
             "id": null,
@@ -863,7 +715,6 @@
               "contentHeight": 18,
               "scrollWidth": 1184,
               "scrollHeight": 18
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
             },
             "computed": {
               "display": "block",
@@ -872,25 +723,18 @@
               "marginRight": 0,
               "marginBottom": 16,
               "marginLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-              "paddingTop": 16,
-              "paddingRight": 32,
-              "paddingBottom": 16,
-              "paddingLeft": 32,
-========
               "paddingTop": 0,
               "paddingRight": 0,
               "paddingBottom": 0,
               "paddingLeft": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
               "borderTopWidth": 0,
               "borderRightWidth": 0,
               "borderBottomWidth": 0,
               "borderLeftWidth": 0,
               "flexDirection": "row",
               "flexWrap": "nowrap",
-              "justifyContent": "space-between",
-              "alignItems": "center",
+              "justifyContent": "normal",
+              "alignItems": "normal",
               "alignContent": "normal",
               "flexGrow": 0,
               "flexShrink": 1,
@@ -917,428 +761,6 @@
             "elementIndex": 1,
             "children": [
               {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                "nodeType": "element",
-                "selector": "h1",
-                "tag": "h1",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 32,
-                  "y": 16,
-                  "width": 125.36,
-                  "height": 28,
-                  "contentWidth": 125,
-                  "contentHeight": 28,
-                  "scrollWidth": 125,
-                  "scrollHeight": 28
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 0,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "normal",
-                  "fontSize": 24,
-                  "lineHeight": "normal",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "700",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 1,
-                "children": [
-                  {
-                    "nodeType": "text",
-                    "text": "Dashboard",
-                    "length": 9,
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 32,
-                          "y": 16,
-                          "width": 125.36,
-                          "height": 27,
-                          "right": 157.36,
-                          "bottom": 43,
-                          "text": "Dashboard",
-                          "startIndex": 0,
-                          "endIndex": 9
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 0,
-                    "children": []
-                  }
-                ]
-              },
-              {
-                "nodeType": "element",
-                "selector": "nav",
-                "tag": "nav",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 931.47,
-                  "y": 21,
-                  "width": 236.53,
-                  "height": 18,
-                  "contentWidth": 237,
-                  "contentHeight": 18,
-                  "scrollWidth": 237,
-                  "scrollHeight": 18
-                },
-                "computed": {
-                  "display": "flex",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 0,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "24px",
-                  "fontSize": 16,
-                  "lineHeight": "normal",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 3,
-                "children": [
-                  {
-                    "nodeType": "element",
-                    "selector": "a:nth-of-type(1)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 931.47,
-                      "y": 21,
-                      "width": 66.69,
-                      "height": 18,
-                      "contentWidth": 67,
-                      "contentHeight": 18,
-                      "scrollWidth": 67,
-                      "scrollHeight": 18
-                    },
-                    "computed": {
-                      "display": "block",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Arial, sans-serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 1,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "Overview",
-                        "length": 8,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 931.47,
-                              "y": 21,
-                              "width": 66.69,
-                              "height": 17,
-                              "right": 998.16,
-                              "bottom": 38,
-                              "text": "Overview",
-                              "startIndex": 0,
-                              "endIndex": 8
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "block",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "a:nth-of-type(2)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 1022.16,
-                      "y": 21,
-                      "width": 64.03,
-                      "height": 18,
-                      "contentWidth": 64,
-                      "contentHeight": 18,
-                      "scrollWidth": 64,
-                      "scrollHeight": 18
-                    },
-                    "computed": {
-                      "display": "block",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Arial, sans-serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 3,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "Analytics",
-                        "length": 9,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 1022.16,
-                              "y": 21,
-                              "width": 64.03,
-                              "height": 17,
-                              "right": 1086.19,
-                              "bottom": 38,
-                              "text": "Analytics",
-                              "startIndex": 0,
-                              "endIndex": 9
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "block",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "a:nth-of-type(3)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 1110.19,
-                      "y": 21,
-                      "width": 57.81,
-                      "height": 18,
-                      "contentWidth": 58,
-                      "contentHeight": 18,
-                      "scrollWidth": 58,
-                      "scrollHeight": 18
-                    },
-                    "computed": {
-                      "display": "block",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Arial, sans-serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 5,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "Settings",
-                        "length": 8,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 1110.19,
-                              "y": 21,
-                              "width": 57.81,
-                              "height": 17,
-                              "right": 1168,
-                              "bottom": 38,
-                              "text": "Settings",
-                              "startIndex": 0,
-                              "endIndex": 8
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "block",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  }
-                ]
-========
                 "nodeType": "text",
                 "text": "Test passes if there is no red visible on the page.",
                 "length": 51,
@@ -1365,32 +787,11 @@
                 "depth": 3,
                 "nodeIndex": 0,
                 "children": []
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
               }
             ]
           },
           {
             "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-            "selector": "header.header2:nth-of-type(2)",
-            "tag": "header",
-            "id": null,
-            "classes": [
-              "header2"
-            ],
-            "layout": {
-              "x": 0,
-              "y": 80,
-              "width": 1200,
-              "height": 60,
-              "contentWidth": 1200,
-              "contentHeight": 60,
-              "scrollWidth": 1200,
-              "scrollHeight": 60
-            },
-            "computed": {
-              "display": "flex",
-========
             "selector": "#table",
             "tag": "div",
             "id": "table",
@@ -1407,445 +808,23 @@
             },
             "computed": {
               "display": "table",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
               "position": "static",
-              "marginTop": 20,
+              "marginTop": 0,
               "marginRight": 0,
               "marginBottom": 0,
               "marginLeft": 0,
               "paddingTop": 0,
-              "paddingRight": 32,
+              "paddingRight": 0,
               "paddingBottom": 0,
-              "paddingLeft": 32,
+              "paddingLeft": 0,
               "borderTopWidth": 0,
               "borderRightWidth": 0,
               "borderBottomWidth": 0,
               "borderLeftWidth": 0,
               "flexDirection": "row",
               "flexWrap": "nowrap",
-              "justifyContent": "space-between",
-              "alignItems": "center",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 3,
-            "children": [
-              {
-                "nodeType": "element",
-                "selector": "h1",
-                "tag": "h1",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 32,
-                  "y": 91.5,
-                  "width": 333.92,
-                  "height": 37,
-                  "contentWidth": 334,
-                  "contentHeight": 37,
-                  "scrollWidth": 334,
-                  "scrollHeight": 37
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 0,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "normal",
-                  "fontSize": 32,
-                  "lineHeight": "normal",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "700",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 1,
-                "children": [
-                  {
-                    "nodeType": "text",
-                    "text": "With min-height: 60px",
-                    "length": 21,
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 32,
-                          "y": 91.5,
-                          "width": 333.92,
-                          "height": 36,
-                          "right": 365.92,
-                          "bottom": 127.5,
-                          "text": "With min-height: 60px",
-                          "startIndex": 0,
-                          "endIndex": 21
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 0,
-                    "children": []
-                  }
-                ]
-              },
-              {
-                "nodeType": "element",
-                "selector": "nav",
-                "tag": "nav",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 1078.14,
-                  "y": 101,
-                  "width": 89.86,
-                  "height": 18,
-                  "contentWidth": 90,
-                  "contentHeight": 18,
-                  "scrollWidth": 90,
-                  "scrollHeight": 18
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 0,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "normal",
-                  "fontSize": 16,
-                  "lineHeight": "normal",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 3,
-                "children": [
-                  {
-                    "nodeType": "element",
-                    "selector": "a:nth-of-type(1)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 1078.14,
-                      "y": 101,
-                      "width": 42.7,
-                      "height": 17,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Arial, sans-serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 1,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "Link 1",
-                        "length": 6,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 1078.14,
-                              "y": 101,
-                              "width": 42.7,
-                              "height": 17,
-                              "right": 1120.84,
-                              "bottom": 118,
-                              "text": "Link 1",
-                              "startIndex": 0,
-                              "endIndex": 6
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  },
-                  {
-                    "nodeType": "text",
-                    "text": "\n      ",
-                    "length": 7,
-                    "isWhitespaceOnly": true,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 1120.84,
-                          "y": 101,
-                          "width": 4.45,
-                          "height": 17,
-                          "right": 1125.3,
-                          "bottom": 118
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 2,
-                    "children": []
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "a:nth-of-type(2)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 1125.3,
-                      "y": 101,
-                      "width": 42.7,
-                      "height": 17,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-                      "position": "static",
-                      "marginTop": 0,
-                      "marginRight": 0,
-                      "marginBottom": 0,
-                      "marginLeft": 0,
-                      "paddingTop": 0,
-                      "paddingRight": 0,
-                      "paddingBottom": 0,
-                      "paddingLeft": 0,
-                      "borderTopWidth": 0,
-                      "borderRightWidth": 0,
-                      "borderBottomWidth": 0,
-                      "borderLeftWidth": 0,
-                      "flexDirection": "row",
-                      "flexWrap": "nowrap",
-                      "justifyContent": "normal",
-                      "alignItems": "normal",
-                      "alignContent": "normal",
-                      "flexGrow": 0,
-                      "flexShrink": 1,
-                      "flexBasis": "auto",
-                      "alignSelf": "auto",
-                      "order": 0,
-                      "gap": "normal",
-                      "fontSize": 16,
-                      "lineHeight": "normal",
-                      "fontFamily": "Arial, sans-serif",
-                      "fontWeight": "400",
-                      "textAlign": "start",
-                      "verticalAlign": "baseline",
-                      "top": "auto",
-                      "right": "auto",
-                      "bottom": "auto",
-                      "left": "auto",
-                      "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
-                    },
-                    "depth": 4,
-                    "elementIndex": 3,
-                    "children": [
-                      {
-                        "nodeType": "text",
-                        "text": "Link 2",
-                        "length": 6,
-                        "isWhitespaceOnly": false,
-                        "layout": {
-                          "rects": [
-                            {
-                              "x": 1125.3,
-                              "y": 101,
-                              "width": 42.7,
-                              "height": 17,
-                              "right": 1168,
-                              "bottom": 118,
-                              "text": "Link 2",
-                              "startIndex": 0,
-                              "endIndex": 6
-                            }
-                          ],
-                          "hasLayout": true,
-                          "parentVisible": true,
-                          "parentDisplay": "inline",
-                          "parentVisibility": "visible"
-                        },
-                        "depth": 5,
-                        "nodeIndex": 0,
-                        "children": []
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "header.header3:nth-of-type(3)",
-            "tag": "header",
-            "id": null,
-            "classes": [
-              "header3"
-            ],
-            "layout": {
-              "x": 0,
-              "y": 160,
-              "width": 1200,
-              "height": 80,
-              "contentWidth": 1200,
-              "contentHeight": 80,
-              "scrollWidth": 1200,
-              "scrollHeight": 80
-            },
-            "computed": {
-              "display": "flex",
-              "position": "static",
-              "marginTop": 20,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 32,
-              "paddingBottom": 0,
-              "paddingLeft": 32,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "space-between",
-              "alignItems": "center",
+              "justifyContent": "normal",
+              "alignItems": "normal",
               "alignContent": "normal",
               "flexGrow": 0,
               "flexShrink": 1,
@@ -1873,24 +852,6 @@
             "children": [
               {
                 "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                "selector": "h1",
-                "tag": "h1",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 32,
-                  "y": 181.5,
-                  "width": 266.38,
-                  "height": 37,
-                  "contentWidth": 266,
-                  "contentHeight": 37,
-                  "scrollWidth": 266,
-                  "scrollHeight": 37
-                },
-                "computed": {
-                  "display": "block",
-========
                 "selector": "div.cg1:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -1909,7 +870,6 @@
                 },
                 "computed": {
                   "display": "table-column-group",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                   "position": "static",
                   "marginTop": 0,
                   "marginRight": 0,
@@ -1934,17 +894,10 @@
                   "alignSelf": "auto",
                   "order": 0,
                   "gap": "normal",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                  "fontSize": 32,
-                  "lineHeight": "normal",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "700",
-========
                   "fontSize": 16,
                   "lineHeight": "normal",
                   "fontFamily": "Times",
                   "fontWeight": "400",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                   "textAlign": "start",
                   "verticalAlign": "baseline",
                   "top": "auto",
@@ -1960,33 +913,6 @@
                 "elementIndex": 1,
                 "children": [
                   {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                    "nodeType": "text",
-                    "text": "With height: 80px",
-                    "length": 17,
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 32,
-                          "y": 181.5,
-                          "width": 266.38,
-                          "height": 36,
-                          "right": 298.38,
-                          "bottom": 217.5,
-                          "text": "With height: 80px",
-                          "startIndex": 0,
-                          "endIndex": 17
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 0,
-========
                     "nodeType": "element",
                     "selector": "div.col:nth-of-type(1)",
                     "tag": "div",
@@ -2110,31 +1036,12 @@
                     },
                     "depth": 4,
                     "elementIndex": 3,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                     "children": []
                   }
                 ]
               },
               {
                 "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                "selector": "nav",
-                "tag": "nav",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 1078.14,
-                  "y": 191,
-                  "width": 89.86,
-                  "height": 18,
-                  "contentWidth": 90,
-                  "contentHeight": 18,
-                  "scrollWidth": 90,
-                  "scrollHeight": 18
-                },
-                "computed": {
-                  "display": "block",
-========
                 "selector": "div.cg2:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -2153,7 +1060,6 @@
                 },
                 "computed": {
                   "display": "table-column-group",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                   "position": "static",
                   "marginTop": 0,
                   "marginRight": 0,
@@ -2180,11 +1086,7 @@
                   "gap": "normal",
                   "fontSize": 16,
                   "lineHeight": "normal",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                  "fontFamily": "Arial, sans-serif",
-========
                   "fontFamily": "Times",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                   "fontWeight": "400",
                   "textAlign": "start",
                   "verticalAlign": "baseline",
@@ -2202,24 +1104,6 @@
                 "children": [
                   {
                     "nodeType": "element",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                    "selector": "a:nth-of-type(1)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 1078.14,
-                      "y": 191,
-                      "width": 42.7,
-                      "height": 17,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-========
                     "selector": "div.col:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -2238,7 +1122,6 @@
                     },
                     "computed": {
                       "display": "table-column",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                       "position": "static",
                       "marginTop": 0,
                       "marginRight": 0,
@@ -2265,9 +1148,6 @@
                       "gap": "normal",
                       "fontSize": 16,
                       "lineHeight": "normal",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                      "fontFamily": "Arial, sans-serif",
-========
                       "fontFamily": "Times",
                       "fontWeight": "400",
                       "textAlign": "start",
@@ -2459,7 +1339,6 @@
                       "fontSize": 16,
                       "lineHeight": "normal",
                       "fontFamily": "Times",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                       "fontWeight": "400",
                       "textAlign": "start",
                       "verticalAlign": "baseline",
@@ -2477,28 +1356,12 @@
                     "children": [
                       {
                         "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                        "text": "Link 1",
-                        "length": 6,
-========
                         "text": "Filler Text",
                         "length": 11,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                         "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                              "x": 1078.14,
-                              "y": 191,
-                              "width": 42.7,
-                              "height": 17,
-                              "right": 1120.84,
-                              "bottom": 208,
-                              "text": "Link 1",
-                              "startIndex": 0,
-                              "endIndex": 6
-========
                               "x": 8,
                               "y": 50,
                               "width": 66.59,
@@ -2508,16 +1371,11 @@
                               "text": "Filler Text",
                               "startIndex": 0,
                               "endIndex": 11
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                             }
                           ],
                           "hasLayout": true,
                           "parentVisible": true,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                          "parentDisplay": "inline",
-========
                           "parentDisplay": "table-cell",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                           "parentVisibility": "visible"
                         },
                         "depth": 5,
@@ -2527,50 +1385,6 @@
                     ]
                   },
                   {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                    "nodeType": "text",
-                    "text": "\n      ",
-                    "length": 7,
-                    "isWhitespaceOnly": true,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 1120.84,
-                          "y": 191,
-                          "width": 4.45,
-                          "height": 17,
-                          "right": 1125.3,
-                          "bottom": 208
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 2,
-                    "children": []
-                  },
-                  {
-                    "nodeType": "element",
-                    "selector": "a:nth-of-type(2)",
-                    "tag": "a",
-                    "id": null,
-                    "classes": [],
-                    "layout": {
-                      "x": 1125.3,
-                      "y": 191,
-                      "width": 42.7,
-                      "height": 17,
-                      "contentWidth": 0,
-                      "contentHeight": 0,
-                      "scrollWidth": 0,
-                      "scrollHeight": 0
-                    },
-                    "computed": {
-                      "display": "inline",
-========
                     "nodeType": "element",
                     "selector": "div.td1:nth-of-type(2)",
                     "tag": "div",
@@ -2590,7 +1404,6 @@
                     },
                     "computed": {
                       "display": "table-cell",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                       "position": "static",
                       "marginTop": 0,
                       "marginRight": 0,
@@ -2617,11 +1430,7 @@
                       "gap": "normal",
                       "fontSize": 16,
                       "lineHeight": "normal",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                      "fontFamily": "Arial, sans-serif",
-========
                       "fontFamily": "Times",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                       "fontWeight": "400",
                       "textAlign": "start",
                       "verticalAlign": "baseline",
@@ -2639,28 +1448,12 @@
                     "children": [
                       {
                         "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                        "text": "Link 2",
-                        "length": 6,
-========
                         "text": "Filler Text",
                         "length": 11,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                         "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                              "x": 1125.3,
-                              "y": 191,
-                              "width": 42.7,
-                              "height": 17,
-                              "right": 1168,
-                              "bottom": 208,
-                              "text": "Link 2",
-                              "startIndex": 0,
-                              "endIndex": 6
-========
                               "x": 74.59,
                               "y": 50,
                               "width": 66.59,
@@ -2670,14 +1463,10 @@
                               "text": "Filler Text",
                               "startIndex": 0,
                               "endIndex": 11
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                             }
                           ],
                           "hasLayout": true,
                           "parentVisible": true,
-<<<<<<<< HEAD:test/layout/reference/issue_flex_header_height_001.json
-                          "parentDisplay": "inline",
-========
                           "parentDisplay": "table-cell",
                           "parentVisibility": "visible"
                         },
@@ -3351,7 +2140,6 @@
                           "hasLayout": true,
                           "parentVisible": true,
                           "parentDisplay": "table-cell",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/column-visibility-002.json
                           "parentVisibility": "visible"
                         },
                         "depth": 5,

@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/block-non-replaced-height-011.json
-  "test_file": "block-non-replaced-height-011.htm",
-========
   "test_file": "containing-block-026.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/containing-block-026.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -20,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 146,
+      "height": 154,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -208,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/block-non-replaced-height-011.json
-                "text": "CSS Test: Floated children are ignored for 'height' on block-level non-replaced elements in normal flow when 'overflow' computes to 'visible'",
-                "length": 141,
-========
                 "text": "CSS Test: Element position based on containing block",
                 "length": 52,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/containing-block-026.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -615,13 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/block-non-replaced-height-011.json
-                "text": "\n            #div1\n            {\n                background: red;\n            }\n            div div\n            {\n                float: left;\n                height: 1in;\n                width: 1in;\n            }\n        ",
-                "length": 222,
-========
                 "text": "\n            div\n            {\n                background: red;\n                height: 1in;\n                width: 1in;\n            }\n            div div\n            {\n                background: green;\n            }\n        ",
                 "length": 226,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/containing-block-026.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -664,9 +650,9 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 18,
+          "height": 130,
           "contentWidth": 1184,
-          "contentHeight": 18,
+          "contentHeight": 130,
           "scrollWidth": 1184,
           "scrollHeight": 130
         },
@@ -813,19 +799,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-<<<<<<<< HEAD:test/layout/reference/block-non-replaced-height-011.json
-              "width": 1184,
-              "height": 0,
-              "contentWidth": 1184,
-              "contentHeight": 0,
-              "scrollWidth": 1184,
-========
               "width": 96,
               "height": 96,
               "contentWidth": 96,
               "contentHeight": 96,
               "scrollWidth": 96,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/containing-block-026.json
               "scrollHeight": 96
             },
             "computed": {
