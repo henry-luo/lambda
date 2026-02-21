@@ -259,6 +259,9 @@ Key characteristics:
 - Skips C code generation entirely — more efficient compilation
 - **Inline boxing operations** (e.g., `emit_box_int()` generates range-check + tag MIR instructions instead of calling `i2it`)
 - **Does not yet support typed arrays** — always uses generic `Array*` for all array literals
+- **Closure support** with mutable capture via env struct write-back
+- **Proc support** with `in_proc` flag and multi-value return path
+- **Cross-module calls** for imported functions (resolves wrappers when needed)
 - Runtime functions imported via proto/import declarations resolved by the same `import_resolver`
 - Used with the `--mir` flag: `./lambda.exe --mir script.ls`
 
@@ -270,11 +273,15 @@ Key characteristics:
 | Compilation steps | 2 (C→MIR, MIR→native) | 1 (MIR→native) |
 | Typed arrays | ✅ `array_int()`, `array_int64()`, `array_float()` | ❌ Always generic `array()` |
 | Inline boxing | ❌ Calls runtime macros | ✅ Inline MIR instructions |
-| Closures | ✅ Supported | ❌ Not yet implemented |
-| Variadic params | ✅ Supported | ❌ Not yet implemented |
-| String patterns | ✅ Supported | ❌ Not yet implemented |
-| Module imports | ✅ Full support | ❌ Not yet implemented |
+| Closures | ✅ Supported | ✅ Supported (with mutable capture via env write-back) |
+| Variadic params | ✅ Supported | ✅ Supported |
+| String patterns | ✅ Supported | ✅ Supported |
+| Module imports | ✅ Full support | ✅ Supported (cross-module calls with wrapper resolution) |
+| Proc support | ✅ Supported | ✅ Supported (`in_proc` flag, multi-value return) |
+| Bitwise operators | ✅ Supported | ✅ Native int arg dispatch (band/bor/bxor/bnot/shl/shr) |
 | Debugging | Check `_transpiled*.c` | No intermediate output |
+
+**Test coverage**: 113/113 tests pass (90 functional + 26 procedural + 3 chart tests, minus 6 excluded). All tests produce identical output to the C2MIR path.
 
 ### System Function Dispatch
 
@@ -548,6 +555,108 @@ Module-level `let` variables in the MIR direct transpiler are stored as MIR BSS 
 - An `in_user_func` flag prevents function-internal `let` statements from creating BSS items
 - The `GlobalVarEntry` struct maps variable names to their BSS items and type metadata
 
+## MIR Direct Transpiler: Implementation Issues
+
+This section documents issues discovered while implementing the MIR direct transpiler and the solutions adopted. These represent fundamental tensions between Lambda's dynamic type system and MIR's static SSA-based IR.
+
+### Variable Type Widening and Register Type Immutability
+
+**Problem**: In MIR, a register's type is fixed at declaration (e.g., `MIR_T_I64` or `MIR_T_D`). When Lambda code widens a variable's type at runtime — such as an `int` variable being assigned a `float` value — the register type cannot change. This breaks MIR's type expectations:
+
+```lambda
+// proc example: variable starts as int, gets assigned float
+var n = 10        // MIR register: MIR_T_I64
+n = n / 2         // int division → assigns float, but register is still int64
+if n <= 1 ...     // MIR_LE on int64 register containing a double → crash
+```
+
+**Root cause**: `transpile_assign_stam` detects that the RHS is `FLOAT` but the LHS variable was declared as `INT`. MIR emits `MIR_LE` (integer less-or-equal) on what it thinks is an int64 register, but the value is actually a double bit pattern.
+
+**Solution**: Loop-depth-dependent handling:
+- **Inside loops** (`loop_depth > 0`): Truncate float→int via `MIR_D2I` to preserve register type consistency. Loops require stable register types across iterations.
+- **Outside loops**: Box the value to `ANY` type via `emit_box` + `MIR_MOV` to a new int64 register. This preserves float precision at the cost of boxing overhead. The variable's `MirVarEntry` is updated: `var->reg = boxed_reg; var->mir_type = MIR_T_I64; var->type_id = LMD_TYPE_ANY`.
+
+**Implication**: MIR register type immutability is a fundamental constraint. Any runtime type widening must either truncate (lossy) or box to ANY (indirect). This is the most architecturally impactful difference from the C transpiler, which uses C variables that can be freely reassigned.
+
+### Bitwise Function Argument Convention Mismatch
+
+**Problem**: Bitwise functions (`fn_band`, `fn_bor`, `fn_bnot`, `fn_shl`, `fn_shr`) expect native `int64_t` arguments, but the MIR transpiler's generic system function dispatch path passes boxed `Item` values via `transpile_box_item`. This produced incorrect results (operations on tagged pointers instead of raw integers).
+
+**Note**: `fn_bxor` worked by coincidence — XOR of two identically-tagged values cancels the tag bits, producing the correct result.
+
+**Solution**: Added dedicated handling in `transpile_call` for bitwise functions (before the generic sys func dispatch). These functions use `transpile_expr` (native values) instead of `transpile_box_item` (boxed Items). If an argument's effective type is `ANY` (e.g., a captured variable), it is unboxed via `emit_unbox` before the call.
+
+**Underlying issue**: The `SysFuncInfo` table does not distinguish between functions that take boxed Items and functions that take native C types. A `NativeArgConvention` field would eliminate this class of bugs (see Suggestion #8).
+
+### Closure Mutable Capture and Env Write-Back
+
+**Problem**: Closures capture variables via an env struct allocated at closure creation time. When a captured variable is mutated inside the closure body, the env struct must be updated — otherwise the mutation is lost when the closure returns.
+
+Three sub-issues were discovered:
+
+#### 1. Missing env write-back on assignment
+After `var x = new_value` inside a closure, the new value was stored only in the local MIR register. The env struct still held the old value, so subsequent calls to the closure (or other closures sharing the same env) saw stale data.
+
+**Solution**: Added `env_offset` field to `MirVarEntry` (`-1` = not captured, `≥0` = byte offset in env struct). After each assignment to a captured variable, the transpiler emits:
+```
+boxed = emit_box(mt, val, type_id)
+MIR_MOV  *(env_ptr + env_offset) = boxed
+```
+
+#### 2. Boxing mismatch: typed value → ANY variable
+Captured variables stored in the env struct are always boxed `Item` values (type `ANY`). When assigning a typed native value (e.g., an `int64_t`) to an ANY variable, the transpiler must box it first. Without this, a raw int64 was stored directly into an Item slot, producing a value with no type tag.
+
+**Solution**: Added an explicit `var_tid == ANY && val_tid != ANY` path in `transpile_assign_stam` that boxes the value before the MOV.
+
+#### 3. Register aliasing in let bindings
+`let tmp = a` shared the same MIR register between `tmp` and `a`. When `a` was subsequently mutated (`a = b`), `tmp` was also affected because both names pointed to the same register.
+
+**Solution**: `transpile_let_stam` now copies the value to a new register via `MIR_MOV` (int64) or `MIR_DMOV` (double), ensuring each variable has its own storage.
+
+### Variable Scoping in If Branches
+
+**Problem**: Variables declared inside `if`/`else` branches leaked into the outer scope, causing name collisions. For example:
+
+```lambda
+let y = 100
+if condition
+  let y = 200    // should shadow outer y, not overwrite it
+y                // should be 100, not 200
+```
+
+Without scope isolation, `let y = 200` in the then-branch overwrote the outer `y` entry in the variable table, and the outer scope saw 200 after the if-statement.
+
+**Solution**: `transpile_if` now calls `push_scope(mt)` before and `pop_scope(mt)` after each branch (both then and else). The scope stack uses a depth counter in the var table, and `pop_scope` removes entries added at the inner depth.
+
+### get_effective_type: Runtime vs AST Types
+
+**Problem**: The AST records the *declared* type of each expression node, but runtime operations can change a variable's effective type (e.g., type widening, captured variable boxing). Using the AST type for code generation decisions after mutations leads to incorrect boxing/unboxing.
+
+**Example**: A variable declared as `int` but widened to `ANY` after assignment still has `LMD_TYPE_INT` in its AST node. If the transpiler uses this to decide `emit_box_int`, it applies integer boxing to what is actually a boxed Item, producing garbage.
+
+**Solution**: `get_effective_type()` checks the variable's `MirVarEntry::type_id` for `IDENT` nodes, which reflects the *current* runtime type after any mutations. This is the authoritative type for code generation decisions:
+
+```cpp
+TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
+    TypeId tid = get_type_id(node->type);  // AST-declared type
+    if (node->node_type == AST_NODE_IDENT) {
+        MirVarEntry* v = find_var(mt, node->str_val);
+        if (v && v->type_id == LMD_TYPE_ANY) return LMD_TYPE_ANY;
+    }
+    return tid;
+}
+```
+
+### Proc Context Detection
+
+**Problem**: Procedural scripts use `pn main()` with imperative statements and mutable variables. The transpiler must handle `var` declarations, assignment statements, and multi-statement function bodies differently from pure functional expressions.
+
+**Solution**: Added `in_proc` flag to `MirTranspiler`. Detection is two-fold:
+1. `transpile_func_def` sets `in_proc = true` when processing a `pn` (procedure) definition
+2. `transpile_content` scans top-level nodes for `VAR_STAM` to detect implicit proc context
+
+In proc context, `transpile_content` returns only the last value expression (ignoring intermediate statement results), matching the C transpiler's behavior.
+
 ## Typed Array Construction
 
 ### Array Type Hierarchy
@@ -594,7 +703,7 @@ System functions dispatch on the runtime TypeId of arrays. Using generic `Array*
 
 ## Suggestions: Making the Runtime More Structured and Easier to Transpile
 
-Based on debugging INT64 boxing issues and reconciling behavior between the two transpiler paths, here are architectural improvements that would reduce friction for transpiler authors and eliminate classes of bugs.
+Based on implementing the MIR direct transpiler to feature-completeness (113/113 tests passing), debugging INT64 boxing issues, closure mutation, type widening, and reconciling behavior between the two transpiler paths, here are architectural improvements that would reduce friction for transpiler authors and eliminate classes of bugs.
 
 ### 1. Establish a Canonical Value Representation Contract
 
@@ -711,6 +820,62 @@ Item push_l_debug(int64_t val) {
 
 This catches double-boxing at the point of occurrence rather than downstream when wrong values appear.
 
+### 8. Native Argument Convention in SysFuncInfo
+
+**Problem**: Most system functions accept boxed `Item` arguments, but some (notably bitwise functions `fn_band`, `fn_bor`, `fn_bnot`, `fn_shl`, `fn_shr`) expect native `int64_t` arguments. The transpiler has no way to distinguish these two conventions from the `SysFuncInfo` table, requiring hardcoded special-case handling for each such function.
+
+**Discovered via**: Bitwise operators produced incorrect results because the generic dispatch path boxed arguments before passing them. `fn_bxor` worked by coincidence (XOR of identically-tagged values cancels the tag bits).
+
+**Suggestion**: Add a `c_arg_convention` field to `SysFuncInfo`:
+
+```cpp
+enum CArgConvention {
+    C_ARG_ITEM,     // arguments are boxed Items (default)
+    C_ARG_NATIVE,   // arguments are native C types (int64_t, double)
+};
+```
+
+The transpiler would consult this field instead of maintaining a list of special-cased function names. This is orthogonal to `c_ret_type` (Suggestion #2) — a function can take native args and return a boxed Item, or vice versa.
+
+### 9. First-Class Variable Type Tracking
+
+**Problem**: The MIR transpiler tracks variable types in `MirVarEntry::type_id`, but this is separate from the AST's type annotations. After mutations (type widening, closure capture boxing), the AST type becomes stale. The `get_effective_type()` function bridges this gap, but it only checks for `ANY` — it doesn't handle all possible type changes.
+
+**Discovered via**: After type widening from INT to ANY (outside loops), subsequent code still used the AST's INT type for boxing decisions, producing `emit_box_int` on an already-boxed Item.
+
+**Suggestion**: Make variable type tracking first-class with a unified `VarTypeState`:
+
+```cpp
+struct VarTypeState {
+    TypeId declared_type;  // original AST declaration
+    TypeId current_type;   // updated after each assignment
+    MIR_type_t mir_type;   // MIR register type (fixed after declaration)
+    bool is_captured;      // part of a closure env
+    int env_offset;        // byte offset in env struct (-1 if not captured)
+};
+```
+
+All type-dependent decisions (boxing, unboxing, comparison instruction selection) should consult `current_type` rather than the AST node's type. This eliminates the need for `get_effective_type()` as a separate concern and makes type tracking explicit.
+
+### 10. Document MIR Register Type Constraints
+
+**Problem**: MIR registers have a fixed type at declaration (`MIR_T_I64` or `MIR_T_D`). This is an inherent SSA constraint, but it has far-reaching consequences for Lambda's dynamic typing that are not obvious to developers working on the transpiler for the first time.
+
+**Key constraints**:
+- A variable declared as `int` (register type `MIR_T_I64`) cannot later hold a `double` natively
+- Loop variables must maintain stable register types across iterations (no widening inside loops)
+- Type widening outside loops requires boxing to `ANY` (the variable's register type changes to `MIR_T_I64` holding a boxed Item)
+- The C transpiler has no equivalent constraint — C variables can be freely reassigned
+
+**Suggestion**: Add a "MIR Register Type Constraints" reference section to this document (or as a comment block in `transpile-mir.cpp`) that explicitly lists these constraints. New code that assigns to variables should always check for type mismatches and route through the appropriate widening path. Consider adding a `WIDENING_ASSERT` macro:
+
+```cpp
+#define WIDENING_ASSERT(var, val_tid) \
+    do { if (var->type_id != LMD_TYPE_ANY && var->type_id != val_tid) \
+        log_error("mir: type widening %s: %d -> %d", var_name, var->type_id, val_tid); \
+    } while(0)
+```
+
 ### Summary of Priorities
 
 | Priority | Improvement | Impact | Effort |
@@ -718,7 +883,10 @@ This catches double-boxing at the point of occurrence rather than downstream whe
 | **High** | Typed arrays in MIR Direct (#3) | Eliminates behavioral divergence | Medium |
 | **High** | Data-driven C return type (#2) | Simplifies transpiler, prevents bugs | Medium |
 | **High** | Debug-mode boxing validation (#7) | Catches bugs early | Low |
+| **High** | Native arg convention (#8) | Eliminates bitwise/native arg bugs | Low |
+| **Medium** | First-class variable type tracking (#9) | Prevents stale type bugs | Medium |
 | **Medium** | Canonical value representation (#1) | Reduces INT64 confusion | High (refactor) |
 | **Medium** | Centralized type narrowing (#6) | Single source of truth | Medium |
+| **Medium** | Document register type constraints (#10) | Prevents widening bugs | Low |
 | **Low** | Idempotent boxing (#4) | Safety net | Low |
 | **Low** | Uniform function signatures (#5) | Cleaner API | High (many functions) |
