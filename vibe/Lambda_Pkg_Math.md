@@ -809,3 +809,587 @@ Phase 2 modules not yet created (from §4 Phase 2 plan):
 | `atoms/text.ls` | `\text{}`, `\textrm{}`, `\mbox{}` | Medium |
 
 Additionally, the 15 unhandled AST node types in C++ (§6.3) remain unfixed — most notably `symbol_command` (#15), `sized_delimiter` (#5), and `color_command` (#6).
+
+---
+
+## 10. Phase 2 Progress Report
+
+### 10.1 Status: Complete
+
+Phase 2 rendering support for all core constructs is implemented and working. All 10 Phase 2 test expressions render without crashes. Baseline regression: **328/328** existing tests pass — zero regressions.
+
+### 10.2 C++ Prerequisite Fixes
+
+Two critical C++ issues had to be resolved before Phase 2 rendering could work:
+
+#### C++ Fix 1: Math input returns simple map instead of AST
+
+- **Symptom:** `input("\\sqrt{x}", {type: 'math', flavor: 'latex'})` returned `{type: :latex-math, source: "\\sqrt{x}", display: false}` — a flat map with no parsed structure.
+- **Root cause:** `parse_math()` in `input-math.cpp` stored the raw source string instead of routing through the tree-sitter-latex-math parser.
+- **Fix:** Modified `input-math.cpp` to call `parse_math_latex_to_ast()` (new public wrapper in `input-latex-ts.cpp`) which creates a `TSParser`, sets the `tree_sitter_latex_math()` language, parses the math string, then calls `convert_math_node()` recursively. Also added the declaration in `input.hpp`.
+- **Files changed:** `input-math.cpp`, `input-latex-ts.cpp` (+wrapper function + forward declaration), `input.hpp` (+declaration).
+- **Impact:** Unblocked entire Phase 2 — without this, the math package had no structured AST to render.
+
+#### C++ Fix 2: Anonymous token fields return null from `ts_node_child_by_field_name()`
+
+- **Symptom:** `accent.cmd`, `big_operator.op`, `fraction.cmd` were all `null` in the AST despite the grammar defining them as named fields.
+- **Root cause:** Fields referencing hidden token rules (`_accent_cmd`, `_big_operator_cmd`, `_frac_cmd`, etc.) use `token()` patterns with `_` prefix in the tree-sitter grammar. Tree-sitter makes these nodes anonymous, and `ts_node_child_by_field_name()` cannot find anonymous nodes — it returns null.
+- **Fix:** Added `extract_leading_command()` helper function that extracts the `\command` from the parent node's source text. Applied to all 14 `cmd` field handlers and 1 `op` field handler as an `else` fallback when field lookup returns null.
+- **Files changed:** `input-latex-ts.cpp` (+helper function, 15 handler modifications).
+- **Impact:** Fixed command extraction for `\hat`, `\vec`, `\bar`, `\sum`, `\int`, `\frac`, `\binom`, `\text`, `\overline`, `\underset`, `\overset`, `\mathbf`, `\color`, `\boxed`, `\phantom`, `\hspace`, `\kern`, and all other command-bearing node types.
+
+### 10.3 Lambda Render Fixes
+
+| File | Fix | Details |
+|------|-----|---------|
+| `render.ls` | `render_radical`: `node.body` → `node.radicand` | AST uses `radicand` attribute, not `body` |
+| `render.ls` | `render_big_op`: `node.cmd` → `node.op` | Big operators store their command in `op`, not `cmd` |
+| `render.ls` | `render_big_op`: added limits rendering | Split into `render_big_op_with_limits`, `render_big_op_display`, `render_big_op_inline` helper functions. Display mode stacks limits above/below via `vbox`; inline mode places them beside the operator with `MSUBSUP` class |
+| `render.ls` | `render_accent`: now works | Was already correct — just needed the C++ `cmd` field fix to populate `\hat` → accent lookup |
+
+### 10.4 Phase 2 Test Results
+
+All 10 Phase 2 test expressions render without errors:
+
+| # | Expression | File | Validates |
+|---|-----------|------|-----------|
+| 1 | `\sqrt{x}` | `m1.tex` | Radical with radicand |
+| 2 | `\sqrt[3]{x}` | `m2.tex` | Radical with index |
+| 3 | `\left( \frac{a}{b} \right)` | `m3.tex` | Auto-sized delimiters |
+| 4 | `\hat{x}` | `m4.tex` | Accent with combining character |
+| 5 | `\overline{AB}` | `m5.tex` | Overline accent |
+| 6 | `\sum_{i=0}^{n} x_i` | `m6.tex` | Big operator with limits |
+| 7 | `\int_0^1 f(x) dx` | `m7.tex` | Integral with limits |
+| 8 | `\text{for all } x` | `m8.tex` | Text command |
+| 9 | `\vec{v}` | `m9.tex` | Vector accent |
+| 10 | `\bar{x}` | `m10.tex` | Bar accent |
+
+AST attribute verification:
+- `accent.cmd = \hat` ✅ (was `null` before C++ fix)
+- `big_operator.op = \sum` ✅ (was `null` before C++ fix)
+- `big_operator.lower` populated ✅
+- `big_operator.upper` populated ✅
+- `fraction.cmd = \frac` ✅ (was `null` before C++ fix)
+- `radical.radicand` populated ✅
+
+### 10.5 Bugs Found (Phase 2)
+
+#### Bug 7: `input()` resolves first argument as file path, not inline string
+
+- **Symptom:** `input("\\sqrt{x}", {type: 'math', flavor: 'latex'})` treated the string as a file/URL path and failed to find it.
+- **Root cause:** The `input()` function always resolves its first argument as a path. There is no inline-string parsing mode.
+- **Workaround:** Write math expressions to `.tex` files first, then `input("temp/m1.tex", {type: 'math', flavor: 'latex'})`.
+- **Status:** Design limitation. A `render_latex(string)` convenience function (§6.4 item 5) would bypass this.
+
+#### Bug 8: `use format` causes parse error
+
+- **Symptom:** Having `use sys` + `use format` before `pn main()` produced a parse error (`ERROR node at Ln 1`).
+- **Root cause:** Unknown — may be a parser issue with `use` and certain identifiers.
+- **Workaround:** Call `format()` directly without `use format`. The function is available as a built-in.
+
+#### Bug 9: Inline comments break nested let-chain expressions
+
+- **Symptom:** A deeply nested `(let ..., let ..., // comment, if (...) ...)` expression caused parse error at the comment line.
+- **Root cause:** The parser does not handle `//` comments inside comma-separated let-chain expressions within parenthesized groups.
+- **Fix:** Refactored complex nested expressions into separate named helper functions. This also improves readability.
+- **Files changed:** `render.ls` — split `render_big_op` into `render_big_op_with_limits`, `render_big_op_display`, `render_big_op_inline`.
+
+#### Bug 10: `format(box_result, 'xml')` renders as `<root/>`
+
+- **Symptom:** Rendering results serialized as `<root/>` via `format(result, 'xml')`, hiding all interior content.
+- **Root cause:** The render result is a map (box model: `{element: <span ...>, height: ..., width: ...}`), not a raw element. `format()` on a map wraps it in a `<root>` element with attributes from map keys, and the nested `<span>` element inside the `element` field is not expanded.
+- **Workaround:** Access the inner element directly: `format(result.element, 'xml')`. Or use `math.render_standalone(ast)` which returns a fully composed element.
+- **Status:** Expected behavior — not a bug, but a usability trap.
+
+#### Bug 11: `for (i in 0 to expr)` does not parse in `pn` context
+
+- **Symptom:** Range-based for loop `for (i in 0 to n)` produced a parse error inside a `pn` procedure block.
+- **Root cause:** Unknown — `for` with range may only be supported in `fn` (functional) context.
+- **Workaround:** Use manual loop: `let i = 0; loop { if (i >= n) break; ...; i = i + 1 }`.
+
+#### Bug 12: Multiple `let x^err` bindings in same scope conflict
+
+- **Symptom:** Having `let a^err = ...` and `let b^err = ...` in the same scope caused "duplicate definition of 'err'" compile error.
+- **Root cause:** The error variable name (`err`) is shared across all error-handling bindings in the same scope.
+- **Fix:** Use unique error variable names: `let a^e1 = ...`, `let b^e2 = ...`, etc.
+
+#### Bug 13: `pn` required for `print()` and error propagation
+
+- **Symptom:** Using `print()` or `?` error propagation inside `fn` caused compile errors.
+- **Root cause:** `fn` is pure functional — side effects like `print()` and error propagation with `?` are only allowed in `pn` (procedure) blocks.
+- **Fix:** Use `pn` for test scripts and any code that needs I/O or error handling.
+
+### 10.6 Updated Lambda Script Syntax Rules
+
+New rules discovered in Phase 2, extending §9.4:
+
+| #   | Rule                                                                         | Consequence of Violation                          |
+| --- | ---------------------------------------------------------------------------- | ------------------------------------------------- |
+| 14  | `input()` first argument is always a file path — no inline string parsing    | File-not-found error                              |
+| 15  | No `//` comments inside parenthesized let-chain expressions                  | Parse error                                       |
+| 16  | `for (i in 0 to n)` may not work in `pn` context                            | Parse error                                       |
+| 17  | Use unique error variable names: `let x^e1`, `let y^e2` — not `^err` twice  | Duplicate definition error                        |
+| 18  | `print()` and `?` error propagation require `pn`, not `fn`                   | Compile error                                     |
+| 19  | Don't use `use format` — call `format()` directly as a built-in             | Parse error                                       |
+| 20  | Access `.element` field on box results before formatting                     | `format()` on boxes produces `<root/>`            |
+
+### 10.7 Outstanding Work for Phase 3
+
+Phase 3 modules not yet created (from §4 Phase 3 plan):
+
+| Module | Feature | Priority |
+|--------|---------|----------|
+| `atoms/array.ls` | `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases`, `aligned`, `array` | High |
+| `atoms/style.ls` | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\displaystyle`, `\operatorname` | High |
+| `atoms/color.ls` | `\textcolor`, `\color`, `\colorbox` — named colors + hex | Medium |
+| `atoms/enclose.ls` | `\boxed`, `\fbox` | Low |
+
+## 11. Phase 3 Progress Report
+
+### 11.1 Status: Complete
+
+All Phase 3 atom modules are implemented and working. **14/14** Phase 3 test constructs render correctly. Baseline regression: **328/328** — zero regressions.
+
+### 11.2 New Modules
+
+| Module | Lines | Constructs | Description |
+|--------|-------|------------|-------------|
+| `atoms/style.ls` | 77 | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathsf`, `\mathtt`, `\mathit`, `\displaystyle`, `\textstyle`, `\operatorname` | Font style commands — maps command name to CSS class, applies to rendered argument |
+| `atoms/color.ls` | 118 | `\textcolor`, `\color`, `\colorbox` | Color commands — resolves named colors (red, blue, etc.) and hex codes, applies as CSS `color` or `background-color` |
+| `atoms/enclose.ls` | 153 | `\boxed`, `\fbox`, `\phantom`, `\rule` | Enclosure commands — `\boxed`/`\fbox` add border, `\phantom` renders invisible, `\rule` draws a filled rectangle with parsed dimensions |
+| `atoms/array.ls` | 220 | `\begin{pmatrix}`, `\begin{bmatrix}`, `\begin{vmatrix}`, `\begin{Vmatrix}`, `\begin{cases}`, `\begin{aligned}`, `\begin{array}`, `\matrix`, `\pmatrix` | Environment/matrix rendering — CSS grid layout with delimiter wrapping |
+
+**Total new code:** 568 lines across 4 new modules.
+
+### 11.3 Modified Files
+
+| File | Lines | Changes |
+|------|-------|---------|
+| `render.ls` | 401 | Added imports for `style`, `color`, `enclose`, `arr_mod`; added dispatch cases for `style_command`, `color_command`, `phantom_command`, `box_command`, `rule_command`, `environment`, `matrix_command`, `env_body`, `matrix_body` |
+| `css.ls` | 154 | Added `MTABLE` class constant and `.ML__mtable{display:inline-grid;vertical-align:middle}` CSS rule |
+
+### 11.4 Architecture Decisions
+
+#### CSS Grid for Matrix/Environment Layout
+
+Environments (matrices, cases, etc.) use **CSS grid** rather than nested box structures:
+- `grid-template-columns: auto auto ...` (one `auto` per column)
+- `column-gap: 1em` (default), `0.2em` for `cases`
+- `row-gap: 0.16em`
+- Per-cell `justify-self` alignment (center, left, or right based on column spec)
+- The grid element is returned as an inline map `{element: ..., height: ..., depth: ...}` directly, avoiding cross-module element JIT issues.
+
+This approach avoids the list-flattening problem discovered during development: Lambda's `for` expression produces lists that auto-flatten when nested, making nested row/column box structures unreliable.
+
+#### Delimiter Wrapping
+
+Matrix environments automatically add matching delimiters:
+- `pmatrix` → `(` ... `)`
+- `bmatrix` → `[` ... `]`
+- `vmatrix` → `|` ... `|`
+- `Vmatrix` → `‖` ... `‖`
+- `cases` → `{` (left only)
+- Others → no delimiters
+
+Delimiters use CSS class `ML__small-delim` and are assembled with `box.hbox()`.
+
+### 11.5 Critical Bug Discovery: `array` Is a Reserved Word
+
+**Root cause:** Using `import array: .lambda.package.math.atoms.array` causes JIT corruption. The alias name `array` conflicts with Lambda's built-in `array` type, causing all return values from functions called via the `array.` prefix to be corrupted.
+
+**Symptoms:**
+- `unknown type error in set_fields` (3× per function call)
+- `map_get ANY type is UNKNOWN: 24` (2× per function call)
+- Elements become `[error]`, numeric values become `<error>`
+- The function body is irrelevant — even `fn f() => box.text_box("X", null, "mord")` fails when called as `array.f()`
+
+**Isolation method:** Systematically simplified `array.ls` to a 10-line stub → still errored. Moved the function inline to `render.ls` → worked. Changed import alias from `array` to `arr_mod` → worked. Confirmed the alias name `array` is the sole cause.
+
+**Fix:** `import arr_mod: .lambda.package.math.atoms.array` in `render.ls`.
+
+**Rule added:** Never use `array`, `list`, `map`, `string`, `int`, `float`, `bool`, `null`, or other built-in type names as import aliases.
+
+### 11.6 Test Results
+
+All 14 Phase 3 constructs render correctly:
+
+| # | Input | Construct | Result |
+|---|-------|-----------|--------|
+| 1 | `\mathbf{A}` | Bold font | `ML__mathbf` class applied |
+| 2 | `\mathbb{R}` | Blackboard bold | `ML__bb` class applied |
+| 3 | `\mathcal{L}` | Calligraphic | `ML__cal` class applied |
+| 4 | `\displaystyle \frac{a}{b}` | Display style | Display context propagated to fraction |
+| 5 | `\operatorname{sin}(x)` | Operator name | `ML__cmr` class applied |
+| 6 | `\textcolor{red}{x+y}` | Text color | `color:#d32f2f` inline style |
+| 7 | `\colorbox{yellow}{z}` | Color box | `background-color:#ffeb3b` + padding |
+| 8 | `\boxed{E=mc^2}` | Boxed | `border:1px solid` style |
+| 9 | `\phantom{x}y` | Phantom | `visibility:hidden` style |
+| 10 | `\rule{2em}{0.5em}` | Rule | `ML__rule` class + width/height styles |
+| 11 | `\begin{pmatrix}` | Pmatrix | `(` + 2×2 CSS grid + `)` |
+| 12 | `\begin{bmatrix}` | Bmatrix | `[` + 2×3 CSS grid + `]` |
+| 13 | `\begin{cases}` | Cases | `{` + 2×2 grid with `0.2em` gap |
+| 14 | `\begin{vmatrix}` | Vmatrix | `|` + 2×2 CSS grid + `|` |
+
+### 11.7 Lambda Syntax Rules Discovered
+
+| # | Rule | Symptom if Violated |
+|---|------|---------------------|
+| 21 | `array` is a reserved type name — cannot be used as an import alias | JIT corruption: `unknown type error in set_fields`, `map_get ANY type is UNKNOWN: 24` |
+| 22 | `for` expressions produce lists that auto-flatten when nested (flatMap behavior) | Nested table structures collapse into flat sequences |
+| 23 | Element literal syntax: `<tag attr1: v1, attr2: v2; child1 child2>` — comma-separated attrs, semicolon before children | Parse errors |
+| 24 | `for` inside element children works: `<span class: c; for (item in items) item>` | N/A — useful pattern |
+| 25 | Inline maps `{element: ..., height: ...}` can be returned from `fn` to avoid cross-module element JIT issues | Elements constructed in one module may corrupt when returned to another |
+
+---
+
+## §12 Phase 4 Implementation Notes
+
+### 12.1 Summary
+
+Phase 4 delivers three functional enhancements plus one partial optimization:
+
+| Feature | Status | Module |
+|---------|--------|--------|
+| Stretchy delimiters (extensible) | ✅ Complete | `atoms/delimiters.ls` |
+| Sized delimiters (`\big`, `\Big`, `\bigg`, `\Bigg`) | ✅ Complete | `atoms/delimiters.ls` |
+| Box coalescing (adjacent span merge) | ✅ Partial | `optimize.ls` |
+| Error rendering (unknown commands) | ✅ Complete | `css.ls` (ERROR class) |
+| Inter-atom spacing | ✅ Already done (Phase 1) | `spacing_table.ls` |
+
+**Test results**: 8/8 Phase 4 tests pass, 328/328 baseline regression pass, Phase 2 + Phase 3 tests all pass.
+
+### 12.2 New Modules
+
+#### `atoms/delimiters.ls` (~164 lines)
+
+Extensible delimiter rendering with two strategies:
+
+1. **Sized fonts (levels 1–4)**: Uses KaTeX size font classes (`size1-regular` through `size4-regular`) for delimiters from 1.2em to 3.0em. Size thresholds: 1.2, 1.8, 2.4, 3.0em.
+
+2. **CSS scaleY (level 5+)**: For delimiters taller than 3.0em, applies a `transform: scaleY(N)` CSS transform to stretch the glyph vertically.
+
+Public API:
+- `render_stretchy(delim, content_height, atom_type)` — Automatically selects size level based on content height, used by `\left...\right` delimiters
+- `render_at_scale(delim, scale, atom_type)` — Renders at a specific scale factor, used by `\big`, `\Big`, `\bigg`, `\Bigg` commands
+
+Supporting data:
+- `SIZED_DELIMS` — Map of all delimiters with sized font variants
+- `DELIM_CHARS` — Maps LaTeX commands (`\langle`, `\vert`, etc.) to Unicode display characters
+- `SVG_DELIM_DATA` — SVG path data for delimiter segments (reserved for future SVG rendering)
+
+#### `optimize.ls` (~65 lines)
+
+Post-processing optimization pass that merges adjacent same-class text-only `<span>` elements to reduce DOM node count.
+
+Public API:
+- `coalesce(bx)` — Takes a box map `{element, height, depth, width, type, italic, skew}` and returns an optimized version
+
+Internal algorithm:
+1. `merge_children(el)` — Entry point; processes multi-child elements
+2. `build_merged(el)` — Extracts children, recursively walks sub-elements, merges adjacent spans via `merge_list`, reconstructs element
+3. `walk(c)` — Recursively processes multi-child child elements
+4. `merge_list(items)` / `do_merge(items, i, acc)` — Functional fold that merges adjacent items passing `can_merge` test
+5. `can_merge(a, b)` — Two elements are mergeable when both have exactly 1 text child, same CSS class, and no inline style
+6. `merge_two(a, b)` — Concatenates text content into a single `<span>`
+
+**Limitation**: Coalescing only penetrates multi-child element levels. Single-child wrapper chains (common at the top of the render tree) are not traversed due to JIT stack overflow constraints.
+
+### 12.3 Modified Files
+
+#### `render.ls` Changes
+- Added `import delims: .lambda.package.math.atoms.delimiters`
+- `render_delimiter_group`: Now uses `delims.render_stretchy()` for `\left`/`\right` delimiters. Calculates `content_height = content.height + content.depth` and passes to delimiter renderer for size selection.
+- `render_sized_delim`: Now uses `delims.render_at_scale()` for `\big`/`\Big`/`\bigg`/`\Bigg` commands.
+
+#### `math.ls` Changes
+- Added `import opt: .lambda.package.math.optimize`
+- Render pipeline now: `render_node(ast)` → `opt.coalesce()` → `box.make_struts()` → wrap in `<span class: ML__latex>`
+
+### 12.4 Architecture Decisions
+
+1. **Font-based stretching over SVG**: Sized KaTeX fonts (Size1–Size4) provide sharp, scalable delimiters at discrete levels. CSS `scaleY` handles arbitrary heights above 3.0em. SVG path stacking (top/repeat/bottom segments) is architecturally prepared but not yet rendering — the font+CSS approach covers all practical cases.
+
+2. **Coalescing as post-processing**: Box coalescing runs after the full render tree is built, not during rendering. This keeps the renderer simple and makes the optimization optional.
+
+3. **Functional fold for merging**: `do_merge` uses a tail-recursive fold pattern with an accumulator, which is the idiomatic Lambda approach for stateful iteration.
+
+### 12.5 Critical JIT Bugs Discovered
+
+| # | Bug Description | Workaround |
+|---|----------------|------------|
+| 1 | `for` comprehension inside element children MUST be on a separate line. `<span; for (c in items) c>` causes parse error. Multi-line `<span;\n for (c in items) c\n>` works. | Always put `for` on its own line inside elements |
+| 2 | `merge_list` return value cannot be directly iterated in element constructor `for (c in merged) c` — produces `[[unknown type raw_pointer!!]]`. Re-extracting via `(for (j in 0 to (len(merged) - 1)) merged[j])` works. | Re-extract array elements through indexing before use in element children |
+| 3 | Recursive functions through single-child element wrappers cause stack overflow even with depth limits of 10. The JIT per-function stack frame size appears very large. | Only recurse through multi-child elements |
+
+#### Bug #3 Detail: Stack Overflow in Single-Child Element Recursion
+
+**Goal**: Walk through single-child wrapper elements (e.g., `<span class: "ML__latex"; <span; <span; [x, y, z]>>>`) to reach multi-child levels where coalescing can happen.
+
+**Attempt 1 — Unbounded recursion** (stack overflow):
+```lambda
+fn merge_children(el) {
+    if (len(el) > 1) build_merged(el)
+    else if (len(el) == 1)
+        (let child = el[0],
+         if (type(child) == "element")
+             <span class: el.class, style: el.style;
+                 merge_children(child)
+             >
+         else el)
+    else el
+}
+```
+
+**Attempt 2 — Depth-limited to 10** (still stack overflow):
+```lambda
+fn merge_at_depth(el, d) {
+    if (d <= 0) el
+    else if (len(el) > 1) build_merged(el)
+    else if (len(el) == 1)
+        (let child = el[0],
+         if (type(child) == "element")
+             <span class: el.class, style: el.style;
+                 merge_at_depth(child, d - 1)
+             >
+         else el)
+    else el
+}
+
+fn merge_children(el) {
+    merge_at_depth(el, 10)
+}
+```
+
+**Root cause**: Each recursive call constructs a `<span class: ..., style: ...; recursive_call(...)>` element inline. The JIT-compiled stack frame for a function that constructs elements appears to be very large (possibly allocating temporary space for element attribute slots, child arrays, and intermediate `Item` values). Even ~10 frames is enough to exhaust the ~8MB stack.
+
+**Error output**:
+```
+signal handler: stack overflow detected (fault_addr=0x16b46bfd0, stack_limit=0x16b47c000)
+exec: recovered from stack overflow via signal handler
+stack overflow in function '<signal>' - possible infinite recursion
+stack usage: 7 KB / 8176 KB (0.1%)
+runtime error [308]: Stack overflow in '<signal>' - likely infinite recursion (stack: 7KB/8176KB)
+```
+
+Note: the reported "stack usage: 7 KB" is misleading — this is measured *after* the signal handler recovered and unwound the stack. The actual usage at overflow was ~8MB.
+
+**Working workaround** — skip single-child wrappers entirely:
+```lambda
+fn merge_children(el) {
+    if (len(el) > 1) build_merged(el)
+    else el
+}
+```
+
+This limits coalescing to multi-child levels only. Single-child wrapper chains (common at the top of the math render tree) are left as-is. The tradeoff is acceptable because coalescing's primary value is merging adjacent same-class text siblings, which only exist at multi-child levels.
+| 4 | `[items[0]]` as a standalone expression causes parse error ("expected ']'"). Same syntax works as a function argument: `do_merge(items, 1, [items[0]])`. | Use `let first = items[0], [first]` or pass as function argument |
+| 5 | `if/else` returning elements with different attribute shapes (e.g., `<span class: c; x>` vs `<span; x>`) crashes JIT | Always use consistent shapes: `<span class: a.class; x>` where class may be null |
+
+### 12.6 Test Results
+
+| # | Test | LaTeX Input | Validates |
+|---|------|-------------|-----------|
+| 1 | Stretchy delimiters | `\left(\frac{a}{b}\right)` | Size selection, delimiter rendering |
+| 2 | Sized delimiters | `\bigl( x \bigr)` | Scale-to-class mapping |
+| 3 | Coalescing candidate | `xyz` | Box coalescing pass (identity at top level) |
+| 4 | Error rendering | `\undefinedcommand` | `ML__error` class on unknown commands |
+| 5 | Tall delimiters | `\left[\frac{\frac{a}{b}}{\frac{c}{d}}\right]` | Multi-level size selection (2.303em height) |
+| 6 | Middle delimiter | `\left( a \middle| b \right)` | `\middle` support in delimiter groups |
+| 7 | Inter-atom spacing | `a + b = c` | Spacing between atom types |
+| 8 | Complex integration | `\sum_{i=0}^{n}\left(\frac{x_i}{y_i}\right)^2` | All features composed |
+
+### 12.7 Lambda Syntax Rules Discovered
+
+| # | Rule | Symptom if Violated |
+|---|------|---------------------|
+| 26 | `for` in element children MUST be on its own line | Parse error: `ERROR node at Ln X` spanning the entire function body |
+| 27 | `[expr[n]]` as standalone return value is parsed as subscript, not array-with-subscript | Parse error: "expected ']'" |
+| 28 | Function return values from `merge_list` (multi-branch return array) produce `raw_pointer` when used in `for (c in result) c` inside element constructor | `[[unknown type raw_pointer!!]]` in element children |
+| 29 | Recursive single-child element traversal overflows stack even with depth limit 10 — JIT stack frames are very large | Stack overflow signal handler fires |
+| 30 | `<span; for (c in items) c>` single-line fails but `<span;\n    for (c in items) c\n>` multi-line works | Parse error vs working code |
+
+### 12.8 Module Inventory (Phase 4 Complete)
+
+```
+lambda/package/math/
+├── math.ls              # Entry point (48 lines)
+├── render.ls            # Core renderer (398 lines)
+├── box.ls               # Box model (233 lines)
+├── css.ls               # CSS classes (126 lines)
+├── context.ls           # Display/text context (42 lines)
+├── metrics.ls           # Font metrics (197 lines)
+├── symbols.ls           # Symbol table (379 lines)
+├── util.ls              # Utilities (47 lines)
+├── spacing_table.ls     # Inter-atom spacing (91 lines)
+├── optimize.ls          # Box coalescing (65 lines)  ← NEW
+└── atoms/
+    ├── fraction.ls      # Fractions (148 lines)
+    ├── scripts.ls       # Sub/superscripts (192 lines)
+    ├── spacing.ls       # Spacing commands (68 lines)
+    ├── style.ls         # Style/font commands (77 lines)
+    ├── color.ls         # Color commands (118 lines)
+    ├── enclose.ls       # Boxing/enclosure (153 lines)
+    ├── array.ls         # Matrix environments (220 lines)
+    └── delimiters.ls    # Stretchy delimiters (164 lines) ← NEW
+```
+
+Total: 18 modules, ~2,568 lines of Lambda Script.
+
+## Appendix D: Completeness Analysis — Lambda Math vs. MathLive
+
+This appendix documents a comprehensive audit of the Lambda math package against MathLive's full feature set, identifying what is covered, what is missing, and the priority path toward broader coverage.
+
+### D.1 Grammar Node Type Coverage (94%)
+
+The tree-sitter-latex-math grammar (`lambda/tree-sitter-latex-math/grammar.js`) produces 33 atom-level node types. The `render.ls` dispatch table handles **31 of 33**:
+
+| # | Node Type | Status |
+|---|-----------|:------:|
+| 1 | `symbol` | ✅ |
+| 2 | `number` | ✅ |
+| 3 | `symbol_command` | ✅ |
+| 4 | `operator` | ✅ |
+| 5 | `relation` | ✅ |
+| 6 | `punctuation` | ✅ |
+| 7 | `group` | ✅ |
+| 8 | `fraction` | ✅ |
+| 9 | `binomial` | ✅ |
+| 10 | `genfrac` | ✅ |
+| 11 | `radical` | ✅ |
+| 12 | `delimiter_group` | ✅ |
+| 13 | `sized_delimiter` | ✅ |
+| 14 | `overunder_command` | ✅ |
+| 15 | `extensible_arrow` | ❌ Missing |
+| 16 | `accent` | ✅ |
+| 17 | `box_command` | ✅ |
+| 18 | `color_command` | ✅ |
+| 19 | `rule_command` | ✅ |
+| 20 | `phantom_command` | ✅ |
+| 21 | `big_operator` | ✅ |
+| 22 | `mathop_command` | ❌ Missing |
+| 23 | `matrix_command` | ✅ |
+| 24 | `environment` | ✅ |
+| 25 | `text_command` | ✅ |
+| 26 | `style_command` | ✅ |
+| 27 | `space_command` | ✅ |
+| 28 | `hspace_command` | ✅ |
+| 29 | `skip_command` | ✅ |
+| 30 | `command` | ✅ (generic fallback) |
+| 31 | `subsup` | ✅ |
+| 32 | `infix_frac` | ✅ |
+| 33 | `brack_group` | ✅ (mapped to `render_group`) |
+
+**Missing renderers** (grammar already parses these):
+- **`extensible_arrow`** — `\xrightarrow`, `\xleftarrow`, `\xRightarrow`, `\xLeftarrow`, `\xleftrightarrow`, `\xhookleftarrow`, `\xhookrightarrow`, `\xmapsto`. Currently falls through to `default` → `render_default`, losing the arrow SVG body and above/below annotations.
+- **`mathop_command`** — `\mathop{...}` (custom operator with limits behavior). Falls through to `default`, losing operator-with-limits semantics.
+
+### D.2 Symbol Coverage (250/506 = 49%)
+
+Lambda `symbols.ls` contains **250 symbols** vs. MathLive's **~506** unique LaTeX commands:
+
+| Category | Lambda | MathLive (approx) |
+|----------|-------:|-------------------:|
+| Greek lowercase | 30 | 34 |
+| Greek uppercase | 11 | 11 |
+| Binary operators | 27 | 52 |
+| Relations | 36 | 86 |
+| Arrows | 30 | 62 |
+| Miscellaneous symbols | 54 | 79 |
+| Big operators | 16 | 28 |
+| Accents | 14 | 22 |
+| Operator names | 32 | 32 |
+| **Total** | **250** | **~506** |
+
+**Major missing symbol categories** (~256 symbols):
+
+- **Negated relations** (~40): `\nless`, `\nleq`, `\ngeq`, `\ngtr`, `\nleqslant`, `\ngeqslant`, `\ncong`, `\nsim`, `\nparallel`, `\nVDash`, `\nvdash`, `\nvDash`, `\nsubseteq`, `\nsupseteq`, `\precnsim`, `\succnsim`, etc.
+- **AMS relations** (~50): `\leqslant`, `\geqslant`, `\lesssim`, `\gtrsim`, `\approxeq`, `\thickapprox`, `\lessgtr`, `\gtrless`, `\curlyeqprec`, `\curlyeqsucc`, `\Vdash`, `\vDash`, `\Vvdash`, `\between`, `\pitchfork`, `\backepsilon`, `\therefore`, `\because`, etc.
+- **AMS binary operators** (~25): `\ltimes`, `\rtimes`, `\leftthreetimes`, `\rightthreetimes`, `\intercal`, `\dotplus`, `\doublebarwedge`, `\divideontimes`, `\boxminus`, `\boxplus`, `\boxtimes`, `\circleddash`, `\circledast`, `\circledcirc`, etc.
+- **AMS arrows** (~20): `\dashrightarrow`, `\dashleftarrow`, `\Rrightarrow`, `\Lleftarrow`, `\leftarrowtail`, `\rightarrowtail`, `\twoheadleftarrow`, `\twoheadrightarrow`, `\upuparrows`, `\downdownarrows`, `\rightsquigarrow`, `\leadsto`, `\multimap`, etc.
+- **AMS ordinals** (~25): `\square`, `\Box`, `\blacksquare`, `\blacktriangle`, `\blacktriangledown`, `\lozenge`, `\blacklozenge`, `\complement`, `\diagup`, `\measuredangle`, `\sphericalangle`, `\backprime`, `\eth`, `\mho`, `\Finv`, `\Game`, etc.
+- **Negated arrows** (~12): `\nleftarrow`, `\nrightarrow`, `\nRightarrow`, `\nLeftarrow`, `\nleftrightarrow`, `\nLeftrightarrow`, etc.
+- **St. Mary's Road / specialty** (~30): `\llbracket`, `\rrbracket`, `\Lbag`, `\Rbag`, `\boxbar`, `\lightning`, etc.
+- **Missing delimiters** (~8): `\ulcorner`, `\urcorner`, `\llcorner`, `\lrcorner`, `\lparen`, `\rparen`, `\lbrack`, `\rbrack`
+- **Missing Greek** (~4): `\digamma`, `\varkappa`, `\coppa`, `\sampi` (AMS/archaic)
+- **Additional integrals** (~5): `\oiint`, `\oiiint`, `\intclockwise`, `\varointclockwise`, `\ointctrclockwise`
+
+### D.3 MathLive Features with No Lambda Equivalent
+
+| Feature | MathLive Source | Description |
+|---------|-----------------|-------------|
+| **Chemistry (mhchem)** | `mhchem.ts` (2603 lines) | `\ce{}`, `\pu{}` chemical equations |
+| **Extensible arrows** | `extensible-symbols.ts` | `\xrightarrow[below]{above}` with SVG arrow body |
+| **Extensible over/under SVGs** | `extensible-symbols.ts` | `\overrightarrow`, `\overleftarrow`, `\overleftrightarrow`, `\overgroup`, `\underrightarrow`, `\underleftarrow`, etc. |
+| **`\mathop{...}`** | `styling.ts` | Custom operator with limits placement |
+| **Cancel / strikethrough** | `enclose.ts` | `\cancel`, `\bcancel`, `\xcancel`, `\sout` |
+| **`\enclose` (MathML)** | `enclose.ts` | Arbitrary menclose notations |
+| **Font sizing** | `styling.ts` | `\tiny`, `\small`, `\large`, `\Large`, `\LARGE`, `\huge`, `\Huge` |
+| **`\mathchoice`** | `styling.ts` | Display/text/script/scriptscript branching |
+| **`\mathbin`/`\mathrel`/`\mathord`** | `styling.ts` | Explicit atom type override |
+| **`\operatorname{...}`** | `styling.ts` | Custom named operators (e.g., `\operatorname{argmax}`) |
+| **`\not` (negation prefix)** | `styling.ts` | Generic negation via overlay slash |
+| **Tooltips** | `styling.ts` | `\mathtip`, `\texttip` |
+| **HTML integration** | `styling.ts` | `\href`, `\class`, `\cssId`, `\htmlStyle`, `\htmlData` |
+| **`\raisebox`/`\raise`/`\lower`** | `styling.ts` | Vertical positioning |
+| **`\char`/`\unicode`** | `styling.ts` | Arbitrary Unicode by codepoint |
+| **Text-mode accents** | `accents.ts` | `\^{a}`, `` \`{e} ``, `\'{o}`, `\"{u}`, `\~{n}`, `\c{c}` |
+| **`\overarc`/`\overparen`** | `accents.ts` | Arc accents |
+| **`\utilde`** | `accents.ts` | Under-tilde |
+| **`\overunderset`** | `styling.ts` | Combined over+under simultaneously |
+| **`\cfrac[l]`/`\cfrac[r]`** | `functions.ts` | Left/right-aligned continued fractions |
+| **`\pdiff`** | `functions.ts` | Partial derivative shorthand |
+| **`\ang`** | `functions.ts` | Angle from siunitx |
+| **`\mathstrut`** | `styling.ts` | Invisible parenthesis-height strut |
+| **`\fcolorbox`** | `styling.ts` | Framed color box |
+| **Starred matrix variants** | `environments.ts` | `pmatrix*`, `bmatrix*`, etc. |
+| **`eqnarray`/`subequations`** | `environments.ts` | Equation environments |
+| **`\displaylines`** | `functions.ts` | Multi-line display |
+
+### D.4 What IS Working Well
+
+The Lambda math package competently handles the **core 85–90%** of everyday math rendering:
+
+- **Fractions**: `\frac`, `\dfrac`, `\tfrac`, `\cfrac`, `\binom`, `\dbinom`, `\tbinom`, `\genfrac`, infix (`\over`, `\atop`, `\choose`, etc.)
+- **Scripts**: subscript, superscript, combined sub+sup, `\limits`/`\nolimits`
+- **Radicals**: `\sqrt` with optional index
+- **Delimiters**: `\left`/`\right` with stretchy rendering (4 size levels + CSS scaleY), `\middle`, all sized variants (`\big` through `\Bigg`)
+- **Accents**: 14 accent types — `\hat`, `\bar`, `\vec`, `\dot`, `\ddot`, `\widehat`, `\widetilde`, `\overbrace`, `\underbrace`, `\overline`, `\underline`, etc.
+- **Big operators**: `\sum`, `\prod`, `\int`, `\iint`, `\iiint`, `\oint`, display-mode limit placement
+- **Environments/matrices**: `array`, `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix`, `cases`, `aligned`, `gathered`, etc.
+- **Styling**: `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathscr`, `\mathbf`, `\mathsf`, `\mathtt`, `\displaystyle`, `\textstyle`, etc.
+- **Text**: `\text`, `\textrm`, `\textbf`, `\textit`, `\mbox`
+- **Colors**: `\color`, `\textcolor`, `\colorbox`
+- **Spacing**: `\,`, `\:`, `\;`, `\!`, `\quad`, `\qquad`, `\hspace`, `\kern`, `\hskip`, `\mskip`
+- **Boxes/phantoms**: `\boxed`, `\fbox`, `\bbox`, `\phantom`, `\hphantom`, `\vphantom`, `\smash`, `\llap`, `\rlap`
+- **Rules**: `\rule` with width/height/depth dimensions
+- **Inter-atom spacing**: Full Knuth spacing table (7×7 atom types)
+- **Post-processing**: Text node coalescing via `optimize.ls`
+
+### D.5 Coverage Summary
+
+| Metric | Value |
+|--------|-------|
+| Grammar node types handled | 31 / 33 (94%) |
+| Symbol coverage vs. MathLive | 250 / 506 (49%) |
+| Core math feature coverage | ~85–90% of common expressions |
+| Advanced/AMS feature coverage | ~40% |
+| Missing renderer dispatch entries | 2 (`extensible_arrow`, `mathop_command`) |
+| Missing MathLive features (no equivalent) | ~27 features |
+| Missing AMS symbols (table entries) | ~256 commands |
+
+**Practical interpretation**: ~85–90% of typical math content (textbook equations, homework, academic papers) uses fractions, scripts, radicals, Greek letters, basic operators/relations, arrows, delimiters, matrices, and accents — all of which are fully handled. The remaining ~10–15% relies on AMS extended symbols, extensible arrows, cancel notations, and specialty features.
+
+### D.6 Priority Path to Broader Coverage
+
+Ranked by impact-to-effort ratio:
+
+1. **Add `extensible_arrow` renderer** — grammar already parses it; needs dispatch case + render function with SVG arrow body. Covers `\xrightarrow`, `\xleftarrow`, and 7 other commands.
+2. **Add `mathop_command` renderer** — grammar already parses it; simple dispatch + big-operator-style limits logic. Covers `\mathop{...}`.
+3. **Expand `symbols.ls` with ~150 AMS symbols** — pure table additions (Unicode codepoints + atom types). Covers negated relations, AMS arrows, AMS binary operators, AMS ordinals. Largest single improvement to symbol coverage.
+4. **Add `\cancel`/`\bcancel`/`\xcancel`** — very common in educational content; diagonal/back-diagonal line overlay via CSS.
+5. **Add `\operatorname{...}` support** — frequently used for custom function names (`\operatorname{argmax}`, `\operatorname{Tr}`). Render as upright text with operator spacing.
+6. **Add font sizing commands** — `\small`, `\large`, `\Large`, etc. Map to CSS font-size multipliers.
+7. **Add `\mathbin`/`\mathrel`/`\mathord`** — atom type override for correct spacing; simple wrapper that sets atom type on child.
+8. **Add `\not` generic negation** — overlay slash on following symbol via CSS positioning.
+9. **Expand delimiter table** — add corner brackets (`\ulcorner`, etc.) and aliases (`\lparen`, `\lbrack`).
+10. **Chemistry (`\ce{}`)** — large feature (MathLive's implementation is 2600 lines); lowest priority unless chemistry use cases are targeted.

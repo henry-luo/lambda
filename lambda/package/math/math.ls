@@ -5,6 +5,7 @@ import render: .lambda.package.math.render
 import ctx: .lambda.package.math.context
 import css: .lambda.package.math.css
 import box: .lambda.package.math.box
+import opt: .lambda.package.math.optimize
 
 // ============================================================
 // Public API
@@ -23,7 +24,10 @@ pub fn render_math(ast, options) {
     else root_ctx
 
     // render the AST into a box tree
-    let result_box = render.render_node(ast, root_ctx2)
+    let raw_box = render.render_node(ast, root_ctx2)
+
+    // coalesce adjacent spans with identical classes
+    let result_box = opt.coalesce(raw_box)
 
     // wrap with struts and ML__latex class
     let content_with_struts = box.make_struts(result_box)
