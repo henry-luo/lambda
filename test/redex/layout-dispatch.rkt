@@ -196,6 +196,15 @@
   (define root-bm (extract-box-model root-styles viewport-w))
   ;; extract body padding if injected by reference-import
   (define body-pad-left (get-style-prop root-styles '__body-padding-left 0))
+
+  ;; CSS 2.2 §9.5: preceding float context from reference-import.
+  ;; When the test HTML has float siblings before the root div, we create a
+  ;; wrapper block containing a phantom float + root so the layout engine
+  ;; can position the root beside the float via BFC avoidance.
+  (define pf-side (get-style-prop root-styles '__preceding-float-side #f))
+  (define pf-w (get-style-prop root-styles '__preceding-float-w 0))
+  (define pf-h (get-style-prop root-styles '__preceding-float-h 0))
+
   ;; CSS 2.2 §17.5.2: tables with auto width use shrink-to-fit sizing.
   ;; When the root element is a table (e.g., body { display: table }),
   ;; use shrink-to-fit width instead of full viewport width.
@@ -207,23 +216,50 @@
         `(avail (definite ,viewport-w) (definite ,viewport-h))
         `(avail (definite ,viewport-w) (definite ,viewport-h))))
   (define view
-    (if is-table-root?
-        ;; table root with auto width: shrink-to-fit
-        (let ()
-          (define css-width (get-style-prop root-styles 'width 'auto))
-          (if (eq? css-width 'auto)
-              ;; shrink-to-fit: measure at max-content, then cap
-              (let* ([max-avail `(avail av-max-content indefinite)]
-                     [max-view (layout root-box max-avail)]
-                     [preferred-w (view-width max-view)]
-                     [min-avail `(avail av-min-content indefinite)]
-                     [min-view (layout root-box min-avail)]
-                     [min-w (view-width min-view)]
-                     [shrink-w (min preferred-w (max min-w viewport-w))]
-                     [final-avail `(avail (definite ,shrink-w) (definite ,viewport-h))])
-                (layout root-box final-avail))
-              (layout root-box avail)))
-        (layout root-box avail)))
+    (cond
+      ;; --- preceding float: create wrapper with phantom float + root ---
+      [pf-side
+       (let* ([phantom-float
+               `(block __phantom-float
+                       (style (float ,pf-side)
+                              (width (px ,pf-w))
+                              (height (px ,pf-h))
+                              (margin-top 0) (margin-right 0)
+                              (margin-bottom 0) (margin-left 0)
+                              (padding-top 0) (padding-right 0)
+                              (padding-bottom 0) (padding-left 0)
+                              (border-top-width 0) (border-right-width 0)
+                              (border-bottom-width 0) (border-left-width 0))
+                       ())]
+              [wrapper `(block __body-wrapper (style) (,phantom-float ,root-box))]
+              [wrapper-view (layout wrapper avail)]
+              [wrapper-children (view-children wrapper-view)]
+              [root-view
+               (for/first ([c (in-list wrapper-children)]
+                           #:when (not (equal? (view-id c) '__phantom-float)))
+                 c)])
+         (or root-view wrapper-view))]
+
+      ;; --- table root with auto width: shrink-to-fit ---
+      [is-table-root?
+       (let ()
+         (define css-width (get-style-prop root-styles 'width 'auto))
+         (if (eq? css-width 'auto)
+             ;; shrink-to-fit: measure at max-content, then cap
+             (let* ([max-avail `(avail av-max-content indefinite)]
+                    [max-view (layout root-box max-avail)]
+                    [preferred-w (view-width max-view)]
+                    [min-avail `(avail av-min-content indefinite)]
+                    [min-view (layout root-box min-avail)]
+                    [min-w (view-width min-view)]
+                    [shrink-w (min preferred-w (max min-w viewport-w))]
+                    [final-avail `(avail (definite ,shrink-w) (definite ,viewport-h))])
+               (layout root-box final-avail))
+             (layout root-box avail)))]
+
+      ;; --- normal block root ---
+      [else
+       (layout root-box avail)]))
   ;; CSS 2.2 §9.7: if the root box itself is floated, position it as if
   ;; <body> were its parent block formatting context.
   ;; §9.7 also: position:absolute/fixed → float computes to none.
@@ -239,11 +275,32 @@
     (cond
       [(eq? effective-float 'float-right)
        (- viewport-w (view-width view) (box-model-margin-right root-bm))]
+      ;; CSS 2.2 §9.3.1: absolutely positioned root with explicit 'left'
+      ;; positions relative to the initial containing block (viewport).
+      ;; Convert to body-relative coords: x = left_value - body_margin.
+      [(and (eq? root-position 'absolute)
+            (let ([lv (get-style-prop root-styles 'left #f)])
+              (and lv (not (eq? lv 'auto)))))
+       (let* ([left-raw (get-style-prop root-styles 'left 0)]
+              [left-px (cond [(and (list? left-raw) (eq? (car left-raw) 'px))
+                              (cadr left-raw)]
+                             [(number? left-raw) left-raw]
+                             [else 0])]
+              [body-margin (get-style-prop root-styles '__body-margin-left 8)])
+         (- left-px body-margin))]
       [else
        (box-model-margin-left root-bm)]))
-  (set-view-pos view
-                (+ body-pad-left base-x)
-                (view-y view)))
+  ;; when preceding float context exists, preserve the x from BFC avoidance;
+  ;; otherwise use normal body margin positioning.
+  ;; always add view-x to preserve relative positioning offset (0 for static elements)
+  (define final-x
+    (if pf-side
+        (+ body-pad-left (view-x view))
+        (+ body-pad-left base-x (view-x view))))
+  ;; Zero the root y: reference->expected-layout zeroes root y for CSS2.1
+  ;; tests (preceding <p> description text is not modeled).  Match that
+  ;; by discarding position:relative offset on the root element.
+  (set-view-pos view final-x 0))
 
 ;; ============================================================
 ;; Text Layout
@@ -349,12 +406,15 @@
                 lh-prop
                 font-size))]))
      ;; half-leading: offset when explicit line-height differs from normal
+     ;; CSS 2.2 §10.6.1: half-leading = (line-height - content-area) / 2
+     ;; Chrome getClientRects(): text rect y = (actual-lh - normal-lh) / 2
+     ;; where normal-lh is the font's natural line-height from metrics.
      (define has-explicit-lh?
        (let ([lh-prop (get-style-prop styles 'line-height #f)])
          (and lh-prop (number? lh-prop) (not (= lh-prop normal-lh)))))
      (define text-view-y
        (if has-explicit-lh?
-           (/ (- line-height font-size) 2)
+           (/ (- line-height normal-lh) 2)
            0))
      (define text-view-h normal-lh)  ;; Chrome always reports normal-lh as text rect height
      ;; Per-character width function from JSON-loaded font metrics.

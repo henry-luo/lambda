@@ -266,11 +266,14 @@
      (lambda (ch font-size)
        (* (if (eq? font-metrics-sym 'arial) 0.556 0.500) font-size))]))
 
-(define (measure-text-with-metrics text font-size font-metrics-sym)
+(define (measure-text-with-metrics text font-size font-metrics-sym [font-variant #f])
   "Measure text width using JSON-loaded font metrics.
    Includes per-character advance widths and kern pair adjustments.
-   Falls back to old behavior if metrics not loaded."
+   When font-variant is \"small-caps\", lowercase letters are measured
+   using uppercase glyph widths at ~0.8× font-size (CSS 2.2 §15.5)."
   (define fd (resolve-font-key font-metrics-sym))
+  (define is-small-caps? (and font-variant (equal? font-variant "small-caps")))
+  (define sc-scale 0.7)  ;; typical browser small-caps scale factor
   (cond
     [fd
      (define ratios (font-data-char-width-ratios fd))
@@ -286,16 +289,21 @@
           (set! prev-cp #f)]  ;; zero-width / control chars reset kerning
          [else
           (define cp (char->integer ch))
-          (define ratio (hash-ref ratios cp default-r))
-          (define char-w (* ratio font-size))
+          ;; small-caps: use uppercase glyph metrics for lowercase, at reduced size
+          (define-values (eff-cp eff-size)
+            (if (and is-small-caps? (char-lower-case? ch))
+                (values (char->integer (char-upcase ch)) (* font-size sc-scale))
+                (values cp font-size)))
+          (define ratio (hash-ref ratios eff-cp default-r))
+          (define char-w (* ratio eff-size))
           ;; apply kerning if we have a previous character
           (define kern-adj
             (if prev-cp
-                (let ([kern-val (hash-ref kerns (cons prev-cp cp) 0)])
-                  (* kern-val font-size))
+                (let ([kern-val (hash-ref kerns (cons prev-cp eff-cp) 0)])
+                  (* kern-val eff-size))
                 0))
           (set! total (+ total char-w kern-adj))
-          (set! prev-cp cp)]))
+          (set! prev-cp eff-cp)]))
      total]
     [else
      ;; no metrics loaded — this shouldn't happen in practice but
