@@ -11,6 +11,10 @@ import sp_table: .lambda.package.math.spacing_table
 import fraction: .lambda.package.math.atoms.fraction
 import scripts: .lambda.package.math.atoms.scripts
 import spacing: .lambda.package.math.atoms.spacing
+import style: .lambda.package.math.atoms.style
+import color: .lambda.package.math.atoms.color
+import arr_mod: .lambda.package.math.atoms.array
+import enclose: .lambda.package.math.atoms.enclose
 
 // ============================================================
 // Main render dispatch
@@ -35,11 +39,11 @@ fn dispatch_element(node, context) {
         case 'binomial':        fraction.render(node, context, render_node)
         case 'command':         render_command(node, context)
         case 'text_command':    render_text_command(node, context)
-        case 'style_command':   render_style_command(node, context)
+        case 'style_command':   style.render(node, context, render_node)
         case 'space_command':   spacing.render(node, context, render_node)
         case 'hspace_command':  spacing.render(node, context, render_node)
         case 'skip_command':    spacing.render(node, context, render_node)
-        case 'color_command':   render_color_command(node, context)
+        case 'color_command':   color.render(node, context, render_node)
         case 'genfrac':         fraction.render(node, context, render_node)
         case 'infix_frac':      fraction.render(node, context, render_node)
         case 'overunder_command': render_overunder(node, context)
@@ -47,10 +51,13 @@ fn dispatch_element(node, context) {
         case 'accent':          render_accent(node, context)
         case 'delimiter_group': render_delimiter_group(node, context)
         case 'sized_delimiter': render_sized_delim(node, context)
-        case 'environment':     render_environment(node, context)
-        case 'phantom_command': render_phantom(node, context)
-        case 'box_command':     render_box_cmd(node, context)
-        case 'rule_command':    render_rule(node, context)
+        case 'environment':     arr_mod.render_env(node, context, render_node)
+        case 'matrix_command':  arr_mod.render_matrix(node, context, render_node)
+        case 'env_body':        render_default(node, context)
+        case 'matrix_body':     render_default(node, context)
+        case 'phantom_command': enclose.render_phantom(node, context, render_node)
+        case 'box_command':     enclose.render_box(node, context, render_node)
+        case 'rule_command':    enclose.render_rule(node, context, render_node)
         case 'radical':         render_radical(node, context)
         case 'middle_delim':    render_middle_delim(node, context)
         case 'limits_modifier': box.text_box("", null, "ord")
@@ -162,62 +169,6 @@ fn render_text_command(node, context) {
 }
 
 // ============================================================
-// Style commands (\mathbf, \mathrm, etc.)
-// ============================================================
-
-fn render_style_command(node, context) {
-    let cmd = if (node.cmd != null) string(node.cmd) else ""
-    let font_name = match cmd {
-        case "\\mathbf": "mathbf"
-        case "\\mathrm": "cmr"
-        case "\\mathit": "mathit"
-        case "\\mathbb": "bb"
-        case "\\mathcal": "cal"
-        case "\\mathfrak": "frak"
-        case "\\mathtt": "tt"
-        case "\\mathscr": "script"
-        case "\\mathsf": "sans"
-        case "\\displaystyle": null
-        case "\\textstyle": null
-        case "\\scriptstyle": null
-        case "\\scriptscriptstyle": null
-        case "\\operatorname": "cmr"
-        default: null
-    }
-
-    let style_override = match cmd {
-        case "\\displaystyle": "display"
-        case "\\textstyle": "text"
-        case "\\scriptstyle": "script"
-        case "\\scriptscriptstyle": "scriptscript"
-        default: null
-    }
-
-    let new_ctx = if (font_name != null) ctx.derive(context, {font: font_name})
-        else if (style_override != null) ctx.derive(context, {style: style_override})
-        else context
-
-    if (node.content != null) render_node(node.content, new_ctx)
-    else (let children = render_children(node, new_ctx),
-          box.hbox(children))
-}
-
-// ============================================================
-// Color commands (\textcolor, \color, \colorbox)
-// ============================================================
-
-fn render_color_command(node, context) {
-    let color = if (node.color != null) string(node.color) else "black"
-    let new_ctx = ctx.derive(context, {color: color})
-    if (node.content != null) {
-        let content_box = render_node(node.content, new_ctx)
-        box.with_color(content_box, color)
-    } else {
-        box.text_box("", null, "ord")
-    }
-}
-
-// ============================================================
 // Overunder commands (\overset, \underset)
 // ============================================================
 
@@ -245,12 +196,49 @@ fn render_overunder(node, context) {
 // ============================================================
 
 fn render_big_op(node, context) {
-    let cmd = if (node.cmd != null) string(node.cmd) else ""
+    let cmd = if (node.op != null) string(node.op) else ""
     let unicode = sym.lookup_symbol(cmd)
     let display_text = if (unicode != null) unicode else cmd
     let op_scale = if (ctx.is_display(context)) 1.5 else 1.0
     let op_box = box.text_box(display_text, css.CMR, "mop")
-    box.with_scale(op_box, op_scale)
+    let scaled_op = box.with_scale(op_box, op_scale)
+
+    let has_lower = node.lower != null
+    let has_upper = node.upper != null
+
+    if (not has_lower and not has_upper) scaled_op
+    else render_big_op_with_limits(node, context, scaled_op, has_lower, has_upper)
+}
+
+fn render_big_op_with_limits(node, context, scaled_op, has_lower, has_upper) {
+    let lower_box = if (has_lower)
+        render_node(node.lower, ctx.sub_context(context)) else null
+    let upper_box = if (has_upper)
+        render_node(node.upper, ctx.sup_context(context)) else null
+
+    if (ctx.is_display(context))
+        render_big_op_display(scaled_op, lower_box, upper_box, has_lower, has_upper)
+    else
+        render_big_op_inline(scaled_op, lower_box, upper_box, has_lower, has_upper)
+}
+
+fn render_big_op_display(scaled_op, lower_box, upper_box, has_lower, has_upper) {
+    let parts = [{box: scaled_op, shift: 0.0}]
+    let parts2 = if (has_upper)
+        [{box: upper_box, shift: 0.0 - scaled_op.height - 0.1}] ++ parts
+    else parts
+    let parts3 = if (has_lower)
+        parts2 ++ [{box: lower_box, shift: scaled_op.depth + 0.1}]
+    else parts2
+    box.vbox(parts3)
+}
+
+fn render_big_op_inline(scaled_op, lower_box, upper_box, has_lower, has_upper) {
+    let sub_parts = if (has_lower)
+        [box.with_class(lower_box, css.MSUBSUP)] else []
+    let sup_parts = if (has_upper)
+        [box.with_class(upper_box, css.MSUBSUP)] else []
+    box.hbox([scaled_op] ++ sub_parts ++ sup_parts)
 }
 
 // ============================================================
@@ -324,7 +312,7 @@ fn render_middle_delim(node, context) {
 // ============================================================
 
 fn render_radical(node, context) {
-    let body_box = if (node.body != null) render_node(node.body, context)
+    let body_box = if (node.radicand != null) render_node(node.radicand, context)
         else box.text_box("", null, "ord")
 
     let index_box = if (node.index != null)
@@ -342,63 +330,6 @@ fn render_radical(node, context) {
         box.hbox([index_box, box.with_class(sqrt_body, css.SQRT)])
     else
         box.with_class(sqrt_body, css.SQRT)
-}
-
-// ============================================================
-// Environments (matrix, cases, etc.)
-// ============================================================
-
-fn render_environment(node, context) {
-    let children = render_children(node, context)
-    box.hbox(children)
-}
-
-// ============================================================
-// Phantom (\phantom, \vphantom, \hphantom)
-// ============================================================
-
-fn render_phantom(node, context) {
-    let content_box = if (node.content != null)
-        render_node(node.content, ctx.derive(context, {phantom: true}))
-    else box.text_box("", null, "ord")
-    {
-        element: <span style: "visibility:hidden;display:inline-block";
-            content_box.element
-        >,
-        height: content_box.height, depth: content_box.depth,
-        width: content_box.width, type: "ord",
-        italic: 0.0, skew: 0.0
-    }
-}
-
-// ============================================================
-// Box commands (\boxed, \fbox)
-// ============================================================
-
-fn render_box_cmd(node, context) {
-    let content_box = if (node.content != null) render_node(node.content, context)
-        else box.text_box("", null, "ord")
-    {
-        element: <span style: "border:1px solid;padding:0.1em";
-            content_box.element
-        >,
-        height: content_box.height + 0.15, depth: content_box.depth + 0.15,
-        width: content_box.width + 0.3, type: "ord",
-        italic: 0.0, skew: 0.0
-    }
-}
-
-// ============================================================
-// Rule command (\rule)
-// ============================================================
-
-fn render_rule(node, context) {
-    let w = if (node.width != null) float(string(node.width)) else 1.0
-    let h = if (node.height != null) float(string(node.height)) else 0.4
-    let rule_style = "width:" ++ string(w) ++ "em;height:" ++ string(h) ++ "em;background:currentColor"
-    box.box_styled(css.RULE, rule_style,
-        h, 0.0, w, "ord"
-    )
 }
 
 // ============================================================
@@ -467,3 +398,4 @@ fn apply_spacing(boxes, context) {
     if (len(filtered) <= 1) filtered
     else build_spaced(filtered, 1, filtered[0].type, [filtered[0]], context)
 }
+
