@@ -242,6 +242,16 @@ void array_float_set(ArrayFloat *arr, int index, double value) {
     }
 }
 
+void array_int_set(ArrayInt *arr, int index, int64_t value) {
+    if (!arr || index < 0 || index >= arr->capacity) {
+        return;
+    }
+    arr->items[index] = value;
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
+}
+
 // set with item value
 void array_float_set_item(ArrayFloat *arr, int index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
