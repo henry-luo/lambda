@@ -452,9 +452,17 @@
            (define text-h (+ (* (sub1 num-lines) line-height) text-view-h))
            (make-text-view id 0 text-view-y text-w text-h content)]
 
-          ;; Ahem font: split on zero-width spaces
+          ;; Ahem font: split on spaces first, then zero-width spaces
+          ;; CSS 2.2 §16.6: normal white-space processing allows breaks at spaces
           [else
-           (define words (string-split content "\u200B"))
+           (define space-split (string-split content " "))
+           (define words
+             (if (> (length space-split) 1)
+                 space-split  ;; text has regular spaces → use as break points
+                 (string-split content "\u200B")))  ;; fallback to ZWSP
+           (define has-spaces? (> (length space-split) 1))
+           ;; Ahem space character has width = font-size (same as any glyph)
+           (define ahem-space-w (ahem-char-width #\space font-size))
            (define word-ws
              (for/list ([w (in-list words)])
                ;; use ahem-char-width for proper Unicode space handling
@@ -470,11 +478,15 @@
                   (values lines (max max-w line-w))]
                  [else
                   (define ww (car remaining-words))
-                  (define new-line-w (+ line-w ww))
+                  ;; when splitting on spaces, account for space width between words
+                  (define new-line-w
+                    (if (and has-spaces? (> line-w 0))
+                        (+ line-w ahem-space-w ww)
+                        (+ line-w ww)))
                   (cond
                     ;; first word on line always fits
                     [(= line-w 0)
-                     (loop (cdr remaining-words) new-line-w lines max-w)]
+                     (loop (cdr remaining-words) ww lines max-w)]
                     ;; word fits on current line
                     [(<= new-line-w effective-avail-w)
                      (loop (cdr remaining-words) new-line-w lines max-w)]
