@@ -80,137 +80,109 @@ void format_number(StringBuf* sb, Item item) {
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
     if (!type) return NULL;
 
-    // If type is null, try to auto-detect from item type
-    if (!type) {
-        log_debug("format: Format type is null, using default");
-        return NULL;
+    const char* t = type->chars;
+    const char* f = (flavor && flavor->chars && strlen(flavor->chars) > 0) ? flavor->chars : NULL;
+
+    log_debug("Formatting with type: %s%s%s", t, f ? "-" : "", f ? f : "");
+
+    // ---- Static dispatch table: type → format function (no flavor) ----
+    struct FormatEntry {
+        const char* type_name;
+        String* (*format_fn)(Pool*, Item);
+    };
+    static const FormatEntry SIMPLE_FORMATS[] = {
+        { "json",       format_json },
+        { "xml",        format_xml },
+        { "html",       format_html },
+        { "yaml",       format_yaml },
+        { "toml",       format_toml },
+        { "ini",        format_ini },
+        { "properties", format_properties },
+        { "css",        format_css },
+        { "jsx",        format_jsx },
+        { "mdx",        format_mdx },
+        { "latex",      format_latex },
+        { "text",       format_text_string },
+        { NULL,         NULL }
+    };
+
+    // ---- Markup dispatch table: type → MarkupOutputRules ----
+    struct MarkupEntry {
+        const char* type_name;
+        const MarkupOutputRules* rules;
+    };
+    static const MarkupEntry MARKUP_FORMATS[] = {
+        { "markdown",  &MARKDOWN_RULES },
+        { "md",        &MARKDOWN_RULES },
+        { "rst",       &RST_RULES },
+        { "org",       &ORG_RULES },
+        { "wiki",      &WIKI_RULES },
+        { "textile",   &TEXTILE_RULES },
+        { NULL,        NULL }
+    };
+
+    // 1. Check simple format table
+    for (const FormatEntry* e = SIMPLE_FORMATS; e->type_name; e++) {
+        if (strcmp(t, e->type_name) == 0) return e->format_fn(pool, item);
     }
 
-    // Helper function to build format type with flavor
-    char format_type_with_flavor[256];
-    if (flavor && flavor->chars && strlen(flavor->chars) > 0) {
-        snprintf(format_type_with_flavor, sizeof(format_type_with_flavor), "%s-%s", type->chars, flavor->chars);
-    } else {
-        strncpy(format_type_with_flavor, type->chars, sizeof(format_type_with_flavor) - 1);
-        format_type_with_flavor[sizeof(format_type_with_flavor) - 1] = '\0';
+    // 2. Check markup format table
+    for (const MarkupEntry* e = MARKUP_FORMATS; e->type_name; e++) {
+        if (strcmp(t, e->type_name) == 0) return format_markup_string(pool, item, e->rules);
     }
 
-    log_debug("Formatting with type: %s", format_type_with_flavor);
+    // 3. Flavor-based dispatch for compound types
+    if (strcmp(t, "graph") == 0) {
+        const char* graph_flavor = f ? f : "dot";
+        return format_graph_with_flavor(pool, item, graph_flavor);
+    }
 
-    String* result = NULL;
+    if (strcmp(t, "markup") == 0) {
+        const char* markup_flavor = (!f || strcmp(f, "standard") == 0) ? "markdown" : f;
+        const MarkupOutputRules* rules = get_markup_rules(markup_flavor);
+        if (!rules) {
+            log_debug("format: unsupported markup flavor: %s, defaulting to markdown", markup_flavor);
+            rules = &MARKDOWN_RULES;
+        }
+        return format_markup_string(pool, item, rules);
+    }
 
-    if (strcmp(type->chars, "json") == 0) {
-        result = format_json(pool, item);
-    }
-    else if (strcmp(type->chars, "markdown") == 0) {
-        result = format_markup_string(pool, item, &MARKDOWN_RULES);
-    }
-    else if (strcmp(type->chars, "rst") == 0) {
-        result = format_markup_string(pool, item, &RST_RULES);
-    }
-    else if (strcmp(type->chars, "xml") == 0) {
-        result = format_xml(pool, item);
-    }
-    else if (strcmp(type->chars, "html") == 0) {
-        result = format_html(pool, item);
-    }
-    else if (strcmp(type->chars, "yaml") == 0) {
-        result = format_yaml(pool, item);
-    }
-    else if (strcmp(type->chars, "toml") == 0) {
-        result = format_toml(pool, item);
-    }
-    else if (strcmp(type->chars, "ini") == 0) {
-        result = format_ini(pool, item);
-    }
-    else if (strcmp(type->chars, "properties") == 0) {
-        result = format_properties(pool, item);
-    }
-    else if (strcmp(type->chars, "css") == 0) {
-        result = format_css(pool, item);
-    }
-    else if (strcmp(type->chars, "jsx") == 0) {
-        result = format_jsx(pool, item);
-    }
-    else if (strcmp(type->chars, "latex") == 0) {
-        result = format_latex(pool, item);
-    }
-    else if (strcmp(type->chars, "org") == 0) {
-        result = format_markup_string(pool, item, &ORG_RULES);
-    }
-    else if (strcmp(type->chars, "wiki") == 0) {
-        result = format_markup_string(pool, item, &WIKI_RULES);
-    }
-    else if (strcmp(type->chars, "textile") == 0) {
-        result = format_markup_string(pool, item, &TEXTILE_RULES);
-    }
-    else if (strcmp(type->chars, "text") == 0) {
-        result = format_text_string(pool, item);
-    }
-    else if (strcmp(type->chars, "graph") == 0) {
-        // Graph type with flavor support for DOT, Mermaid, D2
-        if (!flavor || strcmp(flavor->chars, "dot") == 0) {
-            result = format_graph_with_flavor(pool, item, "dot");
+    if (strcmp(t, "math") == 0) {
+        // Math flavor dispatch table
+        struct MathEntry { const char* flavor; String* (*fn)(Pool*, Item); };
+        static const MathEntry MATH_FLAVORS[] = {
+            { "latex",  format_math_latex },
+            { "typst",  format_math_typst },
+            { "ascii",  format_math_ascii },
+            { "mathml", format_math_mathml },
+            { NULL,     NULL }
+        };
+        const char* mf = f ? f : "latex";
+        for (const MathEntry* e = MATH_FLAVORS; e->flavor; e++) {
+            if (strcmp(mf, e->flavor) == 0) return e->fn(pool, item);
         }
-        else if (strcmp(flavor->chars, "mermaid") == 0) {
-            result = format_graph_with_flavor(pool, item, "mermaid");
-        }
-        else if (strcmp(flavor->chars, "d2") == 0) {
-            result = format_graph_with_flavor(pool, item, "d2");
-        }
-        else {
-            log_debug("format: Unsupported graph flavor: %s, defaulting to dot", flavor->chars);
-            result = format_graph_with_flavor(pool, item, "dot");
+        log_debug("format: unsupported math flavor: %s, defaulting to latex", mf);
+        return format_math_latex(pool, item);
+    }
+
+    // 4. Legacy "type-flavor" combined strings (backward compatibility)
+    if (f) {
+        char combined[256];
+        snprintf(combined, sizeof(combined), "%s-%s", t, f);
+
+        struct MathEntry { const char* name; String* (*fn)(Pool*, Item); };
+        static const MathEntry LEGACY_MATH[] = {
+            { "math-latex",  format_math_latex },
+            { "math-typst",  format_math_typst },
+            { "math-ascii",  format_math_ascii },
+            { "math-mathml", format_math_mathml },
+            { NULL,          NULL }
+        };
+        for (const MathEntry* e = LEGACY_MATH; e->name; e++) {
+            if (strcmp(combined, e->name) == 0) return e->fn(pool, item);
         }
     }
-    else if (strcmp(type->chars, "markup") == 0) {
-        // Markup type with flavor-based format selection
-        // Use unified markup emitter with flavor-based rule lookup
-        const char* markup_flavor = (!flavor || strcmp(flavor->chars, "standard") == 0)
-            ? "markdown" : flavor->chars;
-        const MarkupOutputRules* markup_rules = get_markup_rules(markup_flavor);
-        if (!markup_rules) {
-            log_debug("format: Unsupported markup flavor: %s, defaulting to markdown", markup_flavor);
-            markup_rules = &MARKDOWN_RULES;
-        }
-        result = format_markup_string(pool, item, markup_rules);
-    }
-    else if (strcmp(type->chars, "math") == 0) {
-        // Math type with flavor support
-        if (!flavor || strcmp(flavor->chars, "latex") == 0) {
-            result = format_math_latex(pool, item);
-        }
-        else if (strcmp(flavor->chars, "typst") == 0) {
-            result = format_math_typst(pool, item);
-        }
-        else if (strcmp(flavor->chars, "ascii") == 0) {
-            log_debug("format: calling format_math_ascii");
-            result = format_math_ascii(pool, item);
-        }
-        else if (strcmp(flavor->chars, "mathml") == 0) {
-            result = format_math_mathml(pool, item);
-        }
-        else {
-            log_debug("format: Unsupported math flavor: %s, defaulting to latex", flavor->chars);
-            result = format_math_latex(pool, item);
-        }
-    }
-    // Legacy format type strings (for backwards compatibility)
-    else if (strcmp(format_type_with_flavor, "math-latex") == 0) {
-        result = format_math_latex(pool, item);
-    }
-    else if (strcmp(format_type_with_flavor, "math-typst") == 0) {
-        result = format_math_typst(pool, item);
-    }
-    else if (strcmp(format_type_with_flavor, "math-ascii") == 0) {
-        log_debug("format: calling format_math_ascii via legacy path");
-        result = format_math_ascii(pool, item);
-    }
-    else if (strcmp(format_type_with_flavor, "math-mathml") == 0) {
-        result = format_math_mathml(pool, item);
-    }
-    else {
-        log_error("format: Unsupported format type: %s", format_type_with_flavor);
-    }
-    return result;
+
+    log_error("format: unsupported format type: %s%s%s", t, f ? "-" : "", f ? f : "");
+    return NULL;
 }
