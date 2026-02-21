@@ -2450,18 +2450,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             auto is_font_available = [&](const char* family) -> bool {
                 if (!family) return false;
                 // Generic font families are always "available" (resolved later)
-                if (strcmp(family, "serif") == 0 ||
-                    strcmp(family, "sans-serif") == 0 ||
-                    strcmp(family, "monospace") == 0 ||
-                    strcmp(family, "cursive") == 0 ||
-                    strcmp(family, "fantasy") == 0 ||
-                    strcmp(family, "system-ui") == 0 ||
-                    strcmp(family, "ui-serif") == 0 ||
-                    strcmp(family, "ui-sans-serif") == 0 ||
-                    strcmp(family, "ui-monospace") == 0 ||
-                    strcmp(family, "ui-rounded") == 0 ||
-                    strcmp(family, "-apple-system") == 0 ||
-                    strcmp(family, "BlinkMacSystemFont") == 0) {
+                // Generic font families are always "available" (resolved later)
+                // CSS 2.1: font family names are case-insensitive
+                size_t flen = strlen(family);
+                if (str_ieq(family, flen, "serif", 5) ||
+                    str_ieq(family, flen, "sans-serif", 10) ||
+                    str_ieq(family, flen, "monospace", 9) ||
+                    str_ieq(family, flen, "cursive", 7) ||
+                    str_ieq(family, flen, "fantasy", 7) ||
+                    str_ieq(family, flen, "system-ui", 9) ||
+                    str_ieq(family, flen, "ui-serif", 8) ||
+                    str_ieq(family, flen, "ui-sans-serif", 13) ||
+                    str_ieq(family, flen, "ui-monospace", 12) ||
+                    str_ieq(family, flen, "ui-rounded", 10) ||
+                    str_ieq(family, flen, "-apple-system", 13) ||
+                    str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
                     return true;
                 }
                 // Check @font-face descriptors first (custom fonts take precedence)
@@ -2564,11 +2567,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 // Handle explicit 'inherit' keyword
                 if (align_value == CSS_VALUE_INHERIT) {
-                    // Find parent's text-align value
+                    // Find parent's computed text-align value
+                    // Check computed blk->text_align first (handles HTML align attribute and
+                    // CSS values set through any path), then fall back to specified_style
                     DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
                     DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                    bool resolved = false;
 
                     while (parent) {
+                        // Prefer computed value (covers HTML align attr, CSS, and inherited values)
+                        if (parent->blk && parent->blk->text_align != CSS_VALUE__UNDEF &&
+                            parent->blk->text_align != CSS_VALUE_INHERIT) {
+                            block->blk->text_align = parent->blk->text_align;
+                            log_debug("[CSS] Text-align: inherit resolved to parent computed value %d", parent->blk->text_align);
+                            resolved = true;
+                            break;
+                        }
+                        // Fall back to specified style
                         if (parent->specified_style) {
                             CssDeclaration* parent_decl = style_tree_get_declaration(
                                 parent->specified_style, CSS_PROPERTY_TEXT_ALIGN);
@@ -2577,7 +2592,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 CssEnum parent_align = parent_decl->value->data.keyword;
                                 if (parent_align != CSS_VALUE_INHERIT && parent_align != CSS_VALUE__UNDEF) {
                                     block->blk->text_align = parent_align;
-                                    log_debug("[CSS] Text-align: inherit resolved to parent value %d", parent_align);
+                                    log_debug("[CSS] Text-align: inherit resolved to parent specified value %d", parent_align);
+                                    resolved = true;
                                     break;
                                 }
                             }
@@ -2586,7 +2602,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
 
                     // If no parent value found, use default (left)
-                    if (!parent) {
+                    if (!resolved) {
                         block->blk->text_align = CSS_VALUE_LEFT;
                         log_debug("[CSS] Text-align: inherit with no parent, using LEFT");
                     }
@@ -5625,16 +5641,29 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_FONT_VARIANT: {
             log_debug("[CSS] Processing font-variant property");
             if (!span->font) {
-                log_debug("[CSS] font-variant: FontProp is NULL");
-                break;
+                span->font = alloc_font_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    // Note: Adding font_variant field to FontProp would be needed
-                    log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)",
-                        css_enum_info(value->data.keyword)->name, val);
+                if (val == CSS_VALUE_INHERIT) {
+                    // inherit from parent
+                    DomElement* ancestor = static_cast<DomElement*>(lycon->view);
+                    if (ancestor && ancestor->font) {
+                        span->font->font_variant = ancestor->font->font_variant;
+                    }
+                } else if (val > 0) {
+                    span->font->font_variant = val;
+                    log_debug("[CSS] font-variant: %s -> 0x%04X",
+                        css_enum_info(val)->name, val);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                // Handle unregistered keywords (e.g., "small-caps" parsed as custom)
+                CssEnum val = css_enum_by_name(value->data.custom_property.name);
+                if (val != CSS_VALUE__UNDEF) {
+                    span->font->font_variant = val;
+                    log_debug("[CSS] font-variant from custom: %s -> 0x%04X",
+                        value->data.custom_property.name, val);
                 }
             }
             break;
