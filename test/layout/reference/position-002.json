@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-  "test_file": "font-size-090.htm",
-========
   "test_file": "position-002.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -20,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 58,
+      "height": 82,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1285,
@@ -208,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                "text": "CSS Test: Font-size using percentages with a minimum value, 0%",
-                "length": 62,
-========
                 "text": "CSS Test: Position set to 'relative'",
                 "length": 36,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -692,13 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                "text": "\n            #div1\n            {\n                font: 1in ahem;\n            }\n            div div\n            {\n                color: red;\n                font-size: 0%;\n            }\n        ",
-                "length": 194,
-========
                 "text": "\n            #wrapper\n            {\n                border: 3px solid orange;\n            }\n            #div1\n            {\n                background: blue;\n                left: 1in;\n                position: relative;\n                top: 1in;\n            }\n        ",
                 "length": 269,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -741,17 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 34,
+          "height": 58,
           "contentWidth": 1184,
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-          "contentHeight": 34,
-          "scrollWidth": 1184,
-          "scrollHeight": 34
-========
           "contentHeight": 58,
           "scrollWidth": 1277,
           "scrollHeight": 151
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
         },
         "computed": {
           "display": "block",
@@ -859,28 +839,14 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                "text": "Test passes if there is no red visible on the page.",
-                "length": 51,
-========
                 "text": "Test passes if the blue box is completely shifted below the orange box.",
                 "length": 71,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                      "width": 308.58,
-                      "height": 18,
-                      "right": 316.58,
-                      "bottom": 34,
-                      "text": "Test passes if there is no red visible on the page.",
-                      "startIndex": 0,
-                      "endIndex": 51
-========
                       "width": 451.67,
                       "height": 18,
                       "right": 459.67,
@@ -888,7 +854,6 @@
                       "text": "Test passes if the blue box is completely shifted below the orange box.",
                       "startIndex": 0,
                       "endIndex": 71
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                     }
                   ],
                   "hasLayout": true,
@@ -904,27 +869,19 @@
           },
           {
             "nodeType": "element",
-            "selector": "#div1",
+            "selector": "#wrapper",
             "tag": "div",
-            "id": "div1",
+            "id": "wrapper",
             "classes": [],
             "layout": {
               "x": 8,
               "y": 50,
               "width": 1184,
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-              "height": 0,
-              "contentWidth": 1184,
-              "contentHeight": 0,
-              "scrollWidth": 1184,
-              "scrollHeight": 0
-========
               "height": 24,
               "contentWidth": 1178,
               "contentHeight": 18,
               "scrollWidth": 1274,
               "scrollHeight": 114
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
             },
             "computed": {
               "display": "block",
@@ -937,10 +894,10 @@
               "paddingRight": 0,
               "paddingBottom": 0,
               "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
+              "borderTopWidth": 3,
+              "borderRightWidth": 3,
+              "borderBottomWidth": 3,
+              "borderLeftWidth": 3,
               "flexDirection": "row",
               "flexWrap": "nowrap",
               "justifyContent": "normal",
@@ -952,9 +909,9 @@
               "alignSelf": "auto",
               "order": 0,
               "gap": "normal",
-              "fontSize": 96,
+              "fontSize": 16,
               "lineHeight": "normal",
-              "fontFamily": "ahem",
+              "fontFamily": "Times",
               "fontWeight": "400",
               "textAlign": "start",
               "verticalAlign": "baseline",
@@ -972,21 +929,11 @@
             "children": [
               {
                 "nodeType": "element",
-                "selector": "div",
+                "selector": "#div1",
                 "tag": "div",
-                "id": null,
+                "id": "div1",
                 "classes": [],
                 "layout": {
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                  "x": 8,
-                  "y": 50,
-                  "width": 1184,
-                  "height": 0,
-                  "contentWidth": 1184,
-                  "contentHeight": 0,
-                  "scrollWidth": 1184,
-                  "scrollHeight": 0
-========
                   "x": 107,
                   "y": 149,
                   "width": 1178,
@@ -995,7 +942,6 @@
                   "contentHeight": 18,
                   "scrollWidth": 1178,
                   "scrollHeight": 18
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                 },
                 "computed": {
                   "display": "block",
@@ -1025,21 +971,14 @@
                   "gap": "normal",
                   "fontSize": 16,
                   "lineHeight": "normal",
-                  "fontFamily": "ahem",
+                  "fontFamily": "Times",
                   "fontWeight": "400",
                   "textAlign": "start",
                   "verticalAlign": "baseline",
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-========
                   "top": "96px",
                   "right": "-96px",
                   "bottom": "-96px",
                   "left": "96px",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                   "zIndex": "auto",
                   "overflow": "visible",
                   "overflowX": "visible",
@@ -1050,21 +989,12 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "Filler text",
+                    "text": "Filler Text",
                     "length": 11,
                     "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
                         {
-<<<<<<<< HEAD:test/layout/reference/font-size-090.json
-                          "x": 8,
-                          "y": 50,
-                          "width": 0,
-                          "height": 0,
-                          "right": 8,
-                          "bottom": 50,
-                          "text": "Filler text",
-========
                           "x": 107,
                           "y": 149,
                           "width": 66.59,
@@ -1072,7 +1002,6 @@
                           "right": 173.59,
                           "bottom": 167,
                           "text": "Filler Text",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/position-002.json
                           "startIndex": 0,
                           "endIndex": 11
                         }

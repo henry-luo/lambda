@@ -1069,11 +1069,11 @@
                 "layout": {
                   "x": 8,
                   "y": 86,
-                  "width": 278,
+                  "width": 279,
                   "height": 66,
-                  "contentWidth": 276,
+                  "contentWidth": 277,
                   "contentHeight": 64,
-                  "scrollWidth": 276,
+                  "scrollWidth": 277,
                   "scrollHeight": 64
                 },
                 "computed": {
@@ -1129,11 +1129,11 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 286,
+                      "x": 287,
                       "y": 138,
                       "width": 4,
                       "height": 18,
-                      "right": 290,
+                      "right": 291,
                       "bottom": 156
                     }
                   ],
@@ -1153,7 +1153,7 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 290,
+                  "x": 291,
                   "y": 130,
                   "width": 267.91,
                   "height": 28,
@@ -1214,11 +1214,11 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 290,
+                          "x": 291,
                           "y": 130,
                           "width": 267.91,
                           "height": 28,
-                          "right": 557.91,
+                          "right": 558.91,
                           "bottom": 158,
                           "text": "Focus received by text zone",
                           "startIndex": 0,

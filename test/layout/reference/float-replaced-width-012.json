@@ -799,11 +799,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 93.55,
+              "width": 102,
               "height": 102,
-              "contentWidth": 88,
+              "contentWidth": 96,
               "contentHeight": 96,
-              "scrollWidth": 88,
+              "scrollWidth": 96,
               "scrollHeight": 96
             },
             "computed": {
@@ -839,7 +839,7 @@
               "textAlign": "start",
               "verticalAlign": "baseline",
               "top": "50px",
-              "right": "1098.45px",
+              "right": "1090px",
               "bottom": "648px",
               "left": "8px",
               "zIndex": "auto",
@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 11,
                   "y": 53,
-                  "width": 43.77,
-                  "height": 16,
-                  "contentWidth": 44,
-                  "contentHeight": 16,
-                  "scrollWidth": 44,
-                  "scrollHeight": 25
+                  "width": 48,
+                  "height": 48,
+                  "contentWidth": 48,
+                  "contentHeight": 48,
+                  "scrollWidth": 48,
+                  "scrollHeight": 48
                 },
                 "computed": {
                   "display": "block",

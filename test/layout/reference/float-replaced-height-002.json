@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 66,
+      "height": 65,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -654,7 +654,7 @@
           "contentWidth": 1184,
           "contentHeight": 18,
           "scrollWidth": 1184,
-          "scrollHeight": 50
+          "scrollHeight": 49
         },
         "computed": {
           "display": "block",
@@ -799,12 +799,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 87.55,
-              "height": 16,
-              "contentWidth": 88,
-              "contentHeight": 16,
-              "scrollWidth": 88,
-              "scrollHeight": 16
+              "width": 15,
+              "height": 15,
+              "contentWidth": 15,
+              "contentHeight": 15,
+              "scrollWidth": 30,
+              "scrollHeight": 15
             },
             "computed": {
               "display": "block",
@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 87.55,
-                  "height": 16,
-                  "contentWidth": 88,
-                  "contentHeight": 16,
-                  "scrollWidth": 88,
-                  "scrollHeight": 16
+                  "width": 15,
+                  "height": 15,
+                  "contentWidth": 15,
+                  "contentHeight": 15,
+                  "scrollWidth": 15,
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "block",
@@ -960,8 +960,8 @@
                   "textAlign": "start",
                   "verticalAlign": "baseline",
                   "top": "0px",
-                  "right": "57.5469px",
-                  "bottom": "1px",
+                  "right": "-15px",
+                  "bottom": "0px",
                   "left": "15px",
                   "zIndex": "auto",
                   "overflow": "visible",

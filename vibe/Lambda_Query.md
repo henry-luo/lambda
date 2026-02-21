@@ -23,11 +23,12 @@ This requires two **breaking syntax changes** to free the `?` operator for query
 3. [Query Syntax](#query-syntax)
 4. [Semantics](#semantics)
 5. [Query Scope & Traversal](#query-scope--traversal)
-6. [Chaining & Composition](#chaining--composition)
-7. [Comparison with Existing Approaches](#comparison-with-existing-approaches)
-8. [Grammar Changes](#grammar-changes)
-9. [Open Questions](#open-questions)
-10. [Implementation Plan](#implementation-plan)
+6. [Child-Level Query: `[T]`](#child-level-query-t)
+7. [Chaining & Composition](#chaining--composition)
+8. [Comparison with Existing Approaches](#comparison-with-existing-approaches)
+9. [Grammar Changes](#grammar-changes)
+10. [Design Decisions](#design-decisions)
+11. [Implementation Plan](#implementation-plan)
 
 ---
 
@@ -299,9 +300,144 @@ This is deferred to keep the initial implementation simple.
 
 ---
 
-## 6. Chaining & Composition
+## 6. Child-Level Query: `[T]`
 
-### 6.1 Chained Queries
+### 6.1 Overview
+
+While `?` performs recursive descendant search across all depths, the **child-level query** `[T]` searches only **immediate** attributes and children — one level deep:
+
+```lambda
+expr?T             // recursive: all descendants matching T
+expr[T]            // child-level: direct attributes + children matching T
+```
+
+This is analogous to XPath's `/` (child axis) vs `//` (descendant axis), or CSS's `>` (child combinator) vs ` ` (descendant combinator).
+
+### 6.2 Syntax
+
+```
+child_query := expr '[' type ']'
+```
+
+The `[T]` syntax reuses the existing index operator `expr[x]`. The interpretation depends on the type of `x` at runtime:
+
+| Index value `x` | Interpretation |
+|-----------------|----------------|
+| `int` value | Positional index access (existing) |
+| `string` or `symbol` value | Named field access (existing) |
+| Type | Child-level query (**new**) |
+
+Built-in type keywords (`int`, `string`, `float`, `bool`, `null`, `element`, `map`, `array`, etc.), element literals (`<tag>`), and map patterns (`{k: T}`) are syntactically unambiguous as types. For user-defined type names that look like variables, the resolution is handled at runtime in `fn_member()` — if the value resolves to a type, it performs a child-level query; otherwise, it performs normal index/named access.
+
+### 6.3 Semantics
+
+`expr[T]` returns an **array** of all direct attributes and children of `expr` that match type `T`.
+
+#### On Arrays
+
+Searches array items (one level only):
+
+```lambda
+[1, "hello", 3, "world", true][string]    // ("hello", "world")
+[1, 2, 3][int]                             // (1, 2, 3)
+[1, [2, 3], 4][array]                      // ([2, 3])
+[1, "a", null, true][(int | string)]       // (1, "a")
+```
+
+#### On Maps
+
+Searches map **values** (one level only):
+
+```lambda
+{name: "Alice", age: 30, active: true}[string]    // ("Alice")
+{name: "Alice", age: 30, active: true}[int]       // (30)
+{x: 1, y: 2, label: "origin"}[int]                // (1, 2)
+```
+
+#### On Elements
+
+Searches **attribute values** and **direct children**:
+
+```lambda
+type p = <p>
+type img = <img>
+
+let el = <div class: "main" id: "content";
+    <p; "hello">
+    <img src: "photo.jpg">
+    "some text">
+
+el[p]            // (<p; "hello">) — direct child element
+el[img]          // (<img src: "photo.jpg">) — direct child element
+el[string]       // ("main", "content", "some text") — attr values + text children
+el[element]      // (<p; "hello">, <img src: "photo.jpg">) — all child elements
+```
+
+Note: Unlike `?`, the child-level query does **not** recurse into children or attribute values. `el[string]` finds string attribute values and string direct children of `el`, but does not descend into `<p>` to find its `"hello"` text.
+
+### 6.4 Comparison with `?`
+
+| Feature | `expr[T]` | `expr?T` |
+|---------|-----------|----------|
+| Scope | Direct attributes + children only | All descendants (recursive) |
+| Depth | One level | Unlimited |
+| Self-inclusive variant | N/A | `.?T` |
+| Analogy | XPath `/`, CSS `>` | XPath `//`, CSS ` ` |
+| Return type | Array | Array |
+
+```lambda
+type a = <a>
+type c = <c>
+
+let doc = <root;
+    <a; <b; <c>>>
+    <d>>
+
+doc[element]       // (<a ...>, <d>) — direct children only
+doc?element        // (<a>, <b>, <c>, <d>) — all descendants
+
+doc[a]             // (<a ...>) — direct child <a> only
+doc?<a>            // (<a ...>) — same here (only one <a>)
+
+doc[c]             // () — empty, <c> is not a direct child
+doc?<c>            // (<c>) — found recursively
+```
+
+### 6.5 Chaining
+
+Child-level queries can be chained for multi-level specific traversal:
+
+```lambda
+type body = <body>
+type div = <div>
+type input = <input>
+type tr = <tr>
+type td = <td>
+
+html[body][div]                // direct <div> children of <body>
+html[body][div]?<a>            // then recursive search for <a> inside those divs
+```
+
+Mixed with `?`:
+
+```lambda
+html?<form>[input]             // find all <form> (recursive), then direct <input> children
+html?<table>[tr][td]           // all tables → direct rows → direct cells
+```
+
+### 6.6 Design Notes
+
+**No grammar changes required.** The `[T]` child-level query reuses the existing index syntax `expr[x]`. The runtime (`fn_member()`) already dispatches on the type of the index value. When `x` is a type value, it performs the child-level query instead of positional/named access. This makes the feature purely a runtime extension.
+
+**Return type is array.** Consistent with `?`, the child-level query always returns an array of matches (possibly empty). This enables uniform chaining: `expr[T1][T2]`, `expr[T] | transform`, etc.
+
+**Values only for maps.** When querying a map, only the values are tested and returned — not key-value pairs. This keeps the result type uniform (array of matched values) regardless of the container type.
+
+---
+
+## 7. Chaining & Composition
+
+### 7.1 Chained Queries
 
 Queries can be chained to narrow results:
 
@@ -310,7 +446,7 @@ html?<div>?<a>                 // all <a> inside any <div>
 html?<form>?<input>            // all <input> inside <form>
 ```
 
-### 6.2 Query + Pipe
+### 7.2 Query + Pipe
 
 Queries compose naturally with Lambda's pipe operator:
 
@@ -331,7 +467,7 @@ len(html?<div>)
 html?<img> | {tag: name(~), src: ~.src}
 ```
 
-### 6.3 Query + For
+### 7.3 Query + For
 
 ```lambda
 // Process all matching elements
@@ -343,7 +479,7 @@ for (form in html?<form>)
     {action: form.action, fields: form?<input> | ~.name}
 ```
 
-### 6.4 Query in Conditions
+### 7.4 Query in Conditions
 
 ```lambda
 // Check if any match exists
@@ -355,7 +491,7 @@ let main = (html?<div id: "main">)[0]
 
 ---
 
-## 7. Comparison with Existing Approaches
+## 8. Comparison with Existing Approaches
 
 | Feature | jQuery / CSS | XPath | jq | Lambda Query |
 |---------|-------------|-------|-----|-------------|
@@ -363,6 +499,7 @@ let main = (html?<div id: "main">)[0]
 | Select by attribute | `$("[href]")` | `//*[@href]` | — | `?<element href: string>` |
 | Select by attr value | `$("[id='x']")` | `//*[@id='x']` | — | `?<element id: "x">` |
 | Descendant search | `$("div p")` | `//div//p` | `.. \| .p` | `?<div>?<p>` |
+| Child search | `$("div > p")` | `div/p` | `.p` | `[div][p]` (with `type div=<div>; type p=<p>`) |
 | Self-inclusive | — | `self::div` | — | `.?<div>` |
 | By type | — | — | `numbers` | `?int` |
 | By shape | — | — | `select(.a)` | `?{a: any}` |
@@ -376,9 +513,9 @@ let main = (html?<div id: "main">)[0]
 
 ---
 
-## 8. Grammar Changes
+## 9. Grammar Changes
 
-### 8.1 Summary of Token Changes
+### 9.1 Summary of Token Changes
 
 | Change | Old | New | Affected Grammar Rules |
 |--------|-----|------|----------------------|
@@ -386,7 +523,7 @@ let main = (html?<div id: "main">)[0]
 | Error propagation | `?` | `^` | `call_expr` propagate field |
 | New query operator | — | `?` | new `query_expr` rule |
 
-### 8.2 Grammar Diff (grammar.js)
+### 9.2 Grammar Diff (grammar.js)
 
 #### Power operator `^` → `**`
 
@@ -429,9 +566,9 @@ direct_query_expr: $ => seq(
 ),
 ```
 
-Note: `query_expr` takes `primary_type` on the right, **not** `_type_expr`. This means `that` constraints are not allowed inline — they must be wrapped in parentheses or declared as a named type (see Section 9.5).
+Note: `query_expr` takes `primary_type` on the right, **not** `_type_expr`. This means `that` constraints are not allowed inline — they must be wrapped in parentheses or declared as a named type (see Section 10.5).
 
-### 8.3 AST Node
+### 9.3 AST Node
 
 ```
 QueryExpr {
@@ -441,7 +578,7 @@ QueryExpr {
 }
 ```
 
-### 8.4 Precedence
+### 9.4 Precedence
 
 The `?` query operator binds at the **same level as `.`** (member access) — both are part of `primary_expr`:
 
@@ -470,9 +607,9 @@ html?<img> | ~.src         // query binds tighter than pipe ✓
 
 ---
 
-## 9. Design Decisions
+## 10. Design Decisions
 
-### 9.1 `?` returns all matches
+### 10.1 `?` returns all matches
 
 `?` always returns a **list** of all matching values (possibly empty). Use `(expr?T)[0]` for first match:
 
@@ -482,7 +619,7 @@ html?<img>         // list of all <img> elements
 len(html?<img>)    // count of matches
 ```
 
-### 9.2 Attributes are searched
+### 10.2 Attributes are searched
 
 The query searches the **entire subtree including attribute values**. Lambda attributes can hold complex values — maps, arrays, nested elements — so the query descends into all of them:
 
@@ -491,11 +628,11 @@ let el = <widget data: {scores: [90, 85, 72]}; "content">
 el?int             // (90, 85, 72) — found inside attribute value
 ```
 
-### 9.3 Unlimited depth
+### 10.3 Unlimited depth
 
 The query descends into **all nested containers** with no depth limit. In the future, `?T limit N` may be introduced to cap results (see Section 5.6).
 
-### 9.4 `?` and `?` in types do not conflict
+### 10.4 `?` and `?` in types do not conflict
 
 In the type system, `T?` means `T | null` (optional). In expressions, `expr?T` means query. These are in **different syntactic contexts** (type vs. expression), so there is no ambiguity:
 
@@ -504,7 +641,7 @@ type MaybeInt = int?          // type context: optional int
 let found = data?int          // expr context: query for int values
 ```
 
-### 9.5 Constrained queries via `that`
+### 10.5 Constrained queries via `that`
 
 The `that` keyword is used for constraints in the type system (`constrained_type`), but `that` is **also** the pipe filter operator in expression context. Since `?` takes `primary_type` (not `_type_expr`), a bare `that` after the query would be parsed as a pipe filter, creating ambiguity.
 
@@ -529,7 +666,7 @@ data?(int that (~ > 0))
 data?int that ~ > 0   // parsed as: (data?int) that (~ > 0)
 ```
 
-### 9.6 Performance considerations
+### 10.6 Performance considerations
 
 Recursive descendant search on large trees could be expensive. Options for future optimization:
 - Lazy evaluation (yield results incrementally)
@@ -540,7 +677,7 @@ Recursive descendant search on large trees could be expensive. Options for futur
 
 ---
 
-## 10. Implementation Plan
+## 11. Implementation Plan
 
 ### Phase 1: Breaking Changes (grammar + transpiler + runtime)
 1. Change power operator `^` → `**` in grammar, AST builder, transpiler, all tests
@@ -599,7 +736,7 @@ format(stats, 'json')
 
 ---
 
-## 11. Future: Auto Pipe/Map with Query (KIV)
+## 12. Future: Auto Pipe/Map with Query (KIV)
 
 > **Status**: Keep In View — not yet implemented. Reserved for future consideration.
 

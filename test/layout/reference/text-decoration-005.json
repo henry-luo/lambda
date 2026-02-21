@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/background-applies-to-008.json
-  "test_file": "background-applies-to-008.htm",
-========
   "test_file": "text-decoration-005.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-decoration-005.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -208,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/background-applies-to-008.json
-                "text": "CSS Test: Background applied to elements with 'display' set to 'inline'",
-                "length": 71,
-========
                 "text": "CSS Test: Text-decoration set to 'underline overline'",
                 "length": 53,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-decoration-005.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -692,13 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/background-applies-to-008.json
-                "text": "\n            div\n            {\n                background: black;\n                display: inline;\n            }\n        ",
-                "length": 121,
-========
                 "text": "\n            div\n            {\n               text-decoration: underline overline;\n            }\n        ",
                 "length": 105,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-decoration-005.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -853,28 +839,14 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/background-applies-to-008.json
-                "text": "Test passes if there is a black box below.",
-                "length": 42,
-========
                 "text": "Test passes if the \"Filler Text\" below has a line over it and a line under it.",
                 "length": 78,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-decoration-005.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-<<<<<<<< HEAD:test/layout/reference/background-applies-to-008.json
-                      "width": 259.55,
-                      "height": 18,
-                      "right": 267.55,
-                      "bottom": 34,
-                      "text": "Test passes if there is a black box below.",
-                      "startIndex": 0,
-                      "endIndex": 42
-========
                       "width": 468.64,
                       "height": 18,
                       "right": 476.64,
@@ -882,7 +854,6 @@
                       "text": "Test passes if the \"Filler Text\" below has a line over it and a line under it.",
                       "startIndex": 0,
                       "endIndex": 78
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/text-decoration-005.json
                     }
                   ],
                   "hasLayout": true,
@@ -905,15 +876,15 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 66.59,
+              "width": 1184,
               "height": 18,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
+              "contentWidth": 1184,
+              "contentHeight": 18,
+              "scrollWidth": 1184,
+              "scrollHeight": 18
             },
             "computed": {
-              "display": "inline",
+              "display": "block",
               "position": "static",
               "marginTop": 0,
               "marginRight": 0,
@@ -977,7 +948,7 @@
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
-                  "parentDisplay": "inline",
+                  "parentDisplay": "block",
                   "parentVisibility": "visible"
                 },
                 "depth": 3,

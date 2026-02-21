@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: blocks inside inlines – whitespace-present-1b",
-                "length": 55,
+                "text": "CSS Test: blocks inside inlines â€“ whitespace-present-1b",
+                "length": 57,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 121,
+      "height": 140,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -650,11 +650,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 80,
+          "height": 114,
           "contentWidth": 1184,
-          "contentHeight": 80,
+          "contentHeight": 114,
           "scrollWidth": 1184,
-          "scrollHeight": 105
+          "scrollHeight": 114
         },
         "computed": {
           "display": "block",
@@ -800,11 +800,11 @@
               "x": 18,
               "y": 50,
               "width": 560,
-              "height": 46,
+              "height": 80,
               "contentWidth": 550,
-              "contentHeight": 36,
+              "contentHeight": 70,
               "scrollWidth": 550,
-              "scrollHeight": 66
+              "scrollHeight": 70
             },
             "computed": {
               "display": "block",
@@ -860,7 +860,7 @@
                   "x": 23,
                   "y": 55,
                   "width": 528.77,
-                  "height": 36,
+                  "height": 70,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -947,11 +947,11 @@
                       "rects": [
                         {
                           "x": 119,
-                          "y": 73,
+                          "y": 107,
                           "width": 310.55,
                           "height": 18,
                           "right": 429.55,
-                          "bottom": 91,
+                          "bottom": 125,
                           "text": "Text Filler Text Filler Text Filler Text Filler Text",
                           "startIndex": 0,
                           "endIndex": 52
@@ -977,11 +977,11 @@
                   "rects": [
                     {
                       "x": 429.55,
-                      "y": 73,
+                      "y": 107,
                       "width": 4,
                       "height": 18,
                       "right": 433.55,
-                      "bottom": 91
+                      "bottom": 125
                     }
                   ],
                   "hasLayout": true,
@@ -1002,12 +1002,12 @@
                 "layout": {
                   "x": 433.55,
                   "y": 73,
-                  "width": 71.55,
-                  "height": 18,
-                  "contentWidth": 72,
-                  "contentHeight": 18,
-                  "scrollWidth": 72,
-                  "scrollHeight": 18
+                  "width": 96,
+                  "height": 48,
+                  "contentWidth": 96,
+                  "contentHeight": 48,
+                  "scrollWidth": 96,
+                  "scrollHeight": 48
                 },
                 "computed": {
                   "display": "inline",

@@ -1039,8 +1039,8 @@
                     "id": "ring",
                     "classes": [],
                     "layout": {
-                      "x": 216.36,
-                      "y": 379.8,
+                      "x": 215.88,
+                      "y": 379.92,
                       "width": 42,
                       "height": 42,
                       "contentWidth": 42,
@@ -1080,10 +1080,10 @@
                       "fontWeight": "400",
                       "textAlign": "start",
                       "verticalAlign": "baseline",
-                      "top": "315.811px",
-                      "right": "101.641px",
-                      "bottom": "-17.7969px",
-                      "left": "196.373px",
+                      "top": "315.924px",
+                      "right": "102.125px",
+                      "bottom": "-17.9219px",
+                      "left": "195.883px",
                       "zIndex": "auto",
                       "overflow": "clip",
                       "overflowX": "clip",
@@ -1247,7 +1247,7 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "61.3666% 98.6909%",
+                    "text": "61.2135% 98.7263%",
                     "length": 17,
                     "isWhitespaceOnly": false,
                     "layout": {
@@ -1259,7 +1259,7 @@
                           "height": 18,
                           "right": 203.56,
                           "bottom": 454,
-                          "text": "61.3666% 98.6909%",
+                          "text": "61.2135% 98.7263%",
                           "startIndex": 0,
                           "endIndex": 17
                         }

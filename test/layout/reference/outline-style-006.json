@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-  "test_file": "border-applies-to-011.htm",
-========
   "test_file": "outline-style-006.htm",
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -20,11 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-      "height": 160,
-========
       "height": 154,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -212,13 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-                "text": "CSS Test: Border applied to element with 'display' set to run-in",
-                "length": 64,
-========
                 "text": "CSS Test: Outline-style set to 'groove'",
                 "length": 39,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -696,13 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-                "text": "\n            div\n            {\n                border: solid green;\n                display: run-in;\n                height: 1in;\n                width: 1in;\n            }\n        ",
-                "length": 180,
-========
                 "text": "\n            div\n            {\n                height: 1in;\n                outline-style: groove;\n                outline-color: blue;\n                width: 1in;\n            }\n        ",
                 "length": 186,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -745,19 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-          "height": 136,
-          "contentWidth": 1184,
-          "contentHeight": 136,
-          "scrollWidth": 1184,
-          "scrollHeight": 136
-========
           "height": 130,
           "contentWidth": 1184,
           "contentHeight": 130,
           "scrollWidth": 1184,
           "scrollHeight": 130
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
         },
         "computed": {
           "display": "block",
@@ -902,13 +876,8 @@
             "layout": {
               "x": 8,
               "y": 50,
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-              "width": 102,
-              "height": 102,
-========
               "width": 96,
               "height": 96,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
               "contentWidth": 96,
               "contentHeight": 96,
               "scrollWidth": 96,
@@ -925,17 +894,10 @@
               "paddingRight": 0,
               "paddingBottom": 0,
               "paddingLeft": 0,
-<<<<<<<< HEAD:test/layout/reference/border-applies-to-011.json
-              "borderTopWidth": 3,
-              "borderRightWidth": 3,
-              "borderBottomWidth": 3,
-              "borderLeftWidth": 3,
-========
               "borderTopWidth": 0,
               "borderRightWidth": 0,
               "borderBottomWidth": 0,
               "borderLeftWidth": 0,
->>>>>>>> ee07687b67c9b0bb1bd7e1301a12cf1d80dbf633:test/layout/reference/outline-style-006.json
               "flexDirection": "row",
               "flexWrap": "nowrap",
               "justifyContent": "normal",

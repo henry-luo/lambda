@@ -1180,8 +1180,8 @@
                       "height": 15,
                       "contentWidth": 15,
                       "contentHeight": 15,
-                      "scrollWidth": 60,
-                      "scrollHeight": 70
+                      "scrollWidth": 15,
+                      "scrollHeight": 15
                     },
                     "computed": {
                       "display": "table-cell",

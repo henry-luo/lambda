@@ -1,4 +1,11 @@
 {
+  "test_file": "text-align-bidi-011.htm",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
   "layout_tree": {
     "nodeType": "element",
     "selector": "html",
@@ -116,7 +123,7 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "depth": 0,
+        "depth": 1,
         "elementIndex": 0,
         "children": [
           {
@@ -176,32 +183,42 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
+            "depth": 2,
             "elementIndex": 0,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n                        @font-face {\n                            font-family: 'Ahem';\n                            src: url('file:///Users/jane/Projects/Lambda/test/layout/data/css2.1/html4/support/ah",
+                "text": "\n                            @font-face {\n                                font-family: 'Ahem';\n                                src: url('file:///Users/jane/Projects/Lambda/test/layout/data/css2.1/html4/support/ahem3.ttf') format('truetype');\n                                font-weight: normal;\n                                font-style: normal;\n                            }\n                        ",
+                "length": 401,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
             "nodeType": "text",
             "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 1,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -260,32 +277,42 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 2,
             "children": [
               {
                 "nodeType": "text",
                 "text": "CSS Test: text-align and bidi (basic test)",
+                "length": 42,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
             "nodeType": "text",
             "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 3,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -344,20 +371,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 4,
             "children": []
           },
           {
             "nodeType": "text",
             "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 5,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -416,20 +448,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 6,
             "children": []
           },
           {
             "nodeType": "text",
             "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 7,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -488,20 +525,25 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 8,
             "children": []
           },
           {
             "nodeType": "text",
             "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 9,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -560,45 +602,44 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 10,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .test { margin: 1em; width: 29em; font: 0.5em/1 Ahem; }\n   .left { text-align: left; }\n   .right { tex",
+                "text": "\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .test { margin: 1em; width: 29em; font: 0.5em/1 Ahem; }\n   .left { text-align: left; }\n   .right { text-align: right; }\n   .justify { text-align: justify; }\n  ",
+                "length": 257,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
                   "hasLayout": false,
                   "parentVisible": false,
                   "parentDisplay": "none",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
             "nodeType": "text",
             "text": "\n ",
+            "length": 2,
+            "isWhitespaceOnly": true,
             "layout": {
               "rects": [],
               "hasLayout": false,
               "parentVisible": false,
               "parentDisplay": "none",
               "parentVisibility": "visible"
-            }
+            },
+            "depth": 2,
+            "nodeIndex": 11,
+            "children": []
           }
         ]
-      },
-      {
-        "nodeType": "text",
-        "text": "\n ",
-        "layout": {
-          "rects": [],
-          "hasLayout": false,
-          "parentVisible": true,
-          "parentDisplay": "block",
-          "parentVisibility": "visible"
-        }
       },
       {
         "nodeType": "element",
@@ -657,23 +698,12 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "depth": 0,
-        "elementIndex": 0,
+        "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(1)",
+            "selector": "div.control:nth-of-type(1)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -716,8 +746,8 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 16,
-              "lineHeight": 16,
-              "fontFamily": "Ahem",
+              "lineHeight": "16px",
+              "fontFamily": "Ahem, sans-serif",
               "fontWeight": "400",
               "textAlign": "start",
               "verticalAlign": "baseline",
@@ -730,12 +760,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
                 "nodeType": "text",
                 "text": "Ahem_font_required_for_this_test.",
+                "length": 33,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -754,20 +786,12 @@
                   "parentVisible": true,
                   "parentDisplay": "inline",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
           },
           {
             "nodeType": "element",
@@ -826,44 +850,24 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
                 "nodeType": "text",
                 "text": "There should be a perfect 6×6 grid of squares below. (Force bidi: א) ",
+                "length": 69,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 42,
-                      "width": 419.859375,
+                      "width": 419.86,
                       "height": 18,
-                      "right": 427.859375,
+                      "right": 427.86,
                       "bottom": 60,
-                      "text": "There should be a perfect 6×6 grid of squares below. (Force bidi: א)",
-                      "startIndex": 0,
-                      "endIndex": 69
-                    },
-                    {
-                      "x": 427.859375,
-                      "y": 42,
-                      "width": 7.703125,
-                      "height": 18,
-                      "right": 435.5625,
-                      "bottom": 60,
-                      "text": "There should be a perfect 6×6 grid of squares below. (Force bidi: א)",
-                      "startIndex": 0,
-                      "endIndex": 69
-                    },
-                    {
-                      "x": 435.5625,
-                      "y": 42,
-                      "width": 5.328125,
-                      "height": 18,
-                      "right": 440.890625,
-                      "bottom": 60,
-                      "text": "There should be a perfect 6×6 grid of squares below. (Force bidi: א)",
+                      "text": "There should be a perfect 6×6 grid of squares below. (Force bidi: א) ",
                       "startIndex": 0,
                       "endIndex": 69
                     }
@@ -872,24 +876,16 @@
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(2)",
+            "selector": "div.test.left:nth-of-type(2)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -933,7 +929,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 9,
-              "lineHeight": 9,
+              "lineHeight": "9px",
               "fontFamily": "Ahem",
               "fontWeight": "400",
               "textAlign": "left",
@@ -947,12 +943,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
                 "nodeType": "text",
-                "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -962,10 +960,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 85,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 85,
@@ -973,10 +988,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 94,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 94,
@@ -984,10 +1016,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 103,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 103,
@@ -995,10 +1044,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 112,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx abcd",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 112,
@@ -1006,33 +1072,25 @@
                       "height": 9,
                       "right": 187,
                       "bottom": 121,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx abcd",
                       "startIndex": 0,
-                      "endIndex": 119
+                      "endIndex": 19
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(3)",
+            "selector": "div.test.right:nth-of-type(3)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -1076,7 +1134,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 9,
-              "lineHeight": 9,
+              "lineHeight": "9px",
               "fontFamily": "Ahem",
               "fontWeight": "400",
               "textAlign": "right",
@@ -1090,12 +1148,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 7,
             "children": [
               {
                 "nodeType": "text",
-                "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -1105,10 +1165,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 138,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 32,
                       "y": 138,
@@ -1116,10 +1193,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 147,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 32,
                       "y": 147,
@@ -1127,10 +1221,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 156,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 32,
                       "y": 156,
@@ -1138,10 +1249,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 165,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx abcd",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 77,
                       "y": 165,
@@ -1149,33 +1277,25 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 174,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx abcd",
                       "startIndex": 0,
-                      "endIndex": 119
+                      "endIndex": 19
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(4)",
+            "selector": "div.test.justify:nth-of-type(4)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -1219,7 +1339,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 9,
-              "lineHeight": 9,
+              "lineHeight": "9px",
               "fontFamily": "Ahem",
               "fontWeight": "400",
               "textAlign": "justify",
@@ -1233,12 +1353,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 9,
             "children": [
               {
                 "nodeType": "text",
-                "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -1248,10 +1370,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 191,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 191,
@@ -1259,10 +1398,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 200,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 200,
@@ -1270,10 +1426,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 209,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 209,
@@ -1281,10 +1454,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 218,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 119
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx abcd",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 218,
@@ -1292,33 +1482,25 @@
                       "height": 9,
                       "right": 187,
                       "bottom": 227,
-                      "text": "xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx abcd",
                       "startIndex": 0,
-                      "endIndex": 119
+                      "endIndex": 19
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(5)",
+            "selector": "div.test.left:nth-of-type(5)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -1362,7 +1544,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 9,
-              "lineHeight": 9,
+              "lineHeight": "9px",
               "fontFamily": "Ahem",
               "fontWeight": "400",
               "textAlign": "left",
@@ -1376,12 +1558,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 11,
             "children": [
               {
                 "nodeType": "text",
-                "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                "text": "‮xxxx xxxx xxxx xxxx xxxx ",
+                "length": 26,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -1391,10 +1575,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 244,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "‮xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 26
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 244,
@@ -1402,10 +1603,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 253,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 253,
@@ -1413,10 +1631,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 262,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 262,
@@ -1424,10 +1659,27 @@
                       "height": 9,
                       "right": 232,
                       "bottom": 271,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx abcd",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 271,
@@ -1435,33 +1687,25 @@
                       "height": 9,
                       "right": 187,
                       "bottom": 280,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx abcd",
                       "startIndex": 0,
-                      "endIndex": 120
+                      "endIndex": 19
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(6)",
+            "selector": "div.test.right:nth-of-type(6)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -1505,7 +1749,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 9,
-              "lineHeight": 9,
+              "lineHeight": "9px",
               "fontFamily": "Ahem",
               "fontWeight": "400",
               "textAlign": "right",
@@ -1519,12 +1763,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 13,
             "children": [
               {
                 "nodeType": "text",
-                "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                "text": "‮xxxx xxxx xxxx xxxx xxxx ",
+                "length": 26,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -1534,10 +1780,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 297,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "‮xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 26
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 32,
                       "y": 297,
@@ -1545,10 +1808,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 306,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 32,
                       "y": 306,
@@ -1556,10 +1836,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 315,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 32,
                       "y": 315,
@@ -1567,10 +1864,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 324,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx abcd",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 77,
                       "y": 324,
@@ -1578,33 +1892,25 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 333,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx abcd",
                       "startIndex": 0,
-                      "endIndex": 120
+                      "endIndex": 19
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           },
           {
-            "nodeType": "text",
-            "text": "\n  ",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
-          },
-          {
             "nodeType": "element",
-            "selector": "div:nth-of-type(7)",
+            "selector": "div.test.justify:nth-of-type(7)",
             "tag": "div",
             "id": null,
             "classes": [
@@ -1648,7 +1954,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 9,
-              "lineHeight": 9,
+              "lineHeight": "9px",
               "fontFamily": "Ahem",
               "fontWeight": "400",
               "textAlign": "justify",
@@ -1662,12 +1968,14 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "depth": 0,
-            "elementIndex": 0,
+            "depth": 2,
+            "elementIndex": 15,
             "children": [
               {
                 "nodeType": "text",
-                "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                "text": "‮xxxx xxxx xxxx xxxx xxxx ",
+                "length": 26,
+                "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
@@ -1677,10 +1985,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 350,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "‮xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 26
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 350,
@@ -1688,10 +2013,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 359,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 359,
@@ -1699,10 +2041,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 368,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx xxxx xxxx ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 368,
@@ -1710,10 +2069,27 @@
                       "height": 9,
                       "right": 248,
                       "bottom": 377,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx xxxx xxxx ",
                       "startIndex": 0,
-                      "endIndex": 120
-                    },
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "xxxx xxxx xxxx abcd",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 16,
                       "y": 377,
@@ -1721,36 +2097,25 @@
                       "height": 9,
                       "right": 187,
                       "bottom": 386,
-                      "text": "‮xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx abcd",
+                      "text": "xxxx xxxx xxxx abcd",
                       "startIndex": 0,
-                      "endIndex": 120
+                      "endIndex": 19
                     }
                   ],
                   "hasLayout": true,
                   "parentVisible": true,
                   "parentDisplay": "block",
                   "parentVisibility": "visible"
-                }
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n \n",
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            }
           }
         ]
       }
-    ]
-  },
-  "test_file": "text-align-bidi-011.htm",
-  "browser_info": {
+    ],
     "viewport": {
       "width": 1200,
       "height": 800
