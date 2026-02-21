@@ -51,6 +51,7 @@ pub QUAD = "ML__quad"
 pub QQUAD = "ML__qquad"
 pub RULE = "ML__rule"
 pub NULLDELIMITER = "ML__nulldelimiter"
+pub MTABLE = "ML__mtable"
 pub ERROR = "ML__error"
 
 // ============================================================
@@ -140,6 +141,7 @@ pub fn get_stylesheet() {
     ".ML__qquad{display:inline-block;width:2em;height:0.71em}" ++
     ".ML__nulldelimiter{display:inline-block;width:0.12em}" ++
     ".ML__rule{display:inline-block;border:solid 0;position:relative;box-sizing:border-box}" ++
+    ".ML__mtable{display:inline-grid;vertical-align:middle}" ++
     ".ML__error{color:#bc2612}"
     s
 }
