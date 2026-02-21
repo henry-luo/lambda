@@ -21,12 +21,6 @@ static void add_indent(JsonContext& ctx, int indent) {
 
 // Format a MapReader's contents as JSON object properties
 static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_reader, int indent) {
-    // Prevent infinite recursion
-    if (indent > 10) {
-        ctx.write_text("\"[MAX_DEPTH]\":null");
-        return;
-    }
-
     bool first = true;
     auto iter = map_reader.entries();
     const char* key;
@@ -220,6 +214,12 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
 }
 
 static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& item, int indent) {
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) {
+        ctx.write_text("\"[max_depth]\"");
+        return;
+    }
+
     if (item.isNull()) {
         ctx.write_text("null");
     } else if (item.isBool()) {
