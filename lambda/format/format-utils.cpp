@@ -1,4 +1,5 @@
 #include "format-utils.h"
+#include "format-markup.h"
 #include "../../lib/str.h"
 #include <string.h>
 #include <stdio.h>
@@ -494,6 +495,23 @@ void iterate_table_rows(
 
             if (!section_tag) continue;
 
+            // handle direct <tr> children (no thead/tbody wrapper)
+            if (strcmp(section_tag, "tr") == 0) {
+                bool is_header = false;
+                // detect header: check if first cell child is <th>
+                auto cell_it = section.children();
+                ItemReader first_cell;
+                if (cell_it.next(&first_cell) && first_cell.isElement()) {
+                    ElementReader fc = first_cell.asElement();
+                    if (fc.tagName() && strcmp(fc.tagName(), "th") == 0) {
+                        is_header = true;
+                    }
+                }
+                handler(sb, section, row_idx, is_header, context);
+                row_idx++;
+                continue;
+            }
+
             bool is_header = (strcmp(section_tag, "thead") == 0);
 
             // iterate rows in this section
@@ -652,3 +670,462 @@ const EscapeRule HTML_ATTR_ESCAPE_RULES[] = {
     { '\'', "&#39;"   },
 };
 const int HTML_ATTR_ESCAPE_RULES_COUNT = sizeof(HTML_ATTR_ESCAPE_RULES) / sizeof(HTML_ATTR_ESCAPE_RULES[0]);
+
+// ==============================================================================
+// Unified Markup Output Rules — Link / Image Callbacks
+// ==============================================================================
+
+// Markdown: [text](url "title")
+static void emit_link_markdown(StringBuf* sb, const char* url, const char* text, const char* title) {
+    stringbuf_append_char(sb, '[');
+    if (text) stringbuf_append_str(sb, text);
+    stringbuf_append_str(sb, "](");
+    if (url) stringbuf_append_str(sb, url);
+    if (title && title[0] != '\0') {
+        stringbuf_append_str(sb, " \"");
+        stringbuf_append_str(sb, title);
+        stringbuf_append_char(sb, '"');
+    }
+    stringbuf_append_char(sb, ')');
+}
+
+// RST: `text <url>`_
+static void emit_link_rst(StringBuf* sb, const char* url, const char* text, const char* title) {
+    (void)title;
+    stringbuf_append_char(sb, '`');
+    if (text) stringbuf_append_str(sb, text);
+    if (url && url[0] != '\0') {
+        stringbuf_append_str(sb, " <");
+        stringbuf_append_str(sb, url);
+        stringbuf_append_char(sb, '>');
+    }
+    stringbuf_append_str(sb, "`_");
+}
+
+// Org: [[url][text]]  or  [[url]]
+static void emit_link_org(StringBuf* sb, const char* url, const char* text, const char* title) {
+    (void)title;
+    stringbuf_append_str(sb, "[[");
+    if (url) stringbuf_append_str(sb, url);
+    if (text && text[0] != '\0') {
+        stringbuf_append_str(sb, "][");
+        stringbuf_append_str(sb, text);
+    }
+    stringbuf_append_str(sb, "]]");
+}
+
+// Wiki: [url text]  (external) or  [[text]]  (internal/no-href)
+static void emit_link_wiki(StringBuf* sb, const char* url, const char* text, const char* title) {
+    if (url && url[0] != '\0') {
+        // external link
+        stringbuf_append_char(sb, '[');
+        stringbuf_append_str(sb, url);
+        if (text && text[0] != '\0') {
+            stringbuf_append_char(sb, ' ');
+            stringbuf_append_str(sb, text);
+        } else if (title && title[0] != '\0') {
+            stringbuf_append_char(sb, ' ');
+            stringbuf_append_str(sb, title);
+        }
+        stringbuf_append_char(sb, ']');
+    } else {
+        // internal wiki link
+        stringbuf_append_str(sb, "[[");
+        if (text) stringbuf_append_str(sb, text);
+        stringbuf_append_str(sb, "]]");
+    }
+}
+
+// Textile: "text(title)":url  or  "text":url
+static void emit_link_textile(StringBuf* sb, const char* url, const char* text, const char* title) {
+    stringbuf_append_char(sb, '"');
+    if (text) stringbuf_append_str(sb, text);
+    if (title && title[0] != '\0') {
+        stringbuf_append_char(sb, '(');
+        stringbuf_append_str(sb, title);
+        stringbuf_append_char(sb, ')');
+    }
+    stringbuf_append_str(sb, "\":");
+    if (url) stringbuf_append_str(sb, url);
+}
+
+// Textile image: !url(alt)! or !url!
+static void emit_image_textile(StringBuf* sb, const char* url, const char* alt) {
+    stringbuf_append_char(sb, '!');
+    if (url) stringbuf_append_str(sb, url);
+    if (alt && alt[0] != '\0') {
+        stringbuf_append_char(sb, '(');
+        stringbuf_append_str(sb, alt);
+        stringbuf_append_char(sb, ')');
+    }
+    stringbuf_append_char(sb, '!');
+}
+
+// Markdown image: ![alt](url)
+static void emit_image_markdown(StringBuf* sb, const char* url, const char* alt) {
+    stringbuf_append_str(sb, "![");
+    if (alt) stringbuf_append_str(sb, alt);
+    stringbuf_append_str(sb, "](");
+    if (url) stringbuf_append_str(sb, url);
+    stringbuf_append_char(sb, ')');
+}
+
+// ==============================================================================
+// Unified Markup Output Rules — Rule Table Definitions
+// ==============================================================================
+
+const MarkupOutputRules MARKDOWN_RULES = {
+    // heading
+    .heading = {
+        .type = MarkupOutputRules::HeadingStyle::PREFIX,
+        .repeated_char = '#',
+        .prefix = {NULL, NULL, NULL, NULL, NULL, NULL},
+        .underline_chars = {0, 0, 0, 0, 0, 0},
+    },
+    // inline markup
+    .inline_markup = {
+        .bold_open   = "**",  .bold_close   = "**",
+        .italic_open = "*",   .italic_close = "*",
+        .code_open   = "`",   .code_close   = "`",
+        .strikethrough_open  = "~~",  .strikethrough_close = "~~",
+        .underline_open      = NULL,  .underline_close     = NULL,
+        .superscript_open    = NULL,  .superscript_close   = NULL,
+        .subscript_open      = NULL,  .subscript_close     = NULL,
+        .verbatim_open       = NULL,  .verbatim_close      = NULL,
+    },
+    // tag names
+    .tag_names = {
+        .bold_tags      = {"strong", "b", NULL, NULL},
+        .italic_tags    = {"em", "i", NULL, NULL},
+        .code_tag       = "code",
+        .strike_tags    = {"s", "del", "strike", NULL},
+        .underline_tags = {NULL, NULL, NULL, NULL},
+        .sup_tag        = NULL,
+        .sub_tag        = NULL,
+        .verbatim_tag   = NULL,
+    },
+    // links and images
+    .emit_link  = emit_link_markdown,
+    .emit_image = emit_image_markdown,
+    // lists
+    .list = {
+        .unordered_marker      = "- ",
+        .ordered_format        = "%d. ",
+        .ordered_repeat_char   = 0,
+        .unordered_repeat_char = 0,
+        .use_depth_repetition  = false,
+        .indent_spaces         = 2,
+    },
+    // code block
+    .code_block = {
+        .type          = MarkupOutputRules::CodeBlockStyle::FENCE,
+        .open_prefix   = "```",
+        .close_text    = "```\n",
+        .lang_after_open = true,
+        .lang_in_parens  = false,
+    },
+    // block-level
+    .hr                         = "---\n\n",
+    .paragraph_suffix           = "\n",
+    .blockquote_open            = "> ",
+    .blockquote_close           = "\n",
+    .blockquote_prefix_each_line = true,
+    // table
+    .emit_table = emit_table_pipe,
+    // escaping
+    .escape_config = &MARKDOWN_ESCAPE_CONFIG,
+    // custom handler
+    .custom_element_handler = NULL,
+    // container tags
+    .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
+    .skip_tags      = {"meta", NULL, NULL, NULL},
+    // link tag
+    .link_tag = "a",
+};
+
+const MarkupOutputRules RST_RULES = {
+    // heading
+    .heading = {
+        .type = MarkupOutputRules::HeadingStyle::UNDERLINE,
+        .repeated_char = 0,
+        .prefix = {NULL, NULL, NULL, NULL, NULL, NULL},
+        .underline_chars = {'=', '-', '~', '^', '"', '\''},
+    },
+    // inline markup
+    .inline_markup = {
+        .bold_open   = "**",  .bold_close   = "**",
+        .italic_open = "*",   .italic_close = "*",
+        .code_open   = "``",  .code_close   = "``",
+        .strikethrough_open  = NULL,  .strikethrough_close = NULL,
+        .underline_open      = NULL,  .underline_close     = NULL,
+        .superscript_open    = NULL,  .superscript_close   = NULL,
+        .subscript_open      = NULL,  .subscript_close     = NULL,
+        .verbatim_open       = NULL,  .verbatim_close      = NULL,
+    },
+    // tag names
+    .tag_names = {
+        .bold_tags      = {"strong", "b", NULL, NULL},
+        .italic_tags    = {"em", "i", NULL, NULL},
+        .code_tag       = "code",
+        .strike_tags    = {NULL, NULL, NULL, NULL},
+        .underline_tags = {NULL, NULL, NULL, NULL},
+        .sup_tag        = NULL,
+        .sub_tag        = NULL,
+        .verbatim_tag   = NULL,
+    },
+    // links and images
+    .emit_link  = emit_link_rst,
+    .emit_image = NULL,
+    // lists
+    .list = {
+        .unordered_marker      = "- ",
+        .ordered_format        = "%d. ",
+        .ordered_repeat_char   = 0,
+        .unordered_repeat_char = 0,
+        .use_depth_repetition  = false,
+        .indent_spaces         = 3,
+    },
+    // code block
+    .code_block = {
+        .type          = MarkupOutputRules::CodeBlockStyle::DIRECTIVE,
+        .open_prefix   = ".. code-block:: ",
+        .close_text    = "\n\n",
+        .lang_after_open = true,
+        .lang_in_parens  = false,
+    },
+    // block-level
+    .hr                         = "----\n\n",
+    .paragraph_suffix           = "\n\n",
+    .blockquote_open            = NULL,
+    .blockquote_close           = NULL,
+    .blockquote_prefix_each_line = false,
+    // table
+    .emit_table = emit_table_rst,
+    // escaping
+    .escape_config = &RST_ESCAPE_CONFIG,
+    // custom handler
+    .custom_element_handler = NULL,
+    // container tags
+    .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
+    .skip_tags      = {"meta", NULL, NULL, NULL},
+    // link tag
+    .link_tag = "a",
+};
+
+const MarkupOutputRules ORG_RULES = {
+    // heading
+    .heading = {
+        .type = MarkupOutputRules::HeadingStyle::PREFIX,
+        .repeated_char = '*',
+        .prefix = {NULL, NULL, NULL, NULL, NULL, NULL},
+        .underline_chars = {0, 0, 0, 0, 0, 0},
+    },
+    // inline markup
+    .inline_markup = {
+        .bold_open   = "*",   .bold_close   = "*",
+        .italic_open = "/",   .italic_close = "/",
+        .code_open   = "~",   .code_close   = "~",
+        .strikethrough_open  = "+",   .strikethrough_close = "+",
+        .underline_open      = "_",   .underline_close     = "_",
+        .superscript_open    = NULL,  .superscript_close   = NULL,
+        .subscript_open      = NULL,  .subscript_close     = NULL,
+        .verbatim_open       = "=",   .verbatim_close      = "=",
+    },
+    // tag names
+    .tag_names = {
+        .bold_tags      = {"bold", "strong", "b", NULL},
+        .italic_tags    = {"italic", "em", "i", NULL},
+        .code_tag       = "code",
+        .strike_tags    = {"strikethrough", "s", "del", "strike"},
+        .underline_tags = {"underline", "u", "ins", NULL},
+        .sup_tag        = NULL,
+        .sub_tag        = NULL,
+        .verbatim_tag   = "verbatim",
+    },
+    // links and images
+    .emit_link  = emit_link_org,
+    .emit_image = NULL,
+    // lists
+    .list = {
+        .unordered_marker      = "- ",
+        .ordered_format        = "%d. ",
+        .ordered_repeat_char   = 0,
+        .unordered_repeat_char = 0,
+        .use_depth_repetition  = false,
+        .indent_spaces         = 2,
+    },
+    // code block
+    .code_block = {
+        .type          = MarkupOutputRules::CodeBlockStyle::BEGIN_END,
+        .open_prefix   = "#+BEGIN_SRC",
+        .close_text    = "#+END_SRC\n",
+        .lang_after_open = true,
+        .lang_in_parens  = false,
+    },
+    // block-level
+    .hr                         = "-----\n",
+    .paragraph_suffix           = "\n",
+    .blockquote_open            = "#+BEGIN_QUOTE\n",
+    .blockquote_close           = "#+END_QUOTE\n",
+    .blockquote_prefix_each_line = false,
+    // table
+    .emit_table = emit_table_org,
+    // escaping
+    .escape_config = NULL,
+    // custom handler
+    .custom_element_handler = org_custom_handler,
+    // container tags
+    .container_tags = {"text_content", NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+    .skip_tags      = {NULL, NULL, NULL, NULL},
+    // link tag
+    .link_tag = "link",
+};
+
+const MarkupOutputRules WIKI_RULES = {
+    // heading
+    .heading = {
+        .type = MarkupOutputRules::HeadingStyle::SURROUND,
+        .repeated_char = '=',
+        .prefix = {NULL, NULL, NULL, NULL, NULL, NULL},
+        .underline_chars = {0, 0, 0, 0, 0, 0},
+    },
+    // inline markup
+    .inline_markup = {
+        .bold_open   = "'''",  .bold_close   = "'''",
+        .italic_open = "''",   .italic_close = "''",
+        .code_open   = "<code>", .code_close = "</code>",
+        .strikethrough_open  = "<s>",    .strikethrough_close = "</s>",
+        .underline_open      = "<u>",    .underline_close     = "</u>",
+        .superscript_open    = "<sup>",  .superscript_close   = "</sup>",
+        .subscript_open      = "<sub>",  .subscript_close     = "</sub>",
+        .verbatim_open       = NULL,     .verbatim_close      = NULL,
+    },
+    // tag names
+    .tag_names = {
+        .bold_tags      = {"strong", "b", NULL, NULL},
+        .italic_tags    = {"em", "i", NULL, NULL},
+        .code_tag       = "code",
+        .strike_tags    = {"s", "del", "strike", NULL},
+        .underline_tags = {"u", "ins", NULL, NULL},
+        .sup_tag        = "sup",
+        .sub_tag        = "sub",
+        .verbatim_tag   = NULL,
+    },
+    // links and images
+    .emit_link  = emit_link_wiki,
+    .emit_image = NULL,
+    // lists
+    .list = {
+        .unordered_marker      = NULL,
+        .ordered_format        = NULL,
+        .ordered_repeat_char   = '#',
+        .unordered_repeat_char = '*',
+        .use_depth_repetition  = true,
+        .indent_spaces         = 0,
+    },
+    // code block
+    .code_block = {
+        .type          = MarkupOutputRules::CodeBlockStyle::TAG,
+        .open_prefix   = "<pre>",
+        .close_text    = "</pre>\n\n",
+        .lang_after_open = false,
+        .lang_in_parens  = false,
+    },
+    // block-level
+    .hr                         = "----\n\n",
+    .paragraph_suffix           = "\n\n",
+    .blockquote_open            = NULL,
+    .blockquote_close           = NULL,
+    .blockquote_prefix_each_line = false,
+    // table
+    .emit_table = emit_table_wiki,
+    // escaping
+    .escape_config = &WIKI_ESCAPE_CONFIG,
+    // custom handler
+    .custom_element_handler = NULL,
+    // container tags
+    .container_tags = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+    .skip_tags      = {NULL, NULL, NULL, NULL},
+    // link tag
+    .link_tag = "a",
+};
+
+const MarkupOutputRules TEXTILE_RULES = {
+    // heading
+    .heading = {
+        .type = MarkupOutputRules::HeadingStyle::INDEXED_PREFIX,
+        .repeated_char = 0,
+        .prefix = {"h1. ", "h2. ", "h3. ", "h4. ", "h5. ", "h6. "},
+        .underline_chars = {0, 0, 0, 0, 0, 0},
+    },
+    // inline markup
+    .inline_markup = {
+        .bold_open   = "*",   .bold_close   = "*",
+        .italic_open = "_",   .italic_close = "_",
+        .code_open   = "@",   .code_close   = "@",
+        .strikethrough_open  = "-",   .strikethrough_close = "-",
+        .underline_open      = "+",   .underline_close     = "+",
+        .superscript_open    = "^",   .superscript_close   = "^",
+        .subscript_open      = "~",   .subscript_close     = "~",
+        .verbatim_open       = NULL,  .verbatim_close      = NULL,
+    },
+    // tag names
+    .tag_names = {
+        .bold_tags      = {"strong", "b", NULL, NULL},
+        .italic_tags    = {"em", "i", NULL, NULL},
+        .code_tag       = "code",
+        .strike_tags    = {"s", "del", "strike", NULL},
+        .underline_tags = {"u", "ins", NULL, NULL},
+        .sup_tag        = "sup",
+        .sub_tag        = "sub",
+        .verbatim_tag   = NULL,
+    },
+    // links and images
+    .emit_link  = emit_link_textile,
+    .emit_image = emit_image_textile,
+    // lists
+    .list = {
+        .unordered_marker      = NULL,
+        .ordered_format        = NULL,
+        .ordered_repeat_char   = '#',
+        .unordered_repeat_char = '*',
+        .use_depth_repetition  = true,
+        .indent_spaces         = 0,
+    },
+    // code block
+    .code_block = {
+        .type          = MarkupOutputRules::CodeBlockStyle::DOT_PREFIX,
+        .open_prefix   = "bc.",
+        .close_text    = "\n\n",
+        .lang_after_open = false,
+        .lang_in_parens  = true,
+    },
+    // block-level
+    .hr                         = "\n---\n\n",
+    .paragraph_suffix           = "\n\n",
+    .blockquote_open            = "bq. ",
+    .blockquote_close           = "\n\n",
+    .blockquote_prefix_each_line = false,
+    // table
+    .emit_table = emit_table_textile,
+    // escaping
+    .escape_config = NULL,
+    // custom handler
+    .custom_element_handler = textile_custom_handler,
+    // container tags
+    .container_tags = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+    .skip_tags      = {NULL, NULL, NULL, NULL},
+    // link tag
+    .link_tag = "a",
+};
+
+// lookup rules by format name
+const MarkupOutputRules* get_markup_rules(const char* format_name) {
+    if (!format_name) return NULL;
+    if (strcmp(format_name, "markdown") == 0 || strcmp(format_name, "md") == 0) return &MARKDOWN_RULES;
+    if (strcmp(format_name, "rst") == 0 || strcmp(format_name, "restructuredtext") == 0) return &RST_RULES;
+    if (strcmp(format_name, "org") == 0 || strcmp(format_name, "orgmode") == 0) return &ORG_RULES;
+    if (strcmp(format_name, "wiki") == 0 || strcmp(format_name, "mediawiki") == 0) return &WIKI_RULES;
+    if (strcmp(format_name, "textile") == 0) return &TEXTILE_RULES;
+    return NULL;
+}

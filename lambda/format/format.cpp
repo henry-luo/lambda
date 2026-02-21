@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-markup.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 
@@ -102,13 +103,10 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         result = format_json(pool, item);
     }
     else if (strcmp(type->chars, "markdown") == 0) {
-        StringBuf* sb = stringbuf_new(pool);
-        format_markdown(sb, item);
-        result = stringbuf_to_string(sb);
-        stringbuf_free(sb);
+        result = format_markup_string(pool, item, &MARKDOWN_RULES);
     }
     else if (strcmp(type->chars, "rst") == 0) {
-        result = format_rst_string(pool, item);
+        result = format_markup_string(pool, item, &RST_RULES);
     }
     else if (strcmp(type->chars, "xml") == 0) {
         result = format_xml(pool, item);
@@ -138,13 +136,13 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         result = format_latex(pool, item);
     }
     else if (strcmp(type->chars, "org") == 0) {
-        result = format_org_string(pool, item);
+        result = format_markup_string(pool, item, &ORG_RULES);
     }
     else if (strcmp(type->chars, "wiki") == 0) {
-        result = format_wiki_string(pool, item);
+        result = format_markup_string(pool, item, &WIKI_RULES);
     }
     else if (strcmp(type->chars, "textile") == 0) {
-        result = format_textile_string(pool, item);
+        result = format_markup_string(pool, item, &TEXTILE_RULES);
     }
     else if (strcmp(type->chars, "text") == 0) {
         result = format_text_string(pool, item);
@@ -167,32 +165,15 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
     }
     else if (strcmp(type->chars, "markup") == 0) {
         // Markup type with flavor-based format selection
-        if (!flavor || strcmp(flavor->chars, "standard") == 0 || strcmp(flavor->chars, "markdown") == 0) {
-            // Default to Markdown format
-            StringBuf* sb = stringbuf_new(pool);
-            format_markdown(sb, item);
-            result = stringbuf_to_string(sb);
-            stringbuf_free(sb);
+        // Use unified markup emitter with flavor-based rule lookup
+        const char* markup_flavor = (!flavor || strcmp(flavor->chars, "standard") == 0)
+            ? "markdown" : flavor->chars;
+        const MarkupOutputRules* markup_rules = get_markup_rules(markup_flavor);
+        if (!markup_rules) {
+            log_debug("format: Unsupported markup flavor: %s, defaulting to markdown", markup_flavor);
+            markup_rules = &MARKDOWN_RULES;
         }
-        else if (strcmp(flavor->chars, "rst") == 0) {
-            result = format_rst_string(pool, item);
-        }
-        else if (strcmp(flavor->chars, "org") == 0) {
-            result = format_org_string(pool, item);
-        }
-        else if (strcmp(flavor->chars, "textile") == 0) {
-            result = format_textile_string(pool, item);
-        }
-        else if (strcmp(flavor->chars, "wiki") == 0) {
-            result = format_wiki_string(pool, item);
-        }
-        else {
-            log_debug("format: Unsupported markup flavor: %s, defaulting to markdown", flavor->chars);
-            StringBuf* sb = stringbuf_new(pool);
-            format_markdown(sb, item);
-            result = stringbuf_to_string(sb);
-            stringbuf_free(sb);
-        }
+        result = format_markup_string(pool, item, markup_rules);
     }
     else if (strcmp(type->chars, "math") == 0) {
         // Math type with flavor support
