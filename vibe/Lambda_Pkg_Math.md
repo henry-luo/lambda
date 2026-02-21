@@ -1039,3 +1039,357 @@ All 14 Phase 3 constructs render correctly:
 | 23 | Element literal syntax: `<tag attr1: v1, attr2: v2; child1 child2>` — comma-separated attrs, semicolon before children | Parse errors |
 | 24 | `for` inside element children works: `<span class: c; for (item in items) item>` | N/A — useful pattern |
 | 25 | Inline maps `{element: ..., height: ...}` can be returned from `fn` to avoid cross-module element JIT issues | Elements constructed in one module may corrupt when returned to another |
+
+---
+
+## §12 Phase 4 Implementation Notes
+
+### 12.1 Summary
+
+Phase 4 delivers three functional enhancements plus one partial optimization:
+
+| Feature | Status | Module |
+|---------|--------|--------|
+| Stretchy delimiters (extensible) | ✅ Complete | `atoms/delimiters.ls` |
+| Sized delimiters (`\big`, `\Big`, `\bigg`, `\Bigg`) | ✅ Complete | `atoms/delimiters.ls` |
+| Box coalescing (adjacent span merge) | ✅ Partial | `optimize.ls` |
+| Error rendering (unknown commands) | ✅ Complete | `css.ls` (ERROR class) |
+| Inter-atom spacing | ✅ Already done (Phase 1) | `spacing_table.ls` |
+
+**Test results**: 8/8 Phase 4 tests pass, 328/328 baseline regression pass, Phase 2 + Phase 3 tests all pass.
+
+### 12.2 New Modules
+
+#### `atoms/delimiters.ls` (~164 lines)
+
+Extensible delimiter rendering with two strategies:
+
+1. **Sized fonts (levels 1–4)**: Uses KaTeX size font classes (`size1-regular` through `size4-regular`) for delimiters from 1.2em to 3.0em. Size thresholds: 1.2, 1.8, 2.4, 3.0em.
+
+2. **CSS scaleY (level 5+)**: For delimiters taller than 3.0em, applies a `transform: scaleY(N)` CSS transform to stretch the glyph vertically.
+
+Public API:
+- `render_stretchy(delim, content_height, atom_type)` — Automatically selects size level based on content height, used by `\left...\right` delimiters
+- `render_at_scale(delim, scale, atom_type)` — Renders at a specific scale factor, used by `\big`, `\Big`, `\bigg`, `\Bigg` commands
+
+Supporting data:
+- `SIZED_DELIMS` — Map of all delimiters with sized font variants
+- `DELIM_CHARS` — Maps LaTeX commands (`\langle`, `\vert`, etc.) to Unicode display characters
+- `SVG_DELIM_DATA` — SVG path data for delimiter segments (reserved for future SVG rendering)
+
+#### `optimize.ls` (~65 lines)
+
+Post-processing optimization pass that merges adjacent same-class text-only `<span>` elements to reduce DOM node count.
+
+Public API:
+- `coalesce(bx)` — Takes a box map `{element, height, depth, width, type, italic, skew}` and returns an optimized version
+
+Internal algorithm:
+1. `merge_children(el)` — Entry point; processes multi-child elements
+2. `build_merged(el)` — Extracts children, recursively walks sub-elements, merges adjacent spans via `merge_list`, reconstructs element
+3. `walk(c)` — Recursively processes multi-child child elements
+4. `merge_list(items)` / `do_merge(items, i, acc)` — Functional fold that merges adjacent items passing `can_merge` test
+5. `can_merge(a, b)` — Two elements are mergeable when both have exactly 1 text child, same CSS class, and no inline style
+6. `merge_two(a, b)` — Concatenates text content into a single `<span>`
+
+**Limitation**: Coalescing only penetrates multi-child element levels. Single-child wrapper chains (common at the top of the render tree) are not traversed due to JIT stack overflow constraints.
+
+### 12.3 Modified Files
+
+#### `render.ls` Changes
+- Added `import delims: .lambda.package.math.atoms.delimiters`
+- `render_delimiter_group`: Now uses `delims.render_stretchy()` for `\left`/`\right` delimiters. Calculates `content_height = content.height + content.depth` and passes to delimiter renderer for size selection.
+- `render_sized_delim`: Now uses `delims.render_at_scale()` for `\big`/`\Big`/`\bigg`/`\Bigg` commands.
+
+#### `math.ls` Changes
+- Added `import opt: .lambda.package.math.optimize`
+- Render pipeline now: `render_node(ast)` → `opt.coalesce()` → `box.make_struts()` → wrap in `<span class: ML__latex>`
+
+### 12.4 Architecture Decisions
+
+1. **Font-based stretching over SVG**: Sized KaTeX fonts (Size1–Size4) provide sharp, scalable delimiters at discrete levels. CSS `scaleY` handles arbitrary heights above 3.0em. SVG path stacking (top/repeat/bottom segments) is architecturally prepared but not yet rendering — the font+CSS approach covers all practical cases.
+
+2. **Coalescing as post-processing**: Box coalescing runs after the full render tree is built, not during rendering. This keeps the renderer simple and makes the optimization optional.
+
+3. **Functional fold for merging**: `do_merge` uses a tail-recursive fold pattern with an accumulator, which is the idiomatic Lambda approach for stateful iteration.
+
+### 12.5 Critical JIT Bugs Discovered
+
+| # | Bug Description | Workaround |
+|---|----------------|------------|
+| 1 | `for` comprehension inside element children MUST be on a separate line. `<span; for (c in items) c>` causes parse error. Multi-line `<span;\n for (c in items) c\n>` works. | Always put `for` on its own line inside elements |
+| 2 | `merge_list` return value cannot be directly iterated in element constructor `for (c in merged) c` — produces `[[unknown type raw_pointer!!]]`. Re-extracting via `(for (j in 0 to (len(merged) - 1)) merged[j])` works. | Re-extract array elements through indexing before use in element children |
+| 3 | Recursive functions through single-child element wrappers cause stack overflow even with depth limits of 10. The JIT per-function stack frame size appears very large. | Only recurse through multi-child elements |
+
+#### Bug #3 Detail: Stack Overflow in Single-Child Element Recursion
+
+**Goal**: Walk through single-child wrapper elements (e.g., `<span class: "ML__latex"; <span; <span; [x, y, z]>>>`) to reach multi-child levels where coalescing can happen.
+
+**Attempt 1 — Unbounded recursion** (stack overflow):
+```lambda
+fn merge_children(el) {
+    if (len(el) > 1) build_merged(el)
+    else if (len(el) == 1)
+        (let child = el[0],
+         if (type(child) == "element")
+             <span class: el.class, style: el.style;
+                 merge_children(child)
+             >
+         else el)
+    else el
+}
+```
+
+**Attempt 2 — Depth-limited to 10** (still stack overflow):
+```lambda
+fn merge_at_depth(el, d) {
+    if (d <= 0) el
+    else if (len(el) > 1) build_merged(el)
+    else if (len(el) == 1)
+        (let child = el[0],
+         if (type(child) == "element")
+             <span class: el.class, style: el.style;
+                 merge_at_depth(child, d - 1)
+             >
+         else el)
+    else el
+}
+
+fn merge_children(el) {
+    merge_at_depth(el, 10)
+}
+```
+
+**Root cause**: Each recursive call constructs a `<span class: ..., style: ...; recursive_call(...)>` element inline. The JIT-compiled stack frame for a function that constructs elements appears to be very large (possibly allocating temporary space for element attribute slots, child arrays, and intermediate `Item` values). Even ~10 frames is enough to exhaust the ~8MB stack.
+
+**Error output**:
+```
+signal handler: stack overflow detected (fault_addr=0x16b46bfd0, stack_limit=0x16b47c000)
+exec: recovered from stack overflow via signal handler
+stack overflow in function '<signal>' - possible infinite recursion
+stack usage: 7 KB / 8176 KB (0.1%)
+runtime error [308]: Stack overflow in '<signal>' - likely infinite recursion (stack: 7KB/8176KB)
+```
+
+Note: the reported "stack usage: 7 KB" is misleading — this is measured *after* the signal handler recovered and unwound the stack. The actual usage at overflow was ~8MB.
+
+**Working workaround** — skip single-child wrappers entirely:
+```lambda
+fn merge_children(el) {
+    if (len(el) > 1) build_merged(el)
+    else el
+}
+```
+
+This limits coalescing to multi-child levels only. Single-child wrapper chains (common at the top of the math render tree) are left as-is. The tradeoff is acceptable because coalescing's primary value is merging adjacent same-class text siblings, which only exist at multi-child levels.
+| 4 | `[items[0]]` as a standalone expression causes parse error ("expected ']'"). Same syntax works as a function argument: `do_merge(items, 1, [items[0]])`. | Use `let first = items[0], [first]` or pass as function argument |
+| 5 | `if/else` returning elements with different attribute shapes (e.g., `<span class: c; x>` vs `<span; x>`) crashes JIT | Always use consistent shapes: `<span class: a.class; x>` where class may be null |
+
+### 12.6 Test Results
+
+| # | Test | LaTeX Input | Validates |
+|---|------|-------------|-----------|
+| 1 | Stretchy delimiters | `\left(\frac{a}{b}\right)` | Size selection, delimiter rendering |
+| 2 | Sized delimiters | `\bigl( x \bigr)` | Scale-to-class mapping |
+| 3 | Coalescing candidate | `xyz` | Box coalescing pass (identity at top level) |
+| 4 | Error rendering | `\undefinedcommand` | `ML__error` class on unknown commands |
+| 5 | Tall delimiters | `\left[\frac{\frac{a}{b}}{\frac{c}{d}}\right]` | Multi-level size selection (2.303em height) |
+| 6 | Middle delimiter | `\left( a \middle| b \right)` | `\middle` support in delimiter groups |
+| 7 | Inter-atom spacing | `a + b = c` | Spacing between atom types |
+| 8 | Complex integration | `\sum_{i=0}^{n}\left(\frac{x_i}{y_i}\right)^2` | All features composed |
+
+### 12.7 Lambda Syntax Rules Discovered
+
+| # | Rule | Symptom if Violated |
+|---|------|---------------------|
+| 26 | `for` in element children MUST be on its own line | Parse error: `ERROR node at Ln X` spanning the entire function body |
+| 27 | `[expr[n]]` as standalone return value is parsed as subscript, not array-with-subscript | Parse error: "expected ']'" |
+| 28 | Function return values from `merge_list` (multi-branch return array) produce `raw_pointer` when used in `for (c in result) c` inside element constructor | `[[unknown type raw_pointer!!]]` in element children |
+| 29 | Recursive single-child element traversal overflows stack even with depth limit 10 — JIT stack frames are very large | Stack overflow signal handler fires |
+| 30 | `<span; for (c in items) c>` single-line fails but `<span;\n    for (c in items) c\n>` multi-line works | Parse error vs working code |
+
+### 12.8 Module Inventory (Phase 4 Complete)
+
+```
+lambda/package/math/
+├── math.ls              # Entry point (48 lines)
+├── render.ls            # Core renderer (398 lines)
+├── box.ls               # Box model (233 lines)
+├── css.ls               # CSS classes (126 lines)
+├── context.ls           # Display/text context (42 lines)
+├── metrics.ls           # Font metrics (197 lines)
+├── symbols.ls           # Symbol table (379 lines)
+├── util.ls              # Utilities (47 lines)
+├── spacing_table.ls     # Inter-atom spacing (91 lines)
+├── optimize.ls          # Box coalescing (65 lines)  ← NEW
+└── atoms/
+    ├── fraction.ls      # Fractions (148 lines)
+    ├── scripts.ls       # Sub/superscripts (192 lines)
+    ├── spacing.ls       # Spacing commands (68 lines)
+    ├── style.ls         # Style/font commands (77 lines)
+    ├── color.ls         # Color commands (118 lines)
+    ├── enclose.ls       # Boxing/enclosure (153 lines)
+    ├── array.ls         # Matrix environments (220 lines)
+    └── delimiters.ls    # Stretchy delimiters (164 lines) ← NEW
+```
+
+Total: 18 modules, ~2,568 lines of Lambda Script.
+
+## Appendix D: Completeness Analysis — Lambda Math vs. MathLive
+
+This appendix documents a comprehensive audit of the Lambda math package against MathLive's full feature set, identifying what is covered, what is missing, and the priority path toward broader coverage.
+
+### D.1 Grammar Node Type Coverage (94%)
+
+The tree-sitter-latex-math grammar (`lambda/tree-sitter-latex-math/grammar.js`) produces 33 atom-level node types. The `render.ls` dispatch table handles **31 of 33**:
+
+| # | Node Type | Status |
+|---|-----------|:------:|
+| 1 | `symbol` | ✅ |
+| 2 | `number` | ✅ |
+| 3 | `symbol_command` | ✅ |
+| 4 | `operator` | ✅ |
+| 5 | `relation` | ✅ |
+| 6 | `punctuation` | ✅ |
+| 7 | `group` | ✅ |
+| 8 | `fraction` | ✅ |
+| 9 | `binomial` | ✅ |
+| 10 | `genfrac` | ✅ |
+| 11 | `radical` | ✅ |
+| 12 | `delimiter_group` | ✅ |
+| 13 | `sized_delimiter` | ✅ |
+| 14 | `overunder_command` | ✅ |
+| 15 | `extensible_arrow` | ❌ Missing |
+| 16 | `accent` | ✅ |
+| 17 | `box_command` | ✅ |
+| 18 | `color_command` | ✅ |
+| 19 | `rule_command` | ✅ |
+| 20 | `phantom_command` | ✅ |
+| 21 | `big_operator` | ✅ |
+| 22 | `mathop_command` | ❌ Missing |
+| 23 | `matrix_command` | ✅ |
+| 24 | `environment` | ✅ |
+| 25 | `text_command` | ✅ |
+| 26 | `style_command` | ✅ |
+| 27 | `space_command` | ✅ |
+| 28 | `hspace_command` | ✅ |
+| 29 | `skip_command` | ✅ |
+| 30 | `command` | ✅ (generic fallback) |
+| 31 | `subsup` | ✅ |
+| 32 | `infix_frac` | ✅ |
+| 33 | `brack_group` | ✅ (mapped to `render_group`) |
+
+**Missing renderers** (grammar already parses these):
+- **`extensible_arrow`** — `\xrightarrow`, `\xleftarrow`, `\xRightarrow`, `\xLeftarrow`, `\xleftrightarrow`, `\xhookleftarrow`, `\xhookrightarrow`, `\xmapsto`. Currently falls through to `default` → `render_default`, losing the arrow SVG body and above/below annotations.
+- **`mathop_command`** — `\mathop{...}` (custom operator with limits behavior). Falls through to `default`, losing operator-with-limits semantics.
+
+### D.2 Symbol Coverage (250/506 = 49%)
+
+Lambda `symbols.ls` contains **250 symbols** vs. MathLive's **~506** unique LaTeX commands:
+
+| Category | Lambda | MathLive (approx) |
+|----------|-------:|-------------------:|
+| Greek lowercase | 30 | 34 |
+| Greek uppercase | 11 | 11 |
+| Binary operators | 27 | 52 |
+| Relations | 36 | 86 |
+| Arrows | 30 | 62 |
+| Miscellaneous symbols | 54 | 79 |
+| Big operators | 16 | 28 |
+| Accents | 14 | 22 |
+| Operator names | 32 | 32 |
+| **Total** | **250** | **~506** |
+
+**Major missing symbol categories** (~256 symbols):
+
+- **Negated relations** (~40): `\nless`, `\nleq`, `\ngeq`, `\ngtr`, `\nleqslant`, `\ngeqslant`, `\ncong`, `\nsim`, `\nparallel`, `\nVDash`, `\nvdash`, `\nvDash`, `\nsubseteq`, `\nsupseteq`, `\precnsim`, `\succnsim`, etc.
+- **AMS relations** (~50): `\leqslant`, `\geqslant`, `\lesssim`, `\gtrsim`, `\approxeq`, `\thickapprox`, `\lessgtr`, `\gtrless`, `\curlyeqprec`, `\curlyeqsucc`, `\Vdash`, `\vDash`, `\Vvdash`, `\between`, `\pitchfork`, `\backepsilon`, `\therefore`, `\because`, etc.
+- **AMS binary operators** (~25): `\ltimes`, `\rtimes`, `\leftthreetimes`, `\rightthreetimes`, `\intercal`, `\dotplus`, `\doublebarwedge`, `\divideontimes`, `\boxminus`, `\boxplus`, `\boxtimes`, `\circleddash`, `\circledast`, `\circledcirc`, etc.
+- **AMS arrows** (~20): `\dashrightarrow`, `\dashleftarrow`, `\Rrightarrow`, `\Lleftarrow`, `\leftarrowtail`, `\rightarrowtail`, `\twoheadleftarrow`, `\twoheadrightarrow`, `\upuparrows`, `\downdownarrows`, `\rightsquigarrow`, `\leadsto`, `\multimap`, etc.
+- **AMS ordinals** (~25): `\square`, `\Box`, `\blacksquare`, `\blacktriangle`, `\blacktriangledown`, `\lozenge`, `\blacklozenge`, `\complement`, `\diagup`, `\measuredangle`, `\sphericalangle`, `\backprime`, `\eth`, `\mho`, `\Finv`, `\Game`, etc.
+- **Negated arrows** (~12): `\nleftarrow`, `\nrightarrow`, `\nRightarrow`, `\nLeftarrow`, `\nleftrightarrow`, `\nLeftrightarrow`, etc.
+- **St. Mary's Road / specialty** (~30): `\llbracket`, `\rrbracket`, `\Lbag`, `\Rbag`, `\boxbar`, `\lightning`, etc.
+- **Missing delimiters** (~8): `\ulcorner`, `\urcorner`, `\llcorner`, `\lrcorner`, `\lparen`, `\rparen`, `\lbrack`, `\rbrack`
+- **Missing Greek** (~4): `\digamma`, `\varkappa`, `\coppa`, `\sampi` (AMS/archaic)
+- **Additional integrals** (~5): `\oiint`, `\oiiint`, `\intclockwise`, `\varointclockwise`, `\ointctrclockwise`
+
+### D.3 MathLive Features with No Lambda Equivalent
+
+| Feature | MathLive Source | Description |
+|---------|-----------------|-------------|
+| **Chemistry (mhchem)** | `mhchem.ts` (2603 lines) | `\ce{}`, `\pu{}` chemical equations |
+| **Extensible arrows** | `extensible-symbols.ts` | `\xrightarrow[below]{above}` with SVG arrow body |
+| **Extensible over/under SVGs** | `extensible-symbols.ts` | `\overrightarrow`, `\overleftarrow`, `\overleftrightarrow`, `\overgroup`, `\underrightarrow`, `\underleftarrow`, etc. |
+| **`\mathop{...}`** | `styling.ts` | Custom operator with limits placement |
+| **Cancel / strikethrough** | `enclose.ts` | `\cancel`, `\bcancel`, `\xcancel`, `\sout` |
+| **`\enclose` (MathML)** | `enclose.ts` | Arbitrary menclose notations |
+| **Font sizing** | `styling.ts` | `\tiny`, `\small`, `\large`, `\Large`, `\LARGE`, `\huge`, `\Huge` |
+| **`\mathchoice`** | `styling.ts` | Display/text/script/scriptscript branching |
+| **`\mathbin`/`\mathrel`/`\mathord`** | `styling.ts` | Explicit atom type override |
+| **`\operatorname{...}`** | `styling.ts` | Custom named operators (e.g., `\operatorname{argmax}`) |
+| **`\not` (negation prefix)** | `styling.ts` | Generic negation via overlay slash |
+| **Tooltips** | `styling.ts` | `\mathtip`, `\texttip` |
+| **HTML integration** | `styling.ts` | `\href`, `\class`, `\cssId`, `\htmlStyle`, `\htmlData` |
+| **`\raisebox`/`\raise`/`\lower`** | `styling.ts` | Vertical positioning |
+| **`\char`/`\unicode`** | `styling.ts` | Arbitrary Unicode by codepoint |
+| **Text-mode accents** | `accents.ts` | `\^{a}`, `` \`{e} ``, `\'{o}`, `\"{u}`, `\~{n}`, `\c{c}` |
+| **`\overarc`/`\overparen`** | `accents.ts` | Arc accents |
+| **`\utilde`** | `accents.ts` | Under-tilde |
+| **`\overunderset`** | `styling.ts` | Combined over+under simultaneously |
+| **`\cfrac[l]`/`\cfrac[r]`** | `functions.ts` | Left/right-aligned continued fractions |
+| **`\pdiff`** | `functions.ts` | Partial derivative shorthand |
+| **`\ang`** | `functions.ts` | Angle from siunitx |
+| **`\mathstrut`** | `styling.ts` | Invisible parenthesis-height strut |
+| **`\fcolorbox`** | `styling.ts` | Framed color box |
+| **Starred matrix variants** | `environments.ts` | `pmatrix*`, `bmatrix*`, etc. |
+| **`eqnarray`/`subequations`** | `environments.ts` | Equation environments |
+| **`\displaylines`** | `functions.ts` | Multi-line display |
+
+### D.4 What IS Working Well
+
+The Lambda math package competently handles the **core 85–90%** of everyday math rendering:
+
+- **Fractions**: `\frac`, `\dfrac`, `\tfrac`, `\cfrac`, `\binom`, `\dbinom`, `\tbinom`, `\genfrac`, infix (`\over`, `\atop`, `\choose`, etc.)
+- **Scripts**: subscript, superscript, combined sub+sup, `\limits`/`\nolimits`
+- **Radicals**: `\sqrt` with optional index
+- **Delimiters**: `\left`/`\right` with stretchy rendering (4 size levels + CSS scaleY), `\middle`, all sized variants (`\big` through `\Bigg`)
+- **Accents**: 14 accent types — `\hat`, `\bar`, `\vec`, `\dot`, `\ddot`, `\widehat`, `\widetilde`, `\overbrace`, `\underbrace`, `\overline`, `\underline`, etc.
+- **Big operators**: `\sum`, `\prod`, `\int`, `\iint`, `\iiint`, `\oint`, display-mode limit placement
+- **Environments/matrices**: `array`, `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix`, `cases`, `aligned`, `gathered`, etc.
+- **Styling**: `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathscr`, `\mathbf`, `\mathsf`, `\mathtt`, `\displaystyle`, `\textstyle`, etc.
+- **Text**: `\text`, `\textrm`, `\textbf`, `\textit`, `\mbox`
+- **Colors**: `\color`, `\textcolor`, `\colorbox`
+- **Spacing**: `\,`, `\:`, `\;`, `\!`, `\quad`, `\qquad`, `\hspace`, `\kern`, `\hskip`, `\mskip`
+- **Boxes/phantoms**: `\boxed`, `\fbox`, `\bbox`, `\phantom`, `\hphantom`, `\vphantom`, `\smash`, `\llap`, `\rlap`
+- **Rules**: `\rule` with width/height/depth dimensions
+- **Inter-atom spacing**: Full Knuth spacing table (7×7 atom types)
+- **Post-processing**: Text node coalescing via `optimize.ls`
+
+### D.5 Coverage Summary
+
+| Metric | Value |
+|--------|-------|
+| Grammar node types handled | 31 / 33 (94%) |
+| Symbol coverage vs. MathLive | 250 / 506 (49%) |
+| Core math feature coverage | ~85–90% of common expressions |
+| Advanced/AMS feature coverage | ~40% |
+| Missing renderer dispatch entries | 2 (`extensible_arrow`, `mathop_command`) |
+| Missing MathLive features (no equivalent) | ~27 features |
+| Missing AMS symbols (table entries) | ~256 commands |
+
+**Practical interpretation**: ~85–90% of typical math content (textbook equations, homework, academic papers) uses fractions, scripts, radicals, Greek letters, basic operators/relations, arrows, delimiters, matrices, and accents — all of which are fully handled. The remaining ~10–15% relies on AMS extended symbols, extensible arrows, cancel notations, and specialty features.
+
+### D.6 Priority Path to Broader Coverage
+
+Ranked by impact-to-effort ratio:
+
+1. **Add `extensible_arrow` renderer** — grammar already parses it; needs dispatch case + render function with SVG arrow body. Covers `\xrightarrow`, `\xleftarrow`, and 7 other commands.
+2. **Add `mathop_command` renderer** — grammar already parses it; simple dispatch + big-operator-style limits logic. Covers `\mathop{...}`.
+3. **Expand `symbols.ls` with ~150 AMS symbols** — pure table additions (Unicode codepoints + atom types). Covers negated relations, AMS arrows, AMS binary operators, AMS ordinals. Largest single improvement to symbol coverage.
+4. **Add `\cancel`/`\bcancel`/`\xcancel`** — very common in educational content; diagonal/back-diagonal line overlay via CSS.
+5. **Add `\operatorname{...}` support** — frequently used for custom function names (`\operatorname{argmax}`, `\operatorname{Tr}`). Render as upright text with operator spacing.
+6. **Add font sizing commands** — `\small`, `\large`, `\Large`, etc. Map to CSS font-size multipliers.
+7. **Add `\mathbin`/`\mathrel`/`\mathord`** — atom type override for correct spacing; simple wrapper that sets atom type on child.
+8. **Add `\not` generic negation** — overlay slash on following symbol via CSS positioning.
+9. **Expand delimiter table** — add corner brackets (`\ulcorner`, etc.) and aliases (`\lparen`, `\lbrack`).
+10. **Chemistry (`\ce{}`)** — large feature (MathLive's implementation is 2600 lines); lowest priority unless chemistry use cases are targeted.
