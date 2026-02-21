@@ -4,6 +4,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/log.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -59,7 +60,7 @@ static void format_element_children_reader(RstContext& ctx, const ElementReader&
     // RAII recursion guard
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        printf("RST formatter: Maximum recursion depth reached, stopping element_children_reader\n");
+        log_debug("rst: Maximum recursion depth reached, stopping element_children_reader");
         return;
     }
 
@@ -319,7 +320,7 @@ static void format_item_reader(RstContext& ctx, const ItemReader& item) {
     // prevent infinite recursion
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        printf("RST formatter: Maximum recursion depth reached, stopping format_item_reader\n");
+        log_debug("rst: Maximum recursion depth reached, stopping format_item_reader");
         return;
     }
 

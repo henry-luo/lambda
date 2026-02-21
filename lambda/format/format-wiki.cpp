@@ -4,6 +4,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/log.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -241,7 +242,7 @@ static void format_element_reader(WikiContext& ctx, const ElementReader& elem) {
     // RAII recursion guard
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        printf("WARNING: Maximum recursion depth reached in Wiki formatter\n");
+        log_debug("wiki: Maximum recursion depth reached");
         return;
     }
 

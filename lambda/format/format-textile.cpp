@@ -138,13 +138,6 @@ static void format_raw_text(TextileContext& ctx, String* str) {
     ctx.write_text(str);
 }
 
-// Escape config for Textile special characters
-static const TextEscapeConfig TEXTILE_ESCAPE_CONFIG = {
-    "*_+-@^~\"!|[]{}()#<>=",  // special chars in Textile
-    false,                      // use_backslash_escape - use == for literal
-    nullptr                     // no custom escape function
-};
-
 // Format plain text (escape textile markup)
 static void format_text(TextileContext& ctx, String* str) {
     if (!str || str->len == 0) return;
@@ -174,32 +167,6 @@ static void format_element_children_raw_reader(TextileContext& ctx, const Elemen
             format_item_reader(ctx, child);
         }
     }
-}
-
-// Format heading element
-static void format_heading_reader(TextileContext& ctx, const ElementReader& elem) {
-    const char* tag_name = elem.tagName();
-    int level = 1;
-
-    // Try to get level from attribute (Pandoc schema)
-    ItemReader level_attr = elem.get_attr("level");
-    if (level_attr.isString()) {
-        String* level_str = level_attr.asString();
-        if (level_str && level_str->len > 0) {
-            level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
-            if (level < 1) level = 1;
-            if (level > 6) level = 6;
-        }
-    } else if (strlen(tag_name) >= 2 && tag_name[0] == 'h' && isdigit(tag_name[1])) {
-        // Fallback: parse level from tag name
-        level = tag_name[1] - '0';
-        if (level < 1) level = 1;
-        if (level > 6) level = 6;
-    }
-
-    ctx.write_heading_prefix(level);
-    format_element_children_reader(ctx, elem);
-    ctx.write_text("\n\n");
 }
 
 // Format link element
@@ -381,12 +348,341 @@ static void format_blockquote_reader(TextileContext& ctx, const ElementReader& e
     ctx.write_text("\n\n");
 }
 
+// ==============================================================================
+// Map-as-element helpers
+// ==============================================================================
+
+static void format_map_children(TextileContext& ctx, const MapReader& mp) {
+    ItemReader children = mp.get("_");
+    if (children.isArray()) {
+        ArrayReader arr = children.asArray();
+        auto it = arr.items();
+        ItemReader child;
+        while (it.next(&child)) {
+            format_item_reader(ctx, child);
+        }
+    }
+}
+
+static void format_map_children_raw(TextileContext& ctx, const MapReader& mp) {
+    ItemReader children = mp.get("_");
+    if (children.isArray()) {
+        ArrayReader arr = children.asArray();
+        auto it = arr.items();
+        ItemReader child;
+        while (it.next(&child)) {
+            if (child.isString()) {
+                format_raw_text(ctx, child.asString());
+            }
+        }
+    }
+}
+
+static const char* get_map_attr_cstr(const MapReader& mp, const char* key) {
+    ItemReader val = mp.get(key);
+    if (val.isString()) {
+        String* s = val.asString();
+        return (s && s->len > 0) ? s->chars : nullptr;
+    }
+    return nullptr;
+}
+
+// ==============================================================================
+// TextileSource traits — unified interface for ElementReader and MapReader
+// ==============================================================================
+
+template<typename Source>
+struct TextileSource;
+
+template<>
+struct TextileSource<ElementReader> {
+    static const char* get_attr(const ElementReader& s, const char* k) {
+        return s.get_attr_string(k);
+    }
+    static void children(TextileContext& c, const ElementReader& s) {
+        format_element_children_reader(c, s);
+    }
+    static void children_raw(TextileContext& c, const ElementReader& s) {
+        format_element_children_raw_reader(c, s);
+    }
+
+    // complex tag handlers that use ElementReader-specific helpers
+    static void handle_link(TextileContext& c, const ElementReader& s) {
+        format_link_reader(c, s);
+    }
+    static void handle_image(TextileContext& c, const ElementReader& s) {
+        format_image_reader(c, s);
+    }
+    static void handle_ul(TextileContext& c, const ElementReader& s) {
+        format_unordered_list_reader(c, s, 0);
+    }
+    static void handle_ol(TextileContext& c, const ElementReader& s) {
+        format_ordered_list_reader(c, s, 0);
+    }
+    static void handle_table(TextileContext& c, const ElementReader& s) {
+        format_table_reader(c, s);
+    }
+    static void handle_blockquote(TextileContext& c, const ElementReader& s) {
+        format_blockquote_reader(c, s);
+    }
+    static void handle_pre(TextileContext& c, const ElementReader& s) {
+        // check if pre contains a code element
+        auto it = s.children();
+        ItemReader child;
+        bool has_code = false;
+        while (it.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && strcmp(child_tag, "code") == 0) {
+                    format_code_block_reader(c, child_elem);
+                    has_code = true;
+                    break;
+                }
+            }
+        }
+        if (!has_code) {
+            c.write_pre_block_start();
+            format_element_children_raw_reader(c, s);
+            c.write_text("\n\n");
+        }
+    }
+    static void handle_dl(TextileContext& c, const ElementReader& s) {
+        auto it = s.children();
+        ItemReader child;
+        while (it.next(&child)) {
+            if (child.isElement()) {
+                ElementReader ce = child.asElement();
+                const char* ct = ce.tagName();
+                if (ct && strcmp(ct, "dt") == 0) {
+                    c.write_text("- ");
+                    format_element_children_reader(c, ce);
+                } else if (ct && strcmp(ct, "dd") == 0) {
+                    c.write_text(" := ");
+                    format_element_children_reader(c, ce);
+                    c.write_char('\n');
+                }
+            }
+        }
+        c.write_char('\n');
+    }
+};
+
+template<>
+struct TextileSource<MapReader> {
+    static const char* get_attr(const MapReader& s, const char* k) {
+        return get_map_attr_cstr(s, k);
+    }
+    static void children(TextileContext& c, const MapReader& s) {
+        format_map_children(c, s);
+    }
+    static void children_raw(TextileContext& c, const MapReader& s) {
+        format_map_children_raw(c, s);
+    }
+
+    static void handle_link(TextileContext& c, const MapReader& s) {
+        c.write_link_start();
+        children(c, s);
+        c.write_link_middle(nullptr);
+        const char* href = get_attr(s, "href");
+        if (href) c.write_text(href);
+    }
+    static void handle_image(TextileContext& c, const MapReader& s) {
+        const char* src = get_attr(s, "src");
+        const char* alt = get_attr(s, "alt");
+        if (src) c.write_image(src, alt);
+    }
+    static void handle_ul(TextileContext& c, const MapReader& s) {
+        ItemReader ch = s.get("_");
+        if (ch.isArray()) {
+            ArrayReader arr = ch.asArray();
+            auto it = arr.items();
+            ItemReader child;
+            while (it.next(&child)) {
+                // detect li children (as maps or elements)
+                const char* child_tag = nullptr;
+                if (child.isMap()) {
+                    child_tag = get_map_attr_cstr(child.asMap(), "$");
+                } else if (child.isElement()) {
+                    child_tag = child.asElement().tagName();
+                }
+                if (child_tag && strcmp(child_tag, "li") == 0) {
+                    c.write_list_marker(false, 0);
+                    format_item_reader(c, child);
+                    c.write_char('\n');
+                }
+            }
+        }
+        c.write_char('\n');
+    }
+    static void handle_ol(TextileContext& c, const MapReader& s) {
+        ItemReader ch = s.get("_");
+        if (ch.isArray()) {
+            ArrayReader arr = ch.asArray();
+            auto it = arr.items();
+            ItemReader child;
+            while (it.next(&child)) {
+                const char* child_tag = nullptr;
+                if (child.isMap()) {
+                    child_tag = get_map_attr_cstr(child.asMap(), "$");
+                } else if (child.isElement()) {
+                    child_tag = child.asElement().tagName();
+                }
+                if (child_tag && strcmp(child_tag, "li") == 0) {
+                    c.write_list_marker(true, 0);
+                    format_item_reader(c, child);
+                    c.write_char('\n');
+                }
+            }
+        }
+        c.write_char('\n');
+    }
+    static void handle_table(TextileContext& c, const MapReader& s) {
+        // table support not available for map-as-element; format children
+        children(c, s);
+    }
+    static void handle_blockquote(TextileContext& c, const MapReader& s) {
+        c.write_blockquote_start();
+        children(c, s);
+        c.write_text("\n\n");
+    }
+    static void handle_pre(TextileContext& c, const MapReader& s) {
+        c.write_code_block_start(nullptr);
+        children_raw(c, s);
+        c.write_text("\n\n");
+    }
+    static void handle_dl(TextileContext& c, const MapReader& s) {
+        // dl support not available for map-as-element; format children
+        children(c, s);
+    }
+};
+
+// ==============================================================================
+// Unified tag dispatch
+// ==============================================================================
+
+template<typename Source>
+static void format_tag_dispatch(TextileContext& ctx, const char* tag_name, const Source& src) {
+    using S = TextileSource<Source>;
+
+    // headings h1-h6
+    if (is_heading_tag(tag_name)) {
+        int level = tag_name[1] - '0';
+        const char* la = S::get_attr(src, "level");
+        if (la) {
+            int l = atoi(la);
+            if (l >= 1 && l <= 6) level = l;
+        }
+        ctx.write_heading_prefix(level);
+        S::children(ctx, src);
+        ctx.write_text("\n\n");
+    }
+    else if (strcmp(tag_name, "p") == 0) {
+        S::children(ctx, src);
+        ctx.write_text("\n\n");
+    }
+    else if (strcmp(tag_name, "em") == 0 || strcmp(tag_name, "i") == 0) {
+        ctx.write_char('_');
+        S::children(ctx, src);
+        ctx.write_char('_');
+    }
+    else if (strcmp(tag_name, "strong") == 0 || strcmp(tag_name, "b") == 0) {
+        ctx.write_char('*');
+        S::children(ctx, src);
+        ctx.write_char('*');
+    }
+    else if (strcmp(tag_name, "u") == 0 || strcmp(tag_name, "ins") == 0) {
+        ctx.write_char('+');
+        S::children(ctx, src);
+        ctx.write_char('+');
+    }
+    else if (strcmp(tag_name, "s") == 0 || strcmp(tag_name, "del") == 0 || strcmp(tag_name, "strike") == 0) {
+        ctx.write_char('-');
+        S::children(ctx, src);
+        ctx.write_char('-');
+    }
+    else if (strcmp(tag_name, "code") == 0) {
+        ctx.write_char('@');
+        S::children_raw(ctx, src);
+        ctx.write_char('@');
+    }
+    else if (strcmp(tag_name, "sup") == 0) {
+        ctx.write_char('^');
+        S::children(ctx, src);
+        ctx.write_char('^');
+    }
+    else if (strcmp(tag_name, "sub") == 0) {
+        ctx.write_char('~');
+        S::children(ctx, src);
+        ctx.write_char('~');
+    }
+    else if (strcmp(tag_name, "cite") == 0) {
+        ctx.write_text("??");
+        S::children(ctx, src);
+        ctx.write_text("??");
+    }
+    else if (strcmp(tag_name, "span") == 0) {
+        ctx.write_char('%');
+        S::children(ctx, src);
+        ctx.write_char('%');
+    }
+    else if (strcmp(tag_name, "pre") == 0) {
+        S::handle_pre(ctx, src);
+    }
+    else if (strcmp(tag_name, "a") == 0) {
+        S::handle_link(ctx, src);
+    }
+    else if (strcmp(tag_name, "img") == 0) {
+        S::handle_image(ctx, src);
+    }
+    else if (strcmp(tag_name, "ul") == 0) {
+        S::handle_ul(ctx, src);
+    }
+    else if (strcmp(tag_name, "ol") == 0) {
+        S::handle_ol(ctx, src);
+    }
+    else if (strcmp(tag_name, "li") == 0) {
+        // list items handled by parent list
+        S::children(ctx, src);
+    }
+    else if (strcmp(tag_name, "table") == 0) {
+        S::handle_table(ctx, src);
+    }
+    else if (strcmp(tag_name, "tr") == 0 || strcmp(tag_name, "td") == 0 ||
+             strcmp(tag_name, "th") == 0 || strcmp(tag_name, "thead") == 0 ||
+             strcmp(tag_name, "tbody") == 0) {
+        S::children(ctx, src);
+    }
+    else if (strcmp(tag_name, "blockquote") == 0) {
+        S::handle_blockquote(ctx, src);
+    }
+    else if (strcmp(tag_name, "br") == 0) {
+        ctx.write_char('\n');
+    }
+    else if (strcmp(tag_name, "hr") == 0) {
+        ctx.write_text("\n---\n\n");
+    }
+    else if (strcmp(tag_name, "dl") == 0) {
+        S::handle_dl(ctx, src);
+    }
+    else if (strcmp(tag_name, "dt") == 0 || strcmp(tag_name, "dd") == 0) {
+        S::children(ctx, src);
+    }
+    else {
+        // container or unknown — just format children
+        S::children(ctx, src);
+    }
+}
+
+// ==============================================================================
+// Entry dispatchers
+// ==============================================================================
+
 // Format element
 static void format_element_reader(TextileContext& ctx, const ElementReader& elem) {
-    // RAII recursion guard
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        printf("WARNING: Maximum recursion depth reached in Textile formatter\n");
+        log_debug("textile: Maximum recursion depth reached");
         return;
     }
 
@@ -396,153 +692,8 @@ static void format_element_reader(TextileContext& ctx, const ElementReader& elem
         return;
     }
 
-    // Handle different element types
-    if (strncmp(tag_name, "h", 1) == 0 && strlen(tag_name) == 2 && isdigit(tag_name[1])) {
-        format_heading_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "p") == 0) {
-        format_element_children_reader(ctx, elem);
-        ctx.write_text("\n\n");
-    }
-    else if (strcmp(tag_name, "em") == 0 || strcmp(tag_name, "i") == 0) {
-        ctx.write_char('_');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('_');
-    }
-    else if (strcmp(tag_name, "strong") == 0 || strcmp(tag_name, "b") == 0) {
-        ctx.write_char('*');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('*');
-    }
-    else if (strcmp(tag_name, "u") == 0 || strcmp(tag_name, "ins") == 0) {
-        ctx.write_char('+');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('+');
-    }
-    else if (strcmp(tag_name, "s") == 0 || strcmp(tag_name, "del") == 0 || strcmp(tag_name, "strike") == 0) {
-        ctx.write_char('-');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('-');
-    }
-    else if (strcmp(tag_name, "code") == 0) {
-        ctx.write_char('@');
-        format_element_children_raw_reader(ctx, elem);
-        ctx.write_char('@');
-    }
-    else if (strcmp(tag_name, "sup") == 0) {
-        ctx.write_char('^');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('^');
-    }
-    else if (strcmp(tag_name, "sub") == 0) {
-        ctx.write_char('~');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('~');
-    }
-    else if (strcmp(tag_name, "cite") == 0) {
-        ctx.write_text("??");
-        format_element_children_reader(ctx, elem);
-        ctx.write_text("??");
-    }
-    else if (strcmp(tag_name, "span") == 0) {
-        ctx.write_char('%');
-        format_element_children_reader(ctx, elem);
-        ctx.write_char('%');
-    }
-    else if (strcmp(tag_name, "pre") == 0) {
-        // Check if it contains a code element
-        auto it = elem.children();
-        ItemReader child;
-        bool has_code = false;
-        while (it.next(&child)) {
-            if (child.isElement()) {
-                ElementReader child_elem = child.asElement();
-                const char* child_tag = child_elem.tagName();
-                if (child_tag && strcmp(child_tag, "code") == 0) {
-                    format_code_block_reader(ctx, child_elem);
-                    has_code = true;
-                    break;
-                }
-            }
-        }
-        if (!has_code) {
-            ctx.write_pre_block_start();
-            format_element_children_raw_reader(ctx, elem);
-            ctx.write_text("\n\n");
-        }
-    }
-    else if (strcmp(tag_name, "a") == 0) {
-        format_link_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "img") == 0) {
-        format_image_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "ul") == 0) {
-        format_unordered_list_reader(ctx, elem, 0);
-    }
-    else if (strcmp(tag_name, "ol") == 0) {
-        format_ordered_list_reader(ctx, elem, 0);
-    }
-    else if (strcmp(tag_name, "li") == 0) {
-        // List items are handled by their parent list
-        format_element_children_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "table") == 0) {
-        format_table_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "tr") == 0 || strcmp(tag_name, "td") == 0 ||
-             strcmp(tag_name, "th") == 0 || strcmp(tag_name, "thead") == 0 ||
-             strcmp(tag_name, "tbody") == 0) {
-        // Table elements are handled by their parent table
-        format_element_children_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "blockquote") == 0) {
-        format_blockquote_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "br") == 0) {
-        ctx.write_char('\n');
-    }
-    else if (strcmp(tag_name, "hr") == 0) {
-        ctx.write_text("\n---\n\n");
-    }
-    else if (strcmp(tag_name, "dl") == 0) {
-        // Definition list
-        auto it = elem.children();
-        ItemReader child;
-        while (it.next(&child)) {
-            if (child.isElement()) {
-                ElementReader child_elem = child.asElement();
-                const char* child_tag = child_elem.tagName();
-                if (child_tag && strcmp(child_tag, "dt") == 0) {
-                    ctx.write_text("- ");
-                    format_element_children_reader(ctx, child_elem);
-                } else if (child_tag && strcmp(child_tag, "dd") == 0) {
-                    ctx.write_text(" := ");
-                    format_element_children_reader(ctx, child_elem);
-                    ctx.write_char('\n');
-                }
-            }
-        }
-        ctx.write_char('\n');
-    }
-    else if (strcmp(tag_name, "dt") == 0 || strcmp(tag_name, "dd") == 0) {
-        // Handled by dl parent
-        format_element_children_reader(ctx, elem);
-    }
-    else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "body") == 0 ||
-             strcmp(tag_name, "article") == 0 || strcmp(tag_name, "section") == 0 ||
-             strcmp(tag_name, "div") == 0 || strcmp(tag_name, "main") == 0) {
-        // Container elements - just format children
-        format_element_children_reader(ctx, elem);
-    }
-    else {
-        // Unknown element - just format children
-        format_element_children_reader(ctx, elem);
-    }
+    format_tag_dispatch(ctx, tag_name, elem);
 }
-
-// Forward declaration for Map handling
-static void format_map_as_element_reader(TextileContext& ctx, const MapReader& mp);
 
 // Format item
 static void format_item_reader(TextileContext& ctx, const ItemReader& item) {
@@ -555,10 +706,17 @@ static void format_item_reader(TextileContext& ctx, const ItemReader& item) {
         format_element_reader(ctx, elem);
     }
     else if (item.isMap()) {
-        // Handle Maps that represent Element-like structures (from JSON)
-        // These have "$" key for tag name and "_" key for children
+        // map-as-element: extract tag from "$" key and dispatch
         MapReader mp = item.asMap();
-        format_map_as_element_reader(ctx, mp);
+        const char* tag_name = get_map_attr_cstr(mp, "$");
+        if (tag_name) {
+            FormatterContextCpp::RecursionGuard guard(ctx);
+            if (!guard.exceeded()) {
+                format_tag_dispatch(ctx, tag_name, mp);
+            }
+        } else {
+            format_map_children(ctx, mp);
+        }
     }
     else if (item.isArray()) {
         ArrayReader arr = item.asArray();
@@ -566,388 +724,6 @@ static void format_item_reader(TextileContext& ctx, const ItemReader& item) {
         ItemReader child;
         while (it.next(&child)) {
             format_item_reader(ctx, child);
-        }
-    }
-}
-
-// Format a Map that represents an Element (from JSON parsing)
-// Maps with "$" key represent elements: {"$":"tagname", "_":[children], ...attrs}
-static void format_map_as_element_reader(TextileContext& ctx, const MapReader& mp) {
-    // RAII recursion guard
-    FormatterContextCpp::RecursionGuard guard(ctx);
-    if (guard.exceeded()) {
-        log_debug("format_textile: Maximum recursion depth reached in map_as_element");
-        return;
-    }
-
-    // Get tag name from "$" key
-    ItemReader tag_item = mp.get("$");
-    const char* tag_name = nullptr;
-    if (tag_item.isString()) {
-        String* tag_str = tag_item.asString();
-        if (tag_str && tag_str->len > 0) {
-            tag_name = tag_str->chars;
-        }
-    }
-
-    if (!tag_name) {
-        // No tag name, just format children if any
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        return;
-    }
-
-    // Handle different element types by tag name
-    // Headings
-    if (strncmp(tag_name, "h", 1) == 0 && strlen(tag_name) == 2 && isdigit(tag_name[1])) {
-        int level = tag_name[1] - '0';
-        if (level < 1) level = 1;
-        if (level > 6) level = 6;
-
-        // Check for "level" attribute
-        ItemReader level_attr = mp.get("level");
-        if (level_attr.isString()) {
-            String* level_str = level_attr.asString();
-            if (level_str && level_str->len > 0) {
-                int attr_level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
-                if (attr_level >= 1 && attr_level <= 6) {
-                    level = attr_level;
-                }
-            }
-        }
-
-        ctx.write_heading_prefix(level);
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_text("\n\n");
-    }
-    // Paragraphs
-    else if (strcmp(tag_name, "p") == 0) {
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_text("\n\n");
-    }
-    // Emphasis (italic)
-    else if (strcmp(tag_name, "em") == 0 || strcmp(tag_name, "i") == 0) {
-        ctx.write_char('_');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_char('_');
-    }
-    // Strong (bold)
-    else if (strcmp(tag_name, "strong") == 0 || strcmp(tag_name, "b") == 0) {
-        ctx.write_char('*');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_char('*');
-    }
-    // Inline code
-    else if (strcmp(tag_name, "code") == 0) {
-        ctx.write_char('@');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                if (child.isString()) {
-                    String* str = child.asString();
-                    format_raw_text(ctx, str);
-                } else {
-                    format_item_reader(ctx, child);
-                }
-            }
-        }
-        ctx.write_char('@');
-    }
-    // Links
-    else if (strcmp(tag_name, "a") == 0) {
-        ItemReader href = mp.get("href");
-
-        ctx.write_link_start();
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_link_middle(nullptr);
-
-        if (href.isString()) {
-            String* href_str = href.asString();
-            if (href_str && href_str->len > 0) {
-                ctx.write_text(href_str);
-            }
-        }
-    }
-    // Images
-    else if (strcmp(tag_name, "img") == 0) {
-        ItemReader src = mp.get("src");
-        ItemReader alt = mp.get("alt");
-
-        const char* src_str = nullptr;
-        const char* alt_str = nullptr;
-
-        if (src.isString()) {
-            String* s = src.asString();
-            if (s && s->len > 0) {
-                src_str = s->chars;
-            }
-        }
-        if (alt.isString()) {
-            String* a = alt.asString();
-            if (a && a->len > 0) {
-                alt_str = a->chars;
-            }
-        }
-
-        if (src_str) {
-            ctx.write_image(src_str, alt_str);
-        }
-    }
-    // Unordered list
-    else if (strcmp(tag_name, "ul") == 0) {
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                if (child.isMap()) {
-                    MapReader child_mp = child.asMap();
-                    ItemReader child_tag = child_mp.get("$");
-                    if (child_tag.isString()) {
-                        String* ct = child_tag.asString();
-                        if (ct && strcmp(ct->chars, "li") == 0) {
-                            ctx.write_list_marker(false, 0);
-                            ItemReader li_children = child_mp.get("_");
-                            if (li_children.isArray()) {
-                                ArrayReader li_arr = li_children.asArray();
-                                auto li_it = li_arr.items();
-                                ItemReader li_child;
-                                while (li_it.next(&li_child)) {
-                                    format_item_reader(ctx, li_child);
-                                }
-                            }
-                            ctx.write_char('\n');
-                        }
-                    }
-                }
-            }
-        }
-        ctx.write_char('\n');
-    }
-    // Ordered list
-    else if (strcmp(tag_name, "ol") == 0) {
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                if (child.isMap()) {
-                    MapReader child_mp = child.asMap();
-                    ItemReader child_tag = child_mp.get("$");
-                    if (child_tag.isString()) {
-                        String* ct = child_tag.asString();
-                        if (ct && strcmp(ct->chars, "li") == 0) {
-                            ctx.write_list_marker(true, 0);
-                            ItemReader li_children = child_mp.get("_");
-                            if (li_children.isArray()) {
-                                ArrayReader li_arr = li_children.asArray();
-                                auto li_it = li_arr.items();
-                                ItemReader li_child;
-                                while (li_it.next(&li_child)) {
-                                    format_item_reader(ctx, li_child);
-                                }
-                            }
-                            ctx.write_char('\n');
-                        }
-                    }
-                }
-            }
-        }
-        ctx.write_char('\n');
-    }
-    // Blockquote
-    else if (strcmp(tag_name, "blockquote") == 0) {
-        ctx.write_blockquote_start();
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_text("\n\n");
-    }
-    // Pre/Code blocks
-    else if (strcmp(tag_name, "pre") == 0) {
-        ctx.write_code_block_start(nullptr);
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                if (child.isString()) {
-                    String* str = child.asString();
-                    format_raw_text(ctx, str);
-                } else if (child.isMap()) {
-                    // Handle nested code element
-                    MapReader code_mp = child.asMap();
-                    ItemReader code_tag = code_mp.get("$");
-                    if (code_tag.isString()) {
-                        String* ct = code_tag.asString();
-                        if (ct && strcmp(ct->chars, "code") == 0) {
-                            ItemReader code_children = code_mp.get("_");
-                            if (code_children.isArray()) {
-                                ArrayReader code_arr = code_children.asArray();
-                                auto code_it = code_arr.items();
-                                ItemReader code_child;
-                                while (code_it.next(&code_child)) {
-                                    if (code_child.isString()) {
-                                        String* str = code_child.asString();
-                                        format_raw_text(ctx, str);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        ctx.write_text("\n\n");
-    }
-    // Horizontal rule
-    else if (strcmp(tag_name, "hr") == 0) {
-        ctx.write_text("\n---\n\n");
-    }
-    // Break
-    else if (strcmp(tag_name, "br") == 0) {
-        ctx.write_char('\n');
-    }
-    // Underline/insert
-    else if (strcmp(tag_name, "u") == 0 || strcmp(tag_name, "ins") == 0) {
-        ctx.write_char('+');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_char('+');
-    }
-    // Strikethrough/delete
-    else if (strcmp(tag_name, "s") == 0 || strcmp(tag_name, "del") == 0 || strcmp(tag_name, "strike") == 0) {
-        ctx.write_char('-');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_char('-');
-    }
-    // Superscript
-    else if (strcmp(tag_name, "sup") == 0) {
-        ctx.write_char('^');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_char('^');
-    }
-    // Subscript
-    else if (strcmp(tag_name, "sub") == 0) {
-        ctx.write_char('~');
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-        ctx.write_char('~');
-    }
-    // Container elements - just format children
-    else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "body") == 0 ||
-             strcmp(tag_name, "article") == 0 || strcmp(tag_name, "section") == 0 ||
-             strcmp(tag_name, "div") == 0 || strcmp(tag_name, "main") == 0 ||
-             strcmp(tag_name, "header") == 0 || strcmp(tag_name, "footer") == 0) {
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
-        }
-    }
-    // Unknown element - just format children
-    else {
-        ItemReader children = mp.get("_");
-        if (children.isArray()) {
-            ArrayReader arr = children.asArray();
-            auto it = arr.items();
-            ItemReader child;
-            while (it.next(&child)) {
-                format_item_reader(ctx, child);
-            }
         }
     }
 }

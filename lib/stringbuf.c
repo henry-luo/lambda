@@ -1,6 +1,8 @@
 #include "stringbuf.h"
 #include "str.h"
+#include "string.h"
 #include <string.h>
+#include <inttypes.h>
 #include "log.h"
 
 #define INITIAL_CAPACITY 32
@@ -212,6 +214,103 @@ void stringbuf_vappend(StringBuf *sb, int num_args, va_list args) {
             stringbuf_append_str(sb, str);
         }
     }
+}
+
+void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
+    if (!sb || !fmt) return;
+
+    const char *p = fmt;
+    const char *segment_start = p;
+
+    while (*p) {
+        if (*p != '%') { p++; continue; }
+
+        // flush literal segment before '%'
+        if (p > segment_start) {
+            stringbuf_append_str_n(sb, segment_start, (size_t)(p - segment_start));
+        }
+        p++; // skip '%'
+        if (!*p) break; // trailing '%' at end of format string
+
+        switch (*p) {
+        case 's': {
+            const char *s = va_arg(args, const char*);
+            if (s) stringbuf_append_str(sb, s);
+            break;
+        }
+        case 'S': {
+            String *s = va_arg(args, String*);
+            if (s && s->chars && s->len > 0) {
+                stringbuf_append_str_n(sb, s->chars, s->len);
+            }
+            break;
+        }
+        case 'd': {
+            int v = va_arg(args, int);
+            stringbuf_append_int(sb, v);
+            break;
+        }
+        case 'l': {
+            int64_t v = va_arg(args, int64_t);
+            stringbuf_append_long(sb, (long)v);
+            break;
+        }
+        case 'f': {
+            double v = va_arg(args, double);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.15g", v);
+            stringbuf_append_str(sb, buf);
+            break;
+        }
+        case 'c': {
+            char c = (char)va_arg(args, int);
+            stringbuf_append_char(sb, c);
+            break;
+        }
+        case 'n':
+            stringbuf_append_char(sb, '\n');
+            break;
+        case 'i': {
+            int level = va_arg(args, int);
+            if (level > 0) {
+                stringbuf_append_char_n(sb, ' ', (size_t)(level * 2));
+            }
+            break;
+        }
+        case 'r': {
+            int count = va_arg(args, int);
+            char rc = (char)va_arg(args, int);
+            if (count > 0) {
+                stringbuf_append_char_n(sb, rc, (size_t)count);
+            }
+            break;
+        }
+        case '%':
+            stringbuf_append_char(sb, '%');
+            break;
+        default:
+            // unknown specifier: emit as-is
+            stringbuf_append_char(sb, '%');
+            stringbuf_append_char(sb, *p);
+            break;
+        }
+        p++;
+        segment_start = p;
+    }
+
+    // flush trailing literal segment
+    if (p > segment_start) {
+        stringbuf_append_str_n(sb, segment_start, (size_t)(p - segment_start));
+    }
+}
+
+void stringbuf_emit(StringBuf *sb, const char *fmt, ...) {
+    if (!sb || !fmt) return;
+
+    va_list args;
+    va_start(args, fmt);
+    stringbuf_vemit(sb, fmt, args);
+    va_end(args);
 }
 
 void stringbuf_append_format(StringBuf *sb, const char *format, ...) {

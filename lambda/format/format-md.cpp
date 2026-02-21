@@ -3,6 +3,7 @@
 #include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/log.h"
 #include "../mark_reader.hpp"
 #include <ctype.h>
 
@@ -76,7 +77,7 @@ static void format_text(MarkdownContext& ctx, String* str) {
 
     // only debug when processing LaTeX-like content
     if (strstr(s, "frac") || strstr(s, "[x") || strchr(s, '$')) {
-        printf("DEBUG format_text: Processing text='%s' (len=%zu)\n", s, str->len);
+        log_debug("md format_text: Processing text='%s' (len=%zu)", s, str->len);
     }
 
     format_text_with_escape(ctx.output(), str, &MARKDOWN_ESCAPE_CONFIG);
@@ -910,45 +911,38 @@ static void format_element(StringBuf* sb, Element* elem) {
 
     const char* tag_name = elem_type->name.str;
 
-    printf("DEBUG format_element: processing element '%s' (len=%zu)\n", tag_name, strlen(tag_name));
+    log_debug("md format_element: processing element '%s' (len=%zu)", tag_name, strlen(tag_name));
 
     // Create temporary context for calling _reader functions
     Pool* temp_pool = pool_create();
     MarkdownContext temp_ctx(temp_pool, sb);
 
-    // Special debug for math elements - print exact bytes
+    // debug for math elements
     if (strcmp(tag_name, "math") == 0) {
-        printf("DEBUG: EXACT MATCH for math element!\n");
-        for (int i = 0; i < 5; i++) {
-            printf("DEBUG: tag_name[%d] = 0x%02x ('%c')\n", i, (unsigned char)tag_name[i], tag_name[i]);
-        }
-    }
-    if (strcmp(tag_name, "math") == 0) {
-        printf("DEBUG: math element detected!\n");
+        log_debug("md format_element: math element detected");
     }
 
     // Handle different element types
     if (strcmp(tag_name, "math") == 0) {
         // Math element - check type attribute to determine formatting
-        printf("DEBUG: *** MATH ELEMENT HANDLER TRIGGERED ***\n");
-        printf("DEBUG: Found math element, checking type attribute\n");
+        log_debug("md math handler triggered");
         String* type_attr = get_attribute(elem, "type");
-        printf("DEBUG: type_attr = %p\n", type_attr);
+        log_debug("md math type_attr = %p", type_attr);
         if (type_attr) {
-            printf("DEBUG: type_attr->chars = '%s'\n", type_attr->chars);
+            log_debug("md math type_attr->chars = '%s'", type_attr->chars);
         }
 
         if (type_attr && strcmp(type_attr->chars, "block") == 0) {
             // Display math ($$math$$)
-            printf("DEBUG: Calling format_math_display\n");
+            log_debug("md math: calling format_math_display");
             format_math_display(sb, elem);
         } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
             // Math code block (```math)
-            printf("DEBUG: Calling format_math_code_block\n");
+            log_debug("md math: calling format_math_code_block");
             format_math_code_block(sb, elem);
         } else {
             // Inline math ($math$) - default when no type or unknown type
-            printf("DEBUG: Calling format_math_inline\n");
+            log_debug("md math: calling format_math_inline");
             format_math_inline(sb, elem);
         }
     } else if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
@@ -981,31 +975,30 @@ static void format_element(StringBuf* sb, Element* elem) {
         stringbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "math") == 0) {
         // Math element - check type attribute to determine formatting
-        printf("DEBUG: *** MATH ELEMENT HANDLER TRIGGERED ***\n");
-        printf("DEBUG: Found math element, checking type attribute\n");
+        log_debug("md math handler triggered (second path)");
         String* type_attr = get_attribute(elem, "type");
-        printf("DEBUG: type_attr = %p\n", type_attr);
+        log_debug("md math type_attr = %p", type_attr);
         if (type_attr) {
-            printf("DEBUG: type_attr->chars = '%s'\n", type_attr->chars);
+            log_debug("md math type_attr->chars = '%s'", type_attr->chars);
         }
 
         if (type_attr && strcmp(type_attr->chars, "block") == 0) {
             // Display math ($$math$$)
-            printf("DEBUG: Calling format_math_display\n");
+            log_debug("md math: calling format_math_display");
             format_math_display(sb, elem);
         } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
             // Math code block (```math)
-            printf("DEBUG: Calling format_math_code_block\n");
+            log_debug("md math: calling format_math_code_block");
             format_math_code_block(sb, elem);
         } else {
             // Inline math ($math$) - default when no type or unknown type
-            printf("DEBUG: Calling format_math_inline\n");
+            log_debug("md math: calling format_math_inline");
             format_math_inline(sb, elem);
         }
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 ||
                strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
         // Just format children for document root, body, and span containers
-        printf("DEBUG: Container element case triggered for '%s'\n", tag_name);
+        log_debug("md container element '%s'", tag_name);
         format_element_children(sb, elem);
     } else if (strcmp(tag_name, "meta") == 0) {
         // Skip meta elements in markdown output
@@ -1013,7 +1006,7 @@ static void format_element(StringBuf* sb, Element* elem) {
         return;
     } else {
         // for unknown elements, just format children
-        printf("DEBUG format_element: unknown element '%s', formatting children\n", tag_name);
+        log_debug("md format_element: unknown element '%s', formatting children", tag_name);
 
         // Special case for jsx_element: try to output the content directly
         if (strcmp(tag_name, "jsx_element") == 0) {
@@ -1201,10 +1194,10 @@ static void format_item(StringBuf* sb, Item item) {
     if (type == LMD_TYPE_STRING) {
         String* str = item.get_string();
         if (str && (strstr(str->chars, "frac") || strstr(str->chars, "[x") || strchr(str->chars, '$'))) {
-            printf("DEBUG format_item: type=%d (STRING), text='%s'\n", type, str->chars);
+            log_debug("md format_item: type=%d (STRING), text='%s'", type, str->chars);
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        printf("DEBUG format_item: type=%d (ELEMENT), pointer=%lu\n", type, item.element);
+        log_debug("md format_item: type=%d (ELEMENT), pointer=%lu", type, item.element);
     }
 
     switch (type) {

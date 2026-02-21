@@ -93,6 +93,18 @@ public:
     // Compact mode
     inline void set_compact(bool compact) { compact_mode_ = compact; }
 
+    // Printf-style template output for concise formatting.
+    // See stringbuf_emit() for format specifiers:
+    //   %s (C string), %S (String*), %d (int), %l (int64_t), %f (double),
+    //   %c (char), %n (newline), %i (indent N*2 spaces), %r (repeat char N times)
+    inline void emit(const char* fmt, ...) {
+        if (!output_ || !fmt) return;
+        va_list args;
+        va_start(args, fmt);
+        stringbuf_vemit(output_, fmt, args);
+        va_end(args);
+    }
+
 protected:
     StringBuf* output_;
     Pool* pool_;
@@ -103,7 +115,7 @@ protected:
 
 private:
     friend class RecursionGuard;
-    
+
     inline void enter_recursion() { recursion_depth_++; }
     inline void exit_recursion() { recursion_depth_--; }
 };
@@ -174,7 +186,7 @@ public:
         // RST heading characters in order of preference
         char underline_chars[] = {'=', '-', '~', '^', '"', '\''};
         char underline_char = underline_chars[(level - 1) % 6];
-        
+
         write_newline();
         for (int i = 0; i < text_length; i++) {
             write_char(underline_char);
@@ -221,7 +233,7 @@ public:
         , in_table_(false)
         , in_code_block_(false)
     {}
-    
+
     // markdown heading: ## Heading
     inline void write_heading_prefix(int level) {
         write_newline();
@@ -230,7 +242,7 @@ public:
         }
         write_char(' ');
     }
-    
+
     // markdown list marker
     inline void write_list_marker(bool ordered, int index) {
         if (ordered) {
@@ -242,7 +254,7 @@ public:
             write_text("- ");
         }
     }
-    
+
     // markdown code fence: ```lang
     inline void write_code_fence(const char* lang = nullptr) {
         write_text("```");
@@ -251,7 +263,7 @@ public:
         }
         write_newline();
     }
-    
+
     // markdown link: [text](url)
     inline void write_link(const char* url, String* text = nullptr) {
         write_char('[');
@@ -260,15 +272,15 @@ public:
         write_text(url);
         write_char(')');
     }
-    
+
     // state tracking
     bool in_list() const { return list_depth_ > 0; }
     void enter_list() { list_depth_++; }
     void exit_list() { if (list_depth_ > 0) list_depth_--; }
-    
+
     bool in_table() const { return in_table_; }
     void set_in_table(bool in_table) { in_table_ = in_table; }
-    
+
     bool in_code_block() const { return in_code_block_; }
     void set_in_code_block(bool in_code) { in_code_block_ = in_code; }
 
@@ -461,29 +473,29 @@ public:
     // Check if string needs quoting in YAML
     static bool needs_yaml_quotes(const char* s, size_t len) {
         if (!s || len == 0) return true;
-        
+
         // Check for special characters
-        if (strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') || 
-            strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || 
-            strchr(s, '[') || strchr(s, ']') || strchr(s, '{') || 
-            strchr(s, '}') || strchr(s, '|') || strchr(s, '>') || 
+        if (strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') ||
+            strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') ||
+            strchr(s, '[') || strchr(s, ']') || strchr(s, '{') ||
+            strchr(s, '}') || strchr(s, '|') || strchr(s, '>') ||
             strchr(s, '&') || strchr(s, '*') || strchr(s, '!')) {
             return true;
         }
-        
+
         // Check for leading/trailing whitespace
         if (isspace(s[0]) || isspace(s[len-1])) {
             return true;
         }
-        
+
         // Check for YAML reserved words
-        if (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 || 
-            strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 || 
-            strcmp(s, "no") == 0 || strcmp(s, "on") == 0 || 
+        if (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
+            strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 ||
+            strcmp(s, "no") == 0 || strcmp(s, "on") == 0 ||
             strcmp(s, "off") == 0 || strcmp(s, "~") == 0) {
             return true;
         }
-        
+
         return false;
     }
 
@@ -492,7 +504,7 @@ public:
             write_yaml_null();
             return;
         }
-        
+
         if (force_quotes || needs_yaml_quotes(s, len)) {
             write_char('"');
             for (size_t i = 0; i < len; i++) {
@@ -834,4 +846,3 @@ public:
 };
 
 #endif // FORMAT_UTILS_HPP
-

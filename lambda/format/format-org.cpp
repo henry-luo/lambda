@@ -5,980 +5,525 @@
 #include "../../lib/str.h"
 #include <string.h>
 
-// Forward declarations - old Element* API
-static void format_inline_element(StringBuf* sb, Element* elem);
-static void format_scheduling(StringBuf* sb, Element* elem);
-static void format_timestamp(StringBuf* sb, Element* elem);
-static void format_footnote_definition(StringBuf* sb, Element* elem);
+// Forward declarations
+static void format_inline_element(OrgContext& ctx, const ElementReader& elem);
+static void format_org_element(OrgContext& ctx, const ElementReader& elem);
+static void format_org_item(OrgContext& ctx, const ItemReader& item);
 
-// MarkReader-based forward declarations - new OrgContext& API
-static void format_org_element_reader(OrgContext& ctx, const ElementReader& elem);
-static void format_org_text_reader(OrgContext& ctx, const ItemReader& item);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-// Simple helper to append a string to the buffer
-static void append_string(StringBuf* sb, const char* str) {
-    if (!sb || !str) return;
-    stringbuf_append_str(sb, str);
+// Get text content of a named child element as cstring (returns nullptr if not found)
+static const char* get_child_text(const ElementReader& elem, const char* tag) {
+    ElementReader child = elem.findChildElement(tag);
+    if (!child.isValid()) return nullptr;
+
+    // Extract text from the child element's first string child
+    for (int64_t i = 0; i < child.childCount(); i++) {
+        ItemReader item = child.childAt(i);
+        if (item.isString()) {
+            return item.cstring();
+        }
+        // If child is an element, recurse one level
+        if (item.isElement()) {
+            ElementReader sub = item.asElement();
+            for (int64_t j = 0; j < sub.childCount(); j++) {
+                ItemReader sub_item = sub.childAt(j);
+                if (sub_item.isString()) return sub_item.cstring();
+            }
+        }
+    }
+    return nullptr;
 }
 
-// Helper to get element type name
-static const char* get_element_type_name(Element* elem) {
-    if (!elem || !elem->type) return NULL;
-    TypeElmt* type = (TypeElmt*)elem->type;
-    if (type->name.length == 0) return NULL;
-
-    // Create a null-terminated string from StrView
-    static char type_name_buffer[256];
-    if (type->name.length >= sizeof(type_name_buffer)) return NULL;
-
-    strncpy(type_name_buffer, type->name.str, type->name.length);
-    type_name_buffer[type->name.length] = '\0';
-    return type_name_buffer;
+// Write all string children, recursing into child elements for inline formatting
+static void format_children_inline(OrgContext& ctx, const ElementReader& elem) {
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (child.isString()) {
+            ctx.write_text(child.cstring());
+        } else if (child.isElement()) {
+            format_inline_element(ctx, child.asElement());
+        }
+    }
 }
 
-// Helper to extract string content from first child
-static String* get_first_string_content(Element* elem) {
-    if (!elem) return NULL;
-    List* list = (List*)elem;
-    if (list->length == 0) return NULL;
-
-    Item first_item = list->items[0];
-    TypeId type = get_type_id(first_item);
-    if (type == LMD_TYPE_STRING) {
-        return first_item.get_string();
+// Write only string children (no recursion into child elements)
+static void format_string_children(OrgContext& ctx, const ElementReader& elem) {
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (child.isString()) {
+            ctx.write_text(child.cstring());
+        }
     }
-    else if (type == LMD_TYPE_ELEMENT) {
-        Element* child_elem = first_item.element;
-        return get_first_string_content(child_elem);
-    }
-    return NULL;
 }
 
-// Format a heading element
-static void format_heading(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    List* list = (List*)elem;
-    int level = 1;  // default level
-    String* title = NULL;
-    String* todo = NULL;
-    String* tags = NULL;
-
-    // Extract level, TODO, title, and tags from children
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "level") == 0) {
-                String* level_str = get_first_string_content(child);
-                if (level_str) {
-                    level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
-                }
-            } else if (child_type && strcmp(child_type, "todo") == 0) {
-                todo = get_first_string_content(child);
-            } else if (child_type && strcmp(child_type, "title") == 0) {
-                title = get_first_string_content(child);
-            } else if (child_type && strcmp(child_type, "tags") == 0) {
-                tags = get_first_string_content(child);
-            }
-        }
-    }
-
-    // Output heading with appropriate number of stars
-    for (int i = 0; i < level; i++) {
-        append_string(sb, "*");
-    }
-    append_string(sb, " ");
-
-    // Add TODO keyword if present
-    if (todo) {
-        append_string(sb, todo->chars);
-        append_string(sb, " ");
-    }
-
-    // Add title
-    if (title) {
-        append_string(sb, title->chars);
-    }
-
-    // Add tags if present
-    if (tags) {
-        append_string(sb, " ");
-        append_string(sb, tags->chars);
-    }
-
-    append_string(sb, "\n");
+// Format children wrapped with symmetric delimiters: *bold*, /italic/, etc.
+static void format_delimited_inline(OrgContext& ctx, const ElementReader& elem, const char* delim) {
+    ctx.write_text(delim);
+    format_string_children(ctx, elem);
+    ctx.write_text(delim);
 }
 
-// Format a paragraph element with inline formatting
-static void format_paragraph(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Heading
+// ---------------------------------------------------------------------------
 
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        TypeId child_type_id = get_type_id(child_item);
-        if (child_type_id == LMD_TYPE_STRING) {
-            String* str = child_item.get_string();
-            if (str && str) {
-                append_string(sb, str->chars);
-            }
-        }
-        else if (child_type_id == LMD_TYPE_ELEMENT) {
-            Element* child_elem = child_item.element;
-            format_inline_element(sb, child_elem);
+static void format_heading(OrgContext& ctx, const ElementReader& elem) {
+    int level = 1;
+    const char* title = nullptr;
+    const char* todo  = nullptr;
+    const char* tags  = nullptr;
+
+    // Extract level / TODO / title / tags from child elements
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (!child.isElement()) continue;
+        ElementReader ce = child.asElement();
+        const char* tag = ce.tagName();
+        if (!tag) continue;
+
+        if (strcmp(tag, "level") == 0) {
+            const char* lstr = get_child_text(elem, "level");
+            if (lstr) level = (int)str_to_int64_default(lstr, strlen(lstr), 0);
+        } else if (strcmp(tag, "todo") == 0) {
+            todo = get_child_text(elem, "todo");
+        } else if (strcmp(tag, "title") == 0) {
+            title = get_child_text(elem, "title");
+        } else if (strcmp(tag, "tags") == 0) {
+            tags = get_child_text(elem, "tags");
         }
     }
-    append_string(sb, "\n");
+
+    // Stars
+    for (int i = 0; i < level; i++) ctx.write_char('*');
+    ctx.write_char(' ');
+
+    if (todo)  { ctx.write_text(todo); ctx.write_char(' '); }
+    if (title) ctx.write_text(title);
+    if (tags)  { ctx.write_char(' '); ctx.write_text(tags); }
+
+    ctx.write_char('\n');
 }
 
-// Format inline elements (bold, italic, links, etc.)
-static void format_inline_element(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Paragraph (block-level)
+// ---------------------------------------------------------------------------
 
-    const char* type_name = get_element_type_name(elem);
-    if (!type_name) return;
+static void format_paragraph(OrgContext& ctx, const ElementReader& elem) {
+    format_children_inline(ctx, elem);
+    ctx.write_char('\n');
+}
 
-    if (strcmp(type_name, "plain_text") == 0) {
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-    } else if (strcmp(type_name, "bold") == 0) {
-        append_string(sb, "*");
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-        append_string(sb, "*");
-    } else if (strcmp(type_name, "italic") == 0) {
-        append_string(sb, "/");
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-        append_string(sb, "/");
-    } else if (strcmp(type_name, "verbatim") == 0) {
-        append_string(sb, "=");
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-        append_string(sb, "=");
-    } else if (strcmp(type_name, "code") == 0) {
-        append_string(sb, "~");
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-        append_string(sb, "~");
-    } else if (strcmp(type_name, "strikethrough") == 0) {
-        append_string(sb, "+");
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-        append_string(sb, "+");
-    } else if (strcmp(type_name, "underline") == 0) {
-        append_string(sb, "_");
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            }
-        }
-        append_string(sb, "_");
-    } else if (strcmp(type_name, "link") == 0) {
-        append_string(sb, "[[");
+// ---------------------------------------------------------------------------
+// Inline element dispatch (bold, italic, link, math, etc.)
+// ---------------------------------------------------------------------------
 
-        String* url = NULL;
-        String* description = NULL;
+static void format_inline_element(OrgContext& ctx, const ElementReader& elem) {
+    const char* tag = elem.tagName();
+    if (!tag) return;
 
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = child_item.element;
-                const char* child_type = get_element_type_name(child);
+    // --- simple delimited styles ---
+    if (strcmp(tag, "bold") == 0)          { format_delimited_inline(ctx, elem, "*");  return; }
+    if (strcmp(tag, "italic") == 0)        { format_delimited_inline(ctx, elem, "/");  return; }
+    if (strcmp(tag, "verbatim") == 0)      { format_delimited_inline(ctx, elem, "=");  return; }
+    if (strcmp(tag, "code") == 0)          { format_delimited_inline(ctx, elem, "~");  return; }
+    if (strcmp(tag, "strikethrough") == 0) { format_delimited_inline(ctx, elem, "+");  return; }
+    if (strcmp(tag, "underline") == 0)     { format_delimited_inline(ctx, elem, "_");  return; }
 
-                if (child_type && strcmp(child_type, "url") == 0) {
-                    url = get_first_string_content(child);
-                } else if (child_type && strcmp(child_type, "description") == 0) {
-                    description = get_first_string_content(child);
-                }
-            }
-        }
+    // --- plain text ---
+    if (strcmp(tag, "plain_text") == 0) {
+        format_string_children(ctx, elem);
+        return;
+    }
 
-        if (url) {
-            append_string(sb, url->chars);
-        }
+    // --- link ---
+    if (strcmp(tag, "link") == 0) {
+        ctx.write_text("[[");
+        const char* url  = get_child_text(elem, "url");
+        const char* desc = get_child_text(elem, "description");
+        if (url) ctx.write_text(url);
+        if (desc) { ctx.write_text("]["); ctx.write_text(desc); }
+        ctx.write_text("]]");
+        return;
+    }
 
-        if (description) {
-            append_string(sb, "][");
-            append_string(sb, description->chars);
-        }
+    // --- footnote reference: [fn:name] ---
+    if (strcmp(tag, "footnote_reference") == 0) {
+        ctx.write_text("[fn:");
+        const char* name = get_child_text(elem, "name");
+        if (name) ctx.write_text(name);
+        ctx.write_text("]");
+        return;
+    }
 
-        append_string(sb, "]]");
-    } else if (strcmp(type_name, "footnote_reference") == 0) {
-        // Format footnote reference: [fn:name]
-        append_string(sb, "[fn:");
+    // --- inline footnote: [fn:name:definition] ---
+    if (strcmp(tag, "inline_footnote") == 0) {
+        ctx.write_text("[fn:");
+        const char* name = get_child_text(elem, "name");
+        if (name && strlen(name) > 0) ctx.write_text(name);
+        ctx.write_text(":");
 
-        String* name = NULL;
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = child_item.element;
-                const char* child_type = get_element_type_name(child);
+        ElementReader def_elem = elem.findChildElement("definition");
+        if (def_elem.isValid()) format_children_inline(ctx, def_elem);
 
-                if (child_type && strcmp(child_type, "name") == 0) {
-                    name = get_first_string_content(child);
-                    break;
-                }
-            }
-        }
+        ctx.write_text("]");
+        return;
+    }
 
-        if (name) {
-            append_string(sb, name->chars);
-        }
-        append_string(sb, "]");
-    } else if (strcmp(type_name, "inline_footnote") == 0) {
-        // Format inline footnote: [fn:name:definition] or [fn::definition]
-        append_string(sb, "[fn:");
-
-        String* name = NULL;
-        Element* definition_elem = NULL;
-
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = child_item.element;
-                const char* child_type = get_element_type_name(child);
-
-                if (child_type && strcmp(child_type, "name") == 0) {
-                    name = get_first_string_content(child);
-                } else if (child_type && strcmp(child_type, "definition") == 0) {
-                    definition_elem = child;
-                }
-            }
-        }
-
-        if (name && strlen(name->chars) > 0) {
-            append_string(sb, name->chars);
-        }
-        append_string(sb, ":");
-
-        if (definition_elem) {
-            // Format the definition content (may contain inline formatting)
-            List* def_list = (List*)definition_elem;
-            for (long i = 0; i < def_list->length; i++) {
-                Item def_item = def_list->items[i];
-                if (get_type_id(def_item) == LMD_TYPE_STRING) {
-                    String* str = def_item.get_string();
-                    if (str && str) {
-                        append_string(sb, str->chars);
-                    }
-                } else if (get_type_id(def_item) == LMD_TYPE_ELEMENT) {
-                    Element* def_child = def_item.element;
-                    format_inline_element(sb, def_child);
-                }
-            }
-        }
-        append_string(sb, "]");
-    } else if (strcmp(type_name, "inline_math") == 0) {
-        // Format inline math: $content$
-        String* raw_content = NULL;
-
-        // Look for raw_content element
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = child_item.element;
-                const char* child_type = get_element_type_name(child);
-
-                if (child_type && strcmp(child_type, "raw_content") == 0) {
-                    raw_content = get_first_string_content(child);
-                    break;
-                }
-            }
-        }
-
-        // Determine delimiter based on content (could be $ or \(...\))
-        bool use_latex_style = false;
-        if (raw_content && raw_content->chars) {
-            // Simple heuristic: if it contains backslash commands, use LaTeX style
-            if (strchr(raw_content->chars, '\\')) {
-                use_latex_style = true;
-            }
-        }
-
-        if (use_latex_style) {
-            append_string(sb, "\\(");
-            if (raw_content) {
-                append_string(sb, raw_content->chars);
-            }
-            append_string(sb, "\\)");
+    // --- inline math ---
+    if (strcmp(tag, "inline_math") == 0) {
+        const char* raw = get_child_text(elem, "raw_content");
+        bool latex_style = raw && strchr(raw, '\\');
+        if (latex_style) {
+            ctx.write_text("\\(");
+            if (raw) ctx.write_text(raw);
+            ctx.write_text("\\)");
         } else {
-            append_string(sb, "$");
-            if (raw_content) {
-                append_string(sb, raw_content->chars);
-            }
-            append_string(sb, "$");
+            ctx.write_text("$");
+            if (raw) ctx.write_text(raw);
+            ctx.write_text("$");
         }
-    } else if (strcmp(type_name, "display_math") == 0) {
-        // Format display math: $$content$$ or \[...\]
-        String* raw_content = NULL;
+        return;
+    }
 
-        // Look for raw_content element
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = child_item.element;
-                const char* child_type = get_element_type_name(child);
-
-                if (child_type && strcmp(child_type, "raw_content") == 0) {
-                    raw_content = get_first_string_content(child);
-                    break;
-                }
-            }
-        }
-
-        // Determine delimiter based on content
-        bool use_latex_style = false;
-        if (raw_content && raw_content->chars) {
-            // Use LaTeX style if it contains backslash commands or is complex
-            if (strchr(raw_content->chars, '\\') || strlen(raw_content->chars) > 20) {
-                use_latex_style = true;
-            }
-        }
-
-        if (use_latex_style) {
-            append_string(sb, "\\[");
-            if (raw_content) {
-                append_string(sb, raw_content->chars);
-            }
-            append_string(sb, "\\]");
+    // --- display math ---
+    if (strcmp(tag, "display_math") == 0) {
+        const char* raw = get_child_text(elem, "raw_content");
+        bool latex_style = raw && (strchr(raw, '\\') || strlen(raw) > 20);
+        if (latex_style) {
+            ctx.write_text("\\[");
+            if (raw) ctx.write_text(raw);
+            ctx.write_text("\\]");
         } else {
-            append_string(sb, "$$");
-            if (raw_content) {
-                append_string(sb, raw_content->chars);
-            }
-            append_string(sb, "$$");
+            ctx.write_text("$$");
+            if (raw) ctx.write_text(raw);
+            ctx.write_text("$$");
         }
-    } else if (strcmp(type_name, "timestamp") == 0) {
-        format_timestamp(sb, elem);
-    } else if (strcmp(type_name, "text_content") == 0) {
-        // Handle container of inline elements
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child_elem = child_item.element;
-                format_inline_element(sb, child_elem);
-            }
+        return;
+    }
+
+    // --- timestamp ---
+    if (strcmp(tag, "timestamp") == 0) {
+        // Try extracting from first string child
+        for (int64_t i = 0; i < elem.childCount(); i++) {
+            ItemReader c = elem.childAt(i);
+            if (c.isString()) { ctx.write_text(c.cstring()); return; }
         }
-    } else {
-        // Unknown inline element, treat as plain text
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
+        // Recurse into child elements
+        for (int64_t i = 0; i < elem.childCount(); i++) {
+            ItemReader c = elem.childAt(i);
+            if (c.isElement()) {
+                ElementReader sub = c.asElement();
+                for (int64_t j = 0; j < sub.childCount(); j++) {
+                    ItemReader sj = sub.childAt(j);
+                    if (sj.isString()) { ctx.write_text(sj.cstring()); return; }
                 }
-            } else if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child_elem = child_item.element;
-                format_inline_element(sb, child_elem);
             }
         }
+        return;
     }
+
+    // --- text_content (container of inline elements) ---
+    if (strcmp(tag, "text_content") == 0) {
+        for (int64_t i = 0; i < elem.childCount(); i++) {
+            ItemReader c = elem.childAt(i);
+            if (c.isElement()) format_inline_element(ctx, c.asElement());
+        }
+        return;
+    }
+
+    // --- fallback: treat as mixed inline content ---
+    format_children_inline(ctx, elem);
 }
 
-// Format a list item element
-static void format_list_item(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// List item
+// ---------------------------------------------------------------------------
 
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_STRING) {
-            String* str = child_item.get_string();
-            if (str && str) {
-                append_string(sb, str->chars);
-            }
-        }
-    }
-    append_string(sb, "\n");
+static void format_list_item(OrgContext& ctx, const ElementReader& elem) {
+    format_string_children(ctx, elem);
+    ctx.write_char('\n');
 }
 
-// Format a code block element
-static void format_code_block(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Block elements (code, quote, example, verse, center)
+// ---------------------------------------------------------------------------
 
-    List* list = (List*)elem;
-    String* language = NULL;
-
-    // Extract language and content
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "language") == 0) {
-                language = get_first_string_content(child);
-            }
-        }
-    }
-
-    // Output BEGIN_SRC
-    append_string(sb, "#+BEGIN_SRC");
-    if (language) {
-        append_string(sb, " ");
-        append_string(sb, language->chars);
-    }
-    append_string(sb, "\n");
-
-    // Output content lines
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "content") == 0) {
-                String* content = get_first_string_content(child);
-                if (content) {
-                    append_string(sb, content->chars);
-                    append_string(sb, "\n");
+// Helper: emit all "content" child elements as lines
+static void format_all_content_lines(OrgContext& ctx, const ElementReader& elem) {
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (!child.isElement()) continue;
+        ElementReader ce = child.asElement();
+        if (ce.tagName() && strcmp(ce.tagName(), "content") == 0) {
+            for (int64_t j = 0; j < ce.childCount(); j++) {
+                ItemReader cj = ce.childAt(j);
+                if (cj.isString()) {
+                    ctx.write_text(cj.cstring());
+                    ctx.write_char('\n');
                 }
             }
         }
     }
-
-    // Output END_SRC
-    append_string(sb, "#+END_SRC\n");
 }
 
-// Format a quote block element
-static void format_quote_block(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    // Output BEGIN_QUOTE
-    append_string(sb, "#+BEGIN_QUOTE\n");
-
-    // Output content paragraphs
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "paragraph") == 0) {
-                format_paragraph(sb, child);
-            }
+// Helper: format paragraphs inside a block
+static void format_contained_paragraphs(OrgContext& ctx, const ElementReader& elem) {
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (!child.isElement()) continue;
+        ElementReader ce = child.asElement();
+        if (ce.tagName() && strcmp(ce.tagName(), "paragraph") == 0) {
+            format_paragraph(ctx, ce);
         }
     }
-
-    // Output END_QUOTE
-    append_string(sb, "#+END_QUOTE\n");
 }
 
-// Format an example block element
-static void format_example_block(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    append_string(sb, "#+BEGIN_EXAMPLE\n");
-
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "content") == 0) {
-                String* content = get_first_string_content(child);
-                if (content) {
-                    append_string(sb, content->chars);
-                    append_string(sb, "\n");
-                }
-            }
-        }
-    }
-
-    append_string(sb, "#+END_EXAMPLE\n");
+static void format_code_block(OrgContext& ctx, const ElementReader& elem) {
+    const char* lang = get_child_text(elem, "language");
+    ctx.write_text("#+BEGIN_SRC");
+    if (lang) { ctx.write_char(' '); ctx.write_text(lang); }
+    ctx.write_char('\n');
+    format_all_content_lines(ctx, elem);
+    ctx.write_text("#+END_SRC\n");
 }
 
-// Format a verse block element
-static void format_verse_block(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    append_string(sb, "#+BEGIN_VERSE\n");
-
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "content") == 0) {
-                String* content = get_first_string_content(child);
-                if (content) {
-                    append_string(sb, content->chars);
-                    append_string(sb, "\n");
-                }
-            }
-        }
-    }
-
-    append_string(sb, "#+END_VERSE\n");
+static void format_quote_block(OrgContext& ctx, const ElementReader& elem) {
+    ctx.write_text("#+BEGIN_QUOTE\n");
+    format_contained_paragraphs(ctx, elem);
+    ctx.write_text("#+END_QUOTE\n");
 }
 
-// Format a center block element
-static void format_center_block(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    append_string(sb, "#+BEGIN_CENTER\n");
-
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "paragraph") == 0) {
-                format_paragraph(sb, child);
-            }
-        }
-    }
-
-    append_string(sb, "#+END_CENTER\n");
+static void format_example_block(OrgContext& ctx, const ElementReader& elem) {
+    ctx.write_text("#+BEGIN_EXAMPLE\n");
+    format_all_content_lines(ctx, elem);
+    ctx.write_text("#+END_EXAMPLE\n");
 }
 
-// Format a drawer element
-static void format_drawer(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    List* list = (List*)elem;
-    String* drawer_name = NULL;
-
-    // Extract drawer name first
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "name") == 0) {
-                drawer_name = get_first_string_content(child);
-                break;
-            }
-        }
-    }
-
-    // Output drawer start
-    append_string(sb, ":");
-    if (drawer_name) {
-        append_string(sb, drawer_name->chars);
-    }
-    append_string(sb, ":\n");
-
-    // Output content lines
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "content") == 0) {
-                String* content = get_first_string_content(child);
-                if (content) {
-                    append_string(sb, content->chars);
-                    append_string(sb, "\n");
-                }
-            }
-        }
-    }
-
-    // Output drawer end
-    append_string(sb, ":END:\n");
+static void format_verse_block(OrgContext& ctx, const ElementReader& elem) {
+    ctx.write_text("#+BEGIN_VERSE\n");
+    format_all_content_lines(ctx, elem);
+    ctx.write_text("#+END_VERSE\n");
 }
 
-// Format a scheduling element (SCHEDULED, DEADLINE, CLOSED)
-static void format_scheduling(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+static void format_center_block(OrgContext& ctx, const ElementReader& elem) {
+    ctx.write_text("#+BEGIN_CENTER\n");
+    format_contained_paragraphs(ctx, elem);
+    ctx.write_text("#+END_CENTER\n");
+}
 
-    List* list = (List*)elem;
-    String* keyword = NULL;
-    String* timestamp = NULL;
+// ---------------------------------------------------------------------------
+// Drawer
+// ---------------------------------------------------------------------------
 
-    // Extract keyword and timestamp
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
+static void format_drawer(OrgContext& ctx, const ElementReader& elem) {
+    const char* name = get_child_text(elem, "name");
+    ctx.write_char(':');
+    if (name) ctx.write_text(name);
+    ctx.write_text(":\n");
+    format_all_content_lines(ctx, elem);
+    ctx.write_text(":END:\n");
+}
 
-            if (child_type && strcmp(child_type, "keyword") == 0) {
-                keyword = get_first_string_content(child);
-            } else if (child_type && strcmp(child_type, "timestamp") == 0) {
-                timestamp = get_first_string_content(child);
-            }
-        }
-    }
+// ---------------------------------------------------------------------------
+// Scheduling (SCHEDULED, DEADLINE, CLOSED)
+// ---------------------------------------------------------------------------
 
-    // Output scheduling line
-    append_string(sb, "  "); // Indent
+static void format_scheduling(OrgContext& ctx, const ElementReader& elem) {
+    const char* keyword   = get_child_text(elem, "keyword");
+    const char* timestamp = get_child_text(elem, "timestamp");
+
+    ctx.write_text("  "); // indent
+
     if (keyword) {
-        // Convert keyword to uppercase for output
-        if (strcmp(keyword->chars, "scheduled") == 0) {
-            append_string(sb, "SCHEDULED: ");
-        } else if (strcmp(keyword->chars, "deadline") == 0) {
-            append_string(sb, "DEADLINE: ");
-        } else if (strcmp(keyword->chars, "closed") == 0) {
-            append_string(sb, "CLOSED: ");
-        }
+        if (strcmp(keyword, "scheduled") == 0)      ctx.write_text("SCHEDULED: ");
+        else if (strcmp(keyword, "deadline") == 0)   ctx.write_text("DEADLINE: ");
+        else if (strcmp(keyword, "closed") == 0)     ctx.write_text("CLOSED: ");
     }
-    if (timestamp) {
-        append_string(sb, timestamp->chars);
-    }
-    append_string(sb, "\n");
+
+    if (timestamp) ctx.write_text(timestamp);
+    ctx.write_char('\n');
 }
 
-// Format a timestamp element
-static void format_timestamp(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Footnote definition
+// ---------------------------------------------------------------------------
 
-    String* timestamp = get_first_string_content(elem);
-    if (timestamp) {
-        append_string(sb, timestamp->chars);
-    }
+static void format_footnote_definition(OrgContext& ctx, const ElementReader& elem) {
+    const char* name = get_child_text(elem, "name");
+
+    ctx.write_text("[fn:");
+    if (name) ctx.write_text(name);
+    ctx.write_text("] ");
+
+    ElementReader content = elem.findChildElement("content");
+    if (content.isValid()) format_children_inline(ctx, content);
+
+    ctx.write_char('\n');
 }
 
-// Format a footnote definition element
-static void format_footnote_definition(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Directive
+// ---------------------------------------------------------------------------
 
-    String* name = NULL;
-    Element* content_elem = NULL;
-
-    // Extract footnote name and content
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = child_item.element;
-            const char* child_type = get_element_type_name(child);
-
-            if (child_type && strcmp(child_type, "name") == 0) {
-                name = get_first_string_content(child);
-            } else if (child_type && strcmp(child_type, "content") == 0) {
-                content_elem = child;
-            }
-        }
-    }
-
-    // Format as [fn:name] content
-    append_string(sb, "[fn:");
-    if (name) {
-        append_string(sb, name->chars);
-    }
-    append_string(sb, "] ");
-
-    // Format the content (may contain inline formatting)
-    if (content_elem) {
-        List* content_list = (List*)content_elem;
-        for (long i = 0; i < content_list->length; i++) {
-            Item content_item = content_list->items[i];
-            if (get_type_id(content_item) == LMD_TYPE_STRING) {
-                String* str = content_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            } else if (get_type_id(content_item) == LMD_TYPE_ELEMENT) {
-                Element* content_child = content_item.element;
-                format_inline_element(sb, content_child);
-            }
-        }
-    }
-
-    append_string(sb, "\n");
+static void format_directive(OrgContext& ctx, const ElementReader& elem) {
+    format_string_children(ctx, elem);
+    ctx.write_char('\n');
 }
 
-// Format a directive element
-static void format_directive(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Table
+// ---------------------------------------------------------------------------
 
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_STRING) {
-            String* str = child_item.get_string();
-            if (str && str) {
-                append_string(sb, str->chars);
-            }
-        }
-    }
-    append_string(sb, "\n");
+static void format_table_cell(OrgContext& ctx, const ElementReader& elem) {
+    format_string_children(ctx, elem);
 }
 
-// Format a table cell element
-static void format_table_cell(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+static void format_table_row(OrgContext& ctx, const ElementReader& elem, bool is_header) {
+    ctx.write_char('|');
 
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_STRING) {
-            String* str = child_item.get_string();
-            if (str && str) {
-                append_string(sb, str->chars);
-            }
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (!child.isElement()) continue;
+        ElementReader ce = child.asElement();
+        if (ce.tagName() && strcmp(ce.tagName(), "table_cell") == 0) {
+            ctx.write_char(' ');
+            format_table_cell(ctx, ce);
+            ctx.write_text(" |");
         }
     }
-}
+    ctx.write_char('\n');
 
-// Format a table row element
-static void format_table_row(StringBuf* sb, Element* elem, bool is_header) {
-    if (!elem) return;
-
-    append_string(sb, "|");
-
-    List* list = (List*)elem;
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* cell = child_item.element;
-            const char* cell_type = get_element_type_name(cell);
-
-            if (cell_type && strcmp(cell_type, "table_cell") == 0) {
-                append_string(sb, " ");
-                format_table_cell(sb, cell);
-                append_string(sb, " |");
-            }
-        }
-    }
-    append_string(sb, "\n");
-
-    // If this is a header row, add separator
+    // Separator after header row
     if (is_header) {
-        append_string(sb, "|");
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                append_string(sb, "---------|");
+        ctx.write_char('|');
+        for (int64_t i = 0; i < elem.childCount(); i++) {
+            ItemReader child = elem.childAt(i);
+            if (child.isElement()) {
+                ctx.write_text("---------|");
             }
         }
-        append_string(sb, "\n");
+        ctx.write_char('\n');
     }
 }
 
-// Format a table element
-static void format_table(StringBuf* sb, Element* elem) {
-    if (!elem) return;
-
-    List* list = (List*)elem;
+static void format_table(OrgContext& ctx, const ElementReader& elem) {
     bool first_row = true;
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (!child.isElement()) continue;
+        ElementReader ce = child.asElement();
+        const char* tag = ce.tagName();
+        if (!tag) continue;
 
-    for (long i = 0; i < list->length; i++) {
-        Item child_item = list->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* row = child_item.element;
-            const char* row_type = get_element_type_name(row);
-
-            if (row_type && (strcmp(row_type, "table_row") == 0 ||
-                            strcmp(row_type, "table_header_row") == 0)) {
-                bool is_header = (strcmp(row_type, "table_header_row") == 0) || first_row;
-                format_table_row(sb, row, is_header);
-                first_row = false;
-            }
+        if (strcmp(tag, "table_row") == 0 || strcmp(tag, "table_header_row") == 0) {
+            bool is_header = (strcmp(tag, "table_header_row") == 0) || first_row;
+            format_table_row(ctx, ce, is_header);
+            first_row = false;
         }
     }
 }
 
-// Format an org element based on its type
-static void format_org_element(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+// ---------------------------------------------------------------------------
+// Top-level element dispatch
+// ---------------------------------------------------------------------------
 
-    const char* type_name = get_element_type_name(elem);
-    if (!type_name) return;
+static void format_org_element(OrgContext& ctx, const ElementReader& elem) {
+    const char* tag = elem.tagName();
+    if (!tag) return;
 
-    if (strcmp(type_name, "heading") == 0) {
-        format_heading(sb, elem);
-    } else if (strcmp(type_name, "paragraph") == 0) {
-        format_paragraph(sb, elem);
-    } else if (strcmp(type_name, "list_item") == 0) {
-        format_list_item(sb, elem);
-    } else if (strcmp(type_name, "code_block") == 0) {
-        format_code_block(sb, elem);
-    } else if (strcmp(type_name, "quote_block") == 0) {
-        format_quote_block(sb, elem);
-    } else if (strcmp(type_name, "example_block") == 0) {
-        format_example_block(sb, elem);
-    } else if (strcmp(type_name, "verse_block") == 0) {
-        format_verse_block(sb, elem);
-    } else if (strcmp(type_name, "center_block") == 0) {
-        format_center_block(sb, elem);
-    } else if (strcmp(type_name, "drawer") == 0) {
-        format_drawer(sb, elem);
-    } else if (strcmp(type_name, "scheduling") == 0) {
-        format_scheduling(sb, elem);
-    } else if (strcmp(type_name, "timestamp") == 0) {
-        format_timestamp(sb, elem);
-    } else if (strcmp(type_name, "footnote_definition") == 0) {
-        format_footnote_definition(sb, elem);
-    } else if (strcmp(type_name, "display_math") == 0) {
-        // Handle display math as block-level element
-        format_inline_element(sb, elem);
-        append_string(sb, "\n");
-    } else if (strcmp(type_name, "directive") == 0) {
-        format_directive(sb, elem);
-    } else if (strcmp(type_name, "table") == 0) {
-        format_table(sb, elem);
-    } else if (strcmp(type_name, "table_row") == 0 || strcmp(type_name, "table_header_row") == 0) {
-        bool is_header = (strcmp(type_name, "table_header_row") == 0);
-        format_table_row(sb, elem, is_header);
-    } else if (strcmp(type_name, "table_cell") == 0) {
-        format_table_cell(sb, elem);
-    } else if (strcmp(type_name, "text") == 0) {
-        // Legacy text element - output content directly
-        format_paragraph(sb, elem);
-    } else {
-        // For unknown elements, just output all string content
-        List* list = (List*)elem;
-        for (long i = 0; i < list->length; i++) {
-            Item child_item = list->items[i];
-            TypeId child_type = get_type_id(child_item);
+    if (strcmp(tag, "heading") == 0)              { format_heading(ctx, elem);              return; }
+    if (strcmp(tag, "paragraph") == 0)            { format_paragraph(ctx, elem);            return; }
+    if (strcmp(tag, "list_item") == 0)            { format_list_item(ctx, elem);            return; }
+    if (strcmp(tag, "code_block") == 0)           { format_code_block(ctx, elem);           return; }
+    if (strcmp(tag, "quote_block") == 0)          { format_quote_block(ctx, elem);          return; }
+    if (strcmp(tag, "example_block") == 0)        { format_example_block(ctx, elem);        return; }
+    if (strcmp(tag, "verse_block") == 0)          { format_verse_block(ctx, elem);          return; }
+    if (strcmp(tag, "center_block") == 0)         { format_center_block(ctx, elem);         return; }
+    if (strcmp(tag, "drawer") == 0)               { format_drawer(ctx, elem);               return; }
+    if (strcmp(tag, "scheduling") == 0)           { format_scheduling(ctx, elem);           return; }
+    if (strcmp(tag, "footnote_definition") == 0)  { format_footnote_definition(ctx, elem);  return; }
+    if (strcmp(tag, "directive") == 0)            { format_directive(ctx, elem);            return; }
+    if (strcmp(tag, "table") == 0)                { format_table(ctx, elem);                return; }
 
-            if (child_type == LMD_TYPE_STRING) {
-                String* str = child_item.get_string();
-                if (str && str) {
-                    append_string(sb, str->chars);
-                }
-            } else if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = child_item.element;
-                format_org_element(sb, child_elem);
-            }
+    if (strcmp(tag, "timestamp") == 0) {
+        format_inline_element(ctx, elem);
+        return;
+    }
+    if (strcmp(tag, "display_math") == 0) {
+        format_inline_element(ctx, elem);
+        ctx.write_char('\n');
+        return;
+    }
+    if (strcmp(tag, "table_row") == 0 || strcmp(tag, "table_header_row") == 0) {
+        bool is_header = (strcmp(tag, "table_header_row") == 0);
+        format_table_row(ctx, elem, is_header);
+        return;
+    }
+    if (strcmp(tag, "table_cell") == 0) {
+        format_table_cell(ctx, elem);
+        return;
+    }
+    if (strcmp(tag, "text") == 0) {
+        format_paragraph(ctx, elem);
+        return;
+    }
+
+    // Unknown element: recurse into children
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (child.isString()) {
+            ctx.write_text(child.cstring());
+        } else if (child.isElement()) {
+            format_org_element(ctx, child.asElement());
         }
     }
 }
 
-// Format a text or element item
-static void format_org_text(StringBuf* sb, Item item) {
-    if (item.item == ITEM_NULL) return;
+// ---------------------------------------------------------------------------
+// Item dispatch (string or element)
+// ---------------------------------------------------------------------------
 
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_STRING) {
-        String* str = item.get_string();
-        if (str && str) {
-            append_string(sb, str->chars);
-        }
-    } else if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
-        format_org_element(sb, elem);
+static void format_org_item(OrgContext& ctx, const ItemReader& item) {
+    if (item.isNull()) return;
+
+    if (item.isString()) {
+        ctx.write_text(item.cstring());
+    } else if (item.isElement()) {
+        format_org_element(ctx, item.asElement());
     }
 }
 
-// MarkReader-based implementations
-static void format_org_element_reader(OrgContext& ctx, const ElementReader& elem) {
-    // Delegate to existing Element-based implementation
-    Element* raw_elem = const_cast<Element*>(elem.element());
-    format_org_element(ctx.output(), raw_elem);
-}
+// ---------------------------------------------------------------------------
+// Public entry points
+// ---------------------------------------------------------------------------
 
-static void format_org_text_reader(OrgContext& ctx, const ItemReader& item) {
-    // Delegate to existing Item-based implementation
-    Item raw_item = item.item();
-    format_org_text(ctx.output(), raw_item);
-}
-
-
-// Main Org formatting function
 void format_org(StringBuf* sb, Item root_item) {
     if (!sb || root_item.item == ITEM_NULL) return;
 
-    // Create context for org formatting
     Pool* pool = pool_create();
     OrgContext ctx(pool, sb);
-
-    // Use MarkReader API
     ItemReader root(root_item.to_const());
 
     if (root.isElement()) {
         ElementReader elem = root.asElement();
-        Element* raw_elem = const_cast<Element*>(elem.element());
-        const char* type_name = get_element_type_name(raw_elem);
-
-        if (type_name && strcmp(type_name, "org_document") == 0) {
-            // Format document children
-            List* list = (List*)raw_elem;
-            for (long i = 0; i < list->length; i++) {
-                Item child_item = list->items[i];
-                format_org_text_reader(ctx, ItemReader(child_item.to_const()));
+        if (elem.tagName() && strcmp(elem.tagName(), "org_document") == 0) {
+            // Document root: format all children
+            for (int64_t i = 0; i < elem.childCount(); i++) {
+                format_org_item(ctx, elem.childAt(i));
             }
         } else {
-            // Format single element
-            format_org_element_reader(ctx, elem);
+            format_org_element(ctx, elem);
         }
     } else {
-        // Fallback for other types
-        format_org_text_reader(ctx, root);
+        format_org_item(ctx, root);
     }
 
     pool_destroy(pool);
 }
 
-// String version of the formatter
 String* format_org_string(Pool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) return NULL;
 
