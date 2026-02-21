@@ -368,6 +368,7 @@ struct FontProp {
     float font_size;  // font size in pixels, scaled by pixel_ratio
     CssEnum font_style;
     CssEnum font_weight;
+    CssEnum font_variant;  // CSS font-variant (normal, small-caps)
     CssEnum text_deco; // CSS text decoration
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
