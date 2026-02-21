@@ -540,7 +540,7 @@ void runner_cleanup(Runner* runner) {
 // Only handles List/Array since those are the common containers for script results
 extern "C" Item path_resolve_for_iteration(Path* path);
 
-static void resolve_sys_paths_recursive(Item item) {
+void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_PATH) {
         Path* path = item.path;
