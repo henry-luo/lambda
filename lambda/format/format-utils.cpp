@@ -1,6 +1,8 @@
 #include "format-utils.h"
+#include "../../lib/str.h"
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 // ==============================================================================
 // Formatter Context Implementation
@@ -8,17 +10,17 @@
 
 FormatterContext* formatter_context_create(Pool* pool, StringBuf* output) {
     if (!pool || !output) return NULL;
-    
+
     FormatterContext* ctx = (FormatterContext*)pool_alloc(pool, sizeof(FormatterContext));
     if (!ctx) return NULL;
-    
+
     ctx->output = output;
     ctx->pool = pool;
     ctx->recursion_depth = 0;
     ctx->indent_level = 0;
     ctx->compact_mode = false;
     ctx->format_specific_state = NULL;
-    
+
     return ctx;
 }
 
@@ -56,26 +58,26 @@ static int handler_entry_compare(const void* a, const void* b, void* udata) {
 
 FormatterDispatcher* dispatcher_create(Pool* pool) {
     if (!pool) return NULL;
-    
+
     FormatterDispatcher* dispatcher = (FormatterDispatcher*)pool_alloc(pool, sizeof(FormatterDispatcher));
     if (!dispatcher) return NULL;
-    
+
     // create hashmap with initial capacity of 32
     dispatcher->type_handlers = hashmap_new(sizeof(HandlerEntry), 32, 0, 0,
         handler_entry_hash, handler_entry_compare, NULL, NULL);
     if (!dispatcher->type_handlers) {
         return NULL;
     }
-    
+
     dispatcher->default_handler = NULL;
     dispatcher->pool = pool;
-    
+
     return dispatcher;
 }
 
 void dispatcher_register(FormatterDispatcher* d, const char* type, ElementFormatterFunc fn) {
     if (!d || !type || !fn || !d->type_handlers) return;
-    
+
     // store function pointer in hashmap
     HandlerEntry entry;
     entry.type_name = type;  // assuming type is a static or pooled string
@@ -90,7 +92,7 @@ void dispatcher_set_default(FormatterDispatcher* d, ElementFormatterFunc fn) {
 
 void dispatcher_format(FormatterDispatcher* d, StringBuf* sb, const ElementReader& elem) {
     if (!d || !sb || !d->type_handlers) return;
-    
+
     const char* tag_name = elem.tagName();
     if (!tag_name) {
         // no tag name, use default handler
@@ -99,13 +101,13 @@ void dispatcher_format(FormatterDispatcher* d, StringBuf* sb, const ElementReade
         }
         return;
     }
-    
+
     // look up handler in map
     HandlerEntry key;
     key.type_name = tag_name;
     key.handler = NULL;
     const HandlerEntry* found = (const HandlerEntry*)hashmap_get(d->type_handlers, &key);
-    
+
     if (found) {
         // found specific handler
         found->handler(sb, elem);
@@ -118,12 +120,12 @@ void dispatcher_format(FormatterDispatcher* d, StringBuf* sb, const ElementReade
 
 void dispatcher_destroy(FormatterDispatcher* d) {
     if (!d) return;
-    
+
     if (d->type_handlers) {
         hashmap_free(d->type_handlers);
         d->type_handlers = NULL;
     }
-    
+
     // note: dispatcher itself is pool-allocated, no need to free
 }
 
@@ -262,7 +264,7 @@ void format_element_children_with_processors(
     ItemProcessor item_proc
 ) {
     if (!sb) return;
-    
+
     auto it = elem.children();
     ItemReader child;
     while (it.next(&child)) {
@@ -285,9 +287,9 @@ bool is_html_entity(const char* str, size_t len, size_t pos, size_t* entity_end)
     if (!str || pos >= len || str[pos] != '&') {
         return false;
     }
-    
+
     size_t j = pos + 1;
-    
+
     // check for numeric entity: &#123; or &#xAB;
     if (j < len && str[j] == '#') {
         j++;
@@ -321,7 +323,7 @@ bool is_html_entity(const char* str, size_t len, size_t pos, size_t* entity_end)
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -339,7 +341,7 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
         // this prevents double-encoding of entities like &lt; -> &amp;lt;
         if (c == '&') {
             size_t entity_end = 0;
-            
+
             if (is_html_entity(s, len, i, &entity_end)) {
                 // copy the entire entity as-is (already encoded)
                 while (i <= entity_end && i < len) {
@@ -397,41 +399,41 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
 // analyze table structure
 TableInfo* analyze_table(Pool* pool, const ElementReader& table_elem) {
     if (!pool) return NULL;
-    
+
     TableInfo* info = (TableInfo*)pool_alloc(pool, sizeof(TableInfo));
     if (!info) return NULL;
-    
+
     info->pool = pool;
     info->row_count = 0;
     info->column_count = 0;
     info->has_header = false;
     info->alignments = NULL;
-    
+
     // iterate through table sections (thead, tbody)
     auto section_it = table_elem.children();
     ItemReader section_item;
-    
+
     while (section_it.next(&section_item)) {
         if (section_item.isElement()) {
             ElementReader section = section_item.asElement();
             const char* section_tag = section.tagName();
-            
+
             if (!section_tag) continue;
-            
+
             // check if this is a header section
             if (strcmp(section_tag, "thead") == 0) {
                 info->has_header = true;
             }
-            
+
             // count rows in this section
             auto row_it = section.children();
             ItemReader row_item;
-            
+
             while (row_it.next(&row_item)) {
                 if (row_item.isElement()) {
                     ElementReader row = row_item.asElement();
                     info->row_count++;
-                    
+
                     // count columns from first row
                     if (info->column_count == 0) {
                         auto cell_it = row.children();
@@ -446,7 +448,7 @@ TableInfo* analyze_table(Pool* pool, const ElementReader& table_elem) {
             }
         }
     }
-    
+
     // allocate alignment array (default to NONE)
     if (info->column_count > 0) {
         info->alignments = (TableAlignment*)pool_alloc(
@@ -459,7 +461,7 @@ TableInfo* analyze_table(Pool* pool, const ElementReader& table_elem) {
             }
         }
     }
-    
+
     return info;
 }
 
@@ -478,26 +480,26 @@ void iterate_table_rows(
     void* context
 ) {
     if (!handler) return;
-    
+
     int row_idx = 0;
-    
+
     // iterate through table sections (thead, tbody)
     auto section_it = table_elem.children();
     ItemReader section_item;
-    
+
     while (section_it.next(&section_item)) {
         if (section_item.isElement()) {
             ElementReader section = section_item.asElement();
             const char* section_tag = section.tagName();
-            
+
             if (!section_tag) continue;
-            
+
             bool is_header = (strcmp(section_tag, "thead") == 0);
-            
+
             // iterate rows in this section
             auto row_it = section.children();
             ItemReader row_item;
-            
+
             while (row_it.next(&row_item)) {
                 if (row_item.isElement()) {
                     ElementReader row = row_item.asElement();
@@ -508,3 +510,145 @@ void iterate_table_rows(
         }
     }
 }
+
+// ==============================================================================
+// Heading Level Extraction
+// ==============================================================================
+
+int get_heading_level(const ElementReader& elem, int default_level) {
+    const char* tag_name = elem.tagName();
+    int level = default_level;
+
+    // first try the "level" attribute (Pandoc / semantic schema)
+    ItemReader level_attr = elem.get_attr("level");
+    if (level_attr.isString()) {
+        String* level_str = level_attr.asString();
+        if (level_str && level_str->len > 0) {
+            level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
+            if (level < 1) level = 1;
+            if (level > 6) level = 6;
+            return level;
+        }
+    }
+
+    // fallback: parse hN tag name (h1, h2, ... h6)
+    if (tag_name && strlen(tag_name) >= 2 && tag_name[0] == 'h' && isdigit(tag_name[1])) {
+        level = tag_name[1] - '0';
+        if (level < 1) level = 1;
+        if (level > 6) level = 6;
+    }
+
+    return level;
+}
+
+bool is_heading_tag(const char* tag_name) {
+    if (!tag_name) return false;
+    // check h1-h6
+    if (strlen(tag_name) == 2 && tag_name[0] == 'h' && tag_name[1] >= '1' && tag_name[1] <= '6') {
+        return true;
+    }
+    // check semantic names
+    if (strcmp(tag_name, "heading") == 0 || strcmp(tag_name, "header") == 0) {
+        return true;
+    }
+    return false;
+}
+
+// ==============================================================================
+// Table-Driven String Escaping
+// ==============================================================================
+
+void format_escaped_string(StringBuf* sb, const char* str, size_t len,
+                           const EscapeRule* rules, int num_rules) {
+    if (!str || len == 0) return;
+
+    size_t flush_start = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        char ch = str[i];
+        const char* replacement = NULL;
+
+        // linear scan is fine for small rule tables (typically 3-10 entries)
+        for (int r = 0; r < num_rules; r++) {
+            if (ch == rules[r].from) {
+                replacement = rules[r].to;
+                break;
+            }
+        }
+
+        if (replacement) {
+            // flush accumulated literal segment
+            if (i > flush_start) {
+                stringbuf_append_str_n(sb, str + flush_start, i - flush_start);
+            }
+            stringbuf_append_str(sb, replacement);
+            flush_start = i + 1;
+        }
+    }
+
+    // flush trailing segment
+    if (flush_start < len) {
+        stringbuf_append_str_n(sb, str + flush_start, len - flush_start);
+    }
+}
+
+// ==============================================================================
+// Predefined Escape Rule Tables
+// ==============================================================================
+
+const EscapeRule JSON_ESCAPE_RULES[] = {
+    { '"',  "\\\"" },
+    { '\\', "\\\\" },
+    { '\n', "\\n"  },
+    { '\r', "\\r"  },
+    { '\t', "\\t"  },
+    { '\b', "\\b"  },
+    { '\f', "\\f"  },
+};
+const int JSON_ESCAPE_RULES_COUNT = sizeof(JSON_ESCAPE_RULES) / sizeof(JSON_ESCAPE_RULES[0]);
+
+const EscapeRule XML_TEXT_ESCAPE_RULES[] = {
+    { '<', "&lt;"   },
+    { '>', "&gt;"   },
+    { '&', "&amp;"  },
+};
+const int XML_TEXT_ESCAPE_RULES_COUNT = sizeof(XML_TEXT_ESCAPE_RULES) / sizeof(XML_TEXT_ESCAPE_RULES[0]);
+
+const EscapeRule XML_ATTR_ESCAPE_RULES[] = {
+    { '<',  "&lt;"    },
+    { '>',  "&gt;"    },
+    { '&',  "&amp;"   },
+    { '"',  "&quot;"  },
+    { '\'', "&apos;"  },
+};
+const int XML_ATTR_ESCAPE_RULES_COUNT = sizeof(XML_ATTR_ESCAPE_RULES) / sizeof(XML_ATTR_ESCAPE_RULES[0]);
+
+const EscapeRule LATEX_ESCAPE_RULES[] = {
+    { '#',  "\\#"  },
+    { '$',  "\\$"  },
+    { '&',  "\\&"  },
+    { '%',  "\\%"  },
+    { '_',  "\\_"  },
+    { '{',  "\\{"  },
+    { '}',  "\\}"  },
+    { '^',  "\\^{}" },
+    { '~',  "\\~{}" },
+    { '\\', "\\textbackslash{}" },
+};
+const int LATEX_ESCAPE_RULES_COUNT = sizeof(LATEX_ESCAPE_RULES) / sizeof(LATEX_ESCAPE_RULES[0]);
+
+const EscapeRule HTML_TEXT_ESCAPE_RULES[] = {
+    { '<', "&lt;"   },
+    { '>', "&gt;"   },
+    { '&', "&amp;"  },
+};
+const int HTML_TEXT_ESCAPE_RULES_COUNT = sizeof(HTML_TEXT_ESCAPE_RULES) / sizeof(HTML_TEXT_ESCAPE_RULES[0]);
+
+const EscapeRule HTML_ATTR_ESCAPE_RULES[] = {
+    { '<',  "&lt;"    },
+    { '>',  "&gt;"    },
+    { '&',  "&amp;"   },
+    { '"',  "&quot;"  },
+    { '\'', "&#39;"   },
+};
+const int HTML_ATTR_ESCAPE_RULES_COUNT = sizeof(HTML_ATTR_ESCAPE_RULES) / sizeof(HTML_ATTR_ESCAPE_RULES[0]);

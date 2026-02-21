@@ -298,12 +298,12 @@ static void format_ascii_math_element(StringBuf* sb, Element* elem, int depth) {
     const ASCIIMathFormatDef* def = find_ascii_format_def(element_name);
 
     // Special handling for sum/prod/int/lim with bounds notation
-    printf("DEBUG: Checking element '%s' with length %ld\n", element_name, elem->length);
+    log_debug("math-ascii: Checking element '%s' with length %ld", element_name, elem->length);
     if ((strcmp(element_name, "sum") == 0 || strcmp(element_name, "prod") == 0 ||
          strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0 ||
          strcmp(element_name, "lim") == 0) &&
         elem->length >= 2) {
-        printf("DEBUG: Using special sum/prod/int/lim formatting for '%s'\n", element_name);
+        log_debug("math-ascii: Using special sum/prod/int/lim formatting for '%s'", element_name);
 
         // Special handling for limit notation
         if (strcmp(element_name, "lim") == 0) {
@@ -337,7 +337,7 @@ static void format_ascii_math_element(StringBuf* sb, Element* elem, int depth) {
                 format_ascii_math_item(sb, elem->items[3], depth + 1);  // differential
             }
         }
-        printf("DEBUG: Finished special formatting\n");
+        log_debug("math-ascii: Finished special formatting");
         return;
     } else if (def && def->ascii_format) {
         if (def->has_children && elem->length > 0) {
@@ -411,7 +411,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
     }
 
     TypeId type_id = get_type_id(item);
-    printf("DEBUG format_ascii_math_item: item=0x%lx, type_id=%d, depth=%d\n", item.item, type_id, depth);
+    log_debug("math-ascii format_item: item=0x%lx, type_id=%d, depth=%d", item.item, type_id, depth);
 
     switch (type_id) {
         case LMD_TYPE_ELEMENT: {
@@ -420,22 +420,22 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
             break;
         }
         case LMD_TYPE_STRING: {
-            printf("DEBUG: Processing LMD_TYPE_STRING\n");
+            log_debug("math-ascii: Processing LMD_TYPE_STRING");
             String* str = item.get_string();
             if (str) {
-                printf("DEBUG: String content: '%s'\n", str->chars);
+                log_debug("math-ascii: String content: '%s'", str->chars);
             }
             format_ascii_math_string(sb, str);
             break;
         }
         case LMD_TYPE_SYMBOL: {
-            printf("DEBUG: Processing LMD_TYPE_SYMBOL\n");
+            log_debug("math-ascii: Processing LMD_TYPE_SYMBOL");
             String* str = item.get_string();
             if (str && str->chars) {
-                printf("DEBUG: Symbol content: '%s'\n", str->chars);
+                log_debug("math-ascii: Symbol content: '%s'", str->chars);
                 format_ascii_math_string(sb, str);
             } else {
-                printf("DEBUG: Symbol has NULL content\n");
+                log_debug("math-ascii: Symbol has NULL content");
                 stringbuf_append_str(sb, "?");
             }
             break;
@@ -458,8 +458,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
         }
         default:
             // Unknown type - try to output something reasonable
-            printf("DEBUG: Unknown type %d for item 0x%lx\n", type_id, item.item);
-            fflush(stdout);
+            log_debug("math-ascii: Unknown type %d for item 0x%lx", type_id, item.item);
             stringbuf_append_str(sb, "[UNKNOWN]");
             break;
     }
@@ -467,8 +466,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
 
 // Main ASCII math formatter function
 String* format_math_ascii_standalone(Pool* pool, Item root_item) {
-    printf("DEBUG: format_math_ascii_standalone called with item=0x%lx\n", root_item.item);
-    fflush(stdout);
+    log_debug("math-ascii: format_math_ascii_standalone called with item=0x%lx", root_item.item);
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
@@ -477,8 +475,7 @@ String* format_math_ascii_standalone(Pool* pool, Item root_item) {
     format_ascii_math_item_reader(sb, root, 0);
 
     String* result = stringbuf_to_string(sb);
-    printf("DEBUG: format_math_ascii_standalone result='%s'\n", result ? result->chars : "NULL");
-    fflush(stdout);
+    log_debug("math-ascii: format_math_ascii_standalone result='%s'", result ? result->chars : "NULL");
     return result;
 }
 
@@ -569,12 +566,12 @@ static void format_ascii_math_element_reader(StringBuf* sb, const ElementReader&
     }
 
     // special handling for sum/prod/int/lim with bounds notation
-    printf("DEBUG: Checking element '%s' with length %ld\n", element_name, elem_length);
+    log_debug("math-ascii reader: Checking element '%s' with length %ld", element_name, elem_length);
     if ((strcmp(element_name, "sum") == 0 || strcmp(element_name, "prod") == 0 ||
          strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0 ||
          strcmp(element_name, "lim") == 0) &&
         elem_length >= 2) {
-        printf("DEBUG: Using special sum/prod/int/lim formatting for '%s'\n", element_name);
+        log_debug("math-ascii reader: Using special sum/prod/int/lim formatting for '%s'", element_name);
 
         // special handling for limit notation
         if (strcmp(element_name, "lim") == 0) {
@@ -614,7 +611,7 @@ static void format_ascii_math_element_reader(StringBuf* sb, const ElementReader&
                 format_ascii_math_item_reader(sb, child3, depth + 1);  // differential
             }
         }
-        printf("DEBUG: Finished special formatting\n");
+        log_debug("math-ascii reader: Finished special formatting");
         return;
     } else if (def && def->ascii_format) {
         if (def->has_children && elem_length > 0) {
@@ -672,10 +669,10 @@ static void format_ascii_math_item_reader(StringBuf* sb, const ItemReader& item,
         format_ascii_math_element_reader(sb, elem, depth);
     }
     else if (item.isString()) {
-        printf("DEBUG: Processing string via reader\n");
+        log_debug("math-ascii reader: Processing string");
         String* str = item.asString();
         if (str) {
-            printf("DEBUG: String content: '%s'\n", str->chars);
+            log_debug("math-ascii reader: String content: '%s'", str->chars);
         }
         format_ascii_math_string(sb, str);
     }
@@ -693,8 +690,7 @@ static void format_ascii_math_item_reader(StringBuf* sb, const ItemReader& item,
     }
     else {
         // unknown type
-        printf("DEBUG: Unknown type via reader\n");
-        fflush(stdout);
+        log_debug("math-ascii reader: Unknown type");
         stringbuf_append_str(sb, "[UNKNOWN]");
     }
 }

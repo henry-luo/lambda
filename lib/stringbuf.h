@@ -53,6 +53,13 @@ void stringbuf_vappend(StringBuf *sb, int num_args, va_list args);
 void stringbuf_append_format(StringBuf *sb, const char *format, ...);
 void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args);
 
+// Template emit functions (document formatting oriented)
+// Format specifiers: %s (C string), %S (String*), %d (int), %l (int64_t),
+// %f (double), %c (char), %n (newline), %i (indent N*2 spaces),
+// %r (repeat char N times), %% (literal %)
+void stringbuf_emit(StringBuf *sb, const char *fmt, ...);
+void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args);
+
 // Utility functions
 void stringbuf_copy(StringBuf *dst, const StringBuf *src);
 StringBuf* stringbuf_dup(const StringBuf *sb);

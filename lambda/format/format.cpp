@@ -81,7 +81,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
 
     // If type is null, try to auto-detect from item type
     if (!type) {
-        printf("Format type is null, using default\n");
+        log_debug("format: Format type is null, using default");
         return NULL;
     }
 
@@ -161,7 +161,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
             result = format_graph_with_flavor(pool, item, "d2");
         }
         else {
-            printf("Unsupported graph flavor: %s, defaulting to dot\n", flavor->chars);
+            log_debug("format: Unsupported graph flavor: %s, defaulting to dot", flavor->chars);
             result = format_graph_with_flavor(pool, item, "dot");
         }
     }
@@ -187,7 +187,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
             result = format_wiki_string(pool, item);
         }
         else {
-            printf("Unsupported markup flavor: %s, defaulting to markdown\n", flavor->chars);
+            log_debug("format: Unsupported markup flavor: %s, defaulting to markdown", flavor->chars);
             StringBuf* sb = stringbuf_new(pool);
             format_markdown(sb, item);
             result = stringbuf_to_string(sb);
@@ -203,15 +203,14 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
             result = format_math_typst(pool, item);
         }
         else if (strcmp(flavor->chars, "ascii") == 0) {
-            printf("DEBUG: format.cpp calling format_math_ascii\n");
-            fflush(stdout);
+            log_debug("format: calling format_math_ascii");
             result = format_math_ascii(pool, item);
         }
         else if (strcmp(flavor->chars, "mathml") == 0) {
             result = format_math_mathml(pool, item);
         }
         else {
-            printf("Unsupported math flavor: %s, defaulting to latex\n", flavor->chars);
+            log_debug("format: Unsupported math flavor: %s, defaulting to latex", flavor->chars);
             result = format_math_latex(pool, item);
         }
     }
@@ -223,15 +222,14 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         result = format_math_typst(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-ascii") == 0) {
-        printf("DEBUG: format_data calling format_math_ascii via legacy path\n");
-        fflush(stdout);
+        log_debug("format: calling format_math_ascii via legacy path");
         result = format_math_ascii(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-mathml") == 0) {
         result = format_math_mathml(pool, item);
     }
     else {
-        printf("Unsupported format type: %s\n", format_type_with_flavor);
+        log_error("format: Unsupported format type: %s", format_type_with_flavor);
     }
     return result;
 }

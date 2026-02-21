@@ -85,6 +85,52 @@ extern const TextEscapeConfig RST_ESCAPE_CONFIG;
 extern const TextEscapeConfig WIKI_ESCAPE_CONFIG;
 
 // ==============================================================================
+// Heading Level Extraction
+// ==============================================================================
+
+// extract heading level from element.
+// checks "level" attribute first, then parses hN from tag name.
+// returns value in [1,6] or default_level if not a heading element.
+int get_heading_level(const ElementReader& elem, int default_level = 1);
+
+// check if tag name represents a heading (h1-h6, heading, header)
+bool is_heading_tag(const char* tag_name);
+
+// ==============================================================================
+// Table-Driven String Escaping
+// ==============================================================================
+
+// escape rule: maps a single character to its replacement string
+typedef struct {
+    char from;           // character to escape
+    const char* to;      // replacement string
+} EscapeRule;
+
+// generic character escaper using a rules table.
+// walks str and replaces characters per the rules. Unknown chars pass through.
+void format_escaped_string(StringBuf* sb, const char* str, size_t len,
+                           const EscapeRule* rules, int num_rules);
+
+// predefined escape rule tables
+extern const EscapeRule JSON_ESCAPE_RULES[];
+extern const int JSON_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule XML_TEXT_ESCAPE_RULES[];
+extern const int XML_TEXT_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule XML_ATTR_ESCAPE_RULES[];
+extern const int XML_ATTR_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule LATEX_ESCAPE_RULES[];
+extern const int LATEX_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule HTML_TEXT_ESCAPE_RULES[];
+extern const int HTML_TEXT_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule HTML_ATTR_ESCAPE_RULES[];
+extern const int HTML_ATTR_ESCAPE_RULES_COUNT;
+
+// ==============================================================================
 // HTML Entity Handling
 // ==============================================================================
 
