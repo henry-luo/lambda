@@ -1482,6 +1482,20 @@
                         "icon": "\ud83d\udcdd"
                     },
                     {
+                        "source": "test_format_markup_gtest.cpp",
+                        "name": "Unified Markup Emitter Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_format_markup_gtest.exe",
+                        "icon": "\ud83d\udcdd"
+                    },
+                    {
                         "source": "test_markup_modular_gtest.cpp",
                         "name": "Markup Modular Parser Tests",
                         "dependencies": [
