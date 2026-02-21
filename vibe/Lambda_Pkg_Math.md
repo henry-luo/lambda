@@ -1234,3 +1234,162 @@ lambda/package/math/
 ```
 
 Total: 18 modules, ~2,568 lines of Lambda Script.
+
+## Appendix D: Completeness Analysis — Lambda Math vs. MathLive
+
+This appendix documents a comprehensive audit of the Lambda math package against MathLive's full feature set, identifying what is covered, what is missing, and the priority path toward broader coverage.
+
+### D.1 Grammar Node Type Coverage (94%)
+
+The tree-sitter-latex-math grammar (`lambda/tree-sitter-latex-math/grammar.js`) produces 33 atom-level node types. The `render.ls` dispatch table handles **31 of 33**:
+
+| # | Node Type | Status |
+|---|-----------|:------:|
+| 1 | `symbol` | ✅ |
+| 2 | `number` | ✅ |
+| 3 | `symbol_command` | ✅ |
+| 4 | `operator` | ✅ |
+| 5 | `relation` | ✅ |
+| 6 | `punctuation` | ✅ |
+| 7 | `group` | ✅ |
+| 8 | `fraction` | ✅ |
+| 9 | `binomial` | ✅ |
+| 10 | `genfrac` | ✅ |
+| 11 | `radical` | ✅ |
+| 12 | `delimiter_group` | ✅ |
+| 13 | `sized_delimiter` | ✅ |
+| 14 | `overunder_command` | ✅ |
+| 15 | `extensible_arrow` | ❌ Missing |
+| 16 | `accent` | ✅ |
+| 17 | `box_command` | ✅ |
+| 18 | `color_command` | ✅ |
+| 19 | `rule_command` | ✅ |
+| 20 | `phantom_command` | ✅ |
+| 21 | `big_operator` | ✅ |
+| 22 | `mathop_command` | ❌ Missing |
+| 23 | `matrix_command` | ✅ |
+| 24 | `environment` | ✅ |
+| 25 | `text_command` | ✅ |
+| 26 | `style_command` | ✅ |
+| 27 | `space_command` | ✅ |
+| 28 | `hspace_command` | ✅ |
+| 29 | `skip_command` | ✅ |
+| 30 | `command` | ✅ (generic fallback) |
+| 31 | `subsup` | ✅ |
+| 32 | `infix_frac` | ✅ |
+| 33 | `brack_group` | ✅ (mapped to `render_group`) |
+
+**Missing renderers** (grammar already parses these):
+- **`extensible_arrow`** — `\xrightarrow`, `\xleftarrow`, `\xRightarrow`, `\xLeftarrow`, `\xleftrightarrow`, `\xhookleftarrow`, `\xhookrightarrow`, `\xmapsto`. Currently falls through to `default` → `render_default`, losing the arrow SVG body and above/below annotations.
+- **`mathop_command`** — `\mathop{...}` (custom operator with limits behavior). Falls through to `default`, losing operator-with-limits semantics.
+
+### D.2 Symbol Coverage (250/506 = 49%)
+
+Lambda `symbols.ls` contains **250 symbols** vs. MathLive's **~506** unique LaTeX commands:
+
+| Category | Lambda | MathLive (approx) |
+|----------|-------:|-------------------:|
+| Greek lowercase | 30 | 34 |
+| Greek uppercase | 11 | 11 |
+| Binary operators | 27 | 52 |
+| Relations | 36 | 86 |
+| Arrows | 30 | 62 |
+| Miscellaneous symbols | 54 | 79 |
+| Big operators | 16 | 28 |
+| Accents | 14 | 22 |
+| Operator names | 32 | 32 |
+| **Total** | **250** | **~506** |
+
+**Major missing symbol categories** (~256 symbols):
+
+- **Negated relations** (~40): `\nless`, `\nleq`, `\ngeq`, `\ngtr`, `\nleqslant`, `\ngeqslant`, `\ncong`, `\nsim`, `\nparallel`, `\nVDash`, `\nvdash`, `\nvDash`, `\nsubseteq`, `\nsupseteq`, `\precnsim`, `\succnsim`, etc.
+- **AMS relations** (~50): `\leqslant`, `\geqslant`, `\lesssim`, `\gtrsim`, `\approxeq`, `\thickapprox`, `\lessgtr`, `\gtrless`, `\curlyeqprec`, `\curlyeqsucc`, `\Vdash`, `\vDash`, `\Vvdash`, `\between`, `\pitchfork`, `\backepsilon`, `\therefore`, `\because`, etc.
+- **AMS binary operators** (~25): `\ltimes`, `\rtimes`, `\leftthreetimes`, `\rightthreetimes`, `\intercal`, `\dotplus`, `\doublebarwedge`, `\divideontimes`, `\boxminus`, `\boxplus`, `\boxtimes`, `\circleddash`, `\circledast`, `\circledcirc`, etc.
+- **AMS arrows** (~20): `\dashrightarrow`, `\dashleftarrow`, `\Rrightarrow`, `\Lleftarrow`, `\leftarrowtail`, `\rightarrowtail`, `\twoheadleftarrow`, `\twoheadrightarrow`, `\upuparrows`, `\downdownarrows`, `\rightsquigarrow`, `\leadsto`, `\multimap`, etc.
+- **AMS ordinals** (~25): `\square`, `\Box`, `\blacksquare`, `\blacktriangle`, `\blacktriangledown`, `\lozenge`, `\blacklozenge`, `\complement`, `\diagup`, `\measuredangle`, `\sphericalangle`, `\backprime`, `\eth`, `\mho`, `\Finv`, `\Game`, etc.
+- **Negated arrows** (~12): `\nleftarrow`, `\nrightarrow`, `\nRightarrow`, `\nLeftarrow`, `\nleftrightarrow`, `\nLeftrightarrow`, etc.
+- **St. Mary's Road / specialty** (~30): `\llbracket`, `\rrbracket`, `\Lbag`, `\Rbag`, `\boxbar`, `\lightning`, etc.
+- **Missing delimiters** (~8): `\ulcorner`, `\urcorner`, `\llcorner`, `\lrcorner`, `\lparen`, `\rparen`, `\lbrack`, `\rbrack`
+- **Missing Greek** (~4): `\digamma`, `\varkappa`, `\coppa`, `\sampi` (AMS/archaic)
+- **Additional integrals** (~5): `\oiint`, `\oiiint`, `\intclockwise`, `\varointclockwise`, `\ointctrclockwise`
+
+### D.3 MathLive Features with No Lambda Equivalent
+
+| Feature | MathLive Source | Description |
+|---------|-----------------|-------------|
+| **Chemistry (mhchem)** | `mhchem.ts` (2603 lines) | `\ce{}`, `\pu{}` chemical equations |
+| **Extensible arrows** | `extensible-symbols.ts` | `\xrightarrow[below]{above}` with SVG arrow body |
+| **Extensible over/under SVGs** | `extensible-symbols.ts` | `\overrightarrow`, `\overleftarrow`, `\overleftrightarrow`, `\overgroup`, `\underrightarrow`, `\underleftarrow`, etc. |
+| **`\mathop{...}`** | `styling.ts` | Custom operator with limits placement |
+| **Cancel / strikethrough** | `enclose.ts` | `\cancel`, `\bcancel`, `\xcancel`, `\sout` |
+| **`\enclose` (MathML)** | `enclose.ts` | Arbitrary menclose notations |
+| **Font sizing** | `styling.ts` | `\tiny`, `\small`, `\large`, `\Large`, `\LARGE`, `\huge`, `\Huge` |
+| **`\mathchoice`** | `styling.ts` | Display/text/script/scriptscript branching |
+| **`\mathbin`/`\mathrel`/`\mathord`** | `styling.ts` | Explicit atom type override |
+| **`\operatorname{...}`** | `styling.ts` | Custom named operators (e.g., `\operatorname{argmax}`) |
+| **`\not` (negation prefix)** | `styling.ts` | Generic negation via overlay slash |
+| **Tooltips** | `styling.ts` | `\mathtip`, `\texttip` |
+| **HTML integration** | `styling.ts` | `\href`, `\class`, `\cssId`, `\htmlStyle`, `\htmlData` |
+| **`\raisebox`/`\raise`/`\lower`** | `styling.ts` | Vertical positioning |
+| **`\char`/`\unicode`** | `styling.ts` | Arbitrary Unicode by codepoint |
+| **Text-mode accents** | `accents.ts` | `\^{a}`, `` \`{e} ``, `\'{o}`, `\"{u}`, `\~{n}`, `\c{c}` |
+| **`\overarc`/`\overparen`** | `accents.ts` | Arc accents |
+| **`\utilde`** | `accents.ts` | Under-tilde |
+| **`\overunderset`** | `styling.ts` | Combined over+under simultaneously |
+| **`\cfrac[l]`/`\cfrac[r]`** | `functions.ts` | Left/right-aligned continued fractions |
+| **`\pdiff`** | `functions.ts` | Partial derivative shorthand |
+| **`\ang`** | `functions.ts` | Angle from siunitx |
+| **`\mathstrut`** | `styling.ts` | Invisible parenthesis-height strut |
+| **`\fcolorbox`** | `styling.ts` | Framed color box |
+| **Starred matrix variants** | `environments.ts` | `pmatrix*`, `bmatrix*`, etc. |
+| **`eqnarray`/`subequations`** | `environments.ts` | Equation environments |
+| **`\displaylines`** | `functions.ts` | Multi-line display |
+
+### D.4 What IS Working Well
+
+The Lambda math package competently handles the **core 85–90%** of everyday math rendering:
+
+- **Fractions**: `\frac`, `\dfrac`, `\tfrac`, `\cfrac`, `\binom`, `\dbinom`, `\tbinom`, `\genfrac`, infix (`\over`, `\atop`, `\choose`, etc.)
+- **Scripts**: subscript, superscript, combined sub+sup, `\limits`/`\nolimits`
+- **Radicals**: `\sqrt` with optional index
+- **Delimiters**: `\left`/`\right` with stretchy rendering (4 size levels + CSS scaleY), `\middle`, all sized variants (`\big` through `\Bigg`)
+- **Accents**: 14 accent types — `\hat`, `\bar`, `\vec`, `\dot`, `\ddot`, `\widehat`, `\widetilde`, `\overbrace`, `\underbrace`, `\overline`, `\underline`, etc.
+- **Big operators**: `\sum`, `\prod`, `\int`, `\iint`, `\iiint`, `\oint`, display-mode limit placement
+- **Environments/matrices**: `array`, `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix`, `cases`, `aligned`, `gathered`, etc.
+- **Styling**: `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathscr`, `\mathbf`, `\mathsf`, `\mathtt`, `\displaystyle`, `\textstyle`, etc.
+- **Text**: `\text`, `\textrm`, `\textbf`, `\textit`, `\mbox`
+- **Colors**: `\color`, `\textcolor`, `\colorbox`
+- **Spacing**: `\,`, `\:`, `\;`, `\!`, `\quad`, `\qquad`, `\hspace`, `\kern`, `\hskip`, `\mskip`
+- **Boxes/phantoms**: `\boxed`, `\fbox`, `\bbox`, `\phantom`, `\hphantom`, `\vphantom`, `\smash`, `\llap`, `\rlap`
+- **Rules**: `\rule` with width/height/depth dimensions
+- **Inter-atom spacing**: Full Knuth spacing table (7×7 atom types)
+- **Post-processing**: Text node coalescing via `optimize.ls`
+
+### D.5 Coverage Summary
+
+| Metric | Value |
+|--------|-------|
+| Grammar node types handled | 31 / 33 (94%) |
+| Symbol coverage vs. MathLive | 250 / 506 (49%) |
+| Core math feature coverage | ~85–90% of common expressions |
+| Advanced/AMS feature coverage | ~40% |
+| Missing renderer dispatch entries | 2 (`extensible_arrow`, `mathop_command`) |
+| Missing MathLive features (no equivalent) | ~27 features |
+| Missing AMS symbols (table entries) | ~256 commands |
+
+**Practical interpretation**: ~85–90% of typical math content (textbook equations, homework, academic papers) uses fractions, scripts, radicals, Greek letters, basic operators/relations, arrows, delimiters, matrices, and accents — all of which are fully handled. The remaining ~10–15% relies on AMS extended symbols, extensible arrows, cancel notations, and specialty features.
+
+### D.6 Priority Path to Broader Coverage
+
+Ranked by impact-to-effort ratio:
+
+1. **Add `extensible_arrow` renderer** — grammar already parses it; needs dispatch case + render function with SVG arrow body. Covers `\xrightarrow`, `\xleftarrow`, and 7 other commands.
+2. **Add `mathop_command` renderer** — grammar already parses it; simple dispatch + big-operator-style limits logic. Covers `\mathop{...}`.
+3. **Expand `symbols.ls` with ~150 AMS symbols** — pure table additions (Unicode codepoints + atom types). Covers negated relations, AMS arrows, AMS binary operators, AMS ordinals. Largest single improvement to symbol coverage.
+4. **Add `\cancel`/`\bcancel`/`\xcancel`** — very common in educational content; diagonal/back-diagonal line overlay via CSS.
+5. **Add `\operatorname{...}` support** — frequently used for custom function names (`\operatorname{argmax}`, `\operatorname{Tr}`). Render as upright text with operator spacing.
+6. **Add font sizing commands** — `\small`, `\large`, `\Large`, etc. Map to CSS font-size multipliers.
+7. **Add `\mathbin`/`\mathrel`/`\mathord`** — atom type override for correct spacing; simple wrapper that sets atom type on child.
+8. **Add `\not` generic negation** — overlay slash on following symbol via CSS positioning.
+9. **Expand delimiter table** — add corner brackets (`\ulcorner`, etc.) and aliases (`\lparen`, `\lbrack`).
+10. **Chemistry (`\ce{}`)** — large feature (MathLive's implementation is 2600 lines); lowest priority unless chemistry use cases are targeted.
