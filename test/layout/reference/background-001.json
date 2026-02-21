@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.htm",
+  "test_file": "background-001.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -876,11 +876,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 1184,
+              "width": 260,
               "height": 50,
-              "contentWidth": 1184,
+              "contentWidth": 260,
               "contentHeight": 50,
-              "scrollWidth": 1184,
+              "scrollWidth": 260,
               "scrollHeight": 50
             },
             "computed": {
