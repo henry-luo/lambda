@@ -1120,6 +1120,68 @@ Internal algorithm:
 | 1 | `for` comprehension inside element children MUST be on a separate line. `<span; for (c in items) c>` causes parse error. Multi-line `<span;\n for (c in items) c\n>` works. | Always put `for` on its own line inside elements |
 | 2 | `merge_list` return value cannot be directly iterated in element constructor `for (c in merged) c` — produces `[[unknown type raw_pointer!!]]`. Re-extracting via `(for (j in 0 to (len(merged) - 1)) merged[j])` works. | Re-extract array elements through indexing before use in element children |
 | 3 | Recursive functions through single-child element wrappers cause stack overflow even with depth limits of 10. The JIT per-function stack frame size appears very large. | Only recurse through multi-child elements |
+
+#### Bug #3 Detail: Stack Overflow in Single-Child Element Recursion
+
+**Goal**: Walk through single-child wrapper elements (e.g., `<span class: "ML__latex"; <span; <span; [x, y, z]>>>`) to reach multi-child levels where coalescing can happen.
+
+**Attempt 1 — Unbounded recursion** (stack overflow):
+```lambda
+fn merge_children(el) {
+    if (len(el) > 1) build_merged(el)
+    else if (len(el) == 1)
+        (let child = el[0],
+         if (type(child) == "element")
+             <span class: el.class, style: el.style;
+                 merge_children(child)
+             >
+         else el)
+    else el
+}
+```
+
+**Attempt 2 — Depth-limited to 10** (still stack overflow):
+```lambda
+fn merge_at_depth(el, d) {
+    if (d <= 0) el
+    else if (len(el) > 1) build_merged(el)
+    else if (len(el) == 1)
+        (let child = el[0],
+         if (type(child) == "element")
+             <span class: el.class, style: el.style;
+                 merge_at_depth(child, d - 1)
+             >
+         else el)
+    else el
+}
+
+fn merge_children(el) {
+    merge_at_depth(el, 10)
+}
+```
+
+**Root cause**: Each recursive call constructs a `<span class: ..., style: ...; recursive_call(...)>` element inline. The JIT-compiled stack frame for a function that constructs elements appears to be very large (possibly allocating temporary space for element attribute slots, child arrays, and intermediate `Item` values). Even ~10 frames is enough to exhaust the ~8MB stack.
+
+**Error output**:
+```
+signal handler: stack overflow detected (fault_addr=0x16b46bfd0, stack_limit=0x16b47c000)
+exec: recovered from stack overflow via signal handler
+stack overflow in function '<signal>' - possible infinite recursion
+stack usage: 7 KB / 8176 KB (0.1%)
+runtime error [308]: Stack overflow in '<signal>' - likely infinite recursion (stack: 7KB/8176KB)
+```
+
+Note: the reported "stack usage: 7 KB" is misleading — this is measured *after* the signal handler recovered and unwound the stack. The actual usage at overflow was ~8MB.
+
+**Working workaround** — skip single-child wrappers entirely:
+```lambda
+fn merge_children(el) {
+    if (len(el) > 1) build_merged(el)
+    else el
+}
+```
+
+This limits coalescing to multi-child levels only. Single-child wrapper chains (common at the top of the math render tree) are left as-is. The tradeoff is acceptable because coalescing's primary value is merging adjacent same-class text siblings, which only exist at multi-child levels.
 | 4 | `[items[0]]` as a standalone expression causes parse error ("expected ']'"). Same syntax works as a function argument: `do_merge(items, 1, [items[0]])`. | Use `let first = items[0], [first]` or pass as function argument |
 | 5 | `if/else` returning elements with different attribute shapes (e.g., `<span class: c; x>` vs `<span; x>`) crashes JIT | Always use consistent shapes: `<span class: a.class; x>` where class may be null |
 
