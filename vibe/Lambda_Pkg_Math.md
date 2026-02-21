@@ -809,3 +809,233 @@ Phase 2 modules not yet created (from §4 Phase 2 plan):
 | `atoms/text.ls` | `\text{}`, `\textrm{}`, `\mbox{}` | Medium |
 
 Additionally, the 15 unhandled AST node types in C++ (§6.3) remain unfixed — most notably `symbol_command` (#15), `sized_delimiter` (#5), and `color_command` (#6).
+
+---
+
+## 10. Phase 2 Progress Report
+
+### 10.1 Status: Complete
+
+Phase 2 rendering support for all core constructs is implemented and working. All 10 Phase 2 test expressions render without crashes. Baseline regression: **328/328** existing tests pass — zero regressions.
+
+### 10.2 C++ Prerequisite Fixes
+
+Two critical C++ issues had to be resolved before Phase 2 rendering could work:
+
+#### C++ Fix 1: Math input returns simple map instead of AST
+
+- **Symptom:** `input("\\sqrt{x}", {type: 'math', flavor: 'latex'})` returned `{type: :latex-math, source: "\\sqrt{x}", display: false}` — a flat map with no parsed structure.
+- **Root cause:** `parse_math()` in `input-math.cpp` stored the raw source string instead of routing through the tree-sitter-latex-math parser.
+- **Fix:** Modified `input-math.cpp` to call `parse_math_latex_to_ast()` (new public wrapper in `input-latex-ts.cpp`) which creates a `TSParser`, sets the `tree_sitter_latex_math()` language, parses the math string, then calls `convert_math_node()` recursively. Also added the declaration in `input.hpp`.
+- **Files changed:** `input-math.cpp`, `input-latex-ts.cpp` (+wrapper function + forward declaration), `input.hpp` (+declaration).
+- **Impact:** Unblocked entire Phase 2 — without this, the math package had no structured AST to render.
+
+#### C++ Fix 2: Anonymous token fields return null from `ts_node_child_by_field_name()`
+
+- **Symptom:** `accent.cmd`, `big_operator.op`, `fraction.cmd` were all `null` in the AST despite the grammar defining them as named fields.
+- **Root cause:** Fields referencing hidden token rules (`_accent_cmd`, `_big_operator_cmd`, `_frac_cmd`, etc.) use `token()` patterns with `_` prefix in the tree-sitter grammar. Tree-sitter makes these nodes anonymous, and `ts_node_child_by_field_name()` cannot find anonymous nodes — it returns null.
+- **Fix:** Added `extract_leading_command()` helper function that extracts the `\command` from the parent node's source text. Applied to all 14 `cmd` field handlers and 1 `op` field handler as an `else` fallback when field lookup returns null.
+- **Files changed:** `input-latex-ts.cpp` (+helper function, 15 handler modifications).
+- **Impact:** Fixed command extraction for `\hat`, `\vec`, `\bar`, `\sum`, `\int`, `\frac`, `\binom`, `\text`, `\overline`, `\underset`, `\overset`, `\mathbf`, `\color`, `\boxed`, `\phantom`, `\hspace`, `\kern`, and all other command-bearing node types.
+
+### 10.3 Lambda Render Fixes
+
+| File | Fix | Details |
+|------|-----|---------|
+| `render.ls` | `render_radical`: `node.body` → `node.radicand` | AST uses `radicand` attribute, not `body` |
+| `render.ls` | `render_big_op`: `node.cmd` → `node.op` | Big operators store their command in `op`, not `cmd` |
+| `render.ls` | `render_big_op`: added limits rendering | Split into `render_big_op_with_limits`, `render_big_op_display`, `render_big_op_inline` helper functions. Display mode stacks limits above/below via `vbox`; inline mode places them beside the operator with `MSUBSUP` class |
+| `render.ls` | `render_accent`: now works | Was already correct — just needed the C++ `cmd` field fix to populate `\hat` → accent lookup |
+
+### 10.4 Phase 2 Test Results
+
+All 10 Phase 2 test expressions render without errors:
+
+| # | Expression | File | Validates |
+|---|-----------|------|-----------|
+| 1 | `\sqrt{x}` | `m1.tex` | Radical with radicand |
+| 2 | `\sqrt[3]{x}` | `m2.tex` | Radical with index |
+| 3 | `\left( \frac{a}{b} \right)` | `m3.tex` | Auto-sized delimiters |
+| 4 | `\hat{x}` | `m4.tex` | Accent with combining character |
+| 5 | `\overline{AB}` | `m5.tex` | Overline accent |
+| 6 | `\sum_{i=0}^{n} x_i` | `m6.tex` | Big operator with limits |
+| 7 | `\int_0^1 f(x) dx` | `m7.tex` | Integral with limits |
+| 8 | `\text{for all } x` | `m8.tex` | Text command |
+| 9 | `\vec{v}` | `m9.tex` | Vector accent |
+| 10 | `\bar{x}` | `m10.tex` | Bar accent |
+
+AST attribute verification:
+- `accent.cmd = \hat` ✅ (was `null` before C++ fix)
+- `big_operator.op = \sum` ✅ (was `null` before C++ fix)
+- `big_operator.lower` populated ✅
+- `big_operator.upper` populated ✅
+- `fraction.cmd = \frac` ✅ (was `null` before C++ fix)
+- `radical.radicand` populated ✅
+
+### 10.5 Bugs Found (Phase 2)
+
+#### Bug 7: `input()` resolves first argument as file path, not inline string
+
+- **Symptom:** `input("\\sqrt{x}", {type: 'math', flavor: 'latex'})` treated the string as a file/URL path and failed to find it.
+- **Root cause:** The `input()` function always resolves its first argument as a path. There is no inline-string parsing mode.
+- **Workaround:** Write math expressions to `.tex` files first, then `input("temp/m1.tex", {type: 'math', flavor: 'latex'})`.
+- **Status:** Design limitation. A `render_latex(string)` convenience function (§6.4 item 5) would bypass this.
+
+#### Bug 8: `use format` causes parse error
+
+- **Symptom:** Having `use sys` + `use format` before `pn main()` produced a parse error (`ERROR node at Ln 1`).
+- **Root cause:** Unknown — may be a parser issue with `use` and certain identifiers.
+- **Workaround:** Call `format()` directly without `use format`. The function is available as a built-in.
+
+#### Bug 9: Inline comments break nested let-chain expressions
+
+- **Symptom:** A deeply nested `(let ..., let ..., // comment, if (...) ...)` expression caused parse error at the comment line.
+- **Root cause:** The parser does not handle `//` comments inside comma-separated let-chain expressions within parenthesized groups.
+- **Fix:** Refactored complex nested expressions into separate named helper functions. This also improves readability.
+- **Files changed:** `render.ls` — split `render_big_op` into `render_big_op_with_limits`, `render_big_op_display`, `render_big_op_inline`.
+
+#### Bug 10: `format(box_result, 'xml')` renders as `<root/>`
+
+- **Symptom:** Rendering results serialized as `<root/>` via `format(result, 'xml')`, hiding all interior content.
+- **Root cause:** The render result is a map (box model: `{element: <span ...>, height: ..., width: ...}`), not a raw element. `format()` on a map wraps it in a `<root>` element with attributes from map keys, and the nested `<span>` element inside the `element` field is not expanded.
+- **Workaround:** Access the inner element directly: `format(result.element, 'xml')`. Or use `math.render_standalone(ast)` which returns a fully composed element.
+- **Status:** Expected behavior — not a bug, but a usability trap.
+
+#### Bug 11: `for (i in 0 to expr)` does not parse in `pn` context
+
+- **Symptom:** Range-based for loop `for (i in 0 to n)` produced a parse error inside a `pn` procedure block.
+- **Root cause:** Unknown — `for` with range may only be supported in `fn` (functional) context.
+- **Workaround:** Use manual loop: `let i = 0; loop { if (i >= n) break; ...; i = i + 1 }`.
+
+#### Bug 12: Multiple `let x^err` bindings in same scope conflict
+
+- **Symptom:** Having `let a^err = ...` and `let b^err = ...` in the same scope caused "duplicate definition of 'err'" compile error.
+- **Root cause:** The error variable name (`err`) is shared across all error-handling bindings in the same scope.
+- **Fix:** Use unique error variable names: `let a^e1 = ...`, `let b^e2 = ...`, etc.
+
+#### Bug 13: `pn` required for `print()` and error propagation
+
+- **Symptom:** Using `print()` or `?` error propagation inside `fn` caused compile errors.
+- **Root cause:** `fn` is pure functional — side effects like `print()` and error propagation with `?` are only allowed in `pn` (procedure) blocks.
+- **Fix:** Use `pn` for test scripts and any code that needs I/O or error handling.
+
+### 10.6 Updated Lambda Script Syntax Rules
+
+New rules discovered in Phase 2, extending §9.4:
+
+| #   | Rule                                                                         | Consequence of Violation                          |
+| --- | ---------------------------------------------------------------------------- | ------------------------------------------------- |
+| 14  | `input()` first argument is always a file path — no inline string parsing    | File-not-found error                              |
+| 15  | No `//` comments inside parenthesized let-chain expressions                  | Parse error                                       |
+| 16  | `for (i in 0 to n)` may not work in `pn` context                            | Parse error                                       |
+| 17  | Use unique error variable names: `let x^e1`, `let y^e2` — not `^err` twice  | Duplicate definition error                        |
+| 18  | `print()` and `?` error propagation require `pn`, not `fn`                   | Compile error                                     |
+| 19  | Don't use `use format` — call `format()` directly as a built-in             | Parse error                                       |
+| 20  | Access `.element` field on box results before formatting                     | `format()` on boxes produces `<root/>`            |
+
+### 10.7 Outstanding Work for Phase 3
+
+Phase 3 modules not yet created (from §4 Phase 3 plan):
+
+| Module | Feature | Priority |
+|--------|---------|----------|
+| `atoms/array.ls` | `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases`, `aligned`, `array` | High |
+| `atoms/style.ls` | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\displaystyle`, `\operatorname` | High |
+| `atoms/color.ls` | `\textcolor`, `\color`, `\colorbox` — named colors + hex | Medium |
+| `atoms/enclose.ls` | `\boxed`, `\fbox` | Low |
+
+## 11. Phase 3 Progress Report
+
+### 11.1 Status: Complete
+
+All Phase 3 atom modules are implemented and working. **14/14** Phase 3 test constructs render correctly. Baseline regression: **328/328** — zero regressions.
+
+### 11.2 New Modules
+
+| Module | Lines | Constructs | Description |
+|--------|-------|------------|-------------|
+| `atoms/style.ls` | 77 | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathsf`, `\mathtt`, `\mathit`, `\displaystyle`, `\textstyle`, `\operatorname` | Font style commands — maps command name to CSS class, applies to rendered argument |
+| `atoms/color.ls` | 118 | `\textcolor`, `\color`, `\colorbox` | Color commands — resolves named colors (red, blue, etc.) and hex codes, applies as CSS `color` or `background-color` |
+| `atoms/enclose.ls` | 153 | `\boxed`, `\fbox`, `\phantom`, `\rule` | Enclosure commands — `\boxed`/`\fbox` add border, `\phantom` renders invisible, `\rule` draws a filled rectangle with parsed dimensions |
+| `atoms/array.ls` | 220 | `\begin{pmatrix}`, `\begin{bmatrix}`, `\begin{vmatrix}`, `\begin{Vmatrix}`, `\begin{cases}`, `\begin{aligned}`, `\begin{array}`, `\matrix`, `\pmatrix` | Environment/matrix rendering — CSS grid layout with delimiter wrapping |
+
+**Total new code:** 568 lines across 4 new modules.
+
+### 11.3 Modified Files
+
+| File | Lines | Changes |
+|------|-------|---------|
+| `render.ls` | 401 | Added imports for `style`, `color`, `enclose`, `arr_mod`; added dispatch cases for `style_command`, `color_command`, `phantom_command`, `box_command`, `rule_command`, `environment`, `matrix_command`, `env_body`, `matrix_body` |
+| `css.ls` | 154 | Added `MTABLE` class constant and `.ML__mtable{display:inline-grid;vertical-align:middle}` CSS rule |
+
+### 11.4 Architecture Decisions
+
+#### CSS Grid for Matrix/Environment Layout
+
+Environments (matrices, cases, etc.) use **CSS grid** rather than nested box structures:
+- `grid-template-columns: auto auto ...` (one `auto` per column)
+- `column-gap: 1em` (default), `0.2em` for `cases`
+- `row-gap: 0.16em`
+- Per-cell `justify-self` alignment (center, left, or right based on column spec)
+- The grid element is returned as an inline map `{element: ..., height: ..., depth: ...}` directly, avoiding cross-module element JIT issues.
+
+This approach avoids the list-flattening problem discovered during development: Lambda's `for` expression produces lists that auto-flatten when nested, making nested row/column box structures unreliable.
+
+#### Delimiter Wrapping
+
+Matrix environments automatically add matching delimiters:
+- `pmatrix` → `(` ... `)`
+- `bmatrix` → `[` ... `]`
+- `vmatrix` → `|` ... `|`
+- `Vmatrix` → `‖` ... `‖`
+- `cases` → `{` (left only)
+- Others → no delimiters
+
+Delimiters use CSS class `ML__small-delim` and are assembled with `box.hbox()`.
+
+### 11.5 Critical Bug Discovery: `array` Is a Reserved Word
+
+**Root cause:** Using `import array: .lambda.package.math.atoms.array` causes JIT corruption. The alias name `array` conflicts with Lambda's built-in `array` type, causing all return values from functions called via the `array.` prefix to be corrupted.
+
+**Symptoms:**
+- `unknown type error in set_fields` (3× per function call)
+- `map_get ANY type is UNKNOWN: 24` (2× per function call)
+- Elements become `[error]`, numeric values become `<error>`
+- The function body is irrelevant — even `fn f() => box.text_box("X", null, "mord")` fails when called as `array.f()`
+
+**Isolation method:** Systematically simplified `array.ls` to a 10-line stub → still errored. Moved the function inline to `render.ls` → worked. Changed import alias from `array` to `arr_mod` → worked. Confirmed the alias name `array` is the sole cause.
+
+**Fix:** `import arr_mod: .lambda.package.math.atoms.array` in `render.ls`.
+
+**Rule added:** Never use `array`, `list`, `map`, `string`, `int`, `float`, `bool`, `null`, or other built-in type names as import aliases.
+
+### 11.6 Test Results
+
+All 14 Phase 3 constructs render correctly:
+
+| # | Input | Construct | Result |
+|---|-------|-----------|--------|
+| 1 | `\mathbf{A}` | Bold font | `ML__mathbf` class applied |
+| 2 | `\mathbb{R}` | Blackboard bold | `ML__bb` class applied |
+| 3 | `\mathcal{L}` | Calligraphic | `ML__cal` class applied |
+| 4 | `\displaystyle \frac{a}{b}` | Display style | Display context propagated to fraction |
+| 5 | `\operatorname{sin}(x)` | Operator name | `ML__cmr` class applied |
+| 6 | `\textcolor{red}{x+y}` | Text color | `color:#d32f2f` inline style |
+| 7 | `\colorbox{yellow}{z}` | Color box | `background-color:#ffeb3b` + padding |
+| 8 | `\boxed{E=mc^2}` | Boxed | `border:1px solid` style |
+| 9 | `\phantom{x}y` | Phantom | `visibility:hidden` style |
+| 10 | `\rule{2em}{0.5em}` | Rule | `ML__rule` class + width/height styles |
+| 11 | `\begin{pmatrix}` | Pmatrix | `(` + 2×2 CSS grid + `)` |
+| 12 | `\begin{bmatrix}` | Bmatrix | `[` + 2×3 CSS grid + `]` |
+| 13 | `\begin{cases}` | Cases | `{` + 2×2 grid with `0.2em` gap |
+| 14 | `\begin{vmatrix}` | Vmatrix | `|` + 2×2 CSS grid + `|` |
+
+### 11.7 Lambda Syntax Rules Discovered
+
+| # | Rule | Symptom if Violated |
+|---|------|---------------------|
+| 21 | `array` is a reserved type name — cannot be used as an import alias | JIT corruption: `unknown type error in set_fields`, `map_get ANY type is UNKNOWN: 24` |
+| 22 | `for` expressions produce lists that auto-flatten when nested (flatMap behavior) | Nested table structures collapse into flat sequences |
+| 23 | Element literal syntax: `<tag attr1: v1, attr2: v2; child1 child2>` — comma-separated attrs, semicolon before children | Parse errors |
+| 24 | `for` inside element children works: `<span class: c; for (item in items) item>` | N/A — useful pattern |
+| 25 | Inline maps `{element: ..., height: ...}` can be returned from `fn` to avoid cross-module element JIT issues | Elements constructed in one module may corrupt when returned to another |

@@ -22,6 +22,7 @@
 12. [Phase 5: Layout Edge Cases (est. +50 tests)](#12-phase-5-layout-edge-cases-est-50-tests)
 13. [Projected Progress](#13-projected-progress)
 14. [Architecture Notes](#14-architecture-notes)
+15. [Appendix A: Phase 1 Results (Post-Ahem Re-capture)](#appendix-a-phase-1-results-post-ahem-re-capture)
 
 ---
 
@@ -632,3 +633,153 @@ For the Redex engine to evolve from a verification oracle (~90% conformance targ
 | **Implement a proper cascade** | Replace the current specificity-ordered list with a proper cascade origin/importance/specificity/order resolution per CSS Cascading §6 |
 | **Add a pseudo-element normalization pass** | Pre-process `::first-letter`, `::first-line`, `::before`, `::after` into the box tree before layout, rather than handling each as a special case during import |
 | **Separate counter/quote state machine** | CSS counters and open/close-quote need document-order traversal state — extract into a stateful pre-layout pass |
+
+---
+
+## Appendix A: Phase 1 Results (Post-Ahem Re-capture)
+
+> **Date:** 2026-02-21  
+> **Phase 1 Changes Applied:**  
+> - **1A:** Re-captured 1,572 Ahem-dependent Chrome reference JSONs with `@font-face` injection (Puppeteer)  
+> - **1B:** Reject negative `min-height`, `max-height`, `min-width`, `max-width` values in `reference-import.rkt`  
+
+### Overall Results
+
+| Metric | Before (Baseline) | After (Phase 1) | Delta |
+|--------|-------------------:|-----------------:|------:|
+| **Total Tested** | 8,180 | 8,167 | −13 |
+| **Passed** | 6,343 | 6,676 | **+333** |
+| **Failed** | 1,814 | 1,489 | −325 |
+| **Errors** | 23 | 2 | −21 |
+| **Pass Rate** | **77.5%** | **81.7%** | **+4.2pp** |
+| Skipped (complex) | 1,739 | 1,752 | +13 |
+
+> The −13 total change is due to minor reclassification of some tests after reference re-capture.
+
+### Broad Category Breakdown (Phase 1)
+
+| Category | Total | Pass | Fail | Err | Rate | Δ vs Baseline |
+|----------|------:|-----:|-----:|----:|-----:|--------------:|
+| Cascade & Inheritance | 33 | 33 | 0 | 0 | **100.0%** | +3.0pp |
+| Visibility | 21 | 21 | 0 | 0 | **100.0%** | — |
+| Stacking & Rendering | 2 | 2 | 0 | 0 | **100.0%** | — |
+| Outline | 306 | 300 | 6 | 0 | **98.0%** | +0.3pp |
+| Cursor | 35 | 34 | 1 | 0 | **97.1%** | — |
+| Colors & Backgrounds | 786 | 756 | 30 | 0 | **96.2%** | +18.6pp |
+| Syntax & Parsing | 310 | 299 | 10 | 1 | **96.5%** | +4.2pp |
+| Dimensions: Width | 258 | 242 | 16 | 0 | **93.8%** | +3.1pp |
+| Dimensions: Height | 272 | 253 | 19 | 0 | **93.0%** | +14.0pp |
+| Vertical Alignment | 14 | 13 | 1 | 0 | **92.9%** | +92.9pp |
+| Text | 242 | 221 | 21 | 0 | **91.3%** | +0.8pp |
+| Box Model: Borders | 1,802 | 1,638 | 163 | 1 | **90.9%** | — |
+| Positioning | 401 | 361 | 40 | 0 | **90.0%** | +2.2pp |
+| White Space | 62 | 55 | 7 | 0 | **88.7%** | +1.6pp |
+| Overflow | 15 | 13 | 2 | 0 | **86.7%** | +6.7pp |
+| Clipping | 68 | 58 | 10 | 0 | **85.3%** | — |
+| Box Model: Padding | 351 | 297 | 54 | 0 | **84.6%** | +2.8pp |
+| Paged Media | 73 | 61 | 12 | 0 | **83.6%** | +1.7pp |
+| Fonts | 294 | 241 | 53 | 0 | **82.0%** | +6.8pp |
+| Other | 347 | 276 | 71 | 0 | **79.5%** | −0.4pp |
+| Floats & Clear | 174 | 134 | 40 | 0 | **77.0%** | +2.9pp |
+| Box Model: Margins | 458 | 351 | 107 | 0 | **76.6%** | +1.8pp |
+| Display & Inline | 143 | 109 | 34 | 0 | **76.2%** | +1.4pp |
+| Tables | 349 | 262 | 87 | 0 | **75.1%** | +0.4pp |
+| Generated Content | 359 | 263 | 96 | 0 | **73.3%** | — |
+| Letter Spacing | 44 | 31 | 13 | 0 | **70.5%** | +68.2pp |
+| Bidi & Direction | 82 | 56 | 26 | 0 | **68.3%** | +4.9pp |
+| Line Height & Box | 93 | 49 | 44 | 0 | **52.7%** | +26.9pp |
+| Lists | 116 | 55 | 61 | 0 | **47.4%** | — |
+| Selectors & Pseudo | 629 | 184 | 445 | 0 | **29.3%** | +0.6pp |
+| Word Spacing | 20 | 3 | 17 | 0 | **15.0%** | +10.0pp |
+| Replaced Elements | 8 | 5 | 3 | 0 | **62.5%** | — |
+
+### Fine-Grained Category Breakdown (Top 50, Phase 1)
+
+| Category | Total | Pass | Fail | Rate | Δ vs Baseline |
+|----------|------:|-----:|-----:|-----:|--------------:|
+| first-letter-punctuation | 411 | 0 | 411 | **0.0%** | — |
+| background | 330 | 330 | 0 | **100.0%** | +0.3pp |
+| border-bottom-color | 147 | 147 | 0 | **100.0%** | — |
+| border-left-color | 147 | 147 | 0 | **100.0%** | — |
+| border-right-color | 147 | 147 | 0 | **100.0%** | — |
+| border-top-color | 147 | 147 | 0 | **100.0%** | — |
+| color | 147 | 147 | 0 | **100.0%** | +98.6pp |
+| outline-color | 147 | 147 | 0 | **100.0%** | — |
+| content | 124 | 84 | 40 | **67.7%** | — |
+| border-conflict-style | 106 | 106 | 0 | **100.0%** | — |
+| border-conflict-w | 100 | 100 | 0 | **100.0%** | — |
+| border-conflict-width | 100 | 100 | 0 | **100.0%** | — |
+| margin-collapse | 94 | 76 | 18 | **80.9%** | +4.3pp |
+| background-position | 90 | 90 | 0 | **100.0%** | — |
+| max-height | 75 | 74 | 1 | **98.7%** | +30.7pp |
+| min-height | 73 | 73 | 0 | **100.0%** | +20.5pp |
+| height | 72 | 72 | 0 | **100.0%** | — |
+| line-height | 72 | 35 | 37 | **48.6%** | +34.7pp |
+| max-width | 72 | 69 | 3 | **95.8%** | +5.5pp |
+| text-decoration | 69 | 69 | 0 | **100.0%** | +1.4pp |
+| width | 68 | 68 | 0 | **100.0%** | — |
+| font-size | 67 | 66 | 1 | **98.5%** | — |
+| min-width | 67 | 67 | 0 | **100.0%** | +6.0pp |
+| padding-bottom | 67 | 67 | 0 | **100.0%** | +4.5pp |
+| padding-top | 67 | 67 | 0 | **100.0%** | +4.5pp |
+| floats | 66 | 48 | 18 | **72.7%** | — |
+| padding-left | 66 | 66 | 0 | **100.0%** | — |
+| padding-right | 66 | 26 | 40 | **39.4%** | +4.6pp |
+| outline-width | 64 | 63 | 1 | **98.4%** | — |
+| border-left-width | 62 | 53 | 9 | **85.5%** | — |
+| border-right-width | 62 | 52 | 10 | **83.9%** | — |
+| border-spacing | 61 | 37 | 24 | **60.7%** | — |
+| at-charset | 60 | 60 | 0 | **100.0%** | — |
+| text-indent | 57 | 55 | 2 | **96.5%** | — |
+| border-bottom-width | 56 | 54 | 2 | **96.4%** | — |
+| border-top-width | 56 | 54 | 2 | **96.4%** | — |
+| counter-increment | 54 | 53 | 1 | **98.1%** | — |
+| counter-reset | 54 | 53 | 1 | **98.1%** | — |
+| margin-left | 51 | 51 | 0 | **100.0%** | +3.9pp |
+| bottom | 50 | 49 | 1 | **98.0%** | — |
+| left | 50 | 49 | 1 | **98.0%** | +4.0pp |
+| margin-bottom | 50 | 50 | 0 | **100.0%** | +4.0pp |
+| margin-right | 50 | 2 | 48 | **4.0%** | — |
+| margin-top | 50 | 50 | 0 | **100.0%** | — |
+| right | 50 | 49 | 1 | **98.0%** | +4.0pp |
+| top | 50 | 49 | 1 | **98.0%** | +4.0pp |
+| clip | 47 | 47 | 0 | **100.0%** | — |
+| font | 43 | 41 | 2 | **95.3%** | — |
+| border-conflict-element | 39 | 39 | 0 | **100.0%** | — |
+| quotes | 36 | 34 | 2 | **94.4%** | — |
+
+### Key Improvements from Phase 1
+
+| Category | Before | After | Change |
+|----------|-------:|------:|-------:|
+| color | 1.4% | 100.0% | **+98.6pp** |
+| vertical-align-applies-to | 0.0% | 92.9% | **+92.9pp** |
+| letter-spacing | 2.3% | 70.5% | **+68.2pp** |
+| line-height | 13.9% | 48.6% | **+34.7pp** |
+| max-height | 68.0% | 98.7% | **+30.7pp** |
+| Line Height & Box (broad) | 25.8% | 52.7% | **+26.9pp** |
+| min-height | 79.5% | 100.0% | **+20.5pp** |
+| Colors & Backgrounds (broad) | 77.6% | 96.2% | **+18.6pp** |
+| Dimensions: Height (broad) | 79.0% | 93.0% | **+14.0pp** |
+| Word Spacing | 5.0% | 15.0% | **+10.0pp** |
+| Cascade & Inheritance (broad) | 97.0% | 100.0% | **+3.0pp** |
+
+### Remaining 0% Categories (≥5 tests)
+
+| Category                       | Total | Root Cause                                    |
+| ------------------------------ | ----: | --------------------------------------------- |
+| first-letter-punctuation       |   411 | No `::first-letter` support (Phase 3)         |
+| abspos-containing-block        |    10 | Padding-edge containing block (Phase 5)       |
+| border-color-applies-to        |    14 | Ahem font still not matching for border tests |
+| border-style                   |     8 | Ahem font still not matching for border tests |
+| c534-bgreps                    |     6 | Background-repeat edge case                   |
+| c548-ln-ht                     |     5 | Line-height + inline vertical-align           |
+| list-style-applies-to          |    11 | List marker handling (Phase 4)                |
+| list-style-image-applies-to    |    11 | No list-style-image (Phase 4)                 |
+| list-style-position-applies-to |    11 | List marker position (Phase 4)                |
+| list-style-type-applies-to     |    11 | List marker type (Phase 4)                    |
+| word-spacing-remove-space      |     6 | No word-spacing (Phase 2)                     |
+
+### 100% Pass Rate Categories
+
+**128 of 295** fine-grained categories now pass at 100% (with ≥5 tests each), up from 111 at baseline.
