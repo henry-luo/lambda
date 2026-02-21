@@ -645,6 +645,91 @@ class RadiantLayoutTester {
     }
 
     /**
+     * Merge consecutive Radiant text children to match browser text node count.
+     * Radiant outputs one text entry per visual line (TextRect), while browser
+     * references may have one text node per DOM text node. This merges consecutive
+     * Radiant text children when the browser side has fewer text children in the
+     * corresponding run, so the comparison aligns correctly.
+     */
+    mergeConsecutiveTextNodes(radiantChildren, browserChildren) {
+        // Only attempt merging when radiant has more children
+        if (radiantChildren.length <= browserChildren.length) return radiantChildren;
+
+        const merged = [];
+        let ri = 0, bi = 0;
+
+        while (ri < radiantChildren.length && bi < browserChildren.length) {
+            // If types don't both start a text run, take as-is and advance both
+            if (radiantChildren[ri].type !== 'text' || browserChildren[bi].type !== 'text') {
+                merged.push(radiantChildren[ri]);
+                ri++;
+                bi++;
+                continue;
+            }
+
+            // Both are text nodes — measure consecutive text runs
+            let radiantRunEnd = ri;
+            while (radiantRunEnd < radiantChildren.length && radiantChildren[radiantRunEnd].type === 'text') {
+                radiantRunEnd++;
+            }
+            let browserRunEnd = bi;
+            while (browserRunEnd < browserChildren.length && browserChildren[browserRunEnd].type === 'text') {
+                browserRunEnd++;
+            }
+
+            const radiantRunLen = radiantRunEnd - ri;
+            const browserRunLen = browserRunEnd - bi;
+
+            if (radiantRunLen > browserRunLen) {
+                // Merge radiant text nodes to match browser count
+                // Distribute radiant nodes across browser slots using greedy content matching
+                let rCursor = ri;
+                for (let b = bi; b < browserRunEnd; b++) {
+                    const browserText = (browserChildren[b].node.text || browserChildren[b].node.content || '').trim();
+                    let accumulated = '';
+                    const startCursor = rCursor;
+
+                    // Greedily consume radiant text nodes until content matches
+                    while (rCursor < radiantRunEnd) {
+                        accumulated += radiantChildren[rCursor].node.content || '';
+                        rCursor++;
+                        if (accumulated.trim() === browserText) break;
+                    }
+
+                    // If this is the last browser slot, consume all remaining radiant nodes in the run
+                    if (b === browserRunEnd - 1) {
+                        while (rCursor < radiantRunEnd) {
+                            accumulated += radiantChildren[rCursor].node.content || '';
+                            rCursor++;
+                        }
+                    }
+
+                    // Create merged text node with combined content, keep first node's layout
+                    const mergedNode = { ...radiantChildren[startCursor].node };
+                    mergedNode.content = accumulated;
+                    merged.push({ type: 'text', node: mergedNode, index: startCursor });
+                }
+            } else {
+                // Same length or radiant shorter — take as-is
+                for (let k = ri; k < radiantRunEnd; k++) {
+                    merged.push(radiantChildren[k]);
+                }
+            }
+
+            ri = radiantRunEnd;
+            bi = browserRunEnd;
+        }
+
+        // Append any remaining radiant children
+        while (ri < radiantChildren.length) {
+            merged.push(radiantChildren[ri]);
+            ri++;
+        }
+
+        return merged;
+    }
+
+    /**
      * Compare two tree structures node by node with unified child comparison
      */
     compareNodes(radiantNode, browserNode, path = '', results = null, depth = 0, parentComputed = null) {
@@ -965,8 +1050,12 @@ class RadiantLayoutTester {
 
         // Get all children (elements + text nodes) in document order
         // Pass isRadiant=true for radiant nodes to flatten anonymous boxes
-        const radiantChildren = this.filterForComparison(this.getAllChildren(radiantNode, true), true);
+        const radiantChildrenRaw = this.filterForComparison(this.getAllChildren(radiantNode, true), true);
         const browserChildren = this.filterForComparison(this.getAllChildren(browserNode, false), false);
+
+        // Merge consecutive Radiant text nodes that correspond to a single browser text node
+        // (Radiant outputs one text entry per visual line, browser has one per DOM text node)
+        const radiantChildren = this.mergeConsecutiveTextNodes(radiantChildrenRaw, browserChildren);
 
         const maxChildren = Math.max(radiantChildren.length, browserChildren.length);
 

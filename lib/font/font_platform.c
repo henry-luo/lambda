@@ -300,3 +300,74 @@ int get_font_metrics_platform(const char* font_family, float font_size,
 }
 
 #endif
+
+// ============================================================================
+// Platform codepoint font lookup
+// ============================================================================
+
+#ifdef __APPLE__
+
+char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+    if (out_face_index) *out_face_index = 0;
+
+    // encode codepoint as UTF-16 for CFString
+    UniChar utf16[2];
+    CFIndex utf16_len;
+    if (codepoint <= 0xFFFF) {
+        utf16[0] = (UniChar)codepoint;
+        utf16_len = 1;
+    } else if (codepoint <= 0x10FFFF) {
+        // surrogate pair
+        codepoint -= 0x10000;
+        utf16[0] = (UniChar)(0xD800 + (codepoint >> 10));
+        utf16[1] = (UniChar)(0xDC00 + (codepoint & 0x3FF));
+        utf16_len = 2;
+    } else {
+        return NULL;
+    }
+
+    CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
+    if (!str) return NULL;
+
+    // create a base font (Times New Roman at 12pt) and ask CoreText for a fallback
+    CTFontRef base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
+    if (!base_font) {
+        CFRelease(str);
+        return NULL;
+    }
+
+    CTFontRef fallback = CTFontCreateForString(base_font, str, CFRangeMake(0, utf16_len));
+    CFRelease(str);
+    CFRelease(base_font);
+
+    if (!fallback) return NULL;
+
+    // get the font URL from the fallback font
+    CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
+    CFRelease(fallback);
+    if (!desc) return NULL;
+
+    CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
+    CFRelease(desc);
+    if (!url) return NULL;
+
+    char path[1024];
+    bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
+    CFRelease(url);
+
+    if (ok && path[0]) {
+        log_debug("font_platform: codepoint U+%04X → '%s'", codepoint, path);
+        return mem_strdup(path, MEM_CAT_FONT);
+    }
+    return NULL;
+}
+
+#else
+
+char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+    (void)codepoint;
+    if (out_face_index) *out_face_index = 0;
+    return NULL;
+}
+
+#endif
