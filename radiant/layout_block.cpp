@@ -3267,10 +3267,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             float margin_top = collapse_margins(block->bound->margin.top, parent_margin_top);
 
                             // CSS 8.3.1: When parent has no border/padding, child margin collapses through parent
-                            // If parent had no margin (parent_margin_top == 0), we need to retroactively collapse
-                            // with parent's previous sibling
+                            // If parent had no margin (parent_margin_top == 0) AND parent has no bound,
+                            // we need to retroactively collapse with parent's previous sibling.
+                            // Only do this for no-bound parents — bound parents will get normal sibling
+                            // collapse later in step 7, so doing it here too would double-count.
                             float sibling_collapse = 0;
-                            if (parent_margin_top == 0) {
+                            if (parent_margin_top == 0 && !parent->bound) {
                                 // Find parent's previous in-flow sibling for retroactive sibling collapsing
                                 View* prev_view = parent->prev_placed_view();
                                 while (prev_view && prev_view->is_block()) {
@@ -3449,7 +3451,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width
                     + block->bound->margin.left + block->bound->margin.right);
             } else {
-                lycon->block.advance_y += block->height;
+                // For no-bound blocks, use actual y position to compute advance_y.
+                // Child margin collapsing (parent-child) may have shifted block->y beyond
+                // the original advance_y, so we must use the actual position.
+                lycon->block.advance_y = block->y + block->height;
                 // Include lycon->line.left to account for parent's left border+padding
                 lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width);
             }

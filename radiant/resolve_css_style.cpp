@@ -621,12 +621,9 @@ DisplayValue resolve_display_value(void* child) {
                                 display.inner = CSS_VALUE_NONE;
                                 return display;
                             } else if (keyword == CSS_VALUE_RUN_IN) {
-                                // CSS 2.1: run-in needs special handling at layout time
-                                // to determine if it becomes block or merges into following block
-                                display.outer = CSS_VALUE_RUN_IN;
-                                display.inner = CSS_VALUE_FLOW;
-                                log_debug("[CSS] ✅ MATCHED RUN_IN! Setting display to RUN_IN+FLOW");
-                                return display;
+                                // run-in is unsupported (matches Chrome, which dropped it in v32).
+                                // Don't return — fall through to tag-based default display below.
+                                log_debug("[CSS] run-in unsupported, using tag default display");
                             } else if (keyword == CSS_VALUE_TABLE) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE;
@@ -688,7 +685,7 @@ DisplayValue resolve_display_value(void* child) {
                                 } else if (outer_kw == CSS_VALUE_INLINE) {
                                     display.outer = CSS_VALUE_INLINE;
                                 } else if (outer_kw == CSS_VALUE_RUN_IN) {
-                                    display.outer = CSS_VALUE_RUN_IN; // run-in needs special handling at layout
+                                    // run-in unsupported — don't set, will fall through to tag default
                                 } else {
                                     display.outer = CSS_VALUE_BLOCK; // default to block
                                 }
@@ -1942,6 +1939,33 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     int font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
 
+    // Browser quirk: monospace generic family uses 13px default "medium" size (not 16px).
+    // When font-family transitions to monospace and no explicit font-size was set,
+    // apply the 13/16 scaling ratio to match browser behavior.
+    {
+        ViewSpan* span = (ViewSpan*)lycon->view;
+        if (span && span->font && span->font->family) {
+            bool is_mono = str_ieq_const(span->font->family, strlen(span->font->family), "monospace");
+            if (is_mono) {
+                bool has_explicit_size = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
+                                         avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr;
+                if (!has_explicit_size) {
+                    bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
+                        str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+                    if (!parent_is_mono && span->font->font_size > 0) {
+                        // Avoid double-applying: HTML defaults may have already applied this
+                        // Check if font_size is still the parent's value (not already adjusted)
+                        float parent_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                        if (span->font->font_size == parent_size) {
+                            span->font->font_size = span->font->font_size * 13.0f / 16.0f;
+                            log_debug("[CSS] Monospace font-size quirk: %.1f -> %.1f", parent_size, span->font->font_size);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Set up FreeType font face if a font-family was specified for this element
     // This ensures ex/ch units use the correct font metrics
     if (font_processed > 0) {
@@ -1974,6 +1998,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_WORD_SPACING,
         CSS_PROPERTY_WHITE_SPACE,
         CSS_PROPERTY_VISIBILITY,
+        CSS_PROPERTY_EMPTY_CELLS,
     };
     static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
 

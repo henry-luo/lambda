@@ -339,10 +339,19 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
         return nullptr;
     }
 
+    // HTML5 stores attribute names lowercased. CSS attr() may pass mixed-case.
+    // Lowercase the lookup key for case-insensitive matching per CSS spec.
+    char lower_name[128];
+    size_t i = 0;
+    for (; name[i] && i < sizeof(lower_name) - 1; i++) {
+        lower_name[i] = (name[i] >= 'A' && name[i] <= 'Z') ? (char)(name[i] + 0x20) : name[i];
+    }
+    lower_name[i] = '\0';
+
     // Use ElementReader for read-only access
     if (element->native_element) {
         ElementReader reader(element->native_element);
-        return reader.get_attr_string(name);
+        return reader.get_attr_string(lower_name);
     }
 
     return nullptr;

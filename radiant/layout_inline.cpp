@@ -53,7 +53,7 @@ void compute_span_bounding_box(ViewSpan* span) {
         border_left = span->bound->border->width.left;
     }
 
-    // Update span's bounding box - expand to include vertical border only
+    // Update span's bounding box - expand to include border (vertical always, horizontal for single-line)
     // For inline elements that may span multiple lines, the horizontal border
     // only appears at start/end of the overall inline box, but vertical border
     // affects each line. The bounding box Y position should include top border.
@@ -302,6 +302,21 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         child = static_cast<DomElement*>(elmt)->first_child;
     }
 
+    // CSS 2.1 §8.3: Inline elements' border-left/padding-left push content inward.
+    // Advance the inline cursor so child text/elements start inside the border+padding.
+    // This applies to both normal inline content and block-in-inline splitting.
+    float inline_left_edge = 0;
+    float inline_right_edge = 0;
+    if (span->bound) {
+        if (span->bound->border) {
+            inline_left_edge += span->bound->border->width.left;
+            inline_right_edge += span->bound->border->width.right;
+        }
+        inline_left_edge += span->bound->padding.left;
+        inline_right_edge += span->bound->padding.right;
+    }
+    lycon->line.advance_x += inline_left_edge;
+
     // CSS 2.1 §9.2.1.1 and §17.2.1: Check if inline contains block-level or table-internal children
     // If so, split into anonymous boxes (and wrap table-internal in anonymous tables)
     bool has_block_children = false;
@@ -334,6 +349,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // Handle block-in-inline splitting
         layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
+
+        // Advance past the right border+padding
+        lycon->line.advance_x += inline_right_edge;
         compute_span_bounding_box(span);
 
         // Apply CSS relative positioning after normal layout
@@ -355,6 +373,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             child = child->next_sibling;
         } while (child);
     }
+
+    // Advance past the right border+padding so the next sibling starts after this inline's border
+    lycon->line.advance_x += inline_right_edge;
 
     compute_span_bounding_box(span);
 
