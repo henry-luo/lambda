@@ -614,11 +614,64 @@ StringZilla (included in `./StringZilla/`) is an excellent library, but:
 
 ### 5.2 Why `(const char*, size_t)` Instead of `StrView`?
 
-Using raw `(ptr, len)` pairs instead of `StrView` structs:
-- Avoids coupling `str.h` to `strview.h`
-- Works with any string representation (StrView, StrBuf, String*, raw char*)
-- No struct-passing overhead for small functions
-- The caller can trivially wrap: `str_find(sv.str, sv.length, ...)`
+Since every `str_` function takes `(const char* s, size_t len)` pairs, the question
+naturally arises: why not use `StrView` (which is exactly `{ const char* str; size_t
+length; }`) as the parameter type instead?
+
+**Arguments for `StrView`**:
+- Cleaner signatures — `str_eq(a, b)` (2 params) vs `str_eq(a, a_len, b, b_len)` (4 params)
+- More explicit intent — the type name communicates "non-owning string slice"
+- Performance is equivalent on x86-64 and ARM64: a 16-byte struct passes in 2
+  registers, same as 2 scalar arguments
+
+**Arguments for `(ptr, len)` (why we chose this)**:
+
+1. **Most call sites don't have a `StrView`.** The codebase has ~4,500+ raw
+   `(const char*, size_t)` call sites vs ~80 `StrView` sites. The vast majority of
+   callers have a `const char*` and a `size_t` separately — from `StrBuf`, `String*`,
+   parser output, Tree-sitter nodes, etc. Using `StrView` would force wrapping at
+   every call site:
+   ```c
+   // current — direct, no ceremony
+   str_eq(tag, tag_len, "div", 3);
+
+   // with StrView — wrapper noise at every call
+   str_eq(strview_init(tag, tag_len), strview_from_str("div"));
+   ```
+
+2. **`str.h` is the lowest layer.** It should have zero dependencies. Making it
+   depend on `strview.h` (or inlining the `StrView` typedef into `str.h`) creates
+   coupling. The clean layering is: `strview.h` functions are thin wrappers *on top
+   of* `str.h`, not the other way around.
+
+3. **MIR/JIT interop.** Lambda's JIT pipeline (`mir.c` / `transpile-mir.cpp`) calls
+   C functions directly. Passing two scalar arguments through MIR-compiled code is
+   trivial; struct-by-value calling conventions in MIR are more complex and fragile.
+
+4. **C99 portability.** Compound literals like `(StrView){.str = s, .length = len}`
+   are C99-valid but some compilers (MSVC in C mode) had spotty support historically.
+   Raw scalars are universally portable.
+
+5. **Interop with any string type.** Raw `(ptr, len)` works equally well with
+   `StrView`, `StrBuf`, `String*`, `strbuf_t`, raw `char*` from C stdlib, and
+   Tree-sitter source regions — no adapter needed.
+
+**The recommended pattern**: `strview.h` becomes a thin convenience layer that
+delegates to `str.h`:
+
+```c
+// strview.h — trivial inline wrappers
+static inline bool strview_eq(const StrView* a, const StrView* b) {
+    return str_eq(a->str, a->length, b->str, b->length);
+}
+static inline bool strview_starts_with(const StrView* s, const char* prefix) {
+    return str_starts_with_const(s->str, s->length, prefix);
+}
+```
+
+This gives both worlds: callers with `StrView` get a clean API through `strview_*`,
+callers with raw `(ptr, len)` use `str_*` directly, and `str.h` stays
+dependency-free at the bottom of the stack.
 
 ### 5.3 Why `malloc` for Allocating Functions?
 

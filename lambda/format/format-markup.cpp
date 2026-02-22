@@ -590,7 +590,10 @@ void MarkupEmitter::format_element(const ElementReader& elem) {
         if (lang && lang->len > 0) {
             emit_code_block(elem);
         } else {
-            emit_inline(elem, im.code_open, im.code_close);
+            // inline code: emit raw children (no escaping inside backticks)
+            if (im.code_open) write_text(im.code_open);
+            format_children_raw(elem);
+            if (im.code_close) write_text(im.code_close);
         }
         return;
     }

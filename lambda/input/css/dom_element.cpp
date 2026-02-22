@@ -260,11 +260,25 @@ void dom_element_destroy(DomElement* element) {
 // Attribute Management
 // ============================================================================
 
+// Helper: lowercase attribute name into buffer (HTML5 spec: attribute names are case-insensitive)
+static const char* lowercase_attr_name(const char* name, char* buf, size_t buf_size) {
+    size_t i = 0;
+    for (; name[i] && i < buf_size - 1; i++) {
+        buf[i] = (name[i] >= 'A' && name[i] <= 'Z') ? (char)(name[i] + 0x20) : name[i];
+    }
+    buf[i] = '\0';
+    return buf;
+}
+
 bool dom_element_set_attribute(DomElement* element, const char* name, const char* value) {
     if (!element || !name || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
         return false;
     }
+
+    // HTML5: attribute names are case-insensitive, store lowercased
+    char lower_name[128];
+    lowercase_attr_name(name, lower_name, sizeof(lower_name));
 
     // If native_element exists, use MarkEditor for updates
     if (element->native_element && element->doc) {
@@ -276,7 +290,7 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
         // Update attribute via MarkEditor
         Item result = editor.elmt_update_attr(
             {.element = element->native_element},
-            name,
+            lower_name,
             value_item
         );
 
@@ -287,11 +301,11 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
             element->native_element = result.element;
 
             // Handle special attributes
-            if (strcmp(name, "id") == 0) {
+            if (strcmp(lower_name, "id") == 0) {
                 // Cache ID for fast access
                 ElementReader reader(element->native_element);
                 element->id = reader.get_attr_string("id");
-            } else if (strcmp(name, "class") == 0) {
+            } else if (strcmp(lower_name, "class") == 0) {
                 // Parse space-separated classes
                 // First, clear existing classes
                 element->class_count = 0;
@@ -313,7 +327,7 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                         }
                     }
                 }
-            } else if (strcmp(name, "style") == 0) {
+            } else if (strcmp(lower_name, "style") == 0) {
                 // Parse and apply inline styles
                 dom_element_apply_inline_style(element, value);
             }
@@ -362,13 +376,17 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
         return false;
     }
 
+    // HTML5: attribute names are case-insensitive
+    char lower_name[128];
+    lowercase_attr_name(name, lower_name, sizeof(lower_name));
+
     if (element->native_element && element->doc) {
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
 
         // Delete attribute via MarkEditor
         Item result = editor.elmt_delete_attr(
             {.element = element->native_element},
-            name
+            lower_name
         );
 
         if (result.element) {
@@ -377,7 +395,7 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
             element->native_element = result.element;
 
             // Clear cached fields
-            if (strcmp(name, "id") == 0) {
+            if (strcmp(lower_name, "id") == 0) {
                 element->id = nullptr;
             }
 
@@ -397,9 +415,13 @@ bool dom_element_has_attribute(DomElement* element, const char* name) {
         return false;
     }
 
+    // HTML5: attribute names are case-insensitive
+    char lower_name[128];
+    lowercase_attr_name(name, lower_name, sizeof(lower_name));
+
     if (element->native_element) {
         ElementReader reader(element->native_element);
-        return reader.has_attr(name);
+        return reader.has_attr(lower_name);
     }
 
     return false;

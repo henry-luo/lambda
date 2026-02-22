@@ -156,10 +156,10 @@ String* format_html(Pool* pool, Item root_item) {
     }
 
     // add minimal HTML document structure for non-HTML root elements
-    stringbuf_append_str(ctx.output(), "<!DOCTYPE html>\n<html>\n<head>");
-    stringbuf_append_str(ctx.output(), "<meta charset=\"UTF-8\">");
-    stringbuf_append_str(ctx.output(), "<title>Data</title>");
-    stringbuf_append_str(ctx.output(), "</head>\n<body>\n");
+    stringbuf_append_str(ctx.output(), "<!DOCTYPE html>\n<html>\n<head>"
+                                       "<meta charset=\"UTF-8\">"
+                                       "<title>Data</title>"
+                                       "</head>\n<body>\n");
 
     ItemReader root_reader(root_item.to_const());
     format_item_reader(ctx, root_reader, 0, false);
@@ -262,9 +262,8 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         (memcmp(tag_name, "!DOCTYPE", 8) == 0 ||
          memcmp(tag_name, "!doctype", 8) == 0)) {
         // this is a DOCTYPE element - format as <!DOCTYPE content>
-        stringbuf_append_str(ctx.output(), "<!");
         // preserve the case of "DOCTYPE" or "doctype"
-        stringbuf_append_format(ctx.output(), "%.*s", (int)(tag_len - 1), tag_name + 1);
+        stringbuf_append_format(ctx.output(), "<!%.*s", (int)(tag_len - 1), tag_name + 1);
 
         // output DOCTYPE content (first child text node)
         ItemReader first_child = elem.childAt(0);
@@ -317,8 +316,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
     }
 
     // format as proper HTML element
-    stringbuf_append_char(ctx.output(), '<');
-    stringbuf_append_str(ctx.output(), tag_name);
+    stringbuf_append_format(ctx.output(), "<%s", tag_name);
 
     // add attributes - iterate through element's type shape to get all attributes
     if (elem.element() && elem.element()->type && elem.element()->data) {
@@ -346,20 +344,17 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                     // boolean attribute - output name only if true
                     bool bool_val = *(bool*)data;
                     if (bool_val) {
-                        stringbuf_append_char(ctx.output(), ' ');
-                        stringbuf_append_format(ctx.output(), "%.*s", field_name_len, field_name);
+                        stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
                     }
                 } else if (field_type == LMD_TYPE_STRING || field_type == LMD_TYPE_NULL) {
                     // string attribute or NULL (empty string)
                     String* str = *(String**)data;
-                    stringbuf_append_char(ctx.output(), ' ');
-                    stringbuf_append_format(ctx.output(), "%.*s", field_name_len, field_name);
+                    stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
                     // HTML5 boolean attributes can be output without ="value" if empty
                     // Regular attributes should always have ="value" even if empty
                     bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
                     if (str && str->len > 0) {
-                        stringbuf_append_char(ctx.output(), '=');
-                        stringbuf_append_char(ctx.output(), '"');
+                        stringbuf_append_str(ctx.output(), "=\"");
                         format_html_string_safe(ctx.output(), str, true);  // true = is_attribute
                         stringbuf_append_char(ctx.output(), '"');
                     } else if (!is_bool_attr) {
@@ -393,9 +388,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         }
 
         // close tag (only for non-void elements)
-        stringbuf_append_str(ctx.output(), "</");
-        stringbuf_append_str(ctx.output(), tag_name);
-        stringbuf_append_char(ctx.output(), '>');
+        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
     }
 }
 
@@ -448,9 +441,7 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
         // Format them back as entity references for proper roundtrip
         Symbol* sym = item.asSymbol();
         if (sym && sym->chars) {
-            stringbuf_append_char(ctx.output(), '&');
-            stringbuf_append_format(ctx.output(), "%.*s", (int)sym->len, sym->chars);
-            stringbuf_append_char(ctx.output(), ';');
+            stringbuf_append_format(ctx.output(), "&%.*s;", (int)sym->len, sym->chars);
         }
     }
     else if (item.isArray()) {

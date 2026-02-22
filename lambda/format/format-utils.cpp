@@ -554,14 +554,10 @@ const int HTML_ATTR_ESCAPE_RULES_COUNT = sizeof(HTML_ATTR_ESCAPE_RULES) / sizeof
 
 // Markdown: [text](url "title")
 static void emit_link_markdown(StringBuf* sb, const char* url, const char* text, const char* title) {
-    stringbuf_append_char(sb, '[');
-    if (text) stringbuf_append_str(sb, text);
-    stringbuf_append_str(sb, "](");
+    stringbuf_append_format(sb, "[%s](", text ? text : "");
     if (url) stringbuf_append_str(sb, url);
     if (title && title[0] != '\0') {
-        stringbuf_append_str(sb, " \"");
-        stringbuf_append_str(sb, title);
-        stringbuf_append_char(sb, '"');
+        stringbuf_append_format(sb, " \"%s\"", title);
     }
     stringbuf_append_char(sb, ')');
 }
@@ -572,9 +568,7 @@ static void emit_link_rst(StringBuf* sb, const char* url, const char* text, cons
     stringbuf_append_char(sb, '`');
     if (text) stringbuf_append_str(sb, text);
     if (url && url[0] != '\0') {
-        stringbuf_append_str(sb, " <");
-        stringbuf_append_str(sb, url);
-        stringbuf_append_char(sb, '>');
+        stringbuf_append_format(sb, " <%s>", url);
     }
     stringbuf_append_str(sb, "`_");
 }
@@ -582,11 +576,9 @@ static void emit_link_rst(StringBuf* sb, const char* url, const char* text, cons
 // Org: [[url][text]]  or  [[url]]
 static void emit_link_org(StringBuf* sb, const char* url, const char* text, const char* title) {
     (void)title;
-    stringbuf_append_str(sb, "[[");
-    if (url) stringbuf_append_str(sb, url);
+    stringbuf_append_format(sb, "[[%s", url ? url : "");
     if (text && text[0] != '\0') {
-        stringbuf_append_str(sb, "][");
-        stringbuf_append_str(sb, text);
+        stringbuf_append_format(sb, "][%s", text);
     }
     stringbuf_append_str(sb, "]]");
 }
@@ -595,21 +587,16 @@ static void emit_link_org(StringBuf* sb, const char* url, const char* text, cons
 static void emit_link_wiki(StringBuf* sb, const char* url, const char* text, const char* title) {
     if (url && url[0] != '\0') {
         // external link
-        stringbuf_append_char(sb, '[');
-        stringbuf_append_str(sb, url);
+        stringbuf_append_format(sb, "[%s", url);
         if (text && text[0] != '\0') {
-            stringbuf_append_char(sb, ' ');
-            stringbuf_append_str(sb, text);
+            stringbuf_append_format(sb, " %s", text);
         } else if (title && title[0] != '\0') {
-            stringbuf_append_char(sb, ' ');
-            stringbuf_append_str(sb, title);
+            stringbuf_append_format(sb, " %s", title);
         }
         stringbuf_append_char(sb, ']');
     } else {
         // internal wiki link
-        stringbuf_append_str(sb, "[[");
-        if (text) stringbuf_append_str(sb, text);
-        stringbuf_append_str(sb, "]]");
+        stringbuf_append_format(sb, "[[%s]]", text ? text : "");
     }
 }
 
@@ -618,9 +605,7 @@ static void emit_link_textile(StringBuf* sb, const char* url, const char* text, 
     stringbuf_append_char(sb, '"');
     if (text) stringbuf_append_str(sb, text);
     if (title && title[0] != '\0') {
-        stringbuf_append_char(sb, '(');
-        stringbuf_append_str(sb, title);
-        stringbuf_append_char(sb, ')');
+        stringbuf_append_format(sb, "(%s)", title);
     }
     stringbuf_append_str(sb, "\":");
     if (url) stringbuf_append_str(sb, url);
@@ -631,18 +616,14 @@ static void emit_image_textile(StringBuf* sb, const char* url, const char* alt) 
     stringbuf_append_char(sb, '!');
     if (url) stringbuf_append_str(sb, url);
     if (alt && alt[0] != '\0') {
-        stringbuf_append_char(sb, '(');
-        stringbuf_append_str(sb, alt);
-        stringbuf_append_char(sb, ')');
+        stringbuf_append_format(sb, "(%s)", alt);
     }
     stringbuf_append_char(sb, '!');
 }
 
 // Markdown image: ![alt](url)
 static void emit_image_markdown(StringBuf* sb, const char* url, const char* alt) {
-    stringbuf_append_str(sb, "![");
-    if (alt) stringbuf_append_str(sb, alt);
-    stringbuf_append_str(sb, "](");
+    stringbuf_append_format(sb, "![%s](", alt ? alt : "");
     if (url) stringbuf_append_str(sb, url);
     stringbuf_append_char(sb, ')');
 }
@@ -921,8 +902,8 @@ const MarkupOutputRules WIKI_RULES = {
     // custom handler
     .custom_element_handler = NULL,
     // container tags
-    .container_tags = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
-    .skip_tags      = {NULL, NULL, NULL, NULL},
+    .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
+    .skip_tags      = {"meta", NULL, NULL, NULL},
     // link tag
     .link_tag = "a",
 };
@@ -990,8 +971,8 @@ const MarkupOutputRules TEXTILE_RULES = {
     // custom handler
     .custom_element_handler = textile_custom_handler,
     // container tags
-    .container_tags = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
-    .skip_tags      = {NULL, NULL, NULL, NULL},
+    .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
+    .skip_tags      = {"meta", NULL, NULL, NULL},
     // link tag
     .link_tag = "a",
 };
