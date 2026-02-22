@@ -2150,6 +2150,35 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 border->width.left = 0;
             }
         }
+
+        // CSS 2.1 §8.5.1: initial value of border-width is 'medium' (3px).
+        // When border-style is visible (not none/hidden) but border-width was never
+        // explicitly set (specificity == 0, width == 0), default to medium (3px).
+        // An explicit border-width:0 would have specificity >= 1, so this is safe.
+        if (border->top_style != CSS_VALUE_NONE && border->top_style != CSS_VALUE_HIDDEN &&
+            border->top_style != CSS_VALUE__UNDEF &&
+            border->width.top == 0 && border->width.top_specificity == 0) {
+            border->width.top = 3.0f;
+            log_debug("[CSS] Border-top-style is visible, defaulting width to medium (3px)");
+        }
+        if (border->right_style != CSS_VALUE_NONE && border->right_style != CSS_VALUE_HIDDEN &&
+            border->right_style != CSS_VALUE__UNDEF &&
+            border->width.right == 0 && border->width.right_specificity == 0) {
+            border->width.right = 3.0f;
+            log_debug("[CSS] Border-right-style is visible, defaulting width to medium (3px)");
+        }
+        if (border->bottom_style != CSS_VALUE_NONE && border->bottom_style != CSS_VALUE_HIDDEN &&
+            border->bottom_style != CSS_VALUE__UNDEF &&
+            border->width.bottom == 0 && border->width.bottom_specificity == 0) {
+            border->width.bottom = 3.0f;
+            log_debug("[CSS] Border-bottom-style is visible, defaulting width to medium (3px)");
+        }
+        if (border->left_style != CSS_VALUE_NONE && border->left_style != CSS_VALUE_HIDDEN &&
+            border->left_style != CSS_VALUE__UNDEF &&
+            border->width.left == 0 && border->width.left_specificity == 0) {
+            border->width.left = 3.0f;
+            log_debug("[CSS] Border-left-style is visible, defaulting width to medium (3px)");
+        }
     }
 }
 

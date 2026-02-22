@@ -3493,6 +3493,22 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     // the ViewBlock first and then resolves CSS styles. Calling it here would
     // mark styles_resolved=true prematurely, causing layout_block to skip
     // resolution and lose the given_width/given_height values.
+
+    // Generate ::before and ::after pseudo-elements for table cells
+    if (tcell->is_element()) {
+        tcell->pseudo = alloc_pseudo_content_prop(lycon, tcell);
+        generate_pseudo_element_content(lycon, tcell, true);   // ::before
+        generate_pseudo_element_content(lycon, tcell, false);  // ::after
+        if (tcell->pseudo) {
+            if (tcell->pseudo->before) {
+                insert_pseudo_into_dom((DomElement*)tcell, tcell->pseudo->before, true);
+            }
+            if (tcell->pseudo->after) {
+                insert_pseudo_into_dom((DomElement*)tcell, tcell->pseudo->after, false);
+            }
+        }
+    }
+
     if (tcell->is_element()) {
         DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {

@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include "../lambda/input/css/css_value.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -437,16 +438,129 @@ static int int_to_upper_latin(int value, char* buffer, size_t buffer_size) {
     return len;
 }
 
+/**
+ * Convert integer to lower-greek letters (α, β, γ, δ, ε, ζ, η, θ, ι, κ, λ, μ, ν, ξ, ο, π, ρ, σ, τ, υ, φ, χ, ψ, ω)
+ * CSS 2.1: alphabetic system using Greek lowercase letters
+ */
+static int int_to_lower_greek(int value, char* buffer, size_t buffer_size) {
+    // Greek lowercase alpha=U+03B1 through omega=U+03C9 (24 letters, skipping U+03C2 final sigma)
+    static const int greek_letters[] = {
+        0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B5, 0x03B6, 0x03B7, 0x03B8,
+        0x03B9, 0x03BA, 0x03BB, 0x03BC, 0x03BD, 0x03BE, 0x03BF, 0x03C0,
+        0x03C1, 0x03C3, 0x03C4, 0x03C5, 0x03C6, 0x03C7, 0x03C8, 0x03C9
+    };
+    const int count = 24;
+
+    if (value <= 0 || buffer_size < 10) {
+        return snprintf(buffer, buffer_size, "%d", value);
+    }
+
+    // Alphabetic numbering: 1=α, 2=β, ..., 24=ω, 25=αα, ...
+    char temp[64];
+    int temp_len = 0;
+    value--;
+    do {
+        int idx = value % count;
+        // Encode greek letter as UTF-8 (2 bytes for U+03xx)
+        temp[temp_len++] = (char)(0xCE + (greek_letters[idx] >= 0x03C0 ? 1 : 0));
+        temp[temp_len++] = (char)(0x80 + (greek_letters[idx] & 0x3F));
+        value = value / count - 1;
+    } while (value >= 0 && temp_len < (int)sizeof(temp) - 2);
+
+    // Reverse pairs
+    int len = 0;
+    for (int i = temp_len - 2; i >= 0 && len < (int)buffer_size - 2; i -= 2) {
+        buffer[len++] = temp[i];
+        buffer[len++] = temp[i + 1];
+    }
+    buffer[len] = '\0';
+    return len;
+}
+
+/**
+ * Convert integer to Armenian traditional numbering.
+ * CSS 2.1: Armenian additive system for 1-9999.
+ */
+static int int_to_armenian(int value, char* buffer, size_t buffer_size) {
+    if (value <= 0 || value > 9999 || buffer_size < 20) {
+        return snprintf(buffer, buffer_size, "%d", value);
+    }
+    // Armenian uppercase letters for thousands, hundreds, tens, ones
+    // U+0531-U+0554 (Ա-Ք)
+    static const int thousands[] = {0, 0x0531+35, 0x0531+36, 0x0531+37, 0x0531+38, 0x0531+39, 0x0531+40, 0x0531+41, 0x0531+42};
+    // 1000=Ռ(0x0550), 2000=Ս(0x0551), 3000=Վ(0x0552), 4000=Տ(0x0553), 5000=Ր(0x0550+4), 6000=Ց(0x0551+4), 7000=Ւ(0x0552+4), 8000=Փ(0x0553+4), 9000=Ք(0x0554)
+    static const int armenian_ones[] = {0, 0x0531, 0x0532, 0x0533, 0x0534, 0x0535, 0x0536, 0x0537, 0x0538, 0x0539};
+    static const int armenian_tens[] = {0, 0x053A, 0x053B, 0x053C, 0x053D, 0x053E, 0x053F, 0x0540, 0x0541, 0x0542};
+    static const int armenian_hundreds[] = {0, 0x0543, 0x0544, 0x0545, 0x0546, 0x0547, 0x0548, 0x0549, 0x054A, 0x054B};
+    static const int armenian_thousands[] = {0, 0x054C, 0x054D, 0x054E, 0x054F, 0x0550, 0x0551, 0x0552, 0x0553, 0x0554};
+
+    int len = 0;
+    int digits[] = { value / 1000, (value / 100) % 10, (value / 10) % 10, value % 10 };
+    const int* tables[] = { armenian_thousands, armenian_hundreds, armenian_tens, armenian_ones };
+    (void)thousands; (void)armenian_ones; // suppress unused warnings done through tables
+
+    for (int i = 0; i < 4; i++) {
+        if (digits[i] > 0 && digits[i] <= 9) {
+            int cp = tables[i][digits[i]];
+            // encode as UTF-8 (2 bytes for U+05xx range)
+            if (len < (int)buffer_size - 2) {
+                buffer[len++] = (char)(0xD4 + (cp >= 0x0540 ? 1 : 0));
+                buffer[len++] = (char)(0x80 + (cp & 0x3F));
+            }
+        }
+    }
+    buffer[len] = '\0';
+    return len;
+}
+
+/**
+ * Convert integer to Georgian traditional numbering.
+ * CSS 2.1: Georgian additive system for 1-19999.
+ */
+static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
+    if (value <= 0 || value > 19999 || buffer_size < 20) {
+        return snprintf(buffer, buffer_size, "%d", value);
+    }
+    // Georgian Mkhedruli letters for additive system
+    static const int geo_ones[] = {0, 0x10D0, 0x10D1, 0x10D2, 0x10D3, 0x10D4, 0x10D5, 0x10D6, 0x10D7, 0x10D8};
+    static const int geo_tens[] = {0, 0x10D9, 0x10DA, 0x10DB, 0x10DC, 0x10DD, 0x10DE, 0x10DF, 0x10E0, 0x10E1};
+    static const int geo_hundreds[] = {0, 0x10E2, 0x10E3, 0x10E4, 0x10E5, 0x10E6, 0x10E7, 0x10E8, 0x10E9, 0x10EA};
+    static const int geo_thousands[] = {0, 0x10EB, 0x10EC, 0x10ED, 0x10EE, 0x10EF, 0x10F0, 0x10F1, 0x10F2, 0x10F3};
+
+    int len = 0;
+    int th = value / 1000;
+    int h = (value / 100) % 10;
+    int t = (value / 10) % 10;
+    int o = value % 10;
+
+    int parts[] = { th, h, t, o };
+    const int* tables[] = { geo_thousands, geo_hundreds, geo_tens, geo_ones };
+
+    for (int i = 0; i < 4; i++) {
+        if (parts[i] > 0 && parts[i] <= 9) {
+            int cp = tables[i][parts[i]];
+            // encode as UTF-8 (3 bytes for U+10xx range)
+            if (len < (int)buffer_size - 3) {
+                buffer[len++] = (char)(0xE1);
+                buffer[len++] = (char)(0x80 + ((cp >> 6) & 0x3F));
+                buffer[len++] = (char)(0x80 + (cp & 0x3F));
+            }
+        }
+    }
+    buffer[len] = '\0';
+    return len;
+}
+
 int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_size) {
     if (!buffer || buffer_size == 0) return 0;
 
     switch (style) {
-        case 34: // CSS_VALUE_NONE - return empty string (enum value is 34, not 0x0065)
+        case CSS_VALUE_NONE:
             buffer[0] = '\0';
             return 0;
 
-        case 0x17D: // CSS_VALUE_DISC (381) - bullet point "•"
-            if (buffer_size >= 4) {  // UTF-8 bullet is 3 bytes + null
+        case CSS_VALUE_DISC: // bullet point "•"
+            if (buffer_size >= 4) {
                 buffer[0] = '\xE2';
                 buffer[1] = '\x80';
                 buffer[2] = '\xA2';
@@ -455,8 +569,8 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
             }
             return 0;
 
-        case 0x17E: // CSS_VALUE_CIRCLE (382) - white circle "◦"
-            if (buffer_size >= 4) {  // UTF-8 white circle is 3 bytes + null
+        case CSS_VALUE_CIRCLE: // white circle "◦"
+            if (buffer_size >= 4) {
                 buffer[0] = '\xE2';
                 buffer[1] = '\x97';
                 buffer[2] = '\xA6';
@@ -465,8 +579,8 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
             }
             return 0;
 
-        case 0x17F: // CSS_VALUE_SQUARE (383) - black square "▪"
-            if (buffer_size >= 4) {  // UTF-8 black square is 3 bytes + null
+        case CSS_VALUE_SQUARE: // black square "▪"
+            if (buffer_size >= 4) {
                 buffer[0] = '\xE2';
                 buffer[1] = '\x96';
                 buffer[2] = '\xAA';
@@ -475,21 +589,33 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
             }
             return 0;
 
-        case 0x0134: // CSS_VALUE_LOWER_ROMAN
+        case CSS_VALUE_LOWER_ROMAN:
             return int_to_lower_roman(value, buffer, buffer_size);
 
-        case 0x0136: // CSS_VALUE_UPPER_ROMAN
+        case CSS_VALUE_UPPER_ROMAN:
             return int_to_upper_roman(value, buffer, buffer_size);
 
-        case 0x012E: // CSS_VALUE_LOWER_ALPHA or LOWER_LATIN
-        case 0x012F: // CSS_VALUE_LOWER_LATIN
+        case CSS_VALUE_LOWER_ALPHA:
+        case CSS_VALUE_LOWER_LATIN:
             return int_to_lower_latin(value, buffer, buffer_size);
 
-        case 0x0135: // CSS_VALUE_UPPER_ALPHA or UPPER_LATIN
-        case 0x0137: // CSS_VALUE_UPPER_LATIN
+        case CSS_VALUE_UPPER_ALPHA:
+        case CSS_VALUE_UPPER_LATIN:
             return int_to_upper_latin(value, buffer, buffer_size);
 
-        case 0x00AA: // CSS_VALUE_DECIMAL (default)
+        case CSS_VALUE_DECIMAL_LEADING_ZERO:
+            return snprintf(buffer, buffer_size, "%02d", value);
+
+        case CSS_VALUE_LOWER_GREEK:
+            return int_to_lower_greek(value, buffer, buffer_size);
+
+        case CSS_VALUE_ARMENIAN:
+            return int_to_armenian(value, buffer, buffer_size);
+
+        case CSS_VALUE_GEORGIAN:
+            return int_to_georgian(value, buffer, buffer_size);
+
+        case CSS_VALUE_DECIMAL:
         default:
             return snprintf(buffer, buffer_size, "%d", value);
     }
