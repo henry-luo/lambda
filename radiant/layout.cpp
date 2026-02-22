@@ -1209,6 +1209,34 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // navigate DomNode tree to find body
     DomNode* body_node = nullptr;
     log_debug("Searching for body element in Lambda CSS document");
+
+    // CSS 2.1 §10.3.3: Apply root element margins to position and sizing.
+    // The HTML root element should be offset by its margins and its width
+    // reduced to viewport_width - margin_left - margin_right.
+    if (html->bound && html->bound->margin.left != 0) {
+        html->x = html->bound->margin.left;
+    }
+    if (html->bound && html->bound->margin.top != 0) {
+        html->y = html->bound->margin.top;
+        lycon->block.advance_y = html->bound->margin.top;
+    }
+    {
+        float margin_h = 0;
+        if (html->bound) margin_h = html->bound->margin.left + html->bound->margin.right;
+        if (margin_h > 0) {
+            float new_width = physical_width - margin_h;
+            html->width = new_width;
+            html->content_width = new_width;
+            lycon->block.content_width = new_width;
+            lycon->block.max_width = new_width;
+            lycon->block.given_width = new_width;
+            lycon->block.float_right_edge = new_width;
+            line_init(lycon, 0, new_width);
+            log_debug("[CSS] Root element margins: left=%.1f right=%.1f, width adjusted to %.1f",
+                      html->bound->margin.left, html->bound->margin.right, new_width);
+        }
+    }
+
     DomNode* child = nullptr;
     if (elmt->is_element()) {
         child = static_cast<DomElement*>(elmt)->first_child;

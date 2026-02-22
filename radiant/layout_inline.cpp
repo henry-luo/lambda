@@ -302,12 +302,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         child = static_cast<DomElement*>(elmt)->first_child;
     }
 
-    // CSS 2.1 §8.3: Inline elements' border-left/padding-left push content inward.
-    // Advance the inline cursor so child text/elements start inside the border+padding.
+    // CSS 2.1 §8.3: Inline elements' margin/border/padding push content inward.
+    // Advance the inline cursor so child text/elements start inside the margin+border+padding.
     // This applies to both normal inline content and block-in-inline splitting.
     float inline_left_edge = 0;
     float inline_right_edge = 0;
     if (span->bound) {
+        // CSS 2.1 §8.3: horizontal margins apply to inline elements
+        inline_left_edge += span->bound->margin.left;
+        inline_right_edge += span->bound->margin.right;
         if (span->bound->border) {
             inline_left_edge += span->bound->border->width.left;
             inline_right_edge += span->bound->border->width.right;
