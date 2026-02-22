@@ -156,6 +156,41 @@
      (define-values (auto-w auto-col-widths)
        (compute-table-auto-width all-rows styles avail-w avail layout-fn))
 
+     ;; CSS 2.2 §17.4: table wrapper width = max(table grid width, caption widths)
+     ;; Captions are block-level boxes that sit above/below the table grid.
+     ;; The table wrapper must be wide enough to contain both the grid and captions.
+     (define max-caption-w
+       (for/fold ([max-w 0]) ([g (in-list row-groups)])
+         (match g
+           [`(block ,_ ,s ,children)
+            (define disp (get-style-prop s 'display #f))
+            (if (eq? disp 'table-caption)
+                (let ()
+                  (define explicit-cap-w (get-style-prop s 'width #f))
+                  (define cap-bm (extract-box-model s (or avail-w 0)))
+                  (define cap-content-w
+                    (cond
+                      [(and explicit-cap-w (not (eq? explicit-cap-w 'auto)))
+                       (cond
+                         [(number? explicit-cap-w) explicit-cap-w]
+                         [(and (pair? explicit-cap-w) (eq? (car explicit-cap-w) 'px))
+                          (cadr explicit-cap-w)]
+                         [else 0])]
+                      [else
+                       ;; intrinsic: lay out with max-content
+                       (define cap-box
+                         `(block __cap-measure ,s
+                                 (,@(if (list? children) children '()))))
+                       (define cap-view
+                         (layout-fn cap-box `(avail av-max-content ,(caddr avail))))
+                       (view-width cap-view)]))
+                  (max max-w (compute-border-box-width cap-bm cap-content-w)))
+                max-w)]
+           [_ max-w])))
+
+     ;; table auto width includes both grid and caption widths
+     (define effective-auto-w (max auto-w max-caption-w))
+
      (define content-w
        (cond
          ;; Fixed layout with explicit width: use specified width as-is
@@ -164,9 +199,9 @@
          ;; Auto layout with explicit width: max(specified, content)
          [has-explicit-width?
           (let ([specified-w (if avail-w (resolve-block-width styles avail-w) 0)])
-            (max specified-w auto-w))]
+            (max specified-w effective-auto-w))]
          ;; No explicit width: compute from content
-         [else auto-w]))
+         [else effective-auto-w]))
 
      ;; Determine the number of data columns from the rows.
      ;; This is needed for column width sizing.
@@ -279,7 +314,10 @@
        (define disp (get-style-prop gs 'display #f))
        (define fv (get-style-prop gs 'float #f))
        (define is-float? (and fv (not (eq? fv 'float-none))))
-       (define caption-side-val (get-style-prop gs 'caption-side #f))
+       (define caption-side-val (or (get-style-prop gs 'caption-side #f)
+                                   ;; CSS 2.2 §17.4.1: caption-side is inherited;
+                                   ;; check table element's styles when not set on caption
+                                   (get-style-prop styles 'caption-side #f)))
        (cond
          [is-float? 0]             ; floats keep original position
          ;; CSS 2.2 §17.4.1: caption-side:bottom renders after tfoot
@@ -471,10 +509,14 @@
      (define content-h-from-children (max total-with-trailing-spacing max-float-bottom))
      (define containing-h (avail-height->number (caddr avail)))
      (define explicit-h (resolve-block-height styles containing-h avail-w))
-     (define final-h
+     (define raw-h
        (if explicit-h
            (max content-h-from-children explicit-h)
            content-h-from-children))
+     ;; CSS 2.1 §17: min-height/max-height apply to table elements
+     (define min-h (resolve-min-height styles containing-h))
+     (define max-h (resolve-max-height styles containing-h))
+     (define final-h (max min-h (min max-h raw-h)))
      (define total-row-count (length all-rows))
      (define extra-height (max 0 (- final-h content-h-from-children)))
 

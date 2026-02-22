@@ -358,11 +358,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_style = CSS_VALUE_ITALIC;
         break;
-    case HTM_TAG_CODE:  case HTM_TAG_KBD:  case HTM_TAG_SAMP:  case HTM_TAG_TT:
+    case HTM_TAG_CODE:  case HTM_TAG_KBD:  case HTM_TAG_SAMP:  case HTM_TAG_TT: {
         // monospace font family
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->family = (char*)"monospace";
+        // Browser quirk: monospace generic family uses 13px as default "medium" size
+        // instead of 16px. Apply ratio when transitioning from non-monospace parent.
+        bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
+            str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+        if (!parent_is_mono && span->font->font_size > 0) {
+            span->font->font_size = span->font->font_size * 13.0f / 16.0f;
+        }
         break;
+    }
     case HTM_TAG_MARK:
         // yellow background highlight - handled via background property on block
         // Note: InlineProp doesn't have bg_color; would need BackgroundProp
@@ -413,16 +421,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         span->font->text_deco = CSS_VALUE_UNDERLINE;
         break;
     // ========== Block elements ==========
-    case HTM_TAG_PRE:  case HTM_TAG_LISTING:  case HTM_TAG_XMP:
+    case HTM_TAG_PRE:  case HTM_TAG_LISTING:  case HTM_TAG_XMP: {
         // preformatted: monospace, preserve whitespace, margin 1em 0
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->family = (char*)"monospace";
+        // Browser quirk: monospace generic family uses 13px as default "medium" size
+        bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
+            str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+        if (!parent_is_mono && block->font->font_size > 0) {
+            block->font->font_size = block->font->font_size * 13.0f / 16.0f;
+        }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->white_space = CSS_VALUE_PRE;
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
+    }
     case HTM_TAG_BLOCKQUOTE:
         // margin: 1em 40px
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
