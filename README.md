@@ -270,6 +270,7 @@ for (row in csv) {
 | Document | Description |
 |----------|-------------|
 | [Developer Guide](doc/dev/Developer_Guide.md) | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
+| [C+ Coding Convention](doc/dev/C_Plus_Convention.md) | C/C++ coding convention: what C++ features are used vs. avoided, and why |
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md) | Runtime internals and architecture |
 
 ## Platform Support

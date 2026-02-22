@@ -115,6 +115,8 @@ Grammar source: `lambda/tree-sitter-lambda/grammar.js`. Enum mapping: `lambda/ts
 
 ## Coding Conventions
 
+Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible. See [`doc/dev/C_Plus_Convention.md`](../doc/dev/C_Plus_Convention.md) for details.
+
 - **Memory**: Use `pool_calloc()`, `arena_alloc()` for Lambda objects. Use `MarkBuilder`/`MarkReader` for constructing/reading Lambda data structures.
 - **Logging**: Use `log_debug()`/`log_info()`/`log_error()` from `lib/log.h` → outputs to `./log.txt`
 - **Naming**: `snake_case` for C/C++ functions, `PascalCase` for classes
