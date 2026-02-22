@@ -413,6 +413,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_float_intrusion = false;
     lycon->line.has_replaced_content = false;
     lycon->line.max_normal_line_height = 0;
+    lycon->line.last_text_rect = NULL;
+    lycon->line.trailing_space_width = 0;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
@@ -443,9 +445,17 @@ void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.has_float_intrusion = false;
     line_reset(lycon);
     lycon->line.vertical_align = CSS_VALUE_BASELINE;  // vertical-align does not inherit
+    lycon->line.vertical_align_offset = 0;
 }
 
 void line_break(LayoutContext* lycon) {
+    // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
+    // at the end of a line are removed. Trim the last text rect's width.
+    if (lycon->line.trailing_space_width > 0 && lycon->line.last_text_rect) {
+        lycon->line.last_text_rect->width -= lycon->line.trailing_space_width;
+        lycon->line.advance_x -= lycon->line.trailing_space_width;
+        lycon->line.trailing_space_width = 0;
+    }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
 
     if (lycon->line.max_ascender > lycon->block.init_ascender ||
@@ -496,6 +506,17 @@ void line_break(LayoutContext* lycon) {
     // Use max(css_line_height, font_line_height) to accommodate all inline content.
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
     float used_line_height;
+
+    // CSS 2.1 §10.8.1: FreeType rounds font metrics (ascender/descender) to integer
+    // pixels, which may inflate their sum beyond the normal line-height by 1-2px.
+    // When vertical-align offsets expand the line box, this rounding error propagates.
+    // Correct by subtracting the small excess from the base font metrics.
+    float base_metric_excess = (lycon->block.init_ascender + lycon->block.init_descender) - css_line_height;
+    if (base_metric_excess > 0 && base_metric_excess <= 2 && font_line_height > css_line_height + 2) {
+        font_line_height -= base_metric_excess;
+        // Recheck has_mixed_fonts after correction
+        has_mixed_fonts = (font_line_height > css_line_height + 2);
+    }
 
     if (has_mixed_fonts) {
         // Mixed content: expand to fit inline replaced elements (images, inline-blocks)
@@ -571,9 +592,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             }
             text_width += ginfo.advance_x;
         }
-        // Apply letter-spacing (but not after the last character)
+        // Apply letter-spacing between characters (not after last)
+        // CSS 2.1 §16.4: letter-spacing specifies inter-character space
         str++;
-        if (*str) {  // Not the last character
+        if (*str) {
             text_width += lycon->font.style->letter_spacing;
         }
         // Use effective_right which accounts for float intrusions
@@ -639,6 +661,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     lycon->line.advance_x += text_width;
+    lycon->line.last_text_rect = rect;  // track for trailing whitespace trimming
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     // When line-height is explicitly set, the inline box height equals line-height.
     // Leading = line-height - content_height is split half above and half below.
@@ -662,6 +685,14 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             float half_leading = (lycon->block.line_height - content_height) / 2.0f;
             ascender += half_leading;
             descender += half_leading;
+        }
+        // CSS 2.1 §10.8.1: vertical-align offset shifts the inline box position,
+        // which affects the line box height. A positive offset raises the box,
+        // increasing the effective ascender and decreasing the effective descender.
+        float va_offset = lycon->line.vertical_align_offset;
+        if (va_offset != 0) {
+            ascender += va_offset;
+            descender -= va_offset;
         }
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
@@ -876,6 +907,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     rect->width -= trailing_width;
                     log_debug("stripped trailing whitespace before newline: width reduced by %f", trailing_width);
                 }
+                // Trailing spaces already stripped here — don't double-subtract in line_break
+                lycon->line.trailing_space_width = 0;
             }
             // Output any text before the newline
             if (str > text_start + rect->start_index) {
@@ -899,8 +932,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             wd = lycon->font.style->space_width;
             // Apply word-spacing to space characters
             wd += lycon->font.style->word_spacing;
-            // Apply letter-spacing to spaces as well (but not if it's the last character)
-            if (str[1]) {  // Check if there's a next character
+            // Apply letter-spacing between characters (not after last)
+            if (str[1]) {
                 wd += lycon->font.style->letter_spacing;
             }
             is_word_start = true;  // Next non-space char is word start
@@ -940,10 +973,30 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                 wd = glyph ? (glyph->advance_x / pixel_ratio) : lycon->font.style->space_width;
+                // Track fallback font metrics for line-height computation
+                // When a glyph comes from a fallback font with taller metrics,
+                // update the line ascender/descender (but NOT the text rect height,
+                // which uses primary font metrics per browser behavior)
+                if (glyph && glyph->font_ascender > 0) {
+                    float fb_asc = glyph->font_ascender;
+                    float fb_desc = glyph->font_descender;
+                    if (!lycon->block.line_height_is_normal) {
+                        float content_height = fb_asc + fb_desc;
+                        float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+                        fb_asc += half_leading;
+                        fb_desc += half_leading;
+                    }
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, fb_asc);
+                    lycon->line.max_descender = max(lycon->line.max_descender, fb_desc);
+                    // Also track normal line-height from the fallback font for mixed-font lines
+                    if (lycon->block.line_height_is_normal && glyph->font_normal_line_height > 0) {
+                        lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
+                                                                  glyph->font_normal_line_height);
+                    }
+                }
             }
-            // Apply letter-spacing (add to character width)
-            // Note: letter-spacing is NOT applied after the last character (CSS spec)
-            // We'll check if next character exists before adding letter-spacing
+            // Apply letter-spacing between characters (not after last)
+            // CSS 2.1 §16.4: letter-spacing specifies inter-character space
             if (next_ch && *next_ch) {
                 wd += lycon->font.style->letter_spacing;
             }
@@ -982,6 +1035,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     str++;  // only skip the current space in pre-wrap mode
                 }
                 rect->width -= wd;  // minus away space width at line break
+                lycon->line.trailing_space_width = 0;  // already trimmed, don't double-subtract
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
                 line_break(lycon);
                 log_debug("after space line break");
@@ -1050,6 +1104,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
             lycon->line.has_space = true;
+            lycon->line.trailing_space_width = wd;  // CSS 2.1 §16.6.1: track for end-of-line trimming
         }
         else if (*str == '-') {
             // Hyphens are break opportunities (CSS allows breaking after hyphens)
@@ -1060,6 +1115,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space_is_hyphen = true;  // mark this as a hyphen break
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
+            lycon->line.trailing_space_width = 0;
         }
         else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character
@@ -1068,12 +1124,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             str = next_ch;
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
+            lycon->line.trailing_space_width = 0;
 
             // Track position for potential break (but don't set last_space)
             // CJK breaks happen before the next character, not after a separator
         }
         else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
+            lycon->line.trailing_space_width = 0;
         }
     } while (*str);
     // end of text
