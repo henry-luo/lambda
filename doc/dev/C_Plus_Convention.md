@@ -401,18 +401,17 @@ In practice, this means utility headers like `<type_traits>`, `<initializer_list
 
 ## Summary: What C++ Features Are Used vs. Avoided
 
-| **Used** | **Avoided** |
-|----------|-------------|
-| Inline member functions on structs | Virtual member functions / vtable |
-| Struct inheritance (layout extension) | Deep OOP class hierarchies |
-| Templates (utility only) | Generic / template metaprogramming |
-| `auto`, `constexpr` | `new` / `delete` |
-| Move semantics, `= delete` | Smart pointers (`shared_ptr`, `unique_ptr`) |
-| RAII destructors (stack-allocated) | `try` / `catch` / `throw` |
-| References (`&`) | RTTI (`dynamic_cast`, `typeid`) |
-| `initializer_list` | STL containers (`std::vector`, `std::string`, `std::map`) |
-| Namespaces (sparingly) | Operator overloading (sparingly) |
-| C++ `static_cast` | C++ streams (`iostream`, `cout`) |
+| **Used**                              | **Avoided**                                               |
+| ------------------------------------- | --------------------------------------------------------- |
+| Inline member functions on structs    | Virtual member functions / vtable                         |
+| Struct inheritance (layout extension) | Deep OOP class hierarchies                                |
+| Templates (utility only)              | Generic / template metaprogramming                        |
+| `auto`, `constexpr`                   | `new` / `delete`                                          |
+| RAII destructors (stack-allocated)    | `try` / `catch` / `throw`                                 |
+| References (`&`)                      | RTTI (`dynamic_cast`, `typeid`)                           |
+| `initializer_list`                    | STL containers (`std::vector`, `std::string`, `std::map`) |
+| Namespaces (sparingly)                | Operator overloading (sparingly)                          |
+| C++ `static_cast`                     | C++ streams (`iostream`, `cout`)                          |
 
 ---
 
