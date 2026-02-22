@@ -105,8 +105,7 @@ static void format_jsx_attributes(StringBuf* sb, const ElementReader& elem) {
                 }
             }
 
-            stringbuf_append_char(sb, ' ');
-            stringbuf_append_str(sb, attr_name);
+            stringbuf_append_format(sb, " %s", attr_name);
 
             void* data = ((char*)raw->data) + field->byte_offset;
 
@@ -152,8 +151,7 @@ static void format_jsx_element(StringBuf* sb, const ElementReader& elem) {
     if (try_format_js_expr(sb, elem)) return;
 
     // Regular JSX element
-    stringbuf_append_char(sb, '<');
-    stringbuf_append_str(sb, tag);
+    stringbuf_append_format(sb, "<%s", tag);
 
     format_jsx_attributes(sb, elem);
 
@@ -174,9 +172,7 @@ static void format_jsx_element(StringBuf* sb, const ElementReader& elem) {
         format_jsx_item(sb, elem.childAt(i));
 
     // Closing tag
-    stringbuf_append_str(sb, "</");
-    stringbuf_append_str(sb, tag);
-    stringbuf_append_char(sb, '>');
+    stringbuf_append_format(sb, "</%s>", tag);
 }
 
 // ---------------------------------------------------------------------------

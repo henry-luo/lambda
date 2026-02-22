@@ -81,8 +81,7 @@ static void format_map_attributes(XmlContext& ctx, const MapReader& map_reader) 
     while (iter.next(&key, &value)) {
         // Only output simple types as attributes
         if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
-            stringbuf_append_char(ctx.output(), ' ');
-            stringbuf_append_format(ctx.output(), "%s=\"", key);
+            stringbuf_append_format(ctx.output(), " %s=\"", key);
 
             if (value.isString()) {
                 String* str = value.asString();
@@ -135,8 +134,7 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
 
     if (!tag_name) tag_name = "object";
 
-    stringbuf_append_char(ctx.output(), '<');
-    stringbuf_append_str(ctx.output(), tag_name);
+    stringbuf_append_format(ctx.output(), "<%s", tag_name);
 
     // Add simple types as attributes for better XML structure
     format_map_attributes(ctx, map_reader);
@@ -159,9 +157,7 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
         // Add complex types as child elements
         format_map_elements(ctx, map_reader);
 
-        stringbuf_append_str(ctx.output(), "</");
-        stringbuf_append_str(ctx.output(), tag_name);
-        stringbuf_append_char(ctx.output(), '>');
+        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
     } else {
         // Self-closing tag if no children
         stringbuf_append_str(ctx.output(), "/>");
@@ -248,8 +244,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 if (child.isString()) {
                     String* str = child.asString();
                     if (str) {
-                        stringbuf_append_char(ctx.output(), ' ');
-                        stringbuf_append_str(ctx.output(), str->chars);
+                        stringbuf_append_format(ctx.output(), " %s", str->chars);
                     }
                 }
             }
@@ -258,8 +253,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             return; // Early return for XML declaration
         }
 
-        stringbuf_append_char(ctx.output(), '<');
-        stringbuf_append_str(ctx.output(), elem_name);
+        stringbuf_append_format(ctx.output(), "<%s", elem_name);
 
         // Handle attributes
         if (elem.attrCount() > 0) {
@@ -272,9 +266,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 const char* key = field->name->str;
                 ItemReader value = elem.get_attr(key);
 
-                stringbuf_append_char(ctx.output(), ' ');
-                stringbuf_append_str(ctx.output(), key);
-                stringbuf_append_str(ctx.output(), "=\"");
+                stringbuf_append_format(ctx.output(), " %s=\"", key);
 
                 if (value.isString()) {
                     String* str = value.asString();
@@ -313,9 +305,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                     // Symbol items (named entities) - output as &name;
                     Symbol* sym = child.asSymbol();
                     if (sym && sym->chars) {
-                        stringbuf_append_char(ctx.output(), '&');
-                        stringbuf_append_str(ctx.output(), sym->chars);
-                        stringbuf_append_char(ctx.output(), ';');
+                        stringbuf_append_format(ctx.output(), "&%s;", sym->chars);
                     }
                 } else if (child.isArray()) {
                     // flatten array children: render each item directly
@@ -333,9 +323,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             }
         }
 
-        stringbuf_append_str(ctx.output(), "</");
-        stringbuf_append_str(ctx.output(), elem_name);
-        stringbuf_append_char(ctx.output(), '>');
+        stringbuf_append_format(ctx.output(), "</%s>", elem_name);
     }
     else {
         // Unknown type or null

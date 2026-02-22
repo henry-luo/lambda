@@ -614,30 +614,23 @@ TEST_F(MarkupRoundtripTest, DISABLED_TextileRoundtripTest) {
 TEST_F(MarkupRoundtripTest, BasicTextileTest) {
     printf("\n=== Testing Basic Textile Formatting ===\n");
 
-    // Create a simple doc structure manually to test the formatter
-    // This bypasses the Textile parser which may have performance issues
-    const char* json_input = 
-        "{\"$\":\"doc\",\"version\":\"1.0\",\"_\":["
-        "{\"$\":\"body\",\"_\":["
-        "{\"$\":\"h1\",\"level\":\"1\",\"_\":[\"Main Heading\"]},"
-        "{\"$\":\"p\",\"_\":[\"This is a paragraph.\"]}"
-        "]}"
-        "]}";
+    // Parse markdown to get a proper Element tree (doc > body > h1, p)
+    // Note: JSON parsing creates Maps, not Elements, so we parse markdown instead.
+    const char* markdown_input = "# Main Heading\n\nThis is a paragraph.\n";
 
-    // Create Lambda strings for JSON input
-    String* type_str = create_lambda_string("json");
+    String* type_str = create_lambda_string("markup");
     String* flavor_str = NULL;
 
     // Get current directory for URL resolution
     Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.json");
+    Url* dummy_url = parse_url(cwd, "test.md");
 
     // Make a copy since input_from_source may modify the content
-    char* json_copy = strdup(json_input);
+    char* content_copy = strdup(markdown_input);
 
-    // Parse JSON
-    printf("DEBUG: Parsing JSON input...\n");
-    Input* input = input_from_source(json_copy, dummy_url, type_str, flavor_str);
+    // Parse markdown
+    printf("DEBUG: Parsing markdown input...\n");
+    Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
     ASSERT_NE(input, nullptr) << "Failed to parse JSON content";
 
     // Format to Textile
@@ -667,5 +660,5 @@ TEST_F(MarkupRoundtripTest, BasicTextileTest) {
     }
 
     // Cleanup
-    free(json_copy);
+    free(content_copy);
 }
