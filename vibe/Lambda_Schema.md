@@ -1,6 +1,6 @@
 # Lambda Schema Validation Capabilities Analysis
 
-**Date:** November 14, 2025
+**Date:** November 14, 2025 (Updated: February 22, 2026)
 **Purpose:** Document what validation constraints can be expressed in current Lambda schema syntax
 **Part of:** Validator Enhancement Plan Phase 1.1
 
@@ -10,7 +10,7 @@
 
 Lambda's current schema system already supports powerful validation constraints through its type syntax. This document analyzes what validation patterns are expressible today, eliminating the need for separate schema metadata structures.
 
-**Key Finding:** Lambda's Type AST structures (Type*, TypeUnary, TypeMap, TypeArray, etc.) already capture most validation constraints through occurrence operators, type unions, and structured types.
+**Key Finding:** Lambda's Type AST structures (Type*, TypeUnary, TypeMap, TypeArray, etc.) already capture most validation constraints through occurrence operators, type unions, structured types, and constrained types with the `that` keyword.
 
 ---
 
@@ -28,6 +28,11 @@ type Active = bool
 // Container types
 type Tags = [string*]        // Array of strings
 type Config = {string: int}  // Map type
+
+// Constrained types (value constraints)
+type Age = int that (~ >= 0 and ~ <= 150)
+type Port = int that (~ >= 1 and ~ <= 65535)
+type NonEmptyString = string that (len(~) > 0)
 ```
 
 ### Occurrence Operators (Already Supported)
@@ -315,6 +320,8 @@ type SpanAttrs = BaseAttrs & {
 | Element attributes | `<elmt attr: Type>` | ✅ Works |
 | Element content | `<elmt; Content*>` | ✅ Works |
 | Type intersections | `Type1 & Type2` | ✅ Works |
+| Value constraints | `Type that (pred)` | ✅ Works |
+| Cross-field deps | `{...} that (~.a > ~.b)` | ✅ Works |
 
 ### ⚠️ Needs Enhancement
 
@@ -328,44 +335,133 @@ type SpanAttrs = BaseAttrs & {
 
 ---
 
-## What's NOT Expressible (Future Extensions)
+## Constrained Types (`that` keyword)
 
-These constraints require Lambda schema syntax extensions:
+Lambda supports **constrained types** using the `that` keyword with `~` as the self-reference to the value being validated. This enables value constraints, string length checks, and cross-field dependencies.
+
+### Syntax
+
+```lambda
+Type that (constraint_expression)
+```
+
+- `~` refers to the current value being tested
+- `~.field` accesses a field on the current value (for cross-field dependencies)
+- `~#` refers to the current index/key (in iteration contexts)
+- Parentheses around the constraint expression are required
 
 ### 1. Value Constraints
 
-**Needed Syntax:**
+**Current Syntax:** ✅ **Supported**
+
 ```lambda
 // Range constraints
-type Age = int where value >= 0 && value <= 150
-type Port = int where value in 1 to 65535
+type Age = int that (~ >= 0 and ~ <= 150)
+type Port = int that (~ >= 1 and ~ <= 65535)
 
-// String patterns
-type Email = string where matches /^[^@]+@[^@]+\.[^@]+$/
-type Phone = string where matches /^\d{3}-\d{3}-\d{4}$/
+// Chained comparison (concise range)
+type between5and10 = int that (5 < ~ < 10)
+type Grade = int that (0 <= ~ <= 100)
 
-// Enum values
-type Status = "active" | "inactive" | "pending"  // ✅ Already works via unions
-type Priority = int where value in [1, 2, 3, 4, 5]  // ❌ Needs extension
+// String length constraints
+type NonEmptyString = string that (len(~) > 0)
+type ShortString = string that (len(~) <= 5)
+
+// Enum values (via unions - no constraint needed)
+type Status = "active" | "inactive" | "pending"
+```
+
+**Usage with `is` operator:**
+```lambda
+(25 is Age)       // true
+(200 is Age)      // false
+(-1 is Age)       // false
+
+(80 is Port)      // true
+(0 is Port)       // false
+
+("hello" is NonEmptyString)  // true
+("" is NonEmptyString)       // false
+```
+
+**Usage in `match` expressions:**
+```lambda
+fn grade(score) => match score {
+    case int that (90 <= ~ <= 100): "A"
+    case int that (80 <= ~ < 90):  "B"
+    case int that (70 <= ~ < 80):  "C"
+    case int that (60 <= ~ < 70):  "D"
+    case int that (0 <= ~ < 60):   "F"
+    default: "invalid"
+}
+
+grade(95)   // "A"
+grade(55)   // "F"
+grade(-5)   // "invalid"
+```
+
+**Type AST Representation:**
+```cpp
+TypeConstrained {
+    kind: TYPE_KIND_CONSTRAINED,
+    base: Type{LMD_TYPE_INT},           // base type
+    constraint: AstNode{...},            // constraint expression AST
+    constraint_fn: compiled_check_fn     // JIT-compiled constraint checker
+}
 ```
 
 ### 2. Cross-Field Dependencies
 
-**Needed Syntax:**
-```lambda
-type DateRange = {
-    start: datetime,
-    end: datetime
-} where end > start
+**Current Syntax:** ✅ **Supported**
 
-type Dimensions = {
+```lambda
+// End must be after start
+type DateRange = {
+    start: int,
+    end: int
+} that (~.end > ~.start)
+
+// Area must equal width * height
+type ValidRect = {
     width: int,
     height: int,
     area: int
-} where area == width * height
+} that (~.area == ~.width * ~.height)
 ```
 
-### 3. Open Types (Additional Fields)
+**Usage with `is` operator:**
+```lambda
+({start: 1, end: 5} is DateRange)     // true
+({start: 5, end: 1} is DateRange)     // false
+
+({width: 3, height: 4, area: 12} is ValidRect)  // true
+({width: 3, height: 4, area: 10} is ValidRect)  // false
+```
+
+**Usage in `match` expressions:**
+```lambda
+fn check_range(r) => match r {
+    case {start: int, end: int} that (~.end > ~.start): "valid range"
+    default: "invalid range"
+}
+
+check_range({start: 1, end: 10})   // "valid range"
+check_range({start: 10, end: 1})   // "invalid range"
+```
+
+**How It Works:**
+- The base type (map shape) is validated first (all fields must exist and match types)
+- Then `~` is bound to the entire map value
+- `~.field` accesses fields for cross-field comparisons
+- The constraint expression is evaluated; the type matches only if it returns truthy
+
+---
+
+## What's NOT Expressible (Future Extensions)
+
+These constraints require Lambda schema syntax extensions:
+
+### 1. Open Types (Additional Fields)
 
 **Needed Syntax:**
 ```lambda
@@ -383,17 +479,17 @@ type OpenDocument = {
 }
 ```
 
-### 4. Field Count Constraints
+### 2. Field Count Constraints
 
 **Needed Syntax:**
 ```lambda
 type SmallConfig = {
     ...fields
-} where field_count <= 10
+} that (count(~) <= 10)
 
 type RequiredKeys = {
     ...fields
-} where field_count >= 3
+} that (count(~) >= 3)
 ```
 
 ---
@@ -498,22 +594,31 @@ type EventProperties = CommonProperties & {
 
 ## References
 
-- **Lambda Grammar:** `lambda/tree-sitter-lambda/grammar.js` - Defines occurrence operators
-- **Type Structures:** `lambda/lambda-data.hpp` - Type*, TypeUnary, TypeMap, etc.
+- **Lambda Grammar:** `lambda/tree-sitter-lambda/grammar.js` - Defines occurrence operators and constrained types
+- **Type Structures:** `lambda/lambda-data.hpp` - Type*, TypeUnary, TypeMap, TypeConstrained, etc.
 - **Validator Logic:** `lambda/validate.cpp` - Current validation implementation
-- **Test Cases:** `test/lambda/validator/` - Occurrence and type tests
+- **Constrained Types:** `lambda/build_ast.cpp` - AST building for `that` constraints
+- **JIT Evaluation:** `lambda/transpile-mir.cpp` - Constraint evaluation in `is` and `match`
+- **Test Cases:** `test/lambda/validator/` - Occurrence and type tests, `test/lambda/constrained_type.ls` - Constraint tests
 - **Example Schemas:** `lambda/input/doc_schema.ls`, `eml_schema.ls`, `ics_schema.ls`
 
 ---
 
 ## Conclusion
 
-Lambda's current schema system is **powerful and complete** for expressing most validation constraints through:
+Lambda's current schema system is **powerful and complete** for expressing validation constraints through:
 
 1. **Occurrence operators** (`?`, `+`, `*`) for cardinality
 2. **Type unions** (`|`) for alternatives
 3. **Type intersections** (`&`) for composition
 4. **Nested structures** for complex documents
+5. **Constrained types** (`that`) for value constraints and cross-field dependencies
+
+The `that` keyword with `~` self-reference enables:
+- **Range validation**: `int that (~ >= 0 and ~ <= 150)`
+- **String constraints**: `string that (len(~) > 0)`
+- **Cross-field checks**: `{...} that (~.end > ~.start)`
+- **Pattern matching**: `match x { case int that (~ > 0): ... }`
 
 **No new type structures needed** - validation enhancements will work with existing Type AST.
 
@@ -523,7 +628,7 @@ The enhancement plan focuses on:
 - Format-specific handling (XML unwrapping, HTML quirks)
 - Better error reporting (suggestions, paths, context)
 
-Future schema syntax extensions (value constraints, open types, etc.) are deferred to separate design discussions.
+Future schema syntax extensions (open types, etc.) are deferred to separate design discussions.
 
 ---
 
