@@ -15,9 +15,23 @@ extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool 
 void compute_span_bounding_box(ViewSpan* span) {
     View* child = span->first_child;
     if (!child) {
-        // If no child views, keep current position and zero size
-        span->width = 0;
-        span->height = 0;
+        // Empty inline element - size includes border and padding per CSS 2.1 §8.1
+        float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
+        float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
+        if (span->bound) {
+            if (span->bound->border) {
+                border_left = span->bound->border->width.left;
+                border_right = span->bound->border->width.right;
+                border_top = span->bound->border->width.top;
+                border_bottom = span->bound->border->width.bottom;
+            }
+            pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
+            pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
+            pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
+            pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+        }
+        span->width = (int)(border_left + pad_left + pad_right + border_right);
+        span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
         return;
     }
 
@@ -241,6 +255,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // save parent context
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
     CssEnum pa_line_align = lycon->line.vertical_align;
+    float pa_valign_offset = lycon->line.vertical_align_offset;
     lycon->elmt = elmt;
 
     ViewSpan* span = (ViewSpan*)set_view(lycon, RDT_VIEW_INLINE, elmt);
@@ -293,6 +308,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     if (span->in_line && span->in_line->vertical_align) {
         lycon->line.vertical_align = span->in_line->vertical_align;
+        lycon->line.vertical_align_offset = span->in_line->vertical_align_offset;
     }
     // line.max_ascender and max_descender to be changed only when there's output from the span
 
@@ -390,6 +406,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
+    lycon->line.vertical_align_offset = pa_valign_offset;
     log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
 }
