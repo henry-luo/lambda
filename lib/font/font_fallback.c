@@ -14,6 +14,7 @@
 
 #include "font_internal.h"
 #include "../str.h"
+#include "../memtrack.h"
 
 // ============================================================================
 // Generic CSS family → concrete font name lists
@@ -205,6 +206,28 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 }
                 if (handle) font_handle_release(handle);
             }
+        }
+    }
+
+    // platform-specific codepoint lookup (macOS: CoreText CTFontCreateForString)
+    {
+        int face_index = 0;
+        char* font_path = font_platform_find_codepoint_font(codepoint, &face_index);
+        if (font_path) {
+            FontHandle* handle = font_load_face_internal(
+                ctx, font_path, face_index,
+                style->size_px, physical_size,
+                style->weight, style->slant);
+            mem_free(font_path);
+            if (handle && font_has_codepoint(handle, codepoint)) {
+                // cache positive result
+                CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
+                font_handle_retain(handle);
+                hashmap_set(cache, &entry);
+                log_debug("font_fallback: codepoint U+%04X → platform font", codepoint);
+                return handle;
+            }
+            if (handle) font_handle_release(handle);
         }
     }
 

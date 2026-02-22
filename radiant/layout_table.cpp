@@ -268,9 +268,22 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewBlock* element) {
 
 // Check if a table cell is empty (has no content)
 // CSS 2.1 Section 17.6.1: A cell is empty if it contains no in-flow content
-// (text nodes with only whitespace are considered empty, but replaced elements are content)
+// (text nodes with only whitespace are considered empty when whitespace collapses,
+// but if white-space preserves whitespace (pre, pre-wrap, etc.), the cell is NOT empty)
 static bool is_cell_empty(ViewTableCell* cell) {
     DomNode* child = ((DomElement*)cell)->first_child;
+
+    // Check if whitespace is preserved for this cell (CSS 2.1 §17.6.1.1)
+    bool ws_preserved = false;
+    DomElement* elem = ((DomElement*)cell);
+    if (elem->blk && elem->blk->white_space != 0) {
+        CssEnum ws = elem->blk->white_space;
+        if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+            ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES) {
+            ws_preserved = true;
+        }
+    }
+
     while (child) {
         if (child->is_element()) {
             // Element child = has content (not empty)
@@ -283,6 +296,10 @@ static bool is_cell_empty(ViewTableCell* cell) {
             //                    em space (U+2003), thin space (U+2009), zero-width space (U+200B), etc.
             const char* text = ((DomText*)child)->text;
             if (text) {
+                // If white-space preserves whitespace, any text content = not empty
+                if (ws_preserved && strlen(text) > 0) {
+                    return false;
+                }
                 const unsigned char* p = (const unsigned char*)text;
                 const unsigned char* p_end = p + strlen(text);
                 while (p < p_end) {
@@ -916,9 +933,17 @@ static uint8_t get_border_style_priority(CssEnum style) {
 
 // Select winner between two borders according to CSS 2.1 rules
 static CollapsedBorder select_winning_border(const CollapsedBorder& a, const CollapsedBorder& b) {
-    // Rule 1: hidden wins
-    if (a.style == CSS_VALUE_HIDDEN) return a;
-    if (b.style == CSS_VALUE_HIDDEN) return b;
+    // Rule 1: hidden wins — used width is 0 per CSS 2.1 §17.6.2.1
+    if (a.style == CSS_VALUE_HIDDEN) {
+        CollapsedBorder result = a;
+        result.width = 0;
+        return result;
+    }
+    if (b.style == CSS_VALUE_HIDDEN) {
+        CollapsedBorder result = b;
+        result.width = 0;
+        return result;
+    }
 
     // Rule 2: none loses (skip if both none)
     if (a.style == CSS_VALUE_NONE && b.style == CSS_VALUE_NONE) return a;
@@ -4601,15 +4626,26 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // but we need the width after border/padding only, before spacing)
     int explicit_content_area = explicit_table_width;
     if (explicit_table_width > 0) {
-        // Subtract table border
-        if (table->bound && table->bound->border) {
-            explicit_content_area -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+        if (table->tb->border_collapse) {
+            // Border-collapse: CSS width is border-box including half of outer collapsed borders.
+            // Subtract half of collapsed outer borders to get content area.
+            // Note: padding is ignored in border-collapse per CSS 2.1 §17.6.2
+            float half_left = meta->collapsed_border_left / 2.0f;
+            float half_right = meta->collapsed_border_right / 2.0f;
+            explicit_content_area -= (int)(half_left + half_right + 0.5f);
+            log_debug("Explicit content area (border-collapse, half borders %.1f+%.1f): %dpx",
+                      half_left, half_right, explicit_content_area);
+        } else {
+            // Subtract table border
+            if (table->bound && table->bound->border) {
+                explicit_content_area -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+            }
+            // Subtract table padding
+            if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+                explicit_content_area -= table->bound->padding.left + table->bound->padding.right;
+            }
+            log_debug("Explicit content area (after border/padding): %dpx", explicit_content_area);
         }
-        // Subtract table padding
-        if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
-            explicit_content_area -= table->bound->padding.left + table->bound->padding.right;
-        }
-        log_debug("Explicit content area (after border/padding): %dpx", explicit_content_area);
     }
 
     int used_table_width;
@@ -4625,6 +4661,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Calculate available content width for column distribution
     int available_content_width = used_table_width - border_spacing_total;
+
+    // In border-collapse mode, cell half-borders consume space within the content area.
+    // Subtract total cell half-border widths so column content widths don't overflow.
+    float total_cell_half_borders = 0.0f;
+    if (table->tb->border_collapse && explicit_table_width > 0) {
+        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+            for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+                float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
+                float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
+                total_cell_half_borders += half_left + half_right;
+            }
+            break; // Only first row (all rows have same column structure)
+        }
+        available_content_width -= (int)(total_cell_half_borders + 0.5f);
+        log_debug("Border-collapse: available_content adjusted for cell half-borders (%.1fpx): %dpx",
+                  total_cell_half_borders, available_content_width);
+    }
 
     // Check for equal distribution case (CSS behavior for similar columns)
     bool use_equal_distribution = true;
@@ -5205,9 +5258,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Position tbody based on border-collapse mode
             if (table->tb->border_collapse) {
-                // Border-collapse: tbody starts at half the table border width horizontally,
-                // but vertically uses current_y to stack row groups properly
-                child->x = 1.5f; // Half of table border width (3px / 2)
+                // Border-collapse: tbody starts at half the outer collapsed border
+                child->x = meta->collapsed_border_left / 2.0f;
                 child->y = (float)current_y; // Use current_y to stack row groups
                 child->width = (float)tbody_content_width;
             } else {
