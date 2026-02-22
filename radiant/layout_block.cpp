@@ -628,9 +628,34 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             lycon->block.advance_y, block->content_height);
     }
 
+    // CSS 2.1 §12.5: List-items with visible markers generate at least one line box,
+    // even when the list-item has no content. Default list-style-type is 'disc',
+    // so all list-items get minimum height unless explicitly set to 'none'.
+    if (block->view_type == RDT_VIEW_LIST_ITEM && flow_height == 0) {
+        bool has_marker = true;
+        if (block->blk && block->blk->list_style_type == CSS_VALUE_NONE) {
+            has_marker = false;
+        }
+        if (has_marker) {
+            float min_line_height = lycon->block.line_height;
+            if (min_line_height <= 0) min_line_height = lycon->font.current_font_size > 0 ? lycon->font.current_font_size * 1.2f : 18.0f;
+            flow_height = min_line_height;
+            block->content_height = min_line_height;
+            log_debug("list-item: empty content, setting min height from marker line-height: %.1f", min_line_height);
+        }
+    }
+
     log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
-        block->width = min(flow_width, block->width);
+        // CSS 2.1 §10.3.9: shrink-to-fit width cannot be less than border+padding
+        float min_bp_width = 0;
+        if (block->bound) {
+            min_bp_width = block->bound->padding.left + block->bound->padding.right;
+            if (block->bound->border) {
+                min_bp_width += block->bound->border->width.left + block->bound->border->width.right;
+            }
+        }
+        block->width = min(max(flow_width, min_bp_width), block->width);
         log_debug("inline-block final width set to: %f, text_align=%d", block->width, lycon->block.text_align);
 
         // For inline-block with auto width and text-align:center/right,
@@ -710,6 +735,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             block->height = block_given_height;
             log_debug("finalize: set block->height from given_height: %.1f", block_given_height);
         }
+        // Apply min-height/max-height constraints to explicit height (CSS 2.1 §10.7)
+        block->height = adjust_min_max_height(block, block->height);
         if (flow_height > block->height) { // vt overflow
             if (!block->scroller) {
                 block->scroller = alloc_scroll_prop(lycon);
@@ -1865,6 +1892,48 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 
+// CSS 2.1 §8.3.1: Check if an in-flow block can be considered self-collapsing
+// for margin collapse purposes. A block is self-collapsing when it has:
+// - zero height, no border, no padding
+// - no line boxes (text/inline content) in itself or any descendant blocks
+// - all in-flow children are also self-collapsing
+// This allows margins to collapse "through" the element via the margin chain.
+static bool is_block_self_collapsing(ViewBlock* vb) {
+    if (vb->height > 0) return false;
+    // Tables and table internals are never self-collapsing (CSS 2.1 §17)
+    if (vb->view_type == RDT_VIEW_TABLE || vb->view_type == RDT_VIEW_TABLE_ROW ||
+        vb->view_type == RDT_VIEW_TABLE_ROW_GROUP || vb->view_type == RDT_VIEW_TABLE_CELL) return false;
+    float bt = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
+    float bb = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
+    float pt = vb->bound ? vb->bound->padding.top : 0;
+    float pb = vb->bound ? vb->bound->padding.bottom : 0;
+    if (bt > 0 || bb > 0 || pt > 0 || pb > 0) return false;
+    // BFC roots and floats don't self-collapse
+    bool creates_bfc = vb->scroller &&
+        (vb->scroller->overflow_x != CSS_VALUE_VISIBLE ||
+         vb->scroller->overflow_y != CSS_VALUE_VISIBLE);
+    if (creates_bfc) return false;
+    if (vb->position && element_has_float(vb)) return false;
+    // Check children recursively: text/inline = line boxes = not self-collapsing
+    View* child = ((ViewElement*)vb)->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* cvb = (ViewBlock*)child;
+            bool is_out_of_flow = (cvb->position && element_has_float(cvb)) ||
+                (cvb->position && (cvb->position->position == CSS_VALUE_ABSOLUTE ||
+                                   cvb->position->position == CSS_VALUE_FIXED));
+            if (!is_out_of_flow && !is_block_self_collapsing(cvb)) return false;
+        } else {
+            // text, inline, span = line boxes
+            return false;
+        }
+        View* next = (View*)child->next_sibling;
+        while (next && !next->view_type) next = (View*)next->next_sibling;
+        child = next;
+    }
+    return true;
+}
+
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
@@ -2494,13 +2563,32 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // This applies when block->bound is NULL (no border/padding/margin) OR
     // when block->bound exists but has no bottom border/padding
     // IMPORTANT: Elements that establish a BFC do NOT collapse margins with their children
+    // CSS 2.1 §8.3.1: Bottom margin of parent collapses with last child's bottom margin
+    // ONLY when parent has 'auto' computed height (not explicit height)
+    // Also requires min-height to be zero for the collapse to happen
     bool has_border_bottom = block->bound && block->bound->border && block->bound->border->width.bottom > 0;
     bool has_padding_bottom = block->bound && block->bound->padding.bottom > 0;
     bool creates_bfc_for_collapse = block->scroller &&
                        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
                         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
+    // Floats and absolutely positioned elements also establish BFC (CSS 2.2 §9.4.1)
+    if (!creates_bfc_for_collapse && block->position) {
+        if (element_has_float(block) ||
+            block->position->position == CSS_VALUE_ABSOLUTE ||
+            block->position->position == CSS_VALUE_FIXED) {
+            creates_bfc_for_collapse = true;
+        }
+    }
+    // Inline-blocks also establish BFC
+    if (!creates_bfc_for_collapse && block->view_type == RDT_VIEW_INLINE_BLOCK) {
+        creates_bfc_for_collapse = true;
+    }
+    // CSS 2.1 §8.3.1: Bottom margins only collapse when parent has auto computed height
+    // Note: min-height does NOT prevent bottom margin collapse (only explicit height does)
+    bool has_explicit_height = (block->blk && block->blk->given_height >= 0);
 
-    if (!has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse && block->first_child) {
+    if (!has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse &&
+        !has_explicit_height && block->first_child) {
         // collapse bottom margin with last in-flow child block
         // Skip absolutely positioned and floated children - they're out of normal flow
         // Find last in-flow child (skip abs-positioned, floated elements, and empty zero-height blocks)
@@ -2531,50 +2619,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         // Skip empty zero-height blocks at the end - margins collapse "through" them
         // Find the effective last child whose margin-bottom should collapse with parent
-        // CSS 2.2 Section 8.3.1: Margins collapse through an element only if it has no:
-        // - min-height (> 0), borders, padding, inline content, or block formatting context
+        // CSS 2.2 Section 8.3.1: Margins collapse through self-collapsing blocks
+        // (no height, no border/padding, no line boxes in self or descendants)
         View* effective_last = last_in_flow;
         while (effective_last && effective_last->is_block()) {
             ViewBlock* vb = (ViewBlock*)effective_last;
-            // Check if this is an empty zero-height block that allows collapse-through
-            // Must have: zero height, no borders, no padding, no margin, AND no in-flow content
-            // Note: absolutely positioned children don't count as in-flow content
-            bool has_in_flow_children = false;
-            if (vb->first_child) {
-                View* child_of_vb = (View*)vb->first_child;
-                while (child_of_vb) {
-                    if (child_of_vb->view_type && child_of_vb->is_block()) {
-                        ViewBlock* child_block = (ViewBlock*)child_of_vb;
-                        bool is_child_out_of_flow = (child_block->position &&
-                            (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                             child_block->position->position == CSS_VALUE_FIXED ||
-                             element_has_float(child_block)));
-                        if (!is_child_out_of_flow) {
-                            has_in_flow_children = true;
-                            break;
-                        }
-                    } else if (child_of_vb->view_type) {
-                        // non-block children (like text) are in-flow
-                        has_in_flow_children = true;
-                        break;
-                    }
-                    child_of_vb = (View*)child_of_vb->next_sibling;
-                }
-            }
-
-            if (vb->height == 0 && !has_in_flow_children) {
-                float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
-                float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
-                float padding_top = vb->bound ? vb->bound->padding.top : 0;
-                float padding_bottom = vb->bound ? vb->bound->padding.bottom : 0;
-                float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
-                if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0 && margin_bottom == 0) {
-                    // This empty block allows margins to collapse through - look at previous sibling
-                    log_debug("skipping empty zero-height block (only out-of-flow children) for bottom margin collapsing");
-                    View* prev = effective_last->prev_placed_view();
-                    effective_last = prev;
-                    continue;
-                }
+            float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
+            if (margin_bottom == 0 && is_block_self_collapsing(vb)) {
+                log_debug("skipping self-collapsing block for bottom margin collapsing");
+                View* prev = effective_last->prev_placed_view();
+                effective_last = prev;
+                continue;
             }
             break;
         }
@@ -3255,6 +3310,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         bool parent_creates_bfc = parent && parent->scroller &&
                             (parent->scroller->overflow_x != CSS_VALUE_VISIBLE ||
                              parent->scroller->overflow_y != CSS_VALUE_VISIBLE);
+                        // CSS 2.1 §9.4.1: Absolutely/fixed positioned elements also establish BFC
+                        if (!parent_creates_bfc && parent && parent->position &&
+                            (parent->position->position == CSS_VALUE_ABSOLUTE ||
+                             parent->position->position == CSS_VALUE_FIXED)) {
+                            parent_creates_bfc = true;
+                        }
+                        // Inline-blocks also establish BFC
+                        if (!parent_creates_bfc && parent &&
+                            parent->view_type == RDT_VIEW_INLINE_BLOCK) {
+                            parent_creates_bfc = true;
+                        }
                         // parent has top margin, but no border, no padding;  parent->parent to exclude html
                         // Also: no margin collapsing if parent creates BFC
                         // If parent->bound is NULL, parent has no margin/border/padding - margins collapse through
@@ -3364,58 +3430,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
 
                 // CSS 2.2 Section 8.3.1: Self-collapsing blocks
-                // A block is "self-collapsing" when its top and bottom margins are adjoining:
-                // - height is 0 (no content height)
-                // - no top/bottom border or padding
-                // - does not establish a new BFC (overflow is visible)
-                // - not a float or absolutely positioned
-                // - no in-flow children (no inline content, no in-flow block children)
-                // For self-collapsing blocks, margin-top and margin-bottom collapse into
-                // max(margin-top, margin-bottom), and this collapsed margin then participates
-                // in collapsing with adjacent siblings' margins.
-                bool is_self_collapsing = false;
-                if (block->height == 0) {
-                    float bt = block->bound->border ? block->bound->border->width.top : 0;
-                    float bb = block->bound->border ? block->bound->border->width.bottom : 0;
-                    float pt = block->bound->padding.top;
-                    float pb = block->bound->padding.bottom;
-                    bool creates_bfc = block->scroller &&
-                        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-                         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
-                    bool is_float_blk = block->position && element_has_float(block);
-                    if (bt == 0 && bb == 0 && pt == 0 && pb == 0 && !creates_bfc && !is_float_blk) {
-                        // check that the block has no in-flow children
-                        // (text nodes, inline content, or in-flow block children prevent self-collapsing)
-                        bool has_in_flow_children = false;
-                        View* child = block->parent_view()->first_placed_child();
-                        // iterate children of THIS block, not parent
-                        // block itself IS a ViewBlock which extends ViewElement
-                        child = ((ViewElement*)block)->first_placed_child();
-                        while (child) {
-                            if (child->is_block()) {
-                                ViewBlock* vb = (ViewBlock*)child;
-                                bool is_out_of_flow = (vb->position && element_has_float(vb)) ||
-                                    (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                                      vb->position->position == CSS_VALUE_FIXED));
-                                if (!is_out_of_flow) {
-                                    has_in_flow_children = true;
-                                    break;
-                                }
-                            } else {
-                                // text, inline, span = in-flow content
-                                has_in_flow_children = true;
-                                break;
-                            }
-                            // move to next placed child
-                            View* next = (View*)child->next_sibling;
-                            while (next && !next->view_type) next = (View*)next->next_sibling;
-                            child = next;
-                        }
-                        if (!has_in_flow_children) {
-                            is_self_collapsing = true;
-                        }
-                    }
-                }
+                // A block is "self-collapsing" when its top and bottom margins are adjoining.
+                // Uses recursive check: no line boxes in self or any descendant blocks.
+                bool is_self_collapsing = is_block_self_collapsing(block);
 
                 if (is_self_collapsing) {
                     // self-collapsing: margins collapse through this element

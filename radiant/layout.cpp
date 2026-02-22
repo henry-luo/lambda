@@ -534,12 +534,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     g_style_resolve_count++;
 }
 
-float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline) {
-    log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f",
-        align, item_height, line_height, baseline_pos, item_baseline);
+float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
+    log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f, offset=%f",
+        align, item_height, line_height, baseline_pos, item_baseline, valign_offset);
     switch (align) {
     case CSS_VALUE_BASELINE:
-        return baseline_pos - item_baseline;
+        // For length/percentage vertical-align, offset shifts baseline (positive = raise = lower y)
+        return baseline_pos - item_baseline - valign_offset;
     case CSS_VALUE_TOP:
         return 0;
     case CSS_VALUE_MIDDLE:
@@ -566,6 +567,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     FontBox pa_font = lycon->font;  CssEnum pa_line_align = lycon->line.vertical_align;
+    float pa_valign_offset = lycon->line.vertical_align_offset;
     log_debug("span_vertical_align");
     View* child = span->first_child;
     if (child) {
@@ -574,6 +576,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
         }
         if (span->in_line && span->in_line->vertical_align) {
             lycon->line.vertical_align = span->in_line->vertical_align;
+            lycon->line.vertical_align_offset = span->in_line->vertical_align_offset;
         }
         do {
             view_vertical_align(lycon, child);
@@ -581,6 +584,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
         } while (child);
     }
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
+    lycon->line.vertical_align_offset = pa_valign_offset;
 }
 
 // apply vertical alignment to a view
@@ -596,7 +600,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             log_debug("text view font: %p", text_view->font);
             float item_baseline = text_view->font ? text_view->font->ascender : item_height;
             float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
-                line_height, lycon->line.max_ascender, item_baseline);
+                line_height, lycon->line.max_ascender, item_baseline, lycon->line.vertical_align_offset);
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
                 rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
                 rect->length, text_view->text_data() + rect->start_index);
@@ -614,8 +618,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float item_baseline = item_height;
         CssEnum align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
+        float valign_offset = block->in_line && block->in_line->vertical_align ?
+            block->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
-            line_height, lycon->line.max_ascender, item_baseline);
+            line_height, lycon->line.max_ascender, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
         log_debug("vertical-adjusted-inline-block: y=%f, adv_y=%f, offset=%f, line=%f, blk=%f, max_asc=%f, max_desc=%f",
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height, lycon->line.max_ascender, lycon->line.max_descender);
@@ -1237,6 +1243,37 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
 
+    // CSS 2.1 §10.3.3: Apply root element border and padding to reduce content area
+    // Children are placed inside the border+padding box, not at the margin edge
+    {
+        float bp_left = 0, bp_right = 0, bp_top = 0;
+        if (html->bound) {
+            if (html->bound->border) {
+                bp_left += html->bound->border->width.left;
+                bp_right += html->bound->border->width.right;
+                bp_top += html->bound->border->width.top;
+            }
+            bp_left += html->bound->padding.left;
+            bp_right += html->bound->padding.right;
+            bp_top += html->bound->padding.top;
+        }
+        float bp_h = bp_left + bp_right;
+        if (bp_h > 0) {
+            float new_cw = lycon->block.content_width - bp_h;
+            if (new_cw < 0) new_cw = 0;
+            lycon->block.content_width = new_cw;
+            lycon->block.max_width = new_cw;
+            lycon->block.given_width = new_cw;
+            lycon->block.float_right_edge = new_cw;
+            log_debug("[CSS] Root border+padding: reducing content_width by %.1f to %.1f", bp_h, new_cw);
+        }
+        if (bp_top > 0) {
+            lycon->block.advance_y += bp_top;
+            log_debug("[CSS] Root border+padding: advance_y offset by %.1f to %.1f", bp_top, lycon->block.advance_y);
+        }
+        line_init(lycon, bp_left, lycon->block.content_width + bp_left);
+    }
+
     DomNode* child = nullptr;
     if (elmt->is_element()) {
         child = static_cast<DomElement*>(elmt)->first_child;
@@ -1287,7 +1324,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             if (body_view->bound) {
                 body_total_height += body_view->bound->margin.top + body_view->bound->margin.bottom;
             }
-            lycon->block.advance_y = body_total_height;
+            // Include html's border+padding top so finalize_block_flow gets the full content height
+            float html_bp_top = 0;
+            if (html->bound) {
+                if (html->bound->border) html_bp_top += html->bound->border->width.top;
+                html_bp_top += html->bound->padding.top;
+            }
+            lycon->block.advance_y = html_bp_top + body_total_height;
             log_debug("Body layout done: body->height=%.1f, total=%.1f, advance_y=%.1f",
                 body_view->height, body_total_height, lycon->block.advance_y);
         } else {

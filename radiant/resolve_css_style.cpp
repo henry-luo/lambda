@@ -1075,10 +1075,16 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                        percentage, lycon->height, percentage * lycon->height / 100.0);
                 result = percentage * lycon->height / 100.0;
             } else {
-                // Parent exists but has no definite height - percentage resolves to auto (0)
-                // Per CSS spec, percentage heights compute to auto when parent height is not definite
-                log_debug("percentage height value %.2f%% resolves to 0 (parent has no definite height)", percentage);
-                result = 0.0f;
+                // Parent exists but has no definite height - percentage resolves differently:
+                // Per CSS 2.1 §10.7: max-height percentage → 'none', min-height percentage → '0'
+                // height percentage → 'auto' (treated as 0)
+                if (effective_property == CSS_PROPERTY_MAX_HEIGHT) {
+                    log_debug("percentage max-height %.2f%% resolves to 'none' (parent has no definite height)", percentage);
+                    result = NAN;  // NAN → treated as 'none' (-1) by max-height handler
+                } else {
+                    log_debug("percentage height value %.2f%% resolves to 0 (parent has no definite height)", percentage);
+                    result = 0.0f;
+                }
             }
         } else {
             // width-related and other properties: percentage relative to parent width
@@ -2180,6 +2186,34 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             log_debug("[CSS] Border-left-style is visible, defaulting width to medium (3px)");
         }
     }
+
+    // CSS 2.1 §8.4: Padding does not apply to table-row-group, table-header-group,
+    // table-footer-group, table-row, table-column-group, table-column.
+    // CSS 2.1 §8.3: Margin does not apply to table internal elements
+    // (row-group, row, column-group, column, cell).
+    // Zero out any padding/margin resolved on these element types.
+    ViewType vt = span->view_type;
+    if (vt == RDT_VIEW_TABLE_ROW_GROUP || vt == RDT_VIEW_TABLE_ROW ||
+        vt == RDT_VIEW_TABLE_COLUMN_GROUP || vt == RDT_VIEW_TABLE_COLUMN) {
+        if (span->bound) {
+            if (span->bound->padding.top != 0 || span->bound->padding.right != 0 ||
+                span->bound->padding.bottom != 0 || span->bound->padding.left != 0) {
+                log_debug("[CSS] Zeroing padding on table internal element (view_type=%d)", vt);
+                span->bound->padding.top = 0;
+                span->bound->padding.right = 0;
+                span->bound->padding.bottom = 0;
+                span->bound->padding.left = 0;
+            }
+            if (span->bound->margin.top != 0 || span->bound->margin.right != 0 ||
+                span->bound->margin.bottom != 0 || span->bound->margin.left != 0) {
+                log_debug("[CSS] Zeroing margin on table internal element (view_type=%d)", vt);
+                span->bound->margin.top = 0;
+                span->bound->margin.right = 0;
+                span->bound->margin.bottom = 0;
+                span->bound->margin.left = 0;
+            }
+        }
+    }
 }
 
 struct MultiValue {
@@ -2731,6 +2765,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 CssEnum valign_value = value->data.keyword;
                 if (valign_value != CSS_VALUE__UNDEF) {
                     span->in_line->vertical_align = valign_value;
+                    span->in_line->vertical_align_offset = 0;
                     const CssEnumInfo* info = css_enum_info(valign_value);
                     log_debug("[CSS] Vertical-align: %s -> 0x%04X", info ? info->name : "unknown", valign_value);
                 } else {
@@ -2738,11 +2773,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Length values for vertical-align (e.g., 10px, -5px)
-                // Store as offset - will need to extend PropValue to support length offsets
-                log_debug("[CSS] Vertical-align length: %.2f px (not yet fully supported)", value->data.length.value);
+                // Baseline alignment + shift by the specified amount (positive = raise)
+                float offset = resolve_length_value(lycon, CSS_PROPERTY_VERTICAL_ALIGN, value);
+                span->in_line->vertical_align = CSS_VALUE_BASELINE;
+                span->in_line->vertical_align_offset = offset;
+                log_debug("[CSS] Vertical-align length: %.2f px", offset);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // Percentage values relative to line-height
-                log_debug("[CSS] Vertical-align percentage: %.2f%% (not yet fully supported)", value->data.percentage.value);
+                // Percentage values relative to element's computed line-height
+                float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : lycon->font.current_font_size;
+                float offset = value->data.percentage.value * line_height / 100.0f;
+                span->in_line->vertical_align = CSS_VALUE_BASELINE;
+                span->in_line->vertical_align_offset = offset;
+                log_debug("[CSS] Vertical-align percentage: %.2f%% of line-height %.2f = %.2f px",
+                    value->data.percentage.value, line_height, offset);
             } else {
                 log_debug("[CSS] Vertical-align: unsupported value type %d", value->type);
             }
@@ -2840,6 +2883,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing min-width property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->blk) {
+                    block->blk->given_min_width = parent_block->blk->given_min_width;
+                    log_debug("[CSS] Min-width: inherit %.2f from parent", block->blk->given_min_width);
+                }
+                break;
+            }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
             // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
             if (std::isnan(resolved)) {
@@ -2856,6 +2908,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing max-width property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->blk) {
+                    block->blk->given_max_width = parent_block->blk->given_max_width;
+                    log_debug("[CSS] Max-width: inherit %.2f from parent", block->blk->given_max_width);
+                } else {
+                    block->blk->given_max_width = -1;
+                }
+                break;
+            }
             // CSS 2.2 Section 10.4: max-width percentage resolves against containing block width
             // If parent has 0 or auto width, percentage max-width should be treated as 'none'
             // because the containing block's width depends on this element's width
@@ -2881,6 +2944,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing min-height property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->blk) {
+                    block->blk->given_min_height = parent_block->blk->given_min_height;
+                    log_debug("[CSS] Min-height: inherit %.2f from parent", block->blk->given_min_height);
+                }
+                break;
+            }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
             // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
             if (std::isnan(resolved)) {
@@ -2897,6 +2969,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing max-height property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            // Handle 'inherit' keyword: look up parent's computed max-height
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->blk) {
+                    block->blk->given_max_height = parent_block->blk->given_max_height;
+                    log_debug("[CSS] Max-height: inherit %.2f from parent", block->blk->given_max_height);
+                } else {
+                    block->blk->given_max_height = -1;  // none
+                    log_debug("[CSS] Max-height: inherit but no parent value, treating as 'none'");
+                }
+                break;
+            }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
             // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
             if (std::isnan(resolved)) {
@@ -5393,6 +5478,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block) break;
             if (!block->scroller) {
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
+                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -5414,6 +5501,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block) break;
             if (!block->scroller) {
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
+                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -5433,6 +5522,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block) break;
             if (!block->scroller) {
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
+                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -5508,6 +5599,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block) break;
             if (!block->scroller) {
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+                // initialize overflow to visible so that clip alone doesn't create a BFC
+                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
+                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
             }
 
             // CSS clip property uses rect(top, right, bottom, left) syntax
