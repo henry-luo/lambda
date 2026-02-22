@@ -367,6 +367,9 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
+PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
+void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
+void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 void free_view(ViewTree* tree, View* view);
 
