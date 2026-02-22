@@ -487,6 +487,7 @@ struct InlineProp {
     CssEnum cursor;
     Color color;
     CssEnum vertical_align;
+    float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
 };
@@ -1151,6 +1152,10 @@ struct TableCellProp {
     uint8_t is_annoy_colgroup:1; // whether this element is doubled as an anonymous colgroup
     uint8_t is_empty:1;          // whether this cell has no content (for empty-cells: hide)
     uint8_t hide_empty:1;        // combined flag: is_empty && table has empty-cells: hide
+
+    // Intrinsic width (content + padding) measured during column sizing
+    // Used in border-collapse mode to re-compute column widths with per-cell border halves
+    float intrinsic_width;
 
     // Border-collapse resolved borders (CSS 2.1 §17.6.2)
     // Only populated when table has border-collapse: collapse

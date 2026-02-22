@@ -328,6 +328,23 @@ static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_I
     return fill_loaded_glyph_from_slot(face->glyph);
 }
 
+// fill font metrics fields on the loaded glyph from the given handle
+static void fill_loaded_glyph_font_metrics(FontHandle* h) {
+    if (!h) return;
+    float cell_height = font_get_cell_height(h);
+    float normal_lh = font_calc_normal_line_height(h);
+    const FontMetrics* m = font_get_metrics(h);
+    s_loaded_glyph.font_cell_height = cell_height;
+    s_loaded_glyph.font_normal_line_height = normal_lh;
+    if (m) {
+        s_loaded_glyph.font_ascender = m->hhea_ascender;
+        s_loaded_glyph.font_descender = -(m->hhea_descender); // make positive
+    } else {
+        s_loaded_glyph.font_ascender = 0;
+        s_loaded_glyph.font_descender = 0;
+    }
+}
+
 LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering) {
     if (!handle || !handle->ft_face) return NULL;
@@ -340,7 +357,10 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
 
     // step 1: try the primary font
     LoadedGlyph* result = try_load_from_handle(handle, codepoint, load_flags);
-    if (result) return result;
+    if (result) {
+        fill_loaded_glyph_font_metrics(handle);
+        return result;
+    }
 
     // step 2: try codepoint fallback via FontContext
     FontContext* ctx = handle->ctx;
@@ -349,6 +369,10 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
     if (fallback) {
         result = try_load_from_handle(fallback, codepoint, load_flags);
+        if (result) {
+            // populate metrics from the fallback font, not the primary
+            fill_loaded_glyph_font_metrics(fallback);
+        }
         font_handle_release(fallback); // release the ref from font_find_codepoint_fallback
         if (result) return result;
     }

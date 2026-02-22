@@ -189,6 +189,10 @@ typedef struct LoadedGlyph {
     GlyphBitmap  bitmap;        // rasterized bitmap (buffer, dimensions, bearings)
     float        advance_x;     // horizontal advance in physical pixels (26.6 already decoded)
     float        advance_y;     // vertical advance (usually 0 for horizontal text)
+    float        font_cell_height;      // cell height of actual font used (primary or fallback), in CSS px
+    float        font_ascender;         // hhea ascender of actual font used, in CSS px (positive up)
+    float        font_descender;        // hhea |descender| of actual font used, in CSS px (positive)
+    float        font_normal_line_height; // normal line-height of actual font used, in CSS px
 } LoadedGlyph;
 
 // render a glyph to bitmap (result is cached; pointer valid until cache eviction)

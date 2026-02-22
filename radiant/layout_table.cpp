@@ -411,8 +411,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                  child->view_type == RDT_VIEW_INLINE ||
                  child->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block = (ViewBlock*)child;
-            float child_css_height = get_explicit_css_height(lycon, block);
-            float child_height = (child_css_height > 0) ? child_css_height : block->height;
+            // Use the actual rendered border-box height (block->height), not the CSS content height
+            // which excludes child's border/padding. Children are already laid out at this point.
+            float child_height = block->height;
             // Track the min y and max bottom of block content for stacked blocks
             // This handles padding offset by computing (max_y - min_y) instead of absolute position
             float child_top = child->y;
@@ -618,9 +619,10 @@ static float calculate_cell_width_from_columns(ViewTableCell* tcell, float* col_
 
 // Process a single cell: position, size, layout content, apply alignment
 // Returns the height contribution for the current row (adjusted for rowspan)
+// col_edge_max_border: max resolved border at each column edge (size columns+1), or nullptr
 static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, ViewTable* table,
-                               float* col_widths, float* col_x_positions, int columns) {
-    ViewBlock* cell = (ViewBlock*)tcell;
+                               float* col_widths, float* col_x_positions, int columns,
+                               float* col_edge_max_border = nullptr) {    ViewBlock* cell = (ViewBlock*)tcell;
 
     // Check if this empty cell should have its border/background hidden
     // CSS 2.1 Section 17.6.1: In separated borders model, empty cells can have
@@ -648,23 +650,12 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
         cell_width += col_widths[c];
     }
 
-    // CSS 2.1 §17.6.2: In border-collapse mode, cell's reported width via
-    // getBoundingClientRect includes half of its resolved left and right borders.
-    // Each cell reports its dimensions including its half of the collapsed borders.
+    // CSS 2.1 §17.6.2: In border-collapse mode, col_widths already include
+    // per-cell border halves (added during column width measurement).
+    // No additional border adjustment needed here.
     if (table->tb->border_collapse) {
-        float left_add = 0, right_add = 0;
-        if (tcell->td->left_resolved && tcell->td->left_resolved->width > 0) {
-            left_add = tcell->td->left_resolved->width / 2.0f;
-            cell_width += left_add;
-        }
-        if (tcell->td->right_resolved && tcell->td->right_resolved->width > 0) {
-            right_add = tcell->td->right_resolved->width / 2.0f;
-            cell_width += right_add;
-        }
-        if (left_add > 0 || right_add > 0) {
-            log_debug("Border-collapse cell width adjustment: col=%d, +%.1f left, +%.1f right, total=%.1f",
-                    tcell->td->col_index, left_add, right_add, cell_width);
-        }
+        log_debug("Border-collapse cell width: col=%d, cell_width=%.1f (includes border halves from col_widths)",
+                tcell->td->col_index, cell_width);
     }
 
     cell->width = cell_width;
@@ -872,6 +863,7 @@ struct TableMetadata {
     float* row_y_positions;     // Row Y positions for rowspan calculation
     bool* row_collapsed;        // Visibility: collapse tracking per row
     bool* row_has_percent_height;  // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto
+    float* col_edge_max_border;   // Max resolved border at each column edge across all rows (size: column_count + 1)
 
     // Border-collapse: max winning border widths at table edges (CSS 2.1 §17.6.2)
     // These are the maximum resolved border widths at each outer edge,
@@ -893,6 +885,7 @@ struct TableMetadata {
         row_y_positions = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
         row_collapsed = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
         row_has_percent_height = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
+        col_edge_max_border = (float*)mem_calloc(cols + 1, sizeof(float), MEM_CAT_LAYOUT);
     }
 
     ~TableMetadata() {
@@ -904,6 +897,7 @@ struct TableMetadata {
         mem_free(row_y_positions);
         mem_free(row_collapsed);
         mem_free(row_has_percent_height);
+        mem_free(col_edge_max_border);
     }
 
     // Grid accessor
@@ -3032,13 +3026,24 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             if (!lycon->line.is_line_start) { line_break(lycon); }
             log_debug("Caption after line_break: advance_y=%.1f", lycon->block.advance_y);
 
-            caption->height = lycon->block.advance_y;
-            // Add padding to height (advance_y is content height only)
+            // Determine caption height: use given_height if specified, otherwise content flow height
+            float caption_content_height = lycon->block.advance_y;
+            float caption_given_height = (caption->blk && caption->blk->given_height >= 0) ? caption->blk->given_height : -1;
+            if (caption_given_height >= 0) {
+                caption->height = caption_given_height;
+            } else {
+                caption->height = caption_content_height;
+            }
+            // Add padding and border to height
             if (caption->bound) {
                 caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+                if (caption->bound->border) {
+                    caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                }
             }
             caption->width = (float)caption_width;  // Also set width explicitly
-            log_debug("Caption layout end: caption->height=%.1f (content+padding), advance_y=%.1f", caption->height, lycon->block.advance_y);
+            log_debug("Caption layout end: caption->height=%.1f (given=%.1f, content=%.1f), advance_y=%.1f",
+                caption->height, caption_given_height, caption_content_height, lycon->block.advance_y);
             lycon->block = saved_block;
             lycon->line = saved_line;
         }
@@ -3767,57 +3772,14 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                 }
             }
 
-            float child_max = 0;
-            float child_min = 0;
-
-            if (child_elem->specified_style) {
-                CssDeclaration* width_decl = style_tree_get_declaration(
-                    child_elem->specified_style, CSS_PROPERTY_WIDTH);
-                if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    // Resolve length value (handles em, rem, px, etc.)
-                    float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-                    child_max = child_min = explicit_width; // Both use explicit width
-                }
-            }
-
-            // If no explicit CSS width, check for HTML width attribute (for tables)
-            if (child_max == 0 && child_min == 0) {
-                // Check HTML width attribute directly (don't call dom_node_resolve_style
-                // during measurement - it's not safe with the current context)
-                DomElement* child_elmt = child->as_element();
-                if (child_elmt) {
-                    const char* width_attr = child_elmt->get_attribute("width");
-                    if (width_attr) {
-                        size_t value_len = strlen(width_attr);
-                        if (value_len > 0 && width_attr[value_len - 1] != '%') {
-                            // Parse pixel value (skip percentages - they need parent context)
-                            StrView width_view = strview_init(width_attr, value_len);
-                            float width = strview_to_int(&width_view);
-                            if (width > 0) {
-                                float attr_width = width;  // CSS logical pixels
-                                child_max = child_min = attr_width; // Both use attribute width
-                                log_debug("Cell widths: using HTML width attribute: %.1fpx for %s",
-                                    attr_width, child->node_name());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // If still no explicit width, measure content
-            // Use unified intrinsic sizing API for ALL element types (block, inline, etc.)
-            // This properly handles:
-            // - Block elements with nested inline children (e.g., <div><span>text</span></div>)
-            // - Regular inline elements with text content
-            // - Inline elements with nested block children (block-in-inline)
-            // - Inline elements with table-internal descendants
-            if (child_max == 0 && child_min == 0) {
-                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-                child_max = child_sizes.max_content;
-                child_min = child_sizes.min_content;
-                log_debug("Cell widths: element %s min=%.1f, max=%.1f",
-                          child->node_name(), child_min, child_max);
-            }
+            // Use unified intrinsic sizing API for ALL element types
+            // This properly handles explicit CSS widths (with border/padding), 
+            // block/inline elements, replaced elements, etc.
+            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+            float child_max = child_sizes.max_content;
+            float child_min = child_sizes.min_content;
+            log_debug("Cell widths: element %s min=%.1f, max=%.1f",
+                      child->node_name(), child_min, child_max);
 
             // Check if this is an inline element (flows with text) or block element (starts new line)
             DisplayValue child_display = resolve_display_value(child);
@@ -3887,9 +3849,10 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     max_width += border_horizontal + padding_horizontal;
     min_width += border_horizontal + padding_horizontal;
 
-    // CSS 2.1: Ensure reasonable minimum widths for empty cells
-    if (max_width < 16.0f) max_width = 16.0f;
-    if (min_width < 16.0f) min_width = 16.0f;
+    // CSS 2.1: Ensure minimum widths aren't zero for cells with text content
+    // (empty cells already handled at function entry)
+    if (max_width < 1.0f) max_width = 1.0f;
+    if (min_width < 1.0f) min_width = 1.0f;
 
     log_debug("Cell widths: max=%.2f, min=%.2f (content + padding=%.1f + border=%.1f, collapse=%d)",
         max_width, min_width, padding_horizontal, border_horizontal, border_collapse);
@@ -4040,6 +4003,32 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (table->tb->border_collapse) {
         log_debug("Resolving collapsed borders for rendering (layout uses original borders)");
         resolve_collapsed_borders(lycon, table, meta);
+
+        // CSS 2.1 §17.6.2: Compute the maximum resolved border width at each column edge
+        // across ALL rows. In border-collapse mode, the column grid lines are fixed vertically,
+        // so the max border at each edge determines the space allocated for borders.
+        // This ensures all cells in a column have the same width regardless of per-cell borders.
+        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+            for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+                int col = tcell->td->col_index;
+                int right_edge = col + tcell->td->col_span;
+                if (tcell->td->left_resolved && col >= 0 && col <= columns) {
+                    float w = tcell->td->left_resolved->width;
+                    if (w > meta->col_edge_max_border[col]) {
+                        meta->col_edge_max_border[col] = w;
+                    }
+                }
+                if (tcell->td->right_resolved && right_edge >= 0 && right_edge <= columns) {
+                    float w = tcell->td->right_resolved->width;
+                    if (w > meta->col_edge_max_border[right_edge]) {
+                        meta->col_edge_max_border[right_edge] = w;
+                    }
+                }
+            }
+        }
+        for (int i = 0; i <= columns; i++) {
+            log_debug("Col edge %d max border: %.1fpx", i, meta->col_edge_max_border[i]);
+        }
     }
 
     // Check if table has explicit width (for percentage cell width calculation)
@@ -4160,6 +4149,25 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             } else {
                 // Has explicit CSS width - use it for both min and preferred
                 min_width = pref_width = cell_width;
+            }
+
+            // Store intrinsic width for post-border-resolution adjustment
+            tcell->td->intrinsic_width = pref_width;
+
+            // CSS 2.1 §17.6.2: In border-collapse mode, include half of the cell's
+            // resolved collapsed borders in the column width calculation.
+            // Each cell needs (content + padding + half_left_border + half_right_border).
+            // The column width must accommodate the cell with the largest total.
+            // This correctly handles cases where a cell with less content but wider
+            // borders doesn't inflate the column beyond what's needed.
+            if (table->tb->border_collapse && tcell->td->col_span == 1) {
+                float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
+                float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
+                pref_width += half_left + half_right;
+                min_width += half_left + half_right;
+                cell_width += half_left + half_right;
+                log_debug("Border-collapse cell measurement: col=%d, content+pad=%.1f, +half_left=%.1f, +half_right=%.1f, total=%.1f",
+                         col, tcell->td->intrinsic_width, half_left, half_right, pref_width);
             }
 
             if (tcell->td->col_span == 1) {
@@ -4678,21 +4686,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Calculate available content width for column distribution
     int available_content_width = used_table_width - border_spacing_total;
 
-    // In border-collapse mode, cell half-borders consume space within the content area.
-    // Subtract total cell half-border widths so column content widths don't overflow.
-    float total_cell_half_borders = 0.0f;
+    // In border-collapse mode, col_max_widths and col_min_widths already include
+    // per-cell border halves (added during measurement). No additional subtraction needed.
     if (table->tb->border_collapse && explicit_table_width > 0) {
-        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-            for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
-                float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
-                float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
-                total_cell_half_borders += half_left + half_right;
-            }
-            break; // Only first row (all rows have same column structure)
-        }
-        available_content_width -= (int)(total_cell_half_borders + 0.5f);
-        log_debug("Border-collapse: available_content adjusted for cell half-borders (%.1fpx): %dpx",
-                  total_cell_half_borders, available_content_width);
+        log_debug("Border-collapse: col widths already include border halves, available=%dpx",
+                  available_content_width);
     }
 
     // Check for equal distribution case (CSS behavior for similar columns)
@@ -4801,31 +4799,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Apply border spacing or border collapse adjustments
     if (table->tb->border_collapse) {
         // Border-collapse: CSS 2.1 §17.6.2
-        // The column widths represent content+padding only.
-        // Cell reported widths include half of their resolved collapsed borders.
-        // We need to add the cell half-borders to table_width here.
-        //
-        // For each cell, its width contribution = col_width + half_left_resolved + half_right_resolved
-        // Interior borders are shared between adjacent cells, so we don't double-count.
-        //
-        // Compute the sum of all cells' border half-widths by iterating through cells.
-        float total_cell_border_contribution = 0.0f;
-        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-            // Only process first row to avoid counting each column multiple times
-            for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
-                // Get this cell's resolved border half-widths
-                float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
-                float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
-                total_cell_border_contribution += half_left + half_right;
-                log_debug("  Cell col=%d: half_left=%.1f, half_right=%.1f, running_total=%.1f",
-                         tcell->td->col_index, half_left, half_right, total_cell_border_contribution);
-            }
-            break; // Only process first row (all rows have same column structure)
-        }
-
-        table_width += total_cell_border_contribution;
-        log_debug("Border-collapse: adding cell half-borders: +%.1fpx, table_width=%.1fpx",
-               total_cell_border_contribution, table_width);
+        // col_widths already include per-cell border halves (added during measurement).
+        // No additional border contribution needed for table width.
+        log_debug("Border-collapse: col_widths already include border halves, table_width=%.1fpx",
+               table_width);
     } else if (table->tb->border_spacing_h > 0) {
         // Separate borders: add spacing between columns AND around table edges
         log_debug("Applying border-spacing %fpx to table width", table->tb->border_spacing_h);
@@ -4981,36 +4958,20 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // CSS 2.1 Column Position Calculation (Section 17.5)
-    // In border-collapse mode, we need to compute cell widths (including half-borders)
-    // from resolved collapsed borders, then position columns so cells touch.
+    // In border-collapse mode, col_widths already include per-cell border halves
+    // (added during measurement). Position columns so cells touch.
     if (table->tb->border_collapse) {
-        // Compute cell widths from first row's resolved borders
-        // cell_width[c] = col_widths[c] + half_left_resolved + half_right_resolved
-        float* cell_widths_with_borders = (float*)mem_calloc(columns, sizeof(float), MEM_CAT_LAYOUT);
-        int col_idx = 0;
-        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-            for (ViewTableCell* tcell = row->first_cell(); tcell && col_idx < columns; tcell = row->next_cell(tcell)) {
-                int c = tcell->td->col_index;
-                if (c >= 0 && c < columns) {
-                    float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
-                    float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
-                    cell_widths_with_borders[c] = col_widths[c] + half_left + half_right;
-                    log_debug("Border-collapse cell width[%d]: col_width=%.1f + half_left=%.1f + half_right=%.1f = %.1f",
-                             c, col_widths[c], half_left, half_right, cell_widths_with_borders[c]);
-                }
-                col_idx++;
-            }
-            break; // Only process first row
+        // col_widths already include border halves, use them directly
+        for (int c = 0; c < columns; c++) {
+            log_debug("Border-collapse col_width[%d]: %.1f (includes border halves)", c, col_widths[c]);
         }
 
         // Set column positions: cells touch each other
         for (int i = 1; i <= columns; i++) {
-            col_x_positions[i] = col_x_positions[i-1] + cell_widths_with_borders[i-1];
-            log_debug("Border-collapse: Column %d starts at x=%.1fpx (prev + cell_width %.1f)",
-                     i, col_x_positions[i], cell_widths_with_borders[i-1]);
+            col_x_positions[i] = col_x_positions[i-1] + col_widths[i-1];
+            log_debug("Border-collapse: Column %d starts at x=%.1fpx (prev + col_width %.1f)",
+                     i, col_x_positions[i], col_widths[i-1]);
         }
-
-        mem_free(cell_widths_with_borders);
     } else {
         // Non-collapsed: use original column position logic
         for (int i = 1; i <= columns; i++) {
@@ -5134,8 +5095,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
 
-            caption->height = lycon->block.advance_y;
-            // Add padding to height (advance_y is content height only)
+            // Determine caption height: use given_height if specified, otherwise content flow height
+            float caption_content_height = lycon->block.advance_y;
+            float caption_given_height = (caption->blk && caption->blk->given_height >= 0)
+                ? caption->blk->given_height : -1;
+            if (caption_given_height >= 0) {
+                caption->height = caption_given_height;
+            } else {
+                caption->height = caption_content_height;
+            }
+            // Add padding to height (advance_y/given_height is content height only)
             if (caption->bound) {
                 caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
             }
@@ -5369,7 +5338,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     float row_height = 0.0f;
                     ViewTableRow* trow = (ViewTableRow*)row;
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                        float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns);
+                        float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border);
                         if (height_for_row > row_height) {
                             row_height = height_for_row;
                         }
@@ -5503,7 +5472,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             float row_height = 0.0f;
             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns);
+                float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border);
                 if (height_for_row > row_height) {
                     row_height = height_for_row;
                 }
@@ -6113,8 +6082,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
 
-            caption->height = lycon->block.advance_y;
-            // Add padding to height (advance_y is content height only)
+            // Determine caption height: use given_height if specified, otherwise content flow height
+            float caption_content_height = lycon->block.advance_y;
+            float caption_given_height = (caption->blk && caption->blk->given_height >= 0)
+                ? caption->blk->given_height : -1;
+            if (caption_given_height >= 0) {
+                caption->height = caption_given_height;
+            } else {
+                caption->height = caption_content_height;
+            }
+            // Add padding to height (advance_y/given_height is content height only)
             if (caption->bound) {
                 caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
             }
