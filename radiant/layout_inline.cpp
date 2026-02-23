@@ -417,7 +417,69 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Detect multi-line: if advance_y changed during child layout, the span wrapped to a new line
     bool span_is_multi_line = (lycon->block.advance_y > start_advance_y + 1.0f);
+
+    // CSS 2.1 §16.6.1: Trailing whitespace at end of a line should not expand
+    // the inline element's bounding box. We trim trailing whitespace from the
+    // span bounding box only when the span is the last inline content on the line
+    // (i.e., followed by a block element or end of parent). When more inline
+    // content follows, the trailing space is inter-element spacing and should
+    // be included in the span's bounding box.
+    float saved_trailing = 0;
+    View* last_child_for_trim = nullptr;
+    if (lycon->line.trailing_space_width > 0) {
+        // Check if there's more inline content after this span on the same line
+        bool has_following_inline = false;
+        DomNode* sib = ((DomNode*)span)->next_sibling;
+        while (sib) {
+            if (sib->is_element()) {
+                DomElement* elem = sib->as_element();
+                DisplayValue dv = resolve_display_value(elem);
+                if (dv.outer == CSS_VALUE_INLINE) {
+                    has_following_inline = true;
+                }
+                break;  // any element determines the answer
+            } else if (sib->is_text()) {
+                DomText* tn = sib->as_text();
+                if (tn && tn->text && tn->length > 0) {
+                    // Check if it's all whitespace
+                    bool all_ws = true;
+                    for (size_t i = 0; i < tn->length; i++) {
+                        char c = tn->text[i];
+                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                            all_ws = false;
+                            break;
+                        }
+                    }
+                    if (!all_ws) {
+                        has_following_inline = true;
+                        break;
+                    }
+                }
+            }
+            sib = sib->next_sibling;
+        }
+
+        if (!has_following_inline) {
+            // Span is last inline content on this line — trim trailing whitespace
+            View* c = span->first_child;
+            while (c) {
+                if (c->view_type) last_child_for_trim = c;
+                c = c->next();
+            }
+            if (last_child_for_trim) {
+                saved_trailing = lycon->line.trailing_space_width;
+                last_child_for_trim->width -= saved_trailing;
+            }
+        }
+    }
+
     compute_span_bounding_box(span, span_is_multi_line);
+
+    // Restore the trailing space on the child so advance_x remains correct
+    // for any subsequent layout processing
+    if (last_child_for_trim && saved_trailing > 0) {
+        last_child_for_trim->width += saved_trailing;
+    }
 
     // Apply CSS relative positioning after normal layout
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
