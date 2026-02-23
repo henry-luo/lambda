@@ -633,6 +633,7 @@ typedef struct Context {
     Map* map(int type_index);
     Element* elmt(int type_index);
     Object* object(int type_index);
+    Object* object_fill(Object* obj, ...);
 
     // these getters use runtime num_stack
     Item array_get(Array *array, int index);

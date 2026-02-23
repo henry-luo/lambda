@@ -439,6 +439,7 @@ module.exports = grammar({
       $.list,
       $.array,
       $.map,
+      $.object_literal,
       $.element,
       $.base_type,  // includes null
       $.identifier,
@@ -1011,9 +1012,35 @@ module.exports = grammar({
       'type', field('name', $.identifier), '<', _attr_content_type($), '>'
     ),
 
+    // Object type with optional inheritance and method/constraint body
+    // type Point { x: float, y: float; fn magnitude() => ... }
+    // type Circle : Shape { radius: float; fn area() => ... }
     object_type: $ => seq(
-      'type', field('name', $.identifier), '{', _attr_content_type($), '}'
+      'type', field('name', $.identifier),
+      optional(seq(':', field('base', $.identifier))),
+      '{',
+      // fields (comma-separated attr list)
+      optional(seq(
+        alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
+      )),
+      // ';' separates fields from methods/constraints
+      optional(seq(';',
+        repeat(choice($.fn_stam, $.fn_expr_stam, $.that_constraint))
+      )),
+      '}'
     ),
+
+    // Object-level constraint: that (expr)
+    that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
+
+    // Object literal: {TypeName field: value, ...}
+    object_literal: $ => prec.dynamic(1, seq(
+      '{', field('type_name', $.identifier),
+      optional(seq(
+        choice($.map_item, $._expr), repeat(seq(',', choice($.map_item, $._expr)))
+      )),
+      '}'
+    )),
 
     type_stam: $ => seq(
       'type', field('declare', alias($.type_assign, $.assign_expr)),

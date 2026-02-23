@@ -28,6 +28,9 @@ AstNode* build_current_index(Transpiler* tp, TSNode node);
 // Forward declaration for type building (used by query expressions)
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
 
+// Forward declaration for function building (used by object type methods)
+AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global);
+
 // System function definitions with method call support
 // Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
 // is_method_eligible: true if can be called as obj.method() style
@@ -3464,6 +3467,198 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
+// ============================================================================
+// Object type definition: type Point { x: float, y: float; fn magnitude() => ... }
+// ============================================================================
+AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build_object_type");
+    AstObjectTypeNode* ast_node = (AstObjectTypeNode*)alloc_ast_node(tp,
+        AST_NODE_OBJECT_TYPE, type_node, sizeof(AstObjectTypeNode));
+
+    // allocate TypeObject (extends TypeMap) for this object type definition
+    TypeObject* obj_type = (TypeObject*)pool_calloc(tp->pool, sizeof(TypeObject));
+    obj_type->type_id = LMD_TYPE_OBJECT;
+    obj_type->kind = 0;
+    obj_type->base = NULL;
+    obj_type->methods = NULL;
+    obj_type->methods_last = NULL;
+    obj_type->method_count = 0;
+    obj_type->constraint = NULL;
+    obj_type->constraint_fn = NULL;
+
+    // wrap in TypeType so it behaves as a type value
+    TypeType* tt = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    tt->type = (Type*)obj_type;
+    ast_node->type = (Type*)tt;
+
+    // get type name
+    TSNode name_node = ts_node_child_by_field_id(type_node, FIELD_NAME);
+    StrView name = ts_node_source(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name);
+    obj_type->type_name.str = ast_node->name->chars;
+    obj_type->type_name.length = ast_node->name->len;
+    log_debug("build_object_type: name='%.*s'", (int)name.length, name.str);
+
+    // get optional base type (inheritance)
+    TSNode base_node = ts_node_child_by_field_id(type_node, FIELD_BASE);
+    if (!ts_node_is_null(base_node)) {
+        ast_node->base_type = build_expr(tp, base_node);
+        log_debug("build_object_type: has base type");
+    } else {
+        ast_node->base_type = NULL;
+    }
+
+    // iterate children to find fields (attr), methods (fn_stam/fn_expr_stam), and constraints
+    TSNode child = ts_node_named_child(type_node, 0);
+    AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    AstNode* prev_method = NULL;
+    AstNode* prev_constraint = NULL;
+    ast_node->methods = NULL;
+    ast_node->constraints = NULL;
+
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+
+        if (symbol == SYM_COMMENT) {
+            // skip
+        }
+        else if (symbol == SYM_ATTR) {
+            // field declaration: name: type_expr
+            AstNode* item = (AstNode*)build_key_expr(tp, child);
+            if (item) {
+                if (!prev_field) { ast_node->item = item; }
+                else { prev_field->next = item; }
+                prev_field = item;
+
+                // build shape entry for this field
+                ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+                String* pooled_name = ((AstNamedNode*)item)->name;
+                StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                name_view->str = pooled_name->chars;
+                name_view->length = pooled_name->len;
+                shape_entry->name = name_view;
+                // unwrap TypeType to get the actual field data type
+                Type* field_type = item->type;
+                if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                    field_type = ((TypeType*)field_type)->type;
+                }
+                shape_entry->type = field_type;
+                shape_entry->byte_offset = byte_offset;
+                if (!prev_entry) { obj_type->shape = shape_entry; }
+                else { prev_entry->next = shape_entry; }
+                prev_entry = shape_entry;
+
+                obj_type->length++;
+                byte_offset += sizeof(void*);  // all fields stored as Item (8 bytes)
+            }
+        }
+        else if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+            // method declaration
+            AstNode* method = build_func(tp, child, true, false);
+            if (method) {
+                if (!prev_method) { ast_node->methods = method; }
+                else { prev_method->next = method; }
+                prev_method = method;
+                obj_type->method_count++;
+            }
+        }
+        else if (symbol == SYM_THAT_CONSTRAINT) {
+            // object-level constraint: that (expr)
+            TSNode constraint_expr = ts_node_child_by_field_id(child, FIELD_CONSTRAINT);
+            if (!ts_node_is_null(constraint_expr)) {
+                AstNode* constraint = build_expr(tp, constraint_expr);
+                if (constraint) {
+                    if (!prev_constraint) { ast_node->constraints = constraint; }
+                    else { prev_constraint->next = constraint; }
+                    prev_constraint = constraint;
+                    // store last constraint on the type (for single constraint)
+                    obj_type->constraint = constraint;
+                }
+            }
+        }
+
+        child = ts_node_next_named_sibling(child);
+    }
+
+    obj_type->byte_size = byte_offset;
+    obj_type->last = prev_entry;
+
+    // register the type in the type list
+    arraylist_append(tp->type_list, obj_type);
+    obj_type->type_index = tp->type_list->length - 1;
+
+    // register the type name in the current scope so it can be resolved
+    push_name(tp, (AstNamedNode*)ast_node, NULL);
+
+    log_debug("build_object_type: '%.*s' with %d fields, %d methods",
+        (int)name.length, name.str, obj_type->length, obj_type->method_count);
+    return (AstNode*)ast_node;
+}
+
+// ============================================================================
+// Object literal: {TypeName key: value, ...} or {TypeName source, key: value, ...}
+// ============================================================================
+AstNode* build_object_literal(Transpiler* tp, TSNode lit_node) {
+    log_debug("build_object_literal");
+    AstObjectLiteralNode* ast_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+        AST_NODE_OBJECT_LITERAL, lit_node, sizeof(AstObjectLiteralNode));
+
+    // get type name
+    TSNode name_node = ts_node_child_by_field_id(lit_node, field_type_name);
+    StrView type_name = ts_node_source(tp, name_node);
+    ast_node->type_name = name_pool_create_strview(tp->name_pool, type_name);
+    log_debug("build_object_literal: type_name='%.*s'", (int)type_name.length, type_name.str);
+
+    // look up the type definition to get the TypeObject
+    NameEntry* type_entry = lookup_name(tp, type_name);
+    TypeObject* obj_type = NULL;
+    if (type_entry && type_entry->node && type_entry->node->type) {
+        Type* resolved = type_entry->node->type;
+        if (resolved->type_id == LMD_TYPE_TYPE) {
+            Type* inner = ((TypeType*)resolved)->type;
+            if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                obj_type = (TypeObject*)inner;
+            }
+        }
+    }
+
+    if (!obj_type) {
+        log_error("build_object_literal: unknown object type '%.*s'", (int)type_name.length, type_name.str);
+        ast_node->type = &TYPE_ANY;
+    } else {
+        // create a copy of the TypeObject for this literal (to get a unique type_index)
+        ast_node->type = (Type*)obj_type;
+    }
+
+    // build items (map_item or bare expressions for wrapping)
+    // skip the type_name identifier child
+    int type_name_start = ts_node_start_byte(name_node);
+    TSNode child = ts_node_named_child(lit_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_COMMENT) {
+            child = ts_node_next_named_sibling(child);
+            continue;
+        }
+        // skip the type_name identifier (already extracted above)
+        if ((int)ts_node_start_byte(child) == type_name_start) {
+            child = ts_node_next_named_sibling(child);
+            continue;
+        }
+
+        AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+        if (item) {
+            if (!prev_item) { ast_node->item = item; }
+            else { prev_item->next = item; }
+            prev_item = item;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
@@ -5217,6 +5412,31 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 log_debug("pass 1: registering function placeholder '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
                 push_name(tp, (AstNamedNode*)fn_node, NULL);
             }
+            else if (symbol == SYM_OBJECT_TYPE) {
+                // pre-register object type placeholder so it can be forward-referenced
+                TSNode obj_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView obj_name = ts_node_source(tp, obj_name_node);
+
+                AstObjectTypeNode* obj_node = (AstObjectTypeNode*)alloc_ast_node(tp,
+                    AST_NODE_OBJECT_TYPE, child, sizeof(AstObjectTypeNode));
+                obj_node->name = name_pool_create_strview(tp->name_pool, obj_name);
+                // create placeholder TypeType wrapping a minimal TypeObject
+                TypeObject* placeholder_obj = (TypeObject*)pool_calloc(tp->pool, sizeof(TypeObject));
+                placeholder_obj->type_id = LMD_TYPE_OBJECT;
+                placeholder_obj->type_name.str = obj_node->name->chars;
+                placeholder_obj->type_name.length = obj_node->name->len;
+                TypeType* placeholder_tt = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                placeholder_tt->type = (Type*)placeholder_obj;
+                obj_node->type = (Type*)placeholder_tt;
+                obj_node->base_type = NULL;
+                obj_node->methods = NULL;
+                obj_node->constraints = NULL;
+                obj_node->item = NULL;
+
+                log_debug("pass 1: registering object type placeholder '%.*s'",
+                    (int)obj_name.length, obj_name.str);
+                push_name(tp, (AstNamedNode*)obj_node, NULL);
+            }
             child = ts_node_next_named_sibling(child);
         }
     }
@@ -5364,6 +5584,95 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 // For non-global functions, use original single-pass behavior
                 item = build_func(tp, child, true, is_global);
             }
+        } else if (symbol == SYM_OBJECT_TYPE && is_global) {
+            // For global object types, look up the pre-registered placeholder and complete it
+            TSNode obj_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+            StrView obj_name = ts_node_source(tp, obj_name_node);
+            NameEntry* entry = lookup_name(tp, obj_name);
+
+            if (entry && entry->node && entry->node->node_type == AST_NODE_OBJECT_TYPE) {
+                AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry->node;
+                TypeType* tt = (TypeType*)obj_node->type;
+                TypeObject* obj_type = (TypeObject*)tt->type;
+                log_debug("pass 2: completing object type '%.*s'", (int)obj_name.length, obj_name.str);
+
+                // get optional base type
+                TSNode base_node = ts_node_child_by_field_id(child, FIELD_BASE);
+                if (!ts_node_is_null(base_node)) {
+                    obj_node->base_type = build_expr(tp, base_node);
+                }
+
+                // iterate children: fields, methods, constraints
+                TSNode obj_child = ts_node_named_child(child, 0);
+                AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+                AstNode* prev_method = NULL;
+                AstNode* prev_constraint = NULL;
+
+                while (!ts_node_is_null(obj_child)) {
+                    TSSymbol child_sym = ts_node_symbol(obj_child);
+                    if (child_sym == SYM_ATTR) {
+                        AstNode* field_item = (AstNode*)build_key_expr(tp, obj_child);
+                        if (field_item) {
+                            if (!prev_field) { obj_node->item = field_item; }
+                            else { prev_field->next = field_item; }
+                            prev_field = field_item;
+
+                            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+                            String* pooled_name = ((AstNamedNode*)field_item)->name;
+                            StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                            name_view->str = pooled_name->chars;
+                            name_view->length = pooled_name->len;
+                            shape_entry->name = name_view;
+                            // unwrap TypeType to get the actual field data type
+                            Type* field_type = field_item->type;
+                            if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                                field_type = ((TypeType*)field_type)->type;
+                            }
+                            shape_entry->type = field_type;
+                            shape_entry->byte_offset = byte_offset;
+                            if (!prev_entry) { obj_type->shape = shape_entry; }
+                            else { prev_entry->next = shape_entry; }
+                            prev_entry = shape_entry;
+                            obj_type->length++;
+                            byte_offset += sizeof(void*);
+                        }
+                    } else if (child_sym == SYM_FUNC_STAM || child_sym == SYM_FUNC_EXPR_STAM) {
+                        AstNode* method = build_func(tp, obj_child, true, false);
+                        if (method) {
+                            if (!prev_method) { obj_node->methods = method; }
+                            else { prev_method->next = method; }
+                            prev_method = method;
+                            obj_type->method_count++;
+                        }
+                    } else if (child_sym == SYM_THAT_CONSTRAINT) {
+                        TSNode constraint_expr = ts_node_child_by_field_id(obj_child, FIELD_CONSTRAINT);
+                        if (!ts_node_is_null(constraint_expr)) {
+                            AstNode* constraint = build_expr(tp, constraint_expr);
+                            if (constraint) {
+                                if (!prev_constraint) { obj_node->constraints = constraint; }
+                                else { prev_constraint->next = constraint; }
+                                prev_constraint = constraint;
+                                obj_type->constraint = constraint;
+                            }
+                        }
+                    }
+                    obj_child = ts_node_next_named_sibling(obj_child);
+                }
+
+                obj_type->byte_size = byte_offset;
+                obj_type->last = prev_entry;
+
+                // register in type_list (update the placeholder's type_index)
+                arraylist_append(tp->type_list, obj_type);
+                obj_type->type_index = tp->type_list->length - 1;
+
+                item = (AstNode*)obj_node;
+                log_debug("pass 2: completed object type '%.*s' with %d fields, %d methods",
+                    (int)obj_name.length, obj_name.str, obj_type->length, obj_type->method_count);
+            } else {
+                log_error("pass 2: failed to find pre-registered object type '%.*s'", (int)obj_name.length, obj_name.str);
+                item = build_object_type(tp, child);
+            }
         } else {
             item = build_expr(tp, child);
 
@@ -5492,6 +5801,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_array(tp, expr_node);
     case SYM_MAP:
         return build_map(tp, expr_node);
+    case SYM_OBJECT_LITERAL:
+        return build_object_literal(tp, expr_node);
+    case SYM_OBJECT_TYPE:
+        return build_object_type(tp, expr_node);
     case SYM_ELEMENT:
         return build_elmt(tp, expr_node);
     case SYM_CONTENT:
