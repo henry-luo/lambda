@@ -1,0 +1,8 @@
+"example.com"
+8080
+false
+"api.io"
+443
+true
+"red"
+10

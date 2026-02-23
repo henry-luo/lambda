@@ -1,0 +1,15 @@
+"red"
+5
+"Shape: red"
+75
+true
+true
+true
+false
+"Rex says woof!"
+1
+"Rex"
+1
+"Lab"
+true
+true

@@ -1214,7 +1214,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2f(_env->");
+                        strbuf_append_str(tp->code_buf, "it2d(_env->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_BOOL) {
@@ -1254,7 +1254,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2f(_");
+                        strbuf_append_str(tp->code_buf, "it2d(_");
                         strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_BOOL) {
@@ -3000,7 +3000,23 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
     // type patterns use fn_is (matches runtime type checking)
     if (pattern_type == LMD_TYPE_TYPE) {
         strbuf_append_str(tp->code_buf, "fn_is(_pipe_item, ");
-        transpile_box_item(tp, pattern);
+        // handle bare identifier referencing an object type (AST_NODE_IDENT from type expr resolution)
+        if (pattern->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)pattern;
+            if (ident->entry && ident->entry->node &&
+                ident->entry->node->node_type == AST_NODE_OBJECT_TYPE) {
+                Type* node_type = ident->entry->node->type;
+                if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                    TypeType* type_type = (TypeType*)node_type;
+                    TypeMap* type_map = (TypeMap*)type_type->type;
+                    strbuf_append_format(tp->code_buf, "const_type(%d)", type_map->type_index);
+                }
+            } else {
+                transpile_box_item(tp, pattern);
+            }
+        } else {
+            transpile_box_item(tp, pattern);
+        }
         strbuf_append_char(tp->code_buf, ')');
     }
     // range patterns use fn_in (membership/containment check)
@@ -3305,6 +3321,42 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     }
     // close with ) for store function call, or ; for regular assignment
     strbuf_append_str(tp->code_buf, use_store_func ? ");" : ";");
+
+    // pn method: write field back to object via fn_map_set
+    if (tp->pn_method_obj_type) {
+        TypeObject* obj_type = tp->pn_method_obj_type;
+        ShapeEntry* se = obj_type->shape;
+        while (se) {
+            if (se->name && assign_node->target &&
+                (int)se->name->length == assign_node->target->len &&
+                strncmp(se->name->str, assign_node->target->chars, se->name->length) == 0) {
+                // write back: fn_map_set(_self_item, field_key, boxed_value)
+                strbuf_append_str(tp->code_buf, "\n fn_map_set(_self_item, s2it(heap_create_name(\"");
+                strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+                strbuf_append_str(tp->code_buf, "\")), ");
+                // box the local variable for fn_map_set
+                TypeId ftype = se->type ? se->type->type_id : LMD_TYPE_ANY;
+                if (ftype == LMD_TYPE_INT) {
+                    strbuf_append_str(tp->code_buf, "i2it(_");
+                } else if (ftype == LMD_TYPE_INT64) {
+                    strbuf_append_str(tp->code_buf, "l2it(_");
+                } else if (ftype == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "push_d(_");
+                } else if (ftype == LMD_TYPE_BOOL) {
+                    strbuf_append_str(tp->code_buf, "b2it(_");
+                } else {
+                    strbuf_append_str(tp->code_buf, "_");
+                }
+                strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+                if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 || ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_BOOL) {
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                strbuf_append_str(tp->code_buf, ");");
+                break;
+            }
+            se = se->next;
+        }
+    }
 }
 
 // compound assignment: arr[i] = val → fn_array_set(arr, i, val)
@@ -3959,26 +4011,76 @@ void transpile_object_expr(Transpiler* tp, AstObjectLiteralNode *obj_node) {
         return;
     }
 
+    TypeObject* obj_type = (TypeObject*)obj_node->type;
     strbuf_append_str(tp->code_buf, "({Object* obj = object(");
-    strbuf_append_int(tp->code_buf, ((TypeObject*)obj_node->type)->type_index);
+    strbuf_append_int(tp->code_buf, obj_type->type_index);
     strbuf_append_str(tp->code_buf, ");");
-    AstNode *item = obj_node->item;
-    if (item) {
+
+    if (obj_type->length > 0) {
+        // Check for a source object (bare expression, not key:value) for object update syntax
+        // e.g., {Point p, x: 10.0} → p is the source object
+        AstNode* source_obj = NULL;
+        AstNode* item_scan = obj_node->item;
+        while (item_scan) {
+            if (item_scan->node_type != AST_NODE_KEY_EXPR) {
+                source_obj = item_scan;
+                break;
+            }
+            item_scan = item_scan->next;
+        }
+
+        // If we have a source object, emit it into a temp variable
+        if (source_obj) {
+            strbuf_append_str(tp->code_buf, "\n Item _src = ");
+            transpile_box_item(tp, source_obj);
+            strbuf_append_str(tp->code_buf, ";");
+        }
+
         strbuf_append_str(tp->code_buf, "\n object_fill(obj,");
-        while (item) {
-            if (item->node_type == AST_NODE_KEY_EXPR) {
-                AstNamedNode* key_expr = (AstNamedNode*)item;
+        // Emit values in shape order to match set_fields() positional layout.
+        // For each shape entry, find the matching AST item by name.
+        ShapeEntry* se = obj_type->shape;
+        bool first = true;
+        while (se) {
+            if (!first) { strbuf_append_char(tp->code_buf, ','); }
+            first = false;
+            // find matching AST item
+            AstNode* found = NULL;
+            AstNode* item = obj_node->item;
+            while (item) {
+                if (item->node_type == AST_NODE_KEY_EXPR) {
+                    AstNamedNode* key_expr = (AstNamedNode*)item;
+                    if (key_expr->name && se->name &&
+                        key_expr->name->len == (int)se->name->length &&
+                        strncmp(key_expr->name->chars, se->name->str, se->name->length) == 0) {
+                        found = item;
+                        break;
+                    }
+                }
+                item = item->next;
+            }
+            if (found) {
+                AstNamedNode* key_expr = (AstNamedNode*)found;
                 if (key_expr->as) {
                     transpile_box_item(tp, key_expr->as);
                 } else {
                     log_error("Error: transpile_object_expr key expression missing assignment");
                     strbuf_append_str(tp->code_buf, "ITEM_ERROR");
                 }
+            } else if (source_obj) {
+                // field not provided — copy from source object
+                strbuf_append_str(tp->code_buf, "fn_member(_src, s2it(heap_create_name(\"");
+                strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+                strbuf_append_str(tp->code_buf, "\")))");
             } else {
-                transpile_box_item(tp, item);
+                // field not provided, no source — emit default value if available
+                if (se->default_value) {
+                    transpile_box_item(tp, se->default_value);
+                } else {
+                    strbuf_append_str(tp->code_buf, "ITEM_NULL");
+                }
             }
-            if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-            item = item->next;
+            se = se->next;
         }
         strbuf_append_str(tp->code_buf, ");");
     }
@@ -5374,6 +5476,11 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
+    // Methods: clear captures since field references are handled via _self, not closure env
+    // This ensures is_closure=false and is_method=true for proper method transpilation
+    if (tp->method_owner != nullptr) {
+        fn_node->captures = nullptr;
+    }
     bool is_closure = (fn_node->captures != nullptr);
 
     // Register function name mapping for stack traces (MIR name -> Lambda name)
@@ -5470,20 +5577,19 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // for methods, load fields from self object into local variables
     if (is_method) {
         AstObjectTypeNode* owner = tp->method_owner;
+        TypeType* tt = (TypeType*)owner->type;
+        TypeObject* obj_type = (TypeObject*)tt->type;
         strbuf_append_str(tp->code_buf, " Item _self_item = (uint64_t)(uintptr_t)_self;\n");
-        // iterate fields of the owner object type and load each one
-        AstNode* field = owner->item;
-        while (field) {
-            if (field->node_type == AST_NODE_KEY_EXPR) {
-                AstNamedNode* field_node = (AstNamedNode*)field;
-                const char* fname = field_node->name->chars;
-                int flen = field_node->name->len;
-                // determine the field's data type (unwrap TypeType)
-                Type* field_type = field_node->type;
-                if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
-                    field_type = ((TypeType*)field_type)->type;
-                }
-                // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_symbol("field", len))));
+        // make ~ refer to self inside method bodies (pipe expressions will shadow _pipe_item)
+        strbuf_append_str(tp->code_buf, " Item _pipe_item = _self_item;\n");
+        // iterate ALL fields of the object type (including inherited) via shape entries
+        ShapeEntry* se = obj_type->shape;
+        while (se) {
+            if (se->name) {
+                const char* fname = se->name->str;
+                int flen = (int)se->name->length;
+                Type* field_type = se->type;
+                // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_name("field"))));
                 strbuf_append_str(tp->code_buf, " ");
                 if (field_type) {
                     write_type(tp->code_buf, field_type);
@@ -5515,7 +5621,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                 }
                 strbuf_append_str(tp->code_buf, ";\n");
             }
-            field = field->next;
+            se = se->next;
         }
     }
 
@@ -5549,6 +5655,13 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         tp->method_owner = nullptr;
     }
 
+    // set pn_method_obj_type for pn method bodies (enables field write-back in assignments)
+    TypeObject* prev_pn_method_obj_type = tp->pn_method_obj_type;
+    if (is_method && fn_node->node_type == AST_NODE_PROC) {
+        TypeType* tt = (TypeType*)prev_method_owner->type;
+        tp->pn_method_obj_type = (TypeObject*)tt->type;
+    }
+
     // TCO context setup
     AstFuncNode* prev_tco_func = tp->tco_func;
     bool prev_in_tail = tp->in_tail_position;
@@ -5567,6 +5680,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, " return ");
         transpile_proc_content(tp, (AstListNode*)fn_node->body);
         strbuf_append_str(tp->code_buf, ";\n}\n");
+    } else if (is_proc && fn_node->body->node_type == AST_NODE_ASSIGN_STAM) {
+        // single assignment statement in pn body (flattened content)
+        transpile_assign_stam(tp, (AstAssignStamNode*)fn_node->body);
+        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
     } else if (fn_node->body->node_type == AST_NODE_RAISE_STAM) {
         // raise statement already generates return, don't add another
         transpile_raise(tp, (AstRaiseNode*)fn_node->body);
@@ -5614,6 +5731,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // restore method_owner context
     tp->method_owner = prev_method_owner;
+
+    // restore pn method context
+    tp->pn_method_obj_type = prev_pn_method_obj_type;
 
     // restore current function context
     tp->current_func_node = prev_func_node;

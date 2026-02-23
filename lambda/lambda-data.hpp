@@ -189,6 +189,7 @@ typedef struct ShapeEntry {
     int64_t byte_offset;  // byte offset of the map field
     struct ShapeEntry* next;
     Target* ns;  // namespace target (NULL for unqualified fields)
+    struct AstNode* default_value;  // default value expression (NULL if none)
 } ShapeEntry;
 
 typedef struct TypeMap : Type {

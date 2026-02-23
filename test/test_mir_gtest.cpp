@@ -28,7 +28,12 @@ static const size_t NUM_PROCEDURAL_TEST_DIRECTORIES = sizeof(PROCEDURAL_TEST_DIR
 
 // Tests to skip in MIR path (features not yet implemented in MIR transpiler)
 static const char* MIR_SKIP_TESTS[] = {
-    "object",    // object methods not yet supported in MIR transpiler
+    "object",           // object methods not yet supported in MIR transpiler
+    "object_inherit",   // object inheritance not yet supported in MIR transpiler
+    "object_default",   // object default values not yet supported in MIR transpiler
+    "object_update",    // object update syntax not yet supported in MIR transpiler
+    "object_mutation",  // object mutation methods not yet supported in MIR transpiler
+    "object_pattern",   // object pattern matching not yet supported in MIR transpiler
 };
 static const size_t NUM_MIR_SKIP_TESTS = sizeof(MIR_SKIP_TESTS) / sizeof(MIR_SKIP_TESTS[0]);
 
