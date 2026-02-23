@@ -2612,6 +2612,30 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 TypeId var_tid = declare->type ? declare->type->type_id : expr_tid;
                 if (expr_tid == LMD_TYPE_ANY) var_tid = LMD_TYPE_ANY;
 
+                // Runtime typed array coercion for occurrence annotations (int[], float[], etc.)
+                // When declared type is TypeUnary and RHS is dynamic, call ensure_typed_array
+                if (declare->type && declare->type->kind == TYPE_KIND_UNARY) {
+                    bool needs_coerce = (expr_tid == LMD_TYPE_ANY || expr_tid == LMD_TYPE_NULL ||
+                                         expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_LIST);
+                    if (needs_coerce) {
+                        // extract element type from TypeUnary operand
+                        TypeUnary* unary = (TypeUnary*)declare->type;
+                        Type* operand = unary->operand;
+                        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+                            operand = ((TypeType*)operand)->type;
+                        }
+                        TypeId elem_tid = operand ? operand->type_id : LMD_TYPE_ANY;
+                        // box the expression value to Item if not already boxed
+                        MIR_reg_t boxed = emit_box(mt, val, expr_tid);
+                        // call ensure_typed_array(item, element_type_id) → void* (pointer)
+                        val = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
+                        // result is a pointer (stored as I64), treat as ANY
+                        var_tid = LMD_TYPE_ANY;
+                    }
+                }
+
                 // Convert value if expression type differs from variable type
                 if (var_tid == LMD_TYPE_FLOAT && expr_tid == LMD_TYPE_INT) {
                     // int -> float conversion

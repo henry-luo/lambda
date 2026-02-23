@@ -895,3 +895,77 @@ ArrayList* item_keys(Item data) {
         return NULL;
     }
 }
+
+// ============================================================================
+// Runtime typed array coercion for type annotations (int[], float[], etc.)
+// Converts generic Array/List to typed array, or validates existing typed array.
+// Returns a pointer to the coerced typed array, or NULL if elements are incompatible.
+// ============================================================================
+
+void* ensure_typed_array(Item item, TypeId element_type_id) {
+    TypeId item_tid = get_type_id(item);
+
+    // already the correct typed array — pass through (container types are direct pointers)
+    if (element_type_id == LMD_TYPE_INT &&
+        (item_tid == LMD_TYPE_ARRAY_INT || item_tid == LMD_TYPE_RANGE)) {
+        return (void*)item.container;
+    }
+    if (element_type_id == LMD_TYPE_FLOAT && item_tid == LMD_TYPE_ARRAY_FLOAT) {
+        return (void*)item.container;
+    }
+    if (element_type_id == LMD_TYPE_INT64 && item_tid == LMD_TYPE_ARRAY_INT64) {
+        return (void*)item.container;
+    }
+
+    // null/empty → return NULL (caller checks)
+    if (item_tid == LMD_TYPE_NULL) return NULL;
+
+    // convert generic Array/List to typed array (Array and List are the same struct)
+    if (item_tid == LMD_TYPE_ARRAY || item_tid == LMD_TYPE_LIST) {
+        Array* arr = item.array;
+        Item* items = arr->items;
+        int64_t length = arr->length;
+
+        if (element_type_id == LMD_TYPE_INT) {
+            ArrayInt* typed = array_int_new((int)length);
+            for (int64_t i = 0; i < length; i++) {
+                TypeId elem_tid = get_type_id(items[i]);
+                if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {
+                    log_error("ensure_typed_array: element %lld has type %s, expected int", i, get_type_name(elem_tid));
+                    return NULL;
+                }
+                typed->items[i] = it2i(items[i]);
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_FLOAT) {
+            ArrayFloat* typed = array_float_new((int)length);
+            for (int64_t i = 0; i < length; i++) {
+                TypeId elem_tid = get_type_id(items[i]);
+                if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
+                    elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_DECIMAL) {
+                    log_error("ensure_typed_array: element %lld has type %s, expected float", i, get_type_name(elem_tid));
+                    return NULL;
+                }
+                typed->items[i] = it2d(items[i]);
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_INT64) {
+            ArrayInt64* typed = array_int64_new((int)length);
+            for (int64_t i = 0; i < length; i++) {
+                TypeId elem_tid = get_type_id(items[i]);
+                if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {
+                    log_error("ensure_typed_array: element %lld has type %s, expected int64", i, get_type_name(elem_tid));
+                    return NULL;
+                }
+                typed->items[i] = it2l(items[i]);
+            }
+            return typed;
+        }
+    }
+
+    // incompatible type (e.g., int[] but got a string)
+    log_error("ensure_typed_array: cannot coerce %s to %s[]", get_type_name(item_tid), get_type_name(element_type_id));
+    return NULL;
+}

@@ -908,6 +908,11 @@ typedef struct Context {
     void fn_array_set(Array* arr, int index, Item value);
     void fn_map_set(Item map, Item key, Item value);
 
+    // runtime type coercion for typed array annotations (int[], float[], etc.)
+    // converts generic Array/List to typed array, or validates existing typed array
+    // returns pointer to the coerced typed array, or NULL if elements are incompatible
+    void* ensure_typed_array(Item item, TypeId element_type_id);
+
     // VMap system functions
 #ifdef __cplusplus
 extern "C" {

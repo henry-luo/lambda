@@ -256,6 +256,7 @@ func_obj_t func_list[] = {
     {"it2s", (fn_ptr) it2s},
     {"it2b", (fn_ptr) it2b},
     {"fn_to_cstr", (fn_ptr) fn_to_cstr},
+    {"ensure_typed_array", (fn_ptr) ensure_typed_array},
     // MIR swap-safe store functions (external call prevents SSA reordering)
     {"_store_i64", (fn_ptr) _store_i64},
     {"_store_f64", (fn_ptr) _store_f64},
