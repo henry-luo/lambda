@@ -589,7 +589,7 @@ module.exports = grammar({
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier),
-      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
+      '(', optional(seq(field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))))), ')',
       // return type with optional error type: T or T^E or T^
       optional(field('type', $.return_type)),
       '=>', field('body', $._expr)

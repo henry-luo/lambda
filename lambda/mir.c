@@ -125,6 +125,7 @@ func_obj_t func_list[] = {
     {"object", (fn_ptr) object},
     {"object_fill", (fn_ptr) object_fill},
     {"object_get", (fn_ptr) object_get},
+    {"object_type_set_method", (fn_ptr) object_type_set_method},
     {"is_truthy", (fn_ptr) is_truthy},
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
@@ -270,6 +271,7 @@ func_obj_t func_list[] = {
     {"to_closure_named", (fn_ptr) to_closure_named},
     {"heap_calloc", (fn_ptr) heap_calloc},
     {"heap_create_name", (fn_ptr) heap_create_name},
+    {"heap_create_symbol", (fn_ptr) heap_create_symbol},
     {"heap_strcpy", (fn_ptr) heap_strcpy},  // for creating runtime strings
     {"target_equal", (fn_ptr) target_equal},
     {"fn_call", (fn_ptr) fn_call},

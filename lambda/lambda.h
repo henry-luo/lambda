@@ -532,6 +532,8 @@ void* heap_calloc(size_t size, TypeId type_id);
 String* heap_create_name(const char* name);
 // String creation for runtime strings
 String* heap_strcpy(char* src, int len);
+// Symbol creation for runtime symbols
+Symbol* heap_create_symbol(const char* symbol, size_t len);
 #ifdef __cplusplus
 }
 #endif
@@ -644,6 +646,8 @@ typedef struct Context {
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
+    void object_type_set_method(int64_t type_index, const char* method_name,
+                                fn_ptr func_ptr, int64_t arity, int64_t is_proc);
     Item item_at(Item data, int index);
     Item item_attr(Item data, const char* key);  // get attribute by name
     struct _ArrayList* item_keys(Item data);     // get list of attribute names
