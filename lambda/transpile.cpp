@@ -1360,6 +1360,17 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         (int)ident_node->name->len, ident_node->name->chars, pattern_type->pattern_index);
                     strbuf_append_format(tp->code_buf, "const_pattern(%d)", pattern_type->pattern_index);
                 }
+                else if (entry_node->node_type == AST_NODE_OBJECT_TYPE) {
+                    // Named object type reference — emit const_type(type_index) for runtime type checking
+                    Type* node_type = entry_node->type;
+                    if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* type_type = (TypeType*)node_type;
+                        TypeMap* type_map = (TypeMap*)type_type->type;
+                        strbuf_append_format(tp->code_buf, "const_type(%d)", type_map->type_index);
+                    } else {
+                        strbuf_append_str(tp->code_buf, "ItemError /* bad object type ref */");
+                    }
+                }
                 else {
                     log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
                         (int)ident_node->name->len, ident_node->name->chars,
@@ -3768,6 +3779,33 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
     tp->in_tail_position = prev_in_tail;
 }
 
+// emit object_type_set_method() calls to register methods on an object type at runtime
+void transpile_object_type_method_registration(Transpiler* tp, AstObjectTypeNode* obj_node) {
+    Type* node_type = obj_node->type;
+    TypeObject* obj_type = (node_type->type_id == LMD_TYPE_TYPE)
+        ? (TypeObject*)((TypeType*)node_type)->type
+        : (TypeObject*)node_type;
+    AstNode* method = obj_node->methods;
+    while (method) {
+        AstFuncNode* fn_method = (AstFuncNode*)method;
+        TypeFunc* method_fn_type = (TypeFunc*)fn_method->type;
+        int arity = method_fn_type ? method_fn_type->param_count : 0;
+        bool is_proc = (fn_method->node_type == AST_NODE_PROC);
+        strbuf_append_str(tp->code_buf, " object_type_set_method(");
+        strbuf_append_int(tp->code_buf, obj_type->type_index);
+        strbuf_append_str(tp->code_buf, ", \"");
+        strbuf_append_str_n(tp->code_buf, fn_method->name->chars, fn_method->name->len);
+        strbuf_append_str(tp->code_buf, "\", (fn_ptr)");
+        write_fn_name(tp->code_buf, fn_method, NULL);
+        strbuf_append_str(tp->code_buf, ", ");
+        strbuf_append_int(tp->code_buf, arity);
+        strbuf_append_str(tp->code_buf, ", ");
+        strbuf_append_int(tp->code_buf, is_proc ? 1 : 0);
+        strbuf_append_str(tp->code_buf, ");\n");
+        method = method->next;
+    }
+}
+
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
     log_debug("transpile content expr");
     TypeArray *type = list_node->list_type;
@@ -3821,7 +3859,10 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_glob
                     transpile_let_stam(tp, (AstLetNode*)item, is_global);
                 }
             }
-            // AST_NODE_OBJECT_TYPE is a type declaration — no-op in C transpiler
+            else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+                // register methods on object type at runtime
+                transpile_object_type_method_registration(tp, (AstObjectTypeNode*)item);
+            }
             item = item->next;
         }
         // emit the single value expression as the result
@@ -3850,7 +3891,10 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_glob
                 transpile_let_stam(tp, (AstLetNode*)item, is_global);
             }
         }
-        // AST_NODE_OBJECT_TYPE is a type declaration — no-op in C transpiler
+        else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+            // register methods on object type at runtime
+            transpile_object_type_method_registration(tp, (AstObjectTypeNode*)item);
+        }
         item = item->next;
     }
     if (effective_length == 0) {
@@ -4581,7 +4625,20 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             log_debug("callable call expression detected (wrapped in primary)");
         }
 
-        if (callee_type_id == LMD_TYPE_FUNC || is_callable_param || is_callable_variable || is_callable_call_expr) {
+        // Check if callee is a member/index expression (e.g., obj.method() or arr[idx]())
+        // These may be wrapped in a primary expression
+        bool is_callable_member = false;
+        if (call_node->function->node_type == AST_NODE_MEMBER_EXPR ||
+            call_node->function->node_type == AST_NODE_INDEX_EXPR) {
+            is_callable_member = true;
+        }
+        else if (primary_fn_node && primary_fn_node->expr &&
+                 (primary_fn_node->expr->node_type == AST_NODE_MEMBER_EXPR ||
+                  primary_fn_node->expr->node_type == AST_NODE_INDEX_EXPR)) {
+            is_callable_member = true;
+        }
+
+        if (callee_type_id == LMD_TYPE_FUNC || is_callable_param || is_callable_variable || is_callable_call_expr || is_callable_member) {
             if (callee_type_id == LMD_TYPE_FUNC) {
                 fn_type = (TypeFunc*)call_node->function->type;
             }
@@ -5149,8 +5206,9 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_expr(tp, field_node->object);
     }
     else if (field_node->object->type->type_id == LMD_TYPE_OBJECT) {
-        strbuf_append_str(tp->code_buf, "object_get(");
-        transpile_expr(tp, field_node->object);
+        // use fn_member for objects — handles both field access and method lookup
+        strbuf_append_str(tp->code_buf, "fn_member(");
+        transpile_box_item(tp, field_node->object);
     }
     else if (field_node->object->type->type_id == LMD_TYPE_ELEMENT) {
         strbuf_append_str(tp->code_buf, "elmt_get(");
@@ -5259,6 +5317,9 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     // functions that can raise errors must also return Item
     if (is_closure || fn_type->can_raise) {
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (tp->method_owner != nullptr) {
+        // Methods are called via fn_call* (closure mechanism), must return Item
+        strbuf_append_str(tp->code_buf, "Item");
     } else if (fn_node->param && !has_typed_params(fn_node)) {
         // Functions with ALL untyped params use Item-level runtime ops internally
         // Force Item return so fn_call* and direct calls work correctly
@@ -5274,8 +5335,15 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     write_fn_name(tp->code_buf, fn_node, NULL);
     strbuf_append_char(tp->code_buf, '(');
 
-    // for closures, add hidden env parameter as first param
+    // for methods, add hidden self parameter as first param
+    bool is_method_fwd = (tp->method_owner != nullptr && !is_closure);
     bool has_params = false;
+    if (is_method_fwd) {
+        strbuf_append_str(tp->code_buf, "void* _self");
+        has_params = true;
+    }
+
+    // for closures, add hidden env parameter as first param
     if (is_closure) {
         strbuf_append_str(tp->code_buf, "void* _env_ptr");
         has_params = true;
@@ -5285,8 +5353,8 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
         TypeParam* param_type = (TypeParam*)param->type;
-        // closures receive all params as Item from fn_call*
-        if (is_closure || param_type->is_optional) {
+        // closures and methods receive all params as Item from fn_call*
+        if (is_closure || is_method_fwd || param_type->is_optional) {
             strbuf_append_str(tp->code_buf, "Item");
         } else {
             write_type(tp->code_buf, param->type);
@@ -5328,6 +5396,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // Functions that can raise errors must return Item
         // (since they can return either the success value or an error)
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (tp->method_owner != nullptr) {
+        // Methods are called via fn_call* (closure mechanism), must return Item
+        strbuf_append_str(tp->code_buf, "Item");
     } else if (fn_node->param && !has_typed_params(fn_node)) {
         // Functions with ALL untyped params use Item-level runtime ops internally
         // Force Item return so fn_call* and direct calls work correctly
@@ -5344,8 +5415,15 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // write the params
     strbuf_append_char(tp->code_buf, '(');
 
-    // for closures, add hidden env parameter as first param
+    // for methods, add hidden self parameter as first param
+    bool is_method = (tp->method_owner != nullptr && !is_closure);
     bool has_params = false;
+    if (is_method) {
+        strbuf_append_str(tp->code_buf, "void* _self");
+        has_params = true;
+    }
+
+    // for closures, add hidden env parameter as first param
     if (is_closure) {
         strbuf_append_str(tp->code_buf, "void* _env_ptr");
         has_params = true;
@@ -5354,9 +5432,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        // closures receive all params as Item from fn_call*
+        // closures and methods receive all params as Item from fn_call*
         TypeParam* param_type = (TypeParam*)param->type;
-        if (is_closure || param_type->is_optional) {
+        if (is_closure || is_method || param_type->is_optional) {
             strbuf_append_str(tp->code_buf, "Item");
         } else {
             write_type(tp->code_buf, param->type);
@@ -5389,6 +5467,58 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, "*)_env_ptr;\n");
     }
 
+    // for methods, load fields from self object into local variables
+    if (is_method) {
+        AstObjectTypeNode* owner = tp->method_owner;
+        strbuf_append_str(tp->code_buf, " Item _self_item = (uint64_t)(uintptr_t)_self;\n");
+        // iterate fields of the owner object type and load each one
+        AstNode* field = owner->item;
+        while (field) {
+            if (field->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* field_node = (AstNamedNode*)field;
+                const char* fname = field_node->name->chars;
+                int flen = field_node->name->len;
+                // determine the field's data type (unwrap TypeType)
+                Type* field_type = field_node->type;
+                if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                    field_type = ((TypeType*)field_type)->type;
+                }
+                // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_symbol("field", len))));
+                strbuf_append_str(tp->code_buf, " ");
+                if (field_type) {
+                    write_type(tp->code_buf, field_type);
+                } else {
+                    strbuf_append_str(tp->code_buf, "Item");
+                }
+                strbuf_append_str(tp->code_buf, " _");
+                strbuf_append_str_n(tp->code_buf, fname, flen);
+                strbuf_append_str(tp->code_buf, " = ");
+                // unbox based on type
+                TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
+                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64) {
+                    strbuf_append_str(tp->code_buf, "it2i(");
+                } else if (ftid == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "it2d(");
+                } else if (ftid == LMD_TYPE_BOOL) {
+                    strbuf_append_str(tp->code_buf, "it2b(");
+                } else if (ftid == LMD_TYPE_STRING) {
+                    strbuf_append_str(tp->code_buf, "it2s(");
+                } else {
+                    // no unboxing for Item or complex types
+                }
+                strbuf_append_str(tp->code_buf, "fn_member(_self_item, s2it(heap_create_name(\"");
+                strbuf_append_str_n(tp->code_buf, fname, flen);
+                strbuf_append_str(tp->code_buf, "\")))");
+                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
+                    ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
+                    strbuf_append_char(tp->code_buf, ')');  // close unbox call
+                }
+                strbuf_append_str(tp->code_buf, ";\n");
+            }
+            field = field->next;
+        }
+    }
+
     // Check if this function should use Tail Call Optimization
     // TCO converts tail-recursive calls to goto jumps, eliminating stack growth.
     // Non-tail recursive calls within the same function remain as normal calls.
@@ -5407,9 +5537,16 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     }
 
     // set current_closure context for body transpilation
+    // Methods also set this since their params are passed as Item (like closures)
     AstFuncNode* prev_closure = tp->current_closure;
-    if (is_closure) {
+    if (is_closure || is_method) {
         tp->current_closure = fn_node;
+    }
+
+    // clear method_owner during method body transpilation (so nested fns don't get _self)
+    AstObjectTypeNode* prev_method_owner = tp->method_owner;
+    if (is_method) {
+        tp->method_owner = nullptr;
     }
 
     // TCO context setup
@@ -5443,7 +5580,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // Check if we need to box the return value
         // Box if: (1) it's a closure, OR (2) can_raise is true, OR (3) return type is Item but body type is a scalar
         // OR (4) function has ALL untyped params (returns Item, body may produce native values)
-        bool needs_boxing = is_closure || fn_type_check->can_raise ||
+        bool needs_boxing = is_closure || is_method || fn_type_check->can_raise ||
                            (fn_node->param && !has_typed_params(fn_node));
         if (!needs_boxing && ret_type->type_id == LMD_TYPE_ANY && fn_node->body->type) {
             TypeId body_type_id = fn_node->body->type->type_id;
@@ -5475,17 +5612,21 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // restore previous closure context
     tp->current_closure = prev_closure;
 
+    // restore method_owner context
+    tp->method_owner = prev_method_owner;
+
     // restore current function context
     tp->current_func_node = prev_func_node;
 
-    // For typed functions (non-closure, non-proc), generate an unboxed version
+    // For typed functions (non-closure, non-proc, non-method), generate an unboxed version
     // The unboxed version uses native types for params AND return (no boxing overhead)
-    if (!is_closure && !is_proc && !as_pointer && has_typed_params(fn_node)) {
+    if (!is_closure && !is_method && !is_proc && !as_pointer && has_typed_params(fn_node)) {
         define_func_unboxed(tp, fn_node);
     }
     // Generate fn_call*-compatible wrapper for functions with non-Item ABI
     // This covers typed params AND/OR native return types
-    if (!is_closure && !is_proc && !as_pointer && needs_fn_call_wrapper(fn_node)) {
+    // Methods are excluded because they use the closure mechanism already
+    if (!is_closure && !is_method && !is_proc && !as_pointer && needs_fn_call_wrapper(fn_node)) {
         define_func_call_wrapper(tp, fn_node);
     }
 }
@@ -6185,9 +6326,19 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }
         break;
     }
-    case AST_NODE_OBJECT_TYPE:
-        // type declaration — no-op in C transpiler
+    case AST_NODE_OBJECT_TYPE: {
+        // define method functions inside the object type
+        AstObjectTypeNode* obj_node = (AstObjectTypeNode*)node;
+        AstObjectTypeNode* prev_owner = tp->method_owner;
+        tp->method_owner = obj_node;
+        AstNode* method = obj_node->methods;
+        while (method) {
+            define_func(tp, (AstFuncNode*)method, false);
+            method = method->next;
+        }
+        tp->method_owner = prev_owner;
         break;
+    }
     case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN: {
         // Pattern definitions - compile the pattern and store in type_list
         AstPatternDefNode* pattern_def = (AstPatternDefNode*)node;
@@ -6539,11 +6690,32 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
                 if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC) {
                     forward_declare_func(tp, (AstFuncNode*)item);
                 }
+                else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+                    // forward-declare methods inside object type
+                    AstObjectTypeNode* obj_node = (AstObjectTypeNode*)item;
+                    tp->method_owner = obj_node;
+                    AstNode* method = obj_node->methods;
+                    while (method) {
+                        forward_declare_func(tp, (AstFuncNode*)method);
+                        method = method->next;
+                    }
+                    tp->method_owner = nullptr;
+                }
                 item = item->next;
             }
             child = child->next;
         } else if (child->node_type == AST_NODE_FUNC || child->node_type == AST_NODE_PROC) {
             forward_declare_func(tp, (AstFuncNode*)child);
+            child = child->next;
+        } else if (child->node_type == AST_NODE_OBJECT_TYPE) {
+            AstObjectTypeNode* obj_node = (AstObjectTypeNode*)child;
+            tp->method_owner = obj_node;
+            AstNode* method = obj_node->methods;
+            while (method) {
+                forward_declare_func(tp, (AstFuncNode*)method);
+                method = method->next;
+            }
+            tp->method_owner = nullptr;
             child = child->next;
         } else {
             child = child->next;
@@ -6558,7 +6730,8 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             child = ((AstListNode*)child)->item;
             continue;  // restart the loop with the first content item
         case AST_NODE_OBJECT_TYPE:
-            // type declaration — no-op in C transpiler
+            // define methods inside the object type (via define_ast_node)
+            define_ast_node(tp, child);
             break;
         // declare global vars, types
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
@@ -6662,7 +6835,8 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             assign_global_var(tp, (AstLetNode*)child);
             break;  // already handled
         case AST_NODE_OBJECT_TYPE:
-            break;  // type declaration — no-op in C transpiler
+            transpile_object_type_method_registration(tp, (AstObjectTypeNode*)child);
+            break;
         case AST_NODE_IMPORT:  case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
         case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN:
             break;  // skip global definition nodes

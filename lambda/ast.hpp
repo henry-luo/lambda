@@ -670,6 +670,9 @@ typedef struct Transpiler : Script {
 
     // unique counter for temporary variables (e.g., error propagation temps)
     int temp_var_counter;
+
+    // Object method transpilation context
+    AstObjectTypeNode* method_owner;  // non-null when transpiling a method body
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

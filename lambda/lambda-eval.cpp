@@ -768,7 +768,25 @@ Bool fn_is(Item a, Item b) {
             log_debug("fast path array type check");
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
                 a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
-        } else {  // full type validation
+        }
+        else if (type_b->type->type_id == LMD_TYPE_OBJECT && type_b->type != &TYPE_OBJECT) {
+            // Nominal type check for named object types (e.g., c is Calc)
+            if (a_type_id != LMD_TYPE_OBJECT) return BOOL_FALSE;
+            Object* obj = (Object*)(uintptr_t)a.item;
+            TypeObject* obj_type = (TypeObject*)obj->type;
+            TypeObject* expected = (TypeObject*)type_b->type;
+            // walk inheritance chain
+            while (obj_type) {
+                if (obj_type == expected) return BOOL_TRUE;
+                obj_type = obj_type->base;
+            }
+            return BOOL_FALSE;
+        }
+        else if (type_b->type == &TYPE_OBJECT) {
+            // Generic "object" type check — any object matches
+            return a_type_id == LMD_TYPE_OBJECT ? BOOL_TRUE : BOOL_FALSE;
+        }
+        else {  // full type validation
             log_debug("full type validation for type: %d", type_b->type->type_id);
             ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
             if (result->error_count > 0) {
@@ -2031,9 +2049,55 @@ Item fn_member(Item item, Item key) {
         return map_get(map, key);
     }
     case LMD_TYPE_OBJECT: {
-        // TODO: method dispatch lookup here in future phase
-        // for now, fall back to field access (same layout as Map)
-        return object_get(item.object, key);
+        Object* obj = item.object;
+        // First try field access
+        bool is_found = false;
+        char* key_str = NULL;
+        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+            key_str = (char*)key.get_chars();
+        }
+        if (key_str) {
+            Item field_val = _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
+            if (is_found) return field_val;
+        }
+        // Field not found — check method table
+        if (key_str) {
+            TypeObject* obj_type = (TypeObject*)obj->type;
+            TypeMethod* method = obj_type->methods;
+            while (method) {
+                if (strcmp(method->name->str, key_str) == 0 && method->fn) {
+                    // Create a bound method: closure where closure_env = boxed self Item
+                    // fn_call will pass closure_env as first arg (the _self parameter)
+                    Function* bound = to_closure_named(
+                        method->fn->ptr,
+                        method->fn->arity,
+                        (void*)(uintptr_t)item.item,  // boxed self as closure_env
+                        method->fn->name);
+                    log_debug("fn_member: bound method '%s' on object '%.*s'",
+                        key_str, (int)obj_type->type_name.length, obj_type->type_name.str);
+                    return {.item = (uint64_t)(uintptr_t)bound};
+                }
+                method = method->next;
+            }
+            // Walk inheritance chain
+            TypeObject* base = obj_type->base;
+            while (base) {
+                TypeMethod* bmethod = base->methods;
+                while (bmethod) {
+                    if (strcmp(bmethod->name->str, key_str) == 0 && bmethod->fn) {
+                        Function* bound = to_closure_named(
+                            bmethod->fn->ptr,
+                            bmethod->fn->arity,
+                            (void*)(uintptr_t)item.item,
+                            bmethod->fn->name);
+                        return {.item = (uint64_t)(uintptr_t)bound};
+                    }
+                    bmethod = bmethod->next;
+                }
+                base = base->base;
+            }
+        }
+        return ItemNull;
     }
     case LMD_TYPE_VMAP: {
         VMap *vm = item.vmap;

@@ -119,6 +119,10 @@ struct MirTranspiler {
     AstFuncNode* current_closure;
     MIR_reg_t env_reg;
 
+    // Object method context: set when transpiling a method body inside an object type
+    TypeObject* method_owner;
+    MIR_reg_t self_reg;  // register holding the boxed self Item (_self parameter)
+
     // Whether we're inside a user-defined function (not the main function)
     bool in_user_func;
 
@@ -4967,7 +4971,58 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             TypeType* tt = (TypeType*)obj_type_node->type;
             if (tt->type) {
                 TypeObject* ot = (TypeObject*)tt->type;
-                return transpile_const_type(mt, ot->type_index);
+                MIR_reg_t type_val = transpile_const_type(mt, ot->type_index);
+
+                // Register method function pointers on the TypeObject
+                AstNode* method_node = obj_type_node->methods;
+                while (method_node) {
+                    if (method_node->node_type == AST_NODE_FUNC ||
+                        method_node->node_type == AST_NODE_PROC ||
+                        method_node->node_type == AST_NODE_FUNC_EXPR) {
+                        AstFuncNode* fn_method = (AstFuncNode*)method_node;
+                        // Get the mangled function name
+                        StrBuf* fn_name_buf = strbuf_new_cap(64);
+                        write_fn_name(fn_name_buf, fn_method, NULL);
+                        // Find the compiled MIR function
+                        MIR_item_t method_func = find_local_func(mt, fn_name_buf->str);
+                        if (method_func) {
+                            // Get function address
+                            MIR_reg_t fn_addr = new_reg(mt, "mthaddr", MIR_T_I64);
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, fn_addr),
+                                MIR_new_ref_op(mt->ctx, method_func)));
+                            // Get method name as string
+                            MIR_reg_t mth_name = emit_load_string_literal(mt,
+                                fn_method->name->chars);
+                            // Count user-visible arity (without hidden _self)
+                            int arity = 0;
+                            AstNamedNode* p = fn_method->param;
+                            while (p) { arity++; p = (AstNamedNode*)p->next; }
+                            // Emit: object_type_set_method(type_index, name, fn_ptr, arity, is_proc)
+                            MIR_var_t args[5] = {
+                                {MIR_T_I64, "ti", 0}, {MIR_T_P, "n", 0},
+                                {MIR_T_P, "f", 0}, {MIR_T_I64, "a", 0},
+                                {MIR_T_I64, "p", 0}
+                            };
+                            MirImportEntry* ie = ensure_import(mt, "object_type_set_method",
+                                MIR_T_I64, 5, args, 0);
+                            emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
+                                MIR_new_ref_op(mt->ctx, ie->proto),
+                                MIR_new_ref_op(mt->ctx, ie->import),
+                                MIR_new_int_op(mt->ctx, (int64_t)ot->type_index),
+                                MIR_new_reg_op(mt->ctx, mth_name),
+                                MIR_new_reg_op(mt->ctx, fn_addr),
+                                MIR_new_int_op(mt->ctx, (int64_t)arity),
+                                MIR_new_int_op(mt->ctx, method_node->node_type == AST_NODE_PROC ? 1 : 0)));
+                            log_debug("mir: registered method '%s' on type '%.*s'",
+                                fn_name_buf->str, (int)ot->type_name.length, ot->type_name.str);
+                        }
+                        strbuf_free(fn_name_buf);
+                    }
+                    method_node = method_node->next;
+                }
+
+                return type_val;
             }
         }
         // fallback: return null
@@ -5356,6 +5411,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Check if this function is a closure (has captured variables)
     bool is_closure = (fn_node->captures != nullptr);
 
+    // Check if this is a method inside an object type definition
+    bool is_method = (mt->method_owner != nullptr);
+
     // Build parameter list (all params as Item/boxed for consistency with C transpiler)
     MIR_var_t params[32];
     int param_count = 0;
@@ -5363,6 +5421,12 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // For closures, add hidden _env_ptr as first parameter
     if (is_closure) {
         params[param_count] = {MIR_T_P, strdup("_env_ptr"), 0};
+        param_count++;
+    }
+
+    // For methods, add hidden _self as first parameter (boxed Item containing Object*)
+    if (is_method && !is_closure) {
+        params[param_count] = {MIR_T_P, strdup("_self"), 0};
         param_count++;
     }
 
@@ -5521,6 +5585,56 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     bool saved_in_proc = mt->in_proc;
     mt->in_proc = (fn_as_node->node_type == AST_NODE_PROC);
 
+    // For methods: load object fields from _self into local scope
+    TypeObject* saved_method_owner = mt->method_owner;
+    MIR_reg_t saved_self_reg = mt->self_reg;
+    if (is_method && !is_closure) {
+        // _self is passed as void* (actually a boxed Item: uint64_t reinterpreted as pointer)
+        MIR_reg_t self_ptr_reg = MIR_reg(mt->ctx, "_self", func);
+        // Cast void* to i64 to use as boxed Item
+        MIR_reg_t self_item_reg = new_reg(mt, "self_item", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, self_item_reg),
+            MIR_new_reg_op(mt->ctx, self_ptr_reg)));
+        mt->self_reg = self_item_reg;
+
+        // Load each field from the object into local scope
+        TypeObject* owner = mt->method_owner;
+        ShapeEntry* field = owner->shape;
+        while (field) {
+            const char* field_name = field->name->str;
+            int field_name_len = (int)field->name->length;
+            // Create a Symbol* key for fn_member lookup
+            MIR_reg_t name_ptr = emit_load_string_literal(mt, field_name);
+            MIR_reg_t sym_ptr = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)field_name_len));
+            MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
+            // Call fn_member(self_item, key) to get field value
+            MIR_reg_t field_val = emit_call_2(mt, "fn_member", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, self_item_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed));
+
+            // Determine the field's type for optimal native representation
+            TypeId field_tid = field->type ? field->type->type_id : LMD_TYPE_ANY;
+            // Unwrap TypeType wrapper if present
+            if (field_tid == LMD_TYPE_TYPE && field->type) {
+                TypeType* ft = (TypeType*)field->type;
+                if (ft->type) field_tid = ft->type->type_id;
+            }
+            if (field_tid == LMD_TYPE_INT || field_tid == LMD_TYPE_FLOAT || field_tid == LMD_TYPE_BOOL) {
+                MIR_reg_t unboxed = emit_unbox(mt, field_val, field_tid);
+                MIR_type_t mtype = type_to_mir(field_tid);
+                set_var(mt, field_name, unboxed, mtype, field_tid);
+            } else {
+                set_var(mt, field_name, field_val, MIR_T_I64, LMD_TYPE_ANY);
+            }
+
+            log_debug("mir: method '%s' - loaded field '%s' from self", name_buf->str, field_name);
+            field = field->next;
+        }
+    }
+
     // Transpile body - use transpile_box_item to ensure result is boxed Item
     MIR_reg_t body_result = transpile_box_item(mt, fn_node->body);
 
@@ -5539,6 +5653,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_closure = saved_closure;
     mt->env_reg = saved_env_reg;
     mt->in_proc = saved_in_proc;
+    mt->method_owner = saved_method_owner;
+    mt->self_reg = saved_self_reg;
 
     strbuf_free(name_buf);
 }
@@ -5915,9 +6031,15 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             break;
         }
         case AST_NODE_OBJECT_TYPE: {
-            // recurse into methods for function definition
+            // recurse into methods for function definition, with method_owner context
             AstObjectTypeNode* obj = (AstObjectTypeNode*)node;
-            if (obj->methods) prepass_define_functions(mt, obj->methods);
+            if (obj->methods) {
+                TypeObject* saved_owner = mt->method_owner;
+                TypeType* tt = (TypeType*)obj->type;
+                mt->method_owner = (TypeObject*)tt->type;
+                prepass_define_functions(mt, obj->methods);
+                mt->method_owner = saved_owner;
+            }
             break;
         }
         case AST_NODE_ASSIGN:
@@ -6146,7 +6268,12 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         case AST_NODE_VAR_STAM:
             transpile_let_stam(&mt, (AstLetNode*)child);
             break;
-        case AST_NODE_OBJECT_TYPE:
+        case AST_NODE_OBJECT_TYPE: {
+            // Object type definition — methods compiled in pre-pass
+            // Emit method registration code (transpile_expr handles this)
+            transpile_expr(&mt, child);
+            break;
+        }
         case AST_NODE_IMPORT:
         case AST_NODE_FUNC:
         case AST_NODE_FUNC_EXPR:

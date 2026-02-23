@@ -252,6 +252,31 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
     } else if (item.isMap()) {
         MapReader mp = item.asMap();
         format_map_reader_with_indent(ctx, mp, indent);
+    } else if (item.getType() == LMD_TYPE_OBJECT) {
+        // Object: format as map with "@" type discriminator key
+        Object* obj = (Object*)(uintptr_t)item.item().item;
+        TypeObject* obj_type = (TypeObject*)obj->type;
+        ctx.write_text("{\n");
+        add_indent(ctx, indent + 1);
+        ctx.write_text("\"@\":\"");
+        if (obj_type->type_name.str) {
+            stringbuf_append_str_n(ctx.output(), obj_type->type_name.str, obj_type->type_name.length);
+        }
+        ctx.write_char('"');
+        // Format fields using MapReader (Object has same field layout as Map)
+        MapReader mp = MapReader::fromItem(item.item());
+        auto iter = mp.entries();
+        const char* key;
+        ItemReader value;
+        while (iter.next(&key, &value)) {
+            ctx.write_text(",\n");
+            add_indent(ctx, indent + 1);
+            stringbuf_append_format(ctx.output(), "\"%s\":", key);
+            format_item_reader_with_indent(ctx, value, indent + 1);
+        }
+        ctx.write_char('\n');
+        add_indent(ctx, indent);
+        ctx.write_char('}');
     } else if (item.isElement()) {
         ElementReader elem = item.asElement();
         format_element_reader_with_indent(ctx, elem, indent);

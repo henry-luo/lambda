@@ -625,7 +625,11 @@ Object* object(int type_index) {
     Object *obj = (Object *)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
     obj->type_id = LMD_TYPE_OBJECT;
     ArrayList* type_list = (ArrayList*)context->type_list;
-    TypeObject *obj_type = (TypeObject*)(type_list->data[type_index]);
+    // type_list stores TypeType wrapper; unwrap to get TypeObject
+    Type* stored = (Type*)(type_list->data[type_index]);
+    TypeObject *obj_type = (stored->type_id == LMD_TYPE_TYPE)
+        ? (TypeObject*)((TypeType*)stored)->type
+        : (TypeObject*)stored;
     obj->type = obj_type;
     frame_start();
     return obj;
@@ -658,6 +662,35 @@ Item object_get(Object* obj, Item key) {
     }
     log_debug("object_get key:'%s'", key_str);
     return _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
+}
+
+// Register a compiled method function pointer on a TypeObject's method table
+void object_type_set_method(int64_t type_index, const char* method_name,
+                            fn_ptr func_ptr, int64_t arity, int64_t is_proc) {
+    log_debug("object_type_set_method: type_index=%ld, method='%s', arity=%ld",
+        type_index, method_name, arity);
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    // type_list stores TypeType wrapper; unwrap to get TypeObject
+    Type* stored = (Type*)(type_list->data[type_index]);
+    TypeObject* obj_type = (stored->type_id == LMD_TYPE_TYPE)
+        ? (TypeObject*)((TypeType*)stored)->type
+        : (TypeObject*)stored;
+
+    // Walk the TypeMethod linked list to find matching method
+    TypeMethod* method = obj_type->methods;
+    while (method) {
+        if (strcmp(method->name->str, method_name) == 0) {
+            // Create Function* with the compiled function pointer
+            Function* fn = to_fn_named(func_ptr, (int)arity, method_name);
+            method->fn = fn;
+            log_debug("object_type_set_method: registered '%s' on '%.*s' fn=%p",
+                method_name, (int)obj_type->type_name.length, obj_type->type_name.str, fn);
+            return;
+        }
+        method = method->next;
+    }
+    log_error("object_type_set_method: method '%s' not found in type '%.*s'",
+        method_name, (int)obj_type->type_name.length, obj_type->type_name.str);
 }
 
 Element* elmt_fill(Element* elmt, ...) {

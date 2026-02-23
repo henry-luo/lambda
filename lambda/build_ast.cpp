@@ -3371,9 +3371,9 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "element")) {
         ast_node->type = (Type*)&LIT_TYPE_ELMT;
     }
-    // else if (strview_equal(&type_name, "object")) {
-    //     ast_node->type = (Type*)&LIT_TYPE_OBJECT;
-    // }
+    else if (strview_equal(&type_name, "object")) {
+        ast_node->type = (Type*)&LIT_TYPE_OBJECT;
+    }
     else if (strview_equal(&type_name, "function")) {
         ast_node->type = (Type*)&LIT_TYPE_FUNC;
     }
@@ -3509,6 +3509,7 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     }
 
     // iterate children to find fields (attr), methods (fn_stam/fn_expr_stam), and constraints
+    // Two-pass approach: first collect fields, then build methods with fields in scope
     TSNode child = ts_node_named_child(type_node, 0);
     AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     AstNode* prev_method = NULL;
@@ -3516,6 +3517,7 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     ast_node->methods = NULL;
     ast_node->constraints = NULL;
 
+    // Pass 1: build fields and constraints (no methods yet)
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
 
@@ -3552,16 +3554,6 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
                 byte_offset += sizeof(void*);  // all fields stored as Item (8 bytes)
             }
         }
-        else if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
-            // method declaration
-            AstNode* method = build_func(tp, child, true, false);
-            if (method) {
-                if (!prev_method) { ast_node->methods = method; }
-                else { prev_method->next = method; }
-                prev_method = method;
-                obj_type->method_count++;
-            }
-        }
         else if (symbol == SYM_THAT_CONSTRAINT) {
             // object-level constraint: that (expr)
             TSNode constraint_expr = ts_node_child_by_field_id(child, FIELD_CONSTRAINT);
@@ -3580,11 +3572,57 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
         child = ts_node_next_named_sibling(child);
     }
 
+    // Push field names into scope so methods can reference them (implicit this)
+    // Unwrap TypeType to get the actual data type
+    AstNode* field_node = ast_node->item;
+    while (field_node) {
+        if (field_node->node_type == AST_NODE_KEY_EXPR) {
+            AstNamedNode* fn = (AstNamedNode*)field_node;
+            Type* orig_type = fn->type;
+            if (orig_type && orig_type->type_id == LMD_TYPE_TYPE) {
+                fn->type = ((TypeType*)orig_type)->type;
+            }
+            push_name(tp, fn, NULL);
+        }
+        field_node = field_node->next;
+    }
+
+    // Pass 2: build methods with fields in scope
+    child = ts_node_named_child(type_node, 0);
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+            // method declaration
+            AstNode* method = build_func(tp, child, true, false);
+            if (method) {
+                if (!prev_method) { ast_node->methods = method; }
+                else { prev_method->next = method; }
+                prev_method = method;
+
+                // create TypeMethod entry for runtime method table
+                AstFuncNode* fn_method = (AstFuncNode*)method;
+                TypeMethod* tm = (TypeMethod*)pool_calloc(tp->pool, sizeof(TypeMethod));
+                StrView* method_name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                method_name_view->str = fn_method->name->chars;
+                method_name_view->length = fn_method->name->len;
+                tm->name = method_name_view;
+                tm->fn = NULL;  // populated after JIT compilation
+                tm->is_proc = (method->node_type == AST_NODE_PROC);
+                tm->next = NULL;
+                if (!obj_type->methods) { obj_type->methods = tm; }
+                else { obj_type->methods_last->next = tm; }
+                obj_type->methods_last = tm;
+                obj_type->method_count++;
+            }
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
     obj_type->byte_size = byte_offset;
     obj_type->last = prev_entry;
 
-    // register the type in the type list
-    arraylist_append(tp->type_list, obj_type);
+    // register the type in the type list (store TypeType wrapper for consistency with other types)
+    arraylist_append(tp->type_list, tt);
     obj_type->type_index = tp->type_list->length - 1;
 
     // register the type name in the current scope so it can be resolved
@@ -5603,11 +5641,13 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 }
 
                 // iterate children: fields, methods, constraints
+                // Two-pass: first fields/constraints, then push fields into scope, then methods
                 TSNode obj_child = ts_node_named_child(child, 0);
                 AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
                 AstNode* prev_method = NULL;
                 AstNode* prev_constraint = NULL;
 
+                // Pass 1: fields and constraints
                 while (!ts_node_is_null(obj_child)) {
                     TSSymbol child_sym = ts_node_symbol(obj_child);
                     if (child_sym == SYM_ATTR) {
@@ -5636,14 +5676,6 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             obj_type->length++;
                             byte_offset += sizeof(void*);
                         }
-                    } else if (child_sym == SYM_FUNC_STAM || child_sym == SYM_FUNC_EXPR_STAM) {
-                        AstNode* method = build_func(tp, obj_child, true, false);
-                        if (method) {
-                            if (!prev_method) { obj_node->methods = method; }
-                            else { prev_method->next = method; }
-                            prev_method = method;
-                            obj_type->method_count++;
-                        }
                     } else if (child_sym == SYM_THAT_CONSTRAINT) {
                         TSNode constraint_expr = ts_node_child_by_field_id(obj_child, FIELD_CONSTRAINT);
                         if (!ts_node_is_null(constraint_expr)) {
@@ -5659,11 +5691,57 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     obj_child = ts_node_next_named_sibling(obj_child);
                 }
 
+                // Push field names into scope so method bodies can reference them
+                // Unwrap TypeType to get the actual data type so the transpiler knows
+                // field types correctly (e.g., int instead of TypeType(int))
+                AstNode* field_scan = obj_node->item;
+                while (field_scan) {
+                    if (field_scan->node_type == AST_NODE_KEY_EXPR) {
+                        AstNamedNode* fn = (AstNamedNode*)field_scan;
+                        Type* orig_type = fn->type;
+                        if (orig_type && orig_type->type_id == LMD_TYPE_TYPE) {
+                            fn->type = ((TypeType*)orig_type)->type;
+                        }
+                        push_name(tp, fn, NULL);
+                    }
+                    field_scan = field_scan->next;
+                }
+
+                // Pass 2: methods (with fields in scope)
+                obj_child = ts_node_named_child(child, 0);
+                while (!ts_node_is_null(obj_child)) {
+                    TSSymbol child_sym = ts_node_symbol(obj_child);
+                    if (child_sym == SYM_FUNC_STAM || child_sym == SYM_FUNC_EXPR_STAM) {
+                        AstNode* method = build_func(tp, obj_child, true, false);
+                        if (method) {
+                            if (!prev_method) { obj_node->methods = method; }
+                            else { prev_method->next = method; }
+                            prev_method = method;
+
+                            // create TypeMethod entry for runtime method table
+                            AstFuncNode* fn_method = (AstFuncNode*)method;
+                            TypeMethod* tm = (TypeMethod*)pool_calloc(tp->pool, sizeof(TypeMethod));
+                            StrView* method_name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                            method_name_view->str = fn_method->name->chars;
+                            method_name_view->length = fn_method->name->len;
+                            tm->name = method_name_view;
+                            tm->fn = NULL;
+                            tm->is_proc = (method->node_type == AST_NODE_PROC);
+                            tm->next = NULL;
+                            if (!obj_type->methods) { obj_type->methods = tm; }
+                            else { obj_type->methods_last->next = tm; }
+                            obj_type->methods_last = tm;
+                            obj_type->method_count++;
+                        }
+                    }
+                    obj_child = ts_node_next_named_sibling(obj_child);
+                }
+
                 obj_type->byte_size = byte_offset;
                 obj_type->last = prev_entry;
 
-                // register in type_list (update the placeholder's type_index)
-                arraylist_append(tp->type_list, obj_type);
+                // register in type_list (store TypeType wrapper for const_type() runtime access)
+                arraylist_append(tp->type_list, tt);
                 obj_type->type_index = tp->type_list->length - 1;
 
                 item = (AstNode*)obj_node;

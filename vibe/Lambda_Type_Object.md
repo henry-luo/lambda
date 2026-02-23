@@ -847,8 +847,49 @@ let p2 = {Point p, x: 10.0}           // wrap p, override x (no spread needed)
 2. **Static methods** — Should object types support `fn TypeName.create(...)` static factory methods? Could use standalone functions for now.
 3. **Interfaces / Protocols** — Should Lambda support interface-like types (methods without implementation)? Defer — use structural typing + `that` constraints.
 4. **Object identity** — Should two objects with the same type and field values be `==`? Proposed: yes, structural equality (same as maps). Use `===` for identity if needed later.
-5. **Serialization round-trip** — When converting object to JSON and back, the type name is lost. Should `json()` include a `$type` field? Or is this a format-layer concern?
+5. **Serialization round-trip** — **Decided: use `"@"` key.** See [JSON Serialization](#json-serialization) below.
 6. **Multiple `that` clauses** — Currently proposed: multiple `that` inside a type are ANDed. Should we support `or` composition? Lean: keep it simple, AND only.
+
+---
+
+## JSON Serialization
+
+### Problem
+
+When converting an object to JSON, the type name must be preserved to allow round-trip deserialization. A special key is needed to carry the type discriminator.
+
+### Alternatives Considered
+
+| Key | Precedent | Pros | Cons |
+|-----|-----------|------|------|
+| `"."` | None | Short | No convention; implies member access |
+| `"!"` | YAML type tags (`!!int`, `!ruby/object:Foo`) | Distinctive | YAML-specific, not a JSON convention |
+| `"@"` | **JSON-LD** (`@type`, `@id`, `@context`), Jackson, Spring | W3C standard precedent; `@` = metadata | Slightly longer than `.` |
+| `"~"` | Lambda self-reference (`~.field`) | Consistent with Lambda's `~` | Would overload `~` semantics (self-ref vs type tag) |
+| `"$type"` | .NET (Newtonsoft.Json, System.Text.Json), MongoDB | Widely used in .NET ecosystem | Verbose; `$` is used in MongoDB queries |
+| `"__type"` | WCF, older Microsoft serializers | Self-explanatory | Ugly; double underscore convention |
+
+### Decision: `"@"`
+
+**Chosen: `"@"` as the type discriminator key**, following JSON-LD's convention where `@`-prefixed keys denote metadata rather than data.
+
+```json
+{"@": "Point", "x": 3.14, "y": 2.718}
+{"@": "Circle", "radius": 5.0, "center": {"@": "Point", "x": 0, "y": 0}}
+```
+
+**Rationale:**
+1. **W3C precedent** — JSON-LD standardizes `@` for metadata (`@type`, `@id`, `@context`). Using bare `"@"` is a natural shorthand for `"@type"`.
+2. **No collision with field names** — Lambda identifiers are alphanumeric; `"@"` cannot be a field name.
+3. **Visually distinctive** — Immediately signals "this is metadata, not a data field."
+4. **Bidirectional** — When parsing JSON input containing `"@"`, Lambda can reconstruct typed objects if the type is defined in scope.
+
+### Serialization Rules
+
+- `json(obj)` emits `{"@": "TypeName", ...fields}` with `"@"` as the first key
+- Nested objects are recursively serialized with their own `"@"` keys
+- Plain maps (no type) are serialized as regular JSON objects (no `"@"` key)
+- When deserializing JSON with `"@"`, if the type name matches a defined object type, construct an `Object`; otherwise treat as a plain map with a `"@"` field
 
 ---
 
