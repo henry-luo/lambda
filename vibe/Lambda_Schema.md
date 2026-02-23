@@ -185,7 +185,7 @@ switch (occurrence_op) {
 }
 ```
 
-**Matching semantics:** `int*`, `int+`, `int[n]` etc. match **array, list, and typed range** — not just arrays. The validator's `validate_occurrence_type` checks for `LMD_TYPE_LIST`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, and `LMD_TYPE_ARRAY_FLOAT`. Range (`LMD_TYPE_RANGE`) is handled via the `is` operator fast path in `lambda-eval.cpp` but is not yet checked in the validator's occurrence handler.
+**Matching semantics:** `int*`, `int+`, `int[n]` etc. should match **array, list, and typed range** — not just arrays. The validator's `validate_occurrence_type` checks for `LMD_TYPE_LIST`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, and `LMD_TYPE_ARRAY_FLOAT`. Range (`LMD_TYPE_RANGE`) is handled via the `is` operator fast path in `lambda-eval.cpp` but is not yet checked in the validator's occurrence handler.
 
 #### `Type[]` Support ✅ Implemented
 
@@ -194,6 +194,29 @@ switch (occurrence_op) {
 - **Grammar:** `seq('[', ']')` added to `occurrence_count` in `grammar.js`
 - **AST builder:** `[]` mapped to `OPERATOR_ZERO_MORE` with `min_count=0, max_count=-1` in `build_ast.cpp`
 - **Tests:** `test/lambda/type_occurrence.ls` Test 9 — verified `int[]` and `string[]` with arrays, empty arrays, single values, and type mismatches
+
+#### Transpiler Optimization for Typed Arrays
+
+The transpiler (both C and MIR JIT) **automatically optimizes** homogeneous array literals to use specialized internal types:
+
+| Literal | Inferred Type | Internal C Type | Optimization |
+|---------|--------------|-----------------|-------------|
+| `[1, 2, 3]` | `LMD_TYPE_ARRAY` with `nested=INT` | `ArrayInt*` | `array_int_fill()` — unboxed `int64_t` storage |
+| `[1.0, 2.0, 3.0]` | `LMD_TYPE_ARRAY` with `nested=FLOAT` | `ArrayFloat*` | `array_float_fill()` — unboxed `double` storage |
+| `[1, "a", 2]` | `LMD_TYPE_ARRAY` with `nested=NULL` | `Array*` | `array_fill()` — boxed `Item` storage |
+
+**Type inference is bottom-up from array elements**, not top-down from type annotations:
+- In `build_array()` ([build_ast.cpp](lambda/build_ast.cpp#L743)), all elements are scanned. If all share the same type, `TypeArray.nested` is set to that type; otherwise `nested = NULL`.
+- The transpiler uses `TypeArray.nested` to choose `ArrayInt*`, `ArrayFloat*`, or `Array*` code paths.
+- Type annotations on `let` (e.g., `let a:int[] = ...`) do **not** influence the array's internal representation — they only set the variable's declared type.
+
+**Known issues with occurrence type validation (`validate_occurrence_type`):**
+
+| Issue | Status | Details |
+|-------|--------|---------|
+| `float[]` doesn't match `ArrayFloat` values | ✅ Fixed | Added dedicated handlers `validate_array_float_occurrence` and `validate_array_int64_occurrence` in `validate_pattern.cpp`. |
+| `int[]` doesn't match ranges | ✅ Fixed | Added `LMD_TYPE_RANGE` to the `is_container` check and a `validate_range_occurrence` handler. |
+| Type annotation `let a:int[]` emits wrong C type | ✅ Fixed | `write_type()` now detects `TYPE_KIND_UNARY` and unwraps the TypeType operand to emit `ArrayInt*`, `ArrayFloat*`, etc. |
 
 ---
 
