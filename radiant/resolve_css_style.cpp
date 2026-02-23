@@ -497,6 +497,25 @@ static CssEnum get_float_value_from_style(DomElement* elem) {
     return CSS_VALUE_NONE;
 }
 
+// CSS 2.1 §9.7: Check position property from specified style
+// Returns the position keyword (absolute, fixed, relative, static) or CSS_VALUE_NONE
+static CssEnum get_position_value_from_style(DomElement* elem) {
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) {
+        return CSS_VALUE_NONE;
+    }
+    AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
+    if (pos_node) {
+        StyleNode* style_node = (StyleNode*)pos_node->declaration;
+        if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+            CssValue* val = style_node->winning_decl->value;
+            if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                return val->data.keyword;
+            }
+        }
+    }
+    return CSS_VALUE_NONE;
+}
+
 // CSS 2.1 §9.7: Apply blockification for floated or absolutely positioned elements
 // Converts internal table display values to 'block'
 static DisplayValue blockify_display(DisplayValue display) {
@@ -539,9 +558,13 @@ DisplayValue resolve_display_value(void* child) {
 
         log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->node_name());
 
-        // CSS 2.1 §9.7: Check for float - floated elements get blockified
+        // CSS 2.1 §9.7: Check for float and position - floated or absolutely positioned elements get blockified
         CssEnum float_value = get_float_value_from_style(dom_elem);
         bool is_floated = (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT);
+        CssEnum position_value = get_position_value_from_style(dom_elem);
+        bool is_abspos = (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED);
+        // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
+        bool needs_blockify = is_floated || is_abspos;
 
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
@@ -549,7 +572,9 @@ DisplayValue resolve_display_value(void* child) {
             dom_elem->display.inner != 0 && dom_elem->styles_resolved) {
             log_debug("[CSS] Using pre-set display from element: outer=%d, inner=%d",
                 dom_elem->display.outer, dom_elem->display.inner);
-            return dom_elem->display;
+            // CSS 2.1 §9.7: Even pre-resolved elements must be blockified when
+            // floated or absolutely positioned (takes precedence)
+            return needs_blockify ? blockify_display(dom_elem->display) : dom_elem->display;
         }
 
         // Determine if this is a replaced element (img, video, iframe, svg, etc.)
@@ -605,12 +630,12 @@ DisplayValue resolve_display_value(void* child) {
                                 display.outer = CSS_VALUE_INLINE;
                                 display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                                 // CSS 2.1 §9.7: Floated/absolutely positioned elements become block
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_INLINE_BLOCK) {
                                 display.outer = CSS_VALUE_INLINE_BLOCK;
                                 display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                                 // CSS 2.1 §9.7: Floated elements become block
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_LIST_ITEM) {
                                 display.outer = CSS_VALUE_LIST_ITEM;
                                 display.inner = CSS_VALUE_FLOW;
@@ -635,35 +660,35 @@ DisplayValue resolve_display_value(void* child) {
                             } else if (keyword == CSS_VALUE_TABLE_ROW) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_ROW;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_CELL) {
                                 display.outer = CSS_VALUE_TABLE_CELL;
                                 display.inner = CSS_VALUE_TABLE_CELL;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_ROW_GROUP) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_ROW_GROUP;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_HEADER_GROUP) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_HEADER_GROUP;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_FOOTER_GROUP) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_FOOTER_GROUP;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_COLUMN) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_COLUMN;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_COLUMN_GROUP) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_CAPTION) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_CAPTION;
-                                return is_floated ? blockify_display(display) : display;
+                                return needs_blockify ? blockify_display(display) : display;
                             }
                         } else if (decl->value->type == CSS_VALUE_TYPE_LIST) {
                             // Handle CSS Display Level 3 two-value syntax: "display: <outer> <inner>"
