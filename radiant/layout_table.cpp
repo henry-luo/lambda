@@ -3773,7 +3773,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
             }
 
             // Use unified intrinsic sizing API for ALL element types
-            // This properly handles explicit CSS widths (with border/padding), 
+            // This properly handles explicit CSS widths (with border/padding),
             // block/inline elements, replaced elements, etc.
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             float child_max = child_sizes.max_content;
@@ -4146,8 +4146,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 pref_width = widths.max_width;  // PCW (preferred/max-content)
                 min_width = widths.min_width;   // MCW (minimum/min-content)
                 cell_width = pref_width; // Use preferred for backward compatibility
+            } else if (table->tb->border_collapse) {
+                // Border-collapse with explicit CSS width: CSS width sets the
+                // preferred column width, but the actual minimum is based on
+                // content MCW. This allows the table constraint (from containing
+                // block) to shrink columns below their CSS width when needed,
+                // matching browser behavior.
+                pref_width = cell_width;
+                CellWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
+                min_width = widths.min_width;  // MCW from actual content
             } else {
-                // Has explicit CSS width - use it for both min and preferred
+                // Separate borders with explicit CSS width - use it for both min and preferred
                 min_width = pref_width = cell_width;
             }
 
