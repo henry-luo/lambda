@@ -126,4 +126,22 @@ type InlineAtLeastTwoInts = int[2+]
 "8.3"; (["a", "b"] is InlineRangeStrings) // true
 "8.4"; ([1, 2, 3] is InlineAtLeastTwoInts) // true
 
+// ============================================================
+// Test 9: Empty Bracket Syntax T[] (C/Java-style)
+// T[] is equivalent to T* (zero or more, any length)
+// Matches array, list, and typed range
+// ============================================================
+'Test 9: Empty Bracket Syntax T[]'
+
+type AnyInts = int[]
+type AnyStrings = string[]
+
+"9.1"; ([] is AnyInts)                 // true - empty array
+"9.2"; ([1] is AnyInts)               // true - single element
+"9.3"; ([1, 2, 3] is AnyInts)         // true - multiple elements
+"9.4"; (["a"] is AnyInts)             // false - wrong element type
+"9.5"; ([] is AnyStrings)             // true - empty array
+"9.6"; (["hello", "world"] is AnyStrings) // true - string array
+"9.7"; (1 is AnyInts)                 // true - single value matches occurrence of 1
+
 "===== END OF TYPE OCCURRENCE TESTS ====="

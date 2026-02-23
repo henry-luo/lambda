@@ -37,13 +37,17 @@ type NonEmptyString = string that (len(~) > 0)
 
 ### Occurrence Operators (Already Supported)
 
-Lambda supports three occurrence operators that control cardinality:
+Lambda supports seven occurrence operators that control cardinality:
 
 | Operator | Syntax | Meaning | Type Structure |
 |----------|---------|---------|----------------|
 | `?` | `Type?` | Optional (0 or 1) | `TypeUnary` with `OPERATOR_OPTIONAL` |
 | `+` | `Type+` | One or more (1+) | `TypeUnary` with `OPERATOR_ONE_MORE` |
 | `*` | `Type*` | Zero or more (0+) | `TypeUnary` with `OPERATOR_ZERO_MORE` |
+| `[]` | `Type[]` | Zero or more (0+) | `TypeUnary` with `OPERATOR_ZERO_MORE` (same as `*`) |
+| `[n]` | `Type[n]` | Exactly n | `TypeUnary` with `OPERATOR_REPEAT`, min=n, max=n |
+| `[n, m]` | `Type[n, m]` | Between n and m | `TypeUnary` with `OPERATOR_REPEAT`, min=n, max=m |
+| `[n+]` | `Type[n+]` | At least n | `TypeUnary` with `OPERATOR_REPEAT`, min=n, max=-1 |
 
 **Example Schema:**
 ```lambda
@@ -114,27 +118,54 @@ if (!map_has_field(map, "email")) {
 ```lambda
 type Document = {
     tags: [string*],      // 0 or more tags
-    authors: [string+],   // at least 1 author required
-    versions: [int?]*     // array of optional ints (any length)
+    authors: [string+]    // at least 1 author required
 }
 ```
 
 **How It Works:**
-- `[Type*]` - Array can be empty
+
+There are two syntactic forms for expressing typed arrays:
+
+**Form 1: Explicit array literal `[Type*]`, `[Type+]`**
+- `[Type*]` - Array can be empty (zero or more elements)
 - `[Type+]` - Array must have at least one element
-- `[Type]` - Fixed-size or specific array structure
-- Occurrence operators apply to array ELEMENTS, not array itself
+- `[Type]` - Array with exactly 1 element of Type
+
+**Form 2: C/Java-style postfix occurrence on type**
+- `Type*` - Zero or more (matches array, list, and typed range)
+- `Type+` - One or more (matches array, list, and typed range)
+- `Type[]` - Zero or more, any length (equivalent to `Type*`, C/Java-style)
+- `Type[n]` - Exactly n items, e.g. `int[5]` — 5 int array
+- `Type[n, m]` - Between n and m items, e.g. `int[2, 4]`
+- `Type[n+]` - At least n items, e.g. `int[2+]`
+
+Both forms are equivalent — Form 2 is convenient for users familiar with C/Java array syntax.
+
+**Examples:**
+```lambda
+type RGB = int[3]                  // exactly 3 ints
+type IntVec = int[2+]              // at least 2 ints
+type Tags = string*                // zero or more strings (array)
+type Authors = string+             // one or more strings (array)
+type Matrix = (int*)[2+]           // at least 2 rows of int arrays (explicit grouping)
+```
 
 **Type AST Representation:**
 ```cpp
-// tags: [string*]
+// tags: [string*]  OR  tags: string*
 TypeArray {
     element_type: TypeUnary{OPERATOR_ZERO_MORE, Type{LMD_TYPE_STRING}}
 }
 
-// authors: [string+]
+// authors: [string+]  OR  authors: string+
 TypeArray {
     element_type: TypeUnary{OPERATOR_ONE_MORE, Type{LMD_TYPE_STRING}}
+}
+
+// rgb: int[3]
+TypeUnary {
+    op: OPERATOR_REPEAT, min_count: 3, max_count: 3,
+    operand: Type{LMD_TYPE_INT}
 }
 ```
 
@@ -153,6 +184,16 @@ switch (occurrence_op) {
         break;
 }
 ```
+
+**Matching semantics:** `int*`, `int+`, `int[n]` etc. match **array, list, and typed range** — not just arrays. The validator's `validate_occurrence_type` checks for `LMD_TYPE_LIST`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, and `LMD_TYPE_ARRAY_FLOAT`. Range (`LMD_TYPE_RANGE`) is handled via the `is` operator fast path in `lambda-eval.cpp` but is not yet checked in the validator's occurrence handler.
+
+#### `Type[]` Support ✅ Implemented
+
+`Type[]` (empty brackets) is supported as sugar for `Type*` — zero or more items, any length. This was added to the grammar and AST builder with no conflicts:
+
+- **Grammar:** `seq('[', ']')` added to `occurrence_count` in `grammar.js`
+- **AST builder:** `[]` mapped to `OPERATOR_ZERO_MORE` with `min_count=0, max_count=-1` in `build_ast.cpp`
+- **Tests:** `test/lambda/type_occurrence.ls` Test 9 — verified `int[]` and `string[]` with arrays, empty arrays, single values, and type mismatches
 
 ---
 
