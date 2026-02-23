@@ -940,19 +940,75 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             Item field_item = value.item();
             log_debug("deep_copy_internal: copying map field key='%s', type_id=%d",
                 key ? key : "(null)", field_item.type_id());
-            // Recursively deep copy the field value
             Item copied_field = deep_copy_internal(field_item);
             if (key) {
-                // Add to map
                 String* key_name = createName(key, strlen(key));
                 map_builder.put(key_name, copied_field);
             } else {
-                // empty key for nested map
                 log_debug("deep_copy_internal: null key for nested map, copied type: %d", copied_field.type_id());
                 map_builder.put(key, copied_field);
             }
         }
         return map_builder.final();
+    }
+
+    case LMD_TYPE_OBJECT: {
+        log_debug("=== OBJECT CASE ENTRY ==");
+        Object* src_obj = item.object;
+        TypeObject* obj_type = (TypeObject*)src_obj->type;
+
+        // allocate new object with same data layout using arena
+        int data_size = obj_type->byte_size > 0 ? obj_type->byte_size : (int)(obj_type->length * sizeof(Item));
+        Object* new_obj = (Object*)arena_calloc(arena_, sizeof(Object) + data_size);
+        new_obj->type_id = LMD_TYPE_OBJECT;
+        new_obj->type = (Type*)obj_type;
+        new_obj->data = (char*)new_obj + sizeof(Object);
+        new_obj->data_cap = data_size;
+
+        // copy the entire data buffer first (handles primitives: bool, int, float, datetime)
+        if (src_obj->data && data_size > 0) {
+            memcpy(new_obj->data, src_obj->data, data_size);
+        }
+
+        // deep copy referenced types (strings, containers, etc.)
+        ShapeEntry* field = obj_type->shape;
+        while (field) {
+            void* dst_ptr = (char*)new_obj->data + field->byte_offset;
+            TypeId ftype = field->type->type_id;
+            switch (ftype) {
+            case LMD_TYPE_STRING: case LMD_TYPE_BINARY: {
+                String* str = *(String**)dst_ptr;
+                if (str) {
+                    Item copied = createStringItem(str->chars, str->len);
+                    *(String**)dst_ptr = copied.get_string();
+                }
+                break;
+            }
+            case LMD_TYPE_SYMBOL: {
+                Symbol* sym = *(Symbol**)dst_ptr;
+                if (sym) {
+                    Symbol* copied = createSymbol(sym->chars, sym->len);
+                    *(Symbol**)dst_ptr = copied;
+                }
+                break;
+            }
+            case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_RANGE: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
+                Container* container = *(Container**)dst_ptr;
+                if (container) {
+                    Item copied = deep_copy_internal({.container = container});
+                    *(Container**)dst_ptr = copied.container;
+                }
+                break;
+            }
+            default:
+                // primitive types (bool, int, int64, float, datetime, decimal) are already copied via memcpy
+                break;
+            }
+            field = field->next;
+        }
+
+        return {.object = new_obj};
     }
 
     case LMD_TYPE_ELEMENT: {
