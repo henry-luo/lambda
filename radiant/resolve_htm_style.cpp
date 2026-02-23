@@ -195,22 +195,53 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         value = elmt->get_attribute("width");
         if (value) {
             value_len = strlen(value);
-            StrView width_view = strview_init(value, value_len);
-            float width = strview_to_int(&width_view);
-            if (width >= 0) lycon->block.given_width = width;  // CSS logical pixels
-            // else width attr ignored
+            if (value_len > 0 && value[value_len - 1] == '%') {
+                // HTML attribute width="50%" — percentage of containing block
+                StrView width_view = strview_init(value, value_len - 1);
+                float percent = strview_to_int(&width_view);
+                if (percent > 0) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    block->blk->given_width_percent = percent;
+                    // resolve against container width at layout time
+                    float container_width = lycon->block.content_width > 0
+                        ? lycon->block.content_width : 0;
+                    if (container_width > 0) {
+                        lycon->block.given_width = container_width * percent / 100.0f;
+                    }
+                    log_debug("[HTML] IMG width attribute: %.0f%% -> %.1fpx", percent, lycon->block.given_width);
+                }
+            } else {
+                StrView width_view = strview_init(value, value_len);
+                float width = strview_to_int(&width_view);
+                if (width >= 0) lycon->block.given_width = width;  // CSS logical pixels
+            }
         }
         value = elmt->get_attribute("height");
         if (value) {
             value_len = strlen(value);
-            StrView height_view = strview_init(value, value_len);
-            float height = strview_to_int(&height_view);
-            if (height >= 0) lycon->block.given_height = height;  // CSS logical pixels
-            // else height attr ignored
+            if (value_len > 0 && value[value_len - 1] == '%') {
+                // HTML attribute height="50%" — percentage of containing block
+                StrView height_view = strview_init(value, value_len - 1);
+                float percent = strview_to_int(&height_view);
+                if (percent > 0) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    block->blk->given_height_percent = percent;
+                    float container_height = lycon->block.content_height > 0
+                        ? lycon->block.content_height : 0;
+                    if (container_height > 0) {
+                        lycon->block.given_height = container_height * percent / 100.0f;
+                    }
+                    log_debug("[HTML] IMG height attribute: %.0f%% -> %.1fpx", percent, lycon->block.given_height);
+                }
+            } else {
+                StrView height_view = strview_init(value, value_len);
+                float height = strview_to_int(&height_view);
+                if (height >= 0) lycon->block.given_height = height;  // CSS logical pixels
+            }
         }
         break;
     }
-    case HTM_TAG_IFRAME:
+    case HTM_TAG_IFRAME: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // todo: inset border style
@@ -221,10 +252,50 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_x = CSS_VALUE_AUTO;
         block->scroller->overflow_y = CSS_VALUE_AUTO;
-        // default iframe size to 300 x 200 (CSS logical pixels)
-        lycon->block.given_width = 300;
-        lycon->block.given_height = 200;
+        // Parse HTML width/height attributes; default 300x150 per HTML spec
+        size_t value_len;  const char *value;
+        value = elmt->get_attribute("width");
+        if (value) {
+            value_len = strlen(value);
+            if (value_len > 0 && value[value_len - 1] == '%') {
+                StrView width_view = strview_init(value, value_len - 1);
+                float percent = strview_to_int(&width_view);
+                if (percent > 0) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    block->blk->given_width_percent = percent;
+                    lycon->block.given_width = -1;  // resolve at layout time
+                    log_debug("[HTML] IFRAME width attribute: %.0f%%", percent);
+                }
+            } else {
+                StrView width_view = strview_init(value, value_len);
+                float width = strview_to_int(&width_view);
+                if (width >= 0) lycon->block.given_width = width;
+            }
+        } else {
+            lycon->block.given_width = 300;  // default intrinsic width
+        }
+        value = elmt->get_attribute("height");
+        if (value) {
+            value_len = strlen(value);
+            if (value_len > 0 && value[value_len - 1] == '%') {
+                StrView height_view = strview_init(value, value_len - 1);
+                float percent = strview_to_int(&height_view);
+                if (percent > 0) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    block->blk->given_height_percent = percent;
+                    lycon->block.given_height = -1;  // resolve at layout time
+                    log_debug("[HTML] IFRAME height attribute: %.0f%%", percent);
+                }
+            } else {
+                StrView height_view = strview_init(value, value_len);
+                float height = strview_to_int(&height_view);
+                if (height >= 0) lycon->block.given_height = height;
+            }
+        } else {
+            lycon->block.given_height = 150;  // default intrinsic height
+        }
         break;
+    }
     case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }

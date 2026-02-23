@@ -249,11 +249,32 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // re-resolve percentage width/height against the actual containing block
     if (block->blk && !isnan(block->blk->given_width_percent)) {
         lycon->block.given_width = block->blk->given_width_percent * cb_width / 100.0f;
+        block->blk->given_width = lycon->block.given_width;
         log_debug("[ABS POS] re-resolved width: %.1f%% of %.1f = %.1f", block->blk->given_width_percent, cb_width, lycon->block.given_width);
     }
     if (block->blk && !isnan(block->blk->given_height_percent)) {
         lycon->block.given_height = block->blk->given_height_percent * cb_height / 100.0f;
+        block->blk->given_height = lycon->block.given_height;
         log_debug("[ABS POS] re-resolved height: %.1f%% of %.1f = %.1f", block->blk->given_height_percent, cb_height, lycon->block.given_height);
+    }
+
+    // CSS 2.1 §10.3.8: For absolutely positioned replaced elements with
+    // 'width: auto', use the intrinsic width. §10.6.5: Same for height.
+    // Replaced elements include iframe (300x150), img (intrinsic from image).
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {
+        uintptr_t tag = block->tag();
+        if (tag == HTM_TAG_IFRAME) {
+            if (lycon->block.given_width < 0) {
+                lycon->block.given_width = 300;
+                if (block->blk) block->blk->given_width = 300;
+                log_debug("[ABS POS] iframe intrinsic width: 300");
+            }
+            if (lycon->block.given_height < 0) {
+                lycon->block.given_height = 150;
+                if (block->blk) block->blk->given_height = 150;
+                log_debug("[ABS POS] iframe intrinsic height: 150");
+            }
+        }
     }
 
     float content_width, content_height;
