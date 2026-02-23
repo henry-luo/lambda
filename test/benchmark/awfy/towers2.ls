@@ -21,26 +21,26 @@ pn make_array(n: int, val) {
     return arr
 }
 
-pn push_disk(piles, tops, disk_size: int, pile: int) {
+pn push_disk(piles: int[], tops: int[], disk_size: int, pile: int) {
     let t: int = tops[pile]
     piles[pile * 14 + t] = disk_size
     tops[pile] = t + 1
 }
 
-pn pop_disk_from(piles, tops, pile: int) {
+pn pop_disk_from(piles: int[], tops: int[], pile: int) {
     let t: int = tops[pile] - 1
     tops[pile] = t
     let disk_size = piles[pile * 14 + t]
     return disk_size
 }
 
-pn move_top_disk(piles, tops, state, from_pile: int, to_pile: int) {
+pn move_top_disk(piles: int[], tops: int[], state, from_pile: int, to_pile: int) {
     let disk = pop_disk_from(piles, tops, from_pile)
     push_disk(piles, tops, disk, to_pile)
     state.moves = state.moves + 1
 }
 
-pn move_disks(piles, tops, state, disks: int, from_pile: int, to_pile: int) {
+pn move_disks(piles: int[], tops: int[], state, disks: int, from_pile: int, to_pile: int) {
     if (disks == 1) {
         move_top_disk(piles, tops, state, from_pile, to_pile)
         return 0
@@ -52,8 +52,8 @@ pn move_disks(piles, tops, state, disks: int, from_pile: int, to_pile: int) {
 }
 
 pn benchmark() {
-    var piles = make_array(42, 0)
-    var tops = [0, 0, 0]
+    var piles:int[] = make_array(42, 0)
+    var tops:int[] = [0, 0, 0]
     var i: int = 12
     while (i >= 0) {
         push_disk(piles, tops, i, 0)

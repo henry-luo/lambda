@@ -25,7 +25,7 @@ pn make_array(n: int, val) {
     return arr
 }
 
-pn four1(data, n: int) {
+pn four1(data: float[], n: int) {
     // Bit-reversal section
     var i: int = 0
     var j: int = 0
@@ -80,7 +80,7 @@ pn four1(data, n: int) {
 }
 
 pn benchmark() {
-    var data = make_array(4096, 0.0)
+    var data:float[] = make_array(4096, 0.0)
     four1(data, 4096)
     var result = data[0]
     return result
