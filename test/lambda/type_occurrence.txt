@@ -89,4 +89,19 @@ false
 true
 "8.4"
 true
+'Test 9: Empty Bracket Syntax T[]'
+"9.1"
+true
+"9.2"
+true
+"9.3"
+true
+"9.4"
+false
+"9.5"
+true
+"9.6"
+true
+"9.7"
+true
 "===== END OF TYPE OCCURRENCE TESTS ====="
