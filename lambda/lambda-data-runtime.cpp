@@ -693,6 +693,19 @@ void object_type_set_method(int64_t type_index, const char* method_name,
         method_name, (int)obj_type->type_name.length, obj_type->type_name.str);
 }
 
+// Register a compiled constraint function on a TypeObject
+void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func) {
+    log_debug("object_type_set_constraint: type_index=%ld", type_index);
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    Type* stored = (Type*)(type_list->data[type_index]);
+    TypeObject* obj_type = (stored->type_id == LMD_TYPE_TYPE)
+        ? (TypeObject*)((TypeType*)stored)->type
+        : (TypeObject*)stored;
+    obj_type->constraint_fn = (ConstraintFn)constraint_func;
+    log_debug("object_type_set_constraint: registered constraint on '%.*s'",
+        (int)obj_type->type_name.length, obj_type->type_name.str);
+}
+
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);

@@ -146,6 +146,7 @@ module.exports = grammar({
     [$._compound_type, $.constrained_type],        // _quantified_type could be complete or base of constrained
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
     [$.attr_type, $.binary_expr],                  // attr_type default `= expr >` vs binary `expr > expr`
+    [$.map, $.object_literal],                     // {Identifier} could be map with expr or object literal
   ],
 
   precedences: $ => [[

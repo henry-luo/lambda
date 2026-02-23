@@ -26,8 +26,9 @@ string  symbol  binary  datetime
 ```lambda
 range, 1 to 10          // Range (inclusive both ends)
 array, [123, true]      // Array of values
-list, (0.5, "string:)   // List
+list, (0.5, "string")   // List
 map, {key: 'symbol'}    // Map
+object, {Point x: 1, y: 2}  // Object (nominally-typed map)
 element, <div class: bold; "text" <br>>  // Element
 ```
 
@@ -48,9 +49,57 @@ fn int                        // Same as fn () int
 
 **Type Declarations:**
 ```lambda
-type User = {name: string, age: int};   // Object type
+type User = {name: string, age: int};   // Map type alias
 type Point = (float, float);            // Tuple type
 type Result = int | error;              // Union type
+```
+
+## Object Types
+
+**Definition:**
+```lambda
+type Point { x: float, y: float }           // Fields only
+type Counter {
+    value: int = 0;                          // Default value
+    fn double() => value * 2                 // Functional
+    fn add(n: int) => value + n
+    pn increment() { value = value + 1 }     // Procedural
+}
+type Circle : Shape { radius: float; }      // Inheritance
+```
+
+**Literals & Access:**
+```lambda
+let p = {Point x: 1.0, y: 2.0}    // Object literal
+let c = {Counter}                  // All defaults
+p.x                                // Field access
+c.double()                         // Method call
+{Point p, x: 5.0}                  // Update (copy + override)
+```
+
+**Type Checking (nominal only):**
+```lambda
+p is Point     // true
+p is object    // true
+p is map       // true (objects are map-compatible)
+{x: 1} is Point  // false (plain maps don't match)
+```
+
+**Constraints:**
+```lambda
+type User {
+    name: string that (len(~) > 0),        // Field constraint
+    age: int that (0 <= ~ and ~ <= 150);
+    that (~.name != "admin")               // Object constraint
+}
+```
+
+**Self reference `~`:**
+```lambda
+type Vec { x: float, y: float;
+    fn len() => sqrt(x**2 + y**2)
+    fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
+}
 ```
 
 ## Literals
@@ -275,11 +324,9 @@ if (condition) { something() } else { otherThing() }
 match value {
     case 200: "OK"                // case literal
     case string: "text"           // case type
-    case int | float: "numnber"   // case type union
-    case Circle {                 // mixed stam arm
-        let area = 3.14 * ~.r ** 2
-        "area: " ++ area
-    }
+    case int | float: "number"    // case type union
+    case Circle:                   // case object type
+        3.14 * ~.r ** 2
     default: "other"
 }
 ```
