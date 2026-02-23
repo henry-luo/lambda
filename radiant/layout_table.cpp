@@ -7,6 +7,7 @@
 // str.h included via view.hpp
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
 /*
@@ -3634,11 +3635,33 @@ struct CellWidths {
 // CONSOLIDATED: Combines previous measure_cell_intrinsic_width() and measure_cell_minimum_width()
 // border_collapse: if true, don't add cell border to width (CSS 2.1 border-collapse model)
 static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell, bool border_collapse = false) {
-    CellWidths result = {20.0f, 20.0f}; // CSS minimum usable width
+    CellWidths result = {0.0f, 0.0f};
     if (!cell || !cell->is_element()) return result;
 
     DomElement* cell_elem = cell->as_element();
-    if (!cell_elem->first_child) return result; // Empty cell minimum
+
+    // Check if the cell will have pseudo-element generated content (::before/::after)
+    // Note: at measurement time, pseudo elements haven't been generated yet,
+    // so we check the CSS styles directly via dom_element_has_before/after_content()
+    bool has_pseudo_before = dom_element_has_before_content(cell_elem);
+    bool has_pseudo_after = dom_element_has_after_content(cell_elem);
+    bool has_pseudo_content = has_pseudo_before || has_pseudo_after;
+
+    // CSS 2.1 §17.5.2.2: For truly empty cells (no DOM children and no pseudo content),
+    // intrinsic widths are determined by padding and border only (content width = 0).
+    if (!cell_elem->first_child && !has_pseudo_content) {
+        float padding_horizontal = 0.0f;
+        if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
+            padding_horizontal = (float)(cell->bound->padding.left + cell->bound->padding.right);
+        }
+        float border_horizontal = 0.0f;
+        if (!border_collapse && cell->bound && cell->bound->border) {
+            border_horizontal = cell->bound->border->width.left + cell->bound->border->width.right;
+        }
+        result.min_width = padding_horizontal + border_horizontal;
+        result.max_width = padding_horizontal + border_horizontal;
+        return result;
+    }
 
     // Save current layout context
     BlockContext saved_block = lycon->block;
@@ -3820,6 +3843,42 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
         }
     }
 
+    // CSS 2.1 §12.2: Account for ::before/::after pseudo-element generated content
+    // At measurement time, pseudo elements haven't been generated yet, so we
+    // get content directly from CSS styles via dom_element_get_pseudo_element_content()
+    if (has_pseudo_content) {
+        for (int p = 0; p < 2; p++) {
+            bool is_before = (p == 0);
+            if ((is_before && !has_pseudo_before) || (!is_before && !has_pseudo_after)) continue;
+
+            const char* content = nullptr;
+            if (lycon->counter_context) {
+                content = dom_element_get_pseudo_element_content_with_counters(
+                    cell_elem, is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER,
+                    lycon->counter_context, lycon->doc ? lycon->doc->arena : nullptr);
+            }
+            if (!content) {
+                content = dom_element_get_pseudo_element_content(
+                    cell_elem, is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER);
+            }
+            if (!content || !*content) continue;
+
+            size_t content_len = strlen(content);
+            TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+                lycon, content, content_len);
+
+            float text_max = (float)widths.max_content;
+            float text_min = (float)widths.min_content;
+            log_debug("Cell widths: pseudo %s content='%s' max=%.2f, min=%.2f",
+                      is_before ? "::before" : "::after", content, text_max, text_min);
+
+            // Pseudo content flows inline with other content
+            inline_run_max += text_max;
+            has_inline_content = true;
+            if (text_min > min_width) min_width = text_min;
+        }
+    }
+
     // Finalize any remaining inline run
     if (inline_run_max > max_width) max_width = inline_run_max;
 
@@ -3985,8 +4044,40 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Single-pass analysis counts columns/rows AND assigns cell indices
     TableMetadata* meta = analyze_table_structure(lycon, table);
     if (!meta) {
-        log_debug("Empty table, setting zero dimensions");
-        table->width = 0;  table->height = 0;
+        // No rows/columns — but the table may still have a caption.
+        // CSS 2.1 §17.4: A table with only a caption is valid; the caption
+        // is rendered as a block box and the table wrapper box accommodates it.
+        if (caption) {
+            // Use caption's explicit CSS width if set, otherwise use the container width
+            float table_width = caption->width;
+            if (caption->blk && caption->blk->given_width > 0) {
+                table_width = caption->blk->given_width;
+                // Add padding + border for border-box width
+                if (caption->bound) {
+                    table_width += caption->bound->padding.left + caption->bound->padding.right;
+                    if (caption->bound->border) {
+                        table_width += caption->bound->border->width.left + caption->bound->border->width.right;
+                    }
+                }
+            }
+
+            // Position caption
+            caption->x = 0;
+            caption->y = 0;
+            caption->width = table_width;
+
+            // Table dimensions = caption dimensions
+            table->width = table_width;
+            table->height = (float)caption_height;
+            table->content_width = table_width;
+            table->content_height = (float)caption_height;
+            ((ViewBlock*)table)->height = (float)caption_height;
+
+            log_debug("Caption-only table: width=%.1f, height=%d", table_width, caption_height);
+        } else {
+            log_debug("Empty table (no rows, no caption), setting zero dimensions");
+            table->width = 0;  table->height = 0;
+        }
         return;
     }
 
@@ -4569,25 +4660,34 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int min_table_width = min_table_content_width + border_spacing_total;
     int pref_table_width = pref_table_content_width + border_spacing_total;
 
-    // CSS 2.1: Table width must be at least as wide as the caption
-    // Only consider caption's EXPLICIT CSS width (width: 200px), not computed/auto width
-    int caption_specified_width = 0;
+    // CSS 2.1 §17.5.2.1: Table width must be at least as wide as the caption.
+    // Consider both explicit CSS width and intrinsic content width of the caption.
+    int caption_width_contribution = 0;
     if (caption) {
-        // Get caption's explicitly specified CSS width (not auto/computed width)
         if (caption->blk && caption->blk->given_width > 0) {
-            caption_specified_width = (int)caption->blk->given_width;
-            log_debug("Caption has explicit CSS width: %dpx", caption_specified_width);
-
-            // Table minimum width must accommodate caption's explicit width
-            if (caption_specified_width > pref_table_width) {
-                log_debug("Caption wider than table content: caption=%dpx > table=%dpx",
-                         caption_specified_width, pref_table_width);
-                pref_table_width = caption_specified_width;
-                // Also expand min_table_width if needed
-                if (caption_specified_width > min_table_width) {
-                    min_table_width = caption_specified_width;
-                }
+            // Caption has explicit CSS width
+            caption_width_contribution = (int)caption->blk->given_width;
+            log_debug("Caption has explicit CSS width: %dpx", caption_width_contribution);
+        } else {
+            // Caption has auto width - measure its intrinsic content width
+            // The caption's min-content width determines the minimum table width
+            DomElement* caption_elem = caption->as_element();
+            if (caption_elem) {
+                IntrinsicSizes caption_sizes = measure_element_intrinsic_widths(lycon, caption_elem);
+                caption_width_contribution = (int)ceilf(caption_sizes.min_content);
+                log_debug("Caption auto width - intrinsic min-content: %dpx (max-content: %.1f)",
+                         caption_width_contribution, caption_sizes.max_content);
             }
+        }
+
+        // Table minimum width must accommodate caption
+        if (caption_width_contribution > pref_table_width) {
+            log_debug("Caption wider than table content: caption=%dpx > table=%dpx",
+                     caption_width_contribution, pref_table_width);
+            pref_table_width = caption_width_contribution;
+        }
+        if (caption_width_contribution > min_table_width) {
+            min_table_width = caption_width_contribution;
         }
     }
 
@@ -4750,7 +4850,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 col_widths[i] = meta->col_max_widths[i] + extra_for_col;
                 total_distributed += extra_for_col;
             } else {
-                col_widths[i] = meta->col_max_widths[i];
+                // CSS 2.1: When all columns have zero preferred width, distribute
+                // available space equally among columns
+                int equal_share = extra_space / columns;
+                col_widths[i] = equal_share;
+                total_distributed += equal_share;
             }
         }
 
