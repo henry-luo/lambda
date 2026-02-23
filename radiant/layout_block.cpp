@@ -2304,6 +2304,50 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     uintptr_t elmt_name = block->tag();
+
+    // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
+    // 'height: auto', use intrinsic dimensions. Per HTML spec, iframe default
+    // intrinsic size is 300x150. Skip if a percentage is stored (resolve later).
+    if (elmt_name == HTM_TAG_IFRAME) {
+        bool has_width_percent = block->blk && !isnan(block->blk->given_width_percent);
+        bool has_height_percent = block->blk && !isnan(block->blk->given_height_percent);
+        if (lycon->block.given_width < 0 && !has_width_percent) {
+            lycon->block.given_width = 300;
+            if (block->blk) block->blk->given_width = 300;
+            // clear the AUTO width type so layout uses intrinsic width
+            if (block->blk && block->blk->given_width_type == CSS_VALUE_AUTO) {
+                block->blk->given_width_type = CSS_VALUE__UNDEF;
+            }
+        }
+        if (lycon->block.given_height < 0 && !has_height_percent) {
+            lycon->block.given_height = 150;
+            if (block->blk) block->blk->given_height = 150;
+            // clear the AUTO height type so layout uses intrinsic height
+            if (block->blk && block->blk->given_height_type == CSS_VALUE_AUTO) {
+                block->blk->given_height_type = CSS_VALUE__UNDEF;
+            }
+        }
+        // Re-resolve percentage width/height against containing block
+        if (has_width_percent && lycon->block.given_width < 0) {
+            float container_width = pa_block->content_width;
+            if (container_width > 0) {
+                lycon->block.given_width = container_width * block->blk->given_width_percent / 100.0f;
+                block->blk->given_width = lycon->block.given_width;
+                log_debug("[IFRAME] re-resolved width: %.0f%% of %.1f = %.1f",
+                    block->blk->given_width_percent, container_width, lycon->block.given_width);
+            }
+        }
+        if (has_height_percent && lycon->block.given_height < 0) {
+            float container_height = pa_block->content_height;
+            if (container_height > 0) {
+                lycon->block.given_height = container_height * block->blk->given_height_percent / 100.0f;
+                block->blk->given_height = lycon->block.given_height;
+                log_debug("[IFRAME] re-resolved height: %.0f%% of %.1f = %.1f",
+                    block->blk->given_height_percent, container_height, lycon->block.given_height);
+            }
+        }
+    }
+
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
         log_debug("[IMG LAYOUT] Processing IMG element: %s", block->node_name());
         const char *value;
@@ -2329,6 +2373,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // Image intrinsic dimensions are in CSS logical pixels
             float w = img->width;
             float h = img->height;
+
+            // HTML percentage width/height (e.g., width="50%") — re-resolve
+            // against the actual containing block width now that layout is known.
+            // At HTML parse time, the containing block may not have been laid out yet.
+            if (block->blk && !isnan(block->blk->given_width_percent) &&
+                block->blk->given_width_percent > 0) {
+                float cb_width = pa_block->content_width;
+                if (cb_width > 0) {
+                    lycon->block.given_width = cb_width * block->blk->given_width_percent / 100.0f;
+                    log_debug("[IMG] Re-resolved width%%=%.0f against cb_width=%.1f -> %.1fpx",
+                              block->blk->given_width_percent, cb_width, lycon->block.given_width);
+                }
+            }
 
             // Check if width was specified as percentage but resolved to 0
             // This happens when parent has auto/0 width - use intrinsic width instead
