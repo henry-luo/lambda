@@ -2975,7 +2975,8 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
     while (item) {
         // Skip declarations
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
-            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_FUNC ||
+            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_OBJECT_TYPE ||
+            item->node_type == AST_NODE_FUNC ||
             item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
             item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
             item = item->next;
@@ -2997,6 +2998,7 @@ static bool is_declaration_node(int node_type) {
     switch (node_type) {
     case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM:
     case AST_NODE_TYPE_STAM: case AST_NODE_VAR_STAM:
+    case AST_NODE_OBJECT_TYPE:
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
     case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
         return true;
@@ -4905,6 +4907,76 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return transpile_content(mt, (AstListNode*)node);
     case AST_NODE_MAP:
         return transpile_map(mt, (AstMapNode*)node);
+    case AST_NODE_OBJECT_LITERAL: {
+        // object literal: {TypeName key: value, ...}
+        AstObjectLiteralNode* obj_lit = (AstObjectLiteralNode*)node;
+        TypeObject* obj_type = (TypeObject*)obj_lit->type;
+        int type_index = obj_type->type_index;
+
+        // create object: Object* o = object(type_index) — calls frame_start()
+        MIR_reg_t o = emit_call_1(mt, "object", MIR_T_P, MIR_T_I64,
+            MIR_new_int_op(mt->ctx, type_index));
+
+        // count and evaluate field values
+        AstNode* item = obj_lit->item;
+        int val_count = 0;
+        while (item) { val_count++; item = item->next; }
+
+        if (val_count == 0) {
+            // no fields - call frame_end() and return
+            MirImportEntry* fe = ensure_import(mt, "frame_end", MIR_T_I64, 0, NULL, 0);
+            emit_insn(mt, MIR_new_call_insn(mt->ctx, 2,
+                MIR_new_ref_op(mt->ctx, fe->proto),
+                MIR_new_ref_op(mt->ctx, fe->import)));
+            return o;
+        }
+
+        MIR_op_t* val_ops = (MIR_op_t*)alloca(val_count * sizeof(MIR_op_t));
+        item = obj_lit->item;
+        int vi = 0;
+        while (item) {
+            if (item->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* key_expr = (AstNamedNode*)item;
+                if (key_expr->as) {
+                    MIR_reg_t val = transpile_box_item(mt, key_expr->as);
+                    val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
+                } else {
+                    MIR_reg_t nul = new_reg(mt, "objnull", MIR_T_I64);
+                    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nul),
+                        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                    val_ops[vi++] = MIR_new_reg_op(mt->ctx, nul);
+                }
+            } else {
+                // bare expression (wrapping source object) — not yet handled
+                MIR_reg_t val = transpile_box_item(mt, item);
+                val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
+            }
+            item = item->next;
+        }
+
+        // call object_fill(o, val1, val2, ...) — variadic, calls frame_end()
+        MIR_reg_t filled = emit_vararg_call(mt, "object_fill", MIR_T_P, 1,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, o), vi, val_ops);
+        return filled;
+    }
+    case AST_NODE_OBJECT_TYPE: {
+        // object type definition — type is already registered, emit const_type for type value
+        AstObjectTypeNode* obj_type_node = (AstObjectTypeNode*)node;
+        if (obj_type_node->type && obj_type_node->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* tt = (TypeType*)obj_type_node->type;
+            if (tt->type) {
+                TypeObject* ot = (TypeObject*)tt->type;
+                return transpile_const_type(mt, ot->type_index);
+            }
+        }
+        // fallback: return null
+        MIR_reg_t r = new_reg(mt, "objtype_null", MIR_T_I64);
+        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        return r;
+    }
     case AST_NODE_ELEMENT:
         return transpile_element(mt, (AstElementNode*)node);
     case AST_NODE_MEMBER_EXPR:
@@ -5527,6 +5599,12 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             prepass_forward_declare(mt, let_node->declare);
             break;
         }
+        case AST_NODE_OBJECT_TYPE: {
+            // forward-declare methods inside the object type
+            AstObjectTypeNode* obj = (AstObjectTypeNode*)node;
+            if (obj->methods) prepass_forward_declare(mt, obj->methods);
+            break;
+        }
         case AST_NODE_ASSIGN:
         case AST_NODE_KEY_EXPR:
         case AST_NODE_PARAM:
@@ -5775,6 +5853,12 @@ static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
             prepass_compile_patterns(mt, let_node->declare);
             break;
         }
+        case AST_NODE_OBJECT_TYPE: {
+            // recurse into methods for pattern compilation
+            AstObjectTypeNode* obj = (AstObjectTypeNode*)node;
+            if (obj->methods) prepass_compile_patterns(mt, obj->methods);
+            break;
+        }
         case AST_NODE_FUNC:
         case AST_NODE_PROC:
         case AST_NODE_FUNC_EXPR: {
@@ -5828,6 +5912,12 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
         case AST_NODE_VAR_STAM: {
             AstLetNode* let_node = (AstLetNode*)node;
             prepass_define_functions(mt, let_node->declare);
+            break;
+        }
+        case AST_NODE_OBJECT_TYPE: {
+            // recurse into methods for function definition
+            AstObjectTypeNode* obj = (AstObjectTypeNode*)node;
+            if (obj->methods) prepass_define_functions(mt, obj->methods);
             break;
         }
         case AST_NODE_ASSIGN:
@@ -6056,6 +6146,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         case AST_NODE_VAR_STAM:
             transpile_let_stam(&mt, (AstLetNode*)child);
             break;
+        case AST_NODE_OBJECT_TYPE:
         case AST_NODE_IMPORT:
         case AST_NODE_FUNC:
         case AST_NODE_FUNC_EXPR:

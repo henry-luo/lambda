@@ -107,6 +107,12 @@ extern "C" {
 // #define SYM_SYS_FUNC sym_sys_func
 #define SYM_IMPORT_MODULE sym_import_module
 
+// Object type definition and object literal symbols
+#define SYM_OBJECT_TYPE sym_object_type
+#define SYM_ENTITY_TYPE sym_entity_type
+#define SYM_OBJECT_LITERAL sym_object_literal
+#define SYM_THAT_CONSTRAINT sym_that_constraint
+
 // Namespace declaration symbols
 #define SYM_NAMESPACE_DECL sym_namespace_decl
 
@@ -276,6 +282,8 @@ typedef enum AstNodeType {
     AST_NODE_BINARY_TYPE,
     AST_NODE_UNARY_TYPE,
     AST_NODE_CONSTRAINED_TYPE,  // type with where constraint
+    AST_NODE_OBJECT_TYPE,        // object type definition: type Point { x: float; fn ... }
+    AST_NODE_OBJECT_LITERAL,     // object literal: {Point x: 1.0, y: 2.0}
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
     AST_NODE_PROC, // procedural function
@@ -517,6 +525,21 @@ typedef struct AstMapNode : AstNode {
 typedef struct AstElementNode : AstMapNode {
     AstNode *content;  // first content node
 } AstElementNode;
+
+// Object type definition node
+// type Point { x: float, y: float; fn magnitude() => ... }
+// Extends AstNamedNode so it can be registered in the name scope via push_name
+typedef struct AstObjectTypeNode : AstNamedNode {
+    AstNode* item;              // linked list of field declaration AST nodes
+    AstNode* base_type;         // base type identifier for inheritance (NULL if none)
+    AstNode* methods;           // linked list of fn/pn AST nodes
+    AstNode* constraints;       // linked list of that-constraint AST nodes
+} AstObjectTypeNode;
+
+// Object literal node: {TypeName key: value, ...}
+typedef struct AstObjectLiteralNode : AstMapNode {
+    String* type_name;          // the type name identifier
+} AstObjectLiteralNode;
 
 // ==================== String/Symbol Pattern AST Nodes ====================
 
