@@ -35,7 +35,19 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         return;
     }
 
-    // Initialize bounds with first child
+    // Skip nil-views (RDT_VIEW_NONE) — they don't participate in layout
+    // and have default coordinates (0,0,0,0) that would corrupt bounding box
+    while (child && child->view_type == RDT_VIEW_NONE) {
+        child = child->next();
+    }
+    if (!child) {
+        // All children are nil-views — treat as empty
+        span->width = 0;
+        span->height = 0;
+        return;
+    }
+
+    // Initialize bounds with first non-nil child
     int min_x = child->x;
     int min_y = child->y;
     int max_x = child->x + child->width;
@@ -44,6 +56,11 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     // Iterate through remaining children to find union
     child = child->next();
     while (child) {
+        // Skip nil-views
+        if (child->view_type == RDT_VIEW_NONE) {
+            child = child->next();
+            continue;
+        }
         int child_min_x = child->x;
         int child_min_y = child->y;
         int child_max_x = child->x + child->width;
