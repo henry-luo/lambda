@@ -287,16 +287,52 @@ class RadiantLayoutTester {
     }
 
     /**
-     * Pre-filter test tasks: remove files without browser references or exceeding MAX_TEST_FILE_SIZE.
+     * Load the skip list for a category (e.g., test/layout/data/css2.1/skip_list.txt).
+     * Each line is a test name (without extension) to skip.
+     * Caches the result per category.
+     */
+    async loadSkipList(category) {
+        if (!this._skipListCache) this._skipListCache = {};
+        if (this._skipListCache[category] !== undefined) return this._skipListCache[category];
+
+        const skipListPath = path.join(this.testDataDir, category, 'skip_list.txt');
+        try {
+            const content = await fs.readFile(skipListPath, 'utf8');
+            const names = new Set(
+                content.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line && !line.startsWith('#'))
+            );
+            this._skipListCache[category] = names;
+            return names;
+        } catch (e) {
+            // No skip list file — nothing to skip
+            this._skipListCache[category] = new Set();
+            return this._skipListCache[category];
+        }
+    }
+
+    /**
+     * Pre-filter test tasks: remove files without browser references, exceeding MAX_TEST_FILE_SIZE,
+     * or listed in the category's skip_list.txt.
      * Returns { tasks, skipped } where skipped is the count of removed tasks.
      */
     async filterTestTasks(testTasks) {
         const kept = [];
         let skippedNoRef = 0;
         let skippedTooLarge = 0;
+        let skippedByList = 0;
 
         // Check all tasks in parallel for efficiency
         const checks = await Promise.all(testTasks.map(async (task) => {
+            // Check skip list
+            const skipList = await this.loadSkipList(task.category);
+            const ext = task.htmlFile.endsWith('.htm') && !task.htmlFile.endsWith('.html') ? '.htm' : '.html';
+            const testName = path.basename(task.htmlFile, ext);
+            if (skipList.has(testName)) {
+                return { task, skip: 'skip-list' };
+            }
+
             // Check file size
             try {
                 const stats = await fs.stat(task.htmlFile);
@@ -308,8 +344,6 @@ class RadiantLayoutTester {
             }
 
             // Check browser reference existence
-            const ext = task.htmlFile.endsWith('.htm') && !task.htmlFile.endsWith('.html') ? '.htm' : '.html';
-            const testName = path.basename(task.htmlFile, ext);
             const hasRef = await this.hasBrowserReference(testName, task.category);
             if (!hasRef) {
                 return { task, skip: 'no-ref' };
@@ -326,16 +360,19 @@ class RadiantLayoutTester {
                 if (this.verbose) {
                     console.log(`   ⏭️  Skipped ${path.basename(task.htmlFile)} (file size ${(size / 1024).toFixed(0)}KB > 100KB)`);
                 }
+            } else if (skip === 'skip-list') {
+                skippedByList++;
             } else {
                 kept.push(task);
             }
         }
 
-        const skipped = skippedNoRef + skippedTooLarge;
+        const skipped = skippedNoRef + skippedTooLarge + skippedByList;
         if (skipped > 0 && !this.json) {
             const parts = [];
             if (skippedNoRef > 0) parts.push(`${skippedNoRef} no reference`);
             if (skippedTooLarge > 0) parts.push(`${skippedTooLarge} too large`);
+            if (skippedByList > 0) parts.push(`${skippedByList} skip-listed`);
             console.log(`   ⏭️  Skipped ${skipped} tests (${parts.join(', ')})`);
         }
 
