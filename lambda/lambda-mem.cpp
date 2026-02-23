@@ -170,7 +170,7 @@ void print_heap_entries() {
         if (itm._type_id == LMD_TYPE_RAW_POINTER) {
             TypeId type_id = *((uint8_t*)data);
             log_debug("heap entry data: type: %s", type_info[type_id].name);
-            if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_ELEMENT) {
+            if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_OBJECT) {
                 Container *cont = (Container*)data;
                 log_debug("heap entry container: type: %s, ref_cnt: %d",
                     type_info[type_id].name, cont->ref_cnt);
@@ -214,9 +214,9 @@ void check_memory_leak() {
                 ArrayFloat *arr = (ArrayFloat*)data;
                 log_debug("heap entry array float: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
             }
-            else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+            else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT) {
                 Map *map = (Map*)data;
-                log_debug("heap entry map: %p, length: %ld, ref_cnt: %d", map,
+                log_debug("heap entry map/object: %p, length: %ld, ref_cnt: %d", map,
                     ((TypeMap*)map->type)->length, map->ref_cnt);
             }
         }
@@ -260,7 +260,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
                 free_item(item, clear_entry);
             }
         }
-        else if (LMD_TYPE_LIST <= field->type->type_id && field->type->type_id <= LMD_TYPE_ELEMENT) {
+        else if (LMD_TYPE_LIST <= field->type->type_id && field->type->type_id <= LMD_TYPE_OBJECT) {
             Container *container = *(Container**)field_ptr;
             if (container && container->is_heap) {
                 // only manage heap-owned containers
@@ -391,6 +391,19 @@ void free_container(Container* cont, bool clear_entry) {
                 free_item(elmt->items[j], clear_entry);
             }
             if (elmt->items) free(elmt->items);
+            pool_free(context->heap->pool, cont);
+        }
+    }
+    else if (type_id == LMD_TYPE_OBJECT) {
+        Object *obj = (Object*)cont;
+        log_debug("freeing object: %p, ref_cnt=%d, type=%p, data=%p", obj, obj->ref_cnt, obj->type, obj->data);
+        if (!obj->ref_cnt) {
+            // free object fields based on the shape (same layout as map)
+            ShapeEntry *field = ((TypeObject*)obj->type)->shape;
+            if (field) {
+                free_map_item(field, obj->data, clear_entry);
+            }
+            if (obj->data) free(obj->data);
             pool_free(context->heap->pool, cont);
         }
     }

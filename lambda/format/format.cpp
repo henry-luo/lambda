@@ -23,6 +23,7 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
         case LMD_TYPE_LIST:
             return {.item = (uint64_t)*(void**)field_data};
         case LMD_TYPE_MAP:
+        case LMD_TYPE_OBJECT:
             return {.item = (uint64_t)*(void**)field_data};
         case LMD_TYPE_ELEMENT: {
             Element* element = (Element*)*(void**)field_data;
