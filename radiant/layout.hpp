@@ -79,6 +79,7 @@ typedef struct BlockContext {
     float init_descender;       // Initial descender at line start
     float lead_y;               // Leading space when line_height > font size
     CssEnum text_align;         // Text alignment
+    CssEnum direction;          // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
     float given_width;          // CSS specified width (-1 if auto)
     float given_height;         // CSS specified height (-1 if auto)
     float last_line_ascender;   // Baseline of last line (for inline-block baseline alignment)

@@ -2005,6 +2005,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_WHITE_SPACE,
         CSS_PROPERTY_VISIBILITY,
         CSS_PROPERTY_EMPTY_CELLS,
+        CSS_PROPERTY_DIRECTION,
     };
     static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
 
@@ -2689,16 +2690,65 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         parent = parent->parent ? static_cast<DomElement*>(parent->parent) : nullptr;
                     }
 
-                    // If no parent value found, use default (left)
                     if (!resolved) {
-                        block->blk->text_align = CSS_VALUE_LEFT;
-                        log_debug("[CSS] Text-align: inherit with no parent, using LEFT");
+                        block->blk->text_align = CSS_VALUE_START;
+                        log_debug("[CSS] Text-align: inherit with no parent, using START");
                     }
                 }
                 else if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     const CssEnumInfo* info = css_enum_info(align_value);
                     log_debug("[CSS] Text-align: %s -> 0x%04X", info ? info->name : "unknown", align_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_DIRECTION: {
+            log_debug("[CSS] Processing direction property");
+            if (!block) {
+                // direction also applies to inline elements (span) for bidi
+                ViewSpan* span = lycon->view->is_element() ? (ViewSpan*)lycon->view : nullptr;
+                if (span && span->blk) {
+                    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum dir_value = value->data.keyword;
+                        if (dir_value == CSS_VALUE_LTR || dir_value == CSS_VALUE_RTL) {
+                            span->blk->direction = dir_value;
+                            log_debug("[CSS] Direction (span): %s", dir_value == CSS_VALUE_RTL ? "rtl" : "ltr");
+                        }
+                    }
+                }
+                break;
+            }
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum dir_value = value->data.keyword;
+
+                // Handle 'inherit' keyword
+                if (dir_value == CSS_VALUE_INHERIT) {
+                    // Walk up parents to find computed direction
+                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                    bool resolved = false;
+                    while (parent) {
+                        if (parent->blk && parent->blk->direction != CSS_VALUE__UNDEF &&
+                            parent->blk->direction != CSS_VALUE_INHERIT) {
+                            block->blk->direction = parent->blk->direction;
+                            log_debug("[CSS] Direction: inherit resolved to %s",
+                                block->blk->direction == CSS_VALUE_RTL ? "rtl" : "ltr");
+                            resolved = true;
+                            break;
+                        }
+                        parent = parent->parent ? static_cast<DomElement*>(parent->parent) : nullptr;
+                    }
+                    if (!resolved) {
+                        block->blk->direction = CSS_VALUE_LTR;
+                        log_debug("[CSS] Direction: inherit with no parent, using LTR");
+                    }
+                }
+                else if (dir_value == CSS_VALUE_LTR || dir_value == CSS_VALUE_RTL) {
+                    block->blk->direction = dir_value;
+                    log_debug("[CSS] Direction: %s", dir_value == CSS_VALUE_RTL ? "rtl" : "ltr");
                 }
             }
             break;

@@ -187,6 +187,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
     prop->line_height = null;
     prop->text_align = lycon->block.text_align;  // inherit from parent
+    prop->direction = lycon->block.direction;  // inherit from parent (CSS 2.1 §9.2.1)
     prop->text_transform = (CssEnum)0;  // 0 = not set, will be inherited if needed
     prop->word_break = (CssEnum)0;      // 0 = not set, treat as CSS_VALUE_NORMAL
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined

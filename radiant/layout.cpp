@@ -793,13 +793,14 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
 
 void line_align(LayoutContext* lycon) {
     // horizontal text alignment: left, right, center, justify, start, end
-    // Convert logical values (start/end) to physical values (left/right) for LTR text
-    // Note: For RTL support in future, this would need to be reversed
+    // Convert logical values (start/end) to physical values (left/right)
+    // CSS 2.1 §16.2: 'start' maps to 'left' for LTR and 'right' for RTL
+    bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
     CssEnum text_align = lycon->block.text_align;
     if (text_align == CSS_VALUE_START) {
-        text_align = CSS_VALUE_LEFT;  // LTR: start = left
+        text_align = is_rtl ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
     } else if (text_align == CSS_VALUE_END) {
-        text_align = CSS_VALUE_RIGHT;  // LTR: end = right
+        text_align = is_rtl ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
     }
 
     if (text_align != CSS_VALUE_LEFT) {
