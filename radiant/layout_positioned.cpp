@@ -193,9 +193,8 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
 }
 
 // calculate absolute position based on containing block and offset properties
+// Implements CSS 2.1 §10.3.7 (horizontal) and §10.6.4 (vertical) constraint equations
 void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlock* containing_block) {
-    // 1. top, right, bottom, left resolved relative to the padding box of the containing block.
-    // 2. margin values do offset the absolutely positioned box from where top/left/right/bottom place it. but 'auto' margins are treated as 0.
 
     // get containing block dimensions
     float cb_x = containing_block->x, cb_y = containing_block->y;
@@ -262,7 +261,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     }
 
     float content_width, content_height;
-    // calculate horizontal position
+    // =========================================================================
+    // HORIZONTAL AXIS: CSS 2.1 §10.3.7 constraint equation
+    //   left + margin-left + border-left + padding-left + width +
+    //   padding-right + border-right + margin-right + right = cb_width
+    // =========================================================================
     log_debug("given_width=%f, given_height=%f, width_type=%d", lycon->block.given_width, lycon->block.given_height,
               block->blk ? block->blk->given_width_type : -1);
 
@@ -272,96 +275,188 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
          block->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
          block->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
 
+    // Gather horizontal border+padding for constraint calculations
+    float h_border_padding = 0;
+    if (block->bound) {
+        h_border_padding += block->bound->padding.left + block->bound->padding.right;
+        if (block->bound->border) {
+            h_border_padding += block->bound->border->width.left + block->bound->border->width.right;
+        }
+    }
+
+    bool has_auto_margin_left = block->bound && block->bound->margin.left_type == CSS_VALUE_AUTO;
+    bool has_auto_margin_right = block->bound && block->bound->margin.right_type == CSS_VALUE_AUTO;
+    bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width);
+
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
-    if (lycon->block.given_width >= 0 && !is_intrinsic_width) {
+    if (has_width) {
         content_width = lycon->block.given_width;
     } else if (block->position->has_left && block->position->has_right && !is_intrinsic_width) {
-        // both left and right specified - calculate width from constraints
-        // The constraint defines the BORDER-BOX width, not content width
-        float left_edge = block->position->left + (block->bound ? block->bound->margin.left : 0);
-        float right_edge = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0);
+        // CSS 2.1 §10.3.7: width is auto, both left and right specified
+        // Auto margins are treated as 0 when width is auto
+        float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
+        float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
+        float left_edge = block->position->left + margin_left;
+        float right_edge = cb_width - block->position->right - margin_right;
         float border_box_width = max(right_edge - left_edge, 0.0f);
-        // Subtract padding and border to get content width
-        content_width = border_box_width;
-        if (block->bound) {
-            content_width -= (block->bound->padding.left + block->bound->padding.right);
-            if (block->bound->border) {
-                content_width -= (block->bound->border->width.left + block->bound->border->width.right);
-            }
-        }
-        content_width = max(content_width, 0.0f);
+        content_width = max(border_box_width - h_border_padding, 0.0f);
         // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
         lycon->block.given_width = content_width;
+        // When width is derived from constraints, auto margins become 0
+        if (has_auto_margin_left && block->bound) block->bound->margin.left = 0;
+        if (has_auto_margin_right && block->bound) block->bound->margin.right = 0;
         log_debug("[ABS POS] width from constraints: left_edge=%.1f, right_edge=%.1f, border_box=%.1f, content_width=%.1f (stored in given_width)",
                   left_edge, right_edge, border_box_width, content_width);
     } else if (is_intrinsic_width) {
-        // For max-content/min-content/fit-content, use 0 as initial width
-        // The actual width will be determined by content and adjusted post-layout
-        // Set content_width to 0 to trigger shrink-to-fit behavior
         content_width = 0;
         log_debug("Using intrinsic sizing for absolutely positioned element: content_width=0 (shrink-to-fit)");
     } else {
         // shrink-to-fit: will be determined by content (start with 0, let content grow it)
         // For now, fall back to containing block width minus margins
-        content_width = max(cb_width - (block->bound ? block->bound->margin.right + block->bound->margin.left : 0), 0.0f);
+        float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
+        float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
+        content_width = max(cb_width - margin_left - margin_right, 0.0f);
+    }
+
+    // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
+    // When left, right, and width are all NOT auto, the equation is over-constrained.
+    // Auto margins absorb the remaining space; if both are auto, they split it equally (centering).
+    if (has_width && block->position->has_left && block->position->has_right) {
+        // For box-sizing: border-box, content_width is already the border-box width
+        float used_width = content_width + h_border_padding;
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+            used_width = content_width;  // already includes padding+border
+        }
+        float remaining = cb_width - block->position->left - block->position->right - used_width;
+        if (has_auto_margin_left && has_auto_margin_right) {
+            // Both margins auto → center horizontally
+            float each = max(remaining / 2.0f, 0.0f);
+            if (block->bound) {
+                block->bound->margin.left = each;
+                block->bound->margin.right = each;
+            }
+            log_debug("[ABS POS] auto margin centering horizontal: remaining=%.1f, each=%.1f", remaining, each);
+        } else if (has_auto_margin_left) {
+            float margin_right = block->bound ? block->bound->margin.right : 0;
+            float auto_margin = max(remaining - margin_right, 0.0f);
+            if (block->bound) block->bound->margin.left = auto_margin;
+            log_debug("[ABS POS] auto margin-left=%.1f", auto_margin);
+        } else if (has_auto_margin_right) {
+            float margin_left = block->bound ? block->bound->margin.left : 0;
+            float auto_margin = max(remaining - margin_left, 0.0f);
+            if (block->bound) block->bound->margin.right = auto_margin;
+            log_debug("[ABS POS] auto margin-right=%.1f", auto_margin);
+        }
+    } else {
+        // When not all three (left, right, width) are specified, auto margins become 0
+        if (has_auto_margin_left && block->bound) block->bound->margin.left = 0;
+        if (has_auto_margin_right && block->bound) block->bound->margin.right = 0;
     }
 
     // Now determine x position (relative to padding box, then add border offset)
+    // For right-positioning, subtract the full border-box width (content + padding + border)
+    // Note: with box-sizing: border-box, content_width already IS the border-box width
+    // (CSS width = border-box width), so don't add h_border_padding again.
+    float h_border_box_width = content_width + h_border_padding;
+    if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        h_border_box_width = content_width;  // CSS width is already the border-box width
+    }
     if (block->position->has_left) {
         block->x = border_offset_x + block->position->left + (block->bound ? block->bound->margin.left : 0);
     } else if (block->position->has_right) {
-        block->x = border_offset_x + cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - content_width;
+        block->x = border_offset_x + cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - h_border_box_width;
     } else {
         // neither left nor right specified - use static position (with margin offset)
         block->x = border_offset_x + (block->bound ? block->bound->margin.left : 0);
     }
     assert(content_width >= 0);
 
-    // calculate vertical position - same refactoring as horizontal
+    // =========================================================================
+    // VERTICAL AXIS: CSS 2.1 §10.6.4 constraint equation
+    //   top + margin-top + border-top + padding-top + height +
+    //   padding-bottom + border-bottom + margin-bottom + bottom = cb_height
+    // =========================================================================
+    bool has_auto_margin_top = block->bound && block->bound->margin.top_type == CSS_VALUE_AUTO;
+    bool has_auto_margin_bottom = block->bound && block->bound->margin.bottom_type == CSS_VALUE_AUTO;
+
+    // Gather vertical border+padding for constraint calculations
+    float v_border_padding = 0;
+    if (block->bound) {
+        v_border_padding += block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            v_border_padding += block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+
     log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
               lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
-    if (lycon->block.given_height >= 0) {
+    bool has_height = (lycon->block.given_height >= 0);
+    if (has_height) {
         content_height = lycon->block.given_height;
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
     } else if (block->position->has_top && block->position->has_bottom) {
-        // both top and bottom specified - calculate height from constraints
-        // The constraint defines the BORDER-BOX height, not content height
-        float top_edge = block->position->top + (block->bound ? block->bound->margin.top : 0);
-        float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
+        // CSS 2.1 §10.6.4: height is auto, both top and bottom specified
+        // Auto margins are treated as 0 when height is auto
+        float margin_top = has_auto_margin_top ? 0 : (block->bound ? block->bound->margin.top : 0);
+        float margin_bottom = has_auto_margin_bottom ? 0 : (block->bound ? block->bound->margin.bottom : 0);
+        float top_edge = block->position->top + margin_top;
+        float bottom_edge = cb_height - block->position->bottom - margin_bottom;
         float border_box_height = max(bottom_edge - top_edge, 0.0f);
-        // Subtract padding and border to get content height
-        content_height = border_box_height;
-        if (block->bound) {
-            content_height -= (block->bound->padding.top + block->bound->padding.bottom);
-            if (block->bound->border) {
-                content_height -= (block->bound->border->width.top + block->bound->border->width.bottom);
-            }
-        }
-        content_height = max(content_height, 0.0f);
+        content_height = max(border_box_height - v_border_padding, 0.0f);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
-        // finalize_block_flow uses block->blk->given_height (not lycon->block.given_height) to
-        // determine if height is explicitly set, so we must also update block->blk->given_height
         lycon->block.given_height = content_height;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->given_height = content_height;
+        // When height is derived from constraints, auto margins become 0
+        if (has_auto_margin_top && block->bound) block->bound->margin.top = 0;
+        if (has_auto_margin_bottom && block->bound) block->bound->margin.bottom = 0;
         log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, border_box=%.1f, content_height=%.1f (stored in given_height)",
                   top_edge, bottom_edge, border_box_height, content_height);
     } else {
         // shrink-to-fit: height will be determined by content after layout
-        // Start with 0 and let the post-layout adjustment set the final height
         content_height = 0;
         log_debug("[ABS POS] using auto height (shrink-to-fit)");
     }
 
+    // CSS 2.1 §10.6.4: Solve auto margins for vertical axis
+    // When top, bottom, and height are all NOT auto, auto margins absorb remaining space.
+    if (has_height && block->position->has_top && block->position->has_bottom) {
+        // For box-sizing: border-box, content_height is already the border-box height
+        float used_height = content_height + v_border_padding;
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+            used_height = content_height;  // already includes padding+border
+        }
+        float remaining = cb_height - block->position->top - block->position->bottom - used_height;
+        if (has_auto_margin_top && has_auto_margin_bottom) {
+            // Both margins auto → center vertically
+            float each = max(remaining / 2.0f, 0.0f);
+            if (block->bound) {
+                block->bound->margin.top = each;
+                block->bound->margin.bottom = each;
+            }
+            log_debug("[ABS POS] auto margin centering vertical: remaining=%.1f, each=%.1f", remaining, each);
+        } else if (has_auto_margin_top) {
+            float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
+            float auto_margin = max(remaining - margin_bottom, 0.0f);
+            if (block->bound) block->bound->margin.top = auto_margin;
+            log_debug("[ABS POS] auto margin-top=%.1f", auto_margin);
+        } else if (has_auto_margin_bottom) {
+            float margin_top = block->bound ? block->bound->margin.top : 0;
+            float auto_margin = max(remaining - margin_top, 0.0f);
+            if (block->bound) block->bound->margin.bottom = auto_margin;
+            log_debug("[ABS POS] auto margin-bottom=%.1f", auto_margin);
+        }
+    } else {
+        // When not all three (top, bottom, height) are specified, auto margins become 0
+        if (has_auto_margin_top && block->bound) block->bound->margin.top = 0;
+        if (has_auto_margin_bottom && block->bound) block->bound->margin.bottom = 0;
+    }
+
     // Now determine y position (relative to padding box, then add border offset)
     // CRITICAL: For bottom positioning, we need the border-box height (including padding/border)
-    // not just content_height, to correctly position the element at the bottom
-    // Note: For box-sizing: border-box, the given height IS the border-box height (content_height here)
-    // For box-sizing: content-box (default), we need to add padding and border
     bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
     float border_box_height = content_height;
     if (!is_border_box && block->bound) {
-        // Only add padding/border for content-box sizing
         border_box_height += block->bound->padding.top + block->bound->padding.bottom;
         if (block->bound->border) {
             border_box_height += block->bound->border->width.top + block->bound->border->width.bottom;
