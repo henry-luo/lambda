@@ -2193,6 +2193,38 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_MAP) {
+        // check for {TypeName} pattern: map with single identifier resolving to object type
+        uint32_t named_count = ts_node_named_child_count(child);
+        if (named_count == 1) {
+            TSNode only = ts_node_named_child(child, 0);
+            TSSymbol os = ts_node_symbol(only);
+            if (os == SYM_PRIMARY_EXPR) {
+                only = ts_node_named_child(only, 0);
+                if (!ts_node_is_null(only)) os = ts_node_symbol(only);
+            }
+            if (os == SYM_IDENT) {
+                StrView name = ts_node_source(tp, only);
+                NameEntry* entry = lookup_name(tp, name);
+                if (entry && entry->node && entry->node->type) {
+                    Type* resolved = entry->node->type;
+                    if (resolved->type_id == LMD_TYPE_TYPE) {
+                        Type* inner = ((TypeType*)resolved)->type;
+                        if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                            log_debug("build_primary_expr: detected {%.*s} as empty object literal", (int)name.length, name.str);
+                            TypeObject* obj_type = (TypeObject*)inner;
+                            AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+                                AST_NODE_OBJECT_LITERAL, child, sizeof(AstObjectLiteralNode));
+                            obj_node->type_name = name_pool_create_strview(tp->name_pool, name);
+                            obj_node->type = (Type*)obj_type;
+                            obj_node->item = NULL;
+                            ast_node->expr = (AstNode*)obj_node;
+                            ast_node->type = (Type*)obj_type;
+                            return (AstNode*)ast_node;
+                        }
+                    }
+                }
+            }
+        }
         ast_node->expr = build_map(tp, child);
         ast_node->type = ast_node->expr->type;
     }
@@ -6023,8 +6055,41 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_assign_expr(tp, expr_node, false);  // standalone assign_expr is not a type definition
     case SYM_ARRAY:
         return build_array(tp, expr_node);
-    case SYM_MAP:
+    case SYM_MAP: {
+        // check for {TypeName} pattern: map with single identifier resolving to object type
+        uint32_t named_count = ts_node_named_child_count(expr_node);
+        if (named_count == 1) {
+            TSNode only_child = ts_node_named_child(expr_node, 0);
+            TSSymbol cs = ts_node_symbol(only_child);
+            // unwrap primary_expr wrapper if present
+            if (cs == SYM_PRIMARY_EXPR) {
+                only_child = ts_node_named_child(only_child, 0);
+                if (!ts_node_is_null(only_child)) cs = ts_node_symbol(only_child);
+            }
+            if (cs == SYM_IDENT) {
+                StrView name = ts_node_source(tp, only_child);
+                NameEntry* entry = lookup_name(tp, name);
+                if (entry && entry->node && entry->node->type) {
+                    Type* resolved = entry->node->type;
+                    if (resolved->type_id == LMD_TYPE_TYPE) {
+                        Type* inner = ((TypeType*)resolved)->type;
+                        if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                            // {TypeName} with all defaults — build as empty object literal
+                            log_debug("build_map: detected {%.*s} as empty object literal", (int)name.length, name.str);
+                            TypeObject* obj_type = (TypeObject*)inner;
+                            AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+                                AST_NODE_OBJECT_LITERAL, expr_node, sizeof(AstObjectLiteralNode));
+                            obj_node->type_name = name_pool_create_strview(tp->name_pool, name);
+                            obj_node->type = (Type*)obj_type;
+                            obj_node->item = NULL;
+                            return (AstNode*)obj_node;
+                        }
+                    }
+                }
+            }
+        }
         return build_map(tp, expr_node);
+    }
     case SYM_OBJECT_LITERAL:
         return build_object_literal(tp, expr_node);
     case SYM_OBJECT_TYPE:
