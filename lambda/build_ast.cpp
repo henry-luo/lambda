@@ -3780,13 +3780,24 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     return (AstNode*)ast_node;
 }
 
-// Helper function to parse occurrence count from string like "[2]", "[2, 5]", "[2+]"
+// Helper function to parse occurrence count from string like "[]", "[2]", "[2, 5]", "[2+]"
 // Sets min_count and max_count; max_count=-1 means unbounded
 static void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     *min_count = 0;
     *max_count = -1;  // unbounded by default
 
-    if (op_str.length < 3 || op_str.str[0] != '[') {
+    if (op_str.length < 2 || op_str.str[0] != '[') {
+        return;
+    }
+
+    // [] - any count (equivalent to *)
+    if (op_str.length == 2 && op_str.str[1] == ']') {
+        *min_count = 0;
+        *max_count = -1;
+        return;
+    }
+
+    if (op_str.length < 3) {
         return;
     }
 

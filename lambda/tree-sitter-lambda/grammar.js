@@ -822,12 +822,13 @@ module.exports = grammar({
 
     // Type Definitions: ----------------------------------
 
-    // Occurrence modifiers for types: ?, +, *, [n], [n, m], [n+]
+    // Occurrence modifiers for types: ?, +, *, [], [n], [n, m], [n+]
     occurrence: $ => choice('?', '+', '*', $.occurrence_count),
 
-    // Occurrence count: [n] (exact), [n, m] (range), [n+] (unbounded)
+    // Occurrence count: [] (any), [n] (exact), [n, m] (range), [n+] (unbounded)
     // Higher precedence than primary_type to prefer occurrence over array_type
     occurrence_count: $ => prec(2, choice(
+      seq('[', ']'),                                 // any count: T[]
       seq('[', $.integer, ']'),                      // exactly n: T[5]
       seq('[', $.integer, ',', $.integer, ']'),      // n to m: T[2, 5]
       seq('[', $.integer, '+', ']'),                 // n or more: T[3+]

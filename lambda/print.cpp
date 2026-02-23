@@ -136,7 +136,29 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "Function*");
         break;
     case LMD_TYPE_TYPE:
-        strbuf_append_str(code_buf, "Type*");
+        // Handle TypeUnary (occurrence types like int[], int+, int*, int?)
+        if (type->kind == TYPE_KIND_UNARY) {
+            TypeUnary* unary = (TypeUnary*)type;
+            Type* operand = unary->operand;
+            // unwrap TypeType wrapper if present
+            if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+                operand = ((TypeType*)operand)->type;
+            }
+            if (operand) {
+                if (operand->type_id == LMD_TYPE_INT)
+                    strbuf_append_str(code_buf, "ArrayInt*");
+                else if (operand->type_id == LMD_TYPE_INT64)
+                    strbuf_append_str(code_buf, "ArrayInt64*");
+                else if (operand->type_id == LMD_TYPE_FLOAT)
+                    strbuf_append_str(code_buf, "ArrayFloat*");
+                else
+                    strbuf_append_str(code_buf, "Array*");
+            } else {
+                strbuf_append_str(code_buf, "Array*");
+            }
+        } else {
+            strbuf_append_str(code_buf, "Type*");
+        }
         break;
     default:
         log_error("unknown type to write %d", type_id);

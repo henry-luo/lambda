@@ -126,4 +126,38 @@ type InlineAtLeastTwoInts = int[2+]
 "8.3"; (["a", "b"] is InlineRangeStrings) // true
 "8.4"; ([1, 2, 3] is InlineAtLeastTwoInts) // true
 
+// ============================================================
+// Test 9: Empty Bracket Syntax T[] (C/Java-style)
+// T[] is equivalent to T* (zero or more, any length)
+// Matches array, list, and typed range
+// ============================================================
+'Test 9: Empty Bracket Syntax T[]'
+
+type AnyInts = int[]
+type AnyStrings = string[]
+
+"9.1"; ([] is AnyInts)                 // true - empty array
+"9.2"; ([1] is AnyInts)               // true - single element
+"9.3"; ([1, 2, 3] is AnyInts)         // true - multiple elements
+"9.4"; (["a"] is AnyInts)             // false - wrong element type
+"9.5"; ([] is AnyStrings)             // true - empty array
+"9.6"; (["hello", "world"] is AnyStrings) // true - string array
+"9.7"; (1 is AnyInts)                 // true - single value matches occurrence of 1
+
+// ============================================================
+// Test 10: Typed Array Matching (float[], range)
+// Validates that occurrence types match ArrayFloat and Range
+// ============================================================
+'Test 10: Typed Array and Range Matching'
+
+type FloatArr = float[]
+type IntArr2 = int[]
+
+"10.1"; ([1.0, 2.0, 3.0] is FloatArr)   // true - ArrayFloat matches float[]
+"10.2"; ([1.0] is FloatArr)              // true - single float element
+"10.3"; ([] is FloatArr)                 // true - empty matches float[]
+"10.4"; ([1, 2] is FloatArr)             // false - ints don't match float[]
+"10.5"; (1 to 10 is IntArr2)             // true - Range matches int[]
+"10.6"; (1 to 5 is FloatArr)             // false - Range is int, not float
+
 "===== END OF TYPE OCCURRENCE TESTS ====="
