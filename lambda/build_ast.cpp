@@ -1547,6 +1547,15 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             log_debug("Debug: entry->node->type is %p for identifier %.*s",
                 entry->node->type, (int)entry->name->len, entry->name->chars);
             ast_node->type = entry->node->type;
+            // For function parameters with TypeUnary annotation (int[], float[]),
+            // use the full_type pointer to get the real TypeUnary (not the TypeParam copy)
+            if (entry->node->node_type == AST_NODE_PARAM && entry->node->type &&
+                entry->node->type->kind == TYPE_KIND_UNARY) {
+                TypeParam* pt = (TypeParam*)entry->node->type;
+                if (pt->full_type) {
+                    ast_node->type = pt->full_type;
+                }
+            }
             if (!ast_node->type) {
                 log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY",
                     (int)entry->name->len, entry->name->chars);
@@ -4912,10 +4921,13 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
             if (type_type->type) {
                 // Copy base Type fields
                 *(Type*)param_type = *type_type->type;
-                // For complex types (TypeBinary), store pointer to full type
+                // For complex types (TypeBinary, TypeUnary), store pointer to full type
                 if (type_type->type->kind == TYPE_KIND_BINARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has union type, storing full_type pointer");
+                } else if (type_type->type->kind == TYPE_KIND_UNARY) {
+                    param_type->full_type = type_type->type;
+                    log_debug("parameter has occurrence type, storing full_type pointer");
                 } else {
                     param_type->full_type = NULL;
                 }

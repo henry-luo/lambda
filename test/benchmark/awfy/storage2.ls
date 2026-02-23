@@ -1,7 +1,7 @@
 // AWFY Benchmark: Storage (Typed version)
 // Expected result: 5461
 
-pn random_next(seed_arr) {
+pn random_next(seed_arr: int[]) {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
     s = s % 65536
@@ -29,7 +29,7 @@ pn make_array(n: int, val) {
     return arr
 }
 
-pn build_tree_depth(state, depth: int, seed_arr) {
+pn build_tree_depth(state, depth: int, seed_arr: int[]) {
     state.count = state.count + 1
     if (depth == 1) {
         return make_array((random_next(seed_arr) % 10) + 1, 0)
@@ -44,7 +44,7 @@ pn build_tree_depth(state, depth: int, seed_arr) {
 }
 
 pn benchmark() {
-    var seed_arr = [74755]
+    var seed_arr:int[] = [74755]
     let state = {count: 0}
     build_tree_depth(state, 7, seed_arr)
     return state.count

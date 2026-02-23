@@ -477,9 +477,17 @@ string*            // Array of zero or more strings
 int+               // Array of at least one int
 string+            // Non-empty string array
 
+// Typed array (native performance)
+int[]              // Typed int array
+float[]            // Typed float array
+
 // Examples
 type Args = string*        // Zero or more arguments
 type Names = string+       // At least one name required
+
+// Typed array in variables and parameters
+var positions: float[] = [0.0, 1.0, 2.0]
+pn update(arr: int[], n: int) { arr[0] = n }
 
 // In function signatures
 fn concat(parts: string+) => ...   // Requires at least one
@@ -493,6 +501,7 @@ fn concat(parts: string+) => ...   // Requires at least one
 | `T?` | Zero or one | `T \| null` |
 | `T*` | Zero or more | `[T]` |
 | `T+` | One or more | Non-empty `[T]` |
+| `T[]` | Typed array | Native `T` array (int, float) |
 
 ---
 
