@@ -274,7 +274,8 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     case LMD_TYPE_RANGE:
     case LMD_TYPE_LIST:
     case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT: {
         Container* container = value.container;
         *(Container**)field_ptr = container;
         if (container) container->ref_cnt++;
@@ -304,7 +305,8 @@ void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_RANGE:
     case LMD_TYPE_LIST:
     case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT: {
         Container* container = *(Container**)field_ptr;
         if (container && container->ref_cnt > 0) {
             container->ref_cnt--;
@@ -494,7 +496,7 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
                     if (str) str->ref_cnt++;
                 }
                 else if (entry->type->type_id >= LMD_TYPE_LIST &&
-                         entry->type->type_id <= LMD_TYPE_ELEMENT) {
+                         entry->type->type_id <= LMD_TYPE_OBJECT) {
                     Container* container = *(Container**)new_field;
                     if (container) container->ref_cnt++;
                 }
@@ -1027,7 +1029,7 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
                         if (str) str->ref_cnt++;
                     }
                     else if (entry->type->type_id >= LMD_TYPE_LIST &&
-                             entry->type->type_id <= LMD_TYPE_ELEMENT) {
+                             entry->type->type_id <= LMD_TYPE_OBJECT) {
                         Container* container = *(Container**)new_field;
                         if (container) container->ref_cnt++;
                     }

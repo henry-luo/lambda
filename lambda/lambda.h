@@ -70,6 +70,7 @@ enum EnumTypeId {
     LMD_TYPE_MAP,
     LMD_TYPE_VMAP,  // virtual map with vtable dispatch (hashmap, treemap, etc.)
     LMD_TYPE_ELEMENT,
+    LMD_TYPE_OBJECT,  // object = map + type_name + methods (nominally-typed)
     LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
 
@@ -122,6 +123,7 @@ static inline const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_MAP: return "map";
         case LMD_TYPE_VMAP: return "map";  // VMap appears as "map" to Lambda scripts
         case LMD_TYPE_ELEMENT: return "element";
+        case LMD_TYPE_OBJECT: return "object";
         case LMD_TYPE_TYPE: return "type";
         case LMD_TYPE_FUNC: return "function";
         case LMD_TYPE_ANY: return "any";
@@ -159,6 +161,7 @@ typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
 typedef struct VMap VMap;
 typedef struct Element Element;
+typedef struct Object Object;
 typedef struct Function Function;
 typedef struct Decimal Decimal;
 typedef struct TypePattern TypePattern;
@@ -629,6 +632,7 @@ typedef struct Context {
 
     Map* map(int type_index);
     Element* elmt(int type_index);
+    Object* object(int type_index);
 
     // these getters use runtime num_stack
     Item array_get(Array *array, int index);
@@ -638,6 +642,7 @@ typedef struct Context {
     Item list_get(List *list, int index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
+    Item object_get(Object* obj, Item key);
     Item item_at(Item data, int index);
     Item item_attr(Item data, const char* key);  // get attribute by name
     struct _ArrayList* item_keys(Item data);     // get list of attribute names

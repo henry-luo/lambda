@@ -24,6 +24,7 @@ Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
 TypeArray TYPE_ARRAY;
 Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 Type TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
+Type TYPE_OBJECT = {.type_id = LMD_TYPE_OBJECT};
 Type TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 Type TYPE_ANY = {.type_id = LMD_TYPE_ANY};
@@ -63,6 +64,7 @@ TypeType LIT_TYPE_RANGE;
 TypeType LIT_TYPE_ARRAY;
 TypeType LIT_TYPE_MAP;
 TypeType LIT_TYPE_ELMT;
+TypeType LIT_TYPE_OBJECT;
 TypeType LIT_TYPE_FUNC;
 TypeType LIT_TYPE_TYPE;
 TypeType LIT_TYPE_ANY;
@@ -70,6 +72,7 @@ TypeType LIT_TYPE_ERROR;
 
 TypeMap EmptyMap;
 TypeElmt EmptyElmt;
+TypeObject EmptyObject;
 
 Item ItemNull = {._type_id = LMD_TYPE_NULL};
 Item ItemError = {._type_id = LMD_TYPE_ERROR};
@@ -107,6 +110,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_ARRAY) = LIT_TYPE;  LIT_TYPE_ARRAY.type = (Type*)&TYPE_ARRAY;
     *(Type*)(&LIT_TYPE_MAP) = LIT_TYPE;  LIT_TYPE_MAP.type = &TYPE_MAP;
     *(Type*)(&LIT_TYPE_ELMT) = LIT_TYPE;  LIT_TYPE_ELMT.type = &TYPE_ELMT;
+    *(Type*)(&LIT_TYPE_OBJECT) = LIT_TYPE;  LIT_TYPE_OBJECT.type = &TYPE_OBJECT;
     *(Type*)(&LIT_TYPE_FUNC) = LIT_TYPE;  LIT_TYPE_FUNC.type = &TYPE_FUNC;
     *(Type*)(&LIT_TYPE_TYPE) = LIT_TYPE;  LIT_TYPE_TYPE.type = &TYPE_TYPE;
     *(Type*)(&LIT_TYPE_ANY) = LIT_TYPE;  LIT_TYPE_ANY.type = &TYPE_ANY;
@@ -117,6 +121,9 @@ void init_typetype() {
 
     memset(&EmptyElmt, 0, sizeof(TypeElmt));
     EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
+
+    memset(&EmptyObject, 0, sizeof(TypeObject));
+    EmptyObject.type_id = LMD_TYPE_OBJECT;  EmptyObject.type_index = -1;
 }
 
 TypeInfo type_info[LMD_CONTAINER_HEAP_START + 1];
@@ -143,6 +150,7 @@ void init_type_info() {
     type_info[LMD_TYPE_ARRAY_INT64] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_MAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
+    type_info[LMD_TYPE_OBJECT] = {sizeof(void*), "object", &TYPE_OBJECT, (Type*)&LIT_TYPE_OBJECT};
     type_info[LMD_TYPE_TYPE] = {sizeof(void*), "type", &TYPE_TYPE, (Type*)&LIT_TYPE_TYPE};
     type_info[LMD_TYPE_FUNC] = {sizeof(void*), "function", &TYPE_FUNC, (Type*)&LIT_TYPE_FUNC};
     type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
@@ -408,7 +416,7 @@ void array_set(Array* arr, int index, Item itm) {
         break;
     }
     default:
-        if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_ELEMENT) {
+        if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_OBJECT) {
             Container *container = itm.container;
             container->ref_cnt++;
         }
@@ -501,7 +509,7 @@ void list_push(List *list, Item item) {
             }
         }
     }
-    else if (LMD_TYPE_RANGE <= type_id && type_id <= LMD_TYPE_ELEMENT) {
+    else if (LMD_TYPE_RANGE <= type_id && type_id <= LMD_TYPE_OBJECT) {
         Container *container = item.container;
         container->ref_cnt++;
     }
@@ -715,7 +723,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+            case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                 Container *container = item.container;
                 *(Container**)field_ptr = container;
                 container->ref_cnt++;
@@ -763,7 +771,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     break;
                 }
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                     Container *container = item.container;
                     titem.container = container;  container->ref_cnt++;
                     break;
@@ -838,7 +846,7 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_BINARY:
         return {.item = x2it(titem->string)};
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
         return {.item = titem->item};
     default:
         log_error("map_get ANY type is UNKNOWN: %d", titem->type_id);
@@ -881,7 +889,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
 
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:  case LMD_TYPE_LIST:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         result.container = *(Container**)field_ptr;
         break;

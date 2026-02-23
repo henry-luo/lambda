@@ -562,7 +562,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return {.item = x2it(*(char**)field_ptr)};
 
             case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                 Container* container = *(Container**)field_ptr;
                 if (!container) return ItemNull;  // Was set to null via type transition
                 log_debug("map_get container: %p, type_id: %d", container, container->type_id);
@@ -618,6 +618,46 @@ Element* elmt(int type_index) {
     }
     // else - bare element
     return elmt;
+}
+
+Object* object(int type_index) {
+    log_debug("object with type index: %d", type_index);
+    Object *obj = (Object *)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
+    obj->type_id = LMD_TYPE_OBJECT;
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    TypeObject *obj_type = (TypeObject*)(type_list->data[type_index]);
+    obj->type = obj_type;
+    frame_start();
+    return obj;
+}
+
+Object* object_fill(Object* obj, ...) {
+    TypeObject *obj_type = (TypeObject*)obj->type;
+    obj->data = calloc(1, obj_type->byte_size);
+    log_debug("object byte_size: %ld", obj_type->byte_size);
+    // set object fields (same layout as map)
+    va_list args;
+    va_start(args, obj_type->length);
+    set_fields((TypeMap*)obj_type, obj->data, args);
+    va_end(args);
+    log_debug("object filled with type: %d, length: %ld", obj_type->type_id, obj_type->length);
+    frame_end();
+    return obj;
+}
+
+Item object_get(Object* obj, Item key) {
+    log_debug("object_get %p", obj);
+    if (!obj || !key.item) { return ItemNull; }
+    bool is_found;
+    char *key_str = NULL;
+    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+        key_str = (char*)key.get_chars();
+    } else {
+        log_error("object_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
+        return ItemNull;
+    }
+    log_debug("object_get key:'%s'", key_str);
+    return _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
 }
 
 Element* elmt_fill(Element* elmt, ...) {
@@ -767,7 +807,7 @@ Item item_attr(Item data, const char* key) {
         if (path->result != 0) {
             Item resolved = {.item = path->result};
             TypeId resolved_type = get_type_id(resolved);
-            if (resolved_type == LMD_TYPE_MAP || resolved_type == LMD_TYPE_ELEMENT) {
+            if (resolved_type == LMD_TYPE_MAP || resolved_type == LMD_TYPE_ELEMENT || resolved_type == LMD_TYPE_OBJECT) {
                 // Access attribute from resolved content
                 return item_attr(resolved, key);
             }
