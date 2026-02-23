@@ -572,7 +572,13 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         }
         codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         // CSS font-variant: small-caps — convert lowercase to uppercase
-        if (has_small_caps(lycon)) codepoint = apply_small_caps(codepoint);
+        // Track whether we scaled a lowercase char for size reduction
+        bool is_small_caps_lower = false;
+        if (has_small_caps(lycon)) {
+            uint32_t original = codepoint;
+            codepoint = apply_small_caps(codepoint);
+            is_small_caps_lower = (codepoint != original);
+        }
         is_word_start = false;  // Only first char is word start in this context
 
         // Check for Unicode space characters with defined widths
@@ -582,7 +588,8 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             // (e.g., U+200B ZWSP, U+FEFF ZWNBSP/BOM)
         } else if (unicode_space_em > 0.0f) {
             // Use Unicode-specified width (fraction of em)
-            text_width += unicode_space_em * lycon->font.current_font_size;
+            float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+            text_width += unicode_space_em * lycon->font.current_font_size * sc_scale;
         } else {
             // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
             GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
@@ -590,7 +597,8 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
                 fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
                 return RDT_LINE_NOT_FILLED;
             }
-            text_width += ginfo.advance_x;
+            // CSS Fonts 3: small-caps lowercase chars use ~0.7x font size
+            text_width += ginfo.advance_x * (is_small_caps_lower ? 0.7f : 1.0f);
         }
         // Apply letter-spacing between characters (not after last)
         // CSS 2.1 §16.4: letter-spacing specifies inter-character space
@@ -932,10 +940,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             wd = lycon->font.style->space_width;
             // Apply word-spacing to space characters
             wd += lycon->font.style->word_spacing;
-            // Apply letter-spacing between characters (not after last)
-            if (str[1]) {
-                wd += lycon->font.style->letter_spacing;
-            }
+            // CSS 2.1 §16.4: letter-spacing applies to every character
+            wd += lycon->font.style->letter_spacing;
             is_word_start = true;  // Next non-space char is word start
         }
         else {
@@ -951,7 +957,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // Apply text-transform before loading glyph
             codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
             // CSS font-variant: small-caps — convert lowercase to uppercase
-            if (has_small_caps(lycon)) codepoint = apply_small_caps(codepoint);
+            bool is_small_caps_lower = false;
+            if (has_small_caps(lycon)) {
+                uint32_t original = codepoint;
+                codepoint = apply_small_caps(codepoint);
+                is_small_caps_lower = (codepoint != original);
+            }
             is_word_start = false;  // No longer at word start
 
             // Check for Unicode space characters with defined widths
@@ -965,7 +976,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 continue;  // Skip to next character without adding width
             } else if (unicode_space_em > 0.0f) {
                 // Use Unicode-specified width (fraction of em)
-                wd = unicode_space_em * lycon->font.current_font_size;
+                float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+                wd = unicode_space_em * lycon->font.current_font_size * sc_scale;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
                 LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
@@ -973,6 +985,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                 wd = glyph ? (glyph->advance_x / pixel_ratio) : lycon->font.style->space_width;
+                // CSS Fonts 3: small-caps lowercase chars rendered at ~0.7x font size
+                // font_load_glyph returns advance at the handle's fixed size;
+                // scale proportionally since FT_LOAD_NO_HINTING produces linear metrics
+                if (is_small_caps_lower) {
+                    wd *= 0.7f;
+                }
                 // Track fallback font metrics for line-height computation
                 // When a glyph comes from a fallback font with taller metrics,
                 // update the line ascender/descender (but NOT the text rect height,
@@ -995,8 +1013,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                 }
             }
-            // Apply letter-spacing between characters (not after last)
-            // CSS 2.1 §16.4: letter-spacing specifies inter-character space
+            // CSS 2.1 §16.4: letter-spacing is inter-character space
+            // Do not add trailing letter-spacing after the last character
             if (next_ch && *next_ch) {
                 wd += lycon->font.style->letter_spacing;
             }

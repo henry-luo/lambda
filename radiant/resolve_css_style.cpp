@@ -2385,6 +2385,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 weight_value = v;
                             } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
                                 style_value = v;
+                            } else if (v->data.keyword == CSS_VALUE_SMALL_CAPS) {
+                                // CSS 2.1 §15.8: font shorthand includes font-variant
+                                span->font->font_variant = CSS_VALUE_SMALL_CAPS;
+                                log_debug("[CSS] Font shorthand: set font-variant = small-caps");
                             } else if (v->data.keyword >= CSS_VALUE_SERIF && v->data.keyword <= CSS_VALUE_FANGSONG) {
                                 // Generic font family keyword
                                 family_value = v;
@@ -5884,10 +5888,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_WORD_SPACING: {
             log_debug("[CSS] Processing word-spacing property");
-            if (!span->font) {
-                log_debug("[CSS] word-spacing: FontProp is NULL");
-                break;
-            }
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = resolve_length_value(lycon, prop_id, value);
                 span->font->word_spacing = spacing;
