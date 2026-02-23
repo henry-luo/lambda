@@ -90,6 +90,117 @@ static ValidationResult* validate_array_int_occurrence(
 }
 
 /**
+ * Validate ArrayFloat against occurrence type
+ * ArrayFloat stores raw double values, not tagged Items
+ */
+static ValidationResult* validate_array_float_occurrence(
+    SchemaValidator* validator,
+    const ArrayFloat* arr_float,
+    TypeUnary* type_unary
+) {
+    ValidationResult* result = create_validation_result(validator->get_pool());
+
+    int count = arr_float ? (int)arr_float->length : 0;
+    CountConstraint constraint = get_count_constraint(type_unary);
+
+    log_debug("[PATTERN] ArrayFloat occurrence: count=%d, min=%d, max=%d",
+              count, constraint.min, constraint.max);
+
+    // Check count constraints
+    if (!check_count_constraint(count, constraint, result, validator, "Array")) {
+        return result;
+    }
+
+    // For ArrayFloat, the operand type must be compatible with float
+    Type* operand_type = unwrap_type(type_unary->operand);
+
+    if (operand_type && operand_type->type_id == LMD_TYPE_FLOAT) {
+        result->valid = true;
+    } else {
+        result->valid = false;
+        add_constraint_error_fmt(result, validator,
+            "ArrayFloat elements are floats, but expected type_id=%d",
+            operand_type ? operand_type->type_id : -1);
+    }
+
+    return result;
+}
+
+/**
+ * Validate ArrayInt64 against occurrence type
+ * ArrayInt64 stores raw int64 values, not tagged Items
+ */
+static ValidationResult* validate_array_int64_occurrence(
+    SchemaValidator* validator,
+    const ArrayInt64* arr_int64,
+    TypeUnary* type_unary
+) {
+    ValidationResult* result = create_validation_result(validator->get_pool());
+
+    int count = arr_int64 ? (int)arr_int64->length : 0;
+    CountConstraint constraint = get_count_constraint(type_unary);
+
+    log_debug("[PATTERN] ArrayInt64 occurrence: count=%d, min=%d, max=%d",
+              count, constraint.min, constraint.max);
+
+    // Check count constraints
+    if (!check_count_constraint(count, constraint, result, validator, "Array")) {
+        return result;
+    }
+
+    // For ArrayInt64, the operand type must be compatible with int64
+    Type* operand_type = unwrap_type(type_unary->operand);
+
+    if (operand_type && (operand_type->type_id == LMD_TYPE_INT64 || operand_type->type_id == LMD_TYPE_INT)) {
+        result->valid = true;
+    } else {
+        result->valid = false;
+        add_constraint_error_fmt(result, validator,
+            "ArrayInt64 elements are int64, but expected type_id=%d",
+            operand_type ? operand_type->type_id : -1);
+    }
+
+    return result;
+}
+
+/**
+ * Validate Range against occurrence type
+ * Range is an integer sequence from start to end
+ */
+static ValidationResult* validate_range_occurrence(
+    SchemaValidator* validator,
+    const Range* range,
+    TypeUnary* type_unary
+) {
+    ValidationResult* result = create_validation_result(validator->get_pool());
+
+    int count = range ? (int)range->length : 0;
+    CountConstraint constraint = get_count_constraint(type_unary);
+
+    log_debug("[PATTERN] Range occurrence: count=%d, min=%d, max=%d",
+              count, constraint.min, constraint.max);
+
+    // Check count constraints
+    if (!check_count_constraint(count, constraint, result, validator, "Range")) {
+        return result;
+    }
+
+    // Range elements are always integers
+    Type* operand_type = unwrap_type(type_unary->operand);
+
+    if (operand_type && operand_type->type_id == LMD_TYPE_INT) {
+        result->valid = true;
+    } else {
+        result->valid = false;
+        add_constraint_error_fmt(result, validator,
+            "Range elements are integers, but expected type_id=%d",
+            operand_type ? operand_type->type_id : -1);
+    }
+
+    return result;
+}
+
+/**
  * Validate List/Array against occurrence type
  */
 static ValidationResult* validate_list_occurrence(
@@ -152,12 +263,13 @@ ValidationResult* validate_occurrence_type(
 
     TypeId item_type_id = item.type_id();
 
-    // Check if item is a list/array
+    // Check if item is a list/array/range
     bool is_container = (item_type_id == LMD_TYPE_LIST ||
                          item_type_id == LMD_TYPE_ARRAY ||
                          item_type_id == LMD_TYPE_ARRAY_INT ||
                          item_type_id == LMD_TYPE_ARRAY_INT64 ||
-                         item_type_id == LMD_TYPE_ARRAY_FLOAT);
+                         item_type_id == LMD_TYPE_ARRAY_FLOAT ||
+                         item_type_id == LMD_TYPE_RANGE);
 
     if (!is_container) {
         return validate_single_item_occurrence(validator, item, type_unary);
@@ -166,6 +278,15 @@ ValidationResult* validate_occurrence_type(
     // Handle typed arrays specially
     if (item_type_id == LMD_TYPE_ARRAY_INT) {
         return validate_array_int_occurrence(validator, item.array_int, type_unary);
+    }
+    if (item_type_id == LMD_TYPE_ARRAY_FLOAT) {
+        return validate_array_float_occurrence(validator, item.array_float, type_unary);
+    }
+    if (item_type_id == LMD_TYPE_ARRAY_INT64) {
+        return validate_array_int64_occurrence(validator, item.array_int64, type_unary);
+    }
+    if (item_type_id == LMD_TYPE_RANGE) {
+        return validate_range_occurrence(validator, item.range, type_unary);
     }
 
     // Handle generic List/Array
