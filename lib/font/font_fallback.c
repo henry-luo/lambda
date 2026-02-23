@@ -218,16 +218,39 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 ctx, font_path, face_index,
                 style->size_px, physical_size,
                 style->weight, style->slant);
-            mem_free(font_path);
             if (handle && font_has_codepoint(handle, codepoint)) {
                 // cache positive result
                 CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
                 font_handle_retain(handle);
                 hashmap_set(cache, &entry);
-                log_debug("font_fallback: codepoint U+%04X → platform font", codepoint);
+                log_debug("font_fallback: codepoint U+%04X → platform font (face %d)", codepoint, face_index);
+                mem_free(font_path);
                 return handle;
             }
+            // TTC fallback: face_index=0 may not have the codepoint even though
+            // the collection file does (e.g., Songti.ttc face 0 is "Black" variant
+            // which lacks some CJK glyphs). Try other face indices in the collection.
+            long num_faces = (handle && handle->ft_face) ? handle->ft_face->num_faces : 0;
             if (handle) font_handle_release(handle);
+            if (num_faces > 1) {
+                for (long fi = 1; fi < num_faces; fi++) {
+                    handle = font_load_face_internal(
+                        ctx, font_path, (int)fi,
+                        style->size_px, physical_size,
+                        style->weight, style->slant);
+                    if (handle && font_has_codepoint(handle, codepoint)) {
+                        CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
+                        font_handle_retain(handle);
+                        hashmap_set(cache, &entry);
+                        log_debug("font_fallback: codepoint U+%04X → platform font (face %ld of %ld)",
+                                  codepoint, fi, num_faces);
+                        mem_free(font_path);
+                        return handle;
+                    }
+                    if (handle) font_handle_release(handle);
+                }
+            }
+            mem_free(font_path);
         }
     }
 
