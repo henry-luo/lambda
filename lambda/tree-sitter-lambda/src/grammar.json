@@ -8712,6 +8712,10 @@
     [
       "attr_type",
       "binary_expr"
+    ],
+    [
+      "map",
+      "object_literal"
     ]
   ],
   "precedences": [

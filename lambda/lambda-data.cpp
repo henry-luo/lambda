@@ -713,20 +713,20 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
                 String *str = item.get_string();
                 *(String**)field_ptr = str;
-                str->ref_cnt++;
+                if (str) str->ref_cnt++;
                 break;
             }
             case LMD_TYPE_SYMBOL: {
                 Symbol *sym = item.get_symbol();
                 *(Symbol**)field_ptr = sym;
-                sym->ref_cnt++;
+                if (sym) sym->ref_cnt++;
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                 Container *container = item.container;
                 *(Container**)field_ptr = container;
-                container->ref_cnt++;
+                if (container) container->ref_cnt++;
                 break;
             }
             case LMD_TYPE_TYPE: {

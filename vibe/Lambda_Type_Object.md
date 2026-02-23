@@ -20,7 +20,7 @@
 4. [Object Literals](#object-literals)
 5. [Member Access & `this` Semantics](#member-access--this-semantics)
 6. [Inheritance](#inheritance)
-7. [Type Checking — Nominal with Structural Fallback](#type-checking--nominal-with-structural-fallback)
+7. [Type Checking — Nominal](#type-checking--nominal)
 8. [Mutability — `fn` vs `pn`](#mutability--fn-vs-pn)
 9. [Default Values](#default-values)
 10. [Element Extension](#element-extension)
@@ -54,7 +54,7 @@ Objects address all three by introducing **nominally-typed maps with methods**.
 | Type definition | `type T { fields; methods }` |
 | Self reference | `this` implied; `~` for disambiguation |
 | Inheritance | `type T : Base { ... }` and `type T = A & B` |
-| Type checking | Nominal (primary), structural fallback for plain maps |
+| Type checking | Nominal only (no structural fallback for plain maps) |
 | Mutability | `fn` methods are pure; `pn` methods may mutate |
 | Constructors | No dedicated constructor; literals + default values |
 | Element extension | `type E < attrs, content; methods >` |
@@ -279,9 +279,11 @@ When combining with `&`:
 
 ---
 
-## Type Checking — Nominal with Structural Fallback
+## Type Checking — Nominal
 
-### Nominal Checking (Objects)
+Object types use **nominal** type checking only. A value must be explicitly created with a type name to be considered an instance of that type. Plain maps never match object types, even if they have the same fields.
+
+### Nominal Checking
 
 ```lambda
 type Point { x: float, y: float; }
@@ -296,14 +298,12 @@ let s = {Size  x: 1.0, y: 2.0}
 (s is Point)   // false
 ```
 
-### Structural Fallback (Plain Maps)
-
-Plain maps (without a type name) can still match object types structurally:
+### Plain Maps Do Not Match Object Types
 
 ```lambda
 let m = {x: 1.0, y: 2.0}     // plain map, no type name
 
-(m is Point)    // true  — structural match (all fields present and match types)
+(m is Point)    // false — plain maps never match object types
 (m is map)      // true
 (m is object)   // false — m is a plain map, not an object
 ```
@@ -695,69 +695,73 @@ validate(response, ApiResponse)   // validates against object schema
 
 ### Phase 1: Runtime Foundation
 
-| Task | Details |
-|------|---------|
-| Add `LMD_TYPE_OBJECT` | New enum value in `lambda.h`, update `get_type_name()` |
-| Define `Object` struct | In `lambda-data.hpp`, extends `Container` with same layout as `Map` |
-| Define `TypeObject` | Extends `TypeMap` with `type_name`, `base`, `methods` |
-| Define `TypeMethod` | Method entry struct (name, function ptr, is_proc) |
-| Update `get_type_id()` | Handle `LMD_TYPE_OBJECT` in all type-dispatch switches |
-| Update `is_container()` | Include `LMD_TYPE_OBJECT` |
-| Object allocation | `object()` constructor in `lambda-mem.cpp` |
+| Task | Details | Status |
+|------|---------|--------|
+| Add `LMD_TYPE_OBJECT` | New enum value in `lambda.h`, update `get_type_name()` | Done |
+| Define `Object` struct | In `lambda-data.hpp`, extends `Container` with same layout as `Map` | Done |
+| Define `TypeObject` | Extends `TypeMap` with `type_name`, `base`, `methods` | Done |
+| Define `TypeMethod` | Method entry struct (name, function ptr, is_proc) | Done |
+| Update `get_type_id()` | Handle `LMD_TYPE_OBJECT` in all type-dispatch switches | Done |
+| Update `is_container()` | Include `LMD_TYPE_OBJECT` | Done |
+| Object allocation | `object()` constructor in `lambda-mem.cpp` | Done |
 
 ### Phase 2: Grammar & Parser
 
-| Task | Details |
-|------|---------|
-| Extend `object_type` rule | Add inheritance (`:`) and method declarations |
-| Add `object_literal` rule | `{TypeName field: value, ...}` syntax |
-| Extend `entity_type` rule | Add method declarations after `;` |
-| Regenerate parser | `make generate-grammar` |
-| Update `ts-enum.h` | Map new grammar symbols to C enums |
+| Task | Details | Status |
+|------|---------|--------|
+| Extend `object_type` rule | Add inheritance (`:`) and method declarations | Done |
+| Add `object_literal` rule | `{TypeName field: value, ...}` syntax | Done |
+| Extend `entity_type` rule | Add method declarations after `;` | — |
+| Regenerate parser | `make generate-grammar` | Done |
+| Update `ts-enum.h` | Map new grammar symbols to C enums | Done |
 
 ### Phase 3: AST Builder
 
-| Task | Details |
-|------|---------|
-| `build_object_type()` | Build `TypeObject` from CST, handle fields + methods + defaults |
-| `build_object_literal()` | Parse `{TypeName ...}` and emit object construction AST |
-| Handle inheritance | Merge parent fields/methods into child `TypeObject` |
-| Implicit `this` binding | Resolve bare field names in method bodies to object field access |
-| `~` self-reference | Wire `~` to object context inside method bodies |
+| Task | Details | Status |
+|------|---------|--------|
+| `build_object_type()` | Build `TypeObject` from CST, handle fields + methods + defaults | Done |
+| `build_object_literal()` | Parse `{TypeName ...}` and emit object construction AST | Done |
+| Handle inheritance | Merge parent fields/methods into child `TypeObject` | Done |
+| Implicit `this` binding | Resolve bare field names in method bodies to object field access | Done |
+| `~` self-reference | Wire `~` to object context inside method bodies | Done |
 
 ### Phase 4: Transpiler (C + MIR JIT)
 
-| Task | Details |
-|------|---------|
-| Object construction codegen | Emit code for `Object*` allocation and field packing |
-| Method call codegen | Emit dispatch: `obj.method(args)` → lookup + call |
-| `pn` mutation codegen | Emit field write-back for mutable methods |
-| Default value codegen | Emit default value evaluation for omitted fields |
-| Inherit method dispatch | Walk parent chain for inherited methods |
+| Task | Details | Status |
+|------|---------|--------|
+| Object construction codegen | Emit code for `Object*` allocation and field packing | Done |
+| Method call codegen | Emit dispatch: `obj.method(args)` → lookup + call | Done |
+| `pn` mutation codegen | Emit field write-back for mutable methods | Done |
+| Default value codegen | Emit default value evaluation for omitted fields | Done |
+| Inherit method dispatch | Walk parent chain for inherited methods | Done |
 
 ### Phase 5: Runtime Operations
 
-| Task | Details |
-|------|---------|
-| `object_get()` / `object_set()` | Field access (reuse map layout) |
-| `fn_is()` extension | Nominal type check + parent chain + structural fallback |
-| `print()` / `str()` / `json()` | Object serialization with type name |
-| Pattern matching | `case TypeName:` in `match` expressions |
-| Object wrapping | `{TypeName source, overrides...}` (no spread needed) |
-| Object-level constraints | `that (...)` inside type body, compiled + checked at `is` |
-| Ref counting | Object deallocation (fields + method table) |
+| Task                            | Details                                                         | Status |
+| ------------------------------- | --------------------------------------------------------------- | ------ |
+| `object_get()` / `object_set()` | Field access (reuse map layout)                                 | Done   |
+| `fn_is()` extension             | Nominal type check + parent chain                               | Done   |
+| `print()` / `str()` / `json()`  | Object serialization with type name (`"@"` discriminator)       | Done   |
+| Pattern matching                | `case TypeName:` in `match` expressions                         | Done   |
+| Object wrapping                 | `{TypeName source, overrides...}` (no spread needed)            | Done   |
+| Object-level constraints        | `that (...)` inside type body, compiled + checked at `is`       | Done   |
+| Ref counting                    | Object deallocation (fields + method table)                     | Done   |
+| Member precedence               | Object fields/methods take priority over built-in sys functions | Done   |
+| `{TypeName}` empty literal      | All-defaults object with no explicit fields                     | Done   |
+| Composition via `&`             | `type T = A & B & { ... }` multi-type composition               | —      |
 
 ### Phase 6: Tests
 
-| Task | Details |
-|------|---------|
-| `test/lambda/object_basic.ls` | Object creation, field access, method calls |
-| `test/lambda/object_inherit.ls` | Inheritance, method override, `is` checks |
-| `test/lambda/object_mutation.ls` | `pn` method mutation |
-| `test/lambda/object_defaults.ls` | Default field values |
-| `test/lambda/object_pattern.ls` | Pattern matching with objects |
-| `test/lambda/object_constraint.ls` | Field-level and object-level constraints |
-| `test/lambda/object_element.ls` | Element type with methods |
+| Task | Details | Status |
+|------|---------|--------|
+| `test/lambda/object.ls` | Object creation, field access, method calls | Done |
+| `test/lambda/object_inherit.ls` | Inheritance, method override, `is` checks | Done |
+| `test/lambda/object_mutation.ls` | `pn` method mutation | Done |
+| `test/lambda/object_default.ls` | Default field values | Done |
+| `test/lambda/object_pattern.ls` | Pattern matching with objects | Done |
+| `test/lambda/object_update.ls` | Object update/wrapping syntax | Done |
+| `test/lambda/object_constraint.ls` | Field-level and object-level constraints | Done |
+| `test/lambda/object_element.ls` | Element type with methods | — |
 
 ---
 

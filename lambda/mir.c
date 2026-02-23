@@ -126,6 +126,7 @@ func_obj_t func_list[] = {
     {"object_fill", (fn_ptr) object_fill},
     {"object_get", (fn_ptr) object_get},
     {"object_type_set_method", (fn_ptr) object_type_set_method},
+    {"object_type_set_constraint", (fn_ptr) object_type_set_constraint},
     {"is_truthy", (fn_ptr) is_truthy},
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},

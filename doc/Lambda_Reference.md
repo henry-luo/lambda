@@ -94,6 +94,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | `int[]` | Typed int array | `var a: int[] = [1, 2]` |
 | `float[]` | Typed float array | `var b: float[] = [0.1]` |
 | `map` | Key-value mapping | `{name: "Alice"}` |
+| `object` | Nominally-typed map with methods | `{Point x: 1, y: 2}` |
 | `element` | Markup element | `<div; "content">` |
 
 #### Type System (see [Lambda_Type.md](Lambda_Type.md))
@@ -114,6 +115,16 @@ int?                   // Nullable (int | null)
 // Type declarations
 type User = {name: string, age: int}
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
+
+// Object types (nominally-typed maps with methods)
+type Point {
+    x: float, y: float;
+    fn distance(other: Point) => sqrt((x - other.x)**2 + (y - other.y)**2)
+}
+type Circle : Point { radius: float; }   // Inheritance
+let p = {Point x: 3.0, y: 4.0}           // Object literal
+p.distance({Point x: 0.0, y: 0.0})       // Method call
+p is Point                                // true (nominal)
 ```
 
 #### Expressions (see [Lambda_Expr_Stam.md](Lambda_Expr_Stam.md))

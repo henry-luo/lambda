@@ -3856,6 +3856,29 @@ void transpile_object_type_method_registration(Transpiler* tp, AstObjectTypeNode
         strbuf_append_str(tp->code_buf, ");\n");
         method = method->next;
     }
+
+    // register constraint function if type has constraints
+    // detect from AST field nodes (not shape entries)
+    bool has_field_constraints = false;
+    AstNode* field_item = obj_node->item;
+    while (field_item) {
+        if (field_item->node_type == AST_NODE_KEY_EXPR) {
+            AstNamedNode* fn = (AstNamedNode*)field_item;
+            Type* as_type = fn->as ? fn->as->type : NULL;
+            if (as_type && as_type->type_id == LMD_TYPE_TYPE
+                && as_type->kind == TYPE_KIND_CONSTRAINED) {
+                has_field_constraints = true;
+                break;
+            }
+        }
+        field_item = field_item->next;
+    }
+    bool has_obj_constraints = (obj_node->constraints != NULL);
+    if (has_field_constraints || has_obj_constraints) {
+        strbuf_append_str(tp->code_buf, " object_type_set_constraint(");
+        strbuf_append_int(tp->code_buf, obj_type->type_index);
+        strbuf_append_format(tp->code_buf, ", (fn_ptr)_constraint_%d);\n", obj_type->type_index);
+    }
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
@@ -6457,6 +6480,77 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             method = method->next;
         }
         tp->method_owner = prev_owner;
+
+        // generate constraint-checking function if type has field-level or object-level constraints
+        Type* node_type = obj_node->type;
+        TypeObject* obj_type = (node_type->type_id == LMD_TYPE_TYPE)
+            ? (TypeObject*)((TypeType*)node_type)->type
+            : (TypeObject*)node_type;
+
+        // detect field-level constraints from AST nodes (not shape entries,
+        // since shape entries store unwrapped base types for runtime storage)
+        bool has_field_constraints = false;
+        AstNode* field_item = obj_node->item;
+        while (field_item) {
+            if (field_item->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* fn = (AstNamedNode*)field_item;
+                // check the inner expression type (as), which retains TypeConstrained
+                Type* as_type = fn->as ? fn->as->type : NULL;
+                if (as_type && as_type->type_id == LMD_TYPE_TYPE
+                    && as_type->kind == TYPE_KIND_CONSTRAINED) {
+                    has_field_constraints = true;
+                    break;
+                }
+            }
+            field_item = field_item->next;
+        }
+        bool has_obj_constraints = (obj_node->constraints != NULL);
+
+        if (has_field_constraints || has_obj_constraints) {
+            // emit: uint8_t _constraint_N(Item _self_item) { ... }
+            strbuf_append_format(tp->code_buf, "\nuint8_t _constraint_%d(Item _self_item) {\n",
+                obj_type->type_index);
+            strbuf_append_str(tp->code_buf, "  Item _pipe_item = _self_item;\n");
+
+            // field-level constraint checks — iterate AST field nodes
+            field_item = obj_node->item;
+            while (field_item) {
+                if (field_item->node_type == AST_NODE_KEY_EXPR) {
+                    AstNamedNode* fn = (AstNamedNode*)field_item;
+                    Type* as_type = fn->as ? fn->as->type : NULL;
+                    if (as_type && as_type->type_id == LMD_TYPE_TYPE
+                        && as_type->kind == TYPE_KIND_CONSTRAINED) {
+                        TypeConstrained* tc = (TypeConstrained*)as_type;
+                        if (tc->constraint) {
+                            strbuf_append_str(tp->code_buf, "  {\n");
+                            strbuf_append_str(tp->code_buf, "    Item _fval = fn_member(_self_item, s2it(heap_create_name(\"");
+                            strbuf_append_str_n(tp->code_buf, fn->name->chars, fn->name->len);
+                            strbuf_append_str(tp->code_buf, "\")));\n");
+                            strbuf_append_str(tp->code_buf, "    Item _saved_pipe = _pipe_item;\n");
+                            strbuf_append_str(tp->code_buf, "    _pipe_item = _fval;\n");
+                            strbuf_append_str(tp->code_buf, "    if (!is_truthy(");
+                            transpile_box_item(tp, tc->constraint);
+                            strbuf_append_str(tp->code_buf, ")) { return 0; }\n");
+                            strbuf_append_str(tp->code_buf, "    _pipe_item = _saved_pipe;\n");
+                            strbuf_append_str(tp->code_buf, "  }\n");
+                        }
+                    }
+                }
+                field_item = field_item->next;
+            }
+
+            // object-level constraint checks
+            AstNode* constraint = obj_node->constraints;
+            while (constraint) {
+                strbuf_append_str(tp->code_buf, "  _pipe_item = _self_item;\n");
+                strbuf_append_str(tp->code_buf, "  if (!is_truthy(");
+                transpile_box_item(tp, constraint);
+                strbuf_append_str(tp->code_buf, ")) { return 0; }\n");
+                constraint = constraint->next;
+            }
+
+            strbuf_append_str(tp->code_buf, "  return 1;\n}\n");
+        }
         break;
     }
     case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN: {
