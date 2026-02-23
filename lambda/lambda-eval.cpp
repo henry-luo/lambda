@@ -776,11 +776,23 @@ Bool fn_is(Item a, Item b) {
             TypeObject* obj_type = (TypeObject*)obj->type;
             TypeObject* expected = (TypeObject*)type_b->type;
             // walk inheritance chain
-            while (obj_type) {
-                if (obj_type == expected) return BOOL_TRUE;
-                obj_type = obj_type->base;
+            TypeObject* walk = obj_type;
+            bool nominal_match = false;
+            while (walk) {
+                if (walk == expected) { nominal_match = true; break; }
+                walk = walk->base;
             }
-            return BOOL_FALSE;
+            if (!nominal_match) return BOOL_FALSE;
+            // check object constraint (field-level + object-level that constraints)
+            if (expected->constraint_fn) {
+                log_debug("fn_is: checking constraint on '%.*s'",
+                    (int)expected->type_name.length, expected->type_name.str);
+                if (!expected->constraint_fn(a.item)) {
+                    log_debug("fn_is: constraint check failed");
+                    return BOOL_FALSE;
+                }
+            }
+            return BOOL_TRUE;
         }
         else if (type_b->type == &TYPE_OBJECT) {
             // Generic "object" type check — any object matches

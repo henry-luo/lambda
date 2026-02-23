@@ -392,32 +392,62 @@ let pos: Point = (10.5, 20.5)
 
 ### Object Types
 
+Object types are **nominally-typed maps** with optional methods, inheritance, default values, and constraints. Unlike map type aliases (`type T = {...}`), object types create a distinct runtime type checked by name.
+
 ```lambda
-// Structural object type
-type User = {
-    id: int,
-    name: string,
-    email: string,
-    active: bool
+// Object type with fields and methods
+type Point {
+    x: float, y: float;
+    fn distance(other: Point) => sqrt((x - other.x)**2 + (y - other.y)**2)
+    fn magnitude() => sqrt(x**2 + y**2)
 }
 
-// With optional fields
+// Inheritance
+type Circle : Point {
+    radius: float;
+    fn area() => 3.14159 * radius ** 2
+}
+
+// Default values
+type Counter {
+    value: int = 0;
+    fn double() => value * 2
+    pn increment() { value = value + 1 }   // Mutation method
+}
+
+// Field and object constraints
+type User {
+    name: string that (len(~) > 0),
+    age: int that (0 <= ~ and ~ <= 150);
+    that (~.name != "admin")               // Object-level constraint
+}
+
+// Object literals
+let p = {Point x: 3.0, y: 4.0}
+let c = {Counter}                          // All defaults
+let c2 = {Circle x: 0.0, y: 0.0, radius: 5.0}
+
+// Type checking (nominal only)
+p is Point     // true
+p is object    // true
+p is map       // true (objects are map-compatible)
+{x: 1.0, y: 2.0} is Point  // false (plain maps don't match)
+
+// Object update (copy with overrides)
+let p2 = {Point p, x: 10.0}   // copy p, override x
+```
+
+#### Map Type Aliases
+
+Map type aliases remain available for structural typing:
+
+```lambda
+// Structural map type (type alias — no methods, no nominal checking)
 type Config = {
     host: string,
     port: int,
     timeout?: int,      // Optional
     debug?: bool        // Optional
-}
-
-// Nested types
-type Company = {
-    name: string,
-    address: {
-        street: string,
-        city: string,
-        zip: string
-    },
-    employees: [User]
 }
 ```
 
