@@ -38,6 +38,8 @@ int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
+int[]            // Typed int array
+float[]          // Typed float array
 fn (a: int, b: string) bool   // Function type
 fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
@@ -146,6 +148,8 @@ x = 10       // ERROR E211: cannot reassign let binding
 ```lambda
 var x = 0;         // Mutable variable
 var y: int = 42;   // With type annotation
+var a: int[] = [1, 2, 3];  // Typed int array
+var b: float[] = [0.1, 0.2]; // Typed float array
 x = x + 1          // OK: reassignment
 x = "hello"        // OK: type widening (int → string)
 y = "oops"      // ERROR E201: annotated type enforced
@@ -338,6 +342,8 @@ fn multiply(x: int, y: int) => x * y
 let square = (x) => x * x;
 // Procedural function
 pn f(n) { var x=0; while(x<n) {x=x+1}; x }
+// Typed array parameters (native access)
+pn advance(pos: float[], vel: float[], n: int) { ... }
 ```
 
 **Advanced Features:**

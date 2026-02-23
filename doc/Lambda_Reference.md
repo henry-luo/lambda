@@ -91,6 +91,8 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | `path` | File path or URL | `/etc.hosts`, `https.api.com` |
 | `list` | Immutable tuple | `(1, 2, 3)` |
 | `array` | Mutable array | `[1, 2, 3]` |
+| `int[]` | Typed int array | `var a: int[] = [1, 2]` |
+| `float[]` | Typed float array | `var b: float[] = [0.1]` |
 | `map` | Key-value mapping | `{name: "Alice"}` |
 | `element` | Markup element | `<div; "content">` |
 
@@ -100,6 +102,10 @@ The Lambda language documentation is organized into focused sub-documents for ea
 // Type annotations
 let x: int = 42
 let items: [string] = ["a", "b"]
+
+// Typed array annotations (native performance)
+var arr: int[] = [1, 2, 3]     // Native int array
+var data: float[] = [0.1, 0.2] // Native float array
 
 // Union types
 int | string           // Either int or string
@@ -148,6 +154,13 @@ pn process() {
     x = 3.14             // type widening (int → float)
     let obj = {a: 1}
     obj.a = "hello"       // map field type change
+}
+
+// Typed array parameters for native array access
+pn advance(pos: float[], vel: float[], dt: float) {
+    for i in range(0, len(pos)) {
+        pos[i] = pos[i] + vel[i] * dt   // native float ops
+    }
 }
 
 // Closures with mutable captures
