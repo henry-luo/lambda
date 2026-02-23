@@ -673,6 +673,7 @@ typedef struct Transpiler : Script {
 
     // Object method transpilation context
     AstObjectTypeNode* method_owner;  // non-null when transpiling a method body
+    struct TypeObject* pn_method_obj_type;  // non-null inside pn method body (for field write-back)
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

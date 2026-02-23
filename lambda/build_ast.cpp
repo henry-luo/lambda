@@ -3505,6 +3505,74 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
 }
 
 // ============================================================================
+// Resolve base type for inheritance: returns the parent TypeObject*, or NULL
+// Also copies parent fields into child shape entries (parent fields first).
+// ============================================================================
+static TypeObject* resolve_base_type(Transpiler* tp, TSNode base_node, TypeObject* obj_type,
+    ShapeEntry** prev_entry_out, int* byte_offset_out) {
+    if (ts_node_is_null(base_node)) return NULL;
+
+    // resolve the base type identifier
+    StrView base_name = ts_node_source(tp, base_node);
+    NameEntry* base_entry = lookup_name(tp, base_name);
+    if (!base_entry || !base_entry->node || !base_entry->node->type) {
+        log_error("build_object_type: unknown base type '%.*s'", (int)base_name.length, base_name.str);
+        return NULL;
+    }
+
+    // unwrap TypeType to get TypeObject
+    Type* resolved = base_entry->node->type;
+    if (resolved->type_id == LMD_TYPE_TYPE) {
+        resolved = ((TypeType*)resolved)->type;
+    }
+    if (!resolved || resolved->type_id != LMD_TYPE_OBJECT) {
+        log_error("build_object_type: base type '%.*s' is not an object type", (int)base_name.length, base_name.str);
+        return NULL;
+    }
+
+    TypeObject* base_type = (TypeObject*)resolved;
+    obj_type->base = base_type;
+    log_debug("build_object_type: resolved base type '%.*s' with %lld fields",
+        (int)base_name.length, base_name.str, base_type->length);
+
+    // copy parent shape entries into child (parent fields come first)
+    ShapeEntry* prev_entry = NULL;
+    int byte_offset = 0;
+    for (ShapeEntry* parent_se = base_type->shape; parent_se; parent_se = parent_se->next) {
+        ShapeEntry* se = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+        se->name = parent_se->name;
+        se->type = parent_se->type;
+        se->byte_offset = byte_offset;
+        se->next = NULL;
+        if (!prev_entry) { obj_type->shape = se; }
+        else { prev_entry->next = se; }
+        prev_entry = se;
+        obj_type->length++;
+        byte_offset += sizeof(void*);
+    }
+
+    *prev_entry_out = prev_entry;
+    *byte_offset_out = byte_offset;
+    return base_type;
+}
+
+// ============================================================================
+// Push parent fields into scope so child methods can reference them (implicit this)
+// ============================================================================
+static void push_inherited_fields_to_scope(Transpiler* tp, TypeObject* base_type) {
+    if (!base_type) return;
+    for (ShapeEntry* se = base_type->shape; se; se = se->next) {
+        if (!se->name) continue;
+        // create a lightweight AstNamedNode to push field into scope
+        AstNamedNode* field_ref = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
+        field_ref->node_type = AST_NODE_KEY_EXPR;
+        field_ref->type = se->type;
+        field_ref->name = name_pool_create_len(tp->name_pool, se->name->str, se->name->length);
+        push_name(tp, field_ref, NULL);
+    }
+}
+
+// ============================================================================
 // Object type definition: type Point { x: float, y: float; fn magnitude() => ... }
 // ============================================================================
 AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
@@ -3550,6 +3618,9 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     TSNode child = ts_node_named_child(type_node, 0);
     AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     AstNode* prev_method = NULL;
+
+    // Resolve inheritance: copy parent fields into child shape (parent fields first)
+    TypeObject* base_type_obj = resolve_base_type(tp, base_node, obj_type, &prev_entry, &byte_offset);
     AstNode* prev_constraint = NULL;
     ast_node->methods = NULL;
     ast_node->constraints = NULL;
@@ -3562,7 +3633,7 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
             // skip
         }
         else if (symbol == SYM_ATTR) {
-            // field declaration: name: type_expr
+            // field declaration: name: type_expr [= default]
             AstNode* item = (AstNode*)build_key_expr(tp, child);
             if (item) {
                 if (!prev_field) { ast_node->item = item; }
@@ -3583,6 +3654,13 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
                 }
                 shape_entry->type = field_type;
                 shape_entry->byte_offset = byte_offset;
+                // read optional default value expression
+                TSNode default_node = ts_node_child_by_field_id(child, FIELD_DEFAULT);
+                if (!ts_node_is_null(default_node)) {
+                    shape_entry->default_value = build_expr(tp, default_node);
+                    log_debug("build_object_type: field '%.*s' has default value",
+                        (int)name_view->length, name_view->str);
+                }
                 if (!prev_entry) { obj_type->shape = shape_entry; }
                 else { prev_entry->next = shape_entry; }
                 prev_entry = shape_entry;
@@ -3609,8 +3687,15 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
         child = ts_node_next_named_sibling(child);
     }
 
+    // Create a temporary sub-scope for field names so methods can reference them
+    NameScope* obj_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    obj_scope->parent = tp->current_scope;
+    tp->current_scope = obj_scope;
+
     // Push field names into scope so methods can reference them (implicit this)
-    // Unwrap TypeType to get the actual data type
+    // First push inherited fields from parent
+    push_inherited_fields_to_scope(tp, base_type_obj);
+    // Then push own fields, unwrap TypeType to get the actual data type
     AstNode* field_node = ast_node->item;
     while (field_node) {
         if (field_node->node_type == AST_NODE_KEY_EXPR) {
@@ -3657,6 +3742,9 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
 
     obj_type->byte_size = byte_offset;
     obj_type->last = prev_entry;
+
+    // Restore scope (pop the temporary field scope)
+    tp->current_scope = obj_scope->parent;
 
     // register the type in the type list (store TypeType wrapper for consistency with other types)
     arraylist_append(tp->type_list, tt);
@@ -5093,7 +5181,11 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         ast_node->target_entry = entry;
 
         // check that the target is a mutable variable (declared with var)
-        if (entry && !entry->is_mutable) {
+        // Exception: in pn method bodies, object fields (AST_NODE_KEY_EXPR) are mutable
+        bool is_field_in_pn = (entry && entry->node &&
+                               entry->node->node_type == AST_NODE_KEY_EXPR &&
+                               tp->current_scope && tp->current_scope->is_proc);
+        if (entry && !entry->is_mutable && !is_field_in_pn) {
             record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
                 "cannot assign to '%.*s': %s bindings are immutable",
                 (int)target_str.length, target_str.str,
@@ -5684,6 +5776,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 AstNode* prev_method = NULL;
                 AstNode* prev_constraint = NULL;
 
+                // Resolve inheritance: copy parent fields into child shape (parent fields first)
+                TypeObject* base_type_obj = resolve_base_type(tp, base_node, obj_type, &prev_entry, &byte_offset);
+
                 // Pass 1: fields and constraints
                 while (!ts_node_is_null(obj_child)) {
                     TSSymbol child_sym = ts_node_symbol(obj_child);
@@ -5707,6 +5802,11 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             }
                             shape_entry->type = field_type;
                             shape_entry->byte_offset = byte_offset;
+                            // read optional default value expression
+                            TSNode default_node = ts_node_child_by_field_id(obj_child, FIELD_DEFAULT);
+                            if (!ts_node_is_null(default_node)) {
+                                shape_entry->default_value = build_expr(tp, default_node);
+                            }
                             if (!prev_entry) { obj_type->shape = shape_entry; }
                             else { prev_entry->next = shape_entry; }
                             prev_entry = shape_entry;
@@ -5728,9 +5828,15 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     obj_child = ts_node_next_named_sibling(obj_child);
                 }
 
+                // Create a temporary sub-scope for field names
+                NameScope* obj_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+                obj_scope->parent = tp->current_scope;
+                tp->current_scope = obj_scope;
+
                 // Push field names into scope so method bodies can reference them
-                // Unwrap TypeType to get the actual data type so the transpiler knows
-                // field types correctly (e.g., int instead of TypeType(int))
+                // First push inherited fields from parent
+                push_inherited_fields_to_scope(tp, base_type_obj);
+                // Then push own fields, unwrap TypeType to get the actual data type
                 AstNode* field_scan = obj_node->item;
                 while (field_scan) {
                     if (field_scan->node_type == AST_NODE_KEY_EXPR) {
@@ -5776,6 +5882,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
                 obj_type->byte_size = byte_offset;
                 obj_type->last = prev_entry;
+
+                // Restore scope (pop the temporary field scope)
+                tp->current_scope = obj_scope->parent;
 
                 // register in type_list (store TypeType wrapper for const_type() runtime access)
                 arraylist_append(tp->type_list, tt);

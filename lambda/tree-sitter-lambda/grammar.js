@@ -145,6 +145,7 @@ module.exports = grammar({
     [$._compound_type, $.concat_type],             // _quantified_type could be complete or start of concat
     [$._compound_type, $.constrained_type],        // _quantified_type could be complete or base of constrained
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
+    [$.attr_type, $.binary_expr],                  // attr_type default `= expr >` vs binary `expr > expr`
   ],
 
   precedences: $ => [[
@@ -862,10 +863,11 @@ module.exports = grammar({
       optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)))), '}'
     ),
 
-    attr_type: $ => seq(
+    attr_type: $ => prec(1, seq(
       field('name', choice($.string, $.symbol, $.identifier)),
-      ':', field('as', $._type_expr)
-    ),
+      ':', field('as', $._type_expr),
+      optional(seq('=', field('default', $._expr))),
+    )),
 
     content_type: $ => seq(
       $._type_expr,

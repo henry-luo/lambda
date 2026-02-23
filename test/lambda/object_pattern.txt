@@ -1,0 +1,10 @@
+"circle"
+1
+"rect"
+1
+"unknown"
+true
+1
+true
+1
+false
