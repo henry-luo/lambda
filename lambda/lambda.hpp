@@ -58,6 +58,7 @@ typedef struct Item {
         Map* map;
         VMap* vmap;
         Element* element;
+        Object* object;
         Type* type;
         Function* function;
         Path* path;
@@ -127,6 +128,7 @@ struct ConstItem {
         const ArrayFloat* array_float;
         const Map* map;
         const Element* element;
+        const Object* object;
         const Type* type;
         const Function* function;
     };
@@ -264,4 +266,16 @@ struct VMapVtable {
 struct VMap : Container {
     void* data;            // opaque pointer to backing implementation (e.g. HashMapData*)
     VMapVtable* vtable;    // dispatch table
+};
+
+// Object: nominally-typed map with type name and methods
+// Same memory layout as Map for field access compatibility
+struct Object : Container {
+    void* type;         // TypeObject* — shape + methods + type_name
+    void* data;         // packed field data (same layout as Map)
+    int data_cap;       // data buffer capacity
+
+    ConstItem get(const Item key) const;
+    ConstItem get(const char* key_str) const;
+    bool has_field(const char* field_name) const;
 };

@@ -126,6 +126,9 @@ void write_type(StrBuf* code_buf, Type *type) {
     case LMD_TYPE_MAP:
         strbuf_append_str(code_buf, "Map*");
         break;
+    case LMD_TYPE_OBJECT:
+        strbuf_append_str(code_buf, "Object*");
+        break;
     case LMD_TYPE_ELEMENT:
         strbuf_append_str(code_buf, "Element*");
         break;
@@ -331,7 +334,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
                 print_item(strbuf, *(Item*)data, depth, indent);
                 break;
@@ -410,7 +413,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         path_to_string(titem->path, strbuf);
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         // For complex types, create a temporary Item and use existing print_item logic
         Item temp_item = {.item = titem->item};
         print_item(strbuf, temp_item, depth + 1, indent);
@@ -592,6 +595,23 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_char(strbuf, '}');
         break;
     }
+    case LMD_TYPE_OBJECT: {
+        Object *obj = item.object;
+        TypeObject *obj_type = (TypeObject*)obj->type;
+        strbuf_append_char(strbuf, '{');
+        // print type name first
+        if (obj_type->type_name.str) {
+            strbuf_append_str_n(strbuf, obj_type->type_name.str, obj_type->type_name.length);
+            if (obj_type->length > 0) strbuf_append_char(strbuf, ' ');
+        }
+        print_named_items(strbuf, (TypeMap*)obj_type, obj->data, depth + 1, indent);
+        if (indent && obj_type->length > 0) {
+            strbuf_append_char(strbuf, '\n');
+            for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
+        }
+        strbuf_append_char(strbuf, '}');
+        break;
+    }
     case LMD_TYPE_ELEMENT: {
         Element *element = item.element;
         TypeElmt *elmt_type = (TypeElmt*)element->type;
@@ -740,6 +760,8 @@ char* format_type(Type *type) {
         return "ArrayFloat*";
     case LMD_TYPE_MAP:
         return "Map*";
+    case LMD_TYPE_OBJECT:
+        return "Object*";
     case LMD_TYPE_ELEMENT:
         return "Elmt*";
     case LMD_TYPE_FUNC:

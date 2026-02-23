@@ -212,7 +212,7 @@ MapReader::MapReader(Map* map)
 
 MapReader MapReader::fromItem(Item item) {
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_MAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
         return MapReader(item.map);
     }
     return MapReader();  // Invalid

@@ -848,7 +848,7 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
         return emit_box_symbol(mt, val_reg);
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_LIST: case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
+    case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
     case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
         return emit_box_container(mt, val_reg);
     case LMD_TYPE_DECIMAL:
@@ -2250,12 +2250,18 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     MIR_reg_t is_map_coll = new_reg(mt, "is_map_coll", MIR_T_I64);
     MIR_reg_t is_map_t = new_reg(mt, "is_map_t", MIR_T_I64);
     MIR_reg_t is_vmap_t = new_reg(mt, "is_vmap_t", MIR_T_I64);
+    MIR_reg_t is_obj_t = new_reg(mt, "is_obj_t", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_map_t),
         MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_vmap_t),
         MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_VMAP)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_coll),
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_obj_t),
+        MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_OBJECT)));
+    MIR_reg_t is_map_or_vmap = new_reg(mt, "is_map_or_vmap", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_or_vmap),
         MIR_new_reg_op(mt->ctx, is_map_t), MIR_new_reg_op(mt->ctx, is_vmap_t)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_coll),
+        MIR_new_reg_op(mt->ctx, is_map_or_vmap), MIR_new_reg_op(mt->ctx, is_obj_t)));
 
     // Get length (branching for map vs non-map)
     MIR_reg_t len = new_reg(mt, "for_len", MIR_T_I64);
@@ -4116,12 +4122,18 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     MIR_reg_t is_map = new_reg(mt, "is_map", MIR_T_I64);
     MIR_reg_t is_map_t2 = new_reg(mt, "is_map_t2", MIR_T_I64);
     MIR_reg_t is_vmap_t2 = new_reg(mt, "is_vmap_t2", MIR_T_I64);
+    MIR_reg_t is_obj_t2 = new_reg(mt, "is_obj_t2", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_map_t2),
         MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_vmap_t2),
         MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_VMAP)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map),
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_obj_t2),
+        MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_OBJECT)));
+    MIR_reg_t is_map_or_vmap2 = new_reg(mt, "is_map_or_vmap2", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_or_vmap2),
         MIR_new_reg_op(mt->ctx, is_map_t2), MIR_new_reg_op(mt->ctx, is_vmap_t2)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map),
+        MIR_new_reg_op(mt->ctx, is_map_or_vmap2), MIR_new_reg_op(mt->ctx, is_obj_t2)));
 
     // Pre-declare len, keys_al registers
     MIR_reg_t len = new_reg(mt, "pipe_len", MIR_T_I64);
