@@ -611,20 +611,49 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 // ============================================================================
 
 // CSS 2.1 §10.6.3 + §8.3.1 + erratum q313: Compute the amount of bottom margin
-// that will collapse with this block's bottom margin. This must be excluded from
-// auto height BEFORE min/max-height constraints are applied.
-// Returns 0 if no bottom margin collapse will occur.
+// that must be excluded from auto height BEFORE min/max-height constraints.
+//
+// Two cases:
+// 1. No border/padding: Last child's bottom margin collapses with parent's.
+//    Exclude the full margin (it will become the parent's margin).
+// 2. Has border/padding: Per §10.6.3 "However" clause, content ends at the
+//    last child's margin-edge. But only the child's OWN margin counts — any
+//    margin collapsed-through from grandchildren should NOT inflate the parent's
+//    auto height. Exclude only the collapsed-through portion.
 static float compute_collapsible_bottom_margin(ViewBlock* block) {
     // CSS 2.1 §8.3.1: Root element margins do not collapse.
-    // The html element is the root; its parent is the document node, not an element.
-    // Also, layout_html_root calls finalize directly without bottom margin collapse,
-    // so we must not subtract margins that won't be transferred.
     if (!block->parent || !block->parent->is_block()) return 0;
 
     // Bottom margin collapse requires: no bottom border, no bottom padding
     bool has_border_bottom = block->bound && block->bound->border && block->bound->border->width.bottom > 0;
     bool has_padding_bottom = block->bound && block->bound->padding.bottom > 0;
-    if (has_border_bottom || has_padding_bottom) return 0;
+
+    if (has_border_bottom || has_padding_bottom) {
+        // CSS 2.1 §10.6.3 "However" clause: content ends at last child's
+        // margin-edge, using the child's OWN margin. Exclude only the portion
+        // that was collapsed-through from grandchildren.
+        if (!block->first_child) return 0;
+        View* last_in_flow = nullptr;
+        View* child = (View*)block->first_child;
+        while (child) {
+            if (child->view_type && child->is_block()) {
+                ViewBlock* vb = (ViewBlock*)child;
+                bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
+                bool is_out_of_flow = is_inline_block || (vb->position &&
+                    (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                     vb->position->position == CSS_VALUE_FIXED ||
+                     element_has_float(vb)));
+                if (!is_out_of_flow) last_in_flow = child;
+            } else if (child->view_type) {
+                last_in_flow = child;
+            }
+            child = (View*)child->next_sibling;
+        }
+        if (!last_in_flow || !last_in_flow->is_block()) return 0;
+        ViewBlock* last = (ViewBlock*)last_in_flow;
+        float collapsed_through = last->bound ? last->bound->collapsed_through_mb : 0;
+        return collapsed_through;
+    }
 
     // BFC roots don't collapse margins with children
     bool creates_bfc = block->scroller &&
@@ -2655,7 +2684,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // This must happen after Y position and margins are set, but before children are laid out
     // Note: Check for actual clear values (LEFT=50, RIGHT=51, BOTH), not just "not NONE"
     // because uninitialized clear is 0 (CSS_VALUE__UNDEF) which would incorrectly pass "!= NONE"
-    if (block->position && (block->position->clear == CSS_VALUE_LEFT ||
+    // CSS 2.1 §9.5.2: 'clear' applies only to block-level elements, not inline-level
+    // (inline, inline-block, inline-table are inline-level and should be excluded)
+    bool is_block_level_for_clear = (block->display.outer != CSS_VALUE_INLINE &&
+                                     block->display.outer != CSS_VALUE_INLINE_BLOCK);
+    if (is_block_level_for_clear && block->position &&
+        (block->position->clear == CSS_VALUE_LEFT ||
                              block->position->clear == CSS_VALUE_RIGHT ||
                              block->position->clear == CSS_VALUE_BOTH)) {
         log_debug("Element has clear property, applying clear layout BEFORE children");
@@ -2858,7 +2892,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
                         memset(block->bound, 0, sizeof(BoundaryProp));
                     }
+                    // Track the amount of margin that was added by collapse (from child),
+                    // separate from the block's own specified margin. This is needed by
+                    // the grandparent's auto height calculation (§10.6.3 "However" clause).
+                    float own_mb = block->bound->margin.bottom;
                     block->bound->margin.bottom = margin_bottom;
+                    block->bound->collapsed_through_mb = margin_bottom - own_mb;
                     last_child_block->bound->margin.bottom = 0;
                     log_debug("collapsed bottom margin %f between block and last child (height unchanged at %f)", margin_bottom, block->height);
                 }
