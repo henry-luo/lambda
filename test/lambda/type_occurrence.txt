@@ -117,4 +117,17 @@ false
 true
 "10.6"
 false
+'Test 11: Typed Array Annotation Coercion'
+"11.1"
+[1, 2, 3]
+"11.2"
+true
+"11.3"
+[4, 5, 6]
+"11.4"
+true
+"11.5"
+[1.5, 2.5, 3.5]
+"11.6"
+true
 "===== END OF TYPE OCCURRENCE TESTS ====="

@@ -160,4 +160,32 @@ type IntArr2 = int[]
 "10.5"; (1 to 10 is IntArr2)             // true - Range matches int[]
 "10.6"; (1 to 5 is FloatArr)             // false - Range is int, not float
 
+// ============================================================
+// Test 11: Typed Array Annotation (runtime coercion)
+// Verifies that let a:int[] = expr correctly coerces the RHS
+// when it comes from a dynamic source (function returning ANY)
+// ============================================================
+'Test 11: Typed Array Annotation Coercion'
+
+type IntArr = int[]
+type FloatArr2 = float[]
+
+// identity function erases type info (returns ANY)
+fn wrap(x) { x }
+
+// 11.1-11.2: direct literal — already typed, no coercion needed
+let a:int[] = [1, 2, 3]
+"11.1"; a
+"11.2"; (a is IntArr)   // true - ArrayInt matches int[]
+
+// 11.3-11.4: dynamic source — ensure_typed_array converts Array → ArrayInt
+let b:int[] = wrap([4, 5, 6])
+"11.3"; b
+"11.4"; (b is IntArr)   // true - coerced to ArrayInt
+
+// 11.5-11.6: float[] annotation with float array
+let c:float[] = [1.5, 2.5, 3.5]
+"11.5"; c
+"11.6"; (c is FloatArr2)  // true - ArrayFloat matches float[]
+
 "===== END OF TYPE OCCURRENCE TESTS ====="

@@ -3024,6 +3024,42 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                 // validate that type_expr is actually a type (TypeType)
                 if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
                     ast_node->type = ((TypeType*)type_expr->type)->type;
+
+                    // compile-time type check: annotation vs RHS type
+                    // when the annotation is an occurrence type (e.g., int[], float+)
+                    // and the RHS is a literal array with known element types, verify compatibility
+                    Type* ann_type = ast_node->type;
+                    Type* rhs_type = ast_node->as ? ast_node->as->type : nullptr;
+                    if (ann_type && ann_type->kind == TYPE_KIND_UNARY && rhs_type) {
+                        TypeUnary* unary = (TypeUnary*)ann_type;
+                        // unwrap the TypeType wrapper on the operand
+                        Type* expected_elem = unary->operand;
+                        if (expected_elem && expected_elem->type_id == LMD_TYPE_TYPE && expected_elem->kind == TYPE_KIND_SIMPLE) {
+                            expected_elem = ((TypeType*)expected_elem)->type;
+                        }
+                        if (expected_elem && rhs_type->type_id == LMD_TYPE_ARRAY) {
+                            TypeArray* arr_type = (TypeArray*)rhs_type;
+                            if (arr_type->nested) {
+                                // RHS has known element type — check compatibility
+                                TypeId expected_tid = expected_elem->type_id;
+                                TypeId actual_tid = arr_type->nested->type_id;
+                                if (expected_tid != actual_tid &&
+                                    !types_compatible(arr_type->nested, expected_elem)) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "array element type mismatch: expected %s, but got %s",
+                                        get_type_name(expected_tid), get_type_name(actual_tid));
+                                }
+                            } else if (arr_type->length > 0) {
+                                // RHS is a mixed-type array literal — incompatible with typed occurrence
+                                int line = ts_node_start_point(asn_node).row + 1;
+                                record_type_error(tp, line,
+                                    "cannot assign mixed-type array to %s[]: all elements must be %s",
+                                    get_type_name(expected_elem->type_id),
+                                    get_type_name(expected_elem->type_id));
+                            }
+                        }
+                    }
                 } else {
                     StrView type_str = ts_node_source(tp, type_node);
                     log_error("Error: invalid type annotation '%.*s' - not a valid type",

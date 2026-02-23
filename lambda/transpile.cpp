@@ -2023,6 +2023,30 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     if (is_widened_var) {
         // widened var: RHS must be boxed to Item
         transpile_box_item(tp, asn_node->as);
+    } else if (var_type->kind == TYPE_KIND_UNARY) {
+        // typed array annotation (int[], float[], etc.): coerce generic Array → typed array at runtime
+        TypeUnary* unary = (TypeUnary*)var_type;
+        Type* operand = unary->operand;
+        // unwrap TypeType wrapper if present
+        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+            operand = ((TypeType*)operand)->type;
+        }
+        TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
+        // only coerce when RHS is dynamic/generic (not already the correct typed array)
+        bool needs_coerce = (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL ||
+                             rhs_tid == LMD_TYPE_ARRAY || rhs_tid == LMD_TYPE_LIST);
+        if (needs_coerce && operand) {
+            const char* cast_type = "Array";
+            TypeId elem_tid = operand->type_id;
+            if (elem_tid == LMD_TYPE_INT) cast_type = "ArrayInt";
+            else if (elem_tid == LMD_TYPE_INT64) cast_type = "ArrayInt64";
+            else if (elem_tid == LMD_TYPE_FLOAT) cast_type = "ArrayFloat";
+            strbuf_append_format(tp->code_buf, "(%s*)ensure_typed_array(", cast_type);
+            transpile_box_item(tp, asn_node->as);
+            strbuf_append_format(tp->code_buf, ",%d)", elem_tid);
+        } else {
+            transpile_expr(tp, asn_node->as);
+        }
     } else {
         // coerce Item → native scalar when variable type is scalar but RHS returns Item
         TypeId var_tid = var_type->type_id;
