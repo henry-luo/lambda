@@ -271,7 +271,7 @@ Key characteristics:
 |---|---|---|
 | Code generation | Generates C source text | Generates MIR IR instructions |
 | Compilation steps | 2 (C→MIR, MIR→native) | 1 (MIR→native) |
-| Typed arrays | ✅ `array_int()`, `array_int64()`, `array_float()` | ❌ Always generic `array()` |
+| Typed arrays | ✅ Full: construction, access (`array_int_get`), mutation (`array_int_set`) | ❌ Always generic `array()` |
 | Inline boxing | ❌ Calls runtime macros | ✅ Inline MIR instructions |
 | Closures | ✅ Supported | ✅ Supported (with mutable capture via env write-back) |
 | Variadic params | ✅ Supported | ✅ Supported |
@@ -510,9 +510,9 @@ When a system function returns a boxed Item (`c_ret_tid == LMD_TYPE_ANY`) but th
     }
 ```
 
-### Typed Array Gap
+### Typed Array Gap (MIR Direct)
 
-The C2MIR transpiler constructs typed arrays (`ArrayInt`, `ArrayInt64`, `ArrayFloat`) when the element type is known at compile time. The MIR direct transpiler always uses generic `Array*`. This causes behavioral differences in runtime functions like `fn_sum`:
+The C2MIR transpiler fully supports typed arrays — construction, element access, and mutation all use native typed array APIs. The MIR direct transpiler always uses generic `Array*` and `fn_index`/`fn_array_set`. This causes behavioral differences in runtime functions like `fn_sum`:
 
 | Array type | `fn_sum` path | Returns |
 |---|---|---|
@@ -520,6 +520,8 @@ The C2MIR transpiler constructs typed arrays (`ArrayInt`, `ArrayInt64`, `ArrayFl
 | `Array` with INT elements (MIR path) | `LMD_TYPE_ARRAY` branch | Depends on element types |
 
 This mismatch was a source of bugs where `sum([10,20,30])` returned different types depending on which transpiler was used.
+
+**Status**: The C2MIR path now has full native typed array support including element access and mutation (see "Native Typed Array Access" section). Porting this to the MIR direct transpiler remains a future optimization.
 
 ### Swap-Safe Store Functions
 
@@ -699,6 +701,65 @@ bool is_float_array = nested->type_id == LMD_TYPE_FLOAT;   // → array_float()
 
 System functions dispatch on the runtime TypeId of arrays. Using generic `Array*` vs typed arrays leads to different code paths in functions like `fn_sum`, `fn_min1`, `fn_max1`.  The typed array paths are generally simpler and more correct because elements are stored in their native C type, avoiding boxing/unboxing ambiguities.
 
+### Native Typed Array Access and Mutation
+
+When a variable or parameter has a typed array annotation (`int[]`, `float[]`, `int64[]`), the C2MIR transpiler emits native access/mutation calls instead of generic dispatch:
+
+| Annotation | Declaration | Element Read | Element Write |
+|---|---|---|---|
+| `int[]` | `ArrayInt* _v = (ArrayInt*)ensure_typed_array(...)` | `array_int_get(_v, idx)` | `array_int_set((ArrayInt*)_v, idx, raw_int64)` |
+| `float[]` | `ArrayFloat* _v = (ArrayFloat*)ensure_typed_array(...)` | `array_float_get(_v, idx)` | `array_float_set((ArrayFloat*)_v, idx, raw_double)` |
+| `int64[]` | `ArrayInt64* _v = (ArrayInt64*)ensure_typed_array(...)` | `array_int64_get(_v, idx)` | (generic fallback) |
+| (none) | `Item _v = ...` | `fn_index((Item)_v, boxed_idx)` | `fn_array_set((Array*)_v, idx, boxed_val)` |
+
+**Performance benefit**: Native setters (`array_int_set`, `array_float_set`) take raw `int64_t`/`double` values, bypassing Item boxing entirely. Native getters avoid the type dispatch overhead of `fn_index`.
+
+#### TypeUnary Resolution
+
+Variables declared as `var bx:int[]` have AST type `TypeUnary` (`type_id=LMD_TYPE_TYPE`, `kind=TYPE_KIND_UNARY`). The transpiler resolves this to the effective array TypeId before index operations:
+
+```cpp
+// in transpile_index_expr and transpile_index_assign_stam:
+if (object_type == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+    TypeUnary* unary = (TypeUnary*)type;
+    Type* operand = unary->operand;  // unwrap TypeType wrapper if present
+    if (operand->type_id == LMD_TYPE_INT)   object_type = LMD_TYPE_ARRAY_INT;
+    if (operand->type_id == LMD_TYPE_FLOAT) object_type = LMD_TYPE_ARRAY_FLOAT;
+    // etc.
+}
+```
+
+This enables the existing fast paths (`array_int_get`, `array_float_get`) to match.
+
+#### Function Parameter Annotations
+
+Function parameters also support typed array annotations: `pn advance(bx: float[], by: float[], ...)`. The implementation requires:
+
+1. **`build_param_expr`** (`build_ast.cpp`): Stores the full `TypeUnary` in `TypeParam::full_type` (not just the base Type fields), preserving the operand pointer.
+2. **Identifier lookup** (`build_ast.cpp`): When referencing a parameter with `TYPE_KIND_UNARY`, uses `full_type` as the identifier's type so the transpiler can resolve element types.
+3. **`has_typed_params`** (`transpile.cpp`): Recognizes `LMD_TYPE_TYPE` + `TYPE_KIND_UNARY` as a typed parameter, enabling unboxed call signatures (`ArrayInt*` instead of `Item`).
+4. **`write_type`** (`print.cpp`): Emits `ArrayInt*`/`ArrayFloat*`/`ArrayInt64*` for TypeUnary parameters in function signatures.
+
+#### Runtime Coercion
+
+`ensure_typed_array(Item, TypeId)` converts generic `Array`/`List` to typed arrays at runtime:
+- Pass-through if already the correct typed array
+- Extracts elements via `it2i()`/`it2d()` to build a new typed array
+- Called at variable declaration and function entry for annotated parameters
+
+#### Lambda Syntax Examples
+
+```lambda
+// typed array variable
+var bx:int[] = make_array(100, 0)
+bx[i] = bx[i] + 1            // emits: array_int_set/array_int_get
+
+// typed array function parameter
+pn advance(bx: float[], by: float[], dt) {
+    bx[i] = bx[i] + dt * vx[i]  // emits: array_float_set/array_float_get
+}
+```
+
 ---
 
 ## Suggestions: Making the Runtime More Structured and Easier to Transpile
@@ -743,11 +804,14 @@ For `C_RET_ADAPTIVE` functions, a separate per-function handler can inspect argu
 
 **Problem**: The MIR direct transpiler always creates generic `Array*`, even when element types are known at compile time. This causes runtime behavior differences with the C2MIR path.
 
-**Suggestion**: Port the typed array construction from the C2MIR path. When `TypeArray::nested->type_id` is known:
+**Status**: The C2MIR path now has **full native typed array support** — construction (`array_int()`), element access (`array_int_get()`), and mutation (`array_int_set()`) — for variables and function parameters annotated with `int[]`, `float[]`, or `int64[]`. See "Native Typed Array Access and Mutation" section.
+
+**Remaining**: Port the same typed array support to the MIR direct transpiler. When `TypeArray::nested->type_id` is known:
 - Emit `array_int()` / `array_int_fill()` for INT elements
 - Emit `array_int64()` / `array_int64_fill()` for INT64 elements
 - Emit `array_float()` / `array_float_fill()` for FLOAT elements
-- Fall back to generic `array()` otherwise
+- Add TypeUnary resolution in `transpile_index` and index assignment for native access/mutation
+- Fall back to generic `array()` / `fn_index` / `fn_array_set` otherwise
 
 This eliminates behavioral divergence and enables the faster typed-array code paths in runtime functions.
 
@@ -880,7 +944,7 @@ All type-dependent decisions (boxing, unboxing, comparison instruction selection
 
 | Priority | Improvement | Impact | Effort |
 |---|---|---|---|
-| **High** | Typed arrays in MIR Direct (#3) | Eliminates behavioral divergence | Medium |
+| **High** | Typed arrays in MIR Direct (#3) | Eliminates behavioral divergence | Medium | C2MIR done ✅ |
 | **High** | Data-driven C return type (#2) | Simplifies transpiler, prevents bugs | Medium |
 | **High** | Debug-mode boxing validation (#7) | Catches bugs early | Low |
 | **High** | Native arg convention (#8) | Eliminates bitwise/native arg bugs | Low |

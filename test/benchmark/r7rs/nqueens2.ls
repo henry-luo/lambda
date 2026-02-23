@@ -22,7 +22,7 @@ pn make_array(n: int, val) {
     return arr
 }
 
-pn ok(row: int, dist: int, placed, placed_len: int) {
+pn ok(row: int, dist: int, placed: int[], placed_len: int) {
     if (dist > placed_len) {
         return 1
     }
@@ -37,7 +37,7 @@ pn ok(row: int, dist: int, placed, placed_len: int) {
     return ok(row, dist + 1, placed, placed_len)
 }
 
-pn solve(candidates, cand_len: int, rest, rest_len: int, placed, placed_len: int) {
+pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: int[], placed_len: int) {
     if (cand_len == 0) {
         if (rest_len == 0) {
             return 1
@@ -48,7 +48,7 @@ pn solve(candidates, cand_len: int, rest, rest_len: int, placed, placed_len: int
     var count: int = 0
 
     if (ok(row, 1, placed, placed_len) == 1) {
-        var new_cands = make_array(cand_len - 1 + rest_len, 0)
+        var new_cands:int[] = make_array(cand_len - 1 + rest_len, 0)
         var ni: int = 0
         var ci: int = 1
         while (ci < cand_len) {
@@ -66,7 +66,7 @@ pn solve(candidates, cand_len: int, rest, rest_len: int, placed, placed_len: int
         count = count + solve(new_cands, ni, make_array(1, 0), 0, placed, placed_len + 1)
     }
 
-    var new_rest = make_array(rest_len + 1, 0)
+    var new_rest:int[] = make_array(rest_len + 1, 0)
     var ri2: int = 0
     while (ri2 < rest_len) {
         new_rest[ri2] = rest[ri2]
@@ -74,7 +74,7 @@ pn solve(candidates, cand_len: int, rest, rest_len: int, placed, placed_len: int
     }
     new_rest[rest_len] = row
 
-    var new_cands2 = make_array(cand_len - 1, 0)
+    var new_cands2:int[] = make_array(cand_len - 1, 0)
     var ci2: int = 1
     var ni2: int = 0
     while (ci2 < cand_len) {
@@ -88,14 +88,14 @@ pn solve(candidates, cand_len: int, rest, rest_len: int, placed, placed_len: int
 }
 
 pn nqueens(n: int) {
-    var candidates = make_array(n, 0)
+    var candidates:int[] = make_array(n, 0)
     var i: int = 0
     while (i < n) {
         candidates[i] = i + 1
         i = i + 1
     }
-    var placed = make_array(n, 0)
-    var empty = make_array(1, 0)
+    var placed:int[] = make_array(n, 0)
+    var empty:int[] = make_array(1, 0)
     return solve(candidates, n, empty, 0, placed, 0)
 }
 

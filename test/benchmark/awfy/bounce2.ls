@@ -21,7 +21,7 @@ pn make_array(n: int, val) {
     return arr
 }
 
-pn random_next(seed_arr) {
+pn random_next(seed_arr: int[]) {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
     s = s % 65536
@@ -30,14 +30,14 @@ pn random_next(seed_arr) {
 }
 
 pn benchmark() {
-    var seed_arr = [74755]
+    var seed_arr:int[] = [74755]
     var ball_count: int = 100
     var bounces: int = 0
 
-    var bx = make_array(ball_count, 0)
-    var by = make_array(ball_count, 0)
-    var bxv = make_array(ball_count, 0)
-    var byv = make_array(ball_count, 0)
+    var bx:int[] = make_array(ball_count, 0)
+    var by:int[] = make_array(ball_count, 0)
+    var bxv:int[] = make_array(ball_count, 0)
+    var byv:int[] = make_array(ball_count, 0)
 
     var i: int = 0
     while (i < ball_count) {

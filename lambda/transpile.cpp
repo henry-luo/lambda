@@ -351,10 +351,10 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     return true;
 }
 
-// Check if a function has any explicitly typed (non-any) parameters with concrete scalar C types.
-// Only concrete scalar types (int, float, bool, string, etc.) are considered "typed" because
-// they use native C types that differ from Item. Union types (int^), function types, container
-// types, etc. are all passed as Item (or Item-compatible pointers) at runtime.
+// Check if a function has any explicitly typed (non-any) parameters with concrete C types.
+// Concrete scalar types (int, float, bool, string, etc.) use native C types that differ from Item.
+// TypeUnary parameters (int[], float[]) are typed arrays (ArrayInt*, ArrayFloat*) passed as pointers.
+// Union types (int^), function types, etc. are all passed as Item at runtime.
 bool has_typed_params(AstFuncNode* fn_node) {
     AstNamedNode *param = fn_node->param;
     while (param) {
@@ -366,6 +366,10 @@ bool has_typed_params(AstFuncNode* fn_node) {
                 tid == LMD_TYPE_STRING || tid == LMD_TYPE_BINARY ||
                 tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_DECIMAL ||
                 tid == LMD_TYPE_DTIME) {
+                return true;
+            }
+            // typed array parameters (int[], float[], etc.)
+            if (tid == LMD_TYPE_TYPE && pt->kind == TYPE_KIND_UNARY) {
                 return true;
             }
         }
@@ -3294,6 +3298,59 @@ void transpile_index_assign_stam(Transpiler* tp, AstCompoundAssignNode *node) {
     // check if object type is a typed array with known element type
     TypeId obj_type = node->object->type ? node->object->type->type_id : LMD_TYPE_ANY;
 
+    // resolve TypeUnary (int[], float[] annotations) to effective array type
+    TypeId elem_type = LMD_TYPE_ANY;
+    if (obj_type == LMD_TYPE_TYPE && node->object->type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)node->object->type;
+        Type* operand = unary->operand;
+        // unwrap TypeType wrapper if present
+        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+            operand = ((TypeType*)operand)->type;
+        }
+        if (operand) elem_type = operand->type_id;
+    }
+
+    // fast path: use native array_int_set / array_float_set for typed arrays
+    if (elem_type == LMD_TYPE_INT) {
+        strbuf_append_str(tp->code_buf, "\n array_int_set((ArrayInt*)(");
+        transpile_expr(tp, node->object);
+        strbuf_append_str(tp->code_buf, "),(int)(");
+        transpile_expr(tp, node->key);
+        strbuf_append_str(tp->code_buf, "),");
+        // unbox value to raw int64_t
+        TypeId val_type = node->value->type ? node->value->type->type_id : LMD_TYPE_ANY;
+        if (val_type == LMD_TYPE_INT) {
+            // already int — emit directly
+            transpile_expr(tp, node->value);
+        } else {
+            // need to unbox Item to int
+            strbuf_append_str(tp->code_buf, "it2i(");
+            transpile_box_item(tp, node->value);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        strbuf_append_str(tp->code_buf, ");");
+        return;
+    }
+    else if (elem_type == LMD_TYPE_FLOAT) {
+        strbuf_append_str(tp->code_buf, "\n array_float_set((ArrayFloat*)(");
+        transpile_expr(tp, node->object);
+        strbuf_append_str(tp->code_buf, "),(int)(");
+        transpile_expr(tp, node->key);
+        strbuf_append_str(tp->code_buf, "),");
+        // unbox value to raw double
+        TypeId val_type = node->value->type ? node->value->type->type_id : LMD_TYPE_ANY;
+        if (val_type == LMD_TYPE_FLOAT) {
+            transpile_expr(tp, node->value);
+        } else {
+            strbuf_append_str(tp->code_buf, "it2d(");
+            transpile_box_item(tp, node->value);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        strbuf_append_str(tp->code_buf, ");");
+        return;
+    }
+
+    // generic fallback
     strbuf_append_str(tp->code_buf, "\n fn_array_set((Array*)(");
     transpile_expr(tp, node->object);
     strbuf_append_str(tp->code_buf, "),(int)(");
@@ -4843,6 +4900,22 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 
     TypeId object_type = field_node->object->type->type_id;
     TypeId field_type = field_node->field->type->type_id;
+
+    // resolve TypeUnary (int[], float[] annotations) to effective array type
+    if (object_type == LMD_TYPE_TYPE && field_node->object->type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)field_node->object->type;
+        Type* operand = unary->operand;
+        // unwrap TypeType wrapper if present
+        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+            operand = ((TypeType*)operand)->type;
+        }
+        if (operand) {
+            if (operand->type_id == LMD_TYPE_INT) object_type = LMD_TYPE_ARRAY_INT;
+            else if (operand->type_id == LMD_TYPE_INT64) object_type = LMD_TYPE_ARRAY_INT64;
+            else if (operand->type_id == LMD_TYPE_FLOAT) object_type = LMD_TYPE_ARRAY_FLOAT;
+            else object_type = LMD_TYPE_ARRAY;
+        }
+    }
 
     // Check if field type is numeric (addressing the TODO comment)
     if (field_type != LMD_TYPE_INT && field_type != LMD_TYPE_INT64 && field_type != LMD_TYPE_FLOAT) {
