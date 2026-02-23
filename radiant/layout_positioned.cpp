@@ -835,11 +835,22 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             float flow_height = lycon->block.advance_y;
             // Note: advance_y already includes top border + top padding from setup_inline
             // So we only need to add bottom padding and bottom border
+            float padding_top = block->bound ? block->bound->padding.top : 0;
+            float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
             float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
             float border_bottom = (block->bound && block->bound->border) ? block->bound->border->width.bottom : 0;
-            log_debug("auto-sizing height: flow_height=%f (includes top border+padding), adding padding_bottom=%f, border_bottom=%f",
-                flow_height, padding_bottom, border_bottom);
-            block->height = flow_height + padding_bottom + border_bottom;
+
+            // Extract content height from advance_y (which includes top border+padding)
+            float content_height = flow_height - padding_top - border_top;
+            if (content_height < 0) content_height = 0;
+
+            // CSS 2.1 §10.7: Apply min-height/max-height constraints to content height
+            content_height = adjust_min_max_height(block, content_height);
+
+            // Recompute border-box height
+            block->height = content_height + padding_top + border_top + padding_bottom + border_bottom;
+            log_debug("auto-sizing height: flow_height=%f, content_height=%f (after min/max), adding padding=%f+%f, border=%f+%f, total=%f",
+                flow_height, content_height, padding_top, padding_bottom, border_top, border_bottom, block->height);
         }
 
         // BFC height expansion: if floats extend beyond flow content, expand height

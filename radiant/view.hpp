@@ -752,6 +752,8 @@ typedef struct BoundaryProp {
     BorderProp* border;
     BackgroundProp* background;
     BoxShadow* box_shadow;       // Linked list of box shadows
+    float collapsed_through_mb;  // CSS 2.1 §8.3.1: margin transferred from descendants via
+                                 // parent-child bottom margin collapse (the inflated portion)
 } BoundaryProp;
 
 // Vector path segment for PDF/SVG path rendering
