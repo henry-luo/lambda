@@ -511,7 +511,42 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
 
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
+            // Save the UA-assumed font-size before CSS cascade. For elements with
+            // UA-default font-size (headings), this is their computed font-size.
+            // For others (<p>, <ul>, etc.), they inherit the parent's font-size.
+            float ua_font_size = (dom_elem->font && dom_elem->font->font_size > 0)
+                                 ? dom_elem->font->font_size
+                                 : lycon->font.style->font_size;
+
             resolve_css_styles(dom_elem, lycon);
+
+            // CSS 2.1 §15.2: When CSS changes an element's font-size, UA-default
+            // margins specified in 'em' units (specificity -1) must be re-resolved
+            // using the element's computed font-size, not the inherited parent font-size.
+            // Only applies to elements whose UA stylesheet uses em-based margins:
+            // <p>, <ul>, <ol>, <h1>-<h6>, <pre>, <blockquote>, <dl>, <fieldset>
+            // NOT <body> (which has absolute 8px margins).
+            if (dom_elem->bound && ua_font_size > 0 && dom_elem->is_element()) {
+                uintptr_t tag = dom_elem->tag();
+                bool has_em_margins = (tag == HTM_TAG_P || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
+                    tag == HTM_TAG_PRE || tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_DL ||
+                    (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6));
+                if (has_em_margins) {
+                    ViewSpan* span = (ViewSpan*)dom_elem;
+                    float css_font_size = (span->font && span->font->font_size > 0)
+                                          ? span->font->font_size
+                                          : lycon->font.style->font_size;
+                    if (css_font_size != ua_font_size) {
+                        float ratio = css_font_size / ua_font_size;
+                        if (dom_elem->bound->margin.top_specificity == -1) {
+                            dom_elem->bound->margin.top *= ratio;
+                        }
+                        if (dom_elem->bound->margin.bottom_specificity == -1) {
+                            dom_elem->bound->margin.bottom *= ratio;
+                        }
+                    }
+                }
+            }
 
             // Mark as resolved for this layout pass
             // Don't mark as resolved during measurement mode - let the actual layout pass do that

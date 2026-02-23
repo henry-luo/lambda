@@ -12,7 +12,7 @@ extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool 
 
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
-void compute_span_bounding_box(ViewSpan* span) {
+void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     View* child = span->first_child;
     if (!child) {
         // Empty inline element - size includes border and padding per CSS 2.1 §8.1
@@ -58,23 +58,41 @@ void compute_span_bounding_box(ViewSpan* span) {
         child = child->next();
     }
 
-    // Get border widths if span has border
+    // Get border and padding widths
     float border_top = 0, border_right = 0, border_bottom = 0, border_left = 0;
+    float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
     if (span->bound && span->bound->border) {
         border_top = span->bound->border->width.top;
         border_right = span->bound->border->width.right;
         border_bottom = span->bound->border->width.bottom;
         border_left = span->bound->border->width.left;
     }
+    if (span->bound) {
+        pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
+        pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
+    }
 
-    // Update span's bounding box - expand to include border (vertical always, horizontal for single-line)
-    // For inline elements that may span multiple lines, the horizontal border
-    // only appears at start/end of the overall inline box, but vertical border
-    // affects each line. The bounding box Y position should include top border.
-    span->x = min_x;
-    span->y = min_y - (int)border_top;
-    span->width = max_x - min_x;
-    span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
+    // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
+    // of the inline box. For single-line spans, border+padding expand the bounding box
+    // symmetrically. For multi-line spans, left border+padding only appears on the
+    // first line fragment and right on the last — the union bounding box cannot simply
+    // add both edges, so we skip horizontal expansion for multi-line.
+    float left_edge = border_left + pad_left;
+    float right_edge = border_right + pad_right;
+
+    if (is_multi_line) {
+        // Multi-line: don't add horizontal border+padding to union bounding box
+        span->x = min_x;
+        span->y = min_y - (int)border_top;
+        span->width = max_x - min_x;
+        span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
+    } else {
+        // Single-line: include horizontal border+padding in bounding box
+        span->x = min_x - (int)left_edge;
+        span->y = min_y - (int)border_top;
+        span->width = (max_x - min_x) + (int)left_edge + (int)right_edge;
+        span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
+    }
 }
 
 // ============================================================================
@@ -371,7 +389,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // Advance past the right border+padding
         lycon->line.advance_x += inline_right_edge;
-        compute_span_bounding_box(span);
+        compute_span_bounding_box(span, true);  // block-in-inline always multi-line
 
         // Apply CSS relative positioning after normal layout
         if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
@@ -385,6 +403,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // Normal inline-only content
+    float start_advance_y = lycon->block.advance_y;
     if (child) {
         log_debug("layout inline children: advance_y %f, line_height %f", lycon->block.advance_y, lycon->block.line_height);
         do {
@@ -396,7 +415,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Advance past the right border+padding so the next sibling starts after this inline's border
     lycon->line.advance_x += inline_right_edge;
 
-    compute_span_bounding_box(span);
+    // Detect multi-line: if advance_y changed during child layout, the span wrapped to a new line
+    bool span_is_multi_line = (lycon->block.advance_y > start_advance_y + 1.0f);
+    compute_span_bounding_box(span, span_is_multi_line);
 
     // Apply CSS relative positioning after normal layout
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position

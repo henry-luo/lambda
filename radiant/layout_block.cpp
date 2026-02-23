@@ -2583,8 +2583,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     if (!creates_bfc_for_collapse && block->view_type == RDT_VIEW_INLINE_BLOCK) {
         creates_bfc_for_collapse = true;
     }
-    // CSS 2.1 §8.3.1: Bottom margins only collapse when parent has auto computed height
-    // Note: min-height does NOT prevent bottom margin collapse (only explicit height does)
+    // CSS 2.1 §8.3.1: Bottom margins only collapse when parent has auto computed height.
+    // Per CSS 2.1 erratum q313, min-height has no influence on bottom margin adjacency.
     bool has_explicit_height = (block->blk && block->blk->given_height >= 0);
 
     if (!has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse &&
@@ -3278,15 +3278,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         first_in_flow_child = next;
                         continue;
                     }
-                    // Skip empty zero-height blocks that have no borders/padding
-                    // These blocks allow margins to collapse through them (CSS 2.2 8.3.1)
+                    // Skip empty zero-height blocks that have no borders/padding AND no margins.
+                    // CSS 2.1 §8.3.1: Self-collapsing blocks (height=0, no border/padding) with margins
+                    // ARE valid first in-flow children — their margins participate in parent-child collapse.
+                    // Only skip blocks that have no margins either (truly invisible/empty).
                     if (vb->height == 0) {
                         float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
                         float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
                         float padding_top = vb->bound ? vb->bound->padding.top : 0;
                         float padding_bottom = vb->bound ? vb->bound->padding.bottom : 0;
-                        if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0) {
-                            log_debug("skipping empty zero-height block for margin collapsing");
+                        float margin_top_val = vb->bound ? vb->bound->margin.top : 0;
+                        float margin_bottom_val = vb->bound ? vb->bound->margin.bottom : 0;
+                        if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0
+                            && margin_top_val == 0 && margin_bottom_val == 0) {
+                            log_debug("skipping empty zero-height block (no margins) for margin collapsing");
                             View* next = (View*)first_in_flow_child->next_sibling;
                             while (next && !next->view_type) {
                                 next = (View*)next->next_sibling;
@@ -3301,6 +3306,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // save original margin_top before any collapse modifies it
                 // (needed for self-collapsing block calculation below)
                 float original_margin_top = block->bound->margin.top;
+
+                // Track whether parent-child collapse consumed this block's margins
+                bool parent_child_collapsed = false;
 
                 if (first_in_flow_child == block) {  // first in-flow child
                     if (block->bound->margin.top != 0) {
@@ -3331,6 +3339,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             parent_padding_top == 0 && parent_border_top == 0) {
                             // CSS 2.1 §8.3.1: collapse child and parent margins
                             float margin_top = collapse_margins(block->bound->margin.top, parent_margin_top);
+
+                            // CSS 2.1 §8.3.1: For self-collapsing first children, both mt and mb
+                            // are adjoining to parent's mt through transitivity:
+                            //   parent.mt <-> child.mt (first-child rule)
+                            //   child.mt <-> child.mb (self-collapsing rule)
+                            // Therefore all three collapse together as one set.
+                            bool first_child_self_collapsing = is_block_self_collapsing(block);
+                            if (first_child_self_collapsing) {
+                                margin_top = collapse_margins(margin_top, block->bound->margin.bottom);
+                                log_debug("self-collapsing first child: including mb=%f in parent collapse, margin_top=%f",
+                                    block->bound->margin.bottom, margin_top);
+                            }
 
                             // CSS 8.3.1: When parent has no border/padding, child margin collapses through parent
                             // If parent had no margin (parent_margin_top == 0) AND parent has no bound,
@@ -3366,6 +3386,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 parent->bound->margin.top = margin_top - sibling_collapse;
                             }
                             block->y = 0;  block->bound->margin.top = 0;
+                            parent_child_collapsed = true;
+
+                            // For self-collapsing first child, set mb to carry the full
+                            // collapsed margin for the next sibling's collapse
+                            if (first_child_self_collapsing) {
+                                block->bound->margin.bottom = margin_top;
+                            }
+
                             log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f, sibling_collapse: %f",
                                 margin_top, parent->y, block->y, sibling_collapse);
                         }
@@ -3435,32 +3463,42 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 bool is_self_collapsing = is_block_self_collapsing(block);
 
                 if (is_self_collapsing) {
-                    // self-collapsing: margins collapse through this element
-                    // CSS 2.1 §8.3.1: The element's own margins merge via collapse_margins
-                    // This merged margin then participates in sibling collapsing
-                    float prev_mb = 0;
-                    {
-                        View* pv = block->prev_placed_view();
-                        while (pv && pv->is_block()) {
-                            ViewBlock* vb = (ViewBlock*)pv;
-                            if (vb->position && element_has_float(vb)) { pv = pv->prev_placed_view(); continue; }
-                            if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                                  vb->position->position == CSS_VALUE_FIXED)) { pv = pv->prev_placed_view(); continue; }
-                            break;
+                    if (parent_child_collapsed) {
+                        // CSS 2.1 §8.3.1: Parent-child collapse already absorbed both
+                        // mt and mb of this self-collapsing first child. The contribution
+                        // to advance_y is zero — all margin space was pushed to the parent.
+                        // margin.bottom was already set to carry the full collapsed margin
+                        // for next sibling's use.
+                        log_debug("self-collapsing first child: parent-child collapse absorbed margins, mb=%f (no contribution)",
+                            block->bound->margin.bottom);
+                    } else {
+                        // self-collapsing: margins collapse through this element
+                        // CSS 2.1 §8.3.1: The element's own margins merge via collapse_margins
+                        // This merged margin then participates in sibling collapsing
+                        float prev_mb = 0;
+                        {
+                            View* pv = block->prev_placed_view();
+                            while (pv && pv->is_block()) {
+                                ViewBlock* vb = (ViewBlock*)pv;
+                                if (vb->position && element_has_float(vb)) { pv = pv->prev_placed_view(); continue; }
+                                if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                                      vb->position->position == CSS_VALUE_FIXED)) { pv = pv->prev_placed_view(); continue; }
+                                break;
+                            }
+                            if (pv && pv->is_block() && pv->view_type != RDT_VIEW_INLINE_BLOCK && ((ViewBlock*)pv)->bound) {
+                                prev_mb = ((ViewBlock*)pv)->bound->margin.bottom;
+                            }
                         }
-                        if (pv && pv->is_block() && pv->view_type != RDT_VIEW_INLINE_BLOCK && ((ViewBlock*)pv)->bound) {
-                            prev_mb = ((ViewBlock*)pv)->bound->margin.bottom;
-                        }
-                    }
 
-                    float self_collapsed = collapse_margins(original_margin_top, block->bound->margin.bottom);
-                    float new_pending = collapse_margins(prev_mb, self_collapsed);
-                    float contribution = max(0.f, new_pending - prev_mb);
-                    lycon->block.advance_y += contribution;
-                    // expose the merged margin to next sibling via margin.bottom
-                    block->bound->margin.bottom = new_pending;
-                    log_debug("self-collapsing block: original_mt=%f, mb=%f, self_collapsed=%f, prev_mb=%f, contribution=%f, new_pending=%f",
-                        original_margin_top, block->bound->margin.bottom, self_collapsed, prev_mb, contribution, new_pending);
+                        float self_collapsed = collapse_margins(original_margin_top, block->bound->margin.bottom);
+                        float new_pending = collapse_margins(prev_mb, self_collapsed);
+                        float contribution = max(0.f, new_pending - prev_mb);
+                        lycon->block.advance_y += contribution;
+                        // expose the merged margin to next sibling via margin.bottom
+                        block->bound->margin.bottom = new_pending;
+                        log_debug("self-collapsing block: original_mt=%f, mb=%f, self_collapsed=%f, prev_mb=%f, contribution=%f, new_pending=%f",
+                            original_margin_top, block->bound->margin.bottom, self_collapsed, prev_mb, contribution, new_pending);
+                    }
                 } else {
                     lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
                 }
