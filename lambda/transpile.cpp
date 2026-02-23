@@ -1079,7 +1079,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         break;
     case LMD_TYPE_PATH:
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
         // All container types including Function*, Path*, and Type* (patterns, type expressions) are direct pointers
         strbuf_append_str(tp->code_buf, "(Item)(");
         transpile_expr(tp, item);  // raw pointer treated as Item
@@ -2725,10 +2725,10 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "  if (_pipe_type == LMD_TYPE_ARRAY || _pipe_type == LMD_TYPE_LIST || ");
     strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_RANGE || _pipe_type == LMD_TYPE_MAP || ");
     strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_INT || _pipe_type == LMD_TYPE_ARRAY_INT64 || ");
-    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_FLOAT || _pipe_type == LMD_TYPE_ELEMENT) {\n");
+    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_FLOAT || _pipe_type == LMD_TYPE_ELEMENT || _pipe_type == LMD_TYPE_OBJECT) {\n");
 
     // Map case - iterate over key-value pairs
-    strbuf_append_str(tp->code_buf, "    if (_pipe_type == LMD_TYPE_MAP) {\n");
+    strbuf_append_str(tp->code_buf, "    if (_pipe_type == LMD_TYPE_MAP || _pipe_type == LMD_TYPE_OBJECT) {\n");
     strbuf_append_str(tp->code_buf, "      ArrayList* _pipe_keys = item_keys(_pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "      if (_pipe_keys) {\n");
     strbuf_append_str(tp->code_buf, "        for (int64_t _pipe_i = 0; _pipe_i < _pipe_keys->length; _pipe_i++) {\n");
@@ -5093,6 +5093,10 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
 
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
         strbuf_append_str(tp->code_buf, "map_get(");
+        transpile_expr(tp, field_node->object);
+    }
+    else if (field_node->object->type->type_id == LMD_TYPE_OBJECT) {
+        strbuf_append_str(tp->code_buf, "object_get(");
         transpile_expr(tp, field_node->object);
     }
     else if (field_node->object->type->type_id == LMD_TYPE_ELEMENT) {

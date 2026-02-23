@@ -139,6 +139,7 @@ typedef struct TypedItem {
         List* list;
         Map* map;
         Element* element;
+        Object* object;
         Type* type;
         Function* function;
         Path* path;
@@ -203,6 +204,29 @@ typedef struct TypeElmt : TypeMap {
     int64_t content_length;  // no. of content items, needed for element type
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
+
+// TypeMethod: entry in the method table of a TypeObject
+typedef struct TypeMethod {
+    StrView* name;              // method name (interned)
+    Function* fn;               // compiled function pointer
+    bool is_proc;               // true for pn, false for fn
+    struct TypeMethod* next;    // linked list
+} TypeMethod;
+
+// Forward declaration for constraint function pointer (full typedef below near TypeConstrained)
+typedef uint8_t (*ConstraintFn)(uint64_t value);
+
+// TypeObject: nominally-typed map with methods
+// Extends TypeMap — inherits shape (fields), length, byte_size, type_index
+typedef struct TypeObject : TypeMap {
+    StrView type_name;          // nominal type name ("Point", "Circle")
+    struct TypeObject* base;    // parent type for inheritance (NULL if no base)
+    TypeMethod* methods;        // linked list of methods (head)
+    TypeMethod* methods_last;   // linked list of methods (tail)
+    int method_count;           // number of methods
+    struct AstNode* constraint; // object-level that(...) constraint AST (NULL if none)
+    ConstraintFn constraint_fn; // JIT-compiled constraint checker (NULL if none)
+} TypeObject;
 
 typedef enum Operator {
     // unary
@@ -409,7 +433,7 @@ typedef struct TypeUnary : Type {
 // Constrained type: base_type where (constraint)
 // e.g. int where (5 < ~ < 10)
 // The constraint_fn is a compiled function that takes the value and returns bool
-typedef uint8_t (*ConstraintFn)(uint64_t value);  // returns Bool (BOOL_TRUE/BOOL_FALSE)
+// Note: ConstraintFn typedef is forward-declared above (near TypeObject)
 typedef struct TypeConstrained : Type {
     Type* base;                 // base type (e.g., int, string)
     struct AstNode* constraint; // constraint expression AST (for error messages)

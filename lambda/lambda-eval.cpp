@@ -763,7 +763,7 @@ Bool fn_is(Item a, Item b) {
             return (dt.precision == DATETIME_PRECISION_TIME_ONLY) ? BOOL_TRUE : BOOL_FALSE;
         }
         return BOOL_TRUE;  // is datetime (any precision matches)
-    case LMD_TYPE_ARRAY: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
         if (type_b == &LIT_TYPE_ARRAY) {  // fast path
             log_debug("fast path array type check");
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
@@ -1028,7 +1028,7 @@ static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
     case LMD_TYPE_BINARY: return {.item = x2it(*(char**)field_ptr)};
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = *(Container**)field_ptr;
         if (!c) return ItemNull;
         return {.container = c};
@@ -1069,7 +1069,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         for (int64_t i = 0; i < elmt->length; i++) {
             query_collect(elmt->items[i], type_val, true, result, depth + 1);
         }
-    } else if (type_id == LMD_TYPE_MAP) {
+    } else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         ShapeEntry* field = map_type->shape;
@@ -1152,7 +1152,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
                 array_push(result, child);
             }
         }
-    } else if (type_id == LMD_TYPE_MAP) {
+    } else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         ShapeEntry* field = map_type->shape;
@@ -1266,8 +1266,8 @@ Bool fn_in(Item a_item, Item b_item) {
             }
             return false;
         }
-        else if (b_type == LMD_TYPE_MAP) {
-            // check if a is in map
+        else if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
+            // check if a is in map/object
         }
         else if (b_type == LMD_TYPE_ELEMENT) {
             // check if a is in element
@@ -1410,7 +1410,7 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         StrBuf* sb = strbuf_new();
         print_item(sb, itm, 1, null);  // make list print as list, instead of beaking onto multiple lines
         String* result = heap_strcpy(sb->str, sb->length);
@@ -1603,7 +1603,7 @@ Item fn_input2(Item target_item, Item type) {
         // Legacy behavior: type is a simple string/symbol
         type_str = fn_string(type);
     }
-    else if (type_id == LMD_TYPE_MAP) {
+    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
         log_debug("input type is a map");
         // New behavior: type is a map with options
         Map* options_map = type.map;
@@ -1731,7 +1731,7 @@ String* fn_format2(Item item, Item type) {
         // Legacy behavior: type is a simple string or symbol
         type_str = fn_string(type);
     }
-    else if (type_id == LMD_TYPE_MAP) {
+    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
         log_debug("format type is a map");
         // New behavior: type is a map with options
         Map* options_map = type.map;
@@ -2030,6 +2030,11 @@ Item fn_member(Item item, Item key) {
         Map *map = item.map;
         return map_get(map, key);
     }
+    case LMD_TYPE_OBJECT: {
+        // TODO: method dispatch lookup here in future phase
+        // for now, fall back to field access (same layout as Map)
+        return object_get(item.object, key);
+    }
     case LMD_TYPE_VMAP: {
         VMap *vm = item.vmap;
         if (!vm || !vm->vtable) return ItemNull;
@@ -2081,6 +2086,10 @@ int64_t fn_len(Item item) {
         size = item.array_float->length;
         break;
     case LMD_TYPE_MAP: {
+        size = 0;
+        break;
+    }
+    case LMD_TYPE_OBJECT: {
         size = 0;
         break;
     }
@@ -3523,7 +3532,7 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* old_c = *(Container**)field_ptr;
         if (old_c && old_c->ref_cnt > 0) old_c->ref_cnt--;
         break;
@@ -3558,7 +3567,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: {
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = value.container;
         *(Container**)field_ptr = c;
         if (c) c->ref_cnt++;
@@ -3744,6 +3753,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
         type_slot = &mp->type;
         data_slot = &mp->data;
         cap_slot = &mp->data_cap;
+    } else if (map_type_id == LMD_TYPE_OBJECT) {
+        Object* obj = map_item.object;
+        if (!obj) { log_error("fn_map_set: null object"); return; }
+        type_slot = &obj->type;
+        data_slot = &obj->data;
+        cap_slot = &obj->data_cap;
     } else if (map_type_id == LMD_TYPE_ELEMENT) {
         Element* el = (Element*)map_item.container;
         if (!el) { log_error("fn_map_set: null element"); return; }

@@ -925,12 +925,13 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
     if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
-        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT) {
+        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT &&
+        type != LMD_TYPE_OBJECT) {
         return transform(collection, ItemNull);
     }
 
-    // map case: iterate over key-value pairs
-    if (type == LMD_TYPE_MAP) {
+    // map/object case: iterate over key-value pairs
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
         Map* mp = collection.map;
         List* result = list();
 
@@ -986,7 +987,8 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
     if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
-        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT) {
+        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT &&
+        type != LMD_TYPE_OBJECT) {
         Item result = predicate(collection, ItemNull);
         if (is_truthy(result)) {
             return collection;
@@ -994,8 +996,8 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         return ItemNull;
     }
 
-    // map case: filter key-value pairs (return list of values that pass predicate)
-    if (type == LMD_TYPE_MAP) {
+    // map/object case: filter key-value pairs (return list of values that pass predicate)
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
         Map* mp = collection.map;
         List* result = list();
 
