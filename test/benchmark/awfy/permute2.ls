@@ -21,13 +21,13 @@ pn make_array(n: int, val) {
     return arr
 }
 
-pn swap(v, i: int, j: int) {
+pn swap(v: int[], i: int, j: int) {
     var tmp = v[i]
     v[i] = v[j]
     v[j] = tmp
 }
 
-pn permute(state, v, n: int) {
+pn permute(state, v: int[], n: int) {
     state.count = state.count + 1
     if (n != 0) {
         var n1: int = n - 1
@@ -44,7 +44,7 @@ pn permute(state, v, n: int) {
 
 pn benchmark() {
     let state = {count: 0}
-    var v = make_array(6, 0)
+    var v:int[] = make_array(6, 0)
     permute(state, v, 6)
     return state.count
 }
