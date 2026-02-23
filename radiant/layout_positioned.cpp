@@ -292,6 +292,12 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
          block->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
          block->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
 
+    // CSS 2.1 §10.3.8 / §10.6.5: Absolutely positioned REPLACED elements
+    // use intrinsic dimensions for auto width/height, not the constraint equation.
+    bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
+                        block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
+                        block->tag() == HTM_TAG_OBJECT);
+
     // Gather horizontal border+padding for constraint calculations
     float h_border_padding = 0;
     if (block->bound) {
@@ -308,8 +314,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
     if (has_width) {
         content_width = lycon->block.given_width;
-    } else if (block->position->has_left && block->position->has_right && !is_intrinsic_width) {
-        // CSS 2.1 §10.3.7: width is auto, both left and right specified
+    } else if (block->position->has_left && block->position->has_right && !is_intrinsic_width && !is_replaced) {
+        // CSS 2.1 §10.3.7: width is auto, both left and right specified (non-replaced only)
+        // For replaced elements, §10.3.8 says use intrinsic width (via §10.3.2)
         // Auto margins are treated as 0 when width is auto
         float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
         float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
@@ -408,10 +415,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
               lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
     bool has_height = (lycon->block.given_height >= 0);
+
     if (has_height) {
         content_height = lycon->block.given_height;
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
-    } else if (block->position->has_top && block->position->has_bottom) {
+    } else if (block->position->has_top && block->position->has_bottom && !is_replaced) {
         // CSS 2.1 §10.6.4: height is auto, both top and bottom specified
         // Auto margins are treated as 0 when height is auto
         float margin_top = has_auto_margin_top ? 0 : (block->bound ? block->bound->margin.top : 0);
