@@ -2188,32 +2188,50 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
-    // CSS 2.1 §8.4: Padding does not apply to table-row-group, table-header-group,
-    // table-footer-group, table-row, table-column-group, table-column.
-    // CSS 2.1 §8.3: Margin does not apply to table internal elements
-    // (row-group, row, column-group, column, cell).
-    // Zero out any padding/margin resolved on these element types.
-    ViewType vt = span->view_type;
-    if (vt == RDT_VIEW_TABLE_ROW_GROUP || vt == RDT_VIEW_TABLE_ROW ||
-        vt == RDT_VIEW_TABLE_COLUMN_GROUP || vt == RDT_VIEW_TABLE_COLUMN) {
-        if (span->bound) {
+    // CSS 2.1 §8.3, §8.4, §17.5: Certain box-model properties do not apply to
+    // table-internal display types. Use the element's computed display value
+    // (not view_type, which may not be set yet during CSS resolution).
+    DisplayValue display = resolve_display_value((void*)dom_elem);
+    CssEnum di = display.inner;
+    bool is_row_or_rowgroup = (di == CSS_VALUE_TABLE_ROW ||
+                               di == CSS_VALUE_TABLE_ROW_GROUP ||
+                               di == CSS_VALUE_TABLE_HEADER_GROUP ||
+                               di == CSS_VALUE_TABLE_FOOTER_GROUP);
+    bool is_column = (di == CSS_VALUE_TABLE_COLUMN ||
+                      di == CSS_VALUE_TABLE_COLUMN_GROUP);
+    bool is_cell = (di == CSS_VALUE_TABLE_CELL);
+
+    if (span->bound && (is_row_or_rowgroup || is_column || is_cell)) {
+        // CSS 2.1 §8.3: Margin does not apply to table-row, table-row-group,
+        // table-header-group, table-footer-group, table-column, table-column-group,
+        // and table-cell.
+        if (span->bound->margin.top != 0 || span->bound->margin.right != 0 ||
+            span->bound->margin.bottom != 0 || span->bound->margin.left != 0) {
+            log_debug("[CSS] Zeroing margin on table internal element (display.inner=%d)", di);
+            span->bound->margin.top = 0;
+            span->bound->margin.right = 0;
+            span->bound->margin.bottom = 0;
+            span->bound->margin.left = 0;
+        }
+
+        // CSS 2.1 §8.4: Padding does not apply to table-row, table-row-group,
+        // table-header-group, table-footer-group, table-column, table-column-group.
+        // Note: Padding DOES apply to table-cell.
+        if (!is_cell) {
             if (span->bound->padding.top != 0 || span->bound->padding.right != 0 ||
                 span->bound->padding.bottom != 0 || span->bound->padding.left != 0) {
-                log_debug("[CSS] Zeroing padding on table internal element (view_type=%d)", vt);
+                log_debug("[CSS] Zeroing padding on table internal element (display.inner=%d)", di);
                 span->bound->padding.top = 0;
                 span->bound->padding.right = 0;
                 span->bound->padding.bottom = 0;
                 span->bound->padding.left = 0;
             }
-            if (span->bound->margin.top != 0 || span->bound->margin.right != 0 ||
-                span->bound->margin.bottom != 0 || span->bound->margin.left != 0) {
-                log_debug("[CSS] Zeroing margin on table internal element (view_type=%d)", vt);
-                span->bound->margin.top = 0;
-                span->bound->margin.right = 0;
-                span->bound->margin.bottom = 0;
-                span->bound->margin.left = 0;
-            }
         }
+
+        // CSS 2.1 §17.5: Border handling for table-internal elements depends on
+        // the border model (separated vs collapsed), which is a property of the
+        // ancestor table element. This must be resolved during table layout,
+        // not during CSS resolution. Borders are left as-is here.
     }
 }
 
