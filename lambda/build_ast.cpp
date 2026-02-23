@@ -1322,10 +1322,47 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
     else if (is_method_call) {
-        // Try method-style lookup: obj.method(args) -> method(obj, args)
-        sys_func_info = get_sys_func_for_method(&method_name, arg_count, obj_type_id);
-        if (sys_func_info) {
-            log_debug("method_call resolved to sys func: %s", sys_func_info->name);
+        // For map, element, and object types, check user-defined fields/methods first
+        // before sys func lookup. This lets member fields take precedence over built-in
+        // functions (e.g., a field named "sum" on a map should shadow the built-in sum()).
+        bool has_user_member = false;
+        if (method_object && method_object->type) {
+            TypeId tid = obj_type_id;
+            // Check shape entries (fields) for map, vmap, element, and object types
+            if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP ||
+                tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_OBJECT) {
+                TypeMap* map_type = (TypeMap*)method_object->type;
+                for (ShapeEntry* se = map_type->shape; se; se = se->next) {
+                    if (se->name && se->name->length == method_name.length &&
+                        strncmp(se->name->str, method_name.str, method_name.length) == 0) {
+                        has_user_member = true;
+                        log_debug("method_call: member field '%.*s' takes precedence over sys func",
+                            (int)method_name.length, method_name.str);
+                        break;
+                    }
+                }
+            }
+            // Also check object method table
+            if (!has_user_member && tid == LMD_TYPE_OBJECT) {
+                TypeObject* obj_type = (TypeObject*)method_object->type;
+                for (TypeMethod* m = obj_type->methods; m; m = m->next) {
+                    if (m->name && m->name->length == method_name.length &&
+                        strncmp(m->name->str, method_name.str, method_name.length) == 0) {
+                        has_user_member = true;
+                        log_debug("method_call: user-defined method '%.*s' takes precedence over sys func",
+                            (int)method_name.length, method_name.str);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!has_user_member) {
+            // Try method-style lookup: obj.method(args) -> method(obj, args)
+            sys_func_info = get_sys_func_for_method(&method_name, arg_count, obj_type_id);
+            if (sys_func_info) {
+                log_debug("method_call resolved to sys func: %s", sys_func_info->name);
+            }
         }
     }
 
