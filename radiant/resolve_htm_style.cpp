@@ -965,4 +965,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // these are block-level but have no special default styling
         break;
     }
+
+    // Handle HTML 'dir' attribute (global, applies to all elements)
+    // CSS 2.1 §9.10: The 'dir' attribute maps to the CSS 'direction' property
+    const char* dir_attr = elmt->get_attribute("dir");
+    if (dir_attr) {
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        if (str_ieq_const(dir_attr, strlen(dir_attr), "rtl")) {
+            block->blk->direction = CSS_VALUE_RTL;
+            log_debug("[HTML] dir attribute: rtl");
+        } else if (str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
+            block->blk->direction = CSS_VALUE_LTR;
+            log_debug("[HTML] dir attribute: ltr");
+        }
+    }
 }

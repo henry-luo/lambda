@@ -71,8 +71,12 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     ViewElement* parent = block->parent_view();
     if (parent && parent->is_element()) {
         DomElement* parent_elem = (DomElement*)parent;
-        if (parent_elem->specified_style) {
-            // Query the computed 'direction' property from parent
+        // Use the computed direction from BlockProp if available (set during CSS resolution)
+        if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
+            parent_direction = TD_RTL;
+            log_debug("Parent has direction: rtl (from BlockProp)");
+        } else if (parent_elem->specified_style) {
+            // Fall back to querying specified_style for elements without BlockProp
             CssValue* direction_value = (CssValue*)style_tree_get_computed_value(
                 parent_elem->specified_style,
                 CSS_PROPERTY_DIRECTION,
@@ -83,7 +87,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
             if (direction_value && direction_value->type == CSS_VALUE_TYPE_KEYWORD &&
                 direction_value->data.keyword == CSS_VALUE_RTL) {
                 parent_direction = TD_RTL;
-                log_debug("Parent has direction: rtl");
+                log_debug("Parent has direction: rtl (from specified_style)");
             }
         }
     }
@@ -96,18 +100,10 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
 
     if (both_horizontal) {
         if (parent_direction == TD_RTL) {
-            // RTL: right takes precedence, but equal values cancel out
-            if (block->position->left == block->position->right) {
-                // In RTL with equal left/right values, they geometrically cancel
-                offset_x = 0;
-                log_debug("Over-constrained relative positioning (RTL): left=%d equals right=%d, offset=0",
-                         block->position->left, block->position->right);
-            } else {
-                // RTL with different values: right wins
-                offset_x = -block->position->right;
-                log_debug("Over-constrained relative positioning (RTL): right=%d wins, left=%d ignored",
-                         block->position->right, block->position->left);
-            }
+            // CSS 2.1 §9.4.3: RTL — right wins, left becomes -right
+            offset_x = -block->position->right;
+            log_debug("Over-constrained relative positioning (RTL): right=%d wins, left=%d ignored",
+                     block->position->right, block->position->left);
         } else {
             // LTR: left takes precedence (always, even if equal to right)
             offset_x = block->position->left;

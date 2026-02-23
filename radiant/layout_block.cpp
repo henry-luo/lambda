@@ -1866,6 +1866,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
               lycon->line.left, lycon->line.right, lycon->line.effective_left, lycon->line.effective_right, lycon->line.advance_x);
 
     if (block->blk) lycon->block.text_align = block->blk->text_align;
+    // CSS 2.1 §9.2.1: Propagate direction to block context
+    if (block->blk) lycon->block.direction = block->blk->direction;
     // setup font
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
@@ -2446,15 +2448,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         // CSS 2.1 §10.3.5: For floats, if margin-left/right is 'auto', its used value is 0
         // CSS 2.1 §10.3.3: For normal flow blocks, auto margins center the element
+        bool is_rtl = pa_block->direction == CSS_VALUE_RTL;
         if (is_float) {
             // Floats: auto margins become 0
             if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
             if (block->bound->margin.right_type == CSS_VALUE_AUTO) block->bound->margin.right = 0;
         } else if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
             block->bound->margin.left = block->bound->margin.right = max((pa_block->content_width - block->width) / 2, 0);
-        } else {
-            if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
-            if (block->bound->margin.right_type == CSS_VALUE_AUTO) block->bound->margin.right = 0;
+        } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
+            // CSS 2.1 §10.3.3: Single auto margin absorbs the remaining space
+            block->bound->margin.left = max(pa_block->content_width - block->width - block->bound->margin.right, 0.0f);
+        } else if (block->bound->margin.right_type == CSS_VALUE_AUTO) {
+            block->bound->margin.right = max(pa_block->content_width - block->width - block->bound->margin.left, 0.0f);
+        } else if (is_rtl) {
+            // CSS 2.1 §10.3.3: Over-constrained with direction:rtl — margin-left gets the residual
+            block->bound->margin.left = pa_block->content_width - block->width - block->bound->margin.right;
+            log_debug("[RTL] Over-constrained: computed margin-left=%f (containing=%f, width=%f, margin-right=%f)",
+                block->bound->margin.left, pa_block->content_width, block->width, block->bound->margin.right);
         }
         log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
         float y_before_margin = block->y;

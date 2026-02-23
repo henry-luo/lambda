@@ -42,7 +42,8 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->init_ascender = 0;
     ctx->init_descender = 0;
     ctx->lead_y = 0;
-    ctx->text_align = CSS_VALUE_LEFT;
+    ctx->text_align = CSS_VALUE_START;
+    ctx->direction = CSS_VALUE_LTR;
     ctx->given_width = -1;
     ctx->given_height = -1;
 
