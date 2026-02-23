@@ -1260,7 +1260,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
     if (html->bound && html->bound->margin.top != 0) {
         html->y = html->bound->margin.top;
-        lycon->block.advance_y = html->bound->margin.top;
+        // CSS 2.1 §8.3.1: Root element margins do not collapse.
+        // html.y positions the border box from the viewport edge.
+        // advance_y stays at 0 — children are positioned relative to html's content box.
     }
     {
         float margin_h = 0;

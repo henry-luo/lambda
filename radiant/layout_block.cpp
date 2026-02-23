@@ -66,6 +66,9 @@ bool is_table_internal_display(CssEnum display);
 // Forward declarations for min/max constraint functions
 float adjust_min_max_height(ViewBlock* block, float height);
 
+// Forward declaration for self-collapsing block check (used by compute_collapsible_bottom_margin)
+static bool is_block_self_collapsing(ViewBlock* vb);
+
 // Counter system functions (from layout_counters.cpp)
 typedef struct CounterContext CounterContext;
 int counter_format(CounterContext* ctx, const char* name, uint32_t style,
@@ -607,6 +610,98 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 // End of ::first-letter Pseudo-element Support
 // ============================================================================
 
+// CSS 2.1 §10.6.3 + §8.3.1 + erratum q313: Compute the amount of bottom margin
+// that will collapse with this block's bottom margin. This must be excluded from
+// auto height BEFORE min/max-height constraints are applied.
+// Returns 0 if no bottom margin collapse will occur.
+static float compute_collapsible_bottom_margin(ViewBlock* block) {
+    // CSS 2.1 §8.3.1: Root element margins do not collapse.
+    // The html element is the root; its parent is the document node, not an element.
+    // Also, layout_html_root calls finalize directly without bottom margin collapse,
+    // so we must not subtract margins that won't be transferred.
+    if (!block->parent || !block->parent->is_block()) return 0;
+
+    // Bottom margin collapse requires: no bottom border, no bottom padding
+    bool has_border_bottom = block->bound && block->bound->border && block->bound->border->width.bottom > 0;
+    bool has_padding_bottom = block->bound && block->bound->padding.bottom > 0;
+    if (has_border_bottom || has_padding_bottom) return 0;
+
+    // BFC roots don't collapse margins with children
+    bool creates_bfc = block->scroller &&
+        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
+         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
+    if (!creates_bfc && block->position) {
+        if (element_has_float(block) ||
+            block->position->position == CSS_VALUE_ABSOLUTE ||
+            block->position->position == CSS_VALUE_FIXED) {
+            creates_bfc = true;
+        }
+    }
+    if (!creates_bfc && block->view_type == RDT_VIEW_INLINE_BLOCK) creates_bfc = true;
+    if (creates_bfc) return 0;
+
+    // Explicit height prevents bottom margin collapse
+    if (block->blk && block->blk->given_height >= 0) return 0;
+    if (!block->first_child) return 0;
+
+    // Find last in-flow child (skip abspos, floats, inline-blocks)
+    View* last_in_flow = nullptr;
+    View* child = (View*)block->first_child;
+    while (child) {
+        if (child->view_type && child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
+            bool is_out_of_flow = is_inline_block || (vb->position &&
+                (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                 vb->position->position == CSS_VALUE_FIXED ||
+                 element_has_float(vb)));
+            if (!is_out_of_flow) last_in_flow = child;
+        } else if (child->view_type) {
+            last_in_flow = child;
+        }
+        child = (View*)child->next_sibling;
+    }
+
+    // Skip self-collapsing blocks with zero margin at the end
+    View* effective_last = last_in_flow;
+    while (effective_last && effective_last->is_block()) {
+        ViewBlock* vb = (ViewBlock*)effective_last;
+        float mb = vb->bound ? vb->bound->margin.bottom : 0;
+        if (mb == 0 && is_block_self_collapsing(vb)) {
+            effective_last = effective_last->prev_placed_view();
+            continue;
+        }
+        break;
+    }
+
+    if (!effective_last || !effective_last->is_block()) return 0;
+    ViewBlock* last = (ViewBlock*)effective_last;
+    if (!last->bound || last->bound->margin.bottom <= 0) return 0;
+
+    // Check for in-flow content after the last block child
+    // (content that separates the child's margin from the parent's margin)
+    View* sibling = (View*)effective_last->next_sibling;
+    while (sibling) {
+        if (sibling->view_type) {
+            if (sibling->is_block()) {
+                ViewBlock* sb = (ViewBlock*)sibling;
+                bool is_truly_out_of_flow = sb->position &&
+                    (sb->position->position == CSS_VALUE_ABSOLUTE ||
+                     sb->position->position == CSS_VALUE_FIXED ||
+                     element_has_float(sb));
+                bool is_inline_level = (sb->view_type == RDT_VIEW_INLINE_BLOCK);
+                if (is_inline_level) return 0;  // content separates margins
+                if (!is_truly_out_of_flow && sb->height > 0) return 0;
+            } else {
+                return 0;  // non-block content separates margins
+            }
+        }
+        sibling = (View*)sibling->next_sibling;
+    }
+
+    return last->bound->margin.bottom;
+}
+
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     // finalize the block size
     float flow_width, flow_height;
@@ -768,10 +863,15 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("finalize block flow: has_embed=%d, has_flex=%d, is_table=%d, block=%s",
                   has_embed, has_flex, is_table, block->node_name());
         if (!has_flex && !is_table) {
-            // Apply min-height/max-height constraints to auto height
-            float final_height = adjust_min_max_height(block, flow_height);
-            log_debug("finalize block flow, set block height to flow height: %f (after min/max: %f)",
-                      flow_height, final_height);
+            // CSS 2.1 §10.6.3 + erratum q313: When computing auto height, exclude
+            // the last child's bottom margin that will collapse with the parent's
+            // bottom margin BEFORE applying min/max-height constraints.
+            // min/max-height must not affect margin adjacency (q313).
+            float collapsible_mb = compute_collapsible_bottom_margin(block);
+            float auto_height = flow_height - collapsible_mb;
+            float final_height = adjust_min_max_height(block, auto_height);
+            log_debug("finalize block flow, set block height to flow height: %f (collapsible_mb=%f, auto=%f, after min/max: %f)",
+                      flow_height, collapsible_mb, auto_height, final_height);
             block->height = final_height;
         } else {
             log_debug("finalize block flow: %s container, keeping height: %f (flow=%f)",
@@ -2691,7 +2791,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 } else {
                     float parent_margin = block->bound ? block->bound->margin.bottom : 0;
                     float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
-                    block->height -= last_child_block->bound->margin.bottom;
+                    // CSS 2.1 §10.6.3 + erratum q313: The collapsible margin was already
+                    // excluded from auto height in finalize_block_flow (before min/max
+                    // constraints). Don't subtract from height again — just transfer
+                    // the collapsed margin to the parent.
 
                     // If parent has no bound yet, allocate one to store the collapsed margin
                     if (!block->bound) {
@@ -2700,7 +2803,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     }
                     block->bound->margin.bottom = margin_bottom;
                     last_child_block->bound->margin.bottom = 0;
-                    log_debug("collapsed bottom margin %f between block and last child", margin_bottom);
+                    log_debug("collapsed bottom margin %f between block and last child (height unchanged at %f)", margin_bottom, block->height);
                 }
             }
         }
@@ -3321,7 +3424,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 bool parent_child_collapsed = false;
 
                 if (first_in_flow_child == block) {  // first in-flow child
-                    if (block->bound->margin.top != 0) {
+                    // CSS 2.1 §8.3.1: Clearance prevents margin adjacency.
+                    // If this first child has clear property, its top margin does NOT
+                    // collapse with the parent's top margin.
+                    bool has_clearance = block->position &&
+                        (block->position->clear == CSS_VALUE_LEFT ||
+                         block->position->clear == CSS_VALUE_RIGHT ||
+                         block->position->clear == CSS_VALUE_BOTH);
+
+                    if (block->bound->margin.top != 0 && !has_clearance) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                         // Check if parent creates a BFC - BFC prevents margin collapsing
                         // BFC is created by: overflow != visible, float, position absolute/fixed, etc.
