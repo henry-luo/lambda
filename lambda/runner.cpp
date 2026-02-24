@@ -334,8 +334,8 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
             TSNode child = ts_node_child(error_node, i);
             if (strcmp(ts_node_type(child), "ERROR") == 0) {
                 uint32_t c_start = ts_node_start_byte(child);
-                if (source[c_start] == '"' || source[c_start] == '\'') {
-                    // found an inner ERROR starting with a quote — unterminated string
+                if (source[c_start] == '"') {
+                    // found an inner ERROR starting with a double quote — unterminated string
                     uint32_t c_end = ts_node_end_byte(child);
                     // extract up to 40 chars of the string content for the message
                     int slen = (int)(c_end - c_start);
@@ -359,6 +359,46 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                     error->help = strdup(help);
                     return error;
                 }
+            }
+        }
+    }
+
+    // --- Pattern 6: Unterminated symbol literal ---
+    // A bare "'" token as a child of the ERROR node, possibly followed by an identifier.
+    // e.g. 'symbol  is missing the closing '
+    {
+        uint32_t child_count = ts_node_child_count(error_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(error_node, i);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "'") == 0) {
+                // found a bare single quote — unterminated symbol literal
+                uint32_t q_byte = ts_node_start_byte(child);
+                TSPoint c_loc = ts_node_start_point(child);
+                SourceLocation sloc = src_loc(file, c_loc.row + 1, c_loc.column + 1);
+                sloc.source = source;
+
+                // scan forward from quote to extract the symbol name from source text
+                // the identifier after ' is parsed outside the ERROR node, so read source directly
+                uint32_t name_start = q_byte + 1; // skip the '
+                uint32_t name_end = name_start;
+                while (source[name_end] && (isalnum((unsigned char)source[name_end]) ||
+                       source[name_end] == '_')) {
+                    name_end++;
+                }
+                int name_len = (int)(name_end - name_start);
+                if (name_len > 30) name_len = 30;
+
+                if (name_len > 0) {
+                    snprintf(msg, sizeof(msg), "Unterminated symbol literal: '%.*s — missing closing '''",
+                        name_len, source + name_start);
+                } else {
+                    snprintf(msg, sizeof(msg), "Unterminated symbol literal — missing closing '''");
+                }
+                help = "Symbol literals require a closing single quote: 'name'";
+                LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &sloc);
+                error->help = strdup(help);
+                return error;
             }
         }
     }
