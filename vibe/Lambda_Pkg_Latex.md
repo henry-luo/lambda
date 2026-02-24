@@ -961,43 +961,54 @@ The rationale is that `x is T and y > 0` should naturally read as two independen
 
 ### 11.2 Inline `++` in Map Spread Produces Null
 
-**Status:** Worked Around  
-**Severity:** High — produces null map entries silently
+**Status:** Fixed (runtime — `_map_get` rewritten with last-writer-wins semantics)  
+**Severity:** High — produced null map entries silently
 
-Using the array concatenation operator `++` inline within a map literal that also uses spread causes the entry to become null:
+Using the array concatenation operator `++` inline within a map literal that also uses spread caused the overridden entry to return the original (spread) value instead of the new one:
 
 ```lambda
-// BROKEN — the 'items' key becomes null
+// WAS BROKEN — new_info.items returned [1, 2, 3] instead of [1, 2, 3, 4]
 let new_info = {info, items: info.items ++ [new_item]}
 
-// WORKAROUND — extract to a let binding first
-let updated_items = info.items ++ [new_item]
-let new_info = {info, items: updated_items}
+// NOW WORKS — explicit field overrides spread, matching JS semantics
+let new_info = {info, items: info.items ++ [new_item]}
+new_info.items   // [1, 2, 3, 4] ✓
 ```
 
-**Impact:** Affected analyze.ls extensively — every map update that accumulated items into arrays had to be split into two statements.
+**Root cause:** `_map_get()` in `lambda-data-runtime.cpp` scanned shape entries linearly. When it hit a spread (unnamed field), it recursed into the nested map and returned immediately if the key was found — before ever checking later explicit named fields meant to override it.
+
+**Fix:** Rewrote `_map_get()` as a single-pass **last-writer-wins** scan. All shape entries (both named fields and spread/nested maps) are checked in declaration order, and the last match wins. This matches JavaScript/TypeScript spread semantics:
+
+```js
+// JavaScript semantics (now matched by Lambda):
+{ ...obj, key: val }   // explicit val wins (later)
+{ key: val, ...obj }   // obj.key wins (later)
+```
+
+**Impact:** The workaround `let` bindings in analyze.ls are no longer required but remain harmless.
 
 ### 11.3 `type` as Map Key Conflicts with Built-in
 
-**Status:** Worked Around  
-**Severity:** Medium — parse error
+**Status:** Fixed (grammar — `map_item` accepts `base_type` as key name)  
+**Severity:** Medium — was a parse error
 
-Lambda reserves `type` as a keyword. Using it as a map key causes a parse error:
+`type` and other type-name keywords (`int`, `float`, `string`, `map`, `element`, etc.) previously could not be used as map keys. The grammar was updated to allow `base_type` tokens as map key names:
 
 ```lambda
-// BROKEN — parse error
+// NOW WORKS — type names accepted as map keys
 let info = {type: "section", number: 1}
+info.type    // "section"
 
-// WORKAROUND — use a different key name
-let info = {kind: "section", number: 1}
+let m = {int: 10, float: 3.14, string: "hello"}
+m.int        // 10
 ```
 
-**Impact:** All `DocInfo` and label maps had to use `kind` instead of the more natural `type` key.
+**Impact:** The `kind` workaround in analyze.ls and render2.ls is no longer necessary but remains harmless.
 
 ### 11.4 `name()` Returns a Symbol, Not a String
 
-**Status:** Worked Around  
-**Severity:** High — causes silent comparison failures
+**Status:** Mitigated (compile-time type error now catches symbol vs string comparisons)  
+**Severity:** High — caused silent comparison failures
 
 The `name(element)` function returns a **symbol** (single-quoted), not a string (double-quoted). Comparing with a double-quoted string silently fails — no error, just always `false`:
 
@@ -1005,11 +1016,20 @@ The `name(element)` function returns a **symbol** (single-quoted), not a string 
 // BROKEN — name() returns 'paragraph (symbol), "paragraph" is a string, never equal
 if (name(child) == "paragraph") ...   // always false, no error
 
-// WORKAROUND — compare with a symbol literal (single-quoted)
-if (name(child) == 'paragraph) ...    // correct
+// CORRECT — compare with a symbol literal (single-quoted)
+if (name(child) == 'paragraph') ...    // correct
 ```
 
-**Impact:** This was the root cause of the tabular rendering producing empty output. The `find_tabular_content` function couldn't find the `paragraph` child because every `name()` comparison silently failed. Debugging required dumping the AST to JSON to discover the type mismatch.
+A **compile-time type check** has been added to the AST builder (`build_ast.cpp`) that detects `symbol == string` and `string == symbol` comparisons, reporting a hard error:
+
+```
+error[E201]: comparing 'symbol' with 'string' will always be false
+  — did you mean to use a symbol literal?
+```
+
+The check fires when at least one operand has a literal type and the other is statically known to be the opposite string/symbol type. Dynamic (`any`) types are not flagged to avoid false positives.
+
+**Impact:** This was the root cause of the tabular rendering producing empty output. The `find_tabular_content` function couldn't find the `paragraph` child because every `name()` comparison silently failed. The compile-time check now prevents this class of bug entirely.
 
 ### 11.5 ~~Indexed `for` Comprehension Broken for Arrays~~ (NOT A BUG)
 
@@ -1095,12 +1115,12 @@ fn update_figure_count(info) {
 | #    | Issue                      | Severity | Status        | Workaround Cost                     |
 | ---- | -------------------------- | -------- | ------------- | ----------------------------------- |
 | 11.1 | `is`/`and` precedence      | High     | Fixed         | Grammar fix — reordered precedence  |
-| 11.2 | `++` in map spread → null  | High     | Worked Around | Medium — split into let bindings    |
-| 11.3 | `type` as map key          | Medium   | Worked Around | Low — rename to `kind`              |
-| 11.4 | `name()` returns symbol    | High     | Worked Around | Low — use single-quoted comparisons |
+| 11.2 | `++` in map spread → null  | High     | Fixed         | Runtime fix — last-writer-wins `_map_get` |
+| 11.3 | `type` as map key          | Medium   | Fixed         | Grammar fix — `base_type` as key    |
+| 11.4 | `name()` returns symbol    | High     | Mitigated     | Compile-time type error added        |
 | 11.5 | ~~Indexed `for` broken~~   | N/A      | Not a Bug     | N/A — works correctly               |
 | 11.6 | `trim() == ""` false       | Medium   | Worked Around | Low — use `len()` check             |
 | 11.7 | ~~`if-else` in `for`~~     | N/A      | Not a Bug     | N/A — works correctly               |
 | 11.8 | Map literal after `if`     | Medium   | Worked Around | Medium — restructure code           |
 
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). The remaining real issues (**11.1**, **11.2**, **11.4**, **11.6**, **11.8**) all have low-cost workarounds.
+**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, and **11.3** have been fixed in the language. Issue **11.4** is now mitigated by a compile-time type check that catches symbol-vs-string comparisons. The remaining issues (**11.6**, **11.8**) have low-cost workarounds.
