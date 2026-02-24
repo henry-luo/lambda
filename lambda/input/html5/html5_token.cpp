@@ -47,7 +47,6 @@ Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c) {
 
     // Create single-character string using arena
     String* s = (String*)arena_alloc(arena, sizeof(String) + 2);
-    s->ref_cnt = 1;
     s->len = 1;
     s->chars[0] = c;
     s->chars[1] = '\0';
@@ -64,7 +63,6 @@ Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const 
 
     // Create multi-character string using arena
     String* s = (String*)arena_alloc(arena, sizeof(String) + len + 1);
-    s->ref_cnt = 1;
     s->len = len;
     memcpy(s->chars, chars, len);
     s->chars[len] = '\0';

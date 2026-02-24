@@ -20,7 +20,6 @@ static String* create_string_key(Pool* pool, const char* str) {
 
     str_copy(key->chars, len + 1, str, len);
     key->len = len;
-    key->ref_cnt = 0;
     return key;
 }
 

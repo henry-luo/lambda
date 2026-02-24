@@ -281,7 +281,7 @@ String* it2s(Item itm) {
         return itm.get_string();
     }
     if (itm._type_id == LMD_TYPE_ERROR) {
-        static String str_err = {.len = 7, .ref_cnt = 0, .chars = "<error>"};
+        static String str_err = {.len = 7, .chars = "<error>"};
         return &str_err;
     }
     // For other types, we'd need to convert to string
@@ -407,18 +407,15 @@ void array_set(Array* arr, int index, Item itm) {
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
         String *str = itm.get_string();
-        str->ref_cnt++;
         break;
     }
     case LMD_TYPE_SYMBOL: {
         Symbol *sym = itm.get_symbol();
-        sym->ref_cnt++;
         break;
     }
     default:
         if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_OBJECT) {
             Container *container = itm.container;
-            container->ref_cnt++;
         }
     }
 }
@@ -500,8 +497,6 @@ void list_push(List *list, Item item) {
                 memcpy(merged_str->chars, prev_str->chars, prev_str->len);
                 memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
                 merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
-                merged_str->ref_cnt = 1;  // one reference: this list position
-                prev_str->ref_cnt--;  // remove the list reference (was incremented by list_push)
                 // replace previous string with new merged string, in the list directly,
                 // assuming the list is still being constructed/mutable
                 list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
@@ -511,11 +506,9 @@ void list_push(List *list, Item item) {
     }
     else if (LMD_TYPE_RANGE <= type_id && type_id <= LMD_TYPE_OBJECT) {
         Container *container = item.container;
-        container->ref_cnt++;
     }
     else if (type_id == LMD_TYPE_FUNC) {
         Function *fn = item.function;
-        if (fn) fn->ref_cnt++;
     }
 
     // store the value in the list (and we may need two slots for long/double)
@@ -531,18 +524,15 @@ void list_push(List *list, Item item) {
     switch (item._type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
         String *str = (String*)item.get_string();
-        str->ref_cnt++;
         break;
     }
     case LMD_TYPE_SYMBOL: {
         Symbol *sym = item.get_symbol();
-        sym->ref_cnt++;
         break;
     }
     case LMD_TYPE_DECIMAL: {
         Decimal *dval = item.get_decimal();
         if (dval) {
-            dval->ref_cnt++;
         } else {
             log_debug("list_push: pushed null decimal value");
         }
@@ -670,7 +660,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             TypeId type_id = get_type_id(item);
             if (type_id == LMD_TYPE_MAP) {
                 Map* nested_map = item.map;
-                nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
                 log_error("expected a map, got data of type %s", get_type_name(type_id));
@@ -713,20 +702,17 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
                 String *str = item.get_string();
                 *(String**)field_ptr = str;
-                if (str) str->ref_cnt++;
                 break;
             }
             case LMD_TYPE_SYMBOL: {
                 Symbol *sym = item.get_symbol();
                 *(Symbol**)field_ptr = sym;
-                if (sym) sym->ref_cnt++;
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                 Container *container = item.container;
                 *(Container**)field_ptr = container;
-                if (container) container->ref_cnt++;
                 break;
             }
             case LMD_TYPE_TYPE: {
@@ -736,7 +722,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_FUNC: {
                 Function* fn = item.function;
                 *(Function**)field_ptr = fn;
-                if (fn) fn->ref_cnt++;
                 break;
             }
             case LMD_TYPE_PATH: {
@@ -762,18 +747,18 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.datetime_val = item.get_datetime();  break;
                 case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
                     String *str = item.get_string();
-                    titem.string = str;  str->ref_cnt++;
+                    titem.string = str;
                     break;
                 }
                 case LMD_TYPE_SYMBOL: {
                     Symbol *sym = item.get_symbol();
-                    titem.symbol = sym;  sym->ref_cnt++;
+                    titem.symbol = sym;
                     break;
                 }
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
                 case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                     Container *container = item.container;
-                    titem.container = container;  container->ref_cnt++;
+                    titem.container = container;
                     break;
                 }
                 case LMD_TYPE_TYPE:
@@ -782,7 +767,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_FUNC: {
                     Function* fn = item.function;
                     titem.function = fn;
-                    if (fn) fn->ref_cnt++;
                     break;
                 }
                 case LMD_TYPE_PATH:

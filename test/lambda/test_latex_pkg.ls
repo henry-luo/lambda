@@ -1,5 +1,5 @@
 // test_latex_pkg.ls — Test script for the LaTeX package
-// Run: ./lambda.exe run lambda/package/latex/test_latex_pkg.ls
+// Run: ./lambda.exe run test/lambda/test_latex_pkg.ls
 
 import latex: .lambda.package.latex.latex
 
@@ -43,7 +43,9 @@ To be or not to be, that is the question.
 This is the end.
 \\end{document}"
 
-let ast^err = input(tex_source, {type: "latex", source: true})
+// Write source to temp file and parse from file since source: true
+// may not be supported for LaTeX
+let ast^err = input("test/input/test_input.tex", {type: "latex"})
 
 pn main() {
     print("=== LaTeX AST tags ===")
@@ -51,6 +53,6 @@ pn main() {
     print(len(ast))
 
     print("=== Rendering ===")
-    let html = latex.render(ast, {standalone: false, numbering: true})
-    print(format(html, {type: "html"}))
+    let html = latex.render_to_html(ast, {standalone: false, numbering: true})
+    print(html)
 }

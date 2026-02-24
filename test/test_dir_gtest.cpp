@@ -40,7 +40,7 @@ protected:
         // Set up a minimal context for path operations
         pool = pool_create();
         test_heap.pool = pool;
-        test_heap.entries = nullptr;
+        test_heap.gc = nullptr;
         
         memset(&test_context, 0, sizeof(test_context));
         test_context.heap = &test_heap;
@@ -197,7 +197,7 @@ protected:
         // Set up a minimal context for path operations
         pool = pool_create();
         test_heap.pool = pool;
-        test_heap.entries = nullptr;
+        test_heap.gc = nullptr;
         
         memset(&test_context, 0, sizeof(test_context));
         test_context.heap = &test_heap;
@@ -239,7 +239,6 @@ TEST_F(InputDirTestSimple, UrlDirectoryIntegrationSimple) {
     size_t url_len = strlen(url_text);
     String* url_str = (String*)malloc(sizeof(String) + url_len + 1);
     url_str->len = url_len;
-    url_str->ref_cnt = 1;
     strcpy(url_str->chars, url_text);
 
     Input* input = input_from_url(url_str, NULL, NULL, NULL);

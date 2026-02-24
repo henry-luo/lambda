@@ -4,7 +4,7 @@
 // Default stylesheet (article class)
 // ============================================================
 
-pub STYLESHEET = \".latex-document {
+pub STYLESHEET = ".latex-document {
   max-width: 800px;
   margin: 0 auto;
   padding: 2em;
@@ -129,6 +129,58 @@ table.latex-tabular .hline-bottom { border-bottom: 1px solid black; }
 .latex-sf { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
 .latex-sc { font-variant: small-caps; }
 .latex-sl { font-style: oblique; }
+.latex-rm { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
+.latex-itshape { font-style: italic; }
+.latex-bfseries { font-weight: bold; }
+.latex-ttfamily { font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace; }
+.latex-rmfamily { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
+.latex-sffamily { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
+.latex-scshape { font-variant: small-caps; }
+.latex-slshape { font-style: oblique; }
+.latex-upshape { font-style: normal; }
+.latex-mdseries { font-weight: normal; }
+.latex-centering { text-align: center; }
+.latex-raggedright { text-align: left; }
+.latex-raggedleft { text-align: right; }
+.latex-part-heading {
+  text-align: center;
+  font-size: 2em;
+  font-weight: bold;
+  margin: 3em 0 2em;
+  page-break-before: always;
+}
+.latex-chapter-heading {
+  font-size: 1.8em;
+  font-weight: bold;
+  margin: 2em 0 1em;
+  page-break-before: always;
+}
+table.latex-tabular td[colspan],
+table.latex-tabular td[rowspan] {
+  font-weight: inherit;
+}
+.latex-book .latex-title { margin-bottom: 3em; }
+.latex-report .latex-title { margin-bottom: 3em; }
+.latex-report .latex-abstract {
+  margin: 2em 4em;
+  page-break-after: always;
+}
+.latex-theorem {
+  margin: 1em 0;
+  font-style: italic;
+}
+.latex-theorem .theorem-head {
+  font-weight: bold;
+  font-style: normal;
+  margin-right: 0.5em;
+}
+.latex-proof {
+  margin: 1em 0;
+}
+.latex-proof .proof-head {
+  font-style: italic;
+  margin-right: 0.5em;
+}
 "
 
 // return the stylesheet

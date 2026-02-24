@@ -1044,7 +1044,6 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     // Allocate Symbol struct (has ns field)
                     Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
                     sym->ns = ns_entry->target;  // set namespace target
-                    sym->ref_cnt = 1;
                     sym->len = total_len;
                     memcpy(sym->chars, buf, total_len);
                     sym->chars[total_len] = '\0';
@@ -1657,7 +1656,6 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         memcpy(str->chars, tp->source + start, content_len);
         str->chars[content_len] = '\0';
         str->len = content_len;
-        str->ref_cnt = 1;
 
         arraylist_append(tp->const_list, str);
         str_type->const_index = tp->const_list->length - 1;
@@ -1702,20 +1700,18 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     if (!has_escape) {
         // No escapes - simple copy
         if (symbol == SYM_SYMBOL) {
-            // Allocate as Symbol (has ns field between ref_cnt and chars)
+            // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
             sym->ns = NULL;
             memcpy(sym->chars, content_start, content_len);
             sym->chars[content_len] = '\0';
             sym->len = content_len;
-            sym->ref_cnt = 1;
             str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
         } else {
             str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
             memcpy(str->chars, content_start, content_len);
             str->chars[content_len] = '\0';
             str->len = content_len;
-            str->ref_cnt = 1;
         }
         str_type->string = str;
     }
@@ -1912,7 +1908,6 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
             memcpy(sym->chars, str->chars, slen);
             sym->chars[slen] = '\0';
             sym->len = slen;
-            sym->ref_cnt = 1;
             str = (String*)sym;  // store as String* in TypeString
         }
         str_type->string = str;
@@ -2018,7 +2013,6 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     item_type->decimal = decimal;
 
     // Initialize the decimal with reference counting and libmpdec
-    decimal->ref_cnt = 1;
     // Use transpiler's decimal context via centralized function
     decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
     if (!decimal->dec_val) {
@@ -2426,6 +2420,23 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
     // spread expression has the same type as its operand (the items will be spread)
     ast_node->type = ast_node->operand->type;
 
+    // Check: spread on a static scalar expression is redundant and likely a mistake.
+    // e.g., *5, *"hello", *true, *null — these have no elements to spread.
+    {
+        Type* op_type = ast_node->operand->type;
+        if (op_type && op_type->is_literal) {
+            TypeId tid = op_type->type_id;
+            if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_BOOL ||
+                tid == LMD_TYPE_INT  || tid == LMD_TYPE_INT64 ||
+                tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL ||
+                tid == LMD_TYPE_NUMBER || tid == LMD_TYPE_DTIME ||
+                tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_STRING) {
+                record_semantic_error(tp, sp_node, ERR_SEMANTIC_ERROR,
+                    "Spread operator '*' is redundant on scalar value");
+            }
+        }
+    }
+
     log_debug("end build spread expr");
     return (AstNode*)ast_node;
 }
@@ -2600,6 +2611,30 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
         type_id = LMD_TYPE_BOOL;
+
+        // static type check for equality/inequality: catch comparisons between
+        // incompatible concrete types where one side is a literal
+        // e.g. name(x) == "paragraph" — symbol vs string literal, always false
+        if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE) {
+            bool left_is_literal = ast_node->left->type->is_literal;
+            bool right_is_literal = ast_node->right->type->is_literal;
+            if ((left_is_literal || right_is_literal) &&
+                left_type != LMD_TYPE_ANY && right_type != LMD_TYPE_ANY &&
+                left_type != LMD_TYPE_NULL && right_type != LMD_TYPE_NULL &&
+                left_type != LMD_TYPE_ERROR && right_type != LMD_TYPE_ERROR &&
+                left_type != right_type) {
+                // string vs symbol: always wrong, silent failure — the primary footgun
+                bool is_string_symbol = (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_SYMBOL) ||
+                                        (left_type == LMD_TYPE_SYMBOL && right_type == LMD_TYPE_STRING);
+                if (is_string_symbol) {
+                    record_semantic_error(tp, bi_node, ERR_TYPE_MISMATCH,
+                        "comparing '%s' with '%s' will always be %s — did you mean to use a %s literal?",
+                        get_type_name(left_type), get_type_name(right_type),
+                        ast_node->op == OPERATOR_EQ ? "false" : "true",
+                        left_is_literal ? get_type_name(right_type) : get_type_name(left_type));
+                }
+            }
+        }
     }
     else if (ast_node->op == OPERATOR_IDIV) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&

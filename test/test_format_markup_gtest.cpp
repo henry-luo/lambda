@@ -26,7 +26,6 @@ static String* make_str(const char* text) {
     size_t len = strlen(text);
     String* result = (String*)malloc(sizeof(String) + len + 1);
     result->len = (uint32_t)len;
-    result->ref_cnt = 1;
     strcpy(result->chars, text);
     return result;
 }

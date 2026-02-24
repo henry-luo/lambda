@@ -89,49 +89,412 @@ NamePool* eval_context_get_name_pool(EvalContext* ctx) {
 }
 }
 
-void find_errors(TSNode node) {
-    const char *node_type = ts_node_type(node);
-    TSPoint start_point = ts_node_start_point(node);
-    TSPoint end_point = ts_node_end_point(node);
+// ============================================================================
+// Parse Error Diagnostics
+// ============================================================================
 
-    // Check for direct syntax error nodes
-    if (ts_node_is_error(node)) {
-        printf("PARSE ERROR: Syntax error at Ln %u, Col %u - %u, Col %u: node_type='%s'\n",
-               start_point.row + 1, start_point.column + 1,
-               end_point.row + 1, end_point.column + 1, node_type);
-        // Print child count to see what's inside the error
-        uint32_t child_count = ts_node_child_count(node);
-        printf("  Error node has %u children\n", child_count);
-        for (uint32_t i = 0; i < child_count && i < 5; i++) {
-            TSNode child = ts_node_child(node, i);
-            printf("    Child %u: %s\n", i, ts_node_type(child));
+// Extract a snippet of source text at the given byte range (up to max_len chars).
+// Returns a static buffer — not thread-safe, caller must use before next call.
+static const char* extract_source_text(const char* source, uint32_t start_byte, uint32_t end_byte, int max_len) {
+    static char buf[128];
+    if (!source) return "";
+    int len = (int)(end_byte - start_byte);
+    if (len <= 0) return "";
+    if (len > max_len) len = max_len;
+    if (len > (int)sizeof(buf) - 1) len = (int)sizeof(buf) - 1;
+    memcpy(buf, source + start_byte, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+// Check if a node or any of its children is a specific node type
+static bool node_contains_type(TSNode node, const char* type_name) {
+    if (strcmp(ts_node_type(node), type_name) == 0) return true;
+    uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        if (node_contains_type(ts_node_child(node, i), type_name)) return true;
+    }
+    return false;
+}
+
+// Check if source text at position starts with a specific string
+static bool source_starts_with(const char* source, uint32_t byte_offset, const char* prefix) {
+    if (!source || !prefix) return false;
+    return strncmp(source + byte_offset, prefix, strlen(prefix)) == 0;
+}
+
+// Find the matching opening delimiter for a given closer, scanning backwards in source
+static int find_matching_opener(const char* source, uint32_t close_byte, char opener, char closer) {
+    if (!source) return -1;
+    int depth = 0;
+    for (int i = (int)close_byte - 1; i >= 0; i--) {
+        if (source[i] == closer) depth++;
+        else if (source[i] == opener) {
+            if (depth == 0) return i;
+            depth--;
         }
-        log_error("Syntax error at Ln %u, Col %u - %u, Col %u: %s",
-               start_point.row + 1, start_point.column + 1,
-               end_point.row + 1, end_point.column + 1, node_type);
+    }
+    return -1;
+}
+
+// Get line number (1-based) for a byte offset in source
+static uint32_t byte_to_line(const char* source, uint32_t byte_offset) {
+    uint32_t line = 1;
+    for (uint32_t i = 0; i < byte_offset && source[i]; i++) {
+        if (source[i] == '\n') line++;
+    }
+    return line;
+}
+
+// Get column number (1-based) for a byte offset in source
+static uint32_t byte_to_col(const char* source, uint32_t byte_offset) {
+    uint32_t col = 1;
+    for (int i = (int)byte_offset - 1; i >= 0 && source[i] != '\n'; i--) {
+        col++;
+    }
+    return col;
+}
+
+// Diagnose a specific ERROR node and create a LambdaError with pattern-matched message + help.
+static LambdaError* diagnose_error_node(TSNode error_node, const char* source, const char* file) {
+    TSPoint start = ts_node_start_point(error_node);
+    TSPoint end = ts_node_end_point(error_node);
+    uint32_t start_byte = ts_node_start_byte(error_node);
+    uint32_t end_byte = ts_node_end_byte(error_node);
+
+    SourceLocation loc = src_loc_span(file,
+        start.row + 1, start.column + 1,
+        end.row + 1, end.column + 1);
+    loc.source = source;
+
+    const char* error_text = extract_source_text(source, start_byte, end_byte, 60);
+    char msg[512];
+    const char* help = nullptr;
+
+    // --- Pattern 1: '...' (variadic token) outside function parameters ---
+    // In the parse tree, '...' becomes a variadic node. It can appear in several positions:
+    //   - map context: map → primary_expr(variadic) → ERROR(identifier 'a')  
+    //     → variadic is prev sibling of ERROR
+    //   - call context: call_expr → ( → ERROR(primary_expr(variadic)) → args → )
+    //     → variadic is inside the ERROR node itself
+    TSNode prev = ts_node_prev_sibling(error_node);
+    bool has_variadic_before = false;
+    TSNode variadic_node = {0};
+    // Check prev sibling
+    if (!ts_node_is_null(prev)) {
+        if (strcmp(ts_node_type(prev), "variadic") == 0) {
+            has_variadic_before = true;
+            variadic_node = prev;
+        } else if (node_contains_type(prev, "variadic")) {
+            has_variadic_before = true;
+            variadic_node = prev;
+        }
+    }
+    // Check inside the ERROR node itself
+    if (!has_variadic_before && node_contains_type(error_node, "variadic")) {
+        has_variadic_before = true;
+        variadic_node = error_node;
+    }
+    // Also check siblings in parent
+    TSNode parent = ts_node_parent(error_node);
+    if (!has_variadic_before && !ts_node_is_null(parent)) {
+        uint32_t pcount = ts_node_child_count(parent);
+        for (uint32_t i = 0; i < pcount; i++) {
+            TSNode sibling = ts_node_child(parent, i);
+            if (strcmp(ts_node_type(sibling), "variadic") == 0) {
+                has_variadic_before = true;
+                variadic_node = sibling;
+                break;
+            }
+            // check inside primary_expr wrapper
+            if (strcmp(ts_node_type(sibling), "primary_expr") == 0 &&
+                node_contains_type(sibling, "variadic")) {
+                has_variadic_before = true;
+                variadic_node = sibling;
+                break;
+            }
+        }
+    }
+    if (has_variadic_before) {
+        snprintf(msg, sizeof(msg), "Unexpected '...' — not a spread operator in Lambda");
+        help = "Lambda uses '*expr' for spread. In map construction, spread is\n"
+               "          implicit: {b: 456, a} merges 'a' into the map automatically.";
+        // adjust location to cover the '...' and the identifier after it
+        TSPoint vstart = ts_node_start_point(variadic_node);
+        SourceLocation vloc = src_loc_span(file, vstart.row + 1, vstart.column + 1,
+                                           end.row + 1, end.column + 1);
+        vloc.source = source;
+        LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &vloc);
+        error->help = strdup(help);
+        return error;
     }
 
-    // Check for missing nodes (inserted by parser for error recovery)
+    // --- Pattern 2: Mixed if-expr / if-stam syntax ---
+    // if (cond) expr else { ... } — the else branch gets parsed as a map with an ERROR inside  
+    // Walk up ancestors to find if this ERROR is within an if_expr or if_stam context
+    {
+        TSNode ancestor = parent;
+        int depth = 0;
+        while (!ts_node_is_null(ancestor) && depth < 6) {
+            const char* anc_type = ts_node_type(ancestor);
+            if (strcmp(anc_type, "if_expr") == 0) {
+                // ERROR inside if_expr — likely braced block in if-expression context
+                // Check if error contains statement-like constructs (let, var, etc.)
+                bool has_statements = node_contains_type(error_node, "let_expr") ||
+                                     node_contains_type(error_node, "let_stam") ||
+                                     node_contains_type(error_node, "var_stam") ||
+                                     node_contains_type(error_node, "assign_stam");
+                // Or the parent is a map (braces mistaken for block)
+                bool has_braces = !ts_node_is_null(parent) && 
+                                  strcmp(ts_node_type(parent), "map") == 0;
+                if (has_statements || has_braces) {
+                    snprintf(msg, sizeof(msg),
+                        "Cannot mix if-expression and if-statement syntax");
+                    help = "if-expression: both branches must be bare expressions:\n"
+                           "            if (cond) expr1 else expr2\n"
+                           "          if-statement: both branches must be braced blocks:\n"
+                           "            if cond { expr1 } else { expr2 }";
+                    LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+                    error->help = strdup(help);
+                    return error;
+                }
+                break;
+            }
+            if (strcmp(anc_type, "if_stam") == 0) {
+                snprintf(msg, sizeof(msg),
+                    "Cannot mix if-expression and if-statement syntax");
+                help = "if-statement requires braced blocks for both branches:\n"
+                       "            if cond { expr1 } else { expr2 }\n"
+                       "          For inline expressions, use if-expression:\n"
+                       "            if (cond) expr1 else expr2";
+                LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+                error->help = strdup(help);
+                return error;
+            }
+            ancestor = ts_node_parent(ancestor);
+            depth++;
+        }
+    }
+
+    // --- Pattern 3: fn without => or { ---
+    // The entire fn declaration becomes an ERROR node containing: fn, identifier, (, parameter, ...
+    {
+        uint32_t child_count = ts_node_child_count(error_node);
+        bool has_fn = false;
+        bool has_params = false;
+        for (uint32_t i = 0; i < child_count && i < 10; i++) {
+            TSNode child = ts_node_child(error_node, i);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "fn") == 0) has_fn = true;
+            if (strcmp(ctype, "parameter") == 0 || strcmp(ctype, "(") == 0) has_params = true;
+        }
+        if (has_fn && has_params) {
+            snprintf(msg, sizeof(msg), "Function body requires '=>' or '{...}'");
+            help = "Use '=>' for expression body:  fn name(a, b) => a + b\n"
+                   "          Use '{...}' for statement body:  pn name(a, b) { return a + b }";
+            LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+            error->help = strdup(help);
+            return error;
+        }
+    }
+
+    // --- Pattern 4: = instead of == in conditions ---
+    if (!ts_node_is_null(parent)) {
+        const char* parent_type = ts_node_type(parent);
+        bool in_if_condition = false;
+        // Case A: ERROR inside list that is the condition of if_expr
+        if (strcmp(parent_type, "list") == 0) {
+            TSNode grandparent = ts_node_parent(parent);
+            if (!ts_node_is_null(grandparent) && strcmp(ts_node_type(grandparent), "if_expr") == 0) {
+                in_if_condition = true;
+            }
+        }
+        // Case B: ERROR directly inside if_expr (parser couldn't form a list)
+        if (strcmp(parent_type, "if_expr") == 0) {
+            in_if_condition = true;
+        }
+        if (in_if_condition) {
+            // check if error text contains '=' but not '=='
+            if (strstr(error_text, "=") != nullptr && strstr(error_text, "==") == nullptr) {
+                snprintf(msg, sizeof(msg),
+                    "Assignment in condition — did you mean '=='?");
+                help = "Use '==' for comparison. '=' is for 'let' bindings.";
+                LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+                error->help = strdup(help);
+                return error;
+            }
+        }
+    }
+
+    // --- Pattern 5: Unterminated string literal ---
+    // The inner ERROR child starts with '"' but the string is never closed.
+    {
+        uint32_t child_count = ts_node_child_count(error_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(error_node, i);
+            if (strcmp(ts_node_type(child), "ERROR") == 0) {
+                uint32_t c_start = ts_node_start_byte(child);
+                if (source[c_start] == '"') {
+                    // found an inner ERROR starting with a double quote — unterminated string
+                    uint32_t c_end = ts_node_end_byte(child);
+                    // extract up to 40 chars of the string content for the message
+                    int slen = (int)(c_end - c_start);
+                    if (slen > 40) slen = 40;
+                    char preview[48];
+                    memcpy(preview, source + c_start, slen);
+                    // strip trailing whitespace/newlines from preview
+                    while (slen > 0 && (preview[slen-1] == '\n' || preview[slen-1] == '\r' ||
+                                        preview[slen-1] == ' ' || preview[slen-1] == '\t')) {
+                        slen--;
+                    }
+                    preview[slen] = '\0';
+
+                    TSPoint c_loc = ts_node_start_point(child);
+                    SourceLocation sloc = src_loc(file, c_loc.row + 1, c_loc.column + 1);
+                    sloc.source = source;
+
+                    snprintf(msg, sizeof(msg), "Unterminated string literal: %s", preview);
+                    help = "Add a closing quote to complete the string.";
+                    LambdaError* error = err_create(ERR_UNTERMINATED_STRING, msg, &sloc);
+                    error->help = strdup(help);
+                    return error;
+                }
+            }
+        }
+    }
+
+    // --- Pattern 6: Unterminated symbol literal ---
+    // A bare "'" token as a child of the ERROR node, possibly followed by an identifier.
+    // e.g. 'symbol  is missing the closing '
+    {
+        uint32_t child_count = ts_node_child_count(error_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(error_node, i);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "'") == 0) {
+                // found a bare single quote — unterminated symbol literal
+                uint32_t q_byte = ts_node_start_byte(child);
+                TSPoint c_loc = ts_node_start_point(child);
+                SourceLocation sloc = src_loc(file, c_loc.row + 1, c_loc.column + 1);
+                sloc.source = source;
+
+                // scan forward from quote to extract the symbol name from source text
+                // the identifier after ' is parsed outside the ERROR node, so read source directly
+                uint32_t name_start = q_byte + 1; // skip the '
+                uint32_t name_end = name_start;
+                while (source[name_end] && (isalnum((unsigned char)source[name_end]) ||
+                       source[name_end] == '_')) {
+                    name_end++;
+                }
+                int name_len = (int)(name_end - name_start);
+                if (name_len > 30) name_len = 30;
+
+                if (name_len > 0) {
+                    snprintf(msg, sizeof(msg), "Unterminated symbol literal: '%.*s — missing closing '''",
+                        name_len, source + name_start);
+                } else {
+                    snprintf(msg, sizeof(msg), "Unterminated symbol literal — missing closing '''");
+                }
+                help = "Symbol literals require a closing single quote: 'name'";
+                LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &sloc);
+                error->help = strdup(help);
+                return error;
+            }
+        }
+    }
+
+    // --- Default: generic error with context about what was found ---
+    {
+        uint32_t child_count = ts_node_child_count(error_node);
+        if (child_count > 0) {
+            // collect child type names for context
+            char children_desc[256];
+            int cpos = 0;
+            for (uint32_t i = 0; i < child_count && i < 5 && cpos < (int)sizeof(children_desc) - 40; i++) {
+                TSNode child = ts_node_child(error_node, i);
+                const char* ctype = ts_node_type(child);
+                if (i > 0) cpos += snprintf(children_desc + cpos, sizeof(children_desc) - cpos, ", ");
+                cpos += snprintf(children_desc + cpos, sizeof(children_desc) - cpos, "%s", ctype);
+            }
+            children_desc[cpos] = '\0';
+            snprintf(msg, sizeof(msg), "Unexpected syntax near '%.*s' [%s]",
+                (int)(end_byte - start_byte > 30 ? 30 : end_byte - start_byte),
+                error_text, children_desc);
+        } else {
+            snprintf(msg, sizeof(msg), "Unexpected syntax near '%.*s'",
+                (int)(end_byte - start_byte > 30 ? 30 : end_byte - start_byte),
+                error_text);
+        }
+    }
+
+    LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+    return error;
+}
+
+// Diagnose a MISSING node (parser error recovery inserted a token)
+static LambdaError* diagnose_missing_node(TSNode missing_node, const char* source, const char* file) {
+    const char* expected = ts_node_type(missing_node);
+    TSPoint start = ts_node_start_point(missing_node);
+
+    SourceLocation loc = src_loc(file, start.row + 1, start.column + 1);
+    loc.source = source;
+
+    char msg[256];
+    const char* help = nullptr;
+
+    // Common missing delimiters with help about matching opener
+    if (strcmp(expected, ")") == 0 || strcmp(expected, "}") == 0 ||
+        strcmp(expected, "]") == 0 || strcmp(expected, ">") == 0) {
+        char opener = (expected[0] == ')') ? '(' :
+                      (expected[0] == '}') ? '{' :
+                      (expected[0] == ']') ? '[' : '<';
+        uint32_t miss_byte = ts_node_start_byte(missing_node);
+        int opener_pos = find_matching_opener(source, miss_byte, opener, expected[0]);
+        if (opener_pos >= 0) {
+            uint32_t opener_line = byte_to_line(source, opener_pos);
+            uint32_t opener_col = byte_to_col(source, opener_pos);
+            snprintf(msg, sizeof(msg), "Expected '%s' — unclosed '%c' from line %u, column %u",
+                expected, opener, opener_line, opener_col);
+        } else {
+            snprintf(msg, sizeof(msg), "Expected '%s'", expected);
+        }
+    } else if (strcmp(expected, "=>") == 0) {
+        snprintf(msg, sizeof(msg), "Expected '=>' for function body");
+        help = "Expression functions need '=>':  fn name(params) => expr\n"
+               "          Or use braces for statement body:  fn name(params) { ... }";
+    } else {
+        snprintf(msg, sizeof(msg), "Expected '%s'", expected);
+    }
+
+    LambdaError* error = err_create(ERR_MISSING_TOKEN, msg, &loc);
+    if (help) error->help = strdup(help);
+    return error;
+}
+
+// Recursively find parse errors and create structured LambdaError objects.
+void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors) {
+    // ERROR node — diagnose and don't recurse into children
+    if (ts_node_is_error(node) || strcmp(ts_node_type(node), "ERROR") == 0) {
+        LambdaError* error = diagnose_error_node(node, source, file);
+        arraylist_append(errors, error);
+        log_error("syntax error at %s:%u:%u: %s", file,
+            error->location.line, error->location.column, error->message);
+        return;  // don't recurse into ERROR children
+    }
+
+    // MISSING node — parser inserted expected token
     if (ts_node_is_missing(node)) {
-        printf("PARSE ERROR: Missing node at Ln %u, Col %u: expected '%s'\n",
-               start_point.row + 1, start_point.column + 1, node_type);
-        log_error("Missing node at Ln %u, Col %u: expected %s",
-               start_point.row + 1, start_point.column + 1, node_type);
+        LambdaError* error = diagnose_missing_node(node, source, file);
+        arraylist_append(errors, error);
+        log_error("missing token at %s:%u:%u: %s", file,
+            error->location.line, error->location.column, error->message);
+        return;
     }
 
-    // Check for ERROR node type specifically (some parsers use this)
-    if (strcmp(node_type, "ERROR") == 0) {
-        printf("PARSE ERROR: ERROR node at Ln %u, Col %u - %u, Col %u\n",
-               start_point.row + 1, start_point.column + 1,
-               end_point.row + 1, end_point.column + 1);
-        log_error("ERROR node at Ln %u, Col %u - %u, Col %u",
-               start_point.row + 1, start_point.column + 1,
-               end_point.row + 1, end_point.column + 1);
-    }
-
+    // Recurse into children
     uint32_t child_count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < child_count; ++i) {
-        find_errors(ts_node_child(node, i));
+    for (uint32_t i = 0; i < child_count; i++) {
+        find_errors(ts_node_child(node, i), source, file, errors);
     }
 }
 
@@ -271,14 +634,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     TSNode root_node = ts_tree_root_node(tp->syntax_tree);
     if (ts_node_has_error(root_node)) {
         log_error("Syntax tree has errors.");
-        log_debug("Root node type: %s", ts_node_type(root_node));
-        log_debug("Root node is_error: %d", ts_node_is_error(root_node));
-        log_debug("Root node is_missing: %d", ts_node_is_missing(root_node));
-        log_debug("Root node has_error: %d", ts_node_has_error(root_node));
-        log_debug("Source pointer: %p", script->source);
 
-        // find and print syntax errors
-        find_errors(root_node);
+        // collect structured parse errors
+        if (!tp->errors) tp->errors = arraylist_new(8);
+        find_errors(root_node, tp->source, script_path, tp->errors);
+        tp->error_count = tp->errors->length;
         return;
     }
 
@@ -470,7 +830,7 @@ void runner_setup_context(Runner* runner) {
 
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
-    runner->context.num_stack = num_stack_create(16);
+    runner->context.nursery = gc_nursery_create(0);
     runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context (use shared fixed-precision context for runtime)
@@ -488,7 +848,6 @@ void runner_setup_context(Runner* runner) {
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
-    frame_start();
 }
 
 void runner_cleanup(Runner* runner) {
@@ -498,13 +857,9 @@ void runner_cleanup(Runner* runner) {
         return;
     }
 
-    // Only call frame_end if we set up a heap (which means runner_setup_context was called)
+    // heap cleanup is handled by gc_finalize_all_objects + pool_destroy
     if (runner->context.heap) {
-        log_debug("calling frame_end");
-        frame_end();
-        log_debug("after frame_end");
-    } else {
-        log_debug("no heap, skipping frame_end");
+        log_debug("heap cleanup starting");
     }
 
     // free final result
@@ -516,7 +871,7 @@ void runner_cleanup(Runner* runner) {
         // check memory leaks
         check_memory_leak();
         heap_destroy();
-        if (runner->context.num_stack) num_stack_destroy((num_stack_t*)runner->context.num_stack);
+        if (runner->context.nursery) gc_nursery_destroy(runner->context.nursery);
     }
     // decimal context is now shared global - don't free it
     runner->context.decimal_ctx = NULL;

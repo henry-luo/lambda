@@ -49,7 +49,6 @@ static String* create_test_string(const char* text) {
     String* result = (String*)malloc(total_size);
     if (!result) return NULL;
     result->len = len;
-    result->ref_cnt = 1;
     strcpy(result->chars, text);
     return result;
 }

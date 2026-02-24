@@ -96,18 +96,18 @@ protected:
 // 1. Symbol struct memory layout
 // ============================================================================
 
-// verify sizeof(Symbol) includes the ns pointer between ref_cnt and chars
+// verify sizeof(Symbol) includes the ns pointer before chars
 TEST_F(NamespaceTest, SymbolStructLayout) {
-    // Symbol has: uint32_t (len+ref_cnt) + Target* ns + flexible array chars[]
-    // On 64-bit: 4 bytes + 8 bytes = 12 bytes before chars[]
-    EXPECT_EQ(sizeof(Symbol), 16u);  // 4 + padding/alignment to 8 + 8 for ns, or 4+4(pad)+8
+    // Symbol has: uint32_t len + Target* ns + flexible array chars[]
+    // On 64-bit: 4 bytes + 4 padding + 8 bytes = 16 bytes before chars[]
+    EXPECT_EQ(sizeof(Symbol), 16u);  // 4 + padding(4) + 8 for ns
     // the key check: Symbol is larger than String due to ns field
     EXPECT_GT(sizeof(Symbol), sizeof(String));
 }
 
 // verify that String does NOT have the ns field
 TEST_F(NamespaceTest, StringStructLayout) {
-    // String has: uint32_t (len+ref_cnt) + flexible array chars[]
+    // String has: uint32_t len + flexible array chars[]
     // On 64-bit: 4 bytes before chars[]
     EXPECT_EQ(sizeof(String), 4u);
 }
@@ -124,7 +124,6 @@ TEST_F(NamespaceTest, CreateSymbol_NsIsNull) {
     ASSERT_NE(sym, nullptr);
     EXPECT_STREQ(sym->chars, "hello");
     EXPECT_EQ(sym->len, 5u);
-    EXPECT_EQ(sym->ref_cnt, 1u);
     EXPECT_EQ(sym->ns, nullptr);  // unqualified symbol
 }
 
@@ -631,10 +630,10 @@ TEST_F(NamespaceTest, CharsOffset_SymbolVsString) {
     ptrdiff_t str_offset = (char*)str->chars - (char*)str;
     ptrdiff_t sym_offset = (char*)sym->chars - (char*)sym;
 
-    // String: chars at offset 4 (after uint32_t len:22/ref_cnt:10)
+    // String: chars at offset 4 (after uint32_t len)
     EXPECT_EQ(str_offset, 4);
 
-    // Symbol: chars at offset 12 (after uint32_t len:22/ref_cnt:10 + Target* ns)
+    // Symbol: chars at offset 16 (after uint32_t len + padding + Target* ns)
     // On 64-bit with alignment: uint32_t(4) + padding(4) + Target*(8) = 16,
     // or uint32_t(4) + Target*(8) = 12 if packed
     // the actual offset depends on compiler alignment

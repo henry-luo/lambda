@@ -97,7 +97,6 @@ Symbol* MarkBuilder::createSymbol(const char* symbol, size_t len) {
     if (!symbol || len == 0) return nullptr;
     Symbol* sym = (Symbol*)arena_alloc(arena_, sizeof(Symbol) + len + 1);
     sym->len = len;
-    sym->ref_cnt = 1;
     sym->ns = nullptr;
     memcpy(sym->chars, symbol, len);
     sym->chars[len] = '\0';
@@ -122,7 +121,6 @@ String* MarkBuilder::createString(const char* str, size_t len) {
 
     // Allocate from arena (fast sequential allocation, no deduplication)
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
-    s->ref_cnt = 1;
     s->len = len;
     memcpy(s->chars, str, len);
     s->chars[len] = '\0';
@@ -245,7 +243,6 @@ Item MarkBuilder::createRange(int64_t start, int64_t end) {
 
     range->type_id = LMD_TYPE_RANGE;
     range->flags = 0;
-    range->ref_cnt = 1;
     range->start = start;
     range->end = end;
     range->length = (end >= start) ? (end - start + 1) : 0;
