@@ -129,6 +129,45 @@ table.latex-tabular .hline-bottom { border-bottom: 1px solid black; }
 .latex-sf { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
 .latex-sc { font-variant: small-caps; }
 .latex-sl { font-style: oblique; }
+.latex-part-heading {
+  text-align: center;
+  font-size: 2em;
+  font-weight: bold;
+  margin: 3em 0 2em;
+  page-break-before: always;
+}
+.latex-chapter-heading {
+  font-size: 1.8em;
+  font-weight: bold;
+  margin: 2em 0 1em;
+  page-break-before: always;
+}
+table.latex-tabular td[colspan],
+table.latex-tabular td[rowspan] {
+  font-weight: inherit;
+}
+.latex-book .latex-title { margin-bottom: 3em; }
+.latex-report .latex-title { margin-bottom: 3em; }
+.latex-report .latex-abstract {
+  margin: 2em 4em;
+  page-break-after: always;
+}
+.latex-theorem {
+  margin: 1em 0;
+  font-style: italic;
+}
+.latex-theorem .theorem-head {
+  font-weight: bold;
+  font-style: normal;
+  margin-right: 0.5em;
+}
+.latex-proof {
+  margin: 1em 0;
+}
+.latex-proof .proof-head {
+  font-style: italic;
+  margin-right: 0.5em;
+}
 "
 
 // return the stylesheet
