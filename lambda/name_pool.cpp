@@ -132,7 +132,6 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
     if (pool->parent) {
         String* parent_result = name_pool_lookup_strview(pool->parent, name);
         if (parent_result) {
-            parent_result->ref_cnt++;  // increment for this new reference
             return parent_result;
         }
     }
@@ -140,14 +139,12 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
     // 2. Try to find existing string by content in current pool
     String* existing = find_string_by_content(pool, name.str, name.length);
     if (existing) {
-        existing->ref_cnt++;
         return existing;
     }
 
     // 3. Create new string in current pool
     String* str = string_from_strview(name, pool->pool);
     if (str) {
-        str->ref_cnt = 1;
         // Insert with the String* and its corresponding StrView
         StrView str_view = {.str = str->chars, .length = str->len};
         NamePoolEntry entry = {str, str_view};
@@ -239,7 +236,6 @@ String* name_pool_create_symbol_len(NamePool* pool, const char* symbol, size_t l
 
     // Symbol too long - allocate normally from pool (no interning)
     String* str = string_from_strview({.str = symbol, .length = len}, pool->pool);
-    if (str) str->ref_cnt = 1;
     return str;
 }
 

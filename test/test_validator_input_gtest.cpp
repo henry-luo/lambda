@@ -38,7 +38,6 @@ String* create_lambda_string(const char* text) {
     if (!result) return nullptr;
 
     result->len = len;
-    result->ref_cnt = 1;
     strcpy(result->chars, text);
 
     return result;
@@ -77,7 +76,6 @@ protected:
         size_t len = strlen(value);
         String* str = (String*)pool_calloc(pool, sizeof(String) + len + 1);
         str->len = len;
-        str->ref_cnt = 0;
         strcpy(str->chars, value);
         Item item = {.item = s2it(str)};
         return *(ConstItem*)&item;

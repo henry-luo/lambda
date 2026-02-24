@@ -22,7 +22,6 @@ static String* create_lambda_string(const char* str) {
     size_t len = strlen(str);
     String* s = (String*)malloc(sizeof(String) + len + 1);
     s->len = len;
-    s->ref_cnt = 1;
     memcpy(s->chars, str, len);
     s->chars[len] = '\0';
     return s;

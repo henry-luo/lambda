@@ -654,7 +654,6 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
             memcpy(stream_data->chars, *pdf, data_length);
             stream_data->chars[data_length] = '\0';
             stream_data->len = data_length;
-            stream_data->ref_cnt = 0;
 
             Item data_item = {.item = s2it(stream_data)};
             ctx.builder.putToMap(stream_map, data_key, data_item);
@@ -776,7 +775,6 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                         flag_val->chars[0] = flag;
                                                         flag_val->chars[1] = '\0';
                                                         flag_val->len = 1;
-                                                        flag_val->ref_cnt = 0;
                                                         Item flag_item = {.item = s2it(flag_val)};
                                                         ctx.builder.putToMap(entry_map, flag_key, flag_item);
                                                     }

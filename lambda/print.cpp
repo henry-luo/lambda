@@ -979,7 +979,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_LOOP:
         log_debug("[loop expr:%s]", type_name);
-        print_ast_node(script, ((AstNamedNode*)node)->as, indent + 1);
+        print_ast_node(script, ((AstLoopNode*)node)->as, indent + 1);
         break;
     case AST_NODE_ARRAY: {
         log_debug("[array expr:%s]", type_name);

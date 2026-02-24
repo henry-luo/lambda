@@ -1,0 +1,15 @@
+"===== EXTENDED SYMBOL RESOLUTION TESTS =====1. textalpha:α2. textbeta:β3. textgamma:γ4. textdelta:δ5. textomega:ω6. textpi:π7. textsigma:σ8. textlambda:λ9. textAlpha:Α10. textGamma:Γ11. textDelta:Δ12. textOmega:Ω13. textSigma:Σ14. textPi:Π15. texteuro:€16. textcent:¢17. textyen:¥18. textsterling:£19. textwon:₩20. textdegree:°21. textcelsius:℃22. texttimes:×23. textdiv:÷24. textpm:±25. textsurd:√26. textonehalf:½27. textthreequarters:¾28. textonesuperior:¹29. texttwosuperior:²30. textthreesuperior:³31. textleftarrow:←32. textrightarrow:→33. textuparrow:↑34. textdownarrow:↓35. checkmark:✓36. textregistered:®37. texttrademark:™38. textmusicalnote:♪39. textnumero:№40. textestimated:℮41. IJ:Ĳ42. ij:ĳ43. TH:Þ44. th:þ45. DH:Ð46. dh:ð47. NG:Ŋ48. ng:ŋ49. textzerooldstyle:050. textfiveoldstyle:551. unknown returns null:"
+true
+"===== SPACING ELEMENT TESTS =====52. bigskip:"
+'div'
+"53. medskip:"
+'div'
+"54. smallskip:"
+'div'
+"55. quad:"
+'span'
+"56. qquad:"
+'span'
+"57. thinspace: 58. enspace: 59. noindent:"
+'span'
+"===== ALL TESTS DONE ====="

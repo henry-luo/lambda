@@ -247,7 +247,6 @@ void parse_ini(Input* input, const char* ini_string) {
                 global_name = (String*)pool_calloc(input->pool, sizeof(String) + 7);
                 if (global_name != NULL) {
                     global_name->len = 6;
-                    global_name->ref_cnt = 0;
                     memcpy(global_name->chars, "global", 6);
                     global_name->chars[6] = '\0';
 

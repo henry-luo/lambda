@@ -8,9 +8,8 @@
 #include "ast.hpp"
 
 typedef struct Heap {
-    Pool *pool;  // memory pool for the heap
-    // HeapEntry *first, *last;  // first and last heap entry
-    ArrayList *entries;  // list of allocation entries
+    Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
+    struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
 } Heap;
 
 void heap_init();
@@ -22,8 +21,6 @@ String* heap_create_name(const char* name);
 Symbol* heap_create_symbol(const char* symbol, size_t len);
 Symbol* heap_create_symbol(const char* symbol);
 void heap_destroy();
-void frame_start();
-void frame_end();
 void free_item(Item item, bool clear_entry);
 void expand_list(List *list);
 
@@ -71,7 +68,7 @@ AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_root(Script *script);
 void print_ts_root(const char *source, TSTree* syntax_tree);
 void print_tree(TSNode node, int depth);
-void find_errors(TSNode node);
+void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors);
 void write_node_source(Transpiler* tp, TSNode node);
 void write_type(StrBuf* code_buf, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);

@@ -32,4 +32,4 @@ true
 true
 "Test Unicode:31. index_of UTF-8:"
 7
-"32. slice UTF-8:éll===== ALL TESTS PASSED ====="
+"32. slice UTF-8:éllTest string(type(...)):33. int:int34. float:float35. string:string36. bool:bool37. null:null38. array:array[int]39. map:map40. symbol:symbol41. element:element42. list:list===== ALL TESTS PASSED ====="

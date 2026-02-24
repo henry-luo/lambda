@@ -351,7 +351,6 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             type_string = (String*)malloc(sizeof(String) + strlen(input_format) + 1);
             if (type_string) {
                 type_string->len = strlen(input_format);
-                type_string->ref_cnt = 0;
                 str_copy(type_string->chars, type_string->len + 1, input_format, type_string->len);
             }
         }
@@ -359,7 +358,6 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         Item data_item = {.item = ITEM_ERROR};
         if (url_string) {
             url_string->len = strlen(file_url);
-            url_string->ref_cnt = 0;
             str_copy(url_string->chars, url_string->len + 1, file_url, url_string->len);
 
             Input* input = input_from_url(url_string, type_string, nullptr, nullptr);

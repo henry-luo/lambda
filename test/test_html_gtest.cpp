@@ -24,7 +24,6 @@ String* create_lambda_string(const char* text) {
     if (!result) return NULL;
 
     result->len = len;
-    result->ref_cnt = 1;
     strcpy(result->chars, text);
 
     return result;

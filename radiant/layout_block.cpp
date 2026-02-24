@@ -1306,7 +1306,6 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
             String* text_string = (String*)arena_alloc(parent_elem->doc->arena,
                                                         sizeof(String) + content_len + 1);
             if (text_string) {
-                text_string->ref_cnt = 1;
                 text_string->len = content_len;
                 memcpy(text_string->chars, content, content_len);
                 text_string->chars[content_len] = '\0';

@@ -30,7 +30,6 @@ extern Pool* eval_context_get_pool(EvalContext* ctx);
 static Path ROOT_SENTINEL = {
     LMD_TYPE_PATH,  // type_id
     0,              // flags
-    0,              // ref_cnt
     NULL,           // name
     NULL            // parent
 };
@@ -72,7 +71,6 @@ void path_init(void) {
         Path* root = (Path*)pool_calloc(pool, sizeof(Path));
         root->type_id = LMD_TYPE_PATH;
         root->flags = 0;
-        root->ref_cnt = 0;
         root->name = scheme_names[i];  // static strings, no need to intern
         root->parent = &ROOT_SENTINEL;
         scheme_roots[i] = root;
@@ -138,7 +136,6 @@ Path* path_append_len(Path* parent, const char* segment, size_t len) {
     Path* path = (Path*)pool_calloc(pool, sizeof(Path));
     path->type_id = LMD_TYPE_PATH;
     path->flags = 0;
-    path->ref_cnt = 0;
     path->parent = parent;
 
     // Copy segment name into pool memory
@@ -455,7 +452,6 @@ static Path* path_append_segment_typed(Pool* pool, Path* parent, const char* seg
 
     Path* new_path = (Path*)pool_calloc(pool, sizeof(Path));
     new_path->type_id = LMD_TYPE_PATH;
-    new_path->ref_cnt = 0;
     new_path->parent = parent;
     PATH_SET_SEG_TYPE(new_path, seg_type);
 

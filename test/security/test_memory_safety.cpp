@@ -117,7 +117,7 @@ Test(memory_safety, null_pointer_handling_strings) {
     cr_assert_null(result1, "Concatenating two null strings should return null");
 
     // Test with one null input
-    String test_str = {.len = 5, .ref_cnt = 0, .chars = "test"};
+    String test_str = {.len = 5, .chars = "test"};
     String* result2 = fn_strcat(&test_str, NULL);
     cr_assert_null(result2, "Concatenating with null should return null");
 

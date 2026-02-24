@@ -182,8 +182,7 @@ typedef struct Item Item;
 // a fat string with prefixed length and flags
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
-    uint32_t len:22;  // string len , up to 4MB;
-    uint32_t ref_cnt:10;  // ref_cnt, up to 1024 refs
+    uint32_t len;  // string length
     char chars[];
 } String;
 #define STRING_STRUCT_DEFINED
@@ -192,8 +191,7 @@ typedef struct String {
 typedef struct Target Target;  // forward declaration for Symbol.ns
 
 typedef struct Symbol {
-    uint32_t len:22;    // symbol name length, up to 4MB
-    uint32_t ref_cnt:10;  // ref_cnt, up to 1024 refs
+    uint32_t len;       // symbol name length
     Target* ns;         // namespace target (NULL for unqualified symbols)
     char chars[];       // symbol name characters
 } Symbol;
@@ -212,14 +210,12 @@ struct Container {
             uint8_t reserved:4;
         };
     };
-    uint16_t ref_cnt;  // reference count
 };
 
 #ifndef __cplusplus
     struct Range {
         TypeId type_id;
         uint8_t flags;
-        uint16_t ref_cnt;  // reference count
         //---------------------
         int64_t start;  // inclusive start
         int64_t end;    // inclusive end
@@ -229,7 +225,6 @@ struct Container {
     struct List {
         TypeId type_id;
         uint8_t flags;
-        uint16_t ref_cnt;  // reference count
         //---------------------
         Item* items;  // pointer to items
         int64_t length;  // number of items
@@ -240,7 +235,6 @@ struct Container {
     struct ArrayInt {
         TypeId type_id;
         uint8_t flags;
-        uint16_t ref_cnt;  // reference count
         //---------------------
         int64_t* items;  // pointer to int56 values (stored as int64)
         int64_t length;  // number of items
@@ -251,7 +245,6 @@ struct Container {
     struct ArrayInt64 {
         TypeId type_id;
         uint8_t flags;
-        uint16_t ref_cnt;  // reference count
         //---------------------
         int64_t* items;  // pointer to 64-bit integer items
         int64_t length;  // number of items
@@ -262,7 +255,6 @@ struct Container {
     struct ArrayFloat {
         TypeId type_id;
         uint8_t flags;
-        uint16_t ref_cnt;  // reference count
         //---------------------
         double* items;  // pointer to items
         int64_t length;  // number of items
@@ -297,7 +289,6 @@ Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_spread(Array* arr, Item item);  // push item, spreading if spreadable array
 Item array_end(Array* arr);  // finalize and return array as Item
-void frame_end();  // cleanup memory frame after for-expression
 
 // Mark an item as spreadable (for spread operator *expr)
 Item item_spread(Item item);
@@ -309,7 +300,6 @@ typedef void* (*fn_ptr)();
 struct Function {
     uint8_t type_id;
     uint8_t arity;        // number of parameters (0-255)
-    uint16_t ref_cnt;     // reference count for memory management
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
@@ -361,7 +351,6 @@ typedef enum {
 struct Path {
     TypeId type_id;         // LMD_TYPE_PATH
     uint8_t flags;          // segment type (bits 0-1), metadata loaded (bit 7)
-    uint16_t ref_cnt;       // reference count
     const char* name;       // segment name (interned via name_pool), NULL for wildcards
     Path* parent;           // parent segment (NULL for root schemes)
     uint64_t result;        // cached resolved content (0 = not resolved yet)
