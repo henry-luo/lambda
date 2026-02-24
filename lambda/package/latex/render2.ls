@@ -6,6 +6,7 @@ import util: .lambda.package.latex.util
 import sym: .lambda.package.latex.symbols
 import math_bridge: .lambda.package.latex.math_bridge
 import spacing: .lambda.package.latex.elements.spacing
+import macros: .lambda.package.latex.macros
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -168,6 +169,9 @@ fn render_element(el, info) {
         // ---- footnotes ----
         case 'footnote': render_footnote(el, info)
 
+        // ---- captions (rendered by parent figure/table, suppress here) ----
+        case 'caption': null
+
         // ---- special characters ----
         case 'control_symbol': render_control_symbol(el)
         case 'controlspace_command': " "
@@ -212,6 +216,9 @@ fn render_element(el, info) {
         case 'j': "\u0237"
 
         // ---- skip commands ----
+        case 'newcommand': null
+        case 'renewcommand': null
+        case 'providecommand': null
         case 'setcounter': null
         case 'newcounter': null
         case 'addtocounter': null
@@ -609,17 +616,17 @@ fn render_abstract(el, info) {
 
 fn render_figure(el, info) {
     let items = render_children(el, 0, info)
-    // extract caption
-    let caption = util.find_child(el, 'caption')
+    // extract caption (may be nested inside paragraph)
+    let caption = util.find_descendant(el, 'caption')
     let cap_text = if (caption != null) util.text_of(caption) else null
     // look up figure number from info
     let fig_num = get_figure_num(el, info)
-    let caption_el = if (cap_text != null) {
+    let caption_el = if (cap_text != null) (
         <figcaption;
             <strong; "Figure " ++ string(fig_num) ++ ": ">
             cap_text
         >
-    } else null
+    ) else null
 
     <figure class: "latex-figure";
         for c in items { c }
@@ -699,15 +706,15 @@ fn check_theorem_match(theorems, text, env_type, i) {
 
 fn render_table_env(el, info) {
     let items = render_children(el, 0, info)
-    let caption = util.find_child(el, 'caption')
+    let caption = util.find_descendant(el, 'caption')
     let cap_text = if (caption != null) util.text_of(caption) else null
     let tab_num = get_table_num(el, info)
-    let caption_el = if (cap_text != null) {
+    let caption_el = if (cap_text != null) (
         <div class: "latex-table-caption";
             <strong; "Table " ++ string(tab_num) ++ ": ">
             cap_text
         >
-    } else null
+    ) else null
 
     <div class: "latex-table-wrapper";
         if caption_el != null { caption_el }
@@ -1245,6 +1252,32 @@ fn render_marginpar(el, info) {
 }
 
 fn render_generic(el, info) {
+    // check if this element is a macro invocation
+    let tag_str = string(name(el))
+    let macro_def = if (info.macros != null) macros.find_macro(info.macros, tag_str) else null
+    if (macro_def != null) render_macro_invocation(el, info, macro_def)
+    else render_generic_default(el, info)
+}
+
+fn render_macro_invocation(el, info, macro_def) {
+    let body_items = macros.substitute_body(macro_def.body, el)
+    let rendered = render_items(body_items, 0, len(body_items), info, [])
+    if (len(rendered) == 0) null
+    else if (len(rendered) == 1) rendered[0]
+    else <span; for c in rendered { c }>
+}
+
+fn render_items(items, i, n, info, acc) {
+    if (i >= n) { acc }
+    else {
+        let item = items[i]
+        let rendered = render_node(item, info)
+        let new_acc = if (rendered != null) acc ++ [rendered] else acc
+        render_items(items, i + 1, n, info, new_acc)
+    }
+}
+
+fn render_generic_default(el, info) {
     let n = len(el)
     if n == 0 { null }
     else {
