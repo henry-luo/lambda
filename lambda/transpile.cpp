@@ -2391,7 +2391,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
     strbuf_append_str(tp->code_buf, "({\n Array* arr_out=array_spreadable(); \n");
 
     // If order by is present, allocate keys array AFTER array_spreadable()
-    // inside the frame so it gets cleaned up by frame_end() in array_end()
+    // inside the array scope so it gets finalized by array_end()
     // fn_sort_by_keys runs before array_end, so arr_keys is still alive when needed
     if (has_order) {
         strbuf_append_str(tp->code_buf, " Array* arr_keys=array_plain();\n");
@@ -2600,12 +2600,10 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             transpile_box_item(tp, for_node->limit);
             strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
         }
-        // Finalize via array_end (handles frame_end + returns Item)
+        // Finalize via array_end (returns Item)
         strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
     } else if (has_offset || has_limit) {
         // Without order by, use fn_drop/fn_take which return spreadable Lists
-        // (frame_end first so results are allocated in outer frame)
-        strbuf_append_str(tp->code_buf, " frame_end();\n");
 
         // Apply OFFSET if present
         if (has_offset) {
@@ -4179,7 +4177,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         if (elmt_node->item) {
             strbuf_append_str(tp->code_buf, " list_end(el);})");
         }
-        else { // and no attr, thus no frame_end
+        else { // and no attr
             strbuf_append_str(tp->code_buf, " el;})");
         }
     }

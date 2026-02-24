@@ -18,8 +18,6 @@ extern Type TYPE_ANY, TYPE_INT;
 extern void* heap_alloc(int size, TypeId type_id);
 extern void heap_init();
 extern void heap_destroy();
-extern void frame_start();
-extern void frame_end();
 extern Url* get_current_dir();
 
 // Forward declare Runner helper functions from runner.cpp
@@ -2509,8 +2507,6 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
     } else if (has_offset || has_limit) {
         // Without order by, use fn_drop/fn_take which return spreadable results
-        // Call frame_end first so results are allocated in outer frame
-        emit_call_void_0(mt, "frame_end");
 
         MIR_reg_t cur_result = emit_box_container(mt, output); // cast Array* → Item
         if (has_offset) {
@@ -2850,7 +2846,6 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     // Handle empty arrays without array_end() which returns ITEM_NULL_SPREADABLE
     if (!arr_node->item) {
-        emit_call_void_0(mt, "frame_end");
         // Array* pointer is already a valid Item (container pointer)
         return arr;
     }
@@ -3202,7 +3197,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     int type_index = ((TypeMap*)map_node->type)->type_index;
 
-    // Create map: Map* m = map(type_index)  — this calls frame_start()
+    // Create map: Map* m = map(type_index)
     MIR_reg_t m = emit_call_1(mt, "map", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
 
     // Count value items
@@ -3211,11 +3206,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     while (item) { val_count++; item = item->next; }
 
     if (val_count == 0) {
-        // No fields - call frame_end() and return map
-        MirImportEntry* fe = ensure_import(mt, "frame_end", MIR_T_I64, 0, NULL, 0);
-        emit_insn(mt, MIR_new_call_insn(mt->ctx, 2,
-            MIR_new_ref_op(mt->ctx, fe->proto),
-            MIR_new_ref_op(mt->ctx, fe->import)));
+        // No fields - return empty map
         return m;
     }
 
@@ -3243,7 +3234,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         item = item->next;
     }
 
-    // Call map_fill(m, val1, val2, ...) — variadic, calls frame_end() internally
+    // Call map_fill(m, val1, val2, ...) — variadic
     MIR_reg_t filled = emit_vararg_call(mt, "map_fill", MIR_T_P, 1,
         MIR_T_P, MIR_new_reg_op(mt->ctx, m), vi, val_ops);
 
@@ -3266,7 +3257,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 
     TypeElmt* type = (TypeElmt*)elmt_node->type;
 
-    // Create element: Element* el = elmt(type_index) — calls frame_start() if has attrs/content
+    // Create element: Element* el = elmt(type_index) 
     MIR_reg_t el = emit_call_1(mt, "elmt", MIR_T_P, MIR_T_I64,
         MIR_new_int_op(mt->ctx, type->type_index));
 
@@ -3302,7 +3293,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             scan = scan->next;
         }
 
-        // Call elmt_fill(el, val1, val2, ...) — variadic, does NOT call frame_end
+        // Call elmt_fill(el, val1, val2, ...) — variadic
         emit_vararg_call(mt, "elmt_fill", MIR_T_P, 1,
             MIR_T_P, MIR_new_reg_op(mt->ctx, el), ai, attr_ops);
     }
@@ -3355,7 +3346,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             // Has attributes but no content — call list_end to finalize frame
             emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
-        // else: no attrs and no content — element is just a bare pointer, no frame_end needed
+        // else: no attrs and no content — element is just a bare pointer, 
     }
 
     return el;
@@ -4917,7 +4908,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         TypeObject* obj_type = (TypeObject*)obj_lit->type;
         int type_index = obj_type->type_index;
 
-        // create object: Object* o = object(type_index) — calls frame_start()
+        // create object: Object* o = object(type_index)
         MIR_reg_t o = emit_call_1(mt, "object", MIR_T_P, MIR_T_I64,
             MIR_new_int_op(mt->ctx, type_index));
 
@@ -4927,11 +4918,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         while (item) { val_count++; item = item->next; }
 
         if (val_count == 0) {
-            // no fields - call frame_end() and return
-            MirImportEntry* fe = ensure_import(mt, "frame_end", MIR_T_I64, 0, NULL, 0);
-            emit_insn(mt, MIR_new_call_insn(mt->ctx, 2,
-                MIR_new_ref_op(mt->ctx, fe->proto),
-                MIR_new_ref_op(mt->ctx, fe->import)));
+            // no fields - return empty object
             return o;
         }
 
@@ -4959,7 +4946,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             item = item->next;
         }
 
-        // call object_fill(o, val1, val2, ...) — variadic, calls frame_end()
+        // call object_fill(o, val1, val2, ...) — variadic
         MIR_reg_t filled = emit_vararg_call(mt, "object_fill", MIR_T_P, 1,
             MIR_T_P, MIR_new_reg_op(mt->ctx, o), vi, val_ops);
         return filled;
