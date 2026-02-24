@@ -289,7 +289,6 @@ Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_spread(Array* arr, Item item);  // push item, spreading if spreadable array
 Item array_end(Array* arr);  // finalize and return array as Item
-void frame_end();  // cleanup memory frame after for-expression
 
 // Mark an item as spreadable (for spread operator *expr)
 Item item_spread(Item item);

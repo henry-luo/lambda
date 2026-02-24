@@ -23,9 +23,6 @@ gc_heap_t* gc_heap_create(void) {
         return NULL;
     }
     gc->all_objects = NULL;
-    gc->frame_capacity = GC_FRAME_STACK_INITIAL;
-    gc->frame_stack = (gc_header_t**)calloc(gc->frame_capacity, sizeof(gc_header_t*));
-    gc->frame_depth = 0;
     gc->total_allocated = 0;
     gc->object_count = 0;
     return gc;
@@ -35,7 +32,6 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (!gc) return;
     // pool_destroy bulk-frees all pool-allocated memory (including all GCHeaders + objects)
     if (gc->pool) pool_destroy(gc->pool);
-    if (gc->frame_stack) free(gc->frame_stack);
     free(gc);
 }
 
@@ -90,26 +86,3 @@ void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
     gc->object_count--;
 }
 
-void gc_heap_frame_push(gc_heap_t* gc) {
-    if (!gc) return;
-    // grow frame stack if needed
-    if (gc->frame_depth >= gc->frame_capacity) {
-        int new_cap = gc->frame_capacity * 2;
-        gc->frame_stack = (gc_header_t**)realloc(gc->frame_stack,
-                                                  new_cap * sizeof(gc_header_t*));
-        gc->frame_capacity = new_cap;
-    }
-    // save current list head as frame marker
-    gc->frame_stack[gc->frame_depth++] = gc->all_objects;
-    log_debug("gc_heap_frame_push: depth=%d, marker=%p", gc->frame_depth, gc->all_objects);
-}
-
-gc_header_t* gc_heap_frame_pop(gc_heap_t* gc) {
-    if (!gc || gc->frame_depth <= 0) {
-        log_error("gc_heap_frame_pop: no frame to pop (depth=%d)", gc ? gc->frame_depth : -1);
-        return NULL;
-    }
-    gc_header_t* marker = gc->frame_stack[--gc->frame_depth];
-    log_debug("gc_heap_frame_pop: depth=%d, marker=%p", gc->frame_depth, marker);
-    return marker;
-}

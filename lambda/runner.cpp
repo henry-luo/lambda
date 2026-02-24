@@ -848,7 +848,6 @@ void runner_setup_context(Runner* runner) {
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
-    frame_start();
 }
 
 void runner_cleanup(Runner* runner) {
@@ -858,13 +857,9 @@ void runner_cleanup(Runner* runner) {
         return;
     }
 
-    // Only call frame_end if we set up a heap (which means runner_setup_context was called)
+    // heap cleanup is handled by gc_finalize_all_objects + pool_destroy
     if (runner->context.heap) {
-        log_debug("calling frame_end");
-        frame_end();
-        log_debug("after frame_end");
-    } else {
-        log_debug("no heap, skipping frame_end");
+        log_debug("heap cleanup starting");
     }
 
     // free final result

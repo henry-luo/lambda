@@ -40,7 +40,6 @@ static Item resolve_path_content(Path* path) {
 Array* array() {
     Array *arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
-    frame_start();
     return arr;
 }
 
@@ -56,7 +55,6 @@ Array* array_fill(Array* arr, int count, ...) {
         va_end(args);
     }
     log_debug("array_filled");
-    frame_end();
     log_item({.list = arr}, "array_filled");
     return arr;
 }
@@ -90,11 +88,10 @@ Item array_get(Array *array, int index) {
 ArrayInt* array_int() {
     ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;
-    frame_start();
     return arr;
 }
 
-// used when there's no interleaving with transpiled code, thus no frame_start
+// used when there's no interleaving with transpiled code
 ArrayInt* array_int_new(int length) {
     ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;
@@ -115,7 +112,6 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
         va_end(args);
     }
     log_debug("array_int_filled");
-    frame_end();
     return arr;
 }
 
@@ -137,7 +133,6 @@ Item array_int_get(ArrayInt *array, int index) {
 ArrayInt64* array_int64() {
     ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
     arr->type_id = LMD_TYPE_ARRAY_INT64;
-    frame_start();
     return arr;
 }
 
@@ -162,7 +157,6 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
         va_end(args);
     }
     log_debug("array_int64_filled");
-    frame_end();
     return arr;
 }
 
@@ -181,7 +175,6 @@ ArrayFloat* array_float() {
     ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
     log_debug("array_float_start");
-    frame_start();
     return arr;
 }
 
@@ -207,7 +200,6 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
         va_end(args);
     }
     log_debug("array_float_filled");
-    frame_end();
     return arr;
 }
 
@@ -287,12 +279,11 @@ List* list() {
     log_enter();
     List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
-    frame_start();
     return list;
 }
 
 Item list_end(List *list) {
-    frame_end();  log_leave();
+    log_leave();
     if (list->type_id == LMD_TYPE_ELEMENT) {
         log_debug("elmt_end!");
         log_item({.list = list}, "elmt_end");
@@ -342,14 +333,12 @@ Array* array_spreadable() {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->is_spreadable = true;  // mark as spreadable
-    frame_start();
     return arr;
 }
 
 // finalize spreadable array - returns array as Item (no flattening)
 // returns spreadable null for empty arrays so they can be skipped when spreading
 Item array_end(Array* arr) {
-    frame_end();
     log_debug("array_end: length=%ld, is_spreadable=%d", arr->length, arr->is_spreadable);
     if (arr->length == 0) {
         // return spreadable null - will be skipped when added to collections
@@ -485,7 +474,6 @@ Map* map(int type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
     map->type = map_type;
-    frame_start();
     return map;
 }
 
@@ -500,7 +488,6 @@ Map* map_fill(Map* map, ...) {
     set_fields(map_type, map->data, args);
     va_end(args);
     log_debug("map_filled");
-    frame_end();
     log_debug("map filled with type: %d, length: %ld", map_type->type_id, map_type->length);
     return map;
 }
@@ -623,10 +610,6 @@ Element* elmt(int type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeElmt *elmt_type = (TypeElmt*)(type_list->data[type_index]);
     elmt->type = elmt_type;
-    if (elmt_type->length || elmt_type->content_length) {
-        frame_start();
-    }
-    // else - bare element
     return elmt;
 }
 
@@ -641,7 +624,6 @@ Object* object(int type_index) {
         ? (TypeObject*)((TypeType*)stored)->type
         : (TypeObject*)stored;
     obj->type = obj_type;
-    frame_start();
     return obj;
 }
 
@@ -655,7 +637,6 @@ Object* object_fill(Object* obj, ...) {
     set_fields((TypeMap*)obj_type, obj->data, args);
     va_end(args);
     log_debug("object filled with type: %d, length: %ld", obj_type->type_id, obj_type->length);
-    frame_end();
     return obj;
 }
 
@@ -727,7 +708,6 @@ Element* elmt_fill(Element* elmt, ...) {
     va_start(args, count);
     set_fields((TypeMap*)elmt_type, elmt->data, args);
     va_end(args);
-    // no frame_end here, as there's still element body content
     return elmt;
 }
 
