@@ -8,6 +8,12 @@ import dc_article: .lambda.package.latex.docclass.article
 import dc_book: .lambda.package.latex.docclass.book
 import dc_report: .lambda.package.latex.docclass.report
 
+// helper: create a map from existing + one dynamic key
+fn set_key(m, k, v) {
+    let entry = map([k, v])
+    {m, entry}
+}
+
 // ============================================================
 // Public API
 // ============================================================
@@ -129,23 +135,23 @@ fn walk_children(el, i, n, state) {
 
 fn walk_documentclass(el, state) {
     let cls = trim(util.text_of(el))
-    if cls != "" { {docclass: cls, state} }
+    if cls != "" { {state, docclass: cls} }
     else { state }
 }
 
 fn walk_title(el, state) {
     let t = util.text_of(el)
-    {title: t, state}
+    {state, title: t}
 }
 
 fn walk_author(el, state) {
     let a = util.text_of(el)
-    {author: a, state}
+    {state, author: a}
 }
 
 fn walk_date(el, state) {
     let d = util.text_of(el)
-    {date: d, state}
+    {state, date: d}
 }
 
 // ============================================================
@@ -168,15 +174,15 @@ fn walk_heading(el, state, counter_name, html_level) {
 
     // record heading
     let entry = {level: html_level, number: sec_num, text: title_text, id: slug}
-    let new_heading_nums = {heading_nums: {slug: sec_num, state.heading_nums}}
+    let new_heading_nums = set_key(state.heading_nums, slug, sec_num)
     let new_headings = state.headings ++ [entry]
 
     let new_state = {
+        state,
         counters: new_counters,
         headings: new_headings,
-        heading_nums: new_heading_nums.heading_nums,
-        slug_counts: new_slug_counts,
-        state
+        heading_nums: new_heading_nums,
+        slug_counts: new_slug_counts
     }
     // continue walking children (might contain labels)
     walk_children(el, 0, len(el), new_state)
@@ -198,7 +204,7 @@ fn walk_figure(el, state) {
     let fig_text = trim(util.text_of(el))
     let entry = {number: fig_num, content: fig_text}
     let new_figures = state.figures ++ [entry]
-    let new_state = {counters: new_counters, figures: new_figures, state}
+    let new_state = {state, counters: new_counters, figures: new_figures}
     walk_children(el, 0, len(el), new_state)
 }
 
@@ -208,13 +214,13 @@ fn walk_table(el, state) {
     let tab_text = trim(util.text_of(el))
     let entry = {number: tab_num, content: tab_text}
     let new_tables = state.tables ++ [entry]
-    let new_state = {counters: new_counters, tables: new_tables, state}
+    let new_state = {state, counters: new_counters, tables: new_tables}
     walk_children(el, 0, len(el), new_state)
 }
 
 fn walk_equation(el, state) {
     let new_counters = step_counter(state.counters, "equation")
-    let new_state = {counters: new_counters, state}
+    let new_state = {state, counters: new_counters}
     walk_children(el, 0, len(el), new_state)
 }
 
@@ -224,7 +230,7 @@ fn walk_numbered_env(el, state, env_type) {
     let env_text = trim(util.text_of(el))
     let entry = make_thm_entry(env_type, env_num, env_text)
     let new_theorems = state.theorems ++ [entry]
-    let new_state = {counters: new_counters, theorems: new_theorems, state}
+    let new_state = {state, counters: new_counters, theorems: new_theorems}
     walk_children(el, 0, len(el), new_state)
 }
 
@@ -245,7 +251,7 @@ fn walk_bibitem(el, state) {
     let bib_num = len(state.bibitems) + 1
     let entry = make_bib_entry(bib_key, bib_num)
     let new_bibitems = state.bibitems ++ [entry]
-    {bibitems: new_bibitems, state}
+    {state, bibitems: new_bibitems}
 }
 
 fn make_bib_entry(k, n) {
@@ -279,8 +285,8 @@ fn walk_label(el, state) {
     let label_id = util.slugify(label_name)
 
     let entry = {type: label_type, number: label_number, id: label_id}
-    let new_labels = {labels: {label_name: entry, state.labels}}
-    {labels: new_labels.labels, state}
+    let new_labels = set_key(state.labels, label_name, entry)
+    {state, labels: new_labels}
 }
 
 // ============================================================
@@ -294,9 +300,9 @@ fn walk_footnote(el, state) {
     let content_text = trim(util.text_of(el))
     let fn_key = util.slugify(content_text)
     let entry = {number: fn_num, node: el}
-    let new_fn_map = {footnote_map: {fn_key: entry, state.footnote_map}}
+    let new_fn_map = set_key(state.footnote_map, fn_key, entry)
     let new_footnotes = state.footnotes ++ [entry]
-    {counters: new_counters, footnote_map: new_fn_map.footnote_map, footnotes: new_footnotes, state}
+    {state, counters: new_counters, footnote_map: new_fn_map, footnotes: new_footnotes}
 }
 
 // ============================================================
@@ -305,36 +311,36 @@ fn walk_footnote(el, state) {
 
 fn step_counter(counters, counter_name) {
     match counter_name {        case "part":
-            ({part: counters.part + 1, counters})        case "chapter":
-            {chapter: counters.chapter + 1, section: 0, subsection: 0, subsubsection: 0, counters}
+            ({counters, part: counters.part + 1})        case "chapter":
+            {counters, chapter: counters.chapter + 1, section: 0, subsection: 0, subsubsection: 0}
         case "section":
-            {section: counters.section + 1, subsection: 0, subsubsection: 0, counters}
+            {counters, section: counters.section + 1, subsection: 0, subsubsection: 0}
         case "subsection":
-            {subsection: counters.subsection + 1, subsubsection: 0, counters}
+            {counters, subsection: counters.subsection + 1, subsubsection: 0}
         case "subsubsection":
-            {subsubsection: counters.subsubsection + 1, counters}
+            {counters, subsubsection: counters.subsubsection + 1}
         case "figure":
-            {figure: counters.figure + 1, counters}
+            {counters, figure: counters.figure + 1}
         case "table":
-            {table: counters.table + 1, counters}
+            {counters, table: counters.table + 1}
         case "equation":
-            {equation: counters.equation + 1, counters}
+            {counters, equation: counters.equation + 1}
         case "theorem":
-            {theorem: counters.theorem + 1, counters}
+            {counters, theorem: counters.theorem + 1}
         case "lemma":
-            {lemma: counters.lemma + 1, counters}
+            {counters, lemma: counters.lemma + 1}
         case "corollary":
-            {corollary: counters.corollary + 1, counters}
+            {counters, corollary: counters.corollary + 1}
         case "proposition":
-            {proposition: counters.proposition + 1, counters}
+            {counters, proposition: counters.proposition + 1}
         case "definition":
-            {definition: counters.definition + 1, counters}
+            {counters, definition: counters.definition + 1}
         case "example":
-            {example: counters.example + 1, counters}
+            {counters, example: counters.example + 1}
         case "remark":
-            {remark: counters.remark + 1, counters}
+            {counters, remark: counters.remark + 1}
         case "footnote":
-            {footnote: counters.footnote + 1, counters}
+            {counters, footnote: counters.footnote + 1}
         default: counters
     }
 }
@@ -346,9 +352,9 @@ fn step_counter(counters, counter_name) {
 fn make_unique_slug(base, counts) {
     let current = counts[base]
     if (current == null) {
-        {slug: base, counts: {base: 1, counts}}
+        {slug: base, counts: set_key(counts, base, 1)}
     } else {
         let next = current + 1
-        {slug: base ++ "-" ++ string(next), counts: {base: next, counts}}
+        {slug: base ++ "-" ++ string(next), counts: set_key(counts, base, next)}
     }
 }
