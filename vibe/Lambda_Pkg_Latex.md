@@ -1143,28 +1143,33 @@ set_key(state.footnote_map, fn_key, entry)      // dynamic footnote key
 
 This pattern is necessary any time a map key must be computed at runtime. Without it, all dynamic keys silently become unused literal identifiers, and the map lookups later return `null`.
 
-### 11.10 Element Nodes with Null Type in Tree-Sitter LaTeX AST
+### 11.10 `#N` Placeholder Nodes Are Symbols, Not Elements
 
-**Status:** Worked Around — manual `name()` inspection  
-**Severity:** Medium — confusing runtime behavior
+**Status:** Fixed — `string(type())` now handles `Type` values; `is symbol` works for dispatch  
+**Severity:** Medium — confusing runtime behavior, silent data loss in tree traversal
 
-Certain tree-sitter LaTeX AST nodes — specifically `#1`, `#2`, etc. (macro parameter references inside `\newcommand` bodies) — produce Lambda element nodes where `type()` returns `null` and `node is element` returns `false`, yet `name(node)` returns the node's tag (e.g., `"#1"`):
+The C++ LaTeX parser (`input-latex-ts.cpp` line 1408) constructs `#1`, `#2`, etc. (macro parameter references inside `\newcommand` bodies) as **symbols** via `y2it(builder.createSymbol(source + start, len))`. This means these nodes are an unexpected third type among element children — neither string nor element:
 
 ```lambda
-let body_child = macro_body[1]
-type(body_child)         // null
-body_child is element    // false
-name(body_child)         // "#1"
+let body = newcommand_node[2]   // curly_group body of \newcommand{\greeting}[1]{Hello, #1!}
+// body children:
+//   body[0] is_str=true  is_el=false is_sym=false  name=null    ← "Hello, " (string)
+//   body[1] is_str=false is_el=false is_sym=true   name='#1'    ← #1 placeholder (SYMBOL)
+//   body[2] is_str=true  is_el=false is_sym=false  name=null    ← "!" (string)
 ```
 
-This creates a "neither string nor element" node that falls through standard type-dispatch patterns (`if (x is string) ... else if (x is element) ...`), causing it to be silently dropped.
+The `is symbol` check works correctly. Previously, `string(type(x))` on these nodes returned `null` because `fn_string()` lacked a `LMD_TYPE_TYPE` case — this has been **fixed** by adding the missing case to `fn_string()` in `lambda-eval.cpp`. Now `string(type(x))` correctly returns `"symbol"`, `"string"`, `"element"`, etc. for all element children.
 
-**Workaround:** Check `name()` directly instead of relying on type dispatch:
+**Root cause:** The C++ parser embeds symbols as direct children of elements alongside strings. Lambda's standard tree-traversal patterns assume children are either strings or elements. Symbols are a third case that must be explicitly handled.
+
+**Workaround:** Check `is symbol` or inspect `name()` to detect parameter references:
 
 ```lambda
 fn is_param_ref(node) {
-    let tag = name(node)
-    if (tag != null) check_param_tag(tag) else false
+    if (node is symbol) {
+        let tag = name(node)
+        if (tag != null) check_param_tag(string(tag)) else false
+    } else false
 }
 
 fn check_param_tag(tag) {
@@ -1172,7 +1177,11 @@ fn check_param_tag(tag) {
 }
 ```
 
-**Impact:** Macro parameter substitution in `macros.ls` was completely broken until this workaround was added. `\newcommand{\greeting}[1]{Hello, #1!}` followed by `\greeting{World}` produced `Hello, #1!` instead of `Hello, World!` because the `#1` node was silently skipped during tree traversal.
+**Note on `name()`:** For symbols, `name()` returns the symbol itself (e.g., `'#1'`). Since `name()` returns a symbol, string comparisons like `name(x) == "#1"` will fail silently (issue **11.4**). Use `name(x) == '#1'` with symbol literals, or convert via `string(name(x)) == "#1"`.
+
+**Impact:** Macro parameter substitution in `macros.ls` was completely broken until this workaround was added. `\newcommand{\greeting}[1]{Hello, #1!}` followed by `\greeting{World}` produced `Hello, #1!` instead of `Hello, World!` because the `#1` symbol node fell through the `if (x is string) ... else if (x is element) ...` dispatch and was silently dropped.
+
+**Fix applied:** The `type()` function always returned the correct `Type` value, but `string()` did not handle `Type` values (type id `LMD_TYPE_TYPE`). A `case LMD_TYPE_TYPE` was added to `fn_string()` in `lambda-eval.cpp` that extracts the inner type name via `get_type_name()`. Now `string(type(123))` → `"int"`, `string(type('sym'))` → `"symbol"`, etc. Unit tests for `string(type(...))` covering all basic types were added to `test/lambda/string_funcs.ls`.
 
 ### 11.11 `"expected a map, got data of type map"` Runtime Warning
 
@@ -1230,8 +1239,8 @@ run_script_mir(&lambda_runtime, nullptr, script_path, false);
 | 11.7  | ~~`if-else` in `for`~~        | N/A      | Not a Bug     | N/A — works correctly                    |
 | 11.8  | Map literal after `if`        | Medium   | By Design     | Low — wrap map in parentheses            |
 | 11.9  | Map keys always literal       | Medium   | By Design     | Medium — `map([k,v])` helper required    |
-| 11.10 | Null-type AST nodes           | Medium   | Worked Around | Medium — manual `name()` checks          |
+| 11.10 | `#N` placeholders are symbols  | Medium   | Fixed | `string(type())` fix + `is symbol` checks |
 | 11.11 | "expected a map" warning      | Low      | Outstanding   | None — cosmetic only                     |
 | 11.12 | `run_script_mir` `current_dir`| High     | Fixed         | One-line fix in C++                      |
 
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,444 lines across 15 files). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, **11.6**, and **11.12** have been fixed in the language or runtime. Issue **11.4** is mitigated by a compile-time type check. Issues **11.8** and **11.9** are by design — requiring parenthesization and the `map()` constructor respectively. Issue **11.10** (null-type AST nodes) is a tree-sitter/C++ parser interface issue that required special handling in macro expansion. Issue **11.11** remains outstanding but has no functional impact.
+**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,444 lines across 15 files). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, **11.6**, and **11.12** have been fixed in the language or runtime. Issue **11.4** is mitigated by a compile-time type check. Issues **11.8** and **11.9** are by design — requiring parenthesization and the `map()` constructor respectively. Issue **11.10** (placeholder symbols) is resolved — `string(type())` now works after adding the missing `LMD_TYPE_TYPE` case to `fn_string()`. Issue **11.11** remains outstanding but has no functional impact.

@@ -1456,6 +1456,14 @@ String* fn_string(Item itm) {
         strbuf_free(sb);
         return result;
     }
+    case LMD_TYPE_TYPE: {
+        // convert Type value to its name string, e.g. type(123) → "int"
+        TypeType* type_type = (TypeType*)itm.type;
+        if (!type_type || !type_type->type) return &STR_NULL;
+        const char* name = get_type_name(type_type->type->type_id);
+        if (name) return heap_strcpy((char*)name, strlen(name));
+        return &STR_NULL;
+    }
     case LMD_TYPE_ERROR:
         return &STR_ERROR;  // static error string — never NULL, prevents crash in callers
     default:

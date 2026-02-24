@@ -64,4 +64,16 @@ let sym1 = 'hello_world'
 "31. index_of UTF-8:"; index_of("héllo wörld", "ö")
 "32. slice UTF-8:"; slice("héllo", 1, 4)
 
+"Test string(type(...)):"
+"33. int:"; string(type(123))
+"34. float:"; string(type(3.14))
+"35. string:"; string(type("hello"))
+"36. bool:"; string(type(true))
+"37. null:"; string(type(null))
+"38. array:"; string(type([1, 2, 3]))
+"39. map:"; string(type({a: 1}))
+"40. symbol:"; string(type('sym'))
+"41. element:"; string(type(<div "hello">))
+"42. list:"; string(type((1, 2, 3)))
+
 "===== ALL TESTS PASSED ====="
