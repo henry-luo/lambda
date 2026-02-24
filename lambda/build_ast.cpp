@@ -2617,6 +2617,30 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
         type_id = LMD_TYPE_BOOL;
+
+        // static type check for equality/inequality: catch comparisons between
+        // incompatible concrete types where one side is a literal
+        // e.g. name(x) == "paragraph" — symbol vs string literal, always false
+        if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE) {
+            bool left_is_literal = ast_node->left->type->is_literal;
+            bool right_is_literal = ast_node->right->type->is_literal;
+            if ((left_is_literal || right_is_literal) &&
+                left_type != LMD_TYPE_ANY && right_type != LMD_TYPE_ANY &&
+                left_type != LMD_TYPE_NULL && right_type != LMD_TYPE_NULL &&
+                left_type != LMD_TYPE_ERROR && right_type != LMD_TYPE_ERROR &&
+                left_type != right_type) {
+                // string vs symbol: always wrong, silent failure — the primary footgun
+                bool is_string_symbol = (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_SYMBOL) ||
+                                        (left_type == LMD_TYPE_SYMBOL && right_type == LMD_TYPE_STRING);
+                if (is_string_symbol) {
+                    record_semantic_error(tp, bi_node, ERR_TYPE_MISMATCH,
+                        "comparing '%s' with '%s' will always be %s — did you mean to use a %s literal?",
+                        get_type_name(left_type), get_type_name(right_type),
+                        ast_node->op == OPERATOR_EQ ? "false" : "true",
+                        left_is_literal ? get_type_name(right_type) : get_type_name(left_type));
+                }
+            }
+        }
     }
     else if (ast_node->op == OPERATOR_IDIV) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
