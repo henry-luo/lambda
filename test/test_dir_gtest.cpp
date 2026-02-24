@@ -40,7 +40,7 @@ protected:
         // Set up a minimal context for path operations
         pool = pool_create();
         test_heap.pool = pool;
-        test_heap.entries = nullptr;
+        test_heap.gc = nullptr;
         
         memset(&test_context, 0, sizeof(test_context));
         test_context.heap = &test_heap;
@@ -197,7 +197,7 @@ protected:
         // Set up a minimal context for path operations
         pool = pool_create();
         test_heap.pool = pool;
-        test_heap.entries = nullptr;
+        test_heap.gc = nullptr;
         
         memset(&test_context, 0, sizeof(test_context));
         test_context.heap = &test_heap;
