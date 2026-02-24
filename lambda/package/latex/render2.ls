@@ -7,6 +7,7 @@ import sym: .lambda.package.latex.symbols
 import math_bridge: .lambda.package.latex.math_bridge
 import spacing: .lambda.package.latex.elements.spacing
 import macros: .lambda.package.latex.macros
+import boxes: .lambda.package.latex.elements.boxes
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -141,6 +142,21 @@ fn render_element(el, info) {
         case 'remark': render_theorem_env(el, info, "Remark", "remark")
         case 'proof': render_proof_env(el, info)
 
+        // ---- boxes ----
+        case 'fbox': boxes.render_fbox(render_children(el, 0, info))
+        case 'mbox': boxes.render_mbox(render_children(el, 0, info))
+        case 'frame': boxes.render_frame(render_children(el, 0, info))
+        case 'makebox': boxes.render_makebox(el, render_children_skip_brack(el, info))
+        case 'framebox': boxes.render_framebox(el, render_children_skip_brack(el, info))
+        case 'parbox': boxes.render_parbox(el, render_children_skip_brack(el, info))
+        case 'raisebox': boxes.render_raisebox(el, render_children_skip_brack(el, info))
+        case 'llap': boxes.render_llap(render_children(el, 0, info))
+        case 'rlap': boxes.render_rlap(render_children(el, 0, info))
+        case 'smash': boxes.render_smash(render_children(el, 0, info))
+        case 'phantom': boxes.render_phantom(render_children(el, 0, info))
+        case 'hphantom': boxes.render_hphantom(render_children(el, 0, info))
+        case 'vphantom': boxes.render_vphantom(render_children(el, 0, info))
+
         // ---- tables ----
         case 'table': render_table_env(el, info)
         case 'tabular': render_tabular(el, info)
@@ -154,6 +170,18 @@ fn render_element(el, info) {
         case 'newpage': <hr class: "latex-pagebreak">
         case 'clearpage': <hr class: "latex-pagebreak">
         case 'hfill': <span class: "latex-hfill">
+        case 'bigskip': spacing.render_bigskip_el()
+        case 'medskip': spacing.render_medskip_el()
+        case 'smallskip': spacing.render_smallskip_el()
+        case 'bigbreak': spacing.render_bigbreak_el()
+        case 'medbreak': spacing.render_medbreak_el()
+        case 'smallbreak': spacing.render_smallbreak_el()
+        case 'quad': spacing.render_quad_el()
+        case 'qquad': spacing.render_qquad_el()
+        case 'enspace': spacing.render_enspace_el()
+        case 'thinspace': spacing.render_thinspace_el()
+        case 'negthinspace': spacing.render_negthinspace_el()
+        case 'noindent': spacing.render_noindent_el()
 
         // ---- cross references ----
         case 'label': render_label(el, info)
@@ -215,34 +243,37 @@ fn render_element(el, info) {
         case 'i': "\u0131"
         case 'j': "\u0237"
 
-        // ---- skip commands ----
-        case 'newcommand': null
-        case 'renewcommand': null
-        case 'providecommand': null
-        case 'setcounter': null
-        case 'newcounter': null
-        case 'addtocounter': null
-        case 'stepcounter': null
-        case 'comment': null
-        case 'picture': null
-        case 'put': null
-        case 'line': null
-        case 'vector': null
-        case 'circle': null
-        case 'oval': null
-        case 'bezier': null
-        case 'qbezier': null
-        case 'unitlength': null
-        case 'linethickness': null
-        case 'thinlines': null
-        case 'thicklines': null
-
-        // ---- other ----
-        case 'includegraphics': render_includegraphics(el)
-        case 'marginpar': render_marginpar(el, info)
-
-        default: render_generic(el, info)
+        // ---- extended symbols (textgreek, textcomp, gensymb) ----
+        default: render_extended_or_generic(el, info)
     }
+}
+
+// skip commands that produce null output
+let SKIP_COMMANDS = {
+    "newcommand": true, "renewcommand": true, "providecommand": true,
+    "setcounter": true, "newcounter": true, "addtocounter": true,
+    "stepcounter": true, "comment": true,
+    "picture": true, "put": true, "line": true, "vector": true,
+    "circle": true, "oval": true, "bezier": true, "qbezier": true,
+    "unitlength": true, "linethickness": true, "thinlines": true,
+    "thicklines": true
+}
+
+// Fallback: check skip commands, extended symbol map, then macro, then generic
+fn render_extended_or_generic(el, info) {
+    let tag_str = string(name(el))
+    // skip commands that are no-ops
+    if (SKIP_COMMANDS[tag_str] == true) { null }
+    // other specific commands
+    else if (tag_str == "includegraphics") { render_includegraphics(el) }
+    else if (tag_str == "marginpar") { render_marginpar(el, info) }
+    else { resolve_extended_or_generic(tag_str, el, info) }
+}
+
+fn resolve_extended_or_generic(tag_str, el, info) {
+    let ext = sym.resolve_extended(tag_str)
+    if (ext != null) { ext }
+    else { render_generic(el, info) }
 }
 
 // ============================================================
@@ -253,6 +284,26 @@ fn render_children(el, from_idx, info) {
     let n = len(el)
     if from_idx >= n { [] }
     else { collect_children(el, from_idx, n, [], info) }
+}
+
+// render children but skip brack_group elements (used by box commands)
+fn render_children_skip_brack(el, info) {
+    let n = len(el)
+    collect_children_skip_brack(el, 0, n, [], info)
+}
+
+fn collect_children_skip_brack(el, i, n, acc, info) {
+    if i >= n { acc }
+    else {
+        let child = el[i]
+        if (child is element and string(name(child)) == "brack_group")
+            collect_children_skip_brack(el, i + 1, n, acc, info)
+        else {
+            let rendered = render_node(child, info)
+            let new_acc = if (rendered != null) acc ++ [rendered] else acc
+            collect_children_skip_brack(el, i + 1, n, new_acc, info)
+        }
+    }
 }
 
 fn collect_children(el, i, n, acc, info) {
