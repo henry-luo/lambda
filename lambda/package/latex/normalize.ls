@@ -37,6 +37,8 @@ fn normalize_element(el) {
         case 'nbsp':        "\u00A0"
         case 'control_symbol': resolve_control_symbol(el)
         case 'controlspace_command': " "
+        case 'comment':     null
+        case 'line_comment': null
         default:            normalize_children(el)
     }
 }
@@ -71,9 +73,55 @@ fn normalize_children(el) {
                         let normed = normalize(child)
                         where normed != null)
                     normed)
+        // merge adjacent text nodes
+        let merged = merge_adjacent_text(kids, 0, len(kids), [])
+        // flatten single-child group wrappers
+        let flat = flatten_groups(merged)
         // rebuild element with normalized children
-        rebuild_element(el, kids)
+        rebuild_element(el, flat)
     }
+}
+
+// merge consecutive string children into a single string
+fn merge_adjacent_text(items, i, n, acc) {
+    if (i >= n) acc
+    else merge_next(items, i, n, acc)
+}
+
+fn merge_next(items, i, n, acc) {
+    let item = items[i]
+    let next_is_text = i + 1 < n and items[i + 1] is string
+    if (item is string and next_is_text) merge_text_run(items, i, n, "", acc)
+    else if (item is string) merge_adjacent_text(items, i + 1, n, acc ++ [item])
+    else merge_adjacent_text(items, i + 1, n, acc ++ [item])
+}
+
+fn merge_text_run(items, i, n, buf, acc) {
+    if (i >= n) acc ++ [buf]
+    else merge_text_step(items, i, n, buf, acc)
+}
+
+fn merge_text_step(items, i, n, buf, acc) {
+    let item = items[i]
+    if (item is string) merge_text_run(items, i + 1, n, buf ++ item, acc)
+    else merge_adjacent_text(items, i, n, acc ++ [buf])
+}
+
+// flatten single-child group/curly_group wrappers
+fn flatten_groups(items) {
+    (for (item in items) try_flatten(item))
+}
+
+fn try_flatten(item) {
+    if (item is element) flatten_if_wrapper(item)
+    else item
+}
+
+fn flatten_if_wrapper(el) {
+    let tag = name(el)
+    let is_wrapper = (tag == 'group' or tag == 'curly_group' or tag == 'text_group')
+    if (is_wrapper and len(el) == 1) el[0]
+    else el
 }
 
 // rebuild an element preserving its tag and attributes but replacing children
