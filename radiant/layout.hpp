@@ -120,6 +120,11 @@ typedef struct BlockContext {
     float float_left_edge;      // Left edge of content area (usually 0)
     float float_right_edge;     // Right edge of content area
 
+    // CSS 2.1 §9.5.2: Saved clear_y for deferred clearance computation.
+    // Set in layout_block_content clear check, read in layout_block margin collapsing.
+    // -1 = no clearance applied, >= 0 = clearance was applied (skip margin collapse).
+    float saved_clear_y;
+
     // =========================================================================
     // Memory
     // =========================================================================

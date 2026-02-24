@@ -427,9 +427,8 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         } else {
             value = *block->blk->line_height;
         }
-    } else { // normal initial value
-        value.type = CSS_VALUE_TYPE_KEYWORD;
-        value.data.keyword = CSS_VALUE_NORMAL;
+    } else { // no explicit value → inherit from parent (line-height is an inherited property)
+        value = inherit_line_height(lycon, block);
     }
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         // 'normal' line height
@@ -665,6 +664,17 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // for inline elements, apply to all children
         ViewSpan* span = (ViewSpan*)view;
         span_vertical_align(lycon, span);
+        // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,
+        // recompute the span's bounding box when the span has borders or padding.
+        // compute_span_bounding_box was called earlier during layout_inline() before
+        // vertical alignment, so the span's y/height become stale when borders push
+        // the box beyond the content area and text positions shift.
+        // For borderless spans, the initial bounding box already correctly reflects
+        // the content area including half-leading offsets.
+        if (span->bound && (span->bound->border ||
+                            span->bound->padding.top > 0 || span->bound->padding.bottom > 0)) {
+            compute_span_bounding_box(span, false);
+        }
     }
     else {
         log_debug("view_vertical_align: unknown view type %d", view->view_type);
@@ -1103,6 +1113,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             display = resolved;
         }
 
+        // CSS 2.1 §17.2.1: table-column and table-column-group elements do not
+        // generate boxes. They only serve to define column properties for table layout.
+        // When orphaned (outside a table context), they should not be rendered.
+        if (display.inner == CSS_VALUE_TABLE_COLUMN || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
+            log_debug("skipping table-column/table-column-group element (no visual rendering)");
+            return;
+        }
+
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
@@ -1358,19 +1376,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
 
         if (body_view) {
-            float body_total_height = body_view->height;
-            if (body_view->bound) {
-                body_total_height += body_view->bound->margin.top + body_view->bound->margin.bottom;
-            }
-            // Include html's border+padding top so finalize_block_flow gets the full content height
-            float html_bp_top = 0;
-            if (html->bound) {
-                if (html->bound->border) html_bp_top += html->bound->border->width.top;
-                html_bp_top += html->bound->padding.top;
-            }
-            lycon->block.advance_y = html_bp_top + body_total_height;
-            log_debug("Body layout done: body->height=%.1f, total=%.1f, advance_y=%.1f",
-                body_view->height, body_total_height, lycon->block.advance_y);
+            // advance_y was already correctly computed by layout_block() above,
+            // including margin collapsing (CSS 2.1 §8.3.1) and self-collapsing
+            // block handling. Do NOT override it with a naive margin sum.
+            log_debug("Body layout done: body->height=%.1f, advance_y=%.1f",
+                body_view->height, lycon->block.advance_y);
         } else {
             log_debug("Could not find body view in html children");
         }

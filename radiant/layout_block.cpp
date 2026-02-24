@@ -65,6 +65,7 @@ bool is_table_internal_display(CssEnum display);
 
 // Forward declarations for min/max constraint functions
 float adjust_min_max_height(ViewBlock* block, float height);
+float adjust_min_max_width(ViewBlock* block, float width);
 
 // Forward declaration for self-collapsing block check (used by compute_collapsible_bottom_margin)
 static bool is_block_self_collapsing(ViewBlock* vb);
@@ -691,16 +692,29 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
         child = (View*)child->next_sibling;
     }
 
-    // Skip self-collapsing blocks with zero margin at the end
+    // Skip self-collapsing blocks with zero margin at the end.
+    // CSS 2.1 §9.2.1.1: Inline content between/after block children is wrapped
+    // in anonymous blocks. If the inline content has zero height (no text, no
+    // replaced elements, no inline elements with substance), the implicit
+    // anonymous block is self-collapsing and doesn't prevent margin collapse.
     View* effective_last = last_in_flow;
-    while (effective_last && effective_last->is_block()) {
-        ViewBlock* vb = (ViewBlock*)effective_last;
-        float mb = vb->bound ? vb->bound->margin.bottom : 0;
-        if (mb == 0 && is_block_self_collapsing(vb)) {
-            effective_last = effective_last->prev_placed_view();
-            continue;
+    while (effective_last) {
+        if (effective_last->is_block()) {
+            ViewBlock* vb = (ViewBlock*)effective_last;
+            float mb = vb->bound ? vb->bound->margin.bottom : 0;
+            if (mb == 0 && is_block_self_collapsing(vb)) {
+                effective_last = effective_last->prev_placed_view();
+                continue;
+            }
+            break;
+        } else {
+            // Inline/text with zero height = empty anonymous block wrapper
+            if (effective_last->height <= 0) {
+                effective_last = effective_last->prev_placed_view();
+                continue;
+            }
+            break;
         }
-        break;
     }
 
     if (!effective_last || !effective_last->is_block()) return 0;
@@ -722,7 +736,9 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
                 if (is_inline_level) return 0;  // content separates margins
                 if (!is_truly_out_of_flow && sb->height > 0) return 0;
             } else {
-                return 0;  // non-block content separates margins
+                // CSS 2.1 §9.2.1.1: Zero-height inline/text = empty anonymous
+                // block wrapper; doesn't separate margins
+                if (sibling->height > 0) return 0;
             }
         }
         sibling = (View*)sibling->next_sibling;
@@ -780,6 +796,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             }
         }
         block->width = min(max(flow_width, min_bp_width), block->width);
+        // CSS 2.1 §10.3.9 + §10.4: Apply min-width/max-width constraints
+        // to inline-block shrink-to-fit width, same as other auto-width paths
+        block->width = adjust_min_max_width(block, block->width);
         log_debug("inline-block final width set to: %f, text_align=%d", block->width, lycon->block.text_align);
 
         // For inline-block with auto width and text-align:center/right,
@@ -833,7 +852,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         }
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {
-            if (lycon->block.parent) lycon->block.parent->max_width = max(lycon->block.parent->max_width, flow_width);
+            // CSS 2.1 §10.3.9: Inline-blocks are atomic inline-level boxes.
+            // The parent already accounts for the inline-block's border-box width
+            // via advance_x; internal overflow should not inflate the parent's
+            // max_width used for shrink-to-fit width calculations.
+            // CSS 2.1 §10.4: When max-width constrains a box, the overflow is
+            // the element's own styling choice. The parent's shrink-to-fit
+            // should use the constrained width, not the internal overflow.
+            bool is_max_width_overflow = block->blk && block->blk->given_max_width >= 0;
+            if (display != CSS_VALUE_INLINE_BLOCK && !is_max_width_overflow && lycon->block.parent) {
+                lycon->block.parent->max_width = max(lycon->block.parent->max_width, flow_width);
+            }
         }
         else if (block->scroller->overflow_x == CSS_VALUE_SCROLL ||
             block->scroller->overflow_x == CSS_VALUE_AUTO) {
@@ -1480,16 +1509,31 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
     }
 
     // Float context is now unified in BlockContext - no need to create separate context
+    // CSS 2.1 §9.5: Floats belong to their nearest BFC ancestor, not to non-BFC
+    // parent blocks. Only set establishing_element if the parent ACTUALLY establishes
+    // a BFC. Otherwise, use the BFC found via the parent chain. Setting it on non-BFC
+    // blocks would cause finalize_block_flow to incorrectly expand height for floats.
     if (!lycon->block.establishing_element && parent_block) {
-        // Initialize BlockContext for float tracking if not already done
-        lycon->block.establishing_element = parent_block;
-        lycon->block.float_right_edge = parent_block->content_width > 0 ? parent_block->content_width : parent_block->width;
-        log_debug("[FLOAT PRE-SCAN] Initialized BlockContext for parent block %s",
-                  parent_block->node_name());
+        // Check if this block establishes a BFC
+        if (block_context_establishes_bfc(parent_block)) {
+            lycon->block.establishing_element = parent_block;
+            lycon->block.float_right_edge = parent_block->content_width > 0 ? parent_block->content_width : parent_block->width;
+            log_debug("[FLOAT PRE-SCAN] Initialized BlockContext for BFC parent block %s",
+                      parent_block->node_name());
+        } else {
+            // Non-BFC block: don't set establishing_element. Floats will be
+            // registered to the ancestor BFC via block_context_find_bfc().
+            log_debug("[FLOAT PRE-SCAN] Parent block %s is not BFC, not setting establishing_element",
+                      parent_block->node_name());
+        }
     }
 
-    if (!lycon->block.establishing_element) {
-        log_debug("[FLOAT PRE-SCAN] No establishing element available, cannot pre-scan");
+    // Float pre-scanning can still proceed without establishing_element on THIS block,
+    // because layout_block → layout_block_content will find the BFC via parent chain.
+    // Only bail out if there's no BFC at all in the parent chain.
+    BlockContext* prescan_bfc = block_context_find_bfc(&lycon->block);
+    if (!prescan_bfc || !prescan_bfc->establishing_element) {
+        log_debug("[FLOAT PRE-SCAN] No BFC found in parent chain, cannot pre-scan");
         return;
     }
 
@@ -2052,7 +2096,7 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
          vb->scroller->overflow_y != CSS_VALUE_VISIBLE);
     if (creates_bfc) return false;
     if (vb->position && element_has_float(vb)) return false;
-    // Check children recursively: text/inline = line boxes = not self-collapsing
+    // Check children recursively
     View* child = ((ViewElement*)vb)->first_placed_child();
     while (child) {
         if (child->is_block()) {
@@ -2062,8 +2106,34 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
                                    cvb->position->position == CSS_VALUE_FIXED));
             if (!is_out_of_flow && !is_block_self_collapsing(cvb)) return false;
         } else {
-            // text, inline, span = line boxes
-            return false;
+            // CSS 2.1 §9.4.2: Line boxes that contain no text, no preserved
+            // white space, no inline elements with non-zero margins, padding,
+            // or borders, and no other in-flow content must be treated as not
+            // existing. Such empty inline/text children don't prevent self-collapse.
+            bool is_substantial = false;
+            if (child->view_type == RDT_VIEW_INLINE) {
+                // Check if inline element has non-zero margins/padding/borders
+                ViewElement* ve = (ViewElement*)child;
+                if (ve->bound) {
+                    float m = ve->bound->margin.left + ve->bound->margin.right +
+                              ve->bound->padding.left + ve->bound->padding.right;
+                    if (ve->bound->border) {
+                        m += ve->bound->border->width.left + ve->bound->border->width.right;
+                    }
+                    if (m > 0) is_substantial = true;
+                }
+                // Check if inline element has any placed children (text output, etc.)
+                if (!is_substantial && ve->first_placed_child()) {
+                    is_substantial = true;
+                }
+            } else if (child->view_type == RDT_VIEW_TEXT) {
+                // Text view that survived whitespace collapsing — has actual content
+                is_substantial = true;
+            } else {
+                // BR, inline-block, marker, image, etc. — always substantial
+                is_substantial = true;
+            }
+            if (is_substantial) return false;
         }
         View* next = (View*)child->next_sibling;
         while (next && !next->view_type) next = (View*)next->next_sibling;
@@ -2689,18 +2759,127 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // IMPORTANT: Apply clear BEFORE setting up inline context and laying out children
     // Clear positions this element below earlier floats
     // This must happen after Y position and margins are set, but before children are laid out
-    // Note: Check for actual clear values (LEFT=50, RIGHT=51, BOTH), not just "not NONE"
-    // because uninitialized clear is 0 (CSS_VALUE__UNDEF) which would incorrectly pass "!= NONE"
     // CSS 2.1 §9.5.2: 'clear' applies only to block-level elements, not inline-level
-    // (inline, inline-block, inline-table are inline-level and should be excluded)
     bool is_block_level_for_clear = (block->display.outer != CSS_VALUE_INLINE &&
                                      block->display.outer != CSS_VALUE_INLINE_BLOCK);
+    // CSS 2.1 §9.5.2: Track whether clearance was applied for margin collapsing
+    pa_block->saved_clear_y = -1;  // -1 = no clearance applied
     if (is_block_level_for_clear && block->position &&
         (block->position->clear == CSS_VALUE_LEFT ||
                              block->position->clear == CSS_VALUE_RIGHT ||
                              block->position->clear == CSS_VALUE_BOTH)) {
-        log_debug("Element has clear property, applying clear layout BEFORE children");
-        layout_clear_element(lycon, block);
+        bool is_float = block->position && element_has_float(block);
+        if (is_float || !block->bound) {
+            // Floats and blocks without bound: apply clear directly
+            log_debug("Element has clear property, applying clear layout BEFORE children (float=%d, bound=%p)",
+                      is_float, (void*)block->bound);
+            layout_clear_element(lycon, block);
+        } else {
+            // CSS 2.1 §9.5.2: In-flow non-float block with margins.
+            // Compute hypothetical position (with margin collapsing) and compare
+            // with the float bottom. If hypothetical >= clear_y: no clearance needed,
+            // allow margin collapse later. If hypothetical < clear_y: clearance needed.
+            BlockContext* bfc = block_context_find_bfc(&lycon->block);
+            float clear_y = 0;
+            if (bfc) {
+                float clear_y_bfc = block_context_clear_y(bfc, block->position->clear);
+                float parent_y_in_bfc = 0;
+                ViewElement* parent_view_elem = block->parent_view();
+                if (parent_view_elem) {
+                    ViewElement* v = parent_view_elem;
+                    while (v && bfc->establishing_element && v != bfc->establishing_element) {
+                        parent_y_in_bfc += v->y;
+                        ViewElement* pv = v->parent_view();
+                        if (!pv) break;
+                        v = pv;
+                    }
+                }
+                clear_y = clear_y_bfc - parent_y_in_bfc;
+            }
+
+            // Compute hypothetical position (what if margins collapsed normally)
+            float uncollapsed_y = block->y;
+            float hypothetical_y = uncollapsed_y;
+
+            // Check if this is the first in-flow child (parent-child collapse case)
+            View* first_in_flow = block->parent_view()->first_placed_child();
+            while (first_in_flow && first_in_flow->is_block()) {
+                ViewBlock* vb = (ViewBlock*)first_in_flow;
+                if (vb->position && element_has_float(vb)) {
+                    first_in_flow = (View*)first_in_flow->next_sibling;
+                    while (first_in_flow && !first_in_flow->view_type)
+                        first_in_flow = (View*)first_in_flow->next_sibling;
+                    continue;
+                }
+                break;
+            }
+
+            if (first_in_flow == (View*)block) {
+                // First child: hypothetical with parent-child collapse
+                ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : nullptr;
+                bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
+                float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
+                float parent_border_top = parent && parent->bound && parent->bound->border ?
+                    parent->bound->border->width.top : 0;
+                if (parent && parent->parent && !parent_creates_bfc &&
+                    parent_padding_top == 0 && parent_border_top == 0 &&
+                    block->bound->margin.top != 0) {
+                    float advance_y_before = block->y - block->bound->margin.top;
+                    hypothetical_y = advance_y_before;
+                }
+            } else {
+                // Sibling: hypothetical with sibling margin collapse
+                View* prev_view = block->prev_placed_view();
+                while (prev_view && prev_view->is_block()) {
+                    ViewBlock* vb = (ViewBlock*)prev_view;
+                    if (vb->position && element_has_float(vb)) {
+                        prev_view = prev_view->prev_placed_view(); continue;
+                    }
+                    if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                          vb->position->position == CSS_VALUE_FIXED)) {
+                        prev_view = prev_view->prev_placed_view(); continue;
+                    }
+                    break;
+                }
+                if (prev_view && prev_view->is_block() && prev_view->view_type != RDT_VIEW_INLINE_BLOCK
+                    && ((ViewBlock*)prev_view)->bound) {
+                    ViewBlock* prev_block = (ViewBlock*)prev_view;
+                    float prev_mb = prev_block->bound->margin.bottom;
+                    float cur_mt = block->bound->margin.top;
+                    if (prev_mb != 0 || cur_mt != 0) {
+                        float collapsed = collapse_margins(prev_mb, cur_mt);
+                        float collapse_amount = (prev_mb + cur_mt) - collapsed;
+                        hypothetical_y = uncollapsed_y - collapse_amount;
+                    }
+                }
+            }
+
+            log_debug("[CLEARANCE §9.5.2] hypothetical=%.1f, clear_y=%.1f, uncollapsed=%.1f",
+                      hypothetical_y, clear_y, uncollapsed_y);
+
+            if (hypothetical_y >= clear_y) {
+                // No clearance needed — margin collapse proceeds normally
+                log_debug("[CLEARANCE] No clearance needed, margins will collapse normally");
+            } else {
+                // Clearance IS needed. CSS 2.1 §9.5.2: clearance places border edge
+                // at max(float_bottom, hypothetical) = clear_y (since hypothetical < clear_y).
+                // This may result in NEGATIVE clearance if clear_y < uncollapsed position.
+                if (clear_y >= block->y) {
+                    // Normal (positive) clearance: use layout_clear_element
+                    layout_clear_element(lycon, block);
+                } else {
+                    // Negative clearance: block moves UP from uncollapsed to clear_y
+                    float delta = clear_y - block->y;
+                    block->y = clear_y;
+                    pa_block->advance_y += delta;
+                    log_debug("[CLEARANCE] Negative clearance: moved from %.1f to %.1f (delta=%.1f)",
+                              uncollapsed_y, clear_y, delta);
+                }
+                // Signal margin collapsing section to skip collapse for this block
+                pa_block->saved_clear_y = clear_y;
+                log_debug("[CLEARANCE] Applied: y=%.1f, saved_clear_y=%.1f", block->y, clear_y);
+            }
+        }
     }
 
     // setup inline context
@@ -2818,17 +2997,28 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // Find the effective last child whose margin-bottom should collapse with parent
         // CSS 2.2 Section 8.3.1: Margins collapse through self-collapsing blocks
         // (no height, no border/padding, no line boxes in self or descendants)
+        // CSS 2.1 §9.2.1.1: Zero-height inline content is wrapped in implicit
+        // self-collapsing anonymous blocks that also don't prevent collapse.
         View* effective_last = last_in_flow;
-        while (effective_last && effective_last->is_block()) {
-            ViewBlock* vb = (ViewBlock*)effective_last;
-            float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
-            if (margin_bottom == 0 && is_block_self_collapsing(vb)) {
-                log_debug("skipping self-collapsing block for bottom margin collapsing");
-                View* prev = effective_last->prev_placed_view();
-                effective_last = prev;
-                continue;
+        while (effective_last) {
+            if (effective_last->is_block()) {
+                ViewBlock* vb = (ViewBlock*)effective_last;
+                float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
+                if (margin_bottom == 0 && is_block_self_collapsing(vb)) {
+                    log_debug("skipping self-collapsing block for bottom margin collapsing");
+                    View* prev = effective_last->prev_placed_view();
+                    effective_last = prev;
+                    continue;
+                }
+                break;
+            } else {
+                // Inline/text with zero height = empty anonymous block wrapper
+                if (effective_last->height <= 0) {
+                    effective_last = effective_last->prev_placed_view();
+                    continue;
+                }
+                break;
             }
-            break;
         }
 
         if (effective_last && effective_last->is_block() && ((ViewBlock*)effective_last)->bound) {
@@ -2866,8 +3056,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                             }
                         } else {
                             // Non-block content (text, inline elements)
-                            has_content_after = true;
-                            break;
+                            // CSS 2.1 §9.2.1.1: Zero-height inline content is
+                            // wrapped in implicit self-collapsing anonymous blocks
+                            if (sibling->height > 0) {
+                                has_content_after = true;
+                                break;
+                            }
                         }
                     }
                     sibling = (View*)sibling->next_sibling;
@@ -3516,26 +3710,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 bool parent_child_collapsed = false;
 
                 if (first_in_flow_child == block) {  // first in-flow child
-                    // CSS 2.1 §8.3.1: Clearance prevents margin adjacency.
-                    // If this first child has clear property, its top margin does NOT
-                    // collapse with the parent's top margin.
-                    bool has_clearance = block->position &&
-                        (block->position->clear == CSS_VALUE_LEFT ||
-                         block->position->clear == CSS_VALUE_RIGHT ||
-                         block->position->clear == CSS_VALUE_BOTH);
+                    // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
+                    // skip parent-child margin collapse.
+                    bool has_clearance = (lycon->block.saved_clear_y >= 0);
 
-                    if (block->bound->margin.top != 0 && !has_clearance) {
-                        ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
-                        // CSS 2.1 §9.4.1: Elements that establish a BFC prevent margin collapsing
-                        // with their in-flow children. This includes: overflow != visible,
-                        // float, position absolute/fixed, inline-block, table cells, etc.
-                        bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
-                        // parent has top margin, but no border, no padding;  parent->parent to exclude html
-                        // Also: no margin collapsing if parent creates BFC
-                        // If parent->bound is NULL, parent has no margin/border/padding - margins collapse through
-                        float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
-                        float parent_border_top = parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0;
-                        float parent_margin_top = parent && parent->bound ? parent->bound->margin.top : 0;
+                    ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
+                    bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
+                    float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
+                    float parent_border_top = parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0;
+                    float parent_margin_top = parent && parent->bound ? parent->bound->margin.top : 0;
+
+                    if (!has_clearance && block->bound->margin.top != 0) {
                         if (parent && parent->parent && !parent_creates_bfc &&
                             parent_padding_top == 0 && parent_border_top == 0) {
                             // CSS 2.1 §8.3.1: collapse child and parent margins
@@ -3605,28 +3790,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                 }
                 else {
-                    // check sibling margin collapsing
-                    // CSS 2.2 Section 8.3.1: Margins do NOT collapse when there's clearance
-                    // If this block has clear property, skip sibling margin collapsing
-                    bool has_clearance = block->position &&
-                        (block->position->clear == CSS_VALUE_LEFT ||
-                         block->position->clear == CSS_VALUE_RIGHT ||
-                         block->position->clear == CSS_VALUE_BOTH);
+                    // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
+                    // skip sibling margin collapse.
+                    bool has_clearance = (lycon->block.saved_clear_y >= 0);
 
                     if (!has_clearance) {
+                        // Normal sibling margin collapsing
                         float collapse = 0;
-                        // Find previous in-flow sibling (skip out-of-flow elements: floats and absolute/fixed positioned)
                         View* prev_view = block->prev_placed_view();
                         while (prev_view && prev_view->is_block()) {
                             ViewBlock* vb = (ViewBlock*)prev_view;
-                            // Skip floats - they're out of normal flow and don't participate in margin collapsing
                             if (vb->position && element_has_float(vb)) {
                                 prev_view = prev_view->prev_placed_view();
                                 continue;
                             }
-                            // Skip absolute/fixed positioned elements - they're out of normal flow
-                            // CSS 2.2 Section 9.3.1: "An element is called out of flow if it is floated,
-                            // absolutely positioned, or is the root element."
                             if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
                                                   vb->position->position == CSS_VALUE_FIXED)) {
                                 prev_view = prev_view->prev_placed_view();
@@ -3634,33 +3811,33 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             }
                             break;
                         }
-                        // Inline-block elements are part of inline formatting context and create line boxes.
-                        // They don't participate in sibling margin collapsing because:
-                        // 1. They establish their own BFC internally
-                        // 2. They act as in-flow content that separates adjacent block margins
-                        // CSS 2.2 Section 8.3.1: Margins don't collapse when separated by in-flow content
+
                         if (prev_view && prev_view->is_block() && prev_view->view_type != RDT_VIEW_INLINE_BLOCK
                             && ((ViewBlock*)prev_view)->bound) {
                             ViewBlock* prev_block = (ViewBlock*)prev_view;
                             float prev_mb = prev_block->bound->margin.bottom;
                             float cur_mt = block->bound->margin.top;
                             if (prev_mb != 0 || cur_mt != 0) {
-                                // CSS 2.1 §8.3.1: collapse adjacent sibling margins
                                 float collapsed = collapse_margins(prev_mb, cur_mt);
                                 collapse = (prev_mb + cur_mt) - collapsed;
-                                block->y -= collapse;
-                                block->bound->margin.top -= collapse;
-                                log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
                             }
                         }
+
+                        if (collapse > 0) {
+                            block->y -= collapse;
+                            block->bound->margin.top -= collapse;
+                            log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
+                        }
                     } else {
-                        log_debug("skipping sibling margin collapsing for element with clear property");
+                        log_debug("[CLEARANCE] Clearance was applied, skipping sibling margin collapse");
                     }
                 }
 
                 // CSS 2.2 Section 8.3.1: Self-collapsing blocks
                 // A block is "self-collapsing" when its top and bottom margins are adjoining.
-                // Uses recursive check: no line boxes in self or any descendant blocks.
+                // CSS 2.1 §8.3.1: Elements with clearance CAN be self-collapsing.
+                // Clearance only prevents the element's margins from being adjoining with
+                // the preceding sibling's margins, not the element's own top/bottom margins.
                 bool is_self_collapsing = is_block_self_collapsing(block);
 
                 if (is_self_collapsing) {
