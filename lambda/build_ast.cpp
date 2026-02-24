@@ -2426,6 +2426,23 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
     // spread expression has the same type as its operand (the items will be spread)
     ast_node->type = ast_node->operand->type;
 
+    // Check: spread on a static scalar expression is redundant and likely a mistake.
+    // e.g., *5, *"hello", *true, *null — these have no elements to spread.
+    {
+        Type* op_type = ast_node->operand->type;
+        if (op_type && op_type->is_literal) {
+            TypeId tid = op_type->type_id;
+            if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_BOOL ||
+                tid == LMD_TYPE_INT  || tid == LMD_TYPE_INT64 ||
+                tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL ||
+                tid == LMD_TYPE_NUMBER || tid == LMD_TYPE_DTIME ||
+                tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_STRING) {
+                record_semantic_error(tp, sp_node, ERR_SEMANTIC_ERROR,
+                    "Spread operator '*' is redundant on scalar value");
+            }
+        }
+    }
+
     log_debug("end build spread expr");
     return (AstNode*)ast_node;
 }

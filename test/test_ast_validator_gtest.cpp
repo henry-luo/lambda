@@ -64,9 +64,9 @@ PathSegment* create_path_segment(PathSegmentType type, const char* name, long in
 }
 
 // Stub implementations for missing functions required by validator (C++ linkage)
-void find_errors(TSNode node) {
+void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors) {
     // Stub implementation - do nothing for tests
-    (void)node; // Suppress unused parameter warning
+    (void)node; (void)source; (void)file; (void)errors;
 }
 
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
