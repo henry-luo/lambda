@@ -64,6 +64,7 @@ fn render_element(el, info) {
         case 'tableofcontents': render_toc(info)
 
         // ---- sections ----
+        case 'part': render_heading(el, info, 1)
         case 'chapter': render_heading(el, info, 1)
         case 'section': render_heading(el, info, 2)
         case 'subsection': render_heading(el, info, 3)
@@ -823,7 +824,7 @@ fn handle_string_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
 
 fn handle_text_content(el, i, n, current_cells, acc_rows, col_spec, info, child) {
     let trimmed = trim(child)
-    if (len(trimmed) == 0) collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+    if (trimmed == null or len(trimmed) == 0) collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
     else add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed)
 }
 
@@ -836,6 +837,8 @@ fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child
     let child_name = name(child)
     if (child_name == 'linebreak_command') handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
     else if (child_name == 'hline') collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+    else if (child_name == 'multicolumn') handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
+    else if (child_name == 'multirow') handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
 }
 
@@ -849,6 +852,65 @@ fn handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, chil
     let rendered = render_node(child, info)
     let new_cells = append_to_last_cell(current_cells, rendered)
     collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+}
+
+// --- multicolumn / multirow cell handling ---
+
+fn handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    let colspan = int(child[0])
+    let align = parse_multicol_align(child[1])
+    let content = render_span_content(child, 2, info)
+    let cell_desc = {type: "multicol", colspan: colspan, align: align, content: content}
+    let new_cells = current_cells ++ [cell_desc]
+    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+}
+
+fn handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    let rowspan = int(child[0])
+    let content = render_span_content(child, 2, info)
+    let cell_desc = {type: "multirow", rowspan: rowspan, content: content}
+    let new_cells = current_cells ++ [cell_desc]
+    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+}
+
+fn parse_multicol_align(spec) {
+    if (spec == null) "left"
+    else find_align_in_spec(spec, 0, len(spec))
+}
+
+fn find_align_in_spec(spec, i, n) {
+    if (i >= n) "left"
+    else match_align_char(spec, i, n)
+}
+
+fn match_align_char(spec, i, n) {
+    let ch = slice(spec, i, i + 1)
+    if (ch == "l") "left"
+    else if (ch == "c") "center"
+    else if (ch == "r") "right"
+    else find_align_in_spec(spec, i + 1, n)
+}
+
+fn render_span_content(child, start, info) {
+    if (start >= len(child)) null
+    else if (start == len(child) - 1) render_one_span(child[start], info)
+    else render_span_seq(child, start, len(child), info, [])
+}
+
+fn render_one_span(c, info) {
+    if (c is element) render_node(c, info)
+    else c
+}
+
+fn render_span_seq(el, i, n, info, acc) {
+    if (i >= n) acc
+    else render_next_span(el, i, n, info, acc)
+}
+
+fn render_next_span(el, i, n, info, acc) {
+    let c = el[i]
+    let r = render_one_span(c, info)
+    render_span_seq(el, i + 1, n, info, acc ++ [r])
 }
 
 fn get_align(col_spec, idx) {
@@ -887,8 +949,51 @@ fn all_cells_empty(cells, i) {
 }
 
 fn make_row_inner(cells, col_spec) {
-    let tds = for (i, cell in cells) cell_to_td_aligned(cell, get_align(col_spec, i))
+    let tds = build_tds(cells, col_spec, 0, 0, [])
     <tr; for td in tds { td }>
+}
+
+fn build_tds(cells, col_spec, ci, col, acc) {
+    if (ci >= len(cells)) acc
+    else dispatch_td(cells, col_spec, ci, col, acc)
+}
+
+fn dispatch_td(cells, col_spec, ci, col, acc) {
+    let cell = cells[ci]
+    if (is_span_cell(cell, "multicol")) emit_multicol_td(cells, col_spec, ci, col, acc, cell)
+    else if (is_span_cell(cell, "multirow")) emit_multirow_td(cells, col_spec, ci, col, acc, cell)
+    else emit_regular_td(cells, col_spec, ci, col, acc, cell)
+}
+
+fn is_span_cell(cell, t) {
+    (cell is map) and (cell.type == t)
+}
+
+fn emit_multicol_td(cells, col_spec, ci, col, acc, cell) {
+    let td = multicol_td(cell)
+    build_tds(cells, col_spec, ci + 1, col + cell.colspan, acc ++ [td])
+}
+
+fn multicol_td(cell) {
+    let c = cell.content
+    <td colspan: string(cell.colspan), style: "text-align: " ++ cell.align; c>
+}
+
+fn emit_multirow_td(cells, col_spec, ci, col, acc, cell) {
+    let align = get_align(col_spec, col)
+    let td = multirow_td(cell, align)
+    build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td])
+}
+
+fn multirow_td(cell, align) {
+    let c = cell.content
+    if (align == "left") { <td rowspan: string(cell.rowspan); c> }
+    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ align; c> }
+}
+
+fn emit_regular_td(cells, col_spec, ci, col, acc, cell) {
+    let td = cell_to_td_aligned(cell, get_align(col_spec, col))
+    build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td])
 }
 
 fn append_to_last_cell(cells, content) {
