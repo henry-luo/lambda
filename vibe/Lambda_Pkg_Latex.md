@@ -1109,17 +1109,138 @@ else
 
 **Impact:** When returning a map literal from an `if`-expression branch, wrap it in `(...)` to disambiguate from block syntax. This is a low-cost, consistent pattern.
 
-### 11.9 Summary Table
+### 11.9 Map Keys Are Always Literal Identifiers
 
-| #    | Issue                      | Severity | Status        | Workaround Cost                     |
-| ---- | -------------------------- | -------- | ------------- | ----------------------------------- |
-| 11.1 | `is`/`and` precedence      | High     | Fixed         | Grammar fix — reordered precedence  |
-| 11.2 | `++` in map spread → null  | High     | Fixed         | Runtime fix — last-writer-wins `_map_get` |
-| 11.3 | `type` as map key          | Medium   | Fixed         | Grammar fix — `base_type` as key    |
-| 11.4 | `name()` returns symbol    | High     | Mitigated     | Compile-time type error added        |
-| 11.5 | ~~Indexed `for` broken~~   | N/A      | Not a Bug     | N/A — works correctly               |
-| 11.6 | `trim() == ""` false       | Medium   | Fixed         | Trim returns null for empty result  |
-| 11.7 | ~~`if-else` in `for`~~     | N/A      | Not a Bug     | N/A — works correctly               |
-| 11.8 | Map literal after `if`     | Medium   | By Design     | Low — wrap map in parentheses       |
+**Status:** By Design — use `map()` for dynamic keys  
+**Severity:** Medium — causes silent logic errors
 
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, and **11.6** have been fixed in the language. Issue **11.4** is now mitigated by a compile-time type check that catches symbol-vs-string comparisons. Issue **11.8** is by design — wrap map literals in parentheses to disambiguate from blocks.
+Map literal syntax `{key: value}` always treats `key` as a literal identifier name, never as a variable reference. There is no way to use a variable to compute a map key in a map literal:
+
+```lambda
+let k = "mykey"
+let m = {k: 42}
+m.k       // 42 — "k" is the literal key
+m.mykey   // null — variable k's value was NOT used
+
+// WORKAROUND — use map() constructor for dynamic keys
+let entry = map([k, 42])   // creates {"mykey": 42}
+let merged = {existing_map, entry}  // merge dynamic entry into existing map
+```
+
+**Impact:** This was the root cause of failures in `analyze.ls` where heading numbers, labels, and footnote maps all needed dynamic keys — e.g., using a slugified heading text or a `\label` name as the map key. Required introducing a `set_key()` helper throughout:
+
+```lambda
+fn set_key(m, k, v) {
+    let entry = map([k, v])
+    {m, entry}
+}
+
+// Usage in analyze.ls:
+set_key(state.heading_nums, slug, sec_num)     // dynamic slug key
+set_key(state.labels, label_name, entry)        // dynamic label key
+set_key(state.footnote_map, fn_key, entry)      // dynamic footnote key
+```
+
+This pattern is necessary any time a map key must be computed at runtime. Without it, all dynamic keys silently become unused literal identifiers, and the map lookups later return `null`.
+
+### 11.10 `#N` Placeholder Nodes Are Symbols, Not Elements
+
+**Status:** Fixed — `string(type())` now handles `Type` values; `is symbol` works for dispatch  
+**Severity:** Medium — confusing runtime behavior, silent data loss in tree traversal
+
+The C++ LaTeX parser (`input-latex-ts.cpp` line 1408) constructs `#1`, `#2`, etc. (macro parameter references inside `\newcommand` bodies) as **symbols** via `y2it(builder.createSymbol(source + start, len))`. This means these nodes are an unexpected third type among element children — neither string nor element:
+
+```lambda
+let body = newcommand_node[2]   // curly_group body of \newcommand{\greeting}[1]{Hello, #1!}
+// body children:
+//   body[0] is_str=true  is_el=false is_sym=false  name=null    ← "Hello, " (string)
+//   body[1] is_str=false is_el=false is_sym=true   name='#1'    ← #1 placeholder (SYMBOL)
+//   body[2] is_str=true  is_el=false is_sym=false  name=null    ← "!" (string)
+```
+
+The `is symbol` check works correctly. Previously, `string(type(x))` on these nodes returned `null` because `fn_string()` lacked a `LMD_TYPE_TYPE` case — this has been **fixed** by adding the missing case to `fn_string()` in `lambda-eval.cpp`. Now `string(type(x))` correctly returns `"symbol"`, `"string"`, `"element"`, etc. for all element children.
+
+**Root cause:** The C++ parser embeds symbols as direct children of elements alongside strings. Lambda's standard tree-traversal patterns assume children are either strings or elements. Symbols are a third case that must be explicitly handled.
+
+**Workaround:** Check `is symbol` or inspect `name()` to detect parameter references:
+
+```lambda
+fn is_param_ref(node) {
+    if (node is symbol) {
+        let tag = name(node)
+        if (tag != null) check_param_tag(string(tag)) else false
+    } else false
+}
+
+fn check_param_tag(tag) {
+    if len(tag) > 1 { slice(tag, 0, 1) == "#" } else { false }
+}
+```
+
+**Note on `name()`:** For symbols, `name()` returns the symbol itself (e.g., `'#1'`). Since `name()` returns a symbol, string comparisons like `name(x) == "#1"` will fail silently (issue **11.4**). Use `name(x) == '#1'` with symbol literals, or convert via `string(name(x)) == "#1"`.
+
+**Impact:** Macro parameter substitution in `macros.ls` was completely broken until this workaround was added. `\newcommand{\greeting}[1]{Hello, #1!}` followed by `\greeting{World}` produced `Hello, #1!` instead of `Hello, World!` because the `#1` symbol node fell through the `if (x is string) ... else if (x is element) ...` dispatch and was silently dropped.
+
+**Fix applied:** The `type()` function always returned the correct `Type` value, but `string()` did not handle `Type` values (type id `LMD_TYPE_TYPE`). A `case LMD_TYPE_TYPE` was added to `fn_string()` in `lambda-eval.cpp` that extracts the inner type name via `get_type_name()`. Now `string(type(123))` → `"int"`, `string(type('sym'))` → `"symbol"`, etc. Unit tests for `string(type(...))` covering all basic types were added to `test/lambda/string_funcs.ls`.
+
+### 11.11 `"expected a map, got data of type map"` Runtime Warning
+
+**Status:** Outstanding  
+**Severity:** Low — cosmetic, no impact on correctness
+
+The runtime emits repeated `expected a map, got data of type map` warnings during LaTeX package execution (typically 15–30 per document). The message is self-contradictory — the data IS a map, yet the runtime check reports it isn't. This appears to be a type-check in the runtime that doesn't correctly handle spread-constructed maps or certain map subtypes.
+
+```
+20:24:47 [ERR!] expected a map, got data of type map
+20:24:47 [ERR!] expected a map, got data of type map
+... (repeated ~15 times)
+```
+
+**Impact:** Log noise only. The HTML output is correct despite the warnings. The warnings likely originate from map field access on spread-constructed maps where the runtime's internal shape representation differs from what the type checker expects.
+
+### 11.12 `run_script_mir()` Requires Explicit `current_dir` for Import Resolution
+
+**Status:** Fixed — set `current_dir` on new `Runtime` instances  
+**Severity:** High — prevents any script with imports from running
+
+When creating a new `Runtime` instance programmatically (e.g., in the `convert` command handler) to execute a Lambda script, the `current_dir` field defaults to `NULL`. Relative imports like `.lambda.package.latex.latex` are resolved by prepending `current_dir`, producing paths like `(null)lambda/package/latex/latex.ls`:
+
+```cpp
+// BROKEN — current_dir is NULL after runtime_init
+Runtime lambda_runtime;
+runtime_init(&lambda_runtime);
+run_script_mir(&lambda_runtime, nullptr, script_path, false);
+// Error: Error opening file: (null)lambda/package/latex/latex.ls
+
+// FIXED — set current_dir before running any script with imports
+Runtime lambda_runtime;
+runtime_init(&lambda_runtime);
+lambda_runtime.current_dir = const_cast<char*>("./");
+run_script_mir(&lambda_runtime, nullptr, script_path, false);
+// Imports resolve correctly: ./lambda/package/latex/latex.ls
+```
+
+**Root cause:** `runtime_init()` zero-initializes the struct, leaving `current_dir = NULL`. The main CLI path (`main.cpp` line 829) sets `runtime.current_dir = "./"`, but any additional `Runtime` instances (e.g., for the `convert` command) must set it manually.
+
+**Impact:** Blocked the `convert` command from using the Lambda LaTeX package until the fix was applied. Any C++ code creating a `Runtime` to run Lambda scripts with relative imports must remember to set `current_dir`.
+
+**Recommendation:** `runtime_init()` should default `current_dir` to `"./"` rather than `NULL`, making import resolution work out of the box.
+
+### 11.13 Summary Table
+
+| #     | Issue                         | Severity | Status        | Workaround Cost                          |
+| ----- | ----------------------------- | -------- | ------------- | ---------------------------------------- |
+| 11.1  | `is`/`and` precedence         | High     | Fixed         | Grammar fix — reordered precedence       |
+| 11.2  | `++` in map spread → null     | High     | Fixed         | Runtime fix — last-writer-wins `_map_get` |
+| 11.3  | `type` as map key             | Medium   | Fixed         | Grammar fix — `base_type` as key         |
+| 11.4  | `name()` returns symbol       | High     | Mitigated     | Compile-time type error added            |
+| 11.5  | ~~Indexed `for` broken~~      | N/A      | Not a Bug     | N/A — works correctly                    |
+| 11.6  | `trim() == ""` false          | Medium   | Fixed         | Trim returns null for empty result       |
+| 11.7  | ~~`if-else` in `for`~~        | N/A      | Not a Bug     | N/A — works correctly                    |
+| 11.8  | Map literal after `if`        | Medium   | By Design     | Low — wrap map in parentheses            |
+| 11.9  | Map keys always literal       | Medium   | By Design     | Medium — `map([k,v])` helper required    |
+| 11.10 | `#N` placeholders are symbols  | Medium   | Fixed | `string(type())` fix + `is symbol` checks |
+| 11.11 | "expected a map" warning      | Low      | Outstanding   | None — cosmetic only                     |
+| 11.12 | `run_script_mir` `current_dir`| High     | Fixed         | One-line fix in C++                      |
+
+**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,444 lines across 15 files). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, **11.6**, and **11.12** have been fixed in the language or runtime. Issue **11.4** is mitigated by a compile-time type check. Issues **11.8** and **11.9** are by design — requiring parenthesization and the `map()` constructor respectively. Issue **11.10** (placeholder symbols) is resolved — `string(type())` now works after adding the missing `LMD_TYPE_TYPE` case to `fn_string()`. Issue **11.11** remains outstanding but has no functional impact.

@@ -42,12 +42,14 @@ pub fn render_to_html(ast, options) {
 // render a LaTeX AST (already parsed) to HTML elements
 // options: {docclass, standalone, numbering, toc}
 pub fn render(ast, options) {
-    // pre-process: expand \newcommand macros (skip if no defs found)
-    let expanded_ast = macros.expand(ast)
+    // extract macro definitions from AST (does not modify tree)
+    let macro_defs = macros.get_defs(ast)
     // pass 1: analyze AST to collect counters, headings, labels
-    let info = analyzer.analyze(expanded_ast)
+    let base_info = analyzer.analyze(ast)
+    // add macro definitions to info for render-time expansion
+    let info = {macros: macro_defs, base_info}
     // pass 2: render AST using pre-computed info
-    let html = dispatcher.render_node(expanded_ast, info)
+    let html = dispatcher.render_node(ast, info)
 
     if (is_standalone(options)) {
         wrap_standalone(html, info)
