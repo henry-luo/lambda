@@ -898,6 +898,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // min/max-height must not affect margin adjacency (q313).
             float collapsible_mb = compute_collapsible_bottom_margin(block);
             float auto_height = flow_height - collapsible_mb;
+            // CSS 2.1 §10.6.3: Auto height cannot be negative. When all children
+            // are collapsed-through (self-collapsing), they don't factor in the
+            // auto height calculation — the height is zero.
+            if (auto_height < 0) auto_height = 0;
             float final_height = adjust_min_max_height(block, auto_height);
             log_debug("finalize block flow, set block height to flow height: %f (collapsible_mb=%f, auto=%f, after min/max: %f)",
                       flow_height, collapsible_mb, auto_height, final_height);
@@ -2034,6 +2038,9 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
     // Tables and table internals are never self-collapsing (CSS 2.1 §17)
     if (vb->view_type == RDT_VIEW_TABLE || vb->view_type == RDT_VIEW_TABLE_ROW ||
         vb->view_type == RDT_VIEW_TABLE_ROW_GROUP || vb->view_type == RDT_VIEW_TABLE_CELL) return false;
+    // CSS 2.1 §8.3.1: Self-collapsing applies only to block-level boxes.
+    // Inline-blocks are inline-level and do not self-collapse.
+    if (vb->view_type == RDT_VIEW_INLINE_BLOCK) return false;
     float bt = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
     float bb = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
     float pt = vb->bound ? vb->bound->padding.top : 0;
