@@ -4,7 +4,7 @@
 // Default stylesheet (article class)
 // ============================================================
 
-pub STYLESHEET = \".latex-document {
+pub STYLESHEET = ".latex-document {
   max-width: 800px;
   margin: 0 auto;
   padding: 2em;
