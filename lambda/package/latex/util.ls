@@ -190,3 +190,24 @@ pub fn attr_or(el, attr_name, default_val) {
     if (v != null) v
     else default_val
 }
+
+// rebuild an element with new children (generic version for any tag)
+// Note: Lambda elements require literal tag names, so this returns the
+// original element when children are unchanged, or wraps in a generic container
+pub fn rebuild_with_children(el, new_kids) {
+    // if children haven't changed (same length), return original
+    if (len(new_kids) == len(el)) el
+    else <group; for c in new_kids { c }>
+}
+
+// get text content of the Nth child
+pub fn text_of_child(el, idx) {
+    if (idx >= len(el)) ""
+    else get_child_text(el[idx])
+}
+
+fn get_child_text(child) {
+    if (child is string) child
+    else if (child is element) text_of(child)
+    else string(child)
+}

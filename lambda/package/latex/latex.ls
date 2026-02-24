@@ -6,9 +6,9 @@
 //   let html_string = latex.render_file_to_html("paper.tex")
 //   let elements = latex.render(ast)
 
-import ctx_mod: .lambda.package.latex.context
 import normalize: .lambda.package.latex.normalize
 import analyzer: .lambda.package.latex.analyze
+import macros: .lambda.package.latex.macros
 import dispatcher: .lambda.package.latex.render2
 import css: .lambda.package.latex.css
 import html_ser: .lambda.package.latex.to_html
@@ -42,10 +42,12 @@ pub fn render_to_html(ast, options) {
 // render a LaTeX AST (already parsed) to HTML elements
 // options: {docclass, standalone, numbering, toc}
 pub fn render(ast, options) {
+    // pre-process: expand \newcommand macros (skip if no defs found)
+    let expanded_ast = macros.expand(ast)
     // pass 1: analyze AST to collect counters, headings, labels
-    let info = analyzer.analyze(ast)
+    let info = analyzer.analyze(expanded_ast)
     // pass 2: render AST using pre-computed info
-    let html = dispatcher.render_node(ast, info)
+    let html = dispatcher.render_node(expanded_ast, info)
 
     if (is_standalone(options)) {
         wrap_standalone(html, info)
@@ -82,26 +84,39 @@ pub fn render_string(latex_source) {
 // ============================================================
 
 fn postprocess(html, info) {
-    // footnotes are rendered inline in pass 2, but footnote section needs
-    // the rendered content from the AST — for now just return html
-    html
+    let fn_section = render_footnotes_section(info)
+    if (fn_section != null) wrap_with_footnotes(html, fn_section) else html
 }
 
-fn render_footnotes_section(footnotes) {
-    if (len(footnotes) == 0) {
-        null
-    } else {
+fn wrap_with_footnotes(body, footnotes_el) {
+    <div class: "latex-output";
+        body
+        footnotes_el
+    >
+}
+
+fn render_footnotes_section(info) {
+    let footnotes = info.footnotes
+    if (len(footnotes) == 0) null
+    else (
         <section class: "latex-footnotes";
             <hr>
             <ol;
                 for (fn_entry in footnotes)
-                    <li id: "fn-" ++ string(fn_entry.number);
-                        fn_entry.content
-                        <a class: "footnote-backref", href: "#fnref-" ++ string(fn_entry.number); "\u21A9">
-                    >
+                    render_footnote_item(fn_entry, info)
             >
         >
-    }
+    )
+}
+
+fn render_footnote_item(fn_entry, info) {
+    let fn_num = fn_entry.number
+    let content = dispatcher.render_children_of(fn_entry.node, info)
+    <li id: "fn-" ++ string(fn_num);
+        for c in content { c }
+        " "
+        <a class: "footnote-backref", href: "#fnref-" ++ string(fn_num); "\u21A9">
+    >
 }
 
 // ============================================================

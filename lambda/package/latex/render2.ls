@@ -20,6 +20,11 @@ pub fn render_node(node, info) {
     else string(node)
 }
 
+// render children of a node — used by postprocess for footnote bodies
+pub fn render_children_of(node, info) {
+    render_children(node, 0, info)
+}
+
 fn render_text(t) {
     if (len(trim(t)) == 0) null
     else t
@@ -124,6 +129,16 @@ fn render_element(el, info) {
         case 'minipage': render_env_div(el, info, "latex-minipage", null)
         case 'multicols': render_multicols(el, info)
 
+        // ---- theorem-like environments ----
+        case 'theorem': render_theorem_env(el, info, "Theorem", "theorem")
+        case 'lemma': render_theorem_env(el, info, "Lemma", "lemma")
+        case 'corollary': render_theorem_env(el, info, "Corollary", "corollary")
+        case 'proposition': render_theorem_env(el, info, "Proposition", "proposition")
+        case 'definition': render_theorem_env(el, info, "Definition", "definition")
+        case 'example': render_theorem_env(el, info, "Example", "example")
+        case 'remark': render_theorem_env(el, info, "Remark", "remark")
+        case 'proof': render_proof_env(el, info)
+
         // ---- tables ----
         case 'table': render_table_env(el, info)
         case 'tabular': render_tabular(el, info)
@@ -143,6 +158,11 @@ fn render_element(el, info) {
         case 'ref': render_ref(el, info)
         case 'href': render_href(el, info)
         case 'url': render_url(el)
+        case 'cite': render_cite(el, info)
+
+        // ---- bibliography ----
+        case 'thebibliography': render_bibliography(el, info)
+        case 'bibitem': null
 
         // ---- footnotes ----
         case 'footnote': render_footnote(el, info)
@@ -607,14 +627,19 @@ fn render_figure(el, info) {
 }
 
 fn get_figure_num(el, info) {
-    // figures are numbered sequentially; use caption slug for lookup
-    // fallback: just count from heading_nums or return 0
-    let caption = util.find_child(el, 'caption')
-    if caption != null {
-        let slug = util.slugify(util.text_of(caption))
-        let entry = info.footnote_map[slug]
-        if (entry != null) entry.number else 0
-    } else { 0 }
+    let fig_text = trim(util.text_of(el))
+    find_figure_num(info.figures, fig_text, 0)
+}
+
+fn find_figure_num(figures, text, i) {
+    if (i >= len(figures)) 0
+    else check_figure_match(figures, text, i)
+}
+
+fn check_figure_match(figures, text, i) {
+    let entry = figures[i]
+    if (entry.content == text) entry.number
+    else find_figure_num(figures, text, i + 1)
 }
 
 fn render_multicols(el, info) {
@@ -627,18 +652,88 @@ fn render_multicols(el, info) {
 }
 
 // ============================================================
+// Theorem-like environments
+// ============================================================
+
+fn render_theorem_env(el, info, display_name, env_type) {
+    let items = render_children(el, 0, info)
+    let env_num = get_theorem_num(el, info, env_type)
+    let heading = display_name ++ " " ++ string(env_num) ++ "."
+    <div class: "latex-theorem latex-" ++ env_type;
+        <strong class: "latex-theorem-head"; heading>
+        " "
+        for c in items { c }
+    >
+}
+
+fn render_proof_env(el, info) {
+    let items = render_children(el, 0, info)
+    <div class: "latex-proof";
+        <em class: "latex-proof-head"; "Proof.">
+        " "
+        for c in items { c }
+        <span class: "latex-qed"; "\u25A1">
+    >
+}
+
+fn get_theorem_num(el, info, env_type) {
+    let thm_text = trim(util.text_of(el))
+    find_theorem_num(info.theorems, thm_text, env_type, 0)
+}
+
+fn find_theorem_num(theorems, text, env_type, i) {
+    if (i >= len(theorems)) 0
+    else check_theorem_match(theorems, text, env_type, i)
+}
+
+fn check_theorem_match(theorems, text, env_type, i) {
+    let entry = theorems[i]
+    if (entry.kind == env_type and entry.content == text) entry.number
+    else find_theorem_num(theorems, text, env_type, i + 1)
+}
+
+// ============================================================
 // Tables
 // ============================================================
 
 fn render_table_env(el, info) {
     let items = render_children(el, 0, info)
+    let caption = util.find_child(el, 'caption')
+    let cap_text = if (caption != null) util.text_of(caption) else null
+    let tab_num = get_table_num(el, info)
+    let caption_el = if (cap_text != null) {
+        <div class: "latex-table-caption";
+            <strong; "Table " ++ string(tab_num) ++ ": ">
+            cap_text
+        >
+    } else null
+
     <div class: "latex-table-wrapper";
+        if caption_el != null { caption_el }
         for c in items { c }
     >
 }
 
+fn get_table_num(el, info) {
+    let tab_text = trim(util.text_of(el))
+    find_table_num(info.tables, tab_text, 0)
+}
+
+fn find_table_num(tables, text, i) {
+    if (i >= len(tables)) 0
+    else check_table_match(tables, text, i)
+}
+
+fn check_table_match(tables, text, i) {
+    let entry = tables[i]
+    if (entry.content == text) entry.number
+    else find_table_num(tables, text, i + 1)
+}
+
 fn render_tabular(el, info) {
-    let rows = split_rows(el, info)
+    let col_spec = parse_col_spec(el)
+    let content = find_tabular_content(el)
+    let rows = split_rows(content, col_spec, info)
     <table class: "latex-tabular";
         <tbody;
             for row in rows { row }
@@ -646,63 +741,192 @@ fn render_tabular(el, info) {
     >
 }
 
-fn split_rows(el, info) {
-    collect_rows(el, 0, len(el), [], [], info)
+// parse column spec from first curly_group child: "|l|c|r|" → ["left","center","right"]
+fn parse_col_spec(el) {
+    let cg = find_curly_group(el, 0)
+    if (cg != null) extract_alignments(trim(util.text_of(cg)), 0, [])
+    else []
 }
 
-fn collect_rows(el, i, n, current_cells, acc_rows, info) {
-    if i >= n {
-        let final_row = make_row(current_cells)
-        if (final_row != null) acc_rows ++ [final_row] else acc_rows
-    } else {
-        let child = el[i]
-        if child is symbol {
-            let sv = string(child)
-            if (sv == "row_sep") {
-                let row = make_row(current_cells)
-                let new_rows = if (row != null) acc_rows ++ [row] else acc_rows
-                collect_rows(el, i + 1, n, [], new_rows, info)
-            } else if (sv == "alignment_tab") {
-                collect_rows(el, i + 1, n, current_cells ++ [null], acc_rows, info)
-            } else { collect_rows(el, i + 1, n, current_cells, acc_rows, info) }
-        } else {
-            let rendered = render_node(child, info)
-            let new_cells = append_to_last_cell(current_cells, rendered)
-            collect_rows(el, i + 1, n, new_cells, acc_rows, info)
-        }
-    }
+fn find_curly_group(el, i) {
+    if (i >= len(el)) null
+    else check_curly(el, i)
 }
 
-fn cell_to_td(c) {
+fn check_curly(el, i) {
+    let child = el[i]
+    if ((child is element) and name(child) == 'curly_group') child
+    else find_curly_group(el, i + 1)
+}
+
+fn extract_alignments(spec, i, acc) {
+    if (i >= len(spec)) acc
+    else extract_one_align(spec, i, acc)
+}
+
+fn extract_one_align(spec, i, acc) {
+    let ch = slice(spec, i, i + 1)
+    if (ch == "l") extract_alignments(spec, i + 1, acc ++ ["left"])
+    else if (ch == "c") extract_alignments(spec, i + 1, acc ++ ["center"])
+    else if (ch == "r") extract_alignments(spec, i + 1, acc ++ ["right"])
+    else extract_alignments(spec, i + 1, acc)
+}
+
+// find the paragraph child of tabular that contains the actual content
+fn find_tabular_content(el) {
+    find_para_child(el, 0)
+}
+
+fn find_para_child(el, i) {
+    if (i >= len(el)) el
+    else check_para(el, i)
+}
+
+fn check_para(el, i) {
+    let child = el[i]
+    if ((child is element) and name(child) == 'paragraph') child
+    else find_para_child(el, i + 1)
+}
+
+fn split_rows(content, col_spec, info) {
+    collect_rows(content, 0, len(content), [], [], col_spec, info)
+}
+
+fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) {
+    if (i >= n) finalize_rows(current_cells, acc_rows, col_spec)
+    else route_child(el, i, n, current_cells, acc_rows, col_spec, info)
+}
+
+fn finalize_rows(current_cells, acc_rows, col_spec) {
+    let final_row = make_row(current_cells, col_spec)
+    if (final_row != null) acc_rows ++ [final_row] else acc_rows
+}
+
+fn route_child(el, i, n, current_cells, acc_rows, col_spec, info) {
+    let child = el[i]
+    if (child is string) handle_string_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
+    else if (child is symbol) handle_symbol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
+    else if (child is element) handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
+    else collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+}
+
+fn handle_symbol_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    let sv = string(child)
+    if (sv == "alignment_tab") collect_rows(el, i + 1, n, current_cells ++ [null], acc_rows, col_spec, info)
+    else if (sv == "row_sep") handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
+    else collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+}
+
+fn handle_string_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    handle_text_content(el, i, n, current_cells, acc_rows, col_spec, info, child)
+}
+
+fn handle_text_content(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    let trimmed = trim(child)
+    if (len(trimmed) == 0) collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+    else add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed)
+}
+
+fn add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed) {
+    let new_cells = append_to_last_cell(current_cells, trimmed)
+    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+}
+
+fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    let child_name = name(child)
+    if (child_name == 'linebreak_command') handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
+    else if (child_name == 'hline') collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+    else handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
+}
+
+fn handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info) {
+    let row = make_row(current_cells, col_spec)
+    let new_rows = if (row != null) acc_rows ++ [row] else acc_rows
+    collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
+}
+
+fn handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+    let rendered = render_node(child, info)
+    let new_cells = append_to_last_cell(current_cells, rendered)
+    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+}
+
+fn get_align(col_spec, idx) {
+    if (idx < len(col_spec)) col_spec[idx]
+    else "left"
+}
+
+fn cell_to_td_aligned(c, align) {
+    if (align == "left") cell_to_td_plain(c)
+    else cell_to_td_styled(c, align)
+}
+
+fn cell_to_td_plain(c) {
     if c is array { <td; for item in c { item }> }
     else if c != null { <td; c> }
     else { <td> }
 }
 
-fn make_row(cells) {
-    if len(cells) == 0 { null }
-    else {
-        let tds = (for (c in cells) cell_to_td(c))
-        <tr; for td in tds { td }>
-    }
+fn cell_to_td_styled(c, align) {
+    let style = "text-align: " ++ align
+    if c is array { <td style: style; for item in c { item }> }
+    else if c != null { <td style: style; c> }
+    else { <td style: style> }
+}
+
+fn make_row(cells, col_spec) {
+    if (len(cells) == 0) null
+    else if (all_cells_empty(cells, 0)) null
+    else make_row_inner(cells, col_spec)
+}
+
+fn all_cells_empty(cells, i) {
+    if (i >= len(cells)) true
+    else if (cells[i] != null) false
+    else all_cells_empty(cells, i + 1)
+}
+
+fn make_row_inner(cells, col_spec) {
+    let tds = build_tds(cells, col_spec, 0, len(cells), [])
+    <tr; for td in tds { td }>
+}
+
+fn build_tds(cells, col_spec, i, n, acc) {
+    if (i >= n) acc
+    else build_next_td(cells, col_spec, i, n, acc)
+}
+
+fn build_next_td(cells, col_spec, i, n, acc) {
+    let td = cell_to_td_aligned(cells[i], get_align(col_spec, i))
+    let new_acc = acc ++ [td]
+    build_tds(cells, col_spec, i + 1, n, new_acc)
 }
 
 fn append_to_last_cell(cells, content) {
-    if content == null { cells }
-    else if len(cells) == 0 { [[content]] }
-    else {
-        let last_idx = len(cells) - 1
-        let last = cells[last_idx]
-        if (last == null) replace_last(cells, [content])
-        else if (last is array) replace_last(cells, last ++ [content])
-        else replace_last(cells, [last, content])
-    }
+    if (content == null) cells
+    else if (len(cells) == 0) [[content]]
+    else set_last_cell(cells, content)
+}
+
+fn set_last_cell(cells, content) {
+    let last_idx = len(cells) - 1
+    let last = cells[last_idx]
+    let new_val = compute_new_cell(last, content)
+    slice(cells, 0, last_idx) ++ [new_val]
+}
+
+fn compute_new_cell(last, content) {
+    if (last == null) wrap_content(content)
+    else if (last is array) last ++ [content]
+    else [last, content]
+}
+
+fn wrap_content(content) {
+    [content]
 }
 
 fn replace_last(arr, new_val) {
-    let n = len(arr)
-    (for (idx, item in arr)
-        if (idx == n - 1) new_val else item)
+    slice(arr, 0, len(arr) - 1) ++ [new_val]
 }
 
 // ============================================================
@@ -740,6 +964,137 @@ fn render_url(el) {
     <a class: "latex-url", href: url; url>
 }
 
+fn render_cite(el, info) {
+    let cite_key = trim(util.text_of(el))
+    let bib_num = find_bib_num(info.bibitems, cite_key, 0)
+    let display_num = if (bib_num > 0) string(bib_num) else "?"
+    <a class: "latex-cite", href: "#bib-" ++ cite_key; "[" ++ display_num ++ "]">
+}
+
+fn find_bib_num(bibitems, key, i) {
+    if (i >= len(bibitems)) 0
+    else check_bib_match(bibitems, key, i)
+}
+
+fn check_bib_match(bibitems, key, i) {
+    let entry = bibitems[i]
+    if (entry.key == key) entry.number
+    else find_bib_num(bibitems, key, i + 1)
+}
+
+fn render_bibliography(el, info) {
+    let items = render_bib_items(el, info)
+    <section class: "latex-bibliography";
+        <h2; "References">
+        <ol class: "latex-bib-list";
+            for item in items { item }
+        >
+    >
+}
+
+fn render_bib_items(el, info) {
+    collect_bib_entries(el, 0, len(el), info, [], null)
+}
+
+// walk children of thebibliography: each bibitem starts a new entry,
+// content between bibitems is the entry text
+fn collect_bib_entries(el, i, n, info, acc, current_key) {
+    if (i >= n) finalize_bib_entries(acc, current_key, [])
+    else collect_bib_entry_at(el, i, n, info, acc, current_key)
+}
+
+fn collect_bib_entry_at(el, i, n, info, acc, current_key) {
+    let child = el[i]
+    if ((child is element) and name(child) == 'bibitem') start_bib_entry(el, i, n, info, acc, child)
+    else if ((child is element) and name(child) == 'paragraph') collect_bib_in_paragraph(el, i, n, info, acc, current_key, child)
+    else collect_bib_entries(el, i + 1, n, info, acc, current_key)
+}
+
+fn start_bib_entry(el, i, n, info, acc, bibitem) {
+    let key = trim(util.text_of(bibitem))
+    collect_bib_entries(el, i + 1, n, info, acc, key)
+}
+
+fn collect_bib_in_paragraph(el, i, n, info, acc, current_key, para) {
+    // process paragraph children to split by bibitem
+    let result = collect_bib_from_para(para, 0, len(para), info, acc, current_key)
+    collect_bib_entries(el, i + 1, n, info, result.acc, result.key)
+}
+
+fn collect_bib_from_para(para, i, n, info, acc, current_key) {
+    if (i >= n) make_bib_state(acc, current_key)
+    else collect_bib_from_para_at(para, i, n, info, acc, current_key)
+}
+
+fn collect_bib_from_para_at(para, i, n, info, acc, current_key) {
+    let child = para[i]
+    if ((child is element) and name(child) == 'bibitem') start_bib_from_para(para, i, n, info, acc, child)
+    else accumulate_bib_content(para, i, n, info, acc, current_key, child)
+}
+
+fn start_bib_from_para(para, i, n, info, acc, bibitem) {
+    let key = trim(util.text_of(bibitem))
+    collect_bib_from_para(para, i + 1, n, info, acc, key)
+}
+
+fn accumulate_bib_content(para, i, n, info, acc, current_key, child) {
+    if (current_key == null) collect_bib_from_para(para, i + 1, n, info, acc, current_key)
+    else add_bib_content(para, i, n, info, acc, current_key, child)
+}
+
+fn add_bib_content(para, i, n, info, acc, current_key, child) {
+    let rendered = render_node(child, info)
+    let new_entry = make_bib_item_entry(current_key, rendered)
+    let new_acc = acc ++ [new_entry]
+    collect_bib_from_para(para, i + 1, n, info, new_acc, current_key)
+}
+
+fn make_bib_state(acc, key) {
+    {acc: acc, key: key}
+}
+
+fn make_bib_item_entry(key, content) {
+    {key: key, content: content}
+}
+
+fn finalize_bib_entries(entries, last_key, acc) {
+    if (len(entries) == 0) acc
+    else group_bib_entries(entries, acc)
+}
+
+fn group_bib_entries(entries, acc) {
+    // group entries by key into <li> elements
+    build_bib_list(entries, 0, len(entries), null, [], [])
+}
+
+fn build_bib_list(entries, i, n, cur_key, cur_content, acc) {
+    if (i >= n) finish_bib_list(cur_key, cur_content, acc)
+    else process_bib_entry(entries, i, n, cur_key, cur_content, acc)
+}
+
+fn process_bib_entry(entries, i, n, cur_key, cur_content, acc) {
+    let e = entries[i]
+    if (cur_key == null or cur_key == e.key) build_bib_list(entries, i + 1, n, e.key, cur_content ++ [e.content], acc)
+    else flush_and_continue(entries, i, n, cur_key, cur_content, acc)
+}
+
+fn flush_and_continue(entries, i, n, cur_key, cur_content, acc) {
+    let li = make_bib_li(cur_key, cur_content)
+    let e = entries[i]
+    build_bib_list(entries, i + 1, n, e.key, [e.content], acc ++ [li])
+}
+
+fn finish_bib_list(cur_key, cur_content, acc) {
+    if (cur_key == null) acc
+    else acc ++ [make_bib_li(cur_key, cur_content)]
+}
+
+fn make_bib_li(key, content) {
+    <li id: "bib-" ++ key;
+        for c in content { c }
+    >
+}
+
 // ============================================================
 // Footnotes
 // ============================================================
@@ -747,13 +1102,25 @@ fn render_url(el) {
 fn render_footnote(el, info) {
     let content_text = trim(util.text_of(el))
     let fn_key = util.slugify(content_text)
-    let fn_entry = info.footnote_map[fn_key]
-    let fn_num = if (fn_entry != null) fn_entry.number else 0
+    let fn_num = find_footnote_num(info.footnotes, fn_key, 0)
     <sup class: "latex-footnote-ref";
         <a href: "#fn-" ++ string(fn_num), id: "fnref-" ++ string(fn_num);
             string(fn_num)
         >
     >
+}
+
+fn find_footnote_num(footnotes, key, i) {
+    if (i >= len(footnotes)) 0
+    else find_footnote_by_key(footnotes, key, i)
+}
+
+fn find_footnote_by_key(footnotes, key, i) {
+    let entry = footnotes[i]
+    let entry_text = trim(util.text_of(entry.node))
+    let entry_key = util.slugify(entry_text)
+    if (entry_key == key) entry.number
+    else find_footnote_num(footnotes, key, i + 1)
 }
 
 // ============================================================
