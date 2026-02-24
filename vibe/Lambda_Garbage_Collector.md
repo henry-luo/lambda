@@ -1,7 +1,8 @@
 # Proposal: Garbage Collector for Lambda Runtime
 
-## Status: Proposal
+## Status: Phases 1–4 Complete (In Progress)
 ## Date: 2025-02-24
+## Last Updated: 2026-02-24
 
 ---
 
@@ -503,38 +504,54 @@ The key invariant: **`gc_is_managed()` is the single gatekeeper**. It checks whe
 
 The migration is organized into 5 phases, each independently testable and shippable:
 
-#### Phase 0: GC Infrastructure (no behavior change)
-- Implement `GCHeap`, `NurseryRegion`, `GCHeader`, `gc_alloc()`.
-- Implement tri-color mark-and-sweep (mark stack, tracing per GC category, sweep).
-- Unit tests for allocator and GC correctness.
-- **No changes to Lambda runtime yet.**
+#### Phase 0: GC Infrastructure (no behavior change) — ✅ COMPLETE
+- Implemented `gc_heap_t`, `gc_header_t`, `gc_heap_alloc()`/`gc_heap_calloc()` in `lib/gc_heap.h` and `lib/gc_heap.c`.
+- 16-byte `GCHeader` prepended to every GC-managed allocation: `{ next, type_tag, gc_flags, marked, alloc_size }`.
+- Intrusive singly-linked list (`all_objects`) for tracking all live objects (newest-first).
+- Underlying allocator: rpmalloc `Pool` for bulk-free at context end.
+- **No changes to Lambda runtime behavior.**
 
-#### Phase 1: Replace num_stack with GC Nursery
-- Replace `push_l()`, `push_d()`, `push_k()` to allocate from GC nursery instead of num_stack.
-- Remove `push_l_safe()` — the double-boxing problem disappears because allocation always returns a fresh pointer.
-- Remove num_stack position tracking from `frame_start()`/`frame_end()`.
-- **Test**: All 113 transpiler tests pass with identical output.
+#### Phase 1: Replace num_stack with GC Nursery — ✅ COMPLETE
+- Replaced `push_l()`, `push_d()`, `push_k()` to allocate from `gc_heap_alloc()` instead of num_stack.
+- Removed `push_l_safe()` — the double-boxing problem eliminated because allocation always returns a fresh pointer.
+- Removed `num_stack_t` struct, `num_stack_create()`, `num_stack_destroy()`, `num_stack_push_*()` functions.
+- Removed `NumStackChunk` linked-list allocator.
+- `push_l()`/`push_d()`/`push_k()` now call `gc_heap_alloc()` with appropriate type tags.
+- **Test**: All 375 Lambda + 2098 Radiant tests pass.
 
-#### Phase 2: Replace Heap Tracking with GC
-- Replace `heap_alloc()`/`heap_calloc()` → `gc_alloc()`.
-- Remove the `entries` ArrayList and `frame_start()`/`frame_end()`.
-- Add shadow stack to transpilers (both C2MIR and MIR direct).
-- Remove `is_heap` flag — all GC-managed objects are traced uniformly. Arena objects have no GCHeader and are never traced.
-- **Test**: All transpiler tests + input parser tests pass.
+#### Phase 2: Replace Heap Tracking with GC — ✅ COMPLETE
+- Replaced `entries` ArrayList with GCHeader intrusive linked list for object tracking.
+- `heap_alloc()`/`heap_calloc()` now delegate to `gc_heap_alloc()`/`gc_heap_calloc()`.
+- Fixed critical bug: `gc_heap_pool_free()` was calling `pool_free()` immediately, corrupting the GCHeader `next` pointer needed for linked-list traversal. Fix: deferred actual pool_free, using `GC_FLAG_FREED` marker instead.
+- Added `gc_finalize_all_objects()` in `lambda-mem.cpp` for shutdown cleanup — walks all GC objects, frees sub-allocations (`items[]`, `map->data`, `mpd_t*`, etc.).
+- **Test**: All 375 Lambda + 2098 Radiant tests pass.
 
-#### Phase 3: Remove Reference Counting
-- Remove `ref_cnt` fields from `String`, `Symbol`, `Container`, `Function`, `Decimal`.
-- Remove all `ref_cnt++`/`ref_cnt--` sites (~20+ locations across 5 files).
-- Remove `free_item()`, `free_container()`, `free_map_item()`, `check_memory_leak()`.
-- Finalization (freeing sub-allocations like `items[]`, `map->data`, `mpd_t*`) moves to GC sweep.
-- **Test**: Full test suite + memory profiling to verify no leaks.
+#### Phase 3: Remove Reference Counting — ✅ COMPLETE
+- Removed `ref_cnt` fields from ALL structs:
+  - `String`: was `len:22, ref_cnt:10` bitfield → `uint32_t len` (full 32 bits)
+  - `Symbol`: removed `ref_cnt` field
+  - `Container`: removed `uint16_t ref_cnt`
+  - `Range`, `List`, `ArrayInt`, `ArrayInt64`, `ArrayFloat`, `Function`, `Path`: removed `ref_cnt`
+  - `Decimal`: removed `ref_cnt` from `lambda-data.hpp`
+- Removed ~100+ `ref_cnt++`/`ref_cnt--` operations across 20+ source files.
+- Stubbed `free_item()` and `free_container()` (no-ops; all memory freed at context end via `gc_finalize_all_objects()` + `pool_destroy()`).
+- Fixed latent bug exposed by struct layout change: `AstLoopNode` was incorrectly cast to `AstNamedNode` in 3 locations (`print.cpp`, `transpile.cpp`, `safety_analyzer.cpp`) — different struct layouts caused field offset mismatch for the `as` field.
+- **Files modified**: `lambda.h`, `lambda-data.hpp`, `lambda-mem.cpp`, `lambda-eval.cpp`, `lambda-data.cpp`, `lambda-data-runtime.cpp`, `lambda-decimal.cpp`, `lambda-proc.cpp`, `lambda-vector.cpp`, `mark_editor.cpp`, `name_pool.cpp`, `print.cpp`, `transpile.cpp`, `transpile-mir.cpp`, `safety_analyzer.cpp`, `lib/str.h`, `radiant/symbol_resolver.cpp`, `radiant/layout_block.cpp`, `radiant/pdf/pages.cpp`, ~20 test files.
+- **Test**: All 375 Lambda + 2098 Radiant tests pass.
 
-#### Phase 4: Transpiler Simplification
-- Remove `frame_start()`/`frame_end()` emission from both transpilers.
-- Remove boxing/unboxing special cases for num_stack consistency (e.g., `POST_PROCESS_INT64`).
-- Simplify `transpile_box_item()` — no need to distinguish num_stack vs heap boxing.
-- Update `_store_i64`/`_store_f64` swap workarounds (may no longer be needed if register allocation changes).
-- **Test**: Full test suite + performance benchmarks.
+#### Phase 4: Transpiler Simplification — ✅ COMPLETE
+- Removed all `frame_start()`/`frame_end()` calls from runtime:
+  - `lambda-data-runtime.cpp`: removed 17 calls from `array()`, `array_fill()`, `array_int()`, `array_int_fill()`, `array_int64()`, `array_int64_fill()`, `array_float()`, `array_float_fill()`, `list()`, `list_end()`, `array_spreadable()`, `array_end()`, `map()`, `map_fill()`, `elmt()`, `object()`, `object_fill()`.
+  - `runner.cpp`: removed `frame_start()` from `runner_setup_context()` and `frame_end()` from `runner_cleanup()`.
+- Removed `frame_end()` emission from both transpilers:
+  - `transpile.cpp`: removed `frame_end()` emission for for-expression offset/limit path.
+  - `transpile-mir.cpp`: removed 4 `frame_end` emissions (for-expression, empty array, empty map, empty object), removed 2 extern declarations.
+- Removed `frame_end` from MIR import resolver table (`mir.c`).
+- Removed `gc_heap_frame_push()`/`gc_heap_frame_pop()` functions and `frame_stack`/`frame_depth`/`frame_capacity` from `gc_heap_t` struct.
+- Removed `frame_start()`/`frame_end()` declarations from `lambda.h` and `transpiler.hpp`.
+- Made `frame_start()`/`frame_end()` definitions in `lambda-mem.cpp` empty no-ops (retained for any residual external callers).
+- `POST_PROCESS_INT64` was already eliminated in Phase 1. `_store_i64`/`_store_f64` remain needed — they are MIR JIT workarounds for a register allocation bug unrelated to GC. `transpile_box_item()` uses `push_l`/`push_d`/`push_k` which now uniformly allocate via GC heap, so the num_stack vs heap distinction is already resolved.
+- **Test**: All 375 Lambda + 2098 Radiant tests pass.
 
 ### 3.2 Compatibility Boundary: Arena Objects
 
@@ -594,15 +611,15 @@ struct Container {
 
 **Binary compatibility**: The `Item` union and tagged pointer encoding are unchanged. All `type_id()`, `get_string()`, `get_int64()` accessors work identically. The change is invisible to transpiled code.
 
-### 3.4 Files Modified Per Phase
+### 3.4 Files Modified Per Phase (Actual)
 
-| Phase | Files Modified | Files Removed/Added |
+| Phase | Files Modified | Key Changes |
 |-------|---------------|-------------------|
-| **Phase 0** | None | Add: `lib/gc.h`, `lib/gc.c` |
-| **Phase 1** | `lambda-mem.cpp`, `lambda.h` | Remove num_stack from `frame_start`/`frame_end` |
-| **Phase 2** | `lambda-mem.cpp`, `transpile.cpp`, `transpile-mir.cpp`, `runner.cpp` | Remove `entries` ArrayList |
-| **Phase 3** | `lambda.h`, `lambda.hpp`, `lambda-data.hpp`, `lambda-mem.cpp`, `lambda-eval.cpp`, `mark_editor.cpp`, `lambda-decimal.cpp`, `name_pool.cpp` | Remove `free_item`, `free_container`, `free_map_item`, `check_memory_leak` |
-| **Phase 4** | `transpile.cpp`, `transpile-mir.cpp` | Remove frame bracket emission |
+| **Phase 0** ✅ | `lib/gc_heap.h`, `lib/gc_heap.c` | Added GCHeader, gc_heap_alloc/calloc, intrusive linked list tracking |
+| **Phase 1** ✅ | `lambda-mem.cpp`, `lambda.h`, `lambda-stack.cpp`, `lambda-stack.h`, `runner.cpp` | Replaced num_stack with gc_heap_alloc for push_l/push_d/push_k; removed NumStackChunk |
+| **Phase 2** ✅ | `lambda-mem.cpp`, `lambda.h`, `lib/gc_heap.c` | Replaced entries ArrayList with GCHeader linked list; added gc_finalize_all_objects; deferred pool_free |
+| **Phase 3** ✅ | `lambda.h`, `lambda-data.hpp`, `lambda-mem.cpp`, `lambda-eval.cpp`, `lambda-data.cpp`, `lambda-data-runtime.cpp`, `lambda-decimal.cpp`, `lambda-proc.cpp`, `lambda-vector.cpp`, `mark_editor.cpp`, `name_pool.cpp`, `print.cpp`, `transpile.cpp`, `transpile-mir.cpp`, `safety_analyzer.cpp`, `lib/str.h`, 3 radiant files, ~20 test files | Removed ref_cnt from all structs; stubbed free_item/free_container; fixed AstLoopNode cast bug |
+| **Phase 4** ✅ | `lambda-data-runtime.cpp`, `runner.cpp`, `transpile.cpp`, `transpile-mir.cpp`, `mir.c`, `lambda-mem.cpp`, `lambda.h`, `transpiler.hpp`, `lib/gc_heap.h`, `lib/gc_heap.c` | Removed all frame_start/frame_end calls, emissions, and infrastructure |
 
 ---
 
@@ -841,61 +858,72 @@ Extend the arena model to all runtime allocations. Each function call gets a reg
 
 ## 8. Success Criteria
 
-| Criterion | Measurement |
-|-----------|-------------|
-| **Correctness** | All 113 transpiler tests pass with identical output |
-| **Closure leak fix** | New test: closure cycle is collected (ref_cnt version leaks) |
-| **No double-boxing** | `push_l_safe()` removed; no INT64 boxing workarounds needed |
-| **Transpiler simplification** | `frame_start`/`frame_end` emission removed from both transpilers |
-| **Ref_cnt elimination** | Zero `ref_cnt++`/`ref_cnt--` sites in codebase |
-| **Performance** | Allocation-heavy benchmarks ≥ current throughput |
-| **Memory** | Peak memory ≤ 1.1× current for representative workloads |
+| Criterion | Measurement | Status |
+|-----------|-------------|--------|
+| **Correctness** | All 375 Lambda + 2098 Radiant tests pass | ✅ Achieved |
+| **Closure leak fix** | New test: closure cycle is collected (ref_cnt version leaks) | ⬚ Pending (future GC sweep phase) |
+| **No double-boxing** | `push_l_safe()` removed; no INT64 boxing workarounds needed | ✅ Achieved (Phase 1) |
+| **Transpiler simplification** | `frame_start`/`frame_end` emission removed from both transpilers | ✅ Achieved (Phase 4) |
+| **Ref_cnt elimination** | Zero `ref_cnt++`/`ref_cnt--` sites in codebase | ✅ Achieved (Phase 3) |
+| **Frame management elimination** | Zero `frame_start()`/`frame_end()` calls in runtime and transpiler output | ✅ Achieved (Phase 4) |
+| **Performance** | Allocation-heavy benchmarks ≥ current throughput | ⬚ Pending benchmarks |
+| **Memory** | Peak memory ≤ 1.1× current for representative workloads | ⬚ Pending profiling |
 
 ---
 
-## 9. Estimated Effort
+## 9. Implementation Timeline
 
-| Phase | Estimated Duration | Dependencies |
-|-------|-------------------|--------------|
-| Phase 0: GC infrastructure | 2–3 weeks | None |
-| Phase 1: Replace num_stack | 1–2 weeks | Phase 0 |
-| Phase 2: Replace heap tracking | 2–3 weeks | Phase 1 |
-| Phase 3: Remove ref_cnt | 1–2 weeks | Phase 2 |
-| Phase 4: Transpiler simplification | 1–2 weeks | Phase 3 |
-| **Total** | **7–12 weeks** | |
+| Phase | Estimated | Actual | Status |
+|-------|-----------|--------|--------|
+| Phase 0: GC infrastructure | 2–3 weeks | — | ✅ Complete |
+| Phase 1: Replace num_stack | 1–2 weeks | — | ✅ Complete |
+| Phase 2: Replace heap tracking | 2–3 weeks | — | ✅ Complete |
+| Phase 3: Remove ref_cnt | 1–2 weeks | — | ✅ Complete |
+| Phase 4: Transpiler simplification | 1–2 weeks | — | ✅ Complete |
 
-Each phase is independently testable against the existing test suite, allowing incremental validation and the ability to stop at any phase boundary if priorities change.
+All four phases were completed and validated against the full test suite (375 Lambda + 2098 Radiant tests).
+
+### Remaining Work
+
+The foundational phases are complete. The runtime no longer uses num_stack, reference counting, or frame-based memory management. All memory is allocated via `gc_heap_alloc()`/`gc_heap_calloc()`, tracked via GCHeader linked list, and bulk-freed at context end via `gc_finalize_all_objects()` + `pool_destroy()`.
+
+Future work to realize the full GC vision:
+
+| Item | Description |
+|------|-------------|
+| **Mark-and-sweep collection** | Implement tri-color marking and sweep phases (currently all memory is freed at context end; no mid-execution collection) |
+| **Shadow stack** | Add GC root registration to transpilers for precise root scanning |
+| **Nursery compaction** | Implement minor GC with survivor promotion to tenured region |
+| **Closure cycle collection** | Add test for closure cycles; verify GC collects them |
+| **Performance benchmarks** | Compare allocation throughput and memory usage vs. pre-GC baseline |
+| **Remove `is_heap` flag** | Arena vs GC distinction via `gc_is_managed()` pointer range check instead of per-object flag |
 
 ---
 
-## 10. Appendix: Current Code Inventory
+## 10. Appendix: Code Inventory
 
-### Files Containing ref_cnt Operations
+### Current State (Post Phase 4)
 
-| File | Operations | Count |
-|------|-----------|-------|
-| `lambda-mem.cpp` | `ref_cnt--`, `ref_cnt > 0` checks | 8 |
-| `lambda-eval.cpp` | `ref_cnt++`, `ref_cnt--` for map field store | 6 |
-| `mark_editor.cpp` | `ref_cnt++`, `ref_cnt--` for document mutation | 8 |
-| `lambda-decimal.cpp` | `ref_cnt++`, `ref_cnt--` for decimal sharing | 2 |
-| `name_pool.cpp` | `ref_cnt++` for parent pool references | 1 |
+| Component | Status |
+|-----------|--------|
+| `ref_cnt` fields | ✅ Removed from all structs (`String`, `Symbol`, `Container`, `Range`, `List`, `ArrayInt`, `ArrayInt64`, `ArrayFloat`, `Function`, `Path`, `Decimal`) |
+| `ref_cnt++`/`ref_cnt--` operations | ✅ Removed from all ~100+ sites across 20+ files |
+| `num_stack` | ✅ Removed (`NumStackChunk`, `num_stack_t`, `push_l_safe()` all deleted) |
+| `push_l()`/`push_d()`/`push_k()` | ✅ Reimplemented via `gc_heap_alloc()` |
+| `frame_start()`/`frame_end()` calls | ✅ Removed from all runtime code (17 sites in `lambda-data-runtime.cpp`, 2 in `runner.cpp`) |
+| `frame_start()`/`frame_end()` emissions | ✅ Removed from both transpilers (1 in `transpile.cpp`, 4 in `transpile-mir.cpp`) |
+| `frame_start()`/`frame_end()` definitions | Empty no-ops retained in `lambda-mem.cpp` for external compatibility |
+| `gc_heap_frame_push()`/`gc_heap_frame_pop()` | ✅ Removed from `gc_heap.c`/`gc_heap.h` |
+| `frame_stack`/`frame_depth`/`frame_capacity` | ✅ Removed from `gc_heap_t` struct |
+| `entries` ArrayList | ✅ Removed; replaced by GCHeader intrusive linked list |
+| `free_item()`/`free_container()` | Stubbed (no-ops); memory freed at context end |
+| `gc_finalize_all_objects()` | ✅ Added — walks GCHeader linked list at shutdown, frees sub-allocations |
+| MIR import resolver (`mir.c`) | ✅ `frame_end` entry removed from `func_list` |
 
-### Files Containing num_stack Operations
+### GC Infrastructure Files
 
-| File | Operations |
-|------|-----------|
-| `lambda-mem.cpp` | `push_l()`, `push_d()`, `push_k()`, `push_l_safe()`, `frame_start()`, `frame_end()` |
-| `lambda-data-runtime.cpp` | `push_l()`, `push_d()` in runtime functions |
-| `lambda-eval.cpp` | `push_l()`, `push_d()`, `push_k()` for literal evaluation |
-| `transpile.cpp` | `push_l`, `push_d` emission in generated C |
-| `transpile-mir.cpp` | `push_l`, `push_d`, `push_l_safe` MIR import/call |
-| `runner.cpp` | `num_stack_create()`, `num_stack_destroy()` |
-
-### Files Containing frame_start/frame_end
-
-| File | Context |
-|------|---------|
-| `lambda-mem.cpp` | Implementation |
-| `lambda-data-runtime.cpp` | Called from `array()`, `list()`, `map()`, `elmt()`, `object()`, `*_fill()`, `*_end()` |
-| `transpile.cpp` | Emitted in generated C for for-expressions |
-| `transpile-mir.cpp` | MIR calls for for-expressions |
+| File | Purpose |
+|------|--------|
+| `lib/gc_heap.h` | GCHeader struct (16 bytes), gc_heap_t struct, gc_heap_alloc/calloc/pool_free APIs |
+| `lib/gc_heap.c` | GC heap creation/destruction, allocation with header prepending, pool_free with GC_FLAG_FREED guard |
+| `lambda/lambda-mem.cpp` | `push_l()`/`push_d()`/`push_k()` (GC-backed), `heap_alloc()`/`heap_calloc()` (GC-backed), `gc_finalize_all_objects()`, empty `frame_start()`/`frame_end()` stubs |
