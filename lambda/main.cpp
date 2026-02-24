@@ -660,57 +660,45 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "xml") == 0) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {
-            // Check if input is LaTeX and route to unified converter
+            // Check if input is LaTeX and route to Lambda package converter
             if (is_latex_input) {
-                // Always use unified pipeline (doc model based) for LaTeX to HTML
-                printf("Using unified LaTeX pipeline\n");
+                printf("Using Lambda LaTeX package pipeline\n");
 
-                    // Read the source file content
-                    char* source_content = read_text_file(input_file);
-                    if (!source_content) {
-                        printf("Error: Failed to read source file for unified pipeline\n");
-                        pool_destroy(temp_pool);
-                        return 1;
+                // Build a Lambda script that imports the LaTeX package
+                // and renders the file to HTML
+                char script_buf[4096];
+                const char* standalone_opt = full_document ? ", {standalone: true}" : ", null";
+                snprintf(script_buf, sizeof(script_buf),
+                    "import latex: .lambda.package.latex.latex\n"
+                    "let ast^err = input(\"%s\", {type: \"latex\"})\n"
+                    "latex.render_to_html(ast%s)\n",
+                    input_file, standalone_opt);
+
+                // Run the script using the Lambda runtime
+                Runtime lambda_runtime;
+                runtime_init(&lambda_runtime);
+                lambda_runtime.current_dir = const_cast<char*>("./");
+
+                // Write the script to a temporary file, then execute it
+                const char* tmp_script_path = "temp/_convert_latex_tmp.ls";
+                write_text_file(tmp_script_path, script_buf);
+                Input* script_result = run_script_mir(&lambda_runtime, nullptr, (char*)tmp_script_path, false);
+                if (script_result && get_type_id(script_result->root) != LMD_TYPE_NULL
+                    && get_type_id(script_result->root) != LMD_TYPE_ERROR) {
+                    full_doc_output = strbuf_new_cap(8192);
+                    print_root_item(full_doc_output, script_result->root);
+                } else {
+                    printf("Error: Lambda LaTeX package - HTML rendering failed\n");
+                    if (script_result && get_type_id(script_result->root) == LMD_TYPE_ERROR) {
+                        LambdaError* last_error = get_persistent_last_error();
+                        if (last_error) {
+                            err_print(last_error);
+                            clear_persistent_last_error();
+                        }
                     }
+                }
 
-                    // Create arena for document model
-                    Pool* doc_pool = pool_create();
-                    Arena* doc_arena = arena_create_default(doc_pool);
-
-                    // Create font manager for math typesetting
-                    tex::TFMFontManager* fonts = tex::create_font_manager(doc_arena);
-
-                    // Build document model
-                    tex::TexDocumentModel* doc = tex::doc_model_from_string(
-                        source_content, strlen(source_content), doc_arena, fonts);
-
-                    free(source_content);
-
-                    if (!doc || !doc->root) {
-                        printf("Error: Unified pipeline - document model creation failed\n");
-                        arena_destroy(doc_arena);
-                        pool_destroy(doc_pool);
-                        pool_destroy(temp_pool);
-                        return 1;
-                    }
-
-                    // Render to HTML
-                    StrBuf* html_buf = strbuf_new_cap(8192);
-                    tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::defaults();
-                    opts.standalone = full_document;
-                    opts.pretty_print = true;
-
-                    bool success = tex::doc_model_to_html(doc, html_buf, opts);
-
-                    if (success && html_buf->length > 0) {
-                        full_doc_output = strbuf_dup(html_buf);
-                    } else {
-                        printf("Error: Unified pipeline - HTML rendering failed\n");
-                    }
-
-                    strbuf_free(html_buf);
-                    arena_destroy(doc_arena);
-                    pool_destroy(doc_pool);
+                runtime_cleanup(&lambda_runtime);
             } else {
                 // Use regular HTML formatter
                 formatted_output = format_html(input->pool, input->root);

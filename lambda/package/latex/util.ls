@@ -177,6 +177,29 @@ fn find_child_rec(el, tag_name, i, n) {
     }
 }
 
+// get the first descendant element with a given tag (depth-first), or null
+pub fn find_descendant(el, tag_name) {
+    let n = len(el)
+    find_desc_rec(el, tag_name, 0, n)
+}
+
+fn find_desc_rec(el, tag_name, i, n) {
+    if (i >= n) { null }
+    else {
+        let child = el[i]
+        if (child is element) {
+            if (string(name(child)) == string(tag_name)) { child }
+            else {
+                let deep = find_descendant(child, tag_name)
+                if (deep != null) { deep }
+                else { find_desc_rec(el, tag_name, i + 1, n) }
+            }
+        } else {
+            find_desc_rec(el, tag_name, i + 1, n)
+        }
+    }
+}
+
 // collect all children from an element as an array
 pub fn children_array(el) {
     let n = len(el)
