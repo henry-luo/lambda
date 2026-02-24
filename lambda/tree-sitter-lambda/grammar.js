@@ -456,6 +456,7 @@ module.exports = grammar({
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_item,   // ~ for pipe context
       $.current_index,  // ~# for pipe key/index
+      $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
 
     _arguments: $ => seq(
@@ -492,6 +493,9 @@ module.exports = grammar({
 
     // Path root: / for absolute file paths
     path_root: _ => '/',
+
+    // Variadic marker: ... (higher priority than path_self and path_parent)
+    variadic: _ => token(prec(2, '...')),
 
     // Path self: . for relative paths (current directory)
     path_self: _ => '.',
@@ -564,7 +568,7 @@ module.exports = grammar({
         optional(seq(':', field('type', $._type_expr))),
         optional(seq('=', field('default', $._expr))),
       ),
-      field('variadic', '...'),  // variadic marker (must be last parameter)
+      field('variadic', $.variadic),  // variadic marker (must be last parameter)
     ),
 
     // Named argument in function call: name: value

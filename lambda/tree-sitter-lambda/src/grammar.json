@@ -3603,6 +3603,10 @@
           {
             "type": "SYMBOL",
             "name": "current_index"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "variadic"
           }
         ]
       }
@@ -3818,6 +3822,17 @@
     "path_root": {
       "type": "STRING",
       "value": "/"
+    },
+    "variadic": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "STRING",
+          "value": "..."
+        }
+      }
     },
     "path_self": {
       "type": "STRING",
@@ -5001,8 +5016,8 @@
           "type": "FIELD",
           "name": "variadic",
           "content": {
-            "type": "STRING",
-            "value": "..."
+            "type": "SYMBOL",
+            "name": "variadic"
           }
         }
       ]
