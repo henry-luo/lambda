@@ -887,19 +887,8 @@ fn all_cells_empty(cells, i) {
 }
 
 fn make_row_inner(cells, col_spec) {
-    let tds = build_tds(cells, col_spec, 0, len(cells), [])
+    let tds = for (i, cell in cells) cell_to_td_aligned(cell, get_align(col_spec, i))
     <tr; for td in tds { td }>
-}
-
-fn build_tds(cells, col_spec, i, n, acc) {
-    if (i >= n) acc
-    else build_next_td(cells, col_spec, i, n, acc)
-}
-
-fn build_next_td(cells, col_spec, i, n, acc) {
-    let td = cell_to_td_aligned(cells[i], get_align(col_spec, i))
-    let new_acc = acc ++ [td]
-    build_tds(cells, col_spec, i + 1, n, new_acc)
 }
 
 fn append_to_last_cell(cells, content) {

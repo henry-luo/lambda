@@ -8744,23 +8744,11 @@
       },
       {
         "type": "STRING",
-        "value": "binary_compare"
-      },
-      {
-        "type": "STRING",
         "value": "binary_relation"
       },
       {
         "type": "STRING",
         "value": "binary_eq"
-      },
-      {
-        "type": "STRING",
-        "value": "logical_and"
-      },
-      {
-        "type": "STRING",
-        "value": "logical_or"
       },
       {
         "type": "STRING",
@@ -8781,6 +8769,14 @@
       {
         "type": "STRING",
         "value": "is_in"
+      },
+      {
+        "type": "STRING",
+        "value": "logical_and"
+      },
+      {
+        "type": "STRING",
+        "value": "logical_or"
       },
       {
         "type": "STRING",

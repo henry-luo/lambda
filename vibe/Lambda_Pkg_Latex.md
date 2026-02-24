@@ -931,20 +931,33 @@ This section documents Lambda language issues discovered during the LaTeX packag
 
 ### 11.1 Operator Precedence: `is` binds tighter than `and`
 
-**Status:** Worked Around  
-**Severity:** High — causes silent logic errors
+**Status:** Fixed (grammar.js — moved `and`/`or` below `is`/`in` in precedence table)  
+**Severity:** High — caused silent logic errors
 
-The expression `x is element and len(x) > 0` is parsed as `x is (element and len(x) > 0)` rather than the expected `(x is element) and (len(x) > 0)`. The `is` operator binds more tightly than `and`, consuming the entire right side as a type expression.
+`is` and `in` previously had lower precedence than `and`/`or`, so `x is element and len(x) > 0` was parsed as `x is (element and len(x) > 0)`. Fixed by reordering the precedence list in `grammar.js` so that `is`/`in` bind tighter than `and`/`or`.
 
 ```lambda
-// BROKEN — parsed as: node is (element and name(node) == 'section')
+// NOW CORRECT — parsed as: (node is element) and (name(node) == 'section')
 if (node is element and name(node) == 'section') ...
 
-// WORKAROUND — explicit parentheses required
+// Explicit parentheses still work and improve readability
 if ((node is element) and name(node) == 'section') ...
 ```
 
-**Impact:** Multiple functions in macros.ls and render2.ls silently returned wrong results until parentheses were added around every `is` check.
+**Resolution:** The existing parenthesized code in macros.ls and render2.ls remains correct and is kept for readability.
+
+**Precedent in other languages:** The fix aligns with the universal convention — every mainstream language puts type-check/membership operators above logical operators:
+
+| Language | `is`/`in` precedence | `and`/`or` precedence | Order |
+|----------|---------------------|----------------------|-------|
+| **Python** | `is`, `in`, `not in` at comparison level | `and` below, `or` below `and` | `is` > `and` > `or` |
+| **Kotlin** | `is`, `in` at relational level (`<`, `>`) | `&&` below comparisons, `\|\|` below `&&` | `is` > `&&` > `\|\|` |
+| **C#** | `is` at relational level | `&&` two levels below, `\|\|` below that | `is` > `&&` > `\|\|` |
+| **TypeScript** | `instanceof`, `in` at relational level | `&&` below equality, `\|\|` below `&&` | `in` > `&&` > `\|\|` |
+| **Dart** | `is` at relational level | `&&` below equality, `\|\|` below `&&` | `is` > `&&` > `\|\|` |
+| **Swift** | `is` at cast level (above comparison) | `&&` below ternary, `\|\|` below `&&` | `is` > `&&` > `\|\|` |
+
+The rationale is that `x is T and y > 0` should naturally read as two independent conditions joined by `and` — type-check and membership operators group with comparisons/relationals, which always bind tighter than logical connectives.
 
 ### 11.2 Inline `++` in Map Spread Produces Null
 
@@ -998,27 +1011,25 @@ if (name(child) == 'paragraph) ...    // correct
 
 **Impact:** This was the root cause of the tabular rendering producing empty output. The `find_tabular_content` function couldn't find the `paragraph` child because every `name()` comparison silently failed. Debugging required dumping the AST to JSON to discover the type mismatch.
 
-### 11.5 Indexed `for` Comprehension Broken for Arrays
+### 11.5 ~~Indexed `for` Comprehension Broken for Arrays~~ (NOT A BUG)
 
-**Status:** Worked Around  
-**Severity:** Critical — produces garbage values
+**Status:** Resolved — was a misdiagnosis  
+**Severity:** N/A
 
-The indexed form of `for` comprehension `for (idx, item in arr)` does not work correctly for regular arrays. Both `idx` and `item` return null or garbage values:
+Originally believed that `for (idx, item in arr)` produced garbage values. Re-testing confirms indexed `for` works correctly on both arrays and element children with mixed types:
 
 ```lambda
-// BROKEN — both idx and item are null/garbage
-let result = for (idx, item in [10, 20, 30])
-    {index: idx, value: item}
-// result: [{index: null, value: null}, ...]
+// ALL CORRECT:
+for (i, v in [10, 20, 30]) string(i) ++ ":" ++ string(v)
+// ["0:10", "1:20", "2:30"]
 
-// WORKAROUND — use non-indexed for and track index manually via recursion
-fn build_with_index(arr, idx) {
-    if (idx >= len(arr)) []
-    else [{index: idx, value: arr[idx]}] ++ build_with_index(arr, idx + 1)
-}
+for (i, v in ["a", "b", "c"]) if (i == 2) "Z" else v
+// ["a", "b", "Z"]
 ```
 
-**Impact:** Required rewriting `replace_last` (needed for tabular cell accumulation) from a simple indexed for comprehension into a recursive `build_tds` function. Also forced `slice(arr, 0, last_idx) ++ [new_val]` pattern instead of the natural indexed replacement.
+The original failures were caused by **11.4** (`name()` returning symbols, not strings), which made child-matching logic silently fail and was misattributed to indexed `for`. The recursive `build_tds` workaround in render2.ls has been simplified back to an indexed `for` comprehension.
+
+**Note:** Indexed `for` over elements with only string children does produce unexpected results because Lambda merges adjacent string children into a single text node during element construction. This is element construction behavior, not a `for` bug.
 
 ### 11.6 `trim()` Empty String Comparison Broken
 
@@ -1038,26 +1049,23 @@ if (len(trim(text)) == 0) ...   // correct
 
 **Impact:** Caused trailing empty rows in tabular output. The whitespace-only strings between `\hline` and `\end{tabular}` were trimmed to zero-length but not recognized as empty, creating phantom table rows.
 
-### 11.7 `if-else` Inside `for` Comprehension Produces Nulls
+### 11.7 ~~`if-else` Inside `for` Comprehension Produces Nulls~~ (NOT A BUG)
 
-**Status:** Worked Around  
-**Severity:** High — entire comprehension produces nulls
+**Status:** Resolved — was a misdiagnosis  
+**Severity:** N/A
 
-Using an `if-else` expression inside a `for` comprehension produces all-null results:
+Originally believed that `if-else` inside `for` comprehensions produced all-null results. Re-testing confirms this works correctly:
 
 ```lambda
-// BROKEN — returns [null, null, null]
-let result = for (item in [1, 2, 3])
-    if (item == 2) "found" else "not"
+// ALL CORRECT:
+for (item in [1, 2, 3]) if (item == 2) "found" else "not"
+// ["not", "found", "not"]
 
-// WORKAROUND — extract to a helper function
-fn classify(item) {
-    if (item == 2) "found" else "not"
-}
-let result = for (item in [1, 2, 3]) classify(item)
+for (i, v in [10, 20, 30]) if (i == 1) "mid" else string(v)
+// ["10", "mid", "30"]
 ```
 
-**Impact:** Required extracting all conditional logic from `for` comprehensions into separate named functions throughout render2.ls.
+The original failures were likely caused by other issues in the surrounding code (e.g., **11.4** symbol vs string comparisons) rather than the `for` comprehension itself. Helper function extraction is still a valid style choice for readability but is not required as a workaround.
 
 ### 11.8 Map Literal After `if` Parsed as Block
 
@@ -1084,15 +1092,15 @@ fn update_figure_count(info) {
 
 ### 11.9 Summary Table
 
-| # | Issue | Severity | Status | Workaround Cost |
-|---|-------|----------|--------|-----------------|
-| 11.1 | `is`/`and` precedence | High | Worked Around | Low — add parens |
-| 11.2 | `++` in map spread → null | High | Worked Around | Medium — split into let bindings |
-| 11.3 | `type` as map key | Medium | Worked Around | Low — rename to `kind` |
-| 11.4 | `name()` returns symbol | High | Worked Around | Low — use single-quoted comparisons |
-| 11.5 | Indexed `for` broken | Critical | Worked Around | High — rewrite as recursion |
-| 11.6 | `trim() == ""` false | Medium | Worked Around | Low — use `len()` check |
-| 11.7 | `if-else` in `for` → nulls | High | Worked Around | Medium — extract to functions |
-| 11.8 | Map literal after `if` | Medium | Worked Around | Medium — restructure code |
+| #    | Issue                      | Severity | Status        | Workaround Cost                     |
+| ---- | -------------------------- | -------- | ------------- | ----------------------------------- |
+| 11.1 | `is`/`and` precedence      | High     | Fixed         | Grammar fix — reordered precedence  |
+| 11.2 | `++` in map spread → null  | High     | Worked Around | Medium — split into let bindings    |
+| 11.3 | `type` as map key          | Medium   | Worked Around | Low — rename to `kind`              |
+| 11.4 | `name()` returns symbol    | High     | Worked Around | Low — use single-quoted comparisons |
+| 11.5 | ~~Indexed `for` broken~~   | N/A      | Not a Bug     | N/A — works correctly               |
+| 11.6 | `trim() == ""` false       | Medium   | Worked Around | Low — use `len()` check             |
+| 11.7 | ~~`if-else` in `for`~~     | N/A      | Not a Bug     | N/A — works correctly               |
+| 11.8 | Map literal after `if`     | Medium   | Worked Around | Medium — restructure code           |
 
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. The most impactful issues are **11.5** (indexed for) and **11.7** (if-else in for), which force recursive patterns where simple comprehensions would suffice. Fixing these two would significantly improve Lambda's ergonomics for collection processing.
+**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). The remaining real issues (**11.1**, **11.2**, **11.4**, **11.6**, **11.8**) all have low-cost workarounds.
