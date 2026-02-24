@@ -1244,3 +1244,153 @@ run_script_mir(&lambda_runtime, nullptr, script_path, false);
 | 11.12 | `run_script_mir` `current_dir`| High     | Fixed         | One-line fix in C++                      |
 
 **Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,444 lines across 15 files). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, **11.6**, and **11.12** have been fixed in the language or runtime. Issue **11.4** is mitigated by a compile-time type check. Issues **11.8** and **11.9** are by design — requiring parenthesization and the `map()` constructor respectively. Issue **11.10** (placeholder symbols) is resolved — `string(type())` now works after adding the missing `LMD_TYPE_TYPE` case to `fn_string()`. Issue **11.11** remains outstanding but has no functional impact.
+
+---
+
+## Appendix A: Comparison with LaTeX.js and LaTeXML
+
+This appendix compares the Lambda LaTeX package with two established LaTeX-to-HTML/XML converters: [LaTeX.js](https://latex.js.org/) (JavaScript, browser-oriented) and [LaTeXML](https://math.nist.gov/~BMiller/LaTeXML/) (Perl, NIST-maintained).
+
+### A.1 Architecture Overview
+
+| Aspect | Lambda Package | LaTeX.js | LaTeXML |
+|---|---|---|---|
+| **Language** | Lambda Script (functional) | JavaScript | Perl |
+| **Codebase size** | ~3,400 lines (LaTeX) + ~1,500 lines (math) | ~15,000 lines | ~100,000+ lines |
+| **Parser** | Tree-sitter (C++, shared) | Custom PEG parser | Custom TeX-compatible parser |
+| **Output** | HTML string or element tree | HTML DOM | XML → HTML/MathML/EPUB |
+| **Math rendering** | HTML/CSS (MathLive-style spans) | HTML/CSS (KaTeX-style) | MathML |
+| **Pipeline** | Parse → Normalize → Analyze → Render → Serialize | Parse → Render (single-pass) | Parse → XML → XSLT → HTML |
+| **Passes** | 2-pass (counters/labels first, then render) | Single-pass with deferred refs | Multi-pass with binding |
+
+### A.2 Feature Comparison
+
+| Feature | Lambda | LaTeX.js | LaTeXML |
+|---|---|---|---|
+| **Document structure** | | | |
+| `\documentclass` (article/book/report) | Yes (3 classes) | Yes (3 classes) | Yes (100+ classes) |
+| `\title`, `\author`, `\date`, `\maketitle` | Yes | Yes | Yes |
+| `\tableofcontents` | Yes (auto-generated) | Yes | Yes |
+| `\begin{document}` | Yes | Yes | Yes |
+| **Sectioning** | | | |
+| `\part` through `\subparagraph` (7 levels) | All, auto-numbered | All, auto-numbered | All, auto-numbered |
+| Per-class numbering (Roman parts, chapter-prefixed) | Yes (article/book/report modules) | Yes | Yes |
+| `\section*` (unnumbered) | Yes | Yes | Yes |
+| **Text formatting** | | | |
+| `\textbf`, `\textit`, `\emph`, `\underline` | Yes | Yes | Yes |
+| `\texttt`, `\verb` | Yes | Yes | Yes |
+| `\textsf`, `\textsc`, `\textsl`, `\textrm` | Yes | Yes | Yes |
+| Font sizes (`\tiny` through `\Huge`) | All 10 | All 10 | All 10 |
+| **Math** | | | |
+| Inline `$...$`, `\(...\)` | Yes | Yes | Yes |
+| Display `$$...$$`, `\[...\]` | Yes | Yes | Yes |
+| `equation`, `align`, `gather`, `multline` | Yes | Yes | Yes |
+| Fractions (`\frac`, `\dfrac`, `\tfrac`) | Yes | Yes | Yes |
+| Sub/superscripts | Yes | Yes | Yes |
+| Radicals (`\sqrt`) | Yes | Yes | Yes |
+| Matrices (`pmatrix`, `bmatrix`, etc.) | Yes | Yes | Yes |
+| Big operators (`\sum`, `\int`, `\prod`) with limits | Yes | Yes | Yes |
+| Delimiters (`\left`, `\right`, sized) | Yes | Yes | Yes |
+| Accents (`\hat`, `\bar`, `\vec`, etc.) | Yes | Yes | Yes |
+| Math fonts (`\mathbf`, `\mathcal`, etc.) | Yes | Yes | Yes |
+| `\text{}` in math | Yes | Yes | Yes |
+| Equation numbering | Yes | Yes | Yes |
+| **Lists** | | | |
+| `itemize`, `enumerate`, `description` | Yes | Yes | Yes |
+| Custom item labels `\item[...]` | Yes | Yes | Yes |
+| Nested lists | Yes | Yes | Yes |
+| `enumitem` package (custom counters, labels) | No | Partial | Yes |
+| **Environments** | | | |
+| `quote`, `quotation`, `verse` | Yes | Yes | Yes |
+| `center`, `flushleft`, `flushright` | Yes | Yes | Yes |
+| `verbatim`, `lstlisting` | Yes | Yes | Yes |
+| `abstract` | Yes | Yes | Yes |
+| `minipage` | Yes | Yes | Yes |
+| `multicols` | Yes | Partial | Yes |
+| **Theorem-like environments** | | | |
+| `theorem`, `lemma`, `corollary`, `proposition` | Yes (auto-numbered) | Yes | Yes |
+| `definition`, `example`, `remark` | Yes (auto-numbered) | Yes | Yes |
+| `proof` (with QED □) | Yes | Yes | Yes |
+| `\newtheorem` (custom) | No | No | Yes |
+| **Tables** | | | |
+| `tabular` with `l/c/r` alignment | Yes | Yes | Yes |
+| `\multicolumn` | Yes | Yes | Yes |
+| `\multirow` | Yes | Yes | Yes |
+| `table` float with `\caption` | Yes (auto-numbered) | Yes | Yes |
+| `\hline`, `\cline` | Recognized (CSS borders) | Yes | Yes |
+| `booktabs` (`\toprule`, `\midrule`) | No | No | Yes |
+| `longtable` | No | No | Yes |
+| **Figures** | | | |
+| `figure` float with `\caption` | Yes (auto-numbered) | Yes | Yes |
+| `\includegraphics` | Yes (`<img>`) | Yes | Yes |
+| `\includegraphics` options (width, scale) | No | Partial | Yes |
+| `subfigure`/`subcaption` | No | No | Yes |
+| **Cross-references** | | | |
+| `\label`, `\ref` (resolved to numbers) | Yes | Yes | Yes |
+| `\href`, `\url` | Yes | Yes | Yes |
+| `\autoref`, `\nameref` | No | No | Yes |
+| `hyperref` package | No | Partial | Yes |
+| **Bibliography** | | | |
+| `thebibliography`, `\bibitem`, `\cite` | Yes | Yes | Yes |
+| BibTeX/BibLaTeX integration | No | No | Yes |
+| `\citep`, `\citet` (natbib) | No | No | Yes |
+| **Footnotes** | Yes (with back-refs ↩) | Yes | Yes |
+| **Diacritics** | 15 commands, pre-composed Unicode | Similar | Comprehensive |
+| **Ligatures** | `---`, `--`, `` `` ``, `''` | Same | Same |
+| **Custom macros** | | | |
+| `\newcommand` with `#1`–`#9` | Yes | Yes | Yes |
+| `\renewcommand`, `\providecommand` | Yes | Yes | Yes |
+| `\def` (TeX primitives) | Parsed only | No | Yes |
+| Optional arguments `[default]` | Parsed only | Yes | Yes |
+| **Spacing** | | | |
+| `\\`, `\newline` | Yes | Yes | Yes |
+| `\hspace`, `\vspace` | Yes | Yes | Yes |
+| `\quad`, `\qquad` | Yes | Yes | Yes |
+| `\newpage`, `\clearpage` | Yes (as `<hr>`) | Yes | Yes |
+| **Counters & lengths** | | | |
+| `\setcounter`, `\addtocounter` | Skipped | Partial | Full |
+| `\setlength`, `\newlength` | Skipped | Partial | Full |
+| Custom counter manipulation | No | Limited | Full |
+| **Package support** | | | |
+| Built-in package emulation | None | ~10 packages | 200+ packages |
+| `geometry` | No | Basic | Yes |
+| `graphicx` | Basic (`\includegraphics`) | Partial | Full |
+| `amsmath`, `amssymb` | Math rendering only | Yes | Yes |
+| `hyperref` | No | Partial | Yes |
+| `color`/`xcolor` | `\textcolor` only | Partial | Yes |
+| `tikz`/`pgf` | No | No | Partial |
+| **Output modes** | | | |
+| HTML fragment | Yes | Yes | Yes |
+| Standalone HTML (with CSS) | Yes | Yes | Yes |
+| PDF | No (separate tex/ pipeline) | No | Via LaTeXML post |
+| EPUB | No | No | Yes |
+| **Error handling** | Graceful fallback + `<span>` wrapper | Graceful fallback | Graceful fallback |
+
+### A.3 Strengths and Trade-offs
+
+**Lambda Package strengths:**
+- **Compact and readable**: ~4,900 lines of functional code vs 15K (LaTeX.js) or 100K+ (LaTeXML)
+- **2-pass architecture**: Pre-computes all counters, labels, and cross-references before rendering, avoiding forward-reference issues
+- **Native integration**: Shares the Lambda runtime's tree-sitter LaTeX parser — no separate parsing step
+- **Pure functional style**: Immutable data flow, no global state, easy to reason about
+- **Math package**: Dedicated Lambda math package (~1,500 lines) produces MathLive-compatible HTML/CSS
+
+**Lambda Package limitations vs LaTeX.js:**
+- No package emulation (LaTeX.js handles ~10 common packages)
+- No `\newtheorem` for user-defined theorem types
+- No optional argument defaults in `\newcommand`
+- No `\includegraphics` size options (width, height, scale)
+
+**Lambda Package limitations vs LaTeXML:**
+- No BibTeX/BibLaTeX integration
+- No counter/length manipulation (`\setcounter`, `\setlength`)
+- No custom document classes beyond article/book/report
+- No package loading (LaTeXML supports 200+ packages)
+- No MathML output (Lambda uses HTML/CSS for math)
+- No EPUB or multi-format output pipeline
+
+### A.4 Positioning
+
+The Lambda LaTeX package occupies a pragmatic middle ground: **~85-90% feature parity with LaTeX.js** in a fraction of the code, handling the most common LaTeX document patterns (academic papers, technical articles, textbooks) correctly. It covers the **"80% of documents with 20% of complexity"** design point — sufficient for standard documents but not for heavily-customized ones with exotic packages or complex counter manipulation.
+
+For comparison: LaTeX.js targets browser-based rendering with similar scope, while LaTeXML is a near-complete TeX reimplementation targeting archival-quality XML/HTML conversion for digital libraries (notably used by arXiv for HTML papers).

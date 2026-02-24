@@ -1,0 +1,37 @@
+"===== BOX COMMAND TESTS =====1. mbox tag:"
+'span'
+"2. mbox class:latex-mbox3. fbox tag:"
+'span'
+"4. fbox class:latex-fbox5. frame tag:"
+'span'
+"6. frame class:latex-frame7. makebox tag:"
+'span'
+"8. makebox class:latex-makebox9. makebox style has width:"
+true
+"10. makebox style has center:"
+true
+"11. framebox class:latex-framebox12. framebox has border:"
+true
+"13. parbox tag:"
+'div'
+"14. parbox class:latex-parbox15. parbox has width:"
+true
+"16. raisebox tag:"
+'span'
+"17. raisebox class:latex-raisebox18. raisebox has bottom:"
+true
+"19. llap tag:"
+'span'
+"20. llap class:latex-llap21. llap has width:0:"
+true
+"22. rlap class:latex-rlap23. rlap has width:0:"
+true
+"24. smash class:latex-smash25. smash has height:0:"
+true
+"26. phantom class:latex-phantom27. phantom has hidden:"
+true
+"28. hphantom class:latex-hphantom29. hphantom has hidden:"
+true
+"30. vphantom class:latex-vphantom31. vphantom has hidden:"
+true
+"===== ALL BOX TESTS DONE ====="
