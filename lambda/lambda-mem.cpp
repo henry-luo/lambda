@@ -273,13 +273,9 @@ void free_container(Container* cont, bool clear_entry) {
 }
 
 void frame_start() {
-    log_debug("entering frame_start");
-    gc_heap_frame_push(context->heap->gc);
+    // no-op: frame management removed (GC Phase 4)
 }
 
 void frame_end() {
-    // no-op: memory cleanup is deferred to context end (gc_finalize_all_objects + pool_destroy).
-    // just pop the frame marker for stack balance.
-    gc_heap_frame_pop(context->heap->gc);
-    log_debug("frame_end (no-op)");
+    // no-op: frame management removed (GC Phase 4)
 }
