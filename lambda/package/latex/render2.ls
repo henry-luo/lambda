@@ -8,6 +8,7 @@ import math_bridge: .lambda.package.latex.math_bridge
 import spacing: .lambda.package.latex.elements.spacing
 import macros: .lambda.package.latex.macros
 import boxes: .lambda.package.latex.elements.boxes
+import font_decl: .lambda.package.latex.elements.font_decl
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -86,10 +87,29 @@ fn render_element(el, info) {
         case 'verb': render_verb(el)
 
         // ---- font families ----
-        case 'textsf': render_font(el, info, "font-sans")
-        case 'textsc': render_font(el, info, "font-smallcaps")
-        case 'textsl': render_font(el, info, "font-oblique")
-        case 'textrm': render_font(el, info, "font-serif")
+        case 'textsf': render_font(el, info, "latex-sf")
+        case 'textsc': render_font(el, info, "latex-sc")
+        case 'textsl': render_font(el, info, "latex-sl")
+        case 'textrm': render_font(el, info, "latex-rm")
+
+        // ---- font declarations (handled in render_group, standalone = no-op) ----
+        case 'itshape': null
+        case 'bfseries': null
+        case 'ttfamily': null
+        case 'rmfamily': null
+        case 'sffamily': null
+        case 'scshape': null
+        case 'slshape': null
+        case 'upshape': null
+        case 'mdseries': null
+
+        // ---- alignment declarations (handled in render_group, standalone = no-op) ----
+        case 'centering': null
+        case 'raggedright': null
+        case 'raggedleft': null
+
+        // ---- appendix marker (handled in analyze pass) ----
+        case 'appendix': null
 
         // ---- font sizes ----
         case 'tiny': render_size(el, info, "tiny")
@@ -404,14 +424,32 @@ fn build_heading_el(level, id, num_span, children) {
 // ============================================================
 
 fn render_paragraph(el, info) {
-    let items = render_children(el, 0, info)
-    if len(items) == 0 { null }
-    else if has_block_child(items) {
-        let parts = split_around_blocks(items)
-        if (len(parts) == 1) parts[0]
-        else parts
+    // check for leading font/alignment declaration
+    let decl_tag = find_leading_decl(el, 0, len(el))
+    if (decl_tag != null) render_paragraph_with_decl(el, info, decl_tag)
+    else {
+        let items = render_children(el, 0, info)
+        if len(items) == 0 { null }
+        else if has_block_child(items) {
+            let parts = split_around_blocks(items)
+            if (len(parts) == 1) parts[0]
+            else parts
+        }
+        else { <p; for c in items { c }> }
     }
-    else { <p; for c in items { c }> }
+}
+
+fn render_paragraph_with_decl(el, info, decl_tag) {
+    let items = render_children(el, 0, info)
+    if (len(items) == 0) null
+    else if (font_decl.is_font_decl(decl_tag)) {
+        let style = font_decl.font_decl_style(decl_tag)
+        <p style: style; for c in items { c }>
+    }
+    else {
+        let style = font_decl.align_decl_style(decl_tag)
+        <p style: style; for c in items { c }>
+    }
 }
 
 fn split_around_blocks(items) {
@@ -1286,10 +1324,42 @@ fn render_control_symbol(el) {
 }
 
 fn render_group(el, info) {
+    // check for leading font/alignment declaration in this group
+    let decl_tag = find_leading_decl(el, 0, len(el))
+    if (decl_tag != null) render_group_with_decl(el, info, decl_tag)
+    else {
+        let items = render_children(el, 0, info)
+        if (len(items) == 0) null
+        else if (len(items) == 1) items[0]
+        else <span; for c in items { c }>
+    }
+}
+
+// find the first font/alignment declaration tag among children (skipping whitespace)
+fn find_leading_decl(el, i, n) {
+    if i >= n { null }
+    else {
+        let child = el[i]
+        if (child is string and len(trim(child)) == 0)
+            find_leading_decl(el, i + 1, n)
+        else if (child is element) {
+            let tag_str = string(name(child))
+            if (font_decl.is_font_decl(tag_str)) tag_str
+            else if (font_decl.is_align_decl(tag_str)) tag_str
+            else null
+        }
+        else null
+    }
+}
+
+// render a group whose first significant child is a font/alignment declaration
+fn render_group_with_decl(el, info, decl_tag) {
+    // render children after the declaration (the decl itself returns null)
     let items = render_children(el, 0, info)
-    if (len(items) == 0) null
-    else if (len(items) == 1) items[0]
-    else <span; for c in items { c }>
+    if (font_decl.is_font_decl(decl_tag))
+        font_decl.wrap_font_decl(decl_tag, items)
+    else
+        font_decl.wrap_align_decl(decl_tag, items)
 }
 
 fn render_includegraphics(el) {

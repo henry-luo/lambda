@@ -24,18 +24,20 @@ pub TOP_LEVEL = 1  // <h1> for \chapter
 
 // format section number from counters
 // book: "1" (chapter), "1.1" (section), "1.1.1" (subsection)
-pub fn format_section_number(counters, counter_name) {
+// in appendix: "A" (chapter), "A.1" (section)
+pub fn format_section_number(counters, counter_name, in_appendix) {
+    let chap = if (in_appendix) number_to_alph(counters.chapter) else string(counters.chapter)
     match counter_name {
         case "part":
             roman_numeral(counters.part)
         case "chapter":
-            string(counters.chapter)
+            chap
         case "section":
-            string(counters.chapter) ++ "." ++ string(counters.section)
+            chap ++ "." ++ string(counters.section)
         case "subsection":
-            string(counters.chapter) ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection)
+            chap ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection)
         case "subsubsection":
-            string(counters.chapter) ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
+            chap ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
         default: null
     }
 }
@@ -124,4 +126,15 @@ fn roman_rec(n, acc) {
     else if (n >= 4) roman_rec(n - 4, acc ++ "IV")
     else if (n >= 1) roman_rec(n - 1, acc ++ "I")
     else acc
+}
+
+// ============================================================
+// Appendix letter conversion: 1→A, 2→B, ... 26→Z
+// ============================================================
+
+let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
+
+fn number_to_alph(n) {
+    if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
+    else string(n)
 }
