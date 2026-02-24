@@ -1053,18 +1053,17 @@ The original failures were caused by **11.4** (`name()` returning symbols, not s
 
 ### 11.6 `trim()` Empty String Comparison Broken
 
-**Status:** Worked Around  
+**Status:** Fixed  
 **Severity:** Medium — incorrect boolean result
 
-After `trim()`, comparing the result to an empty string `""` returns `false` even when the string has length 0:
+`trim()` on an all-whitespace string previously returned a zero-length string instead of `null`. In Lambda, empty strings should be normalized to `null`. This caused `trim("\n") == ""` to return `false` (zero-length string ≠ empty string literal) and phantom rows in tabular output.
+
+**Fix:** `trim()`, `trim_start()`, and `trim_end()` now return `ItemNull` when the trimmed result would be zero-length, consistent with Lambda's null-normalization semantics.
 
 ```lambda
-let s = trim("\n")
-len(s) == 0     // true
-s == ""          // false (!)
-
-// WORKAROUND — always use len() for empty checks after trim
-if (len(trim(text)) == 0) ...   // correct
+trim(" ")       // null (was: zero-length string)
+trim("\n\t")    // null
+trim(" hello ") // "hello" (unchanged)
 ```
 
 **Impact:** Caused trailing empty rows in tabular output. The whitespace-only strings between `\hline` and `\end{tabular}` were trimmed to zero-length but not recognized as empty, creating phantom table rows.
@@ -1119,8 +1118,8 @@ fn update_figure_count(info) {
 | 11.3 | `type` as map key          | Medium   | Fixed         | Grammar fix — `base_type` as key    |
 | 11.4 | `name()` returns symbol    | High     | Mitigated     | Compile-time type error added        |
 | 11.5 | ~~Indexed `for` broken~~   | N/A      | Not a Bug     | N/A — works correctly               |
-| 11.6 | `trim() == ""` false       | Medium   | Worked Around | Low — use `len()` check             |
+| 11.6 | `trim() == ""` false       | Medium   | Fixed         | Trim returns null for empty result  |
 | 11.7 | ~~`if-else` in `for`~~     | N/A      | Not a Bug     | N/A — works correctly               |
 | 11.8 | Map literal after `if`     | Medium   | Worked Around | Medium — restructure code           |
 
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, and **11.3** have been fixed in the language. Issue **11.4** is now mitigated by a compile-time type check that catches symbol-vs-string comparisons. The remaining issues (**11.6**, **11.8**) have low-cost workarounds.
+**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, and **11.6** have been fixed in the language. Issue **11.4** is now mitigated by a compile-time type check that catches symbol-vs-string comparisons. The remaining issue (**11.8**) has a low-cost workaround.
