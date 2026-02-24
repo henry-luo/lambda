@@ -9,8 +9,7 @@
 
 // String structure from Lambda (for resolve_symbol_string)
 typedef struct String {
-    uint32_t len:22;
-    uint32_t ref_cnt:10;
+    uint32_t len;
     char chars[];
 } String;
 

@@ -31,7 +31,6 @@ String* format_css(Pool *pool, Item item) {
                     String* result = (String*)pool_alloc(pool, sizeof(String) + len + 1);
                     if (result) {
                         result->len = len;
-                        result->ref_cnt = 1;
                         memcpy(result->chars, result_str, len + 1);
                         css_formatter_destroy(formatter);
                         return result;
@@ -46,7 +45,6 @@ String* format_css(Pool *pool, Item item) {
     String* empty = (String*)pool_alloc(pool, sizeof(String) + 1);
     if (empty) {
         empty->len = 0;
-        empty->ref_cnt = 1;
         empty->chars[0] = '\0';
     }
     return empty;

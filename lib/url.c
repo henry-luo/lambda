@@ -22,7 +22,6 @@ String* url_create_string(const char* value) {
     if (!str) return NULL;
 
     str->len = len;
-    str->ref_cnt = 1;
     str_copy(str->chars, len + 1, value, len);
     return str;
 }
@@ -258,7 +257,6 @@ String* url_construct_href(const Url* url) {
     if (!result) return NULL;
 
     result->len = 0;
-    result->ref_cnt = 1;
     char* buffer = result->chars;
     size_t pos = 0;
 
@@ -379,7 +377,6 @@ String* url_serialize_origin(const Url* url) {
     if (!result) return NULL;
 
     result->len = 0;
-    result->ref_cnt = 1;
     char* buffer = result->chars;
     size_t pos = 0;
 
@@ -434,7 +431,6 @@ String* url_serialize_scheme(const Url* url) {
         if (!result) return NULL;
 
         result->len = len + 1;
-        result->ref_cnt = 1;
         str_copy(result->chars, len + 2, scheme_str, len);
         result->chars[len] = ':';
         result->chars[len + 1] = '\0';
@@ -460,7 +456,6 @@ String* url_serialize_host(const Url* url) {
                 if (!result) return NULL;
 
                 result->len = total_len;
-                result->ref_cnt = 1;
                 str_copy(result->chars, total_len + 1, url->hostname->chars, url->hostname->len);
                 result->chars[url->hostname->len] = ':';
                 str_copy(result->chars + url->hostname->len + 1, url->port->len + 1, url->port->chars, url->port->len);

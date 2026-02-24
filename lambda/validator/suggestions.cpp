@@ -144,7 +144,6 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
         size_t len = strlen(text);
         String* str = (String*)pool_calloc(pool, sizeof(String) + len + 1);
         str->len = len;
-        str->ref_cnt = 0;
         memcpy(str->chars, text, len);
         str->chars[len] = '\0';
         Item item = {.item = s2it(str)};
@@ -176,7 +175,6 @@ List* generate_type_suggestions(TypeId actual_type, Type* expected_type, Pool* p
         size_t len = strlen(text);
         String* str = (String*)pool_calloc(p, sizeof(String) + len + 1);
         str->len = len;
-        str->ref_cnt = 0;
         memcpy(str->chars, text, len);
         str->chars[len] = '\0';
         return str;

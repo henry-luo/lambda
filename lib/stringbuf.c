@@ -48,7 +48,6 @@ void stringbuf_reset(StringBuf *sb) {
     if (sb->str && sb->capacity > 0) {
         // Reset the String structure
         sb->str->len = 0;
-        sb->str->ref_cnt = 0;
         // Null-terminate the chars array
         if (sb->capacity > sizeof(String)) {
             sb->str->chars[0] = '\0';
@@ -106,7 +105,6 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
 
         // Initialize String structure
         new_str->len = 0;
-        new_str->ref_cnt = 0;
         new_str->chars[0] = '\0';
     } else {
         // Realloc existing buffer - copy String header + actual string data
@@ -502,7 +500,6 @@ String* stringbuf_to_string(StringBuf *sb) {
 
     // Ensure the String structure is properly set up
     sb->str->len = sb->length;
-    sb->str->ref_cnt = 0;
 
     // Return the String and reset the StringBuf
     String *result = sb->str;

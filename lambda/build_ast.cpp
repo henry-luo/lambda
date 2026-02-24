@@ -1044,7 +1044,6 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     // Allocate Symbol struct (has ns field)
                     Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
                     sym->ns = ns_entry->target;  // set namespace target
-                    sym->ref_cnt = 1;
                     sym->len = total_len;
                     memcpy(sym->chars, buf, total_len);
                     sym->chars[total_len] = '\0';
@@ -1657,7 +1656,6 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         memcpy(str->chars, tp->source + start, content_len);
         str->chars[content_len] = '\0';
         str->len = content_len;
-        str->ref_cnt = 1;
 
         arraylist_append(tp->const_list, str);
         str_type->const_index = tp->const_list->length - 1;
@@ -1702,20 +1700,18 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     if (!has_escape) {
         // No escapes - simple copy
         if (symbol == SYM_SYMBOL) {
-            // Allocate as Symbol (has ns field between ref_cnt and chars)
+            // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
             sym->ns = NULL;
             memcpy(sym->chars, content_start, content_len);
             sym->chars[content_len] = '\0';
             sym->len = content_len;
-            sym->ref_cnt = 1;
             str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
         } else {
             str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
             memcpy(str->chars, content_start, content_len);
             str->chars[content_len] = '\0';
             str->len = content_len;
-            str->ref_cnt = 1;
         }
         str_type->string = str;
     }
@@ -1912,7 +1908,6 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
             memcpy(sym->chars, str->chars, slen);
             sym->chars[slen] = '\0';
             sym->len = slen;
-            sym->ref_cnt = 1;
             str = (String*)sym;  // store as String* in TypeString
         }
         str_type->string = str;
@@ -2018,7 +2013,6 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     item_type->decimal = decimal;
 
     // Initialize the decimal with reference counting and libmpdec
-    decimal->ref_cnt = 1;
     // Use transpiler's decimal context via centralized function
     decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
     if (!decimal->dec_val) {

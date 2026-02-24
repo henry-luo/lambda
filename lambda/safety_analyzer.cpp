@@ -304,7 +304,7 @@ static bool has_any_recursive_call(AstNode* expr, AstFuncNode* func_node) {
     }
 
     case AST_NODE_LOOP: {
-        AstNamedNode* loop = (AstNamedNode*)expr;
+        AstLoopNode* loop = (AstLoopNode*)expr;
         return has_any_recursive_call(loop->as, func_node);
     }
 

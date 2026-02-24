@@ -107,8 +107,7 @@ extern TypeInfo type_info[];
 
 typedef struct mpd_t mpd_t;
 struct Decimal {
-    uint16_t ref_cnt:15;
-    uint16_t unlimited:1;  // whether it is an unlimited decimal
+    uint8_t unlimited;   // whether it is an unlimited decimal
     mpd_t* dec_val;  // libmpdec decimal number
 };
 
