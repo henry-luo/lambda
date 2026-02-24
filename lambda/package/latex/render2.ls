@@ -223,12 +223,12 @@ fn render_element(el, info) {
 
 fn render_children(el, from_idx, info) {
     let n = len(el)
-    if (from_idx >= n) []
-    else collect_children(el, from_idx, n, [], info)
+    if from_idx >= n { [] }
+    else { collect_children(el, from_idx, n, [], info) }
 }
 
 fn collect_children(el, i, n, acc, info) {
-    if (i >= n) acc
+    if i >= n { acc }
     else {
         let child = el[i]
         let rendered = render_node(child, info)
@@ -243,7 +243,7 @@ fn collect_children(el, i, n, acc, info) {
 
 fn render_document(el, info) {
     let doc_body = util.find_child(el, 'document')
-    if (doc_body != null) render_body(doc_body, info)
+    if doc_body != null { render_body(doc_body, info) }
     else {
         let items = render_children(el, 0, info)
         <article class: "latex-document latex-" ++ info.docclass;
@@ -271,7 +271,7 @@ fn render_maketitle(info) {
 }
 
 fn render_toc(info) {
-    if (len(info.headings) == 0) null
+    if len(info.headings) == 0 { null }
     else {
         let items = (for (h in info.headings, let cls = "toc-l" ++ string(h.level))
             <li class: cls;
@@ -300,13 +300,10 @@ fn render_heading(el, info, html_level) {
     let sec_num = info.heading_nums[title_id]
 
     // render title children
-    let title_children = if (title_el != null) {
-        if (title_el is element) render_children(title_el, 0, info)
+    let title_children =
+        if (title_el != null and title_el is element) render_children(title_el, 0, info)
         else if (title_text != "") [title_text]
         else []
-    } else {
-        if (title_text != "") [title_text] else []
-    }
 
     let num_span = if (sec_num != null) <span class: "sec-num"; sec_num ++ " "> else null
     build_heading_el(html_level, title_id, num_span, title_children)
@@ -329,13 +326,13 @@ fn build_heading_el(level, id, num_span, children) {
 
 fn render_paragraph(el, info) {
     let items = render_children(el, 0, info)
-    if (len(items) == 0) null
-    else if (has_block_child(items)) {
+    if len(items) == 0 { null }
+    else if has_block_child(items) {
         let parts = split_around_blocks(items)
         if (len(parts) == 1) parts[0]
         else parts
     }
-    else <p; for c in items { c }>
+    else { <p; for c in items { c }> }
 }
 
 fn split_around_blocks(items) {
@@ -343,10 +340,10 @@ fn split_around_blocks(items) {
 }
 
 fn split_blocks_rec(items, i, n, current, acc) {
-    if (i >= n) flush_inline(current, acc)
+    if i >= n { flush_inline(current, acc) }
     else {
         let item = items[i]
-        if (is_block_element(item)) {
+        if is_block_element(item) {
             let flushed = flush_inline(current, acc)
             split_blocks_rec(items, i + 1, n, [], flushed ++ [item])
         } else {
@@ -434,8 +431,8 @@ fn render_font(el, info, css_class) {
 fn render_size(el, info, cmd_name) {
     let size = sym.get_font_size(cmd_name)
     let items = render_children(el, 0, info)
-    if (size != null) <span style: "font-size:" ++ size; for c in items { c }>
-    else <span; for c in items { c }>
+    if size != null { <span style: "font-size:" ++ size; for c in items { c }> }
+    else { <span; for c in items { c }> }
 }
 
 fn render_accent(el, info) {
@@ -478,15 +475,15 @@ fn flatten_paragraphs(node) {
 }
 
 fn flatten_para_rec(node, i, n, acc) {
-    if (i >= n) acc
+    if i >= n { acc }
     else {
         let child = node[i]
         if (child is element) {
             if (string(name(child)) == "paragraph") {
                 let inner = flatten_inner(child, 0, len(child), [])
                 flatten_para_rec(node, i + 1, n, acc ++ inner)
-            } else flatten_para_rec(node, i + 1, n, acc ++ [child])
-        } else flatten_para_rec(node, i + 1, n, acc ++ [child])
+            } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
+        } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
     }
 }
 
@@ -496,9 +493,9 @@ fn flatten_inner(el, i, n, acc) {
 }
 
 fn is_item_node(child) {
-    if (child is element) {
+    if child is element {
         if (string(name(child)) == "item") true else false
-    } else false
+    } else { false }
 }
 
 fn split_list_items(flat, info) {
@@ -525,8 +522,8 @@ fn split_desc_items(flat, info) {
 }
 
 fn split_desc_rec(flat, i, n, acc, term, content, info) {
-    if (i >= n) flush_desc(acc, term, content)
-    else if (is_item_node(flat[i])) {
+    if i >= n { flush_desc(acc, term, content) }
+    else if is_item_node(flat[i]) {
         let flushed = flush_desc(acc, term, content)
         let label_text = get_item_label(flat[i])
         let new_term = if (label_text != null) <dt; label_text> else <dt>
@@ -539,17 +536,17 @@ fn split_desc_rec(flat, i, n, acc, term, content, info) {
 }
 
 fn flush_desc(acc, term, content) {
-    if (term != null) {
+    if term != null {
         let dd = if (len(content) > 0) <dd; for c in content { c }> else <dd>
         acc ++ [term, dd]
-    } else if (len(content) > 0) {
+    } else if len(content) > 0 {
         acc ++ [<dd; for c in content { c }>]
-    } else acc
+    } else { acc }
 }
 
 fn get_item_label(item_node) {
     let opt = util.find_child(item_node, 'brack_group')
-    if (opt != null) util.text_of(opt)
+    if opt != null { util.text_of(opt) }
     else {
         if (len(item_node) > 0) util.text_of(item_node) else null
     }
@@ -613,11 +610,11 @@ fn get_figure_num(el, info) {
     // figures are numbered sequentially; use caption slug for lookup
     // fallback: just count from heading_nums or return 0
     let caption = util.find_child(el, 'caption')
-    if (caption != null) {
+    if caption != null {
         let slug = util.slugify(util.text_of(caption))
         let entry = info.footnote_map[slug]
         if (entry != null) entry.number else 0
-    } else 0
+    } else { 0 }
 }
 
 fn render_multicols(el, info) {
@@ -654,12 +651,12 @@ fn split_rows(el, info) {
 }
 
 fn collect_rows(el, i, n, current_cells, acc_rows, info) {
-    if (i >= n) {
+    if i >= n {
         let final_row = make_row(current_cells)
         if (final_row != null) acc_rows ++ [final_row] else acc_rows
     } else {
         let child = el[i]
-        if (child is symbol) {
+        if child is symbol {
             let sv = string(child)
             if (sv == "row_sep") {
                 let row = make_row(current_cells)
@@ -667,7 +664,7 @@ fn collect_rows(el, i, n, current_cells, acc_rows, info) {
                 collect_rows(el, i + 1, n, [], new_rows, info)
             } else if (sv == "alignment_tab") {
                 collect_rows(el, i + 1, n, current_cells ++ [null], acc_rows, info)
-            } else collect_rows(el, i + 1, n, current_cells, acc_rows, info)
+            } else { collect_rows(el, i + 1, n, current_cells, acc_rows, info) }
         } else {
             let rendered = render_node(child, info)
             let new_cells = append_to_last_cell(current_cells, rendered)
@@ -676,20 +673,23 @@ fn collect_rows(el, i, n, current_cells, acc_rows, info) {
     }
 }
 
+fn cell_to_td(c) {
+    if c is array { <td; for item in c { item }> }
+    else if c != null { <td; c> }
+    else { <td> }
+}
+
 fn make_row(cells) {
-    if (len(cells) == 0) null
+    if len(cells) == 0 { null }
     else {
-        let tds = (for c in cells
-            if (c is array) <td; for item in c { item }>
-            else if (c != null) <td; c>
-            else <td>)
+        let tds = (for (c in cells) cell_to_td(c))
         <tr; for td in tds { td }>
     }
 }
 
 fn append_to_last_cell(cells, content) {
-    if (content == null) cells
-    else if (len(cells) == 0) [[content]]
+    if content == null { cells }
+    else if len(cells) == 0 { [[content]] }
     else {
         let last_idx = len(cells) - 1
         let last = cells[last_idx]
@@ -701,7 +701,7 @@ fn append_to_last_cell(cells, content) {
 
 fn replace_last(arr, new_val) {
     let n = len(arr)
-    (for (item in arr, let idx = index)
+    (for (idx, item in arr)
         if (idx == n - 1) new_val else item)
 }
 
@@ -785,7 +785,7 @@ fn render_marginpar(el, info) {
 
 fn render_generic(el, info) {
     let n = len(el)
-    if (n == 0) null
+    if n == 0 { null }
     else {
         let items = render_children(el, 0, info)
         if (len(items) == 0) null

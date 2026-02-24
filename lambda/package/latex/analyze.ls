@@ -87,7 +87,7 @@ fn walk_element(el, state) {
 }
 
 fn walk_children(el, i, n, state) {
-    if (i >= n) state
+    if i >= n { state }
     else {
         let child = el[i]
         let new_state = walk_node(child, state)
@@ -101,8 +101,8 @@ fn walk_children(el, i, n, state) {
 
 fn walk_documentclass(el, state) {
     let cls = trim(util.text_of(el))
-    if (cls != "") { {docclass: cls, state} }
-    else state
+    if cls != "" { {docclass: cls, state} }
+    else { state }
 }
 
 fn walk_title(el, state) {
