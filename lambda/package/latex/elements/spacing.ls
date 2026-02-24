@@ -75,14 +75,16 @@ pub fn render_nbsp(ctx) {
 // element-returning versions for two-pass rendering
 pub fn render_hspace_el(node) {
     let amount = get_length_arg(node)
-    if (amount != null) <span class: "latex-hspace", style: "margin-left:" ++ amount>
-    else null
+    if amount != null {
+        <span class: "latex-hspace", style: "margin-left:" ++ amount>
+    } else { null }
 }
 
 pub fn render_vspace_el(node) {
     let amount = get_length_arg(node)
-    if (amount != null) <div class: "latex-vspace", style: "margin-top:" ++ amount>
-    else null
+    if amount != null {
+        <div class: "latex-vspace", style: "margin-top:" ++ amount>
+    } else { null }
 }
 
 // ============================================================
