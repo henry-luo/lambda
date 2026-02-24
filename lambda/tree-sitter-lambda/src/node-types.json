@@ -3513,8 +3513,8 @@
         "required": false,
         "types": [
           {
-            "type": "...",
-            "named": false
+            "type": "variadic",
+            "named": true
           }
         ]
       }
@@ -3778,6 +3778,10 @@
         },
         {
           "type": "unary_expr",
+          "named": true
+        },
+        {
+          "type": "variadic",
           "named": true
         }
       ]
@@ -4669,10 +4673,6 @@
     "named": false
   },
   {
-    "type": "...",
-    "named": false
-  },
-  {
     "type": ".?",
     "named": false
   },
@@ -4814,11 +4814,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -5034,11 +5034,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",
@@ -5055,6 +5055,10 @@
   {
     "type": "var",
     "named": false
+  },
+  {
+    "type": "variadic",
+    "named": true
   },
   {
     "type": "where",
