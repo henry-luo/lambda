@@ -89,24 +89,22 @@ Symbol* heap_create_symbol(const char* symbol) {
 
 Item push_d(double dval) {
     log_debug("push_d: %g", dval);
-    // Safety check: if context is num_stack is NULL
-    if (!context->num_stack) {
+    if (!context->nursery) {
         log_error("push_d called with invalid context");
         return ItemError;
     }
-    double *dptr = num_stack_push_double(context->num_stack, dval);
+    double *dptr = gc_nursery_alloc_double(context->nursery, dval);
     return {.item = d2it(dptr)};
 }
 
 Item push_l(int64_t lval) {
     log_debug("push_l: %" PRId64, lval);
-    // Safety check: if context is num_stack is NULL
-    if (!context->num_stack) {
+    if (!context->nursery) {
         log_error("push_l called with invalid context");
         return ItemError;
     }
     if (lval == INT64_ERROR) return ItemError;
-    int64_t *lptr = num_stack_push_long(context->num_stack, lval);
+    int64_t *lptr = gc_nursery_alloc_long(context->nursery, lval);
     return {.item = l2it(lptr)};
 }
 
@@ -136,17 +134,16 @@ Item push_l_safe(int64_t val) {
 }
 
 Item push_k(DateTime val) {
-    // Check for DateTime error sentinel before pushing
+    // check for DateTime error sentinel before pushing
     if (DATETIME_IS_ERROR(val)) {
         log_debug("push_k: received DateTime error sentinel");
         return ItemError;
     }
-    // Safety check: if context is num_stack is NULL
-    if (!context->num_stack) {
+    if (!context->nursery) {
         log_error("push_k called with invalid context");
         return ItemError;
     }
-    DateTime *dtptr = num_stack_push_datetime(context->num_stack, val);
+    DateTime *dtptr = gc_nursery_alloc_datetime(context->nursery, val);
     return {.item = k2it(dtptr)};
 }
 
@@ -453,9 +450,9 @@ void free_item(Item item, bool clear_entry) {
 }
 
 void frame_start() {
-    size_t stack_pos = context->num_stack->total_length;
-    log_debug("entering frame_start with num stack position: %zu", stack_pos);
-    arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
+    log_debug("entering frame_start");
+    // push sentinel marker (no num_stack position — nursery values persist until destroy)
+    arraylist_append(context->heap->entries, (void*) 0);  // placeholder (was num_stack position)
     arraylist_append(context->heap->entries, (void*) HEAP_ENTRY_START.item);
 }
 
@@ -518,10 +515,9 @@ void frame_end() {
         }
         else if (itm._type_id == LMD_CONTAINER_HEAP_START) {
             log_debug("reached container start: %d", i);
-            size_t stack_pos = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
-            num_stack_reset_to_index((num_stack_t*)context->num_stack, stack_pos);
+            // nursery values persist until destroy — no reset needed
             entries->length = i-1;
-            log_debug("reset num stack to index: %zu, new entries length: %d", stack_pos, entries->length);
+            log_debug("frame_end: new entries length: %d", entries->length);
             return;
         }
     }

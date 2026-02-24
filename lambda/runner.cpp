@@ -470,7 +470,7 @@ void runner_setup_context(Runner* runner) {
 
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
-    runner->context.num_stack = num_stack_create(16);
+    runner->context.nursery = gc_nursery_create(0);
     runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context (use shared fixed-precision context for runtime)
@@ -516,7 +516,7 @@ void runner_cleanup(Runner* runner) {
         // check memory leaks
         check_memory_leak();
         heap_destroy();
-        if (runner->context.num_stack) num_stack_destroy((num_stack_t*)runner->context.num_stack);
+        if (runner->context.nursery) gc_nursery_destroy(runner->context.nursery);
     }
     // decimal context is now shared global - don't free it
     runner->context.decimal_ctx = NULL;

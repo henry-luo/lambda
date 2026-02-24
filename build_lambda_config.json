@@ -245,6 +245,7 @@
                 "lib/strview.c",
                 "lib/string.c",
                 "lib/num_stack.c",
+                "lib/gc_nursery.c",
                 "lib/datetime.c",
                 "lib/url.c",
                 "lib/url_parser.c",
