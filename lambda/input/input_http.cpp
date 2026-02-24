@@ -309,7 +309,6 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
         type_str = (String*)malloc(sizeof(String) + strlen(type) + 1);
         if (type_str) {
             type_str->len = strlen(type);
-            type_str->ref_cnt = 0;
             str_copy(type_str->chars, type_str->len + 1, type, type_str->len);
         }
     }
@@ -318,7 +317,6 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
         flavor_str = (String*)malloc(sizeof(String) + strlen(flavor) + 1);
         if (flavor_str) {
             flavor_str->len = strlen(flavor);
-            flavor_str->ref_cnt = 0;
             str_copy(flavor_str->chars, flavor_str->len + 1, flavor, flavor_str->len);
         }
     }

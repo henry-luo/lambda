@@ -410,7 +410,6 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
             error->message = (String*)malloc(sizeof(String) + len + 1);
             if (error->message) {
                 error->message->len = len;
-                error->message->ref_cnt = 1;
                 str_copy(error->message->chars, error->message->len + 1, message, error->message->len);
             }
         }

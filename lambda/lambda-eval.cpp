@@ -170,7 +170,7 @@ String *fn_strcat(String *left, String *right) {
         return NULL;
     }
     log_debug("str result %p", result);
-    result->ref_cnt = 0;  result->len = left_len + right_len;
+    result->len = left_len + right_len;
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
@@ -313,7 +313,6 @@ String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
-        result->ref_cnt = 0;
         result->len = 0;
         result->chars[0] = '\0';
         return result;
@@ -322,7 +321,6 @@ String *str_repeat(String *str, int64_t times) {
     size_t str_len = str->len;
     size_t total_len = str_len * times;
     String *result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
-    result->ref_cnt = 0;
     result->len = total_len;
 
     for (long i = 0; i < times; i++) {
@@ -375,7 +373,6 @@ Item fn_normalize(Item str_item, Item type_item) {
 
     // Create new string with normalized content
     String* result = (String*)heap_alloc(sizeof(String) + normalized_len + 1, LMD_TYPE_STRING);
-    result->ref_cnt = 0;
     result->len = normalized_len;
     memcpy(result->chars, normalized, normalized_len);
     result->chars[normalized_len] = '\0';
@@ -418,7 +415,6 @@ Function* to_fn(fn_ptr ptr) {
     log_debug("create fn %p", ptr);
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->ref_cnt = 1;
     fn->ptr = ptr;
     fn->closure_env = NULL;
     return fn;
@@ -429,7 +425,6 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
     log_debug("create fn %p with arity %d", ptr, arity);
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->ref_cnt = 1;
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
@@ -442,7 +437,6 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
     log_debug("create fn %p with arity %d, name %s", ptr, arity, name ? name : "(null)");
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->ref_cnt = 1;
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
@@ -455,7 +449,6 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
     log_debug("create closure %p with arity %d and env %p", ptr, arity, env);
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->ref_cnt = 1;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
@@ -469,7 +462,6 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     log_debug("create closure %p with arity %d, env %p, name %s", ptr, arity, env, name ? name : "(null)");
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->ref_cnt = 1;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
@@ -1309,10 +1301,10 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-String STR_NULL = {.len = 4, .ref_cnt = 0, .chars = "null"};
-String STR_TRUE = {.len = 4, .ref_cnt = 0, .chars = "true"};
-String STR_FALSE = {.len = 5, .ref_cnt = 0, .chars = "false"};
-String STR_ERROR = {.len = 7, .ref_cnt = 0, .chars = "<error>"};
+String STR_NULL = {.len = 4, .chars = "null"};
+String STR_TRUE = {.len = 4, .chars = "true"};
+String STR_FALSE = {.len = 5, .chars = "false"};
+String STR_ERROR = {.len = 7, .chars = "<error>"};
 
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
@@ -3595,14 +3587,12 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
     switch (field_type) {
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
         String* old_str = *(String**)field_ptr;
-        if (old_str && old_str->ref_cnt > 0) old_str->ref_cnt--;
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* old_c = *(Container**)field_ptr;
-        if (old_c && old_c->ref_cnt > 0) old_c->ref_cnt--;
         break;
     }
     case LMD_TYPE_NULL: {
@@ -3610,7 +3600,6 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
         void* old_ptr = *(void**)field_ptr;
         if (old_ptr) {
             Container* old_c = (Container*)old_ptr;
-            if (old_c->ref_cnt > 0) old_c->ref_cnt--;
         }
         break;
     }
@@ -3630,7 +3619,6 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
         String* s = value.get_string();
         *(String**)field_ptr = s;
-        if (s) s->ref_cnt++;
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
@@ -3638,7 +3626,6 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = value.container;
         *(Container**)field_ptr = c;
-        if (c) c->ref_cnt++;
         break;
     }
     default:

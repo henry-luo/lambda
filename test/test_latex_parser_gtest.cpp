@@ -33,7 +33,6 @@ static String* create_string(const char* text) {
     String* result = (String*)malloc(sizeof(String) + len + 1);
     if (!result) return nullptr;
     result->len = len;
-    result->ref_cnt = 1;
     strcpy(result->chars, text);
     return result;
 }

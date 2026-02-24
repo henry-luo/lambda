@@ -6663,7 +6663,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         break;
     }
     case AST_NODE_LOOP:
-        define_ast_node(tp, ((AstNamedNode*)node)->as);
+        define_ast_node(tp, ((AstLoopNode*)node)->as);
         break;
     case AST_NODE_ARRAY: {
         AstNode *item = ((AstArrayNode*)node)->item;

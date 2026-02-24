@@ -264,7 +264,6 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     case LMD_TYPE_BINARY: {
         String* str = value.get_string();
         *(String**)field_ptr = str;
-        if (str) str->ref_cnt++;
         break;
     }
     case LMD_TYPE_ARRAY:
@@ -278,7 +277,6 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     case LMD_TYPE_OBJECT: {
         Container* container = value.container;
         *(Container**)field_ptr = container;
-        if (container) container->ref_cnt++;
         break;
     }
     default:
@@ -291,13 +289,8 @@ void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_STRING:
     case LMD_TYPE_SYMBOL:
-    case LMD_TYPE_BINARY: {
-        String* str = *(String**)field_ptr;
-        if (str && str->ref_cnt > 0) {
-            str->ref_cnt--;
-        }
+    case LMD_TYPE_BINARY:
         break;
-    }
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64:
@@ -306,13 +299,8 @@ void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_LIST:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT: {
-        Container* container = *(Container**)field_ptr;
-        if (container && container->ref_cnt > 0) {
-            container->ref_cnt--;
-        }
+    case LMD_TYPE_OBJECT:
         break;
-    }
     default:
         // Other types don't use ref counting
         break;
@@ -493,12 +481,10 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
                     entry->type->type_id == LMD_TYPE_SYMBOL ||
                     entry->type->type_id == LMD_TYPE_BINARY) {
                     String* str = *(String**)new_field;
-                    if (str) str->ref_cnt++;
                 }
                 else if (entry->type->type_id >= LMD_TYPE_LIST &&
                          entry->type->type_id <= LMD_TYPE_OBJECT) {
                     Container* container = *(Container**)new_field;
-                    if (container) container->ref_cnt++;
                 }
             }
         }
@@ -517,7 +503,6 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
             return ItemError;
         }
         memcpy(result_map, old_map, sizeof(Map));
-        result_map->ref_cnt = 0;
     }
 
     // Create or update TypeMap
@@ -581,7 +566,6 @@ Item MarkEditor::map_update_immutable(Map* old_map, String* key, Item value) {
         if (!new_map) return ItemError;
 
         memcpy(new_map, old_map, sizeof(Map));
-        new_map->ref_cnt = 0;
 
         new_map->data = pool_calloc(pool_, old_type->byte_size);
         if (!new_map->data && old_type->byte_size > 0) return ItemError;
@@ -615,7 +599,6 @@ Item MarkEditor::map_update_immutable(Map* old_map, String* key, Item value) {
         if (!new_map) return ItemError;
 
         memcpy(new_map, old_map, sizeof(Map));
-        new_map->ref_cnt = 0;
 
         // This will create new data buffer and TypeMap
         Item rebuilt = map_rebuild_with_new_shape(new_map, &builder, false);
@@ -707,7 +690,6 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
         Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
         if (!new_map) return ItemError;
         memcpy(new_map, target_map, sizeof(Map));
-        new_map->ref_cnt = 0;
         rebuilt = map_rebuild_with_new_shape(new_map, &builder, false);
     }
 
@@ -796,7 +778,6 @@ Item MarkEditor::map_delete_immutable(Map* old_map, String* key) {
     if (!new_map) return ItemError;
 
     memcpy(new_map, old_map, sizeof(Map));
-    new_map->ref_cnt = 0;
 
     // Build new shape without the deleted field
     ShapeBuilder builder = shape_builder_init_map(shape_pool_);
@@ -836,7 +817,6 @@ Item MarkEditor::map_delete_batch(Item map, int count, const char** keys) {
         Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
         if (!new_map) return ItemError;
         memcpy(new_map, target_map, sizeof(Map));
-        new_map->ref_cnt = 0;
         return map_rebuild_with_new_shape(new_map, &builder, false);
     }
 }
@@ -1026,12 +1006,10 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
                         entry->type->type_id == LMD_TYPE_SYMBOL ||
                         entry->type->type_id == LMD_TYPE_BINARY) {
                         String* str = *(String**)new_field;
-                        if (str) str->ref_cnt++;
                     }
                     else if (entry->type->type_id >= LMD_TYPE_LIST &&
                              entry->type->type_id <= LMD_TYPE_OBJECT) {
                         Container* container = *(Container**)new_field;
-                        if (container) container->ref_cnt++;
                     }
                 }
             }
@@ -1049,7 +1027,6 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
             return ItemError;
         }
         memcpy(result_elmt, old_elmt, sizeof(Element));
-        result_elmt->ref_cnt = 0;
     }
 
     // Create or update TypeElmt
@@ -1112,7 +1089,6 @@ Item MarkEditor::elmt_update_attr_immutable(Element* old_elmt, String* attr_name
         if (!new_elmt) return ItemError;
 
         memcpy(new_elmt, old_elmt, sizeof(Element));
-        new_elmt->ref_cnt = 0;
 
         if (old_type->byte_size > 0) {
             new_elmt->data = pool_calloc(pool_, old_type->byte_size);
@@ -1134,7 +1110,6 @@ Item MarkEditor::elmt_update_attr_immutable(Element* old_elmt, String* attr_name
         if (!new_elmt) return ItemError;
 
         memcpy(new_elmt, old_elmt, sizeof(Element));
-        new_elmt->ref_cnt = 0;
 
         ShapeBuilder builder = shape_builder_init_element(shape_pool_, old_type->name.str);
         shape_builder_import_shape(&builder, old_type->shape);
@@ -1211,7 +1186,6 @@ Item MarkEditor::elmt_update_attr_batch(Item element, int count, ...) {
         Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
         if (!new_elmt) return ItemError;
         memcpy(new_elmt, target_elmt, sizeof(Element));
-        new_elmt->ref_cnt = 0;
         return elmt_rebuild_with_new_shape(new_elmt, &builder, false);
     }
 }
@@ -1276,7 +1250,6 @@ Item MarkEditor::elmt_delete_attr_immutable(Element* old_elmt, String* attr_name
     if (!new_elmt) return ItemError;
 
     memcpy(new_elmt, old_elmt, sizeof(Element));
-    new_elmt->ref_cnt = 0;
 
     ShapeBuilder builder = shape_builder_init_element(shape_pool_, old_type->name.str);
     shape_builder_import_shape(&builder, old_type->shape);
@@ -1585,7 +1558,6 @@ Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_childr
     if (!new_elmt) return ItemError;
 
     memcpy(new_elmt, old_elmt, sizeof(Element));
-    new_elmt->ref_cnt = 0;
 
     // Set new children
     new_elmt->items = new_children;
@@ -1634,7 +1606,6 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
         Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
         if (!new_elmt) return ItemError;
         memcpy(new_elmt, old_elmt, sizeof(Element));
-        new_elmt->ref_cnt = 0;
         return elmt_rebuild_with_new_shape(new_elmt, &builder, false);
     }
 }
@@ -1669,7 +1640,6 @@ Item MarkEditor::array_set(Item array, int index, Item value) {
             if (!new_arr) return ItemError;
 
             memcpy(new_arr, arr, sizeof(Array));
-            new_arr->ref_cnt = 0;
 
             // Copy items
             new_arr->items = (Item*)arena_alloc(arena_, arr->length * sizeof(Item));
@@ -1735,7 +1705,6 @@ Item MarkEditor::array_insert(Item array, int index, Item value) {
             if (!new_arr) return ItemError;
 
             memcpy(new_arr, arr, sizeof(Array));
-            new_arr->ref_cnt = 0;
             new_arr->length = new_length;
             new_arr->capacity = new_length;
 
@@ -1789,7 +1758,6 @@ Item MarkEditor::array_delete(Item array, int index) {
             if (!new_arr) return ItemError;
 
             memcpy(new_arr, arr, sizeof(Array));
-            new_arr->ref_cnt = 0;
             new_arr->length = new_length;
             new_arr->capacity = new_length;
 

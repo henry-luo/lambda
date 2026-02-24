@@ -174,7 +174,6 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
         return ItemNull;
     }
     
-    new_dec->ref_cnt = 1;
     new_dec->unlimited = is_unlimited ? 1 : 0;
     new_dec->dec_val = new_dec_val;
     
@@ -243,29 +242,16 @@ Decimal* decimal_create(mpd_t* mpd_val) {
         return NULL;
     }
     
-    decimal->ref_cnt = 1;
     decimal->dec_val = mpd_val;
     return decimal;
 }
 
 void decimal_retain(Decimal* dec) {
-    if (dec && dec->ref_cnt < UINT16_MAX) {
-        dec->ref_cnt++;
-    }
+    // no-op: ref counting removed, GC handles lifetime
 }
 
 void decimal_release(Decimal* dec) {
-    if (!dec) return;
-    
-    if (dec->ref_cnt > 0) {
-        dec->ref_cnt--;
-    }
-    
-    if (dec->ref_cnt == 0 && dec->dec_val) {
-        mpd_del(dec->dec_val);
-        dec->dec_val = NULL;
-        // Note: heap memory is freed by garbage collector
-    }
+    // no-op: ref counting removed, gc_finalize_all_objects handles cleanup
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -364,7 +350,6 @@ Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited) {
         return ItemError;
     }
     
-    decimal->ref_cnt = 1;
     decimal->unlimited = is_unlimited ? 1 : 0;
     decimal->dec_val = mpd_val;
     

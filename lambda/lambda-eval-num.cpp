@@ -25,7 +25,6 @@ Item push_decimal(mpd_t* dec_val) {
         return ItemError;
     }
 
-    decimal->ref_cnt = 1;
     decimal->dec_val = dec_val;
 
     Item result;
@@ -2382,7 +2381,6 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     }
 
     sym->len = name_len;
-    sym->ref_cnt = 1;
     sym->ns = ns_target;
     memcpy(sym->chars, name_str, name_len);
     sym->chars[name_len] = '\0';

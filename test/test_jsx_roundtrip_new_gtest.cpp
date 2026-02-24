@@ -121,7 +121,7 @@ protected:
         ASSERT_NE(url, nullptr) << "Failed to parse URL";
 
         // Create a simple JSX type string structure
-        static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
+        static String jsx_type_struct = {4, {'j', 's', 'x', '\0'}};
         String* jsx_type = &jsx_type_struct;
 
         Input* input = input_from_source(original_content, url, jsx_type, NULL);
@@ -186,7 +186,7 @@ TEST_F(JSXRoundtripTest, jsx_expressions) {
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, "test.jsx");
     // Create a simple JSX type string structure
-    static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
+    static String jsx_type_struct = {4, {'j', 's', 'x', '\0'}};
     String* jsx_type = &jsx_type_struct;
 
     Input* input = input_from_source(jsx_with_expressions, url, jsx_type, NULL);
@@ -209,7 +209,7 @@ TEST_F(JSXRoundtripTest, jsx_attributes) {
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, "test.jsx");
     // Create a simple JSX type string structure
-    static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
+    static String jsx_type_struct = {4, {'j', 's', 'x', '\0'}};
     String* jsx_type = &jsx_type_struct;
 
     Input* input = input_from_source(jsx_with_attrs, url, jsx_type, NULL);
