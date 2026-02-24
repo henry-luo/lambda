@@ -1807,7 +1807,8 @@ String* fn_format2(Item item, Item type) {
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     String* result = format_data(item, type_str, flavor_str, context->heap->pool);
     if (result) {
-         arraylist_append(context->heap->entries, (void*)s2it(result));
+         // re-allocate as GC-tracked string (format_data uses pool directly, no GCHeader)
+         result = heap_strcpy(result->chars, result->len);
     }
     return result;
 }

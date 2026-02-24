@@ -246,6 +246,7 @@
                 "lib/string.c",
                 "lib/num_stack.c",
                 "lib/gc_nursery.c",
+                "lib/gc_heap.c",
                 "lib/datetime.c",
                 "lib/url.c",
                 "lib/url_parser.c",

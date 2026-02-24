@@ -8,9 +8,8 @@
 #include "ast.hpp"
 
 typedef struct Heap {
-    Pool *pool;  // memory pool for the heap
-    // HeapEntry *first, *last;  // first and last heap entry
-    ArrayList *entries;  // list of allocation entries
+    Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
+    struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
 } Heap;
 
 void heap_init();
