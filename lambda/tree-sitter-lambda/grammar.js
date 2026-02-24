@@ -163,17 +163,17 @@ module.exports = grammar({
     'binary_pow',
     'binary_times',
     'binary_plus',
-    'binary_compare',
     'binary_relation',
     'binary_eq',
-    'logical_and',
-    'logical_or',
     // set operators
     'range_to',
     'set_intersect',  // like *
     'set_exclude',    // like -
     'set_union',      // like or
+    // logic operators
     'is_in',
+    'logical_and',
+    'logical_or',    
     // pipe operators (low precedence, just above control flow)
     'pipe',
     'pipe_file',  // |> and |>> - lowest binary precedence
