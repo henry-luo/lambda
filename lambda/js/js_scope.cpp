@@ -329,7 +329,7 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     // The push_d/push_l functions use the global 'context' variable
     EvalContext js_context;
     memset(&js_context, 0, sizeof(EvalContext));
-    js_context.num_stack = num_stack_create(16);  // Create num_stack for push_d/push_l
+    js_context.nursery = gc_nursery_create(0);  // create nursery for push_d/push_l
     
     // Save old context and set new one
     EvalContext* old_context = context;
@@ -361,11 +361,11 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     
     // Copy the result value before destroying the heap
     // For simple scalars (int, bool), the value is in the Item itself
-    // For float, we need to copy the double value (it's on num_stack which we're about to destroy)
+    // For float, we need to copy the double value (it's on nursery which we're about to destroy)
     Item copied_result;
     TypeId type_id = get_type_id(result);
     if (type_id == LMD_TYPE_FLOAT) {
-        // Float values are stored on num_stack - need to copy the actual value
+        // Float values are stored on nursery - need to copy the actual value
         double value = it2d(result);
         log_debug("JS result: float = %g", value);
         // For now, return an int representation if it's a whole number
@@ -391,8 +391,8 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     }
     
     // Clean up JS context
-    if (js_context.num_stack) {
-        num_stack_destroy((num_stack_t*)js_context.num_stack);
+    if (js_context.nursery) {
+        gc_nursery_destroy(js_context.nursery);
     }
     heap_destroy();
     
