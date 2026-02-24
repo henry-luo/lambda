@@ -458,11 +458,8 @@ module.exports = grammar({
       $.current_index,  // ~# for pipe key/index
     )),
 
-    spread_argument: $ => seq('...', $._expr),
-
     _arguments: $ => seq(
-      '(', comma_sep(optional(
-      field('argument', choice($.named_argument, $._expr, $.spread_argument)))), ')',
+      '(', comma_sep( field('argument', choice($.named_argument, $._expr)) ), ')',
     ),
 
     import: _ => token('import'),
