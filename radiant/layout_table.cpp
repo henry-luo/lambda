@@ -362,9 +362,11 @@ static bool is_visibility_collapse(ViewBlock* element) {
 
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
-    float block_content_min_y = -1.0f;  // Track min y of block content (for offset)
+    bool has_block_content = false;
+    float block_content_min_y = 0.0f;   // Track min y of block content (for offset)
     float block_content_max_y = 0.0f;   // Track max bottom of block content
-    float inline_content_min_y = -1.0f; // Track min y of inline/text content
+    bool has_inline_content = false;
+    float inline_content_min_y = 0.0f;  // Track min y of inline/text content
     float inline_content_max_y = 0.0f;  // Track max bottom of inline/text content
 
     // Set up line-height for this cell so we can use it for text content measurement
@@ -393,8 +395,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             float text_height = max(cell_line_height > 0 ? cell_line_height : 0.0f, text->height);
             float text_bottom = text_top + text_height;
 
-            if (inline_content_min_y < 0 || text_top < inline_content_min_y) {
+            if (!has_inline_content || text_top < inline_content_min_y) {
                 inline_content_min_y = text_top;
+                has_inline_content = true;
             }
             if (text_bottom > inline_content_max_y) {
                 inline_content_max_y = text_bottom;
@@ -405,14 +408,16 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // Their Y position indicates where the next line starts
             float br_top = child->y;
             float br_bottom = br_top + child->height;
-            if (inline_content_min_y < 0 || br_top < inline_content_min_y) {
+            if (!has_inline_content || br_top < inline_content_min_y) {
                 inline_content_min_y = br_top;
+                has_inline_content = true;
             }
             if (br_bottom > inline_content_max_y) {
                 inline_content_max_y = br_bottom;
             }
         }
         else if (child->view_type == RDT_VIEW_BLOCK ||
+                 child->view_type == RDT_VIEW_LIST_ITEM ||
                  child->view_type == RDT_VIEW_INLINE ||
                  child->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block = (ViewBlock*)child;
@@ -420,11 +425,18 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // which excludes child's border/padding. Children are already laid out at this point.
             float child_height = block->height;
             // Track the min y and max bottom of block content for stacked blocks
-            // This handles padding offset by computing (max_y - min_y) instead of absolute position
+            // CSS 2.1 §9.4.1: Table cells establish a BFC. Child margins don't collapse
+            // through the cell boundary, so they must be included in the content extent.
+            // Include margin_top of first child and margin_bottom of last child.
             float child_top = child->y;
             float child_bottom = child->y + child_height;
-            if (block_content_min_y < 0 || child_top < block_content_min_y) {
+            if (block->bound) {
+                child_top -= block->bound->margin.top;
+                child_bottom += block->bound->margin.bottom;
+            }
+            if (!has_block_content || child_top < block_content_min_y) {
                 block_content_min_y = child_top;
+                has_block_content = true;
             }
             if (child_bottom > block_content_max_y) {
                 block_content_max_y = child_bottom;
@@ -438,8 +450,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // Treat nested tables like block content for extent tracking
             float table_top = child->y;
             float table_bottom = table_top + table_height;
-            if (block_content_min_y < 0 || table_top < block_content_min_y) {
+            if (!has_block_content || table_top < block_content_min_y) {
                 block_content_min_y = table_top;
+                has_block_content = true;
             }
             if (table_bottom > block_content_max_y) {
                 block_content_max_y = table_bottom;
@@ -449,11 +462,11 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
 
     // Compute block content height as the extent from min to max y
     // This correctly handles cells with padding by subtracting the initial offset
-    float block_content_height = (block_content_min_y >= 0) ? (block_content_max_y - block_content_min_y) : 0.0f;
+    float block_content_height = has_block_content ? (block_content_max_y - block_content_min_y) : 0.0f;
 
     // Compute inline content height as the extent from min to max y
     // This handles multi-line text (e.g., 10 lines at y=0,20,40...180 = 200px total)
-    float inline_content_height = (inline_content_min_y >= 0) ? (inline_content_max_y - inline_content_min_y) : 0.0f;
+    float inline_content_height = has_inline_content ? (inline_content_max_y - inline_content_min_y) : 0.0f;
 
     // Use the larger of inline content height or block content extent
     float content_height = max(inline_content_height, block_content_height);
@@ -566,22 +579,36 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, f
         target_y = content_start_y + (cell_content_area - content_height);
     }
 
-    // Find current content Y position (min y of all VISIBLE children)
-    // Skip nil-views (RDT_VIEW_NONE) as they don't represent actual content
-    float current_min_y = 1e9f;
+    // CSS 2.1 §17.5.4: Vertical alignment positions content within the cell's content area.
+    // We find where content actually starts by scanning children, accounting for margins.
+    // For block children with margins (e.g., margin-top: 50px), the margin-box top is
+    // child.y - margin.top, which gives the true start of the content extent.
+    // This preserves margin spacing: if a child has margin pushing it down, the
+    // adjustment is relative to the margin-box top, not the child's border-box position.
+    // Skip children with view_type == 0 (uninitialized views, e.g. collapsed whitespace nodes).
+    float current_content_top = 1e8f;
     for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
-        if (child->view_type != RDT_VIEW_NONE && child->y < current_min_y) {
-            current_min_y = child->y;
+        if (!child->view_type) continue; // skip uninitialized view nodes
+        float ct = child->y;
+        if (child->view_type == RDT_VIEW_BLOCK ||
+            child->view_type == RDT_VIEW_LIST_ITEM ||
+            child->view_type == RDT_VIEW_INLINE_BLOCK) {
+            ViewBlock* block = (ViewBlock*)child;
+            if (block->bound) {
+                ct -= block->bound->margin.top;
+            }
         }
+        if (ct < current_content_top) current_content_top = ct;
     }
+    if (current_content_top >= 1e8f) return; // no content
 
-    // Calculate adjustment needed to move content from current position to target
-    float y_adjustment = target_y - current_min_y;
-    log_debug("  vertical-align: target_y=%.1f, current_min_y=%.1f, y_adjustment=%.1f",
-             target_y, current_min_y, y_adjustment);
+    float y_adjustment = target_y - current_content_top;
+    log_debug("  vertical-align: target_y=%.1f, current_content_top=%.1f, y_adjustment=%.1f",
+             target_y, current_content_top, y_adjustment);
 
-    if (y_adjustment != 0 && current_min_y < 1e8f) {
+    if (y_adjustment != 0) {
         for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+            if (!child->view_type) continue; // skip uninitialized view nodes
             child->y += y_adjustment;
             // Also update TextRect for ViewText nodes
             if (child->view_type == RDT_VIEW_TEXT) {
@@ -670,7 +697,6 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     layout_table_cell_content(lycon, cell);
     log_debug("[PROCESS_TABLE_CELL] Returned from layout_table_cell_content");
 
-    // Get explicit CSS height and measure content
     float explicit_cell_height = get_explicit_css_height(lycon, cell);
     float content_height = measure_cell_content_height(lycon, tcell);
 
@@ -3319,7 +3345,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
             float child_bottom = text->y + text->height;
             if (child_bottom > max_y) max_y = child_bottom;
             has_content = true;
-        } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE) {
+        } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
             ViewBlock* block = (ViewBlock*)child;
             if (block->y < min_y) min_y = block->y;
             float child_bottom = block->y + block->height;
@@ -3372,7 +3398,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
                 text->y += vertical_offset;
                 log_debug("CSS vertical-align: adjusted text Y by +%dpx (align=%d)",
                          vertical_offset, (int)valign);
-            } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE) {
+            } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
                 ViewBlock* block = (ViewBlock*)child;
                 block->y += vertical_offset;
             }
