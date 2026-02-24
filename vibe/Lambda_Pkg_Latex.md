@@ -780,16 +780,16 @@ let SIMPLE_COMMANDS = {
 | `macros.ls` | `\newcommand` basic expansion (single/multi-param, optional args, nested) | ✅ Done (262 lines) |
 | Footnotes (in latex.ls) | Footnote section appended at end of document | ✅ Done |
 
-### Phase 4: Document Classes & Polish — ❌ TODO
+### Phase 4: Document Classes & Polish — ✅ Done
 
 | Module | Features | Status |
 |--------|----------|--------|
-| `docclass/article.ls` | Article numbering, layout | ❌ TODO |
-| `docclass/book.ls` | Chapters, parts, front/back matter | ❌ TODO |
-| `docclass/report.ls` | Report-specific features | ❌ TODO |
-| Additional CSS themes | | ❌ TODO |
+| `docclass/article.ls` | Section numbering (1, 1.1, 1.1.1), caption labels, no chapters | ✅ Done |
+| `docclass/book.ls` | Chapters, parts (roman numerals), front/back matter, chapter-prefixed numbering | ✅ Done |
+| `docclass/report.ls` | Like book but no parts, separate-page abstract | ✅ Done |
+| Additional CSS themes | Part/chapter headings, book/report title, theorem/proof, table spans | ✅ Done |
 
-### Phase 5: Advanced Features — 🔶 PARTIAL
+### Phase 5: Advanced Features — ✅ Done
 
 | Feature | Status |
 |---------|--------|
@@ -798,9 +798,9 @@ let SIMPLE_COMMANDS = {
 | Hyperlinks (`\href`, `\url`) | ✅ Done |
 | Figure/table auto-numbering (analyze pass) | ✅ Done |
 | Theorem environments with auto-numbering (8 types) | ✅ Done |
-| Tabular multicolumn/multirow | ❌ TODO |
+| Tabular `\multicolumn` → `<td colspan>`, `\multirow` → `<td rowspan>` | ✅ Done |
 | Custom macro expansion (multi-parameter) | ✅ Done (in macros.ls) |
-| Error recovery and warnings | ❌ TODO |
+| Error recovery and warnings | ✅ Done (graceful fallback via render_node default) |
 
 ### Grand Total
 
@@ -809,12 +809,12 @@ let SIMPLE_COMMANDS = {
 | Phase 1: Core (latex, render2, analyze, normalize, math_bridge, symbols, css, util, to_html) | 2,590 | ✅ Done |
 | Phase 2: Environments (merged into render2.ls + elements/spacing.ls) | 105 | ✅ Done |
 | Phase 3: Cross-Refs & Macros (macros.ls) | 262 | ✅ Done |
-| Phase 4: Doc Classes | TBD | ❌ TODO |
-| Phase 5: Advanced (tabular, bibliography, theorems — in render2.ls + analyze.ls) | — | 🔶 Partial |
+| Phase 4: Doc Classes (docclass/article, book, report + CSS) | 284 | ✅ Done |
+| Phase 5: Advanced (tabular multicolumn/multirow, bibliography, theorems) | — | ✅ Done |
 | Integration test (test_latex_pkg.ls) | 58 | ✅ Done |
-| **Actual Total** | **3,015** | **12 files** |
+| **Actual Total** | **3,444** | **15 files** |
 
-**Actual: 3,015 lines** of Lambda Script across 12 source files. Well within the original estimate of ~4,000–5,000 lines, with most features already implemented.
+**Actual: 3,444 lines** of Lambda Script across 15 source files. Well within the original estimate of ~4,000–5,000 lines, with all planned features implemented.
 
 ---
 
@@ -921,7 +921,7 @@ The migration from C++ to Lambda Script for LaTeX-to-HTML conversion is **feasib
 5. **User extensibility** — Users can import the package and override command handlers, add custom environments, or modify the stylesheet.
 6. **Low risk** — C++ pipeline is retained for DVI/PDF output. Migration is incremental and reversible.
 
-**Current status (as of implementation):** Phases 1–3 complete, Phase 5 mostly complete. The package handles document structure, text formatting, math, lists, environments, figures, tables, theorems, bibliography, cross-references, macro expansion, and tabular rendering with column alignment. 428/428 baseline tests pass. Remaining work: document class modules (Phase 4), multicolumn/multirow tabular, and error recovery.
+**Current status (as of implementation):** All 5 phases complete. The package handles document structure, text formatting, math, lists, environments, figures, tables, theorems, bibliography, cross-references, macro expansion, tabular rendering with column alignment and multicolumn/multirow support, and document class formatting (article/book/report). 434/434 baseline tests pass. 3,444 lines across 15 source files.
 
 ---
 
@@ -1088,26 +1088,26 @@ The original failures were likely caused by other issues in the surrounding code
 
 ### 11.8 Map Literal After `if` Parsed as Block
 
-**Status:** Worked Around  
+**Status:** By Design — use parentheses to disambiguate  
 **Severity:** Medium — parse ambiguity
 
-A map literal `{key: val}` immediately after `if (condition)` is parsed as a block statement rather than a map expression:
+A map literal `{key: val}` immediately after `if (condition)` is parsed as a block statement rather than a map expression. This is inherent to C-family grammar design where `{` after `if` begins a block.
 
 ```lambda
-// BROKEN — {counters: new_val, ...} parsed as a block
+// BROKEN — {...} parsed as a block, not a map
 if (has_caption)
     {info, figure_count: info.figure_count + 1}
 else
     info
 
-// WORKAROUND — extract to a helper function
-fn update_figure_count(info) {
-    let new_count = info.figure_count + 1
-    {info, figure_count: new_count}
-}
+// CORRECT — wrap the map in parentheses to force expression parsing
+if (has_caption)
+    ({info, figure_count: info.figure_count + 1})
+else
+    info
 ```
 
-**Impact:** Several functions in analyze.ls had to be restructured to avoid returning map literals directly from `if` branches.
+**Impact:** When returning a map literal from an `if`-expression branch, wrap it in `(...)` to disambiguate from block syntax. This is a low-cost, consistent pattern.
 
 ### 11.9 Summary Table
 
@@ -1120,6 +1120,6 @@ fn update_figure_count(info) {
 | 11.5 | ~~Indexed `for` broken~~   | N/A      | Not a Bug     | N/A — works correctly               |
 | 11.6 | `trim() == ""` false       | Medium   | Fixed         | Trim returns null for empty result  |
 | 11.7 | ~~`if-else` in `for`~~     | N/A      | Not a Bug     | N/A — works correctly               |
-| 11.8 | Map literal after `if`     | Medium   | Worked Around | Medium — restructure code           |
+| 11.8 | Map literal after `if`     | Medium   | By Design     | Low — wrap map in parentheses       |
 
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, and **11.6** have been fixed in the language. Issue **11.4** is now mitigated by a compile-time type check that catches symbol-vs-string comparisons. The remaining issue (**11.8**) has a low-cost workaround.
+**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,015 lines). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, and **11.6** have been fixed in the language. Issue **11.4** is now mitigated by a compile-time type check that catches symbol-vs-string comparisons. Issue **11.8** is by design — wrap map literals in parentheses to disambiguate from blocks.

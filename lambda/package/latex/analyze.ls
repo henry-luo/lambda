@@ -4,6 +4,9 @@
 // Returns immutable DocInfo used by render pass.
 
 import util: .lambda.package.latex.util
+import dc_article: .lambda.package.latex.docclass.article
+import dc_book: .lambda.package.latex.docclass.book
+import dc_report: .lambda.package.latex.docclass.report
 
 // ============================================================
 // Public API
@@ -16,7 +19,7 @@ pub fn analyze(ast) {
         author: null,
         date: null,
         counters: {
-            chapter: 0, section: 0, subsection: 0, subsubsection: 0,
+            part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0,
             paragraph: 0, figure: 0, table: 0, equation: 0, footnote: 0,
             theorem: 0, lemma: 0, corollary: 0, proposition: 0,
             definition: 0, example: 0, remark: 0
@@ -70,6 +73,7 @@ fn walk_element(el, state) {
         case 'date': walk_date(el, state)
 
         // ---- sections ----
+        case 'part': walk_heading(el, state, "part", 0)
         case 'chapter': walk_heading(el, state, "chapter", 1)
         case 'section': walk_heading(el, state, "section", 2)
         case 'subsection': walk_heading(el, state, "subsection", 3)
@@ -150,7 +154,7 @@ fn walk_date(el, state) {
 
 fn walk_heading(el, state, counter_name, html_level) {
     let new_counters = step_counter(state.counters, counter_name)
-    let sec_num = compute_section_num(new_counters, counter_name)
+    let sec_num = compute_section_num(new_counters, counter_name, state.docclass)
 
     // extract title text
     let title_el = el.title
@@ -178,15 +182,10 @@ fn walk_heading(el, state, counter_name, html_level) {
     walk_children(el, 0, len(el), new_state)
 }
 
-fn compute_section_num(counters, counter_name) {
-    match counter_name {
-        case "chapter": string(counters.chapter)
-        case "section": string(counters.section)
-        case "subsection": string(counters.section) ++ "." ++ string(counters.subsection)
-        case "subsubsection": string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
-        case "paragraph": null
-        default: null
-    }
+fn compute_section_num(counters, counter_name, docclass) {
+    if (docclass == "book") dc_book.format_section_number(counters, counter_name)
+    else if (docclass == "report") dc_report.format_section_number(counters, counter_name)
+    else dc_article.format_section_number(counters, counter_name)
 }
 
 // ============================================================
@@ -305,8 +304,8 @@ fn walk_footnote(el, state) {
 // ============================================================
 
 fn step_counter(counters, counter_name) {
-    match counter_name {
-        case "chapter":
+    match counter_name {        case "part":
+            ({part: counters.part + 1, counters})        case "chapter":
             {chapter: counters.chapter + 1, section: 0, subsection: 0, subsubsection: 0, counters}
         case "section":
             {section: counters.section + 1, subsection: 0, subsubsection: 0, counters}
