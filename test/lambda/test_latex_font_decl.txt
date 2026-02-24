@@ -1,0 +1,23 @@
+"===== FONT DECLARATION TESTS =====1. itshape is font_decl:"
+true
+"2. bfseries is font_decl:"
+true
+"3. ttfamily is font_decl:"
+true
+"4. centering is not font_decl:"
+false
+"5. unknown is not font_decl:"
+false
+"6. centering is align_decl:"
+true
+"7. raggedright is align_decl:"
+true
+"8. raggedleft is align_decl:"
+true
+"9. itshape is not align_decl:"
+false
+"10. itshape style:font-style:italic11. bfseries style:font-weight:bold12. ttfamily style:font-family:monospace13. rmfamily style:font-family:serif14. sffamily style:font-family:sans-serif15. scshape style:font-variant:small-caps16. slshape style:font-style:oblique17. upshape style:font-style:normal18. mdseries style:font-weight:normal19. centering style:text-align:center20. raggedright style:text-align:left21. raggedleft style:text-align:right22. wrap itshape tag:"
+'span'
+"23. wrap itshape class:latex-itshape24. wrap itshape style:font-style:italic25. wrap bfseries class:latex-bfseries26. wrap bfseries style:font-weight:bold27. wrap ttfamily class:latex-ttfamily28. wrap centering tag:"
+'div'
+"29. wrap centering class:latex-centering30. wrap centering style:text-align:center31. wrap raggedleft class:latex-raggedleft32. wrap raggedleft style:text-align:right===== APPENDIX NUMBERING TESTS =====33. normal section:334. normal subsection:3.235. normal subsubsection:3.2.136. appendix section A:A37. appendix subsection A.2:A.238. appendix section B:B39. appendix subsubsection B.1.3:B.1.340. appendix section Z:Z===== ALL FONT DECL TESTS DONE ====="

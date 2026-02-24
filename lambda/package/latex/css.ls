@@ -129,6 +129,19 @@ table.latex-tabular .hline-bottom { border-bottom: 1px solid black; }
 .latex-sf { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
 .latex-sc { font-variant: small-caps; }
 .latex-sl { font-style: oblique; }
+.latex-rm { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
+.latex-itshape { font-style: italic; }
+.latex-bfseries { font-weight: bold; }
+.latex-ttfamily { font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace; }
+.latex-rmfamily { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
+.latex-sffamily { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
+.latex-scshape { font-variant: small-caps; }
+.latex-slshape { font-style: oblique; }
+.latex-upshape { font-style: normal; }
+.latex-mdseries { font-weight: normal; }
+.latex-centering { text-align: center; }
+.latex-raggedright { text-align: left; }
+.latex-raggedleft { text-align: right; }
 .latex-part-heading {
   text-align: center;
   font-size: 2em;

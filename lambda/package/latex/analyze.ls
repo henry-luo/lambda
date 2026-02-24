@@ -39,7 +39,9 @@ pub fn analyze(ast) {
         tables: [],
         theorems: [],
         bibitems: [],
-        slug_counts: {}
+        slug_counts: {},
+        in_appendix: false,
+        secnumdepth: 3
     }
     let result = walk_node(ast, state)
     // return clean DocInfo (drop internal counters)
@@ -55,7 +57,8 @@ pub fn analyze(ast) {
         figures: result.figures,
         tables: result.tables,
         theorems: result.theorems,
-        bibitems: result.bibitems
+        bibitems: result.bibitems,
+        secnumdepth: result.secnumdepth
     }
 }
 
@@ -115,6 +118,10 @@ fn walk_element(el, state) {
         case 'thebibliography': walk_bibliography(el, state)
         case 'bibitem': walk_bibitem(el, state)
 
+        // ---- appendix & counters ----
+        case 'appendix': walk_appendix(el, state)
+        case 'setcounter': walk_setcounter(el, state)
+
         // ---- everything else: walk children ----
         default: walk_children(el, 0, len(el), state)
     }
@@ -160,7 +167,11 @@ fn walk_date(el, state) {
 
 fn walk_heading(el, state, counter_name, html_level) {
     let new_counters = step_counter(state.counters, counter_name)
-    let sec_num = compute_section_num(new_counters, counter_name, state.docclass)
+    // determine numbering depth for this counter
+    let counter_depth = counter_name_to_depth(counter_name)
+    let sec_num = if (counter_depth <= state.secnumdepth)
+        compute_section_num(new_counters, counter_name, state.docclass, state.in_appendix)
+    else null
 
     // extract title text
     let title_el = el.title
@@ -188,10 +199,25 @@ fn walk_heading(el, state, counter_name, html_level) {
     walk_children(el, 0, len(el), new_state)
 }
 
-fn compute_section_num(counters, counter_name, docclass) {
-    if (docclass == "book") dc_book.format_section_number(counters, counter_name)
-    else if (docclass == "report") dc_report.format_section_number(counters, counter_name)
-    else dc_article.format_section_number(counters, counter_name)
+// map counter names to numbering depth levels
+// matches LaTeX: part=-1, chapter=0, section=1, subsection=2, subsubsection=3, paragraph=4, subparagraph=5
+fn counter_name_to_depth(counter_name) {
+    match counter_name {
+        case "part": -1
+        case "chapter": 0
+        case "section": 1
+        case "subsection": 2
+        case "subsubsection": 3
+        case "paragraph": 4
+        default: 5
+    }
+}
+
+fn compute_section_num(counters, counter_name, docclass, in_appendix) {
+    if (docclass == "book") dc_book.format_section_number(counters, counter_name, in_appendix)
+    else if (docclass == "report") dc_report.format_section_number(counters, counter_name, in_appendix)
+    else dc_article.format_section_number(counters, counter_name, in_appendix)
+}
 }
 
 // ============================================================
@@ -256,6 +282,30 @@ fn walk_bibitem(el, state) {
 
 fn make_bib_entry(k, n) {
     {key: k, number: n}
+}
+
+// ============================================================
+// Appendix & counter commands
+// ============================================================
+
+fn walk_appendix(el, state) {
+    // reset section counter and switch to appendix mode
+    let new_counters = {state.counters, section: 0, subsection: 0, subsubsection: 0}
+    {state, in_appendix: true, counters: new_counters}
+}
+
+fn walk_setcounter(el, state) {
+    // children: [counter_name_text, value_text]
+    let n = len(el)
+    if n >= 2 {
+        let cname = trim(string(el[0]))
+        let cval = trim(string(el[1]))
+        let val = int(cval)
+        if (cname == "secnumdepth" and val != null)
+            {state, secnumdepth: val}
+        else state
+    }
+    else state
 }
 
 fn get_env_counter(counters, env_type) {
