@@ -12,7 +12,7 @@ import ctx_mod: .lambda.package.latex.context
 // extracts preamble info, then renders the <document> body
 pub fn render_document(node, ctx, render_fn) {
     let preamble_ctx = extract_preamble(node, ctx)
-    let doc_body = util.find_child(node, "document")
+    let doc_body = util.find_child(node, 'document')
     if (doc_body != null) {
         let body_result = render_body(doc_body, preamble_ctx, render_fn)
         {result: body_result.result, ctx: body_result.ctx}
@@ -38,6 +38,11 @@ pub fn render_body(node, ctx, render_fn) {
 // Preamble extraction
 // ============================================================
 
+pub fn extract_preamble_ctx(node, ctx) {
+    let n = len(node)
+    extract_preamble_rec(node, 0, n, ctx)
+}
+
 // walk preamble children to extract \title, \author, \date, \documentclass
 fn extract_preamble(node, ctx) {
     let n = len(node)
@@ -49,14 +54,11 @@ fn extract_preamble_rec(node, i, n, ctx) {
     else {
         let child = node[i]
         let new_ctx = if (child is element) match name(child) {
-                case "documentclass": {
-                    let cls = util.text_of(child)
-                    let trimmed = trim(cls)
-                    if (trimmed != "") {ctx, docclass: trimmed} else ctx
-                }
-                case "title": ctx_mod.set_title(ctx, util.text_of(child))
-                case "author": ctx_mod.set_author(ctx, util.text_of(child))
-                case "date": ctx_mod.set_date(ctx, util.text_of(child))
+                case 'documentclass': (let cls = util.text_of(child), let trimmed = trim(cls),
+                    if (trimmed != "") {docclass: trimmed, ctx} else ctx)
+                case 'title': ctx_mod.set_title(ctx, util.text_of(child))
+                case 'author': ctx_mod.set_author(ctx, util.text_of(child))
+                case 'date': ctx_mod.set_date(ctx, util.text_of(child))
                 default: ctx
             }
             else ctx
@@ -74,46 +76,122 @@ pub fn render_heading(node, ctx, counter_name, html_level, render_fn) {
     // step the counter
     let new_ctx = ctx_mod.step_counter(ctx, counter_name)
 
-    // compute section number
-    let sec_level = match counter_name {
-        case "chapter": 0
-        case "section": if (ctx.docclass == "article") 0 else 1
-        case "subsection": if (ctx.docclass == "article") 1 else 2
-        case "subsubsection": if (ctx.docclass == "article") 2 else 3
-        default: 4
-    }
-    let number = ctx_mod.format_section_number(new_ctx, sec_level)
+    // compute section number directly from counter
+    let sec_num = compute_section_num(new_ctx.counters, counter_name, ctx.docclass)
 
-    // extract title text
-    let title_el = node.title
-    let title_text = if (title_el != null) util.text_of(title_el) else ""
-    let title_id = util.slugify(title_text)
+    // extract title
+    let title_info = extract_title_info(node)
+    let title_text = title_info.text
+    let title_id = title_info.id
 
     // record heading for TOC
-    let ctx2 = ctx_mod.add_heading(new_ctx, html_level, number, title_text, title_id)
+    let ctx2 = ctx_mod.add_heading(new_ctx, html_level, sec_num, title_text, title_id)
 
-    // render title children
-    let title_children = if (title_el != null and title_el is element) {
-        render_children_sequential(title_el, ctx2, render_fn).items
-    } else if (title_text != "") { [title_text] }
-    else { [] }
-
-    // build the heading element
-    let heading = build_heading_element(html_level, title_id, number, title_children)
+    // render title children and build element
+    let title_children = get_title_children(title_info.el, title_text, ctx2, render_fn)
+    let heading = build_heading_element(html_level, title_id, sec_num, title_children)
 
     {result: heading, ctx: ctx2}
 }
 
-fn build_heading_element(level, id, number, title_children) {
-    let num_span = if (number != null) <span class: "sec-num"; number> else null
-    match level {
-        case 1: <h1 id: id; if num_span != null { num_span } for c in title_children { c }>
-        case 2: <h2 id: id; if num_span != null { num_span } for c in title_children { c }>
-        case 3: <h3 id: id; if num_span != null { num_span } for c in title_children { c }>
-        case 4: <h4 id: id; if num_span != null { num_span } for c in title_children { c }>
-        case 5: <h5 id: id; if num_span != null { num_span } for c in title_children { c }>
-        default: <h6 id: id; if num_span != null { num_span } for c in title_children { c }>
+pub fn compute_section_num_pub(counters, counter_name, docclass) {
+    compute_section_num(counters, counter_name, docclass)
+}
+
+fn compute_section_num(counters, counter_name, docclass) {
+    match counter_name {
+        case "section": string(counters.section)
+        case "subsection": string(counters.section) ++ "." ++ string(counters.subsection)
+        case "subsubsection": string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
+        case "chapter": string(counters.chapter)
+        default: null
     }
+}
+
+fn extract_title_info(node) {
+    let title_el = node.title
+    let title_text = get_title_text(title_el)
+    let title_id = util.slugify(title_text)
+    {el: title_el, text: title_text, id: title_id}
+}
+
+fn get_title_text(title_el) {
+    if (title_el != null) { util.text_of(title_el) }
+    else { "" }
+}
+
+fn get_title_children(title_el, title_text, ctx, render_fn) {
+    if (title_el == null) {
+        if (title_text != "") { [title_text] }
+        else { [] }
+    } else {
+        get_title_children_from_el(title_el, title_text, ctx, render_fn)
+    }
+}
+
+fn get_title_children_from_el(title_el, title_text, ctx, render_fn) {
+    if (title_el is element) {
+        render_children_sequential(title_el, ctx, render_fn).items
+    } else if (title_text != "") { [title_text] }
+    else { [] }
+}
+
+pub fn build_heading_pub(level, id, sec_num, title_children) {
+    build_heading_element(level, id, sec_num, title_children)
+}
+
+fn build_heading_element(level, id, sec_num, title_children) {
+    let num_span = make_num_span(sec_num)
+    match level {
+        case 1: build_h1(id, num_span, title_children)
+        case 2: build_h2(id, num_span, title_children)
+        case 3: build_h3(id, num_span, title_children)
+        case 4: build_h4(id, num_span, title_children)
+        case 5: build_h5(id, num_span, title_children)
+        default: build_h6(id, num_span, title_children)
+    }
+}
+
+fn make_num_span(sec_num) {
+    if (sec_num == null) { null }
+    else { <span class: "sec-num"; sec_num ++ " "> }
+}
+
+fn build_h1(id, num_span, title_children) {
+    <h1 id: id;
+        if num_span != null { num_span }
+        for c in title_children { c }
+    >
+}
+fn build_h2(id, num_span, title_children) {
+    <h2 id: id;
+        if num_span != null { num_span }
+        for c in title_children { c }
+    >
+}
+fn build_h3(id, num_span, title_children) {
+    <h3 id: id;
+        if num_span != null { num_span }
+        for c in title_children { c }
+    >
+}
+fn build_h4(id, num_span, title_children) {
+    <h4 id: id;
+        if num_span != null { num_span }
+        for c in title_children { c }
+    >
+}
+fn build_h5(id, num_span, title_children) {
+    <h5 id: id;
+        if num_span != null { num_span }
+        for c in title_children { c }
+    >
+}
+fn build_h6(id, num_span, title_children) {
+    <h6 id: id;
+        if num_span != null { num_span }
+        for c in title_children { c }
+    >
 }
 
 // ============================================================
@@ -140,8 +218,7 @@ pub fn render_maketitle(ctx) {
 pub fn render_toc(headings) {
     if (len(headings) == 0) { null }
     else {
-        let items = (for (h in headings)
-            let cls = "toc-l" ++ string(h.level),
+        let items = (for (h in headings, let cls = "toc-l" ++ string(h.level))
             <li class: cls;
                 <a href: "#" ++ h.id;
                     if h.number != null { <span class: "sec-num"; h.number> }
@@ -171,12 +248,13 @@ fn render_seq_rec(node, i, n, acc, ctx, render_fn) {
     else {
         let child = node[i]
         let rendered = render_fn(child, ctx)
-        let new_acc = if (rendered.result != null) {
-            if (rendered.result is array) acc ++ (for (r in rendered.result where r != null) r)
-            else acc ++ [rendered.result]
-        } else {
-            acc
-        }
+        let new_acc = accumulate_result(acc, rendered.result)
         render_seq_rec(node, i + 1, n, new_acc, rendered.ctx, render_fn)
     }
+}
+
+fn accumulate_result(acc, result) {
+    if (result == null) acc
+    else if (result is array) acc ++ (for (r in result where r != null) r)
+    else acc ++ [result]
 }

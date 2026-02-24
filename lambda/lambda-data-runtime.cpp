@@ -510,6 +510,10 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
     while (field) {
         if (!field->name) { // nested map, skip
             Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            if (!nested_map || nested_map->type_id != LMD_TYPE_MAP) {
+                field = field->next;
+                continue;
+            }
             bool nested_is_found;
             Item result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found);
             if (nested_is_found) {

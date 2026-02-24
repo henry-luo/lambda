@@ -5,6 +5,16 @@
 import util: .lambda.package.latex.util
 import ctx_mod: .lambda.package.latex.context
 
+// helper: check if element is caption or label (to skip in figure rendering)
+fn is_caption_or_label(c) {
+    if (c is element) {
+        let t = string(name(c))
+        if (t == "caption") true
+        else if (t == "label") true
+        else false
+    } else { false }
+}
+
 // ============================================================
 // Quote / quotation / verse
 // ============================================================
@@ -78,29 +88,35 @@ pub fn render_figure(node, ctx, render_fn) {
 
     // extract caption if present
     let caption = find_caption(node)
-    let caption_el = if (caption != null) {
-        let cap_text = util.text_of(caption)
-        <figcaption; <strong; "Figure " ++ string(fig_num) ++ ": "> cap_text>
-    } else null
+    let cap_text = if (caption != null) util.text_of(caption) else null
+    let caption_el = if (cap_text != null) make_figcaption(fig_num, cap_text) else null
 
     // extract label if present
-    let label_node = util.find_child(node, "label")
-    let ctx2 = if (label_node != null) {
-        let label_name = util.text_of(label_node)
+    let label_node = util.find_child(node, 'label')
+    let label_name = if (label_node != null) util.text_of(label_node) else null
+    let ctx2 = if (label_name != null)
         ctx_mod.add_label(children.ctx, label_name, "figure", string(fig_num), util.slugify("fig-" ++ label_name))
-    } else children.ctx
+        else children.ctx
 
     let result = <figure class: "latex-figure";
         for c in children.items {
-            if (not (c is element and (name(c) == "caption" or name(c) == "label"))) { c }
+            if (not is_caption_or_label(c)) { c }
         }
         if caption_el != null { caption_el }
     >
     {result: result, ctx: ctx2}
 }
 
+fn make_figcaption(fig_num, cap_text) {
+    let label = <strong; "Figure " ++ string(fig_num) ++ ": ">
+    <figcaption;
+        label
+        cap_text
+    >
+}
+
 fn find_caption(node) {
-    util.find_child(node, "caption")
+    util.find_child(node, 'caption')
 }
 
 // ============================================================
@@ -121,7 +137,7 @@ pub fn render_minipage(node, ctx, render_fn) {
 
 pub fn render_multicols(node, ctx, render_fn) {
     // extract column count from first curly_group
-    let col_group = util.find_child(node, "curly_group")
+    let col_group = util.find_child(node, 'curly_group')
     let cols = if (col_group != null) util.text_of(col_group) else "2"
     let children = render_children(node, ctx, render_fn)
     let result = <div class: "latex-multicols", style: "column-count:" ++ trim(cols);

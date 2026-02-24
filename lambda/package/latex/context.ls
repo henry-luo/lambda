@@ -55,27 +55,27 @@ pub fn step_counter(ctx, counter_name) {
     let c = ctx.counters
     match counter_name {
         case "chapter":
-            {ctx, counters: {c, chapter: c.chapter + 1, section: 0, subsection: 0, subsubsection: 0}}
+            {counters: {chapter: c.chapter + 1, section: 0, subsection: 0, subsubsection: 0, c}, ctx}
         case "section":
-            {ctx, counters: {c, section: c.section + 1, subsection: 0, subsubsection: 0}}
+            {counters: {section: c.section + 1, subsection: 0, subsubsection: 0, c}, ctx}
         case "subsection":
-            {ctx, counters: {c, subsection: c.subsection + 1, subsubsection: 0}}
+            {counters: {subsection: c.subsection + 1, subsubsection: 0, c}, ctx}
         case "subsubsection":
-            {ctx, counters: {c, subsubsection: c.subsubsection + 1}}
+            {counters: {subsubsection: c.subsubsection + 1, c}, ctx}
         case "figure":
-            {ctx, counters: {c, figure: c.figure + 1}}
+            {counters: {figure: c.figure + 1, c}, ctx}
         case "table":
-            {ctx, counters: {c, table: c.table + 1}}
+            {counters: {table: c.table + 1, c}, ctx}
         case "equation":
-            {ctx, counters: {c, equation: c.equation + 1}}
+            {counters: {equation: c.equation + 1, c}, ctx}
         case "footnote":
-            {ctx, counters: {c, footnote: c.footnote + 1}}
+            {counters: {footnote: c.footnote + 1, c}, ctx}
         case "enumi":
-            {ctx, counters: {c, enumi: c.enumi + 1, enumii: 0, enumiii: 0}}
+            {counters: {enumi: c.enumi + 1, enumii: 0, enumiii: 0, c}, ctx}
         case "enumii":
-            {ctx, counters: {c, enumii: c.enumii + 1, enumiii: 0}}
+            {counters: {enumii: c.enumii + 1, enumiii: 0, c}, ctx}
         case "enumiii":
-            {ctx, counters: {c, enumiii: c.enumiii + 1}}
+            {counters: {enumiii: c.enumiii + 1, c}, ctx}
         default: ctx
     }
 }
@@ -112,14 +112,14 @@ pub fn format_section_number(ctx, level) {
 pub fn add_label(ctx, label_name, label_type, number, id) {
     let label_entry = {type: label_type, number: number, id: id}
     let label_map = map([label_name, label_entry])
-    let new_labels = {ctx.labels, label_map}
-    {ctx, labels: new_labels}
+    let new_labels = {label_map, ctx.labels}
+    {labels: new_labels, ctx}
 }
 
 // record a heading for table of contents
 pub fn add_heading(ctx, level, number, text, id) {
     let entry = {level: level, number: number, text: text, id: id}
-    {ctx, headings: ctx.headings ++ [entry]}
+    {headings: ctx.headings ++ [entry], ctx}
 }
 
 // record a footnote
@@ -127,16 +127,16 @@ pub fn add_footnote(ctx, content) {
     let num = ctx.counters.footnote + 1
     let new_ctx = step_counter(ctx, "footnote")
     let entry = {number: num, content: content}
-    {new_ctx, footnotes: new_ctx.footnotes ++ [entry]}
+    {footnotes: new_ctx.footnotes ++ [entry], new_ctx}
 }
 
 // ============================================================
 // Title metadata
 // ============================================================
 
-pub fn set_title(ctx, title) => {ctx, title: title}
-pub fn set_author(ctx, author) => {ctx, author: author}
-pub fn set_date(ctx, date) => {ctx, date: date}
+pub fn set_title(ctx, title) => {title: title, ctx}
+pub fn set_author(ctx, author) => {author: author, ctx}
+pub fn set_date(ctx, date) => {date: date, ctx}
 
 // derive a context for deeper list nesting
-pub fn enter_list(ctx) => {ctx, list_depth: ctx.list_depth + 1}
+pub fn enter_list(ctx) => {list_depth: ctx.list_depth + 1, ctx}

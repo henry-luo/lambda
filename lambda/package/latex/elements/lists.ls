@@ -4,6 +4,13 @@
 import util: .lambda.package.latex.util
 import ctx_mod: .lambda.package.latex.context
 
+// helper: check if child is an <item> element
+fn is_item(child) {
+    if (child is element) {
+        if (string(name(child)) == "item") true else false
+    } else { false }
+}
+
 // ============================================================
 // Itemize (unordered list)
 // ============================================================
@@ -57,8 +64,48 @@ pub fn render_description(node, ctx, render_fn) {
 
 // split unordered list items
 fn split_items(node, ctx, render_fn) {
+    let flat = flatten_paragraphs(node)
+    let n = len(flat)
+    collect_items(flat, 0, n, [], [], ctx, render_fn)
+}
+
+pub fn flatten_paragraphs_pub(node) {
+    flatten_paragraphs(node)
+}
+
+// flatten paragraph wrappers: if direct children of node are <paragraph> elements,
+// inline their children into a flat array for item splitting
+fn flatten_paragraphs(node) {
     let n = len(node)
-    collect_items(node, 0, n, [], [], ctx, render_fn)
+    flatten_para_rec(node, 0, n, [])
+}
+
+fn flatten_para_rec(node, i, n, acc) {
+    if (i >= n) { acc }
+    else {
+        let child = node[i]
+        if (is_paragraph(child)) {
+            let inner_n = len(child)
+            let inner = flatten_inner(child, 0, inner_n, [])
+            flatten_para_rec(node, i + 1, n, acc ++ inner)
+        } else {
+            flatten_para_rec(node, i + 1, n, acc ++ [child])
+        }
+    }
+}
+
+fn is_paragraph(child) {
+    if (child is element) {
+        if (string(name(child)) == "paragraph") true else false
+    } else { false }
+}
+
+fn flatten_inner(el, i, n, acc) {
+    if (i >= n) { acc }
+    else {
+        let child = el[i]
+        flatten_inner(el, i + 1, n, acc ++ [child])
+    }
 }
 
 // recursive helper: walk children, accumulate content between <item> separators
@@ -70,7 +117,7 @@ fn collect_items(node, i, n, current_content, acc_items, ctx, render_fn) {
         {elements: final_items, ctx: ctx}
     } else {
         let child = node[i]
-        if (child is element and name(child) == "item") {
+        if (is_item(child)) {
             let flushed = if (len(current_content) > 0)
                 acc_items ++ [<li; for c in current_content { c }>]
                 else acc_items
@@ -87,8 +134,9 @@ fn collect_items(node, i, n, current_content, acc_items, ctx, render_fn) {
 
 // split enumerated list items (with counter stepping)
 fn split_items_enum(node, ctx, render_fn, counter) {
-    let n = len(node)
-    collect_items_enum(node, 0, n, [], [], ctx, render_fn, counter)
+    let flat = flatten_paragraphs(node)
+    let n = len(flat)
+    collect_items_enum(flat, 0, n, [], [], ctx, render_fn, counter)
 }
 
 fn collect_items_enum(node, i, n, current_content, acc_items, ctx, render_fn, counter) {
@@ -99,7 +147,7 @@ fn collect_items_enum(node, i, n, current_content, acc_items, ctx, render_fn, co
         {elements: final_items, ctx: ctx}
     } else {
         let child = node[i]
-        if (child is element and name(child) == "item") {
+        if (is_item(child)) {
             let flushed = if (len(current_content) > 0)
                 acc_items ++ [<li; for c in current_content { c }>]
                 else acc_items
@@ -117,37 +165,23 @@ fn collect_items_enum(node, i, n, current_content, acc_items, ctx, render_fn, co
 
 // split description items — <item> children may have a label attribute
 fn split_description_items(node, ctx, render_fn) {
-    let n = len(node)
-    collect_desc_items(node, 0, n, [], null, [], ctx, render_fn)
+    let flat = flatten_paragraphs(node)
+    let n = len(flat)
+    collect_desc_items(flat, 0, n, [], null, [], ctx, render_fn)
 }
 
 // acc_term: current <dt> element or null
 // acc_content: content for current <dd>
 fn collect_desc_items(node, i, n, acc_items, acc_term, acc_content, ctx, render_fn) {
     if (i >= n) {
-        let final_items = if (acc_term != null) {
-            let dd = if (len(acc_content) > 0) <dd; for c in acc_content { c }> else <dd>
-            acc_items ++ [acc_term, dd]
-        } else if (len(acc_content) > 0) {
-            acc_items ++ [<dd; for c in acc_content { c }>]
-        } else {
-            acc_items
-        }
+        let final_items = flush_desc(acc_items, acc_term, acc_content)
         {elements: final_items, ctx: ctx}
     } else {
         let child = node[i]
-        if (child is element and name(child) == "item") {
-            let flushed = if (acc_term != null) {
-                let dd = if (len(acc_content) > 0) <dd; for c in acc_content { c }> else <dd>
-                acc_items ++ [acc_term, dd]
-            } else if (len(acc_content) > 0) {
-                acc_items ++ [<dd; for c in acc_content { c }>]
-            } else {
-                acc_items
-            }
-
+        if (is_item(child)) {
+            let flushed = flush_desc(acc_items, acc_term, acc_content)
             let label_text = get_item_label(child)
-            let new_term = if (label_text != null) <dt; label_text> else <dt>
+            let new_term = make_dt(label_text)
             collect_desc_items(node, i + 1, n, flushed, new_term, [], ctx, render_fn)
         } else {
             let rendered = render_fn(child, ctx)
@@ -159,9 +193,32 @@ fn collect_desc_items(node, i, n, acc_items, acc_term, acc_content, ctx, render_
     }
 }
 
+fn flush_desc(acc_items, acc_term, acc_content) {
+    if acc_term != null {
+        let dd = make_dd(acc_content)
+        acc_items ++ [acc_term, dd]
+    } else if (len(acc_content) > 0) {
+        acc_items ++ [make_dd(acc_content)]
+    } else {
+        acc_items
+    }
+}
+
+fn make_dd(content) {
+    if (len(content) > 0) { <dd; for c in content { c }> } else { <dd> }
+}
+
+fn make_dt(label_text) {
+    if (label_text != null) { <dt; label_text> } else { <dt> }
+}
+
+pub fn get_item_label_pub(item_node) {
+    get_item_label(item_node)
+}
+
 fn get_item_label(item_node) {
     // look for optional argument or direct text child
-    let opt = util.find_child(item_node, "brack_group")
+    let opt = util.find_child(item_node, 'brack_group')
     if (opt != null) { util.text_of(opt) }
     else {
         let n = len(item_node)
