@@ -2769,21 +2769,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Also requires min-height to be zero for the collapse to happen
     bool has_border_bottom = block->bound && block->bound->border && block->bound->border->width.bottom > 0;
     bool has_padding_bottom = block->bound && block->bound->padding.bottom > 0;
-    bool creates_bfc_for_collapse = block->scroller &&
-                       (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-                        block->scroller->overflow_y != CSS_VALUE_VISIBLE);
-    // Floats and absolutely positioned elements also establish BFC (CSS 2.2 §9.4.1)
-    if (!creates_bfc_for_collapse && block->position) {
-        if (element_has_float(block) ||
-            block->position->position == CSS_VALUE_ABSOLUTE ||
-            block->position->position == CSS_VALUE_FIXED) {
-            creates_bfc_for_collapse = true;
-        }
-    }
-    // Inline-blocks also establish BFC
-    if (!creates_bfc_for_collapse && block->view_type == RDT_VIEW_INLINE_BLOCK) {
-        creates_bfc_for_collapse = true;
-    }
+    // CSS 2.1 §9.4.1: Elements that establish a BFC prevent margin collapsing
+    // with their in-flow children. This includes: overflow != visible,
+    // float, position absolute/fixed, inline-block, table cells, etc.
+    bool creates_bfc_for_collapse = block_context_establishes_bfc(block);
     // CSS 2.1 §8.3.1: Bottom margins only collapse when parent has auto computed height.
     // Per CSS 2.1 erratum q313, min-height has no influence on bottom margin adjacency.
     bool has_explicit_height = (block->blk && block->blk->given_height >= 0);
@@ -3530,22 +3519,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
                     if (block->bound->margin.top != 0 && !has_clearance) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
-                        // Check if parent creates a BFC - BFC prevents margin collapsing
-                        // BFC is created by: overflow != visible, float, position absolute/fixed, etc.
-                        bool parent_creates_bfc = parent && parent->scroller &&
-                            (parent->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-                             parent->scroller->overflow_y != CSS_VALUE_VISIBLE);
-                        // CSS 2.1 §9.4.1: Absolutely/fixed positioned elements also establish BFC
-                        if (!parent_creates_bfc && parent && parent->position &&
-                            (parent->position->position == CSS_VALUE_ABSOLUTE ||
-                             parent->position->position == CSS_VALUE_FIXED)) {
-                            parent_creates_bfc = true;
-                        }
-                        // Inline-blocks also establish BFC
-                        if (!parent_creates_bfc && parent &&
-                            parent->view_type == RDT_VIEW_INLINE_BLOCK) {
-                            parent_creates_bfc = true;
-                        }
+                        // CSS 2.1 §9.4.1: Elements that establish a BFC prevent margin collapsing
+                        // with their in-flow children. This includes: overflow != visible,
+                        // float, position absolute/fixed, inline-block, table cells, etc.
+                        bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
                         // parent has top margin, but no border, no padding;  parent->parent to exclude html
                         // Also: no margin collapsing if parent creates BFC
                         // If parent->bound is NULL, parent has no margin/border/padding - margins collapse through

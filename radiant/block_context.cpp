@@ -153,9 +153,13 @@ bool block_context_establishes_bfc(ViewBlock* block) {
 
     // 5. Tables, table cells and captions
     // CSS 2.2 §9.4.1: "The border box of a table..."
+    // Check both display.inner (from CSS resolution) and view_type (from table tree building)
+    // because table internal elements may have display.inner=0 if resolved via mark_table_node
     if (block->display.inner == CSS_VALUE_TABLE ||
         block->display.inner == CSS_VALUE_TABLE_CELL ||
-        block->display.inner == CSS_VALUE_TABLE_CAPTION) {
+        block->display.inner == CSS_VALUE_TABLE_CAPTION ||
+        block->view_type == RDT_VIEW_TABLE ||
+        block->view_type == RDT_VIEW_TABLE_CELL) {
         return true;
     }
 
