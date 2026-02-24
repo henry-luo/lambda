@@ -26,9 +26,6 @@ extern "C" {
 // GC header flags
 #define GC_FLAG_FREED    0x01   // object has been freed (by recursive free_container)
 
-// initial frame stack capacity
-#define GC_FRAME_STACK_INITIAL 64
-
 /**
  * GCHeader - 16 bytes prepended to every GC-managed allocation.
  *
@@ -50,15 +47,10 @@ typedef struct gc_header {
  * GCHeap - manages all GC-tracked allocations via intrusive linked list.
  *
  * Replaces the old Heap.entries ArrayList with a linked list of GCHeaders.
- * Frame management uses a frame_stack of saved list head pointers instead
- * of sentinel entries in the ArrayList.
  */
 typedef struct gc_heap {
     Pool* pool;                 // underlying rpmalloc memory pool
     gc_header_t* all_objects;   // linked list head (most recent allocation first)
-    gc_header_t** frame_stack;  // stack of saved list head pointers (frame markers)
-    int frame_depth;            // current frame nesting depth
-    int frame_capacity;         // capacity of frame_stack array
     size_t total_allocated;     // total bytes allocated (including headers)
     size_t object_count;        // number of live objects
 } gc_heap_t;
@@ -97,25 +89,11 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag);
 
 /**
  * Free a GC-managed object. Accounts for the prepended GCHeader.
- * Also sets GC_FLAG_FREED on the header so the frame_end walk can skip it.
+ * Also sets GC_FLAG_FREED on the header.
  * @param gc  heap the object was allocated from
  * @param ptr user data pointer (as returned by gc_heap_alloc/gc_heap_calloc)
  */
 void gc_heap_pool_free(gc_heap_t* gc, void* ptr);
-
-/**
- * Push a frame marker. Saves the current all_objects head.
- * The frame boundary determines which objects belong to the current scope.
- * @param gc heap
- */
-void gc_heap_frame_push(gc_heap_t* gc);
-
-/**
- * Pop the most recent frame marker.
- * @param gc heap
- * @return the saved all_objects head from the matching frame_push
- */
-gc_header_t* gc_heap_frame_pop(gc_heap_t* gc);
 
 /**
  * Get the GCHeader for a user data pointer.
