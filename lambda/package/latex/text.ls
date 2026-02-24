@@ -126,10 +126,7 @@ fn get_diacritic_base(node) {
     if (n == 0) { "" }
     else {
         let first = node[0]
-        if (first is element and name(first) == "curly_group")
-            util.text_of(first)
-        else
-            util.text_of(first)
+        util.text_of(first)
     }
 }
 

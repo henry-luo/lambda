@@ -27,6 +27,56 @@ fn join_children_text(el, i, n, acc) {
     else join_children_text(el, i + 1, n, acc ++ text_of(el[i]))
 }
 
+// extract text with common symbol commands resolved
+pub fn rich_text_of(node) {
+    if (node == null) { "" }
+    else if (node is string) { node }
+    else if (node is int) { string(node) }
+    else if (node is float) { string(node) }
+    else if (node is symbol) { string(node) }
+    else if (node is element) { rich_text_of_element(node) }
+    else { string(node) }
+}
+
+fn rich_text_of_element(el) {
+    let resolved = resolve_symbol_cmd(el)
+    if (resolved != null) { resolved }
+    else {
+        let n = len(el)
+        if (n == 0) { "" }
+        else { join_rich_children(el, 0, n, "") }
+    }
+}
+
+fn resolve_symbol_cmd(el) {
+    let tag = string(name(el))
+    match tag {
+        case "LaTeX": "LaTeX"
+        case "TeX": "TeX"
+        case "LaTeXe": "LaTeX2e"
+        case "ldots": "\u2026"
+        case "dots": "\u2026"
+        case "copyright": "\u00A9"
+        case "dag": "\u2020"
+        case "ddag": "\u2021"
+        case "ss": "\u00DF"
+        case "ae": "\u00E6"
+        case "AE": "\u00C6"
+        case "oe": "\u0153"
+        case "OE": "\u0152"
+        case "aa": "\u00E5"
+        case "AA": "\u00C5"
+        case "o": "\u00F8"
+        case "O": "\u00D8"
+        default: null
+    }
+}
+
+fn join_rich_children(el, i, n, acc) {
+    if (i >= n) { acc }
+    else { join_rich_children(el, i + 1, n, acc ++ rich_text_of(el[i])) }
+}
+
 // ============================================================
 // String helpers
 // ============================================================
@@ -118,8 +168,12 @@ fn find_child_rec(el, tag_name, i, n) {
     if (i >= n) { null }
     else {
         let child = el[i]
-        if (child is element and name(child) == tag_name) child
-        else find_child_rec(el, tag_name, i + 1, n)
+        if (child is element) {
+            if (string(name(child)) == string(tag_name)) { child }
+            else { find_child_rec(el, tag_name, i + 1, n) }
+        } else {
+            find_child_rec(el, tag_name, i + 1, n)
+        }
     }
 }
 

@@ -5,6 +5,16 @@
 import util: .lambda.package.latex.util
 import ctx_mod: .lambda.package.latex.context
 
+// helper: check if child should be skipped in table rendering (caption/label)
+fn is_skip_in_table(child) {
+    if (child is element) {
+        let t = string(name(child))
+        if (t == "caption") true
+        else if (t == "label") true
+        else false
+    } else { false }
+}
+
 // ============================================================
 // Table environment (float wrapper)
 // ============================================================
@@ -15,18 +25,16 @@ pub fn render_table_env(node, ctx, render_fn) {
     let children = render_table_children(node, new_ctx, render_fn)
 
     // extract caption
-    let caption_node = util.find_child(node, "caption")
-    let caption_el = if (caption_node != null) {
-        let cap_text = util.text_of(caption_node)
-        <caption; <strong; "Table " ++ string(tbl_num) ++ ": "> cap_text>
-    } else null
+    let caption_node = util.find_child(node, 'caption')
+    let cap_text = if (caption_node != null) util.text_of(caption_node) else null
+    let caption_el = if (cap_text != null) make_table_caption(tbl_num, cap_text) else null
 
     // extract label
-    let label_node = util.find_child(node, "label")
-    let ctx2 = if (label_node != null) {
-        let label_name = util.text_of(label_node)
+    let label_node = util.find_child(node, 'label')
+    let label_name = if (label_node != null) util.text_of(label_node) else null
+    let ctx2 = if (label_name != null)
         ctx_mod.add_label(children.ctx, label_name, "table", string(tbl_num), util.slugify("tbl-" ++ label_name))
-    } else children.ctx
+        else children.ctx
 
     let result = <div class: "latex-table-float";
         for c in children.items { c }
@@ -64,10 +72,7 @@ fn split_rows(node, ctx, render_fn) {
 // walk children: accumulate cells until row_sep, then emit <tr>
 fn collect_rows(node, i, n, current_cells, acc_rows, ctx, render_fn) {
     if (i >= n) {
-        let final_rows = if (len(current_cells) > 0) {
-            let tr = make_row(current_cells)
-            acc_rows ++ [tr]
-        } else { acc_rows }
+        let final_rows = flush_row(current_cells, acc_rows)
         {elements: final_rows, ctx: ctx, caption: null}
     } else {
         let child = node[i]
@@ -112,26 +117,29 @@ fn split_at_tabs(items, i, n, current_cell, acc_cells) {
 
 // check if child is a row separator (\\)
 fn is_row_sep(child) {
-    (child is symbol and string(child) == "row_sep") or
-    (child is element and name(child) == "row_sep")
+    if (child is symbol) { string(child) == "row_sep" }
+    else if (child is element) { string(name(child)) == "row_sep" }
+    else { false }
 }
 
 // check if child is alignment tab (&) in AST
 fn is_alignment_tab(child) {
-    (child is symbol and string(child) == "alignment_tab") or
-    (child is element and name(child) == "alignment_tab") or
-    (child is string and trim(child) == "&")
+    if (child is symbol) { string(child) == "alignment_tab" }
+    else if (child is element) { string(name(child)) == "alignment_tab" }
+    else if (child is string) { trim(child) == "&" }
+    else { false }
 }
 
 // check rendered output for tab marker
 fn is_alignment_tab_rendered(item) {
-    (item is string and trim(item) == "&") or
-    (item is element and name(item) == "alignment_tab")
+    if (item is string) { trim(item) == "&" }
+    else if (item is element) { string(name(item)) == "alignment_tab" }
+    else { false }
 }
 
 // extract column specification string
 fn extract_col_spec(node) {
-    let cg = util.find_child(node, "curly_group")
+    let cg = util.find_child(node, 'curly_group')
     if (cg != null) util.text_of(cg)
     else null
 }
@@ -151,12 +159,29 @@ fn render_tbl_rec(node, i, n, acc, ctx, render_fn) {
     else {
         let child = node[i]
         // skip caption and label — handled separately
-        let skip = child is element and (name(child) == "caption" or name(child) == "label")
+        let skip = is_skip_in_table(child)
         if (skip) { render_tbl_rec(node, i + 1, n, acc, ctx, render_fn) }
         else {
             let rendered = render_fn(child, ctx)
             let new_acc = if (rendered.result != null) acc ++ [rendered.result] else acc
             render_tbl_rec(node, i + 1, n, new_acc, rendered.ctx, render_fn)
         }
+    }
+}
+
+fn make_table_caption(tbl_num, cap_text) {
+    let label = <strong; "Table " ++ string(tbl_num) ++ ": ">
+    <caption;
+        label
+        cap_text
+    >
+}
+
+fn flush_row(current_cells, acc_rows) {
+    if (len(current_cells) > 0) {
+        let tr = make_row(current_cells)
+        acc_rows ++ [tr]
+    } else {
+        acc_rows
     }
 }
