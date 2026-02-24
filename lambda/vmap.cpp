@@ -115,8 +115,8 @@ static void hashmap_data_free(HashMapData* hd) {
     free(hd);
 }
 
-// Stabilize numeric values: float/int64/datetime use tagged pointers into num_stack,
-// which gets invalidated by frame_end(). Copy them to heap-owned storage so they survive.
+// Stabilize numeric values: float/int64/datetime use tagged pointers into nursery memory.
+// Copy them to heap-owned storage so they survive independent of nursery lifecycle.
 static Item stabilize_value(HashMapData* hd, Item value) {
     TypeId vtype = get_type_id(value);
     if (vtype == LMD_TYPE_FLOAT) {

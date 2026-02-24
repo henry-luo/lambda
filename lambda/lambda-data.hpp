@@ -25,7 +25,7 @@ typedef struct mpd_t mpd_t;
 #include "../lib/arena.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
-#include "../lib/num_stack.h"
+#include "../lib/gc_nursery.h"
 #include "../lib/datetime.h"
 #include "../lib/url.h"
 
@@ -70,14 +70,14 @@ class SchemaValidator;
 typedef struct Heap Heap;
 typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
-typedef struct num_stack_t num_stack_t;
+typedef struct gc_nursery gc_nursery_t;
 struct LambdaError;  // forward declaration
 
 typedef struct EvalContext : Context {
     Heap* heap;
     Pool* ast_pool;
     NamePool* name_pool;        // name_pool for runtime-generated names
-    num_stack_t* num_stack;  // for long and double pointers
+    gc_nursery_t* nursery;  // bump-pointer allocator for numeric temporaries (int64, double, DateTime)
     void* type_info;  // meta info for the base types
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
