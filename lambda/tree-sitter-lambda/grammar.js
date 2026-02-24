@@ -163,17 +163,17 @@ module.exports = grammar({
     'binary_pow',
     'binary_times',
     'binary_plus',
-    'binary_compare',
     'binary_relation',
     'binary_eq',
-    'logical_and',
-    'logical_or',
     // set operators
     'range_to',
     'set_intersect',  // like *
     'set_exclude',    // like -
     'set_union',      // like or
+    // logic operators
     'is_in',
+    'logical_and',
+    'logical_or',    
     // pipe operators (low precedence, just above control flow)
     'pipe',
     'pipe_file',  // |> and |>> - lowest binary precedence
@@ -456,13 +456,11 @@ module.exports = grammar({
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_item,   // ~ for pipe context
       $.current_index,  // ~# for pipe key/index
+      $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
 
-    spread_argument: $ => seq('...', $._expr),
-
     _arguments: $ => seq(
-      '(', comma_sep(optional(
-      field('argument', choice($.named_argument, $._expr, $.spread_argument)))), ')',
+      '(', comma_sep( field('argument', choice($.named_argument, $._expr)) ), ')',
     ),
 
     import: _ => token('import'),
@@ -495,6 +493,9 @@ module.exports = grammar({
 
     // Path root: / for absolute file paths
     path_root: _ => '/',
+
+    // Variadic marker: ... (higher priority than path_self and path_parent)
+    variadic: _ => token(prec(2, '...')),
 
     // Path self: . for relative paths (current directory)
     path_self: _ => '.',
@@ -567,7 +568,7 @@ module.exports = grammar({
         optional(seq(':', field('type', $._type_expr))),
         optional(seq('=', field('default', $._expr))),
       ),
-      field('variadic', '...'),  // variadic marker (must be last parameter)
+      field('variadic', $.variadic),  // variadic marker (must be last parameter)
     ),
 
     // Named argument in function call: name: value

@@ -71,7 +71,7 @@ AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_root(Script *script);
 void print_ts_root(const char *source, TSTree* syntax_tree);
 void print_tree(TSNode node, int depth);
-void find_errors(TSNode node);
+void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors);
 void write_node_source(Transpiler* tp, TSNode node);
 void write_type(StrBuf* code_buf, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);

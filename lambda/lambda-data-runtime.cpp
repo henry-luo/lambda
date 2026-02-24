@@ -505,90 +505,100 @@ Map* map_fill(Map* map, ...) {
     return map;
 }
 
+// extract field value from a named shape entry's storage
+static Item _map_read_field(ShapeEntry* field, void* map_data) {
+    TypeId type_id = field->type->type_id;
+    void* field_ptr = (char*)map_data + field->byte_offset;
+    log_debug("map_get found field: %.*s, type: %d, ptr: %p",
+        (int)field->name->length, field->name->str, type_id, field_ptr);
+    switch (type_id) {
+    case LMD_TYPE_NULL: {
+        void* ptr = *(void**)field_ptr;
+        if (ptr) {
+            Container* container = (Container*)ptr;
+            return {.container = container};
+        }
+        return ItemNull;
+    }
+    case LMD_TYPE_BOOL:
+        return {.item = b2it(*(bool*)field_ptr)};
+    case LMD_TYPE_INT:
+        return {.item = i2it(*(int64_t*)field_ptr)};
+    case LMD_TYPE_INT64:
+        return push_l(*(int64_t*)field_ptr);
+    case LMD_TYPE_FLOAT:
+        return push_d(*(double*)field_ptr);
+    case LMD_TYPE_DTIME: {
+        DateTime dt = *(DateTime*)field_ptr;
+        StrBuf *strbuf = strbuf_new();
+        datetime_format_lambda(strbuf, &dt);
+        log_debug("map_get datetime: %s", strbuf->str);
+        return push_k(dt);
+    }
+    case LMD_TYPE_DECIMAL:
+        return {.item = c2it(*(char**)field_ptr)};
+    case LMD_TYPE_STRING:
+        return {.item = s2it(*(char**)field_ptr)};
+    case LMD_TYPE_SYMBOL:
+        return {.item = y2it(*(char**)field_ptr)};
+    case LMD_TYPE_BINARY:
+        return {.item = x2it(*(char**)field_ptr)};
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+        Container* container = *(Container**)field_ptr;
+        if (!container) return ItemNull;
+        log_debug("map_get container: %p, type_id: %d", container, container->type_id);
+        return {.container = container};
+    }
+    case LMD_TYPE_TYPE:
+        return {.type = *(Type**)field_ptr};
+    case LMD_TYPE_FUNC:
+        return {.function = *(Function**)field_ptr};
+    case LMD_TYPE_PATH:
+        return {.path = *(Path**)field_ptr};
+    case LMD_TYPE_ANY: {
+        log_debug("map_get ANY type, pointer: %p", field_ptr);
+        return typeditem_to_item((TypedItem*)field_ptr);
+    }
+    default:
+        log_error("unknown map item type %s", get_type_name(type_id));
+        return ItemError;
+    }
+}
+
+// last-writer-wins: scan all entries in declaration order, keep the last match
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
+    Item result = ItemNull;
+    *is_found = false;
     ShapeEntry *field = map_type->shape;
     while (field) {
-        if (!field->name) { // nested map, skip
+        if (!field->name) {
+            // spread/nested map — search recursively
             Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
-            bool nested_is_found;
-            Item result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found);
-            if (nested_is_found) {
-                *is_found = true;
-                return result;
-            }
-            field = field->next;
-            continue;
-        }
-        // printf("map_get compare field: %.*s\n", (int)field->name->length, field->name->str);
-        if (strncmp(field->name->str, key, field->name->length) == 0 &&
-            strlen(key) == field->name->length) {
-            *is_found = true;
-            TypeId type_id = field->type->type_id;
-            void* field_ptr = (char*)map_data + field->byte_offset;
-            log_debug("map_get found field: %.*s, type: %d, ptr: %p",
-                (int)field->name->length, field->name->str, type_id, field_ptr);
-            switch (type_id) {
-            case LMD_TYPE_NULL: {
-                // Check if a non-null pointer was stored via type transition (NULL→container)
-                void* ptr = *(void**)field_ptr;
-                if (ptr) {
-                    Container* container = (Container*)ptr;
-                    return {.container = container};
+            if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
+                bool nested_found;
+                Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_found);
+                if (nested_found) {
+                    *is_found = true;
+                    result = nested_result;
+                    // don't return — later entries may override
                 }
-                return ItemNull;
             }
-            case LMD_TYPE_BOOL:
-                return {.item = b2it(*(bool*)field_ptr)};
-            case LMD_TYPE_INT:
-                return {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
-            case LMD_TYPE_INT64:
-                return push_l(*(int64_t*)field_ptr);
-            case LMD_TYPE_FLOAT:
-                return push_d(*(double*)field_ptr);
-            case LMD_TYPE_DTIME: {
-                DateTime dt = *(DateTime*)field_ptr;
-                StrBuf *strbuf = strbuf_new();
-                datetime_format_lambda(strbuf, &dt);
-                log_debug("map_get datetime: %s", strbuf->str);
-                return push_k(dt);
-            }
-            case LMD_TYPE_DECIMAL:
-                return {.item = c2it(*(char**)field_ptr)};
-            case LMD_TYPE_STRING:
-                return {.item = s2it(*(char**)field_ptr)};
-            case LMD_TYPE_SYMBOL:
-                return {.item = y2it(*(char**)field_ptr)};
-            case LMD_TYPE_BINARY:
-                return {.item = x2it(*(char**)field_ptr)};
-
-            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-                Container* container = *(Container**)field_ptr;
-                if (!container) return ItemNull;  // Was set to null via type transition
-                log_debug("map_get container: %p, type_id: %d", container, container->type_id);
-                // assert(container->type_id == type_id);
-                return {.container = container};
-            }
-            case LMD_TYPE_TYPE:
-                return {.type = *(Type**)field_ptr};
-            case LMD_TYPE_FUNC:
-                return {.function = *(Function**)field_ptr};
-            case LMD_TYPE_PATH:
-                return {.path = *(Path**)field_ptr};
-            case LMD_TYPE_ANY: {
-                log_debug("map_get ANY type, pointer: %p", field_ptr);
-                return typeditem_to_item((TypedItem*)field_ptr);
-            }
-            default:
-                log_error("unknown map item type %s", get_type_name(type_id));
-                return ItemError;
+        } else {
+            // named field — direct match
+            if (strncmp(field->name->str, key, field->name->length) == 0 &&
+                strlen(key) == field->name->length) {
+                *is_found = true;
+                result = _map_read_field(field, map_data);
+                // don't return — later entries may override
             }
         }
         field = field->next;
     }
-    *is_found = false;
-    log_debug("map_get: key '%s' not found", key);
-    return ItemNull;
+    if (!*is_found) {
+        log_debug("map_get: key '%s' not found", key);
+    }
+    return result;
 }
 
 Item map_get(Map* map, Item key) {

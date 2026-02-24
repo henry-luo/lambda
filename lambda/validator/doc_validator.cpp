@@ -11,6 +11,7 @@
 #include "validator.hpp"
 #include "../schema_ast.hpp"
 #include "../mark_reader.hpp"
+#include "../lambda-error.h"
 
 // External function declarations
 extern "C" {
@@ -19,7 +20,7 @@ extern "C" {
 }
 
 // C++ function declarations (no extern "C" needed)
-void find_errors(TSNode node);
+void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 ArrayList* arraylist_new(size_t initial_capacity);
 
@@ -89,7 +90,11 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
     if (ts_node_has_error(root_node)) {
         // Log syntax errors but continue - validator will handle them
         log_error("Syntax tree has errors - parsing failed");
-        find_errors(root_node);
+        ArrayList* parse_errors = arraylist_new(8);
+        find_errors(root_node, source, "<validator>", parse_errors);
+        for (int i = 0; i < parse_errors->length; i++) {
+            err_print((LambdaError*)parse_errors->data[i]);
+        }
         return nullptr;
     }
 

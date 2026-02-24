@@ -2523,14 +2523,8 @@ Item fn_trim(Item str_item) {
     }
 
     if (start >= end) {
-        // return empty string/symbol
-        if (str_type == LMD_TYPE_SYMBOL) {
-            return {.item = y2it(heap_create_symbol("", 0))};
-        }
-        String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
-        empty->len = 0;
-        empty->chars[0] = '\0';
-        return {.item = s2it(empty)};
+        // empty result normalized to null
+        return ItemNull;
     }
 
     size_t result_len = end - start;
@@ -2572,6 +2566,9 @@ Item fn_trim_start(Item str_item) {
     }
 
     size_t result_len = len - start;
+    if (result_len == 0) {
+        return ItemNull;
+    }
     if (str_type == LMD_TYPE_SYMBOL) {
         return {.item = y2it(heap_create_symbol(chars + start, result_len))};
     }
@@ -2610,14 +2607,8 @@ Item fn_trim_end(Item str_item) {
     }
 
     if (end == 0) {
-        // return empty string/symbol
-        if (str_type == LMD_TYPE_SYMBOL) {
-            return {.item = y2it(heap_create_symbol("", 0))};
-        }
-        String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
-        empty->len = 0;
-        empty->chars[0] = '\0';
-        return {.item = s2it(empty)};
+        // empty result normalized to null
+        return ItemNull;
     }
 
     if (str_type == LMD_TYPE_SYMBOL) {

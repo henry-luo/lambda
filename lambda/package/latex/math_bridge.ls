@@ -1,91 +1,48 @@
-// latex/math_bridge.ls — Bridge to the math package for inline/display math rendering
+// latex/math_bridge.ls - Bridge to the math package
 // Delegates math AST rendering to lambda/package/math/math.ls
 
 import math: .lambda.package.math.math
-import ctx_mod: .lambda.package.latex.context
 
 // ============================================================
-// Inline math: $...$ or \(...\)
+// Inline math
 // ============================================================
 
-pub fn render_inline(node, ctx) {
+pub fn render_inline_el(node) {
     let math_ast = node.ast
-    let result = if (math_ast != null) {
-        math.render_inline(math_ast)
-    } else {
-        // fallback: render source text as-is
-        let src = if (node.source != null) node.source else ""
-        <span class: "math-inline"; src>
-    }
-    {result: result, ctx: ctx}
+    let src = if (node.source != null) node.source else ""
+    if (math_ast != null) math.render_inline(math_ast)
+    else <span class: "math-inline"; src>
 }
 
 // ============================================================
-// Display math: $$...$$ or \[...\]
+// Display math
 // ============================================================
 
-pub fn render_display(node, ctx) {
+pub fn render_display_el(node) {
     let math_ast = node.ast
-    let math_html = if (math_ast != null) {
-        math.render_display(math_ast)
-    } else {
-        let src = if (node.source != null) node.source else ""
-        <span class: "math-display"; src>
-    }
-    let result = <div class: "math-display-container"; math_html>
-    {result: result, ctx: ctx}
+    let src = if (node.source != null) node.source else ""
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display"; src>
+    <div class: "math-display-container"; math_html>
 }
 
 // ============================================================
 // Numbered equation environment
 // ============================================================
 
-pub fn render_equation(node, ctx) {
+pub fn render_equation_el(node) {
     let math_ast = node.ast
-    let math_html = if (math_ast != null) {
-        math.render_display(math_ast)
-    } else {
-        let src = if (node.source != null) node.source else ""
-        <span class: "math-display"; src>
-    }
-
-    // step equation counter
-    let new_ctx = ctx_mod.step_counter(ctx, "equation")
-    let eq_num = new_ctx.counters.equation
-
-    let result = <div class: "latex-equation";
-        math_html
-        if ctx.numbering { <span class: "latex-eq-number"; "(" ++ string(eq_num) ++ ")"> }
-    >
-    {result: result, ctx: new_ctx}
+    let src = if (node.source != null) node.source else ""
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display"; src>
+    <div class: "latex-equation"; math_html>
 }
 
 // ============================================================
 // Align/gather/multline environments
 // ============================================================
 
-pub fn render_math_environment(node, ctx, env_name) {
-    // for now, treat like display math with source
+pub fn render_math_env_el(node, env_name) {
     let math_ast = node.ast
-    let math_html = if (math_ast != null) {
-        math.render_display(math_ast)
-    } else {
-        let src = if (node.source != null) node.source else ""
-        <span class: "math-display"; src>
-    }
-
-    // numbered if not starred
-    let is_starred = ends_with(env_name, "*")
-    if (is_starred) {
-        let result = <div class: "math-display-container"; math_html>
-        {result: result, ctx: ctx}
-    } else {
-        let new_ctx = ctx_mod.step_counter(ctx, "equation")
-        let eq_num = new_ctx.counters.equation
-        let result = <div class: "latex-equation";
-            math_html
-            if ctx.numbering { <span class: "latex-eq-number"; "(" ++ string(eq_num) ++ ")"> }
-        >
-        {result: result, ctx: new_ctx}
-    }
+    let src = if (node.source != null) node.source else ""
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display"; src>
+    <div class: "math-display-container"; math_html>
 }
