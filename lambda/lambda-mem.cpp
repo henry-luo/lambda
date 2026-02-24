@@ -1,35 +1,31 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/gc_heap.h"
 
 extern __thread EvalContext* context;
 
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)calloc(1, sizeof(Heap));
-    size_t grow_size = 4096;  // 4k
-    size_t tolerance_percent = 20;
-    context->heap->pool = pool_create();
-    context->heap->entries = arraylist_new(1024);
+    context->heap->gc = gc_heap_create();
+    context->heap->pool = context->heap->gc->pool;  // alias for compatibility
 }
 
 void* heap_alloc(int size, TypeId type_id) {
-    Heap *heap = context->heap;
-    void *data = pool_alloc(heap->pool, size);
+    gc_heap_t *gc = context->heap->gc;
+    void *data = gc_heap_alloc(gc, size, type_id);
     if (!data) {
-        log_error("Failed to allocate memory for heap entry");
+        log_error("failed to allocate memory for heap entry");
         return NULL;
     }
-    // scalar pointers needs to be tagged
-    void* entry = type_id < LMD_TYPE_CONTAINER ?
-        (void*)((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data;
-    arraylist_append(heap->entries, entry);
     return data;
 }
 
 // declared extern "C" to allow calling from C code (path.c)
 extern "C" void* heap_calloc(size_t size, TypeId type_id) {
-    void* ptr = heap_alloc(size, type_id);
-    memset(ptr, 0, size);
+    gc_heap_t *gc = context->heap->gc;
+    void* ptr = gc_heap_calloc(gc, size, type_id);
+    if (!ptr) return NULL;
     // mark containers as heap-owned so free_container can distinguish from arena-owned
     // Note: Function has different layout (arity at offset 1 instead of flags), skip it
     if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC) {
@@ -149,74 +145,74 @@ Item push_k(DateTime val) {
 
 void heap_destroy() {
     if (context->heap) {
-        if (context->heap->pool) pool_destroy(context->heap->pool);
+        if (context->heap->gc) gc_heap_destroy(context->heap->gc);
+        context->heap->pool = NULL;  // pool was owned by gc_heap, now destroyed
         free(context->heap);
     }
 }
 
-Item HEAP_ENTRY_START = {.item = ((uint64_t)LMD_CONTAINER_HEAP_START << 56)};
-
 void print_heap_entries() {
-    ArrayList *entries = context->heap->entries;
-    log_debug("after exec heap entries: %d", entries->length);
-    for (int i = 0; i < entries->length; i++) {
-        void *data = entries->data[i];
-        if (!data) { continue; }  // skip NULL entries
-        Item itm = *(Item*)&data;
-        log_debug("heap entry index: %d, type: %d, data: %p", i, itm._type_id, data);
-        if (itm._type_id == LMD_TYPE_RAW_POINTER) {
-            TypeId type_id = *((uint8_t*)data);
-            log_debug("heap entry data: type: %s", type_info[type_id].name);
-            if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_OBJECT) {
-                Container *cont = (Container*)data;
-                log_debug("heap entry container: type: %s, ref_cnt: %d",
-                    type_info[type_id].name, cont->ref_cnt);
-            }
+    gc_heap_t *gc = context->heap->gc;
+    log_debug("after exec gc objects: %zu", gc->object_count);
+    gc_header_t *header = gc->all_objects;
+    int idx = 0;
+    while (header) {
+        if (header->gc_flags & GC_FLAG_FREED) { header = header->next; idx++; continue; }
+        void *data = (void*)(header + 1);
+        uint16_t type_tag = header->type_tag;
+        log_debug("gc object index: %d, type: %s, data: %p", idx, type_info[type_tag].name, data);
+        if (type_tag >= LMD_TYPE_CONTAINER && type_tag <= LMD_TYPE_OBJECT) {
+            Container *cont = (Container*)data;
+            log_debug("gc object container: type: %s, ref_cnt: %d",
+                type_info[type_tag].name, cont->ref_cnt);
         }
+        header = header->next;
+        idx++;
     }
 }
 
 void check_memory_leak() {
     StrBuf *strbuf = strbuf_new_cap(1024);
-    ArrayList *entries = context->heap->entries;
-    log_debug("check heap entries: %d", entries->length);
-    for (int i = 0; i < entries->length; i++) {
-        void* data = entries->data[i];
-        Item itm = *(Item*)&data;
-        log_debug("heap entry index: %d, type: %s, data: %p", i, type_info[itm._type_id].name, data);
-        if (!data) { continue; }  // skip NULL entries
-        if (itm._type_id == LMD_TYPE_RAW_POINTER) {
-            TypeId type_id = *((uint8_t*)itm.item);
-            log_debug("heap entry data: type: %s", type_info[type_id].name);
-            if (type_id == LMD_TYPE_LIST) {
-                List *list = (List*)data;
-                log_debug("heap entry list: %p, length: %ld, ref_cnt: %d", list, list->length, list->ref_cnt);
-                strbuf_reset(strbuf);
-                print_item(strbuf, itm);
-                log_debug("heap entry list: %s", strbuf->str);
-            }
-            else if (type_id == LMD_TYPE_ARRAY) {
-                Array *arr = (Array*)data;
-                log_debug("heap entry array: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
-            }
-            else if (type_id == LMD_TYPE_ARRAY_INT) {
-                ArrayInt *arr = (ArrayInt*)data;
-                log_debug("heap entry array int: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
-            }
-            else if (type_id == LMD_TYPE_ARRAY_INT64) {
-                ArrayInt64 *arr = (ArrayInt64*)data;
-                log_debug("heap entry array int64: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
-            }
-            else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-                ArrayFloat *arr = (ArrayFloat*)data;
-                log_debug("heap entry array float: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
-            }
-            else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT) {
-                Map *map = (Map*)data;
-                log_debug("heap entry map/object: %p, length: %ld, ref_cnt: %d", map,
-                    ((TypeMap*)map->type)->length, map->ref_cnt);
-            }
+    gc_heap_t *gc = context->heap->gc;
+    log_debug("check gc objects: %zu", gc->object_count);
+    gc_header_t *header = gc->all_objects;
+    int idx = 0;
+    while (header) {
+        if (header->gc_flags & GC_FLAG_FREED) { header = header->next; idx++; continue; }
+        void* data = (void*)(header + 1);
+        uint16_t type_tag = header->type_tag;
+        log_debug("gc object index: %d, type: %s, data: %p", idx, type_info[type_tag].name, data);
+        if (type_tag == LMD_TYPE_LIST) {
+            List *list = (List*)data;
+            log_debug("gc object list: %p, length: %ld, ref_cnt: %d", list, list->length, list->ref_cnt);
+            Item itm = {.list = list};
+            strbuf_reset(strbuf);
+            print_item(strbuf, itm);
+            log_debug("gc object list: %s", strbuf->str);
         }
+        else if (type_tag == LMD_TYPE_ARRAY) {
+            Array *arr = (Array*)data;
+            log_debug("gc object array: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
+        }
+        else if (type_tag == LMD_TYPE_ARRAY_INT) {
+            ArrayInt *arr = (ArrayInt*)data;
+            log_debug("gc object array int: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
+        }
+        else if (type_tag == LMD_TYPE_ARRAY_INT64) {
+            ArrayInt64 *arr = (ArrayInt64*)data;
+            log_debug("gc object array int64: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
+        }
+        else if (type_tag == LMD_TYPE_ARRAY_FLOAT) {
+            ArrayFloat *arr = (ArrayFloat*)data;
+            log_debug("gc object array float: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
+        }
+        else if (type_tag == LMD_TYPE_MAP || type_tag == LMD_TYPE_ELEMENT || type_tag == LMD_TYPE_OBJECT) {
+            Map *map = (Map*)data;
+            log_debug("gc object map/object: %p, length: %ld, ref_cnt: %d", map,
+                ((TypeMap*)map->type)->length, map->ref_cnt);
+        }
+        header = header->next;
+        idx++;
     }
 }
 
@@ -271,7 +267,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
                 if (fn->ref_cnt > 0) fn->ref_cnt--;
                 if (!fn->ref_cnt) {
                     log_debug("freeing map field function: %p", fn);
-                    pool_free(context->heap->pool, fn);
+                    gc_heap_pool_free(context->heap->gc, fn);
                 }
             }
         }
@@ -283,27 +279,29 @@ void free_container(Container* cont, bool clear_entry) {
     if (!cont) return;
     // only free heap-owned containers; arena-owned ones are managed by arena lifecycle
     if (!cont->is_heap) return;
+    // guard against double-free: check GC_FLAG_FREED
+    gc_header_t *hdr = gc_get_header(cont);
+    if (hdr->gc_flags & GC_FLAG_FREED) return;
     log_debug("free_container: cont=%p, clear_entry=%d", cont, clear_entry);
     log_debug("container details: type_id=%d, ref_cnt=%d", cont->type_id, cont->ref_cnt);
     assert(cont->ref_cnt == 0);
+    gc_heap_t *gc = context->heap->gc;
     TypeId type_id = cont->type_id;
     if (type_id == LMD_TYPE_LIST) {
         List *list = (List *)cont;
         if (!list->ref_cnt) {
-            // free list items
             log_debug("freeing list items: %p, length: %ld", list, list->length);
             for (int j = 0; j < list->length; j++) {
                 free_item(list->items[j], clear_entry);
             }
             if (list->items && list->items != (Item*)(list + 1)) free(list->items);
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY) {
         Array *arr = (Array*)cont;
         log_debug("freeing array: %p, ref_cnt=%d, length=%ld, items=%p", arr, arr->ref_cnt, arr->length, arr->items);
         if (!arr->ref_cnt) {
-            // free array items
             log_debug("freeing array items, length=%ld", arr->length);
             for (int j = 0; j < arr->length; j++) {
                 log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id(), arr->items[j].item);
@@ -313,45 +311,40 @@ void free_container(Container* cont, bool clear_entry) {
                 log_debug("freeing arr->items array: %p", arr->items);
                 free(arr->items);
             }
-            log_debug("calling pool_free on array container: %p, pool=%p", cont, context->heap->pool);
-            log_debug("checking if pointer is in pool range...");
-            // DIAGNOSTIC: Check if this pointer looks valid
+            log_debug("calling gc_heap_pool_free on array container: %p", cont);
             if ((uint64_t)cont < 0x100000000ULL) {
-                log_error("DIAGNOSTIC: Array pointer %p appears to be in low memory - likely stack allocated or corrupted!", cont);
-                log_error("DIAGNOSTIC: This array was NOT allocated from heap pool and should NOT be freed!");
-                // Don't free this - it will crash
+                log_error("DIAGNOSTIC: Array pointer %p appears to be in low memory!", cont);
                 return;
             }
-            pool_free(context->heap->pool, cont);
-            log_debug("pool_free completed for array");
+            gc_heap_pool_free(gc, cont);
+            log_debug("gc_heap_pool_free completed for array");
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt *arr = (ArrayInt*)cont;
         if (!arr->ref_cnt) {
             if (arr->items && (void*)arr->items != (void*)(arr + 1)) free(arr->items);
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64 *arr = (ArrayInt64*)cont;
         if (!arr->ref_cnt) {
             if (arr->items && (void*)arr->items != (void*)(arr + 1)) free(arr->items);
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat *arr = (ArrayFloat*)cont;
         if (!arr->ref_cnt) {
             if (arr->items && (void*)arr->items != (void*)(arr + 1)) free(arr->items);
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_MAP) {
         Map *map = (Map*)cont;
         log_debug("freeing map: %p, ref_cnt=%d, type=%p, data=%p", map, map->ref_cnt, map->type, map->data);
         if (!map->ref_cnt) {
-            // free map items based on the shape
             ShapeEntry *field = ((TypeMap*)map->type)->shape;
             log_debug("map shape field: %p", field);
             if (field) {
@@ -362,8 +355,8 @@ void free_container(Container* cont, bool clear_entry) {
                 log_debug("freeing map->data: %p", map->data);
                 free(map->data);
             }
-            log_debug("calling pool_free on map: %p", cont);
-            pool_free(context->heap->pool, cont);
+            log_debug("calling gc_heap_pool_free on map: %p", cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_VMAP) {
@@ -373,50 +366,48 @@ void free_container(Container* cont, bool clear_entry) {
             if (vm->vtable && vm->data) {
                 vm->vtable->destroy(vm->data);
             }
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_ELEMENT) {
         Element *elmt = (Element*)cont;
         if (!elmt->ref_cnt) {
-            // free element attrs based on the shape
             ShapeEntry *field = ((TypeElmt*)elmt->type)->shape;
             if (field) { free_map_item(field, elmt->data, clear_entry); }
             if (elmt->data) free(elmt->data);
-            // free content
             for (int64_t j = 0; j < elmt->length; j++) {
                 free_item(elmt->items[j], clear_entry);
             }
             if (elmt->items) free(elmt->items);
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
     else if (type_id == LMD_TYPE_OBJECT) {
         Object *obj = (Object*)cont;
         log_debug("freeing object: %p, ref_cnt=%d, type=%p, data=%p", obj, obj->ref_cnt, obj->type, obj->data);
         if (!obj->ref_cnt) {
-            // free object fields based on the shape (same layout as map)
             ShapeEntry *field = ((TypeObject*)obj->type)->shape;
             if (field) {
                 free_map_item(field, obj->data, clear_entry);
             }
             if (obj->data) free(obj->data);
-            pool_free(context->heap->pool, cont);
+            gc_heap_pool_free(gc, cont);
         }
     }
 }
 
 void free_item(Item item, bool clear_entry) {
+    gc_heap_t *gc = context->heap->gc;
     if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL || item._type_id == LMD_TYPE_BINARY) {
         String *str = item.get_string();
         if (str && !str->ref_cnt) {
-            pool_free(context->heap->pool, str);
+            gc_heap_pool_free(gc, str);
         }
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         Decimal *dec = item.get_decimal();
         if (dec && !dec->ref_cnt) {
-            pool_free(context->heap->pool, dec);
+            gc_heap_pool_free(gc, dec);
         }
     }
     else if (item._type_id == LMD_TYPE_FUNC) {
@@ -425,7 +416,7 @@ void free_item(Item item, bool clear_entry) {
             if (fn->ref_cnt > 0) fn->ref_cnt--;
             if (!fn->ref_cnt) {
                 log_debug("freeing function item: %p", fn);
-                pool_free(context->heap->pool, fn);
+                gc_heap_pool_free(gc, fn);
             }
         }
     }
@@ -437,89 +428,92 @@ void free_item(Item item, bool clear_entry) {
             if (!container->ref_cnt) free_container(container, clear_entry);
         }
     }
-    if (clear_entry) {
-        ArrayList *entries = context->heap->entries;
-        // remove the entry from heap entries
-        for (int i = entries->length - 1; i >= 0; i--) {
-            void *data = entries->data[i];
-            if (data == (void*)item.item) {
-                entries->data[i] = NULL;  break;
-            }
-        }
-    }
+    // clear_entry is now a no-op — GCHeader list doesn't need manual entry removal.
+    // Objects freed here have their GC_FLAG_FREED set by gc_heap_pool_free.
 }
 
 void frame_start() {
     log_debug("entering frame_start");
-    // push sentinel marker (no num_stack position — nursery values persist until destroy)
-    arraylist_append(context->heap->entries, (void*) 0);  // placeholder (was num_stack position)
-    arraylist_append(context->heap->entries, (void*) HEAP_ENTRY_START.item);
+    gc_heap_frame_push(context->heap->gc);
 }
 
 void frame_end() {
-    ArrayList *entries = context->heap->entries;
-    log_debug("entering frame_end with entries: %d", entries->length);
-    // free heap allocations
-    int loop_count = 0;
-    int original_length = entries->length;
-    for (int i = entries->length - 1; i >= 0; i--) {
-        log_debug("frame_end loop: %d, i: %d, original_length: %d", loop_count, i, original_length);
-        loop_count++;
-        if (loop_count > original_length + 100) {
-            log_error("frame_end infinite loop detected! loop_count=%d, i=%d, original_length=%d",
-                   loop_count, i, original_length);
-            break;
+    gc_heap_t *gc = context->heap->gc;
+    gc_header_t *marker = gc_heap_frame_pop(gc);
+    log_debug("entering frame_end, marker=%p", marker);
+
+    // walk from newest allocation back to the frame marker
+    gc_header_t *current = gc->all_objects;
+    gc_header_t *prev = NULL;
+
+    while (current != marker) {
+        gc_header_t *next = current->next;  // save before potential free
+
+        // skip objects already freed by recursive free_container
+        if (current->gc_flags & GC_FLAG_FREED) {
+            // unlink freed object from list, then actually pool_free
+            if (prev) prev->next = next;
+            else gc->all_objects = next;
+            pool_free(gc->pool, current);  // safe: next was saved above
+            current = next;
+            continue;
         }
-        log_debug("free heap entry index: %d", i);
-        void *data = entries->data[i];
-        if (!data) { continue; }  // skip NULL entries
-        Item itm = {.item = *(uint64_t*)&data};
-        if (itm._type_id == LMD_TYPE_STRING || itm._type_id == LMD_TYPE_SYMBOL ||
-            itm._type_id == LMD_TYPE_BINARY) {
-            String *str = itm.get_string();
-            if (str && !str->ref_cnt) {
-                log_debug("freeing heap string: %s", str->chars);
-                pool_free(context->heap->pool, (void*)str);
+
+        void *obj = (void*)(current + 1);
+        uint16_t type_tag = current->type_tag;
+        bool should_free = false;
+
+        if (type_tag == LMD_TYPE_STRING || type_tag == LMD_TYPE_SYMBOL || type_tag == LMD_TYPE_BINARY) {
+            String *str = (String*)obj;
+            if (!str->ref_cnt) {
+                log_debug("freeing gc string: %s", str->chars);
+                should_free = true;
             }
         }
-        else if (itm._type_id == LMD_TYPE_DECIMAL) {
-            Decimal *dec = itm.get_decimal();
-            if (dec && !dec->ref_cnt) {
-                log_debug("freeing heap decimal");
-                pool_free(context->heap->pool, (void*)dec);
+        else if (type_tag == LMD_TYPE_DECIMAL) {
+            Decimal *dec = (Decimal*)obj;
+            if (!dec->ref_cnt) {
+                log_debug("freeing gc decimal");
+                should_free = true;
             }
         }
-        else if (itm._type_id == LMD_TYPE_RAW_POINTER) {
-            Container* cont = itm.container;
-            if (cont) {
-                // check if this is a Function (type_id at offset 0)
-                TypeId type_id = cont->type_id;
-                if (type_id == LMD_TYPE_FUNC) {
-                    // Function has different layout than Container
-                    Function* fn = (Function*)cont;
-                    if (fn->ref_cnt > 0) {
-                        // still referenced, keep in heap
-                        entries->data[i] = NULL;
-                    } else {
-                        // no references, free it
-                        log_debug("freeing heap function: %p", fn);
-                        pool_free(context->heap->pool, fn);
-                    }
-                }
-                else if (cont->ref_cnt > 0) {
-                    // clear the heap entry, and keep the container to be freed by ref_cnt
-                    entries->data[i] = NULL;
-                }
-                else free_container(cont, false);
+        else if (type_tag == LMD_TYPE_FUNC) {
+            Function *fn = (Function*)obj;
+            if (fn->ref_cnt > 0) {
+                // still referenced, keep in list
+            } else {
+                log_debug("freeing gc function: %p", fn);
+                should_free = true;
             }
         }
-        else if (itm._type_id == LMD_CONTAINER_HEAP_START) {
-            log_debug("reached container start: %d", i);
-            // nursery values persist until destroy — no reset needed
-            entries->length = i-1;
-            log_debug("frame_end: new entries length: %d", entries->length);
-            return;
+        else if (type_tag >= LMD_TYPE_CONTAINER) {
+            Container *cont = (Container*)obj;
+            if (cont->ref_cnt > 0) {
+                // adopted, keep in list
+            } else {
+                // free container and its children recursively
+                free_container(cont, false);
+                // free_container called gc_heap_pool_free on cont,
+                // which marked GC_FLAG_FREED (but deferred pool_free).
+                // Unlink from list and actually pool_free now.
+                if (prev) prev->next = next;
+                else gc->all_objects = next;
+                pool_free(gc->pool, current);  // safe: next was saved above
+                current = next;
+                continue;
+            }
         }
+
+        if (should_free) {
+            // unlink from list and free
+            if (prev) prev->next = next;
+            else gc->all_objects = next;
+            pool_free(gc->pool, current);  // safe: next was saved above
+        } else {
+            prev = current;
+        }
+
+        current = next;
     }
-    log_debug("end of frame_end with entries: %d", entries->length);
+    log_debug("frame_end complete");
 }
