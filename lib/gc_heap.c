@@ -116,6 +116,10 @@ gc_heap_t* gc_heap_create(void) {
     gc->collecting = 0;
     gc->collect_callback = NULL;
 
+    // VMap callbacks (set by runtime via lambda-mem.cpp)
+    gc->vmap_trace = NULL;
+    gc->vmap_destroy = NULL;
+
     log_debug("gc_heap_create: dual-zone GC heap created (threshold=%zu)", gc->gc_threshold);
     return gc;
 }
@@ -552,9 +556,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
     case LMD_TYPE_VMAP_: {
         // VMap: { Container(2), data*(8@8), vtable*(8@16) }
-        // VMap entries may contain Items, but are managed by the vtable backend.
-        // For now, skip VMap deep tracing — the HashMap backing data uses malloc.
-        // TODO: Implement VMap tracing when VMap data moves to data zone.
+        // VMap entries (Item keys/values) are stored in a malloc'd HashMap.
+        // Delegate tracing to the runtime-provided callback.
+        uint8_t* p = (uint8_t*)obj;
+        void* data = *(void**)(p + 8);
+        if (data && gc->vmap_trace) {
+            gc->vmap_trace(data, gc);
+        }
         break;
     }
 
@@ -700,7 +708,7 @@ static void gc_compact_data(gc_heap_t* gc) {
 
 // Finalize a dead object's sub-allocations that are NOT in the data zone
 // (e.g., mpd_t from libmpdec, VMap backing data from HashMap).
-static void gc_finalize_dead_object(gc_header_t* header) {
+static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
     void* obj = (void*)(header + 1);
     uint16_t tag = header->type_tag;
 
@@ -713,8 +721,14 @@ static void gc_finalize_dead_object(gc_header_t* header) {
         // TODO: Add a finalization callback mechanism.
     }
     else if (tag == LMD_TYPE_VMAP_) {
-        // VMap: backing data is malloc'd by HashMap implementation
-        // Same situation as Decimal — defer to context teardown.
+        // VMap: backing data is malloc'd by HashMap implementation.
+        // Free it immediately during sweep so dead VMaps don't leak.
+        uint8_t* p = (uint8_t*)obj;
+        void* data = *(void**)(p + 8);
+        if (data && gc->vmap_destroy) {
+            gc->vmap_destroy(data);
+            *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
+        }
     }
     // Other types: sub-allocations (items[], data, closure_env) are in data zone
     // and will be reclaimed by data zone reset. No explicit free needed.
@@ -747,7 +761,7 @@ static void gc_sweep(gc_heap_t* gc) {
             prev = current;
         } else {
             // dead — finalize external sub-allocations
-            gc_finalize_dead_object(current);
+            gc_finalize_dead_object(gc, current);
 
             // unlink from all_objects
             if (prev) prev->next = next_obj;

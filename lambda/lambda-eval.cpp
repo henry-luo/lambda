@@ -1500,7 +1500,7 @@ TypePattern* const_pattern(int pattern_index) {
 }
 
 Type* fn_type(Item item) {
-    TypeType *type = (TypeType *)calloc(1, sizeof(TypeType) + sizeof(Type));
+    TypeType *type = (TypeType *)heap_calloc(sizeof(TypeType) + sizeof(Type), LMD_TYPE_TYPE);
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     if (item._type_id) {
