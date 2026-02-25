@@ -199,6 +199,8 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
     prop->given_width = prop->given_height = -1;  // -1 for not specified
     prop->given_width_percent = prop->given_height_percent = NAN;  // NAN for not percentage
+    prop->given_min_width_percent = prop->given_max_width_percent = NAN;
+    prop->given_min_height_percent = prop->given_max_height_percent = NAN;
     prop->text_indent = 0;  // default to 0
     prop->text_indent_percent = NAN;  // NAN means not percentage (deferred resolution)
     return prop;
