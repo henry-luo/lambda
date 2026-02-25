@@ -638,7 +638,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
                 rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
                 rect->length, text_view->text_data() + rect->start_index);
-            rect->y = lycon->block.advance_y + max(vertical_offset, 0);
+            // CSS 2.1 §10.8.1: Content area may overflow the line box when
+            // line-height < content-height (negative half-leading). Allow negative
+            // offsets so the content area extends above the line box top.
+            rect->y = lycon->block.advance_y + vertical_offset;
             rect = rect->next;
         }
         adjust_text_bounds(text_view);
@@ -665,16 +668,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewSpan* span = (ViewSpan*)view;
         span_vertical_align(lycon, span);
         // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,
-        // recompute the span's bounding box when the span has borders or padding.
-        // compute_span_bounding_box was called earlier during layout_inline() before
-        // vertical alignment, so the span's y/height become stale when borders push
-        // the box beyond the content area and text positions shift.
-        // For borderless spans, the initial bounding box already correctly reflects
-        // the content area including half-leading offsets.
-        if (span->bound && (span->bound->border ||
-                            span->bound->padding.top > 0 || span->bound->padding.bottom > 0)) {
-            compute_span_bounding_box(span, false);
-        }
+        // recompute the span's bounding box. The bounding box was computed earlier
+        // in layout_inline() before vertical alignment, so child y positions may
+        // have shifted (e.g., baseline alignment with half-leading offsets).
+        // Always recompute to ensure the span's bounds reflect final child positions.
+        compute_span_bounding_box(span, false);
     }
     else {
         log_debug("view_vertical_align: unknown view type %d", view->view_type);
