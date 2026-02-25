@@ -51,10 +51,6 @@ extern "C" {
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
 #include "../radiant/pdf/pdf_to_view.hpp"
-#include "../lambda/tex/tex_latex_bridge.hpp"
-#include "../lambda/tex/tex_pdf_out.hpp"
-#include "../lambda/tex/tex_document_model.hpp"
-#include "../lambda/tex/tex_tfm.hpp"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -76,7 +72,7 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_latex_doc_tex(Url* latex_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
@@ -1858,17 +1854,9 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         log_info("[load_html_doc] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Load LaTeX document
-        // Check LAMBDA_TEX_PIPELINE env var to select pipeline (supports --flavor from CLI)
-        const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
-        if (use_tex && strcmp(use_tex, "1") == 0) {
-            log_info("[load_html_doc] Detected LaTeX file, using TeX typesetting pipeline (tex-proper)");
-            extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
-            doc = load_latex_doc_tex(full_url, viewport_width, viewport_height, pool, 1.0f);
-        } else {
-            log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline (latex-js)");
-            doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
-        }
+        // Load LaTeX document via LaTeX→HTML pipeline
+        log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
+        doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
         // Load Markdown document: parse Markdown → convert to HTML → layout
         log_info("[load_html_doc] Detected Markdown file, using Markdown→HTML pipeline");
@@ -2866,41 +2854,23 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     log_debug("[Lambda LaTeX] Dumping LaTeX input tree:");
     log_root_item(latex_input->root);
 
-    // Step 2: Generate complete HTML document with external CSS links
-    log_debug("[Lambda LaTeX] Converting LaTeX to HTML with external CSS...");
-
+    // Step 2: Convert LaTeX Element tree to HTML using format_html
+    log_debug("[Lambda LaTeX] Converting LaTeX to HTML...");
     log_info("[Lambda LaTeX] Starting LaTeX document load from %s", latex_filepath);
 
-    const char* doc_class = "article";  // Default document class
-
-    // Generate complete HTML document using unified pipeline
-    tex::TFMFontManager* fonts = tex::create_font_manager(latex_input->arena);
-    tex::LaTeXContext ctx = tex::LaTeXContext::create(latex_input->arena, fonts, doc_class);
-    tex::TexDocumentModel* doc_model = tex::doc_model_from_latex(latex_input->root, latex_input->arena, ctx);
-    if (!doc_model || !doc_model->root) {
-        log_error("Failed to build document model from LaTeX");
+    String* html_str = format_html(pool, latex_input->root);
+    if (!html_str || html_str->len == 0) {
+        log_error("Failed to generate HTML from LaTeX Element tree");
         return nullptr;
     }
-
-    StrBuf* html_buf = strbuf_new_cap(8192);
-    tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::defaults();
-    opts.standalone = true;
-    opts.pretty_print = true;
-    opts.include_css = true;
-
-    bool success = tex::doc_model_to_html(doc_model, html_buf, opts);
-    if (!success || html_buf->length == 0) {
-        log_error("Failed to generate HTML document from LaTeX");
-        strbuf_free(html_buf);
-        return nullptr;
-    }
-    const char* html_doc = html_buf->str;
+    const char* html_doc = html_str->chars;
 
     // Log the first 100 characters to verify structure
-    size_t html_len = strlen(html_doc);
+    size_t html_len = html_str->len;
     char html_preview[101];
-    strncpy(html_preview, html_doc, 100);
-    html_preview[100] = '\0';
+    size_t preview_len = html_len < 100 ? html_len : 100;
+    memcpy(html_preview, html_doc, preview_len);
+    html_preview[preview_len] = '\0';
     log_info("[Lambda LaTeX] Generated HTML (%zu bytes), starts with: %s", html_len, html_preview);
 
     // Step 3: Parse the generated HTML for DOM construction
@@ -3038,47 +3008,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     log_debug("[Lambda LaTeX] LaTeX document loaded, converted to HTML, and styled");
     return dom_doc;
-}
-
-/**
- * Load LaTeX document using TeX typesetting pipeline
- *
- * This function uses the direct LaTeX→TeX→PDF pipeline:
- * 1. Parse LaTeX with tree-sitter-latex → Lambda Element tree
- * 2. Convert to TeX nodes via tex_latex_bridge
- * 3. Apply line breaking and page breaking
- * 4. Generate PDF in memory
- * 5. Load PDF to ViewTree for display
- *
- * @param latex_url URL to LaTeX file
- * @param viewport_width Viewport width (unused for PDF)
- * @param viewport_height Viewport height (unused for PDF)
- * @param pool Memory pool for allocations
- * @param pixel_ratio Display pixel ratio for high-DPI
- * @return DomDocument structure with pre-rendered ViewTree
- *
- * NOTE: tex_pages_to_view_tree has been removed as part of MathLive pipeline cleanup.
- * This function is temporarily disabled. Use load_latex_doc_pdf instead, or wait for
- * the unified TeX pipeline with RDT_VIEW_TEXNODE to be completed.
- */
-DomDocument* load_latex_doc_tex(Url* latex_url, int viewport_width, int viewport_height,
-                                 Pool* pool, float pixel_ratio) {
-    (void)viewport_width;
-    (void)viewport_height;
-    (void)pixel_ratio;
-
-    if (!latex_url || !pool) {
-        log_error("load_latex_doc_tex: invalid parameters");
-        return nullptr;
-    }
-
-    char* latex_filepath = url_to_local_path(latex_url);
-    log_error("load_latex_doc_tex: This function is temporarily disabled. "
-              "tex_pages_to_view_tree has been removed. Use load_latex_doc_pdf instead. "
-              "File: %s", latex_filepath);
-
-    // TODO: Reimplement using unified TeX pipeline with RDT_VIEW_TEXNODE
-    return nullptr;
 }
 
 /**
@@ -3559,13 +3488,6 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
  */
 #define MAX_INPUT_FILES 1024
 
-// LaTeX rendering flavor
-enum LatexFlavor {
-    LATEX_FLAVOR_AUTO,      // Use environment variable or default
-    LATEX_FLAVOR_JS,        // LaTeX→HTML→CSS pipeline (latex-js)
-    LATEX_FLAVOR_TEX_PROPER // LaTeX→TeX→ViewTree pipeline (tex-proper)
-};
-
 struct LayoutOptions {
     const char* input_files[MAX_INPUT_FILES];  // array of input file paths
     int input_file_count;                       // number of input files
@@ -3580,7 +3502,6 @@ struct LayoutOptions {
     bool debug;
     bool continue_on_error;                     // continue processing on errors in batch mode
     bool summary;                               // print summary statistics
-    LatexFlavor latex_flavor;                   // LaTeX rendering pipeline to use
 };
 
 bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
@@ -3596,7 +3517,6 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->debug = false;
     opts->continue_on_error = false;
     opts->summary = false;
-    opts->latex_flavor = LATEX_FLAVOR_AUTO;
 
     // Parse arguments
     for (int i = 0; i < argc; i++) {
@@ -3672,22 +3592,6 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                 return false;
             }
         }
-        else if (strcmp(argv[i], "--flavor") == 0) {
-            if (i + 1 < argc) {
-                const char* flavor = argv[++i];
-                if (strcmp(flavor, "latex-js") == 0) {
-                    opts->latex_flavor = LATEX_FLAVOR_JS;
-                } else if (strcmp(flavor, "tex-proper") == 0) {
-                    opts->latex_flavor = LATEX_FLAVOR_TEX_PROPER;
-                } else {
-                    log_error("Error: unknown flavor '%s'. Use 'latex-js' or 'tex-proper'", flavor);
-                    return false;
-                }
-            } else {
-                log_error("Error: --flavor requires an argument");
-                return false;
-            }
-        }
         else if (argv[i][0] != '-') {
             // Collect all non-option arguments as input files
             if (opts->input_file_count < MAX_INPUT_FILES) {
@@ -3726,8 +3630,7 @@ static bool layout_single_file(
     int viewport_width,
     int viewport_height,
     UiContext* ui_context,
-    Url* cwd,
-    LatexFlavor latex_flavor = LATEX_FLAVOR_AUTO
+    Url* cwd
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
 
@@ -3790,27 +3693,9 @@ static bool layout_single_file(
         log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Determine which pipeline to use
-        // Priority: --flavor flag > LAMBDA_TEX_PIPELINE env var > default (latex-js)
-        bool use_native = false;
-        if (latex_flavor == LATEX_FLAVOR_TEX_PROPER) {
-            use_native = true;
-        } else if (latex_flavor == LATEX_FLAVOR_JS) {
-            use_native = false;
-        } else {
-            // Auto: check environment variable
-            const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
-            use_native = (use_tex && strcmp(use_tex, "1") == 0);
-        }
-
-        if (use_native) {
-            log_info("[Layout] Detected LaTeX file, using TeX typesetting pipeline (tex-proper)");
-            extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
-            doc = load_latex_doc_tex(input_url, viewport_width, viewport_height, pool, 1.0f);
-        } else {
-            log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline (latex-js)");
-            doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
-        }
+        // Load LaTeX document via LaTeX→HTML pipeline
+        log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
+        doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
         log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
         doc = load_markdown_doc(input_url, viewport_width, viewport_height, pool);
@@ -4002,8 +3887,7 @@ int cmd_layout(int argc, char** argv) {
             opts.viewport_width,
             opts.viewport_height,
             &ui_context,
-            cwd,
-            opts.latex_flavor
+            cwd
         );
 
         if (success) {
