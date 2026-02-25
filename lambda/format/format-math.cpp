@@ -12,10 +12,7 @@
 
 // Format math to LaTeX (default format)
 String* format_math_latex(Pool* pool, Item root_item) {
-    (void)pool;
-    (void)root_item;
-    log_debug("format_math_latex: MathNode formatting disabled - to be reimplemented with TexNode");
-    return nullptr;
+    return format_math_latex_standalone(pool, root_item);
 }
 
 // Format math to Typst

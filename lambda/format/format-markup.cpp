@@ -690,6 +690,34 @@ void MarkupEmitter::format_element(const ElementReader& elem) {
         return;
     }
 
+    // math: unified math element from markup parser (type=inline or type=block)
+    // Contains raw math content as string children
+    if (strcmp(tag, "math") == 0) {
+        ItemReader type_attr = elem.get_attr("type");
+        bool is_block = false;
+        if (!type_attr.isNull() && type_attr.isString()) {
+            is_block = strcmp(type_attr.cstring(), "block") == 0;
+        }
+        for (int64_t i = 0; i < elem.childCount(); i++) {
+            ItemReader child = elem.childAt(i);
+            if (child.isString()) {
+                const char* raw = child.cstring();
+                if (is_block) {
+                    write_text("$$");
+                    write_text(raw);
+                    write_text("$$");
+                    write_char('\n');
+                } else {
+                    write_text("$");
+                    write_text(raw);
+                    write_text("$");
+                }
+                return;
+            }
+        }
+        return;
+    }
+
     // fallback: unknown tag — just emit children
     format_children(elem);
 }

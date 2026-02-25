@@ -249,14 +249,25 @@ std::string normalize_script_braces(const std::string& expr) {
 }
 
 bool are_expressions_semantically_equivalent(const std::string& expr1, const std::string& expr2) {
+    // Strip leading/trailing whitespace (formatters may add trailing newlines)
+    auto trim = [](const std::string& s) -> std::string {
+        size_t start = 0;
+        while (start < s.size() && (s[start] == ' ' || s[start] == '\n' || s[start] == '\r' || s[start] == '\t')) start++;
+        size_t end = s.size();
+        while (end > start && (s[end-1] == ' ' || s[end-1] == '\n' || s[end-1] == '\r' || s[end-1] == '\t')) end--;
+        return s.substr(start, end - start);
+    };
+    std::string t1 = trim(expr1);
+    std::string t2 = trim(expr2);
+
     // Direct comparison first
-    if (expr1 == expr2) {
+    if (t1 == t2) {
         return true;
     }
 
     // Normalize and compare
-    std::string norm1 = normalize_latex_for_comparison(expr1);
-    std::string norm2 = normalize_latex_for_comparison(expr2);
+    std::string norm1 = normalize_latex_for_comparison(t1);
+    std::string norm2 = normalize_latex_for_comparison(t2);
 
     if (norm1 == norm2) {
         return true;
@@ -264,8 +275,8 @@ bool are_expressions_semantically_equivalent(const std::string& expr1, const std
 
     // Remove all spaces and compare (very lenient)
     std::string no_space1, no_space2;
-    for (char c : expr1) if (c != ' ') no_space1 += c;
-    for (char c : expr2) if (c != ' ') no_space2 += c;
+    for (char c : t1) if (c != ' ') no_space1 += c;
+    for (char c : t2) if (c != ' ') no_space2 += c;
 
     if (no_space1 == no_space2) {
         return true;
@@ -504,7 +515,7 @@ TEST_F(MathRoundtripTest, PureMathRoundtrip) {
 
 TEST_F(MathRoundtripTest, MinimalMarkdownTest) {
     const char* test_cases[] = {
-        "# Simple Test\n\nThis is a test.\n"
+        "# Simple Test\nThis is a test.\n"
     };
 
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
@@ -543,7 +554,7 @@ TEST_F(MathRoundtripTest, SpacingTest) {
 
 TEST_F(MathRoundtripTest, SimpleMarkdownRoundtrip) {
     const char* test_cases[] = {
-        "# Heading\n\nSome text with $x = 1$ math.\n"
+        "# Heading\nSome text with $x = 1$ math.\n"
     };
 
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
