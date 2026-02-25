@@ -465,7 +465,11 @@ html?<table>[tr][td]           // all tables → direct rows → direct cells
 
 ### If Expressions
 
-If expressions require both branches and return a value:
+Lambda has two `if` forms that share the same `else` syntax and produce the same AST node.
+
+#### Expression Form: `if (cond) expr else ...`
+
+The parenthesized condition form requires `else` and returns a value:
 
 ```lambda
 // Simple if expression
@@ -479,7 +483,55 @@ let grade = if (score >= 90) "A"
 
 // If in let bindings
 (let x = 5, if (x > 3) "big" else "small")
+
+// Block else (NEW) — else branch can be a { stam } block
+let msg = if (x > 0) "ok" else {
+    let reason = diagnose(x);
+    "error: " ++ reason
+}
 ```
+
+#### Block Form: `if cond { stam } [else ...]`
+
+The block form uses `{ stam }` for the then-branch. `else` is optional:
+
+```lambda
+// Block if, no else
+if x > 0 { print("positive") }
+
+// Block if with block else
+if temperature > 30 {
+    print("hot")
+} else {
+    print("comfortable")
+}
+
+// Expression else (NEW) — else branch can be an expression
+if x > 0 { compute(x) } else default_value
+
+// Chaining
+if x > 0 {
+    "positive"
+} else if x < 0 {
+    "negative"
+} else {
+    "zero"
+}
+```
+
+#### Unified Else Branch
+
+Both forms accept the same `else` options:
+
+| Else form | Example |
+|---|---|
+| `else expr` | `else "fallback"` |
+| `else { stam }` | `else { let x = calc(); x }` |
+| `else if ...` | `else if (y > 0) ...` or `else if y > 0 { ... }` |
+
+When `else` is omitted (block form only), the result is `null`.
+
+> **Map/block ambiguity:** `else { ... }` is always parsed as a block, not a map literal. To return a map from an else branch, use parentheses: `else ({a: 1, b: 2})`.
 
 ### For Expressions
 
@@ -791,17 +843,22 @@ let items: [string] = ["a", "b", "c"];
 
 #### If Statements
 
+If statements use the block form described in [If Expressions](#if-expressions). Both forms produce the same AST node and can appear in statement position:
+
 ```lambda
-// If statement (can omit else)
-if (x > 0) {
+// Block form (else optional)
+if x > 0 {
     print("positive")
 }
 
-if (temperature > 30) {
+if temperature > 30 {
     print("hot")
 } else {
     print("comfortable")
 }
+
+// Expression else in statement position
+if x > 0 { print("ok") } else print("fail")
 ```
 
 #### For Statements
