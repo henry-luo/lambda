@@ -640,17 +640,17 @@ static void format_item(StringBuf* sb, const ItemReader& item, int depth) {
         }
     }
     else if (item.isSymbol()) {
-        String* str = item.asString();
-        if (str && str->chars) {
+        Symbol* sym = item.asSymbol();
+        if (sym && sym->chars) {
             // Symbols are used for command_name (backslash-stripped), row_sep, col_sep
-            if (strcmp(str->chars, "row_sep") == 0) {
+            if (strcmp(sym->chars, "row_sep") == 0) {
                 stringbuf_append_str(sb, "; ");
-            } else if (strcmp(str->chars, "col_sep") == 0) {
+            } else if (strcmp(sym->chars, "col_sep") == 0) {
                 stringbuf_append_str(sb, ", ");
             } else {
                 // Command name as symbol - look up in tables
-                const char* ascii = cmd_to_ascii(str->chars);
-                stringbuf_append_str(sb, ascii ? ascii : str->chars);
+                const char* ascii = cmd_to_ascii(sym->chars);
+                stringbuf_append_str(sb, ascii ? ascii : sym->chars);
             }
         }
     }
