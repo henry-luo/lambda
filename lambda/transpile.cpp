@@ -539,7 +539,7 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
     case AST_NODE_CURRENT_INDEX:
         // no children to process
         break;
-    case AST_NODE_IF_EXPR:  case AST_NODE_IF_STAM: {
+    case AST_NODE_IF_EXPR: {
         AstIfNode* if_node = (AstIfNode*)node;
         pre_define_closure_envs(tp, if_node->cond);
         pre_define_closure_envs(tp, if_node->then);
@@ -1916,7 +1916,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     tp->in_tail_position = prev_in_tail;
 }
 
-// for both if_expr and if_stam
+// for both if-expression and if-block forms
 void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     log_debug("transpile if expr");
 
@@ -2888,7 +2888,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
     if (if_node->then) {
         if (if_node->then->node_type == AST_NODE_CONTENT) {
             transpile_proc_statements(tp, (AstListNode*)if_node->then);
-        } else if (if_node->then->node_type == AST_NODE_IF_STAM) {
+        } else if (if_node->then->node_type == AST_NODE_IF_EXPR) {
             // nested if in then branch
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->then);
@@ -2912,7 +2912,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
         strbuf_append_str(tp->code_buf, " else {");
         if (if_node->otherwise->node_type == AST_NODE_CONTENT) {
             transpile_proc_statements(tp, (AstListNode*)if_node->otherwise);
-        } else if (if_node->otherwise->node_type == AST_NODE_IF_STAM) {
+        } else if (if_node->otherwise->node_type == AST_NODE_IF_EXPR) {
             // else if chain
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->otherwise);
@@ -3675,7 +3675,7 @@ void transpile_proc_statements(Transpiler* tp, AstListNode *list_node) {
             transpile_pipe_file_stam(tp, (AstBinaryNode*)item);
             strbuf_append_char(tp->code_buf, ';');
         }
-        else if (item->node_type == AST_NODE_IF_STAM) {
+        else if (item->node_type == AST_NODE_IF_EXPR) {
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)item);
         }
@@ -3777,23 +3777,13 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_FOR_STAM) {
             transpile_for(tp, (AstForNode*)item);
         }
-        else if (item->node_type == AST_NODE_IF_STAM) {
-            // procedural if statement - use C-style if/else blocks
+        else if (item->node_type == AST_NODE_IF_EXPR) {
+            // if expression/statement — use C-style if/else blocks in proc context
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)item);
         }
         else if (item->node_type == AST_NODE_MATCH_EXPR) {
             transpile_match_stam(tp, (AstMatchNode*)item);
-        }
-        else if (item->node_type == AST_NODE_IF_EXPR) {
-            // if expression - wrap value (ternary style)
-            if (item == last_item) {
-                strbuf_append_str(tp->code_buf, "\n result = ");
-            } else {
-                strbuf_append_str(tp->code_buf, "\n ");
-            }
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ';');
         }
         else if (item->node_type == AST_NODE_CALL_EXPR) {
             // call expression - capture result if last
@@ -6180,9 +6170,6 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_IF_EXPR:
         transpile_if(tp, (AstIfNode*)expr_node);
         break;
-    case AST_NODE_IF_STAM:
-        transpile_if(tp, (AstIfNode*)expr_node);
-        break;
     case AST_NODE_MATCH_EXPR:
         transpile_match(tp, (AstMatchNode*)expr_node);
         break;
@@ -6431,15 +6418,6 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         define_ast_node(tp, ((AstBinaryNode*)node)->right);
         break;
     case AST_NODE_IF_EXPR: {
-        AstIfNode* if_node = (AstIfNode*)node;
-        define_ast_node(tp, if_node->cond);
-        define_ast_node(tp, if_node->then);
-        if (if_node->otherwise) {
-            define_ast_node(tp, if_node->otherwise);
-        }
-        break;
-    }
-    case AST_NODE_IF_STAM: {
         AstIfNode* if_node = (AstIfNode*)node;
         define_ast_node(tp, if_node->cond);
         define_ast_node(tp, if_node->then);

@@ -879,19 +879,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_IF_EXPR: {
-        log_debug("[if expr:%s]", type_name);
-        AstIfNode* if_node = (AstIfNode*)node;
-        print_ast_node(script, if_node->cond, indent + 1);
-        print_label(indent + 1, "then:");
-        print_ast_node(script, if_node->then, indent + 1);
-        if (if_node->otherwise) {
-            print_label(indent + 1, "else:");
-            print_ast_node(script, if_node->otherwise, indent + 1);
-        }
-        break;
-    }
-    case AST_NODE_IF_STAM: {
-        log_debug("[if stam:%s]", type_name);
+        log_debug("[if:%s]", type_name);
         AstIfNode* if_node = (AstIfNode*)node;
         print_ast_node(script, if_node->cond, indent + 1);
         print_label(indent + 1, "then:");
