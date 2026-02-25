@@ -768,3 +768,204 @@ TEST_F(GCHeapTest, ClosureNoEnvSafe) {
 
     gc_unregister_root(gc, &root);
 }
+
+// ============================================================================
+// 10. VMap GC Tracing and Finalization
+// ============================================================================
+
+// VMap layout: { type_id(2@0), pad(6), data*(8@8), vtable*(8@16) } = 24 bytes
+// type_id is Container.id which is uint16_t, matching type_tag 19 (LMD_TYPE_VMAP)
+#define TEST_TYPE_VMAP 19
+
+// Test-local state for VMap callback verification
+static int s_vmap_trace_calls = 0;
+static void* s_vmap_trace_last_data = nullptr;
+static gc_heap_t* s_vmap_trace_last_gc = nullptr;
+static int s_vmap_destroy_calls = 0;
+static void* s_vmap_destroy_last_data = nullptr;
+
+// Track Items marked during trace callback
+static uint64_t s_traced_items[64];
+static int s_traced_item_count = 0;
+
+static void test_vmap_trace(void* data, gc_heap_t* gc) {
+    s_vmap_trace_calls++;
+    s_vmap_trace_last_data = data;
+    s_vmap_trace_last_gc = gc;
+    // Simulate tracing: mark two Items stored at data[0] and data[1]
+    // (our test fake data is an array of uint64_t Items)
+    uint64_t* items = (uint64_t*)data;
+    for (int i = 0; i < 2; i++) {
+        if (items[i]) {
+            if (s_traced_item_count < 64) {
+                s_traced_items[s_traced_item_count++] = items[i];
+            }
+            gc_mark_item(gc, items[i]);
+        }
+    }
+}
+
+static void test_vmap_destroy(void* data) {
+    s_vmap_destroy_calls++;
+    s_vmap_destroy_last_data = data;
+    free(data);
+}
+
+static void reset_vmap_test_state() {
+    s_vmap_trace_calls = 0;
+    s_vmap_trace_last_data = nullptr;
+    s_vmap_trace_last_gc = nullptr;
+    s_vmap_destroy_calls = 0;
+    s_vmap_destroy_last_data = nullptr;
+    s_traced_item_count = 0;
+    memset(s_traced_items, 0, sizeof(s_traced_items));
+}
+
+// Helper: create a fake VMap with a malloc'd data block
+// The data block is an array of 2 uint64_t Items (simulating key/value pairs).
+static void* make_vmap(GCHeapTest* /*t*/, gc_heap_t* gc, uint64_t item0, uint64_t item1) {
+    void* obj = gc_heap_calloc(gc, 24, TEST_TYPE_VMAP);
+    uint8_t* p = (uint8_t*)obj;
+    *(uint16_t*)(p + 0) = TEST_TYPE_VMAP;  // Container type_id
+
+    // Allocate fake "data" via malloc (simulates HashMapData*)
+    uint64_t* fake_data = (uint64_t*)calloc(2, sizeof(uint64_t));
+    fake_data[0] = item0;
+    fake_data[1] = item1;
+
+    *(void**)(p + 8) = fake_data;   // data pointer
+    *(void**)(p + 16) = nullptr;    // vtable (not needed for GC)
+    return obj;
+}
+
+TEST_F(GCHeapTest, VMapTraceCallbackInvoked) {
+    // VMap trace callback is invoked during mark phase for rooted VMaps
+    reset_vmap_test_state();
+    gc->vmap_trace = test_vmap_trace;
+    gc->vmap_destroy = test_vmap_destroy;
+
+    void* str = make_string("vmap_value");
+    void* vm = make_vmap(this, gc, string_item(str), int_item(42));
+
+    uint64_t root = list_item(vm);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // trace callback should have been called once
+    EXPECT_EQ(s_vmap_trace_calls, 1);
+    // The string referenced by VMap should survive (marked through callback)
+    EXPECT_EQ(gc->object_count, 2u);  // vm + str
+
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, VMapTracedValuesKeepReferencesAlive) {
+    // Objects referenced only through VMap data should survive GC
+    reset_vmap_test_state();
+    gc->vmap_trace = test_vmap_trace;
+    gc->vmap_destroy = test_vmap_destroy;
+
+    void* str_alive = make_string("kept_alive");
+    void* str_dead = make_string("unreachable");
+    void* vm = make_vmap(this, gc, string_item(str_alive), int_item(99));
+
+    EXPECT_EQ(gc->object_count, 3u);  // vm + str_alive + str_dead
+
+    // Root only the VMap — str_alive is reachable through VMap, str_dead is not
+    uint64_t root = list_item(vm);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // str_alive survives (marked through VMap trace), str_dead is collected
+    EXPECT_EQ(gc->object_count, 2u);
+
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, VMapDestroyCallbackOnDead) {
+    // Dead VMap gets its backing data freed during sweep
+    reset_vmap_test_state();
+    gc->vmap_trace = test_vmap_trace;
+    gc->vmap_destroy = test_vmap_destroy;
+
+    void* vm = make_vmap(this, gc, int_item(1), int_item(2));
+    EXPECT_EQ(gc->object_count, 1u);
+
+    // Collect with no roots — VMap is dead
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // VMap should be collected
+    EXPECT_EQ(gc->object_count, 0u);
+    // destroy callback should have been called once
+    EXPECT_EQ(s_vmap_destroy_calls, 1);
+}
+
+TEST_F(GCHeapTest, VMapDeadAlsoCollectsUnreferencedChildren) {
+    // When a VMap dies, its children (strings) also die if not rooted elsewhere
+    reset_vmap_test_state();
+    gc->vmap_trace = test_vmap_trace;
+    gc->vmap_destroy = test_vmap_destroy;
+
+    void* str = make_string("orphan");
+    void* vm = make_vmap(this, gc, string_item(str), int_item(0));
+    EXPECT_EQ(gc->object_count, 2u);
+
+    // No roots — both VMap and string are dead
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(s_vmap_destroy_calls, 1);
+}
+
+TEST_F(GCHeapTest, VMapNullDataSafe) {
+    // VMap with NULL data pointer should not crash during trace or finalize
+    reset_vmap_test_state();
+    gc->vmap_trace = test_vmap_trace;
+    gc->vmap_destroy = test_vmap_destroy;
+
+    void* obj = gc_heap_calloc(gc, 24, TEST_TYPE_VMAP);
+    uint8_t* p = (uint8_t*)obj;
+    *(uint16_t*)(p + 0) = TEST_TYPE_VMAP;
+    *(void**)(p + 8) = nullptr;   // NULL data
+    *(void**)(p + 16) = nullptr;
+
+    // Collect with no roots — should not crash
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 0u);
+    // trace/destroy should NOT have been called (data was NULL)
+    EXPECT_EQ(s_vmap_trace_calls, 0);
+    EXPECT_EQ(s_vmap_destroy_calls, 0);
+}
+
+TEST_F(GCHeapTest, VMapNoCallbacksSafe) {
+    // VMap trace/destroy with no callbacks registered should not crash
+    // (gc->vmap_trace and gc->vmap_destroy stay NULL)
+    EXPECT_EQ(gc->vmap_trace, nullptr);
+    EXPECT_EQ(gc->vmap_destroy, nullptr);
+
+    void* fake_data = calloc(2, sizeof(uint64_t));
+    void* obj = gc_heap_calloc(gc, 24, TEST_TYPE_VMAP);
+    uint8_t* p = (uint8_t*)obj;
+    *(uint16_t*)(p + 0) = TEST_TYPE_VMAP;
+    *(void**)(p + 8) = fake_data;
+    *(void**)(p + 16) = nullptr;
+
+    // Root it, then collect — should silently skip tracing
+    uint64_t root = list_item(obj);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 1u);  // survives because rooted
+
+    // Now unroot and collect — without destroy callback, data leaks (expected)
+    gc_unregister_root(gc, &root);
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 0u);
+    // Manually free since no callback was set
+    free(fake_data);
+}

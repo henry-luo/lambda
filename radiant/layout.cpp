@@ -942,7 +942,15 @@ void line_align(LayoutContext* lycon) {
                         }
 
                         // Don't justify the last line per CSS spec
+                        // CSS 2.1 §16.2: Last line of justified text aligns to 'start'
+                        // For RTL, start = right; for LTR, start = left (already positioned)
                         if (is_last_line) {
+                            if (is_rtl) {
+                                float offset = lycon->block.content_width - line_width;
+                                if (offset > 0 && last_rect) {
+                                    last_rect->x += offset;
+                                }
+                            }
                             return;
                         }
 

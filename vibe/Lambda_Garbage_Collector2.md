@@ -861,8 +861,8 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
   - List/Array: scan `items[]` for Item references
   - Map/Object: walk `ShapeEntry` linked list, trace pointer-type fields in packed `data` buffer
   - Element: trace both `items[]` children and `data` attributes
-  - Function: trace `closure_env` (deferred — needs `closure_field_count`)
-  - VMap: deferred (complex external backing store)
+  - Function: trace `closure_env` (deferred — needs `closure_field_count`) → ✅ Resolved (Step 6)
+  - VMap: callback-based tracing via `gc_heap_t.vmap_trace` → ✅ Resolved (Step 7)
   - Scalars (int64, double, String, Symbol, etc.): no outgoing references, nothing to trace
 - TypeMap struct offset corrected: `shape` field is at byte offset 32 (Type(2) + padding(6) + length(8) + byte_size(8) + type_index(4) + padding(4) = 32)
 - **Type tag constants** corrected to exactly match `lambda.h` `EnumTypeId` enum (RAW_POINTER=0, NULL=1, BOOL=2, INT=3, INT64=4, ..., STRING=10, ..., LIST=12, ..., FUNC=23)
@@ -924,6 +924,23 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 
 **Files modified**: `lambda/lambda.h`, `lambda/lambda-eval.cpp`, `lambda/transpile-mir.cpp`, `lambda/transpile.cpp`, `lib/gc_heap.c`, `test/test_gc_heap_gtest.cpp`
 
+### Step 7: VMap Tracing & Finalization ✅ Complete
+- Added callback-based VMap tracing to `gc_heap_t`: `vmap_trace` (mark phase) and `vmap_destroy` (sweep phase) function pointer fields
+- **gc_heap.c**: `gc_trace_object()` VMap case reads `data*` at offset 8, invokes `gc->vmap_trace(data, gc)` to mark all HashMap entries; `gc_finalize_dead_object()` invokes `gc->vmap_destroy(data)` and NULLs the data pointer to prevent double-free at context teardown
+- **vmap.cpp**: Added `vmap_gc_trace()` bridge — iterates `hashmap_iter()` over all `HashMapEntry` key/value Items, calling `gc_mark_item()` for each; and `vmap_gc_destroy()` bridge — calls `hashmap_data_free()` to release HashMap, key_order, num_values and malloc'd numeric copies
+- **lambda-mem.cpp**: Registers both callbacks in `heap_init()` so GC can trace/finalize VMaps without C++ dependencies in gc_heap.c
+- **6 new GC tests** for VMap tracing:
+  - `VMapTraceCallbackInvoked`: trace callback called during mark, referenced strings survive
+  - `VMapTracedValuesKeepReferencesAlive`: objects reachable only through VMap survive GC
+  - `VMapDestroyCallbackOnDead`: unreachable VMap gets backing data freed during sweep
+  - `VMapDeadAlsoCollectsUnreferencedChildren`: dead VMap's children also collected
+  - `VMapNullDataSafe`: VMap with NULL data doesn't crash on trace or finalize
+  - `VMapNoCallbacksSafe`: VMap with no callbacks registered doesn't crash
+- **37/37 GC unit tests pass** ✅
+- **389/389 Lambda baseline tests pass** ✅ (no regressions)
+
+**Files modified**: `lib/gc_heap.h`, `lib/gc_heap.c`, `lambda/vmap.cpp`, `lambda/lambda-mem.cpp`, `test/test_gc_heap_gtest.cpp`
+
 ---
 
 ## 9. Risks and Mitigations
@@ -942,17 +959,16 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 
 ## 10. Success Criteria
 
-| Criterion | Measurement | Status |
-|-----------|-------------|--------|
-| All existing tests pass | 389 Lambda tests green | ✅ 389/389 pass (Steps 1–6) |
-| Radiant tests pass | 2149 Radiant tests (51 pre-existing layout failures, not GC-related) | ✅ No regressions |
-| GC unit tests pass | 31 tests covering mark/sweep/compact/trigger/stack-scan/closure | ✅ 31/31 pass |
-| Long-running loop memory bounded | Loop allocating 1M temporary arrays stays under constant peak memory | ⬜ Runtime validation pending |
-| Closure cycle collected | Test: cyclic closure reference is reclaimed (ref_cnt version leaks) | ✅ ClosureCycleCollected test verifies |
-| Data zone fully reclaims | After GC, nursery data zone usage returns to zero | ✅ CompactMovesNurseryData test verifies |
-| No pointer corruption | Stress test: build large data structures, trigger multiple GC cycles, verify data integrity | ✅ StressAllocCollect + CompactPreservesListData tests verify |
-| Allocation performance | Benchmark: bump allocation (data zone) ≥ current `malloc()` throughput | ⬜ Requires benchmarking |
----
+| Criterion                        | Measurement                                                                                 | Status                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| All existing tests pass          | 389 Lambda tests green                                                                      | ✅ 389/389 pass (Steps 1–7)                                     |
+| Radiant tests pass               | 2149 Radiant tests (51 pre-existing layout failures, not GC-related)                        | ✅ No regressions                                               |
+| GC unit tests pass               | 37 tests covering mark/sweep/compact/trigger/stack-scan/closure/vmap                        | ✅ 37/37 pass                                                   |
+| Long-running loop memory bounded | Loop allocating 1M temporary arrays stays under constant peak memory                        | ⬜ Runtime validation pending                                   |
+| Closure cycle collected          | Test: cyclic closure reference is reclaimed (ref_cnt version leaks)                         | ✅ ClosureCycleCollected test verifies                          |
+| Data zone fully reclaims         | After GC, nursery data zone usage returns to zero                                           | ✅ CompactMovesNurseryData test verifies                        |
+| No pointer corruption            | Stress test: build large data structures, trigger multiple GC cycles, verify data integrity | ✅ StressAllocCollect and CompactPreservesListData tests verify |
+| Allocation performance           | Benchmark: bump allocation (data zone) ≥ current `malloc()` throughput                      | Requires benchmarking                                          |
 
 ## 11. Known Issues & Deferred Work
 
@@ -968,13 +984,13 @@ Three sites in `mark_editor.cpp` use raw `realloc()` to grow `items[]` arrays fo
 
 **Impact**: Low risk — these code paths only execute during procedural element/array mutation of Input-parsed data. The `realloc()` works today because arena backing is ultimately `malloc`-based (`rpmalloc`), but it is technically incorrect as it bypasses the arena's tracking. Should be fixed when MarkEditor is refactored.
 
-### `fn_type()` in `lambda-eval.cpp` — Raw `calloc()`
+### `fn_type()` in `lambda-eval.cpp` — ✅ Resolved
 
-Line 1498 uses `calloc(1, sizeof(TypeType) + sizeof(Type))` to allocate a `TypeType` wrapper. This is a **type metadata allocation**, not a data container — it is not tracked by GC and is never freed (persists for context lifetime). Low priority; could be moved to `pool_calloc` for consistency.
+`fn_type()` now uses `heap_calloc(sizeof(TypeType) + sizeof(Type), LMD_TYPE_TYPE)` instead of raw `calloc()`. The TypeType + inline Type struct is GC-managed in the object zone. `LMD_TYPE_TYPE` was added to the exclusion list in `heap_calloc()`'s `is_heap` marking since Type structs have a different byte-1 layout than Container (bitfield `kind:4 + is_literal:1 + is_const:1` vs Container `flags`).
 
-### VMap Tracing — Deferred
+### VMap Tracing — ✅ Resolved (Step 7)
 
-`gc_trace_object()` does not yet trace `VMap` backing data (HashMap entries containing `Item` keys/values). VMap uses an external `vtable->destroy` pattern. Tracing would require a `vtable->trace` callback to walk all stored Items. Deferred until VMaps are used in GC-triggering scenarios.
+`gc_trace_object()` now traces VMap backing data via a callback-based approach. Two function pointer fields (`vmap_trace`, `vmap_destroy`) were added to `gc_heap_t`. The runtime registers C-callable bridge functions (`vmap_gc_trace`, `vmap_gc_destroy` in `vmap.cpp`) at init time. During mark phase, the trace callback iterates all `HashMapEntry` key/value Items via `hashmap_iter()` and calls `gc_mark_item()` for each. During sweep, dead VMaps have their `HashMapData` freed immediately (with the data pointer NULLed to prevent double-free at context teardown). 6 unit tests added covering trace invocation, liveness propagation, finalization, null-data safety, and no-callback safety.
 
 ### Closure Environment Tracing — ✅ Resolved (Step 6)
 
