@@ -700,8 +700,7 @@ Item fn_div(Item item_a, Item item_b) {
         for (int64_t i = 0; i < arr_a->length; i++) {
             if (arr_b->items[i] == 0) {
                 log_error("integer division by zero error in array element %" PRId64, i);
-                free(result->items);
-                free(result);
+                // result abandoned in GC heap/data zone — reclaimed by GC
                 return ItemError;
             }
             result->items[i] = (double)arr_a->items[i] / (double)arr_b->items[i];
@@ -719,8 +718,7 @@ Item fn_div(Item item_a, Item item_b) {
         for (int64_t i = 0; i < arr_a->length; i++) {
             if (arr_b->items[i] == 0) {
                 log_error("integer division by zero error in array element %" PRId64, i);
-                free(result->items);
-                free(result);
+                // result abandoned in GC heap/data zone — reclaimed by GC
                 return ItemError;
             }
             result->items[i] = (double)arr_a->items[i] / (double)arr_b->items[i];
@@ -738,8 +736,7 @@ Item fn_div(Item item_a, Item item_b) {
         for (int64_t i = 0; i < arr_a->length; i++) {
             if (arr_b->items[i] == 0.0) {
                 log_error("float division by zero error in array element %" PRId64, i);
-                free(result->items);
-                free(result);
+                // result abandoned in GC heap/data zone — reclaimed by GC
                 return ItemError;
             }
             result->items[i] = arr_a->items[i] / arr_b->items[i];

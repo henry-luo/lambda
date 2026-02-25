@@ -38,6 +38,25 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
+// allocate variable-size data (items[], data buffers) from the GC data zone
+// these are bump-allocated, not individually freeable — reclaimed at GC
+extern "C" void* heap_data_alloc(size_t size) {
+    gc_heap_t *gc = context->heap->gc;
+    void* ptr = gc_data_alloc(gc, size);
+    if (!ptr) {
+        log_error("heap_data_alloc: failed to allocate %zu bytes from data zone", size);
+        return NULL;
+    }
+    return ptr;
+}
+
+// allocate zeroed variable-size data from the GC data zone
+extern "C" void* heap_data_calloc(size_t size) {
+    void* ptr = heap_data_alloc(size);
+    if (ptr) memset(ptr, 0, size);
+    return ptr;
+}
+
 // create a content string by copying from source (NOT pooled - arena allocated)
 // use this for user content, text data, or any non-structural strings
 // declared extern "C" to allow calling from C code (path.c)
@@ -160,8 +179,9 @@ void heap_destroy() {
 }
 
 // finalize all GC-managed objects before pool_destroy.
-// walks all_objects and frees non-pool sub-allocations for each object.
-// does NOT free the objects themselves — pool_destroy handles that.
+// walks all_objects and frees external sub-allocations (not zone-managed).
+// items[], data buffers, closure_env are in the data zone — no free needed.
+// Only external resources (mpd_t, VMap backing HashMap) need explicit cleanup.
 static void gc_finalize_all_objects(gc_heap_t *gc) {
     gc_header_t *current = gc->all_objects;
     while (current) {
@@ -172,51 +192,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         void *obj = (void*)(current + 1);
         uint16_t tag = current->type_tag;
 
-        if (tag == LMD_TYPE_LIST || tag == LMD_TYPE_ARRAY) {
-            List *list = (List*)obj;
-            if (list->items && list->items != (Item*)(list + 1)) {
-                free(list->items);
-                list->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_ARRAY_INT) {
-            ArrayInt *arr = (ArrayInt*)obj;
-            if (arr->items && (void*)arr->items != (void*)(arr + 1)) {
-                free(arr->items);
-                arr->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_ARRAY_INT64) {
-            ArrayInt64 *arr = (ArrayInt64*)obj;
-            if (arr->items && (void*)arr->items != (void*)(arr + 1)) {
-                free(arr->items);
-                arr->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_ARRAY_FLOAT) {
-            ArrayFloat *arr = (ArrayFloat*)obj;
-            if (arr->items && (void*)arr->items != (void*)(arr + 1)) {
-                free(arr->items);
-                arr->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_MAP) {
-            Map *map = (Map*)obj;
-            if (map->data) { free(map->data); map->data = NULL; }
-        }
-        else if (tag == LMD_TYPE_ELEMENT) {
-            Element *elmt = (Element*)obj;
-            if (elmt->data) { free(elmt->data); elmt->data = NULL; }
-            if (elmt->items && elmt->items != (Item*)(elmt + 1)) {
-                free(elmt->items);
-                elmt->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_OBJECT) {
-            Object *obj_s = (Object*)obj;
-            if (obj_s->data) { free(obj_s->data); obj_s->data = NULL; }
-        }
-        else if (tag == LMD_TYPE_VMAP) {
+        if (tag == LMD_TYPE_VMAP) {
             VMap *vm = (VMap*)obj;
             if (vm->vtable && vm->data) {
                 vm->vtable->destroy(vm->data);
@@ -230,13 +206,8 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
                 dec->dec_val = NULL;
             }
         }
-        else if (tag == LMD_TYPE_FUNC) {
-            Function *fn = (Function*)obj;
-            if (fn->closure_env) {
-                free(fn->closure_env);
-                fn->closure_env = NULL;
-            }
-        }
+        // All other types: items[], data, closure_env are zone-managed (data zone or object zone)
+        // and will be bulk-freed by zone/pool destruction. No individual free needed.
         current = current->next;
     }
 }

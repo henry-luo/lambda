@@ -1,14 +1,53 @@
 /**
  * gc_heap.c - GC Heap Allocator Implementation
  *
- * All GC-managed allocations are prepended with a 16-byte GCHeader
- * and linked into an intrusive singly-linked list (newest first).
- * Frame management uses a stack of saved list head pointers.
+ * Phase 5: Dual-zone non-moving mark-and-sweep garbage collector.
+ *
+ * Object structs are allocated from the Object Zone (size-class free lists).
+ * Variable-size data buffers are allocated from the Data Zone (bump pointer).
+ * The mark-sweep collector reclaims dead objects without moving them.
+ * Data zone buffers of surviving objects are compacted to tenured data zone.
  */
 #include "gc_heap.h"
 #include "log.h"
 #include <stdlib.h>
 #include <string.h>
+
+// Initial mark stack capacity (grows if needed)
+#define GC_MARK_STACK_INITIAL 4096
+
+// ============================================================================
+// Type identification helpers (match lambda.h TypeId values)
+// These must match the TypeId enum in lambda.h.
+// We declare the values we need rather than including lambda.h from C.
+// ============================================================================
+#define LMD_TYPE_NULL_     0
+#define LMD_TYPE_BOOL_     1
+#define LMD_TYPE_INT_      2
+#define LMD_TYPE_INT64_    3
+#define LMD_TYPE_FLOAT_    4
+#define LMD_TYPE_DTIME_    6
+#define LMD_TYPE_DECIMAL_  7
+#define LMD_TYPE_STRING_   9
+#define LMD_TYPE_SYMBOL_  10
+#define LMD_TYPE_BINARY_  11
+#define LMD_TYPE_PATH_    12
+#define LMD_TYPE_LIST_    13
+#define LMD_TYPE_RANGE_   14
+#define LMD_TYPE_ARRAY_   15
+#define LMD_TYPE_ARRAY_INT_ 16
+#define LMD_TYPE_ARRAY_INT64_ 17
+#define LMD_TYPE_ARRAY_FLOAT_ 18
+#define LMD_TYPE_MAP_     19
+#define LMD_TYPE_VMAP_    20
+#define LMD_TYPE_ELEMENT_ 21
+#define LMD_TYPE_OBJECT_  22
+#define LMD_TYPE_TYPE_    23
+#define LMD_TYPE_FUNC_    24
+
+// ============================================================================
+// Lifecycle
+// ============================================================================
 
 gc_heap_t* gc_heap_create(void) {
     gc_heap_t* gc = (gc_heap_t*)calloc(1, sizeof(gc_heap_t));
@@ -22,29 +61,97 @@ gc_heap_t* gc_heap_create(void) {
         free(gc);
         return NULL;
     }
+
+    // create object zone (size-class free-list allocator)
+    gc->object_zone = gc_object_zone_create(gc->pool);
+    if (!gc->object_zone) {
+        log_error("gc_heap_create: failed to create object zone");
+        pool_destroy(gc->pool);
+        free(gc);
+        return NULL;
+    }
+
+    // create nursery data zone (bump allocator for variable-size buffers)
+    gc->data_zone = gc_data_zone_create(gc->pool, GC_DATA_ZONE_BLOCK_SIZE);
+    if (!gc->data_zone) {
+        log_error("gc_heap_create: failed to create data zone");
+        gc_object_zone_destroy(gc->object_zone);
+        pool_destroy(gc->pool);
+        free(gc);
+        return NULL;
+    }
+
+    // create tenured data zone (survivors go here during GC compaction)
+    gc->tenured_data = gc_data_zone_create(gc->pool, GC_DATA_ZONE_BLOCK_SIZE);
+    if (!gc->tenured_data) {
+        log_error("gc_heap_create: failed to create tenured data zone");
+        gc_data_zone_destroy(gc->data_zone);
+        gc_object_zone_destroy(gc->object_zone);
+        pool_destroy(gc->pool);
+        free(gc);
+        return NULL;
+    }
+
+    // allocate mark stack
+    gc->mark_stack = (gc_header_t**)malloc(GC_MARK_STACK_INITIAL * sizeof(gc_header_t*));
+    gc->mark_top = 0;
+    gc->mark_capacity = GC_MARK_STACK_INITIAL;
+
     gc->all_objects = NULL;
     gc->total_allocated = 0;
     gc->object_count = 0;
+    gc->collections = 0;
+    gc->bytes_collected = 0;
+
+    log_debug("gc_heap_create: dual-zone GC heap created");
     return gc;
 }
 
 void gc_heap_destroy(gc_heap_t* gc) {
     if (!gc) return;
-    // pool_destroy bulk-frees all pool-allocated memory (including all GCHeaders + objects)
+
+    // free mark stack (C heap allocated)
+    if (gc->mark_stack) {
+        free(gc->mark_stack);
+        gc->mark_stack = NULL;
+    }
+
+    // free zone metadata (zone memory is pool-allocated, freed by pool_destroy)
+    if (gc->object_zone) gc_object_zone_destroy(gc->object_zone);
+    if (gc->data_zone) gc_data_zone_destroy(gc->data_zone);
+    if (gc->tenured_data) gc_data_zone_destroy(gc->tenured_data);
+
+    // pool_destroy bulk-frees all pool-allocated memory
     if (gc->pool) pool_destroy(gc->pool);
+
+    log_debug("gc_heap_destroy: %zu objects, %zu collections, %zu bytes collected",
+              gc->object_count, gc->collections, gc->bytes_collected);
     free(gc);
 }
+
+// ============================================================================
+// Allocation
+// ============================================================================
 
 void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     if (!gc || !gc->pool) {
         log_error("gc_heap_alloc: invalid gc_heap");
         return NULL;
     }
-    // allocate header + user data as one contiguous block
+
+    // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
+    void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
+    if (ptr) {
+        gc->total_allocated += sizeof(gc_header_t) + size;
+        gc->object_count++;
+        return ptr;
+    }
+
+    // large object: fall back to direct pool allocation with GCHeader
     size_t total = sizeof(gc_header_t) + size;
     gc_header_t* header = (gc_header_t*)pool_alloc(gc->pool, total);
     if (!header) {
-        log_error("gc_heap_alloc: pool_alloc failed for %zu bytes", total);
+        log_error("gc_heap_alloc: pool_alloc failed for %zu bytes (large object)", total);
         return NULL;
     }
     // initialize header
@@ -54,12 +161,11 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     header->marked = 0;
     header->alloc_size = (uint32_t)size;
 
-    // link to head of all_objects list
+    // link to all_objects list
     gc->all_objects = header;
     gc->total_allocated += total;
     gc->object_count++;
 
-    // return pointer to user data (after header)
     return (void*)(header + 1);
 }
 
@@ -74,15 +180,532 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
     if (!ptr || !gc) return;
     gc_header_t* header = gc_get_header(ptr);
-    // guard against double-free (e.g., frame_end freed it, then free_item tries again)
+    // guard against double-free
     if (header->gc_flags & GC_FLAG_FREED) return;
-    // mark as freed so frame_end walk and future free_item calls can skip it.
-    // DO NOT call pool_free here — the header must remain readable for
-    // frame_end's linked list traversal. pool_free corrupts the header's
-    // next pointer (used by allocator free list), breaking the walk.
-    // Actual pool_free is deferred to frame_end when nodes are unlinked.
     header->gc_flags |= GC_FLAG_FREED;
     gc->total_allocated -= sizeof(gc_header_t) + header->alloc_size;
     gc->object_count--;
 }
 
+void* gc_data_alloc(gc_heap_t* gc, size_t size) {
+    if (!gc || !gc->data_zone || size == 0) return NULL;
+    return gc_data_zone_alloc(gc->data_zone, size);
+}
+
+// ============================================================================
+// Ownership queries
+// ============================================================================
+
+int gc_is_managed(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return 0;
+    // check object zone
+    if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
+    // check data zones
+    if (gc_data_zone_owns(gc->data_zone, ptr)) return 1;
+    if (gc_data_zone_owns(gc->tenured_data, ptr)) return 1;
+    return 0;
+}
+
+int gc_is_nursery_data(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return 0;
+    return gc_data_zone_owns(gc->data_zone, ptr);
+}
+
+// ============================================================================
+// Mark-and-Sweep Collector
+// ============================================================================
+
+// push a header onto the mark stack
+static void mark_stack_push(gc_heap_t* gc, gc_header_t* header) {
+    if (gc->mark_top >= gc->mark_capacity) {
+        // grow mark stack
+        gc->mark_capacity *= 2;
+        gc->mark_stack = (gc_header_t**)realloc(gc->mark_stack,
+                                                  gc->mark_capacity * sizeof(gc_header_t*));
+        if (!gc->mark_stack) {
+            log_error("gc mark stack: realloc failed");
+            return;
+        }
+    }
+    gc->mark_stack[gc->mark_top++] = header;
+}
+
+static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
+    if (gc->mark_top <= 0) return NULL;
+    return gc->mark_stack[--gc->mark_top];
+}
+
+// extract raw pointer from a tagged Item value
+static void* item_to_ptr(uint64_t item) {
+    uint8_t tag = (uint8_t)(item >> 56);
+    if (tag == 0) return NULL; // null
+    if (tag == LMD_TYPE_BOOL_ || tag == LMD_TYPE_INT_) return NULL; // inline values
+
+    if (tag >= LMD_TYPE_LIST_) {
+        // container types: direct pointer (no tag mask needed, tag is in struct)
+        return (void*)(uintptr_t)item;
+    }
+    // tagged pointer types (int64, float, datetime, string, symbol, etc.)
+    return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+}
+
+// check if a pointer is to a GC-managed OBJECT (has GCHeader)
+static int is_gc_object(gc_heap_t* gc, void* ptr) {
+    return gc_object_zone_owns(gc->object_zone, ptr);
+}
+
+void gc_mark_item(gc_heap_t* gc, uint64_t item) {
+    void* ptr = item_to_ptr(item);
+    if (!ptr) return;
+
+    // only mark objects that are in the GC object zone (have GCHeader)
+    if (!is_gc_object(gc, ptr)) return;
+
+    gc_header_t* header = gc_get_header(ptr);
+    if (!header) return;
+    if (header->marked) return;     // already visited
+    if (header->gc_flags & GC_FLAG_FREED) return; // freed object
+
+    header->marked = 1;
+    mark_stack_push(gc, header);
+}
+
+// trace outgoing Item pointers from a type-aware object
+// This is the core tracing logic that knows Lambda's struct layouts.
+static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
+    void* obj = (void*)(header + 1);
+    uint16_t tag = header->type_tag;
+
+    switch (tag) {
+    // types with no outgoing Item pointers — nothing to trace
+    case LMD_TYPE_INT64_:
+    case LMD_TYPE_FLOAT_:
+    case LMD_TYPE_DTIME_:
+    case LMD_TYPE_STRING_:
+    case LMD_TYPE_SYMBOL_:
+    case LMD_TYPE_BINARY_:
+    case LMD_TYPE_DECIMAL_:
+    case LMD_TYPE_RANGE_:
+    case LMD_TYPE_ARRAY_INT_:
+    case LMD_TYPE_ARRAY_INT64_:
+    case LMD_TYPE_ARRAY_FLOAT_:
+    case LMD_TYPE_PATH_:
+        break;
+
+    case LMD_TYPE_LIST_:
+    case LMD_TYPE_ARRAY_: {
+        // List/Array: items is an Item* array
+        // struct layout: { type_id(1), flags(1), Item* items(8), length(8), extra(8), capacity(8) }
+        // We read items and length at known offsets.
+        // Container is 2 bytes, then padding to pointer alignment.
+        // Use byte offsets matching the actual struct layout:
+        //   offset 0: type_id (1 byte)
+        //   offset 1: flags (1 byte)
+        //   offset 2: padding (6 bytes on 64-bit)
+        //   offset 8: Item* items (8 bytes)
+        //   offset 16: int64_t length (8 bytes)
+        uint8_t* p = (uint8_t*)obj;
+        void* items_ptr = *(void**)(p + 8);   // Item* items
+        int64_t length = *(int64_t*)(p + 16);  // length
+        if (items_ptr && length > 0) {
+            uint64_t* items = (uint64_t*)items_ptr;
+            for (int64_t i = 0; i < length; i++) {
+                gc_mark_item(gc, items[i]);
+            }
+        }
+        break;
+    }
+
+    case LMD_TYPE_MAP_:
+    case LMD_TYPE_OBJECT_: {
+        // Map/Object: { Container(8), type*(8@8), data*(8@16), data_cap(4@24) }
+        uint8_t* p = (uint8_t*)obj;
+        void* type_ptr = *(void**)(p + 8);    // TypeMap*
+        void* data_ptr = *(void**)(p + 16);   // data buffer
+        if (!type_ptr || !data_ptr) break;
+
+        // Walk shape entries to find Item fields
+        // TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
+        //   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
+        uint8_t* tp = (uint8_t*)type_ptr;
+        int64_t byte_size = *(int64_t*)(tp + 16);     // TypeMap.byte_size
+        void* shape_ptr = *(void**)(tp + 32);          // TypeMap.shape (ShapeEntry*)
+
+        // Walk ShapeEntry linked list
+        // ShapeEntry: { name*(8), type*(8), byte_offset(8), next*(8), ns*(8), default_value*(8) }
+        uint8_t* shape = (uint8_t*)shape_ptr;
+        while (shape) {
+            void* field_type = *(void**)(shape + 8);   // ShapeEntry.type (Type*)
+            int64_t byte_offset = *(int64_t*)(shape + 16);  // ShapeEntry.byte_offset
+            void* next_shape = *(void**)(shape + 24);  // ShapeEntry.next
+
+            if (field_type) {
+                uint8_t field_type_id = *(uint8_t*)field_type;  // Type.type_id
+                // only trace Item-typed fields (containers, strings, etc.)
+                // Skip inline values (bool, int) which don't hold GC pointers
+                if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_) {
+                    if (byte_offset >= 0 && byte_offset < byte_size) {
+                        void* field_ptr = (uint8_t*)data_ptr + byte_offset;
+                        // read as pointer-sized value (Item or pointer depending on type)
+                        uint64_t val = *(uint64_t*)field_ptr;
+                        if (val != 0) {
+                            if (field_type_id >= LMD_TYPE_LIST_) {
+                                // container pointer stored directly
+                                gc_mark_item(gc, val);
+                            } else if (field_type_id == LMD_TYPE_STRING_ ||
+                                       field_type_id == LMD_TYPE_SYMBOL_ ||
+                                       field_type_id == LMD_TYPE_DECIMAL_ ||
+                                       field_type_id == LMD_TYPE_INT64_ ||
+                                       field_type_id == LMD_TYPE_FLOAT_ ||
+                                       field_type_id == LMD_TYPE_DTIME_) {
+                                // these are stored as raw pointers in the data buffer
+                                // they need to be marked if they're GC-managed
+                                void* embedded_ptr = (void*)(uintptr_t)val;
+                                if (is_gc_object(gc, embedded_ptr)) {
+                                    gc_header_t* h = gc_get_header(embedded_ptr);
+                                    if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
+                                        h->marked = 1;
+                                        mark_stack_push(gc, h);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            shape = (uint8_t*)next_shape;
+        }
+        break;
+    }
+
+    case LMD_TYPE_ELEMENT_: {
+        // Element extends List: { Container(2), Item*items(8@8), length(8@16),
+        //   extra(8@24), capacity(8@32), type*(8@40), data*(8@48), data_cap(4@56) }
+        uint8_t* p = (uint8_t*)obj;
+        void* items_ptr = *(void**)(p + 8);
+        int64_t length = *(int64_t*)(p + 16);
+        void* type_ptr = *(void**)(p + 40);
+        void* data_ptr = *(void**)(p + 48);
+
+        // trace children items
+        if (items_ptr && length > 0) {
+            uint64_t* items = (uint64_t*)items_ptr;
+            for (int64_t i = 0; i < length; i++) {
+                gc_mark_item(gc, items[i]);
+            }
+        }
+
+        // trace attributes (same shape-walk as Map)
+        if (type_ptr && data_ptr) {
+            uint8_t* tp = (uint8_t*)type_ptr;
+            int64_t byte_size = *(int64_t*)(tp + 16);
+            void* shape_ptr = *(void**)(tp + 32);
+            uint8_t* shape = (uint8_t*)shape_ptr;
+            while (shape) {
+                void* field_type = *(void**)(shape + 8);
+                int64_t byte_offset = *(int64_t*)(shape + 16);
+                void* next_shape = *(void**)(shape + 24);
+                if (field_type) {
+                    uint8_t ftid = *(uint8_t*)field_type;
+                    if (ftid >= LMD_TYPE_INT64_ && ftid != LMD_TYPE_BOOL_ &&
+                        byte_offset >= 0 && byte_offset < byte_size) {
+                        uint64_t val = *(uint64_t*)((uint8_t*)data_ptr + byte_offset);
+                        if (val != 0) {
+                            if (ftid >= LMD_TYPE_LIST_) {
+                                gc_mark_item(gc, val);
+                            } else {
+                                void* embedded_ptr = (void*)(uintptr_t)val;
+                                if (is_gc_object(gc, embedded_ptr)) {
+                                    gc_header_t* h = gc_get_header(embedded_ptr);
+                                    if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
+                                        h->marked = 1;
+                                        mark_stack_push(gc, h);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                shape = (uint8_t*)next_shape;
+            }
+        }
+        break;
+    }
+
+    case LMD_TYPE_FUNC_: {
+        // Function: { type_id(1), arity(1), padding(6), fn_type*(8@8), ptr*(8@16),
+        //             closure_env*(8@24), name*(8@32) }
+        uint8_t* p = (uint8_t*)obj;
+        void* closure_env = *(void**)(p + 24);
+        if (closure_env) {
+            // Closure env is packed Item fields.
+            // We don't have the field count stored, but we can use the allocation
+            // size to infer it. The env is allocated from the data zone.
+            // For now, conservatively scan the env as packed Items.
+            // The alloc_size in the GC header tells us the env size.
+            // But env is in data zone (no GCHeader). We need another way to know size.
+            // TODO: Add closure_field_count to Function struct.
+            // For now, skip closure env tracing — will be added when
+            // closure_field_count is available.
+            log_debug("gc_trace: closure env at %p (tracing deferred)", closure_env);
+        }
+        break;
+    }
+
+    case LMD_TYPE_VMAP_: {
+        // VMap: { Container(2), data*(8@8), vtable*(8@16) }
+        // VMap entries may contain Items, but are managed by the vtable backend.
+        // For now, skip VMap deep tracing — the HashMap backing data uses malloc.
+        // TODO: Implement VMap tracing when VMap data moves to data zone.
+        break;
+    }
+
+    default:
+        break;
+    }
+}
+
+// ---- Data Zone Compaction ----
+
+// Compact surviving data from nursery data zone to tenured data zone.
+// For each marked object that has data pointers into the nursery data zone,
+// copy the data to tenured and update the object's pointer.
+static void gc_compact_data(gc_heap_t* gc) {
+    gc_header_t* current = gc->all_objects;
+    size_t compacted = 0;
+
+    while (current) {
+        if (!current->marked || (current->gc_flags & GC_FLAG_FREED)) {
+            current = current->next;
+            continue;
+        }
+
+        void* obj = (void*)(current + 1);
+        uint16_t tag = current->type_tag;
+
+        switch (tag) {
+        case LMD_TYPE_LIST_:
+        case LMD_TYPE_ARRAY_: {
+            uint8_t* p = (uint8_t*)obj;
+            void** items_slot = (void**)(p + 8);
+            int64_t length = *(int64_t*)(p + 16);
+            int64_t capacity = *(int64_t*)(p + 32);
+            if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
+                size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
+                void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
+                if (new_items) {
+                    *items_slot = new_items;
+                    compacted++;
+                }
+            }
+            break;
+        }
+        case LMD_TYPE_ARRAY_INT_:
+        case LMD_TYPE_ARRAY_INT64_: {
+            uint8_t* p = (uint8_t*)obj;
+            void** items_slot = (void**)(p + 8);
+            int64_t capacity = *(int64_t*)(p + 32);
+            if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
+                size_t size = capacity * sizeof(int64_t);
+                void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
+                if (new_items) {
+                    *items_slot = new_items;
+                    compacted++;
+                }
+            }
+            break;
+        }
+        case LMD_TYPE_ARRAY_FLOAT_: {
+            uint8_t* p = (uint8_t*)obj;
+            void** items_slot = (void**)(p + 8);
+            int64_t capacity = *(int64_t*)(p + 32);
+            if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
+                size_t size = capacity * sizeof(double);
+                void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
+                if (new_items) {
+                    *items_slot = new_items;
+                    compacted++;
+                }
+            }
+            break;
+        }
+        case LMD_TYPE_MAP_:
+        case LMD_TYPE_OBJECT_: {
+            uint8_t* p = (uint8_t*)obj;
+            void** data_slot = (void**)(p + 16);   // map->data
+            void* type_ptr = *(void**)(p + 8);      // map->type
+            if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
+                int64_t byte_size = *(int64_t*)((uint8_t*)type_ptr + 16);
+                if (byte_size > 0) {
+                    void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
+                    if (new_data) {
+                        *data_slot = new_data;
+                        compacted++;
+                    }
+                }
+            }
+            break;
+        }
+        case LMD_TYPE_ELEMENT_: {
+            uint8_t* p = (uint8_t*)obj;
+            // compact items[]
+            void** items_slot = (void**)(p + 8);
+            int64_t capacity = *(int64_t*)(p + 32);
+            if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
+                size_t size = capacity * sizeof(uint64_t);
+                void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
+                if (new_items) {
+                    *items_slot = new_items;
+                    compacted++;
+                }
+            }
+            // compact data
+            void** data_slot = (void**)(p + 48);
+            void* type_ptr = *(void**)(p + 40);
+            if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
+                int64_t byte_size = *(int64_t*)((uint8_t*)type_ptr + 16);
+                if (byte_size > 0) {
+                    void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
+                    if (new_data) {
+                        *data_slot = new_data;
+                        compacted++;
+                    }
+                }
+            }
+            break;
+        }
+        case LMD_TYPE_FUNC_: {
+            uint8_t* p = (uint8_t*)obj;
+            void** env_slot = (void**)(p + 24);
+            if (*env_slot && gc_data_zone_owns(gc->data_zone, *env_slot)) {
+                // env size: we don't know it precisely yet
+                // TODO: use closure_field_count * sizeof(Item) when available
+                // For now, skip env compaction for safety
+                log_debug("gc_compact: skipping closure env compaction (size unknown)");
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        current = current->next;
+    }
+
+    log_debug("gc_compact_data: compacted %zu data buffers to tenured", compacted);
+}
+
+// ---- Sweep Phase ----
+
+// Finalize a dead object's sub-allocations that are NOT in the data zone
+// (e.g., mpd_t from libmpdec, VMap backing data from HashMap).
+static void gc_finalize_dead_object(gc_header_t* header) {
+    void* obj = (void*)(header + 1);
+    uint16_t tag = header->type_tag;
+
+    if (tag == LMD_TYPE_DECIMAL_) {
+        // Decimal: mpd_t is allocated by libmpdec (outside GC)
+        // We can't call mpd_del here from C code — it requires mpdecimal.h
+        // This will be handled by gc_finalize_all_objects in lambda-mem.cpp
+        // during context teardown. During mid-execution GC, decimals that
+        // are truly dead will have their mpd_t leaked until context end.
+        // TODO: Add a finalization callback mechanism.
+    }
+    else if (tag == LMD_TYPE_VMAP_) {
+        // VMap: backing data is malloc'd by HashMap implementation
+        // Same situation as Decimal — defer to context teardown.
+    }
+    // Other types: sub-allocations (items[], data, closure_env) are in data zone
+    // and will be reclaimed by data zone reset. No explicit free needed.
+}
+
+static void gc_sweep(gc_heap_t* gc) {
+    gc_header_t* current = gc->all_objects;
+    gc_header_t* prev = NULL;
+    size_t freed_count = 0;
+    size_t freed_bytes = 0;
+
+    while (current) {
+        gc_header_t* next_obj = current->next;
+
+        if (current->gc_flags & GC_FLAG_FREED) {
+            // already freed — unlink from list
+            if (prev) prev->next = next_obj;
+            else gc->all_objects = next_obj;
+            current = next_obj;
+            continue;
+        }
+
+        if (current->marked) {
+            // alive — reset mark for next cycle
+            current->marked = 0;
+            prev = current;
+        } else {
+            // dead — finalize external sub-allocations
+            gc_finalize_dead_object(current);
+
+            // unlink from all_objects
+            if (prev) prev->next = next_obj;
+            else gc->all_objects = next_obj;
+
+            freed_bytes += sizeof(gc_header_t) + current->alloc_size;
+            freed_count++;
+
+            // return to object zone free list
+            if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
+                gc_object_zone_free(gc->object_zone, current);
+            }
+            // large objects: memory stays in pool until pool_destroy
+        }
+
+        current = next_obj;
+    }
+
+    gc->object_count -= freed_count;
+    gc->total_allocated -= freed_bytes;
+    gc->bytes_collected += freed_bytes;
+
+    log_debug("gc_sweep: freed %zu objects (%zu bytes), %zu remain",
+              freed_count, freed_bytes, gc->object_count);
+}
+
+// ============================================================================
+// gc_collect: Full Collection Cycle
+// ============================================================================
+
+void gc_collect(gc_heap_t* gc, void* root_items, int root_count) {
+    if (!gc) return;
+
+    log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes)",
+              gc->collections + 1, gc->object_count, gc->total_allocated);
+
+    // reset mark stack
+    gc->mark_top = 0;
+
+    // Phase 1: Mark — push all roots, trace reachable objects
+    if (root_items && root_count > 0) {
+        uint64_t* roots = (uint64_t*)root_items;
+        for (int i = 0; i < root_count; i++) {
+            gc_mark_item(gc, roots[i]);
+        }
+    }
+
+    // process mark stack (trace gray objects until empty)
+    while (gc->mark_top > 0) {
+        gc_header_t* obj = mark_stack_pop(gc);
+        gc_trace_object(gc, obj);
+    }
+
+    // Phase 2: Compact — copy surviving data zone buffers to tenured
+    gc_compact_data(gc);
+
+    // Phase 3: Sweep — free dead objects, return to free lists
+    gc_sweep(gc);
+
+    // Phase 4: Reset nursery data zone (all surviving data copied to tenured)
+    gc_data_zone_reset(gc->data_zone);
+
+    gc->collections++;
+    log_debug("gc_collect: collection #%zu complete, %zu objects remain",
+              gc->collections, gc->object_count);
+}
