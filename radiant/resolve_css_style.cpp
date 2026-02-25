@@ -2119,6 +2119,17 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
             }
 
+            // Special case: font shorthand sets font-size directly on span->font
+            // without creating a CssDeclaration, so also check if font_size is set
+            if (prop_id == CSS_PROPERTY_FONT_SIZE) {
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (span->font && span->font->font_size > 0) {
+                    log_debug("[FONT INHERIT] Skipping inheritance - font-size already set via shorthand: %.1f",
+                             span->font->font_size);
+                    continue;
+                }
+            }
+
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
             DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
