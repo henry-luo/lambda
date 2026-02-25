@@ -2087,6 +2087,18 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 continue;  // Move to next property
             }
 
+            // Special handling for line-height: also check ancestor's computed blk->line_height
+            // This handles cases where font shorthand was used (sets blk->line_height without
+            // creating a CSS_PROPERTY_LINE_HEIGHT declaration)
+            if (prop_id == CSS_PROPERTY_LINE_HEIGHT && ancestor && ancestor->blk && ancestor->blk->line_height) {
+                log_debug("[CSS INHERIT] Found computed line-height in parent <%s> via font shorthand",
+                    ancestor->tag_name ? ancestor->tag_name : "?");
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (!span->blk) { span->blk = alloc_block_prop(lycon); }
+                span->blk->line_height = ancestor->blk->line_height;
+                continue;
+            }
+
             // Special handling for font-size: also check ancestor's computed font->font_size
             // This handles cases where ancestor is an anonymous box with no specified_style
             // (e.g., anonymous table-row wrapping table-cells)
