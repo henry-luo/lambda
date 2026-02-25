@@ -1,0 +1,15 @@
+"===== MATH CSS TESTS =====1. LATEX:ML__latex2. BASE:ML__base3. STRUT:ML__strut4. MATHIT:ML__mathit5. CMR:ML__cmr6. MATHBF:ML__mathbf7. MFRAC:ML__mfrac8. SQRT:ML__sqrt9. MSUBSUP:ML__msubsup10. NULLDELIMITER:ML__nulldelimiter11. ERROR:ML__error12. THIN:ML__thinspace13. MEDIUM:ML__mediumspace14. THICK:ML__thickspace15. QUAD:ML__quad16. QQUAD:ML__qquad17. classes 2:ML__mathit ML__bold18. classes with null:ML__cmr ML__it19. classes single:ML__text20. classes empty:21. font mathit:ML__mathit22. font cmr:ML__cmr23. font mathbf:ML__mathbf24. font bb:ML__bb25. font cal:ML__cal26. font frak:ML__frak27. font tt:ML__tt28. font text:ML__text29. font unknown:ML__mathit30. stylesheet is string:"
+true
+"31. stylesheet has ML__latex:"
+true
+"32. stylesheet has ML__mathit:"
+true
+"33. stylesheet has ML__mfrac:"
+true
+"34. wrap tag:"
+'span'
+"35. wrap has style child:"
+'style'
+"36. wrap has content:"
+'span'
+"===== ALL CSS TESTS DONE ====="
