@@ -409,7 +409,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, and YAML parser tests"
+	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
@@ -774,6 +774,8 @@ test-input-baseline: build-test
 	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
 	md_passed=0; md_failed=0; md_skipped=0; md_status="⏭️  SKIP"; \
 	yaml_passed=0; yaml_failed=0; yaml_skipped=0; yaml_status="⏭️  SKIP"; \
+	math_passed=0; math_failed=0; math_skipped=0; math_status="⏭️  SKIP"; \
+	latex_math_passed=0; latex_math_failed=0; latex_math_skipped=0; latex_math_status="⏭️  SKIP"; \
 	\
 	echo ""; \
 	echo "📦 HTML5 WPT Parser Tests:"; \
@@ -821,8 +823,36 @@ test-input-baseline: build-test
 		echo "   ⚠️  test/test_yaml_suite_gtest.exe not found"; \
 	fi; \
 	\
-	total_passed=$$((wpt_passed + md_passed + yaml_passed)); \
-	total_failed=$$((wpt_failed + md_failed + yaml_failed)); \
+	echo ""; \
+	echo "📦 ASCII Math Tests:"; \
+	if [ -f "test/test_math_ascii_gtest.exe" ]; then \
+		output=$$(./test/test_math_ascii_gtest.exe 2>&1) || true; \
+		echo "$$output" | tail -20; \
+		math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		math_passed=$${math_passed:-0}; math_failed=$${math_failed:-0}; math_skipped=$${math_skipped:-0}; \
+		if [ "$$math_failed" = "0" ] || [ -z "$$math_failed" ]; then math_status="✅ PASS"; math_failed=0; else math_status="❌ FAIL"; fi; \
+	else \
+		echo "   ⚠️  test/test_math_ascii_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 LaTeX Math Tests:"; \
+	if [ -f "test/test_math_gtest.exe" ]; then \
+		output=$$(./test/test_math_gtest.exe 2>&1) || true; \
+		echo "$$output" | tail -20; \
+		latex_math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		latex_math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		latex_math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		latex_math_passed=$${latex_math_passed:-0}; latex_math_failed=$${latex_math_failed:-0}; latex_math_skipped=$${latex_math_skipped:-0}; \
+		if [ "$$latex_math_failed" = "0" ] || [ -z "$$latex_math_failed" ]; then latex_math_status="✅ PASS"; latex_math_failed=0; else latex_math_status="❌ FAIL"; fi; \
+	else \
+		echo "   ⚠️  test/test_math_gtest.exe not found"; \
+	fi; \
+	\
+	total_passed=$$((wpt_passed + md_passed + yaml_passed + math_passed + latex_math_passed)); \
+	total_failed=$$((wpt_failed + md_failed + yaml_failed + math_failed + latex_math_failed)); \
 	total_tests=$$((total_passed + total_failed)); \
 	\
 	echo ""; \
@@ -833,7 +863,9 @@ test-input-baseline: build-test
 	echo "📊 Test Results by Suite:"; \
 	echo "   ├── HTML5 WPT Parser    $$wpt_status  ($$wpt_passed passed, $$wpt_failed failed)"; \
 	echo "   ├── CommonMark Markdown $$md_status  ($$md_passed passed, $$md_failed failed)"; \
-	echo "   └── YAML Suite          $$yaml_status  ($$yaml_passed passed, $$yaml_failed failed)"; \
+	echo "   ├── YAML Suite          $$yaml_status  ($$yaml_passed passed, $$yaml_failed failed)"; \
+	echo "   ├── ASCII Math          $$math_status  ($$math_passed passed, $$math_failed failed)"; \
+	echo "   └── LaTeX Math          $$latex_math_status  ($$latex_math_passed passed, $$latex_math_failed failed)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \

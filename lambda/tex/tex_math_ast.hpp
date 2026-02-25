@@ -309,12 +309,19 @@ class ItemReader;
 
 namespace tex { // reopen tex namespace
 
+// Math input flavor: LaTeX (backslash commands) or ASCII (text-based)
+enum MathFlavor {
+    MATH_FLAVOR_LATEX = 0,
+    MATH_FLAVOR_ASCII = 1
+};
+
 // Parse LaTeX math from Lambda Element AST to MathASTNode tree
 // Called from build_doc_element() when processing inline_math/display_math
 MathASTNode* parse_math_to_ast(const ::ItemReader& math_elem, Arena* arena);
 
-// Parse LaTeX math from source string (for testing)
-MathASTNode* parse_math_string_to_ast(const char* latex_src, size_t len, Arena* arena);
+// Parse math from source string with specified flavor (default: LaTeX)
+MathASTNode* parse_math_string_to_ast(const char* latex_src, size_t len, Arena* arena,
+                                       MathFlavor flavor = MATH_FLAVOR_LATEX);
 
 // ============================================================================
 // Typesetting Entry Point (Phase B)

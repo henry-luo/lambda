@@ -72,9 +72,6 @@ Item parse_math_latex_to_ast(Input* input, const char* math_source, size_t math_
 extern "C" {
 #endif
 
-// ASCII Math parsing functions (from input-math-ascii.cpp)
-Item input_ascii_math(Input* input, const char* ascii_math);
-
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
