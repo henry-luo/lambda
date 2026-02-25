@@ -1,8 +1,9 @@
 // input-math.cpp - Math expression parser dispatcher
 //
-// Routes math parsing to appropriate parser based on flavor:
-// - LaTeX/Typst: Stores source for later TeX pipeline rendering
-// - ASCII: Custom parser (input-math-ascii.cpp)
+// Routes math parsing to the unified tree-sitter-latex-math grammar.
+// Both LaTeX and ASCII math flavors are handled by the same grammar,
+// which supports LaTeX commands (\frac, \sum) and ASCII tokens (word,
+// ascii_operator, quoted_text) in a single parse.
 //
 // Note: Actual LaTeX math typesetting happens in the TeX pipeline
 // (tex_math_bridge.cpp), which is linked separately for tests and rendering.
@@ -27,26 +28,21 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     log_debug("parse_math called with: '%s', flavor: '%s'",
               math_string, flavor_str ? flavor_str : "null");
 
-    // ASCII math uses separate parser
+    // Both ASCII and LaTeX math now use the unified tree-sitter-latex-math grammar.
+    // The grammar handles LaTeX commands (\frac{a}{b}) and ASCII tokens (alpha, ->, xx)
+    // in a single parse. The AST builder uses MathFlavor to interpret ambiguous tokens.
+    const char* flavor_label = "latex";
     if (flavor_str && (strcmp(flavor_str, "ascii") == 0 || strcmp(flavor_str, "asciimath") == 0)) {
-        log_debug("parse_math: routing to ASCII math parser");
-        Item result = input_ascii_math(input, math_string);
-        if (result.item == ITEM_ERROR || result.item == ITEM_NULL) {
-            input->root = ItemNull;
-            return;
-        }
-        input->root = result;
-        return;
+        flavor_label = "ascii";
     }
 
-    // LaTeX math: parse to structured AST using tree-sitter-latex-math
-    log_debug("parse_math: LaTeX math - parsing to AST via tree-sitter");
+    log_debug("parse_math: routing to unified tree-sitter parser (flavor=%s)", flavor_label);
     size_t math_len = strlen(math_string);
     Item ast = parse_math_latex_to_ast(input, math_string, math_len);
     if (ast.item != ITEM_NULL) {
         input->root = ast;
     } else {
-        log_error("parse_math: failed to parse LaTeX math to AST");
+        log_error("parse_math: failed to parse math to AST (flavor=%s)", flavor_label);
         input->root = ItemNull;
     }
 }

@@ -55,4 +55,7 @@ String* format_math_mathml(Pool* pool, Item root_item);
 // Standalone ASCII math formatter
 String* format_math_ascii_standalone(Pool* pool, Item root_item);
 
+// Standalone LaTeX math formatter
+String* format_math_latex_standalone(Pool* pool, Item root_item);
+
 #endif // FORMAT_H
