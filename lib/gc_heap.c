@@ -18,32 +18,36 @@
 
 // ============================================================================
 // Type identification helpers (match lambda.h TypeId values)
-// These must match the TypeId enum in lambda.h.
+// These must match the EnumTypeId enum in lambda.h exactly.
 // We declare the values we need rather than including lambda.h from C.
 // ============================================================================
-#define LMD_TYPE_NULL_     0
-#define LMD_TYPE_BOOL_     1
-#define LMD_TYPE_INT_      2
-#define LMD_TYPE_INT64_    3
-#define LMD_TYPE_FLOAT_    4
-#define LMD_TYPE_DTIME_    6
-#define LMD_TYPE_DECIMAL_  7
-#define LMD_TYPE_STRING_   9
-#define LMD_TYPE_SYMBOL_  10
+#define LMD_TYPE_RAW_POINTER_ 0
+#define LMD_TYPE_NULL_     1
+#define LMD_TYPE_BOOL_     2
+#define LMD_TYPE_INT_      3
+#define LMD_TYPE_INT64_    4
+#define LMD_TYPE_FLOAT_    5
+#define LMD_TYPE_DECIMAL_  6
+#define LMD_TYPE_NUMBER_   7
+#define LMD_TYPE_DTIME_    8
+#define LMD_TYPE_SYMBOL_   9
+#define LMD_TYPE_STRING_  10
 #define LMD_TYPE_BINARY_  11
-#define LMD_TYPE_PATH_    12
-#define LMD_TYPE_LIST_    13
-#define LMD_TYPE_RANGE_   14
-#define LMD_TYPE_ARRAY_   15
-#define LMD_TYPE_ARRAY_INT_ 16
-#define LMD_TYPE_ARRAY_INT64_ 17
-#define LMD_TYPE_ARRAY_FLOAT_ 18
-#define LMD_TYPE_MAP_     19
-#define LMD_TYPE_VMAP_    20
-#define LMD_TYPE_ELEMENT_ 21
-#define LMD_TYPE_OBJECT_  22
-#define LMD_TYPE_TYPE_    23
-#define LMD_TYPE_FUNC_    24
+#define LMD_TYPE_LIST_    12
+#define LMD_TYPE_RANGE_   13
+#define LMD_TYPE_ARRAY_INT_ 14
+#define LMD_TYPE_ARRAY_INT64_ 15
+#define LMD_TYPE_ARRAY_FLOAT_ 16
+#define LMD_TYPE_ARRAY_   17
+#define LMD_TYPE_MAP_     18
+#define LMD_TYPE_VMAP_    19
+#define LMD_TYPE_ELEMENT_ 20
+#define LMD_TYPE_OBJECT_  21
+#define LMD_TYPE_TYPE_    22
+#define LMD_TYPE_FUNC_    23
+#define LMD_TYPE_ANY_     24
+#define LMD_TYPE_ERROR_   25
+#define LMD_TYPE_PATH_    27
 
 // ============================================================================
 // Lifecycle
@@ -103,7 +107,16 @@ gc_heap_t* gc_heap_create(void) {
     gc->collections = 0;
     gc->bytes_collected = 0;
 
-    log_debug("gc_heap_create: dual-zone GC heap created");
+    // initialize root slot registry
+    gc->root_slot_count = 0;
+    memset(gc->root_slots, 0, sizeof(gc->root_slots));
+
+    // collection trigger
+    gc->gc_threshold = GC_DATA_ZONE_THRESHOLD;
+    gc->collecting = 0;
+    gc->collect_callback = NULL;
+
+    log_debug("gc_heap_create: dual-zone GC heap created (threshold=%zu)", gc->gc_threshold);
     return gc;
 }
 
@@ -189,6 +202,17 @@ void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
 
 void* gc_data_alloc(gc_heap_t* gc, size_t size) {
     if (!gc || !gc->data_zone || size == 0) return NULL;
+
+    // check if data zone usage exceeds threshold — trigger GC before allocating
+    if (!gc->collecting && gc->collect_callback) {
+        size_t used = gc_data_zone_used(gc->data_zone);
+        if (used >= gc->gc_threshold) {
+            log_debug("gc_data_alloc: threshold exceeded (%zu >= %zu), triggering GC",
+                      used, gc->gc_threshold);
+            gc->collect_callback();
+        }
+    }
+
     return gc_data_zone_alloc(gc->data_zone, size);
 }
 
@@ -209,6 +233,55 @@ int gc_is_managed(gc_heap_t* gc, void* ptr) {
 int gc_is_nursery_data(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     return gc_data_zone_owns(gc->data_zone, ptr);
+}
+
+// ============================================================================
+// Root Slot Registration
+// ============================================================================
+
+void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
+    if (!gc || !slot) return;
+    if (gc->root_slot_count >= GC_MAX_ROOT_SLOTS) {
+        log_error("gc_register_root: root slot table full (%d slots)", GC_MAX_ROOT_SLOTS);
+        return;
+    }
+    // check for duplicate
+    for (int i = 0; i < gc->root_slot_count; i++) {
+        if (gc->root_slots[i] == slot) return;
+    }
+    gc->root_slots[gc->root_slot_count++] = slot;
+    log_debug("gc_register_root: registered slot %p (total: %d)", (void*)slot, gc->root_slot_count);
+}
+
+void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
+    if (!gc || !slot) return;
+    for (int i = 0; i < gc->root_slot_count; i++) {
+        if (gc->root_slots[i] == slot) {
+            // shift remaining entries down
+            for (int j = i; j < gc->root_slot_count - 1; j++) {
+                gc->root_slots[j] = gc->root_slots[j + 1];
+            }
+            gc->root_slot_count--;
+            log_debug("gc_unregister_root: removed slot %p (total: %d)", (void*)slot, gc->root_slot_count);
+            return;
+        }
+    }
+}
+
+// ============================================================================
+// Collection Trigger Query
+// ============================================================================
+
+int gc_should_collect(gc_heap_t* gc) {
+    if (!gc || gc->collecting) return 0;
+    size_t used = gc_data_zone_used(gc->data_zone);
+    return used >= gc->gc_threshold;
+}
+
+void gc_set_collect_callback(gc_heap_t* gc, gc_collect_callback_t callback) {
+    if (!gc) return;
+    gc->collect_callback = callback;
+    log_debug("gc_set_collect_callback: callback %s", callback ? "registered" : "cleared");
 }
 
 // ============================================================================
@@ -235,18 +308,47 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
     return gc->mark_stack[--gc->mark_top];
 }
 
-// extract raw pointer from a tagged Item value
+// extract raw pointer from a tagged Item value.
+// Lambda Item encoding:
+//   - Null: _type_id = LMD_TYPE_NULL (1), lower 56 bits = 0. item != 0.
+//   - Bool/Int: _type_id = 2 or 3, value packed inline → no pointer.
+//   - Tagged pointers (Int64, Float, Decimal, DateTime, String, Symbol, Binary):
+//     _type_id = 4-11, lower 56 bits = pointer (mask off tag to get address).
+//   - Containers (List, Array, Map, Element, Function, etc.):
+//     Stored as raw pointer (item.item = (uint64_t)pointer).
+//     On 64-bit platforms, heap pointer high byte is 0 → _type_id = 0.
+//     Type is determined by reading Container.type_id at the struct's first byte.
+//   - Error/Any: _type_id = 25 or 24, lower bits = 0 → no pointer.
 static void* item_to_ptr(uint64_t item) {
-    uint8_t tag = (uint8_t)(item >> 56);
-    if (tag == 0) return NULL; // null
-    if (tag == LMD_TYPE_BOOL_ || tag == LMD_TYPE_INT_) return NULL; // inline values
+    if (item == 0) return NULL;  // all-zero value
 
-    if (tag >= LMD_TYPE_LIST_) {
-        // container types: direct pointer (no tag mask needed, tag is in struct)
+    uint8_t tag = (uint8_t)(item >> 56);
+
+    // tag 1 = NULL item, tag 2 = BOOL (inline), tag 3 = INT (inline)
+    if (tag >= LMD_TYPE_NULL_ && tag <= LMD_TYPE_INT_) return NULL;
+
+    // tag 0: container pointer (raw heap address, high byte = 0 on 64-bit systems)
+    if (tag == 0) {
         return (void*)(uintptr_t)item;
     }
-    // tagged pointer types (int64, float, datetime, string, symbol, etc.)
-    return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+
+    // tags 4-11: tagged pointer types (Int64, Float, Decimal, DateTime, String, etc.)
+    // mask off the tag byte in the upper 8 bits to get the actual pointer
+    if (tag >= LMD_TYPE_INT64_ && tag <= LMD_TYPE_BINARY_) {
+        return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+    }
+
+    // tags >= 12 (containers with tag in high byte): shouldn't normally occur on
+    // mainstream 64-bit platforms where heap pointers have 0 in the high byte.
+    // But for safety, treat as raw pointer.
+    if (tag >= LMD_TYPE_LIST_) {
+        return (void*)(uintptr_t)item;
+    }
+
+    // anything else (ERROR=25 with null pointer, ANY=24, etc.)
+    // extract pointer — if lower 56 bits are 0, returns NULL
+    void* ptr = (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+    return ptr;
 }
 
 // check if a pointer is to a GC-managed OBJECT (has GCHeader)
@@ -629,9 +731,13 @@ static void gc_sweep(gc_heap_t* gc) {
         gc_header_t* next_obj = current->next;
 
         if (current->gc_flags & GC_FLAG_FREED) {
-            // already freed — unlink from list
+            // already freed — unlink from list and return to free list
             if (prev) prev->next = next_obj;
             else gc->all_objects = next_obj;
+            // return to object zone free list for reuse
+            if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
+                gc_object_zone_free(gc->object_zone, current);
+            }
             current = next_obj;
             continue;
         }
@@ -673,27 +779,79 @@ static void gc_sweep(gc_heap_t* gc) {
 // gc_collect: Full Collection Cycle
 // ============================================================================
 
-void gc_collect(gc_heap_t* gc, void* root_items, int root_count) {
-    if (!gc) return;
+// Conservative stack scanning: scan C stack for potential Item values.
+// Treats each aligned 8-byte value as a potential tagged pointer and checks
+// if it points to a GC-managed object.
+static void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_current) {
+    if (stack_base == 0 || stack_current == 0) return;
+    if (stack_current >= stack_base) return;  // stack grows down; current < base
 
-    log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes)",
-              gc->collections + 1, gc->object_count, gc->total_allocated);
+    // scan from current SP up to stack base (stack grows downward)
+    uintptr_t* scan_start = (uintptr_t*)stack_current;
+    uintptr_t* scan_end = (uintptr_t*)stack_base;
+    int scanned = 0;
+    int marked = 0;
+
+    for (uintptr_t* p = scan_start; p < scan_end; p++) {
+        uint64_t val = (uint64_t)*p;
+        scanned++;
+        // try to interpret as a tagged Item
+        void* ptr = item_to_ptr(val);
+        if (!ptr) continue;
+        // check if it points to a GC-managed object
+        if (is_gc_object(gc, ptr)) {
+            gc_header_t* header = gc_get_header(ptr);
+            if (header && !header->marked && !(header->gc_flags & GC_FLAG_FREED)) {
+                header->marked = 1;
+                mark_stack_push(gc, header);
+                marked++;
+            }
+        }
+    }
+
+    log_debug("gc_scan_stack: scanned %d slots (%zu bytes), marked %d objects",
+              scanned, (size_t)(stack_base - stack_current), marked);
+}
+
+void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
+                uintptr_t stack_base, uintptr_t stack_current) {
+    if (!gc) return;
+    if (gc->collecting) {
+        log_debug("gc_collect: skipping re-entrant collection");
+        return;
+    }
+    gc->collecting = 1;
+
+    log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes, data_zone=%zu)",
+              gc->collections + 1, gc->object_count, gc->total_allocated,
+              gc_data_zone_used(gc->data_zone));
 
     // reset mark stack
     gc->mark_top = 0;
 
-    // Phase 1: Mark — push all roots, trace reachable objects
-    if (root_items && root_count > 0) {
-        uint64_t* roots = (uint64_t*)root_items;
-        for (int i = 0; i < root_count; i++) {
-            gc_mark_item(gc, roots[i]);
+    // Phase 1a: Mark registered root slots (BSS globals, context->result, etc.)
+    for (int i = 0; i < gc->root_slot_count; i++) {
+        if (gc->root_slots[i]) {
+            gc_mark_item(gc, *gc->root_slots[i]);
         }
     }
 
-    // process mark stack (trace gray objects until empty)
+    // Phase 1b: Mark explicit extra roots (caller-provided Items)
+    if (extra_roots && extra_count > 0) {
+        for (int i = 0; i < extra_count; i++) {
+            gc_mark_item(gc, extra_roots[i]);
+        }
+    }
+
+    // Phase 1c: Conservative stack scan
+    gc_scan_stack(gc, stack_base, stack_current);
+
+    // Phase 1d: Process mark stack (trace gray objects until empty)
     while (gc->mark_top > 0) {
         gc_header_t* obj = mark_stack_pop(gc);
         gc_trace_object(gc, obj);
+
+        // tracing may have pushed more objects; continue until empty
     }
 
     // Phase 2: Compact — copy surviving data zone buffers to tenured
@@ -706,6 +864,7 @@ void gc_collect(gc_heap_t* gc, void* root_items, int root_count) {
     gc_data_zone_reset(gc->data_zone);
 
     gc->collections++;
-    log_debug("gc_collect: collection #%zu complete, %zu objects remain",
-              gc->collections, gc->object_count);
+    gc->collecting = 0;
+    log_debug("gc_collect: collection #%zu complete, %zu objects remain, %zu bytes collected total",
+              gc->collections, gc->object_count, gc->bytes_collected);
 }

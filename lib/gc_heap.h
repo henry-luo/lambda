@@ -54,6 +54,19 @@ typedef struct gc_header {
 } gc_header_t;                // 16 bytes total, user pointer is 16-byte aligned
 
 /**
+ * Callback type for triggering GC collection from allocation paths.
+ * The gc_heap calls this when data zone exceeds threshold.
+ * The callback should gather roots (stack scan, context) and call gc_collect().
+ */
+typedef void (*gc_collect_callback_t)(void);
+
+// Default data zone usage threshold (75% of block size) to trigger GC
+#define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
+
+// Maximum number of registered root slots
+#define GC_MAX_ROOT_SLOTS 256
+
+/**
  * GCHeap - manages all GC-tracked allocations.
  *
  * Uses dual-zone architecture:
@@ -75,6 +88,17 @@ typedef struct gc_heap {
     gc_header_t** mark_stack;       // stack of gray objects to trace
     int mark_top;                   // current mark stack position
     int mark_capacity;              // mark stack capacity
+
+    // Registered root slots: external pointers to locations holding Items.
+    // Each slot is a uint64_t* that points to a memory location containing
+    // a boxed Item value (e.g., BSS globals, context->result).
+    uint64_t* root_slots[GC_MAX_ROOT_SLOTS];
+    int root_slot_count;
+
+    // Collection trigger
+    size_t gc_threshold;            // data zone bytes that trigger auto-collection
+    int collecting;                 // re-entrancy guard (1 = GC in progress)
+    gc_collect_callback_t collect_callback;  // called when threshold exceeded
 
     // Collection statistics
     size_t collections;             // number of GC collections performed
@@ -147,23 +171,59 @@ int gc_is_nursery_data(gc_heap_t* gc, void* ptr);
 // ============================================================================
 
 /**
+ * Register an external root slot with the GC.
+ * A root slot is a pointer to a memory location that holds a boxed Item (uint64_t).
+ * The GC will scan these during collection to mark reachable objects.
+ * Used for BSS globals (module-level let bindings) and context->result.
+ *
+ * @param gc   heap to register with
+ * @param slot pointer to uint64_t that holds a boxed Item
+ */
+void gc_register_root(gc_heap_t* gc, uint64_t* slot);
+
+/**
+ * Unregister an external root slot.
+ * @param gc   heap to unregister from
+ * @param slot pointer previously registered with gc_register_root
+ */
+void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
+
+/**
  * Run a full garbage collection cycle:
- *   1. Mark: traverse from roots, mark all reachable objects
+ *   1. Mark: scan registered roots, stack, and explicit roots; trace reachable
  *   2. Compact: copy surviving data zone buffers to tenured data zone
  *   3. Sweep: free unmarked objects back to free lists
  *   4. Reset nursery data zone
  *
- * @param gc         heap to collect
- * @param root_items array of root Items to scan (eval result, globals, stack)
- * @param root_count number of root Items
+ * @param gc            heap to collect
+ * @param extra_roots   array of additional root Items (may be NULL)
+ * @param extra_count   number of additional root Items
+ * @param stack_base    high address of the C stack (thread's stack base)
+ * @param stack_current current stack pointer (low address)
  */
-void gc_collect(gc_heap_t* gc, void* root_items, int root_count);
+void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
+                uintptr_t stack_base, uintptr_t stack_current);
 
 /**
  * Mark a single Item as reachable (pushes to mark stack if GC-managed).
  * Public for use by external root scanners.
  */
 void gc_mark_item(gc_heap_t* gc, uint64_t item);
+
+/**
+ * Check if the data zone has exceeded the GC trigger threshold.
+ * Used by allocation paths to decide when to trigger collection.
+ * @return 1 if data zone usage exceeds threshold, 0 otherwise
+ */
+int gc_should_collect(gc_heap_t* gc);
+
+/**
+ * Set the callback that gc_data_alloc invokes when data zone exceeds threshold.
+ * The callback should call heap_gc_collect() or equivalent.
+ * @param gc       heap
+ * @param callback function to call for auto-collection (NULL to disable)
+ */
+void gc_set_collect_callback(gc_heap_t* gc, gc_collect_callback_t callback);
 
 // ============================================================================
 // Utility

@@ -1,7 +1,7 @@
 # Phase 5: Mark-and-Sweep Collection with Dual-Zone Nursery
 
-Status: Proposal
-Date: 2026-02-25
+Status: Steps 1–5 Complete (mark-and-sweep collection fully operational with auto-trigger)
+Date: 2026-02-25 (Steps 1–2), 2026-02-26 (Steps 3–5)
 
 ---
 
@@ -827,38 +827,87 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 
 ## 8. Implementation Plan
 
-### Step 1: Object Zone Allocator
-- Implement `ObjectZone` with size-class free lists in `lib/gc_object_zone.h` / `lib/gc_object_zone.c`
-- Wire `gc_heap_alloc()`/`gc_heap_calloc()` to use object zone
-- All tests must continue passing (allocation behavior unchanged, just different allocator backend)
+### Step 1: Object Zone Allocator ✅ Complete
+- Implemented `gc_object_zone_t` with size-class free lists in `lib/gc_object_zone.h` / `lib/gc_object_zone.c`
+- 7 size classes: 16, 32, 48, 64, 96, 128, 256 bytes (user data, excluding GCHeader)
+- Slab-based allocation with per-class slot counts (512/256/256/128/128/64/32 slots per slab)
+- Wired `gc_heap_alloc()`/`gc_heap_calloc()` to route ≤256B allocations through object zone
+- Large objects (>256B) fall back to `pool_alloc()` from the underlying memory pool
+- Forward declaration pattern resolves circular include between `gc_object_zone.h` ↔ `gc_heap.h`
+- All 385 Lambda tests pass ✅
 
-### Step 2: Data Zone Allocator
-- Implement `DataZone` bump allocator in `lib/gc_data_zone.h` / `lib/gc_data_zone.c`
-- Replace `calloc()`/`malloc()` for `items[]`, `data`, `closure_env` with `data_zone_alloc()`
-- Replace `realloc()` for array growth with `data_zone_alloc()` + `memcpy()`
-- Remove `free()` calls from `gc_finalize_all_objects()` for data-zone-managed chunks
-- All tests must continue passing
+**Files created**: `lib/gc_object_zone.h`, `lib/gc_object_zone.c`
 
-### Step 3: Mark Phase
-- Implement root scanning (context->result, module globals, conservative stack scan)
-- Implement `gc_mark_item()`, `gc_trace_object()`, mark stack
-- Add `gc_collect()` API (callable from tests)
-- Write GC-specific tests: allocate objects, trigger collection, verify live objects survive and dead objects are freed
+### Step 2: Data Zone Allocator ✅ Complete
+- Implemented `gc_data_zone_t` bump allocator in `lib/gc_data_zone.h` / `lib/gc_data_zone.c`
+- 256 KB default block size, 16-byte alignment, block-chain overflow for large allocations
+- `gc_data_zone_reset()`: zeros and resets all block cursors for post-GC nursery clearing
+- `gc_data_zone_copy()`: alloc + memcpy helper for GC compaction
+- Replaced all `malloc()`/`calloc()` for `items[]`, `data` buffers with `heap_data_alloc()`/`heap_data_calloc()` across:
+  - `lambda-data-runtime.cpp`: 8 `malloc` → `heap_data_alloc`, 3 `calloc` → `heap_data_calloc` (array_fill, array_int_new/fill, array_int64_new/fill, array_float_new/fill, map_fill, object_fill, elmt_fill)
+  - `lambda-data.cpp`: `expand_list()` — `realloc` → `heap_data_alloc` + `memcpy` (old buffer abandoned)
+  - `lambda-eval.cpp`: `convert_specialized_to_generic()` — `calloc` → `heap_data_calloc`, removed 3× `free(old_items)`; `fn_join()` — 3× `malloc` → `heap_data_alloc` for typed array items; `map_rebuild_for_type_change()` — `calloc` → `heap_data_calloc`, removed `free(old_data)` for is_heap containers
+  - `lambda-eval-num.cpp`: removed 6× `free()` on GC-managed ArrayFloat objects/items in division-by-zero error paths
+- Simplified `gc_finalize_all_objects()` to only handle VMap (`vtable->destroy`) and Decimal (`mpd_del`)
+- Added weak symbol fallback in `lambda-data.cpp` for input library linking (overridden by real definition)
+- All 385 Lambda tests pass ✅
 
-### Step 4: Sweep with Data Compaction
-- Implement `gc_sweep()`: walk `all_objects`, free dead objects to free list
-- Implement `gc_compact_data_zone()`: copy surviving data chunks to tenured, fixup struct pointers
-- Reset nursery data zone after compaction
-- Write tests: verify data pointers are updated correctly after compaction
+**Files created**: `lib/gc_data_zone.h`, `lib/gc_data_zone.c`
+**Files modified**: `lambda-data-runtime.cpp`, `lambda-data.cpp`, `lambda-eval.cpp`, `lambda-eval-num.cpp`, `lambda-mem.cpp`, `build_lambda_config.json`
 
-### Step 5: Collection Triggers
-- Add allocation threshold checks to `data_zone_alloc()` and `object_zone_alloc()`
-- Auto-trigger minor GC when data zone reaches capacity
-- Auto-trigger full GC when tenured exceeds threshold
-- Validate with long-running script tests (loops that generate temporary data)
+### Step 3: Mark Phase ✅ Complete
+- Implemented `gc_mark_item()`, `gc_trace_object()`, growable mark stack in `lib/gc_heap.c`
+- `gc_trace_object()` handles all Lambda types:
+  - List/Array: scan `items[]` for Item references
+  - Map/Object: walk `ShapeEntry` linked list, trace pointer-type fields in packed `data` buffer
+  - Element: trace both `items[]` children and `data` attributes
+  - Function: trace `closure_env` (deferred — needs `closure_field_count`)
+  - VMap: deferred (complex external backing store)
+  - Scalars (int64, double, String, Symbol, etc.): no outgoing references, nothing to trace
+- TypeMap struct offset corrected: `shape` field is at byte offset 32 (Type(2) + padding(6) + length(8) + byte_size(8) + type_index(4) + padding(4) = 32)
+- **Type tag constants** corrected to exactly match `lambda.h` `EnumTypeId` enum (RAW_POINTER=0, NULL=1, BOOL=2, INT=3, INT64=4, ..., STRING=10, ..., LIST=12, ..., FUNC=23)
+- **`item_to_ptr()` rewritten** for robust pointer extraction:
+  - `item == 0` → NULL (literal zero)
+  - Tags 1-3 (NULL/BOOL/INT) → NULL (inline values, no pointer)
+  - Tag 0 with `item != 0` → container pointer (raw heap address on 64-bit)
+  - Tags 4-11 → tagged pointer (mask off upper byte)
+  - Tags ≥12 → container (safety fallback)
+- **Root scanning implemented**:
+  - Root slot registry: `gc_register_root()`/`gc_unregister_root()` with 256-slot array for BSS globals, `context->result`, etc.
+  - Conservative stack scanning: `gc_scan_stack()` walks aligned 8-byte values from SP to stack base, marking any that point into the object zone
+  - BSS global registration: `register_bss_gc_roots()` in `mir.c` walks MIR modules to find `_gvar_*` BSS items and registers their addresses as GC roots
+  - Extra roots parameter in `gc_collect()` for caller-provided Items
+- `gc_collect()` full pipeline: mark registered roots → mark extra roots → conservative stack scan → process mark stack (drain gray objects) → compact → sweep → reset nursery
+- Re-entrancy guard (`gc->collecting` flag) prevents recursive collection
 
-### Step 6: Closure Cycle Collection
+**Files modified**: `lib/gc_heap.h`, `lib/gc_heap.c`, `lambda/lambda-mem.cpp`, `lambda/transpiler.hpp`, `lambda/mir.c`, `lambda/transpile-mir.cpp`, `lambda/runner.cpp`
+
+### Step 4: Sweep with Data Compaction ✅ Complete
+- Implemented `gc_sweep()` in `lib/gc_heap.c`: walks `all_objects` list, frees dead objects to object zone free lists, resets mark bits on survivors
+- Implemented `gc_compact_data()`: for each marked object with nursery data zone pointers, copies data to tenured data zone and updates the struct's pointer (single fixup per object)
+- Handles List/Array `items[]`, Map/Object/Element `data`, Element `items[]` + `data`, Function `closure_env`
+- `gc_data_zone_reset()` called after compaction to reclaim entire nursery data zone
+- Full collection flow: mark → compact → sweep → reset
+- **Bug fix**: Explicitly freed objects (via `gc_heap_pool_free`) are now correctly returned to the object zone free list during sweep (previously leaked)
+
+**Files modified**: `lib/gc_heap.c`
+
+### Step 5: Collection Triggers ✅ Complete
+- Threshold-based auto-trigger: `gc_data_alloc()` checks `gc_data_zone_used() >= gc_threshold` before each allocation
+- `GC_DATA_ZONE_THRESHOLD` default: 75% of `GC_DATA_ZONE_BLOCK_SIZE` (192 KB)
+- Callback mechanism: `gc_set_collect_callback()` sets the function called when threshold is exceeded
+- `heap_gc_collect()` in `lambda-mem.cpp` provides the callback: reads stack bounds (inline asm for SP on ARM64/x86_64), calls `gc_collect()` with full root scanning
+- Re-entrancy guard prevents recursive GC during collection
+- **26 GC unit tests** in `test/test_gc_heap_gtest.cpp` — all passing ✅
+  - Covers: allocation, data zone, root registration, marking, tracing, collection (live/dead), compaction (nursery→tenured + data preservation), multi-cycle, threshold triggers, re-entrancy guard, explicit free, collection stats, conservative stack scanning, stress test (1000 objects)
+- **389/389 Lambda baseline tests pass** ✅ (no regressions)
+
+**Files created**: `test/test_gc_heap_gtest.cpp`
+**Files modified**: `lib/gc_heap.h`, `lib/gc_heap.c`, `lambda/lambda-mem.cpp`, `build_lambda_config.json`
+
+### Step 6: Closure Cycle Collection — Not Started
 - Add `closure_field_count` to `Function` struct
+- Update transpiler to emit closure field count
 - Implement `gc_mark_closure_env()` that scans closure env `Item` fields
 - Write test: closure cycle (Function A → env → Container C → Function A) is properly collected
 - Verify: leak that exists under old ref_cnt system is now collected
@@ -881,11 +930,40 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 
 ## 10. Success Criteria
 
-| Criterion | Measurement |
-|-----------|-------------|
-| All existing tests pass | 375 Lambda + 2098 Radiant tests green |
-| Long-running loop memory bounded | Loop allocating 1M temporary arrays stays under constant peak memory |
-| Closure cycle collected | Test: cyclic closure reference is reclaimed (ref_cnt version leaks) |
-| Data zone fully reclaims | After GC, nursery data zone usage returns to zero |
-| No pointer corruption | Stress test: build large data structures, trigger multiple GC cycles, verify data integrity |
-| Allocation performance | Benchmark: bump allocation (data zone) ≥ current `malloc()` throughput |
+| Criterion | Measurement | Status |
+|-----------|-------------|--------|
+| All existing tests pass | 389 Lambda tests green | ✅ 389/389 pass (Steps 1–5) |
+| Radiant tests pass | 2149 Radiant tests (51 pre-existing layout failures, not GC-related) | ✅ No regressions |
+| GC unit tests pass | 26 tests covering mark/sweep/compact/trigger/stack-scan | ✅ 26/26 pass |
+| Long-running loop memory bounded | Loop allocating 1M temporary arrays stays under constant peak memory | ⬜ Runtime validation pending |
+| Closure cycle collected | Test: cyclic closure reference is reclaimed (ref_cnt version leaks) | ⬜ Requires Step 6 |
+| Data zone fully reclaims | After GC, nursery data zone usage returns to zero | ✅ CompactMovesNurseryData test verifies |
+| No pointer corruption | Stress test: build large data structures, trigger multiple GC cycles, verify data integrity | ✅ StressAllocCollect + CompactPreservesListData tests verify |
+| Allocation performance | Benchmark: bump allocation (data zone) ≥ current `malloc()` throughput | ⬜ Requires benchmarking |
+---
+
+## 11. Known Issues & Deferred Work
+
+### `mark_editor.cpp` — `realloc()` on Arena-Allocated Items
+
+Three sites in `mark_editor.cpp` use raw `realloc()` to grow `items[]` arrays for Input arena-allocated objects (constructed by `MarkBuilder`). These are **not** GC-managed (they belong to Input arena lifecycle), so `heap_data_alloc` is not the right fix. They should use `arena_alloc` + `memcpy` instead of `realloc`.
+
+| Line | Function | Description |
+|------|----------|-------------|
+| 1291 | `elmt_insert_child` | Element children `items[]` — single insert |
+| 1381 | `elmt_insert_children` | Element children `items[]` — batch insert |
+| 1684 | `array_insert` | Array `items[]` |
+
+**Impact**: Low risk — these code paths only execute during procedural element/array mutation of Input-parsed data. The `realloc()` works today because arena backing is ultimately `malloc`-based (`rpmalloc`), but it is technically incorrect as it bypasses the arena's tracking. Should be fixed when MarkEditor is refactored.
+
+### `fn_type()` in `lambda-eval.cpp` — Raw `calloc()`
+
+Line 1498 uses `calloc(1, sizeof(TypeType) + sizeof(Type))` to allocate a `TypeType` wrapper. This is a **type metadata allocation**, not a data container — it is not tracked by GC and is never freed (persists for context lifetime). Low priority; could be moved to `pool_calloc` for consistency.
+
+### VMap Tracing — Deferred
+
+`gc_trace_object()` does not yet trace `VMap` backing data (HashMap entries containing `Item` keys/values). VMap uses an external `vtable->destroy` pattern. Tracing would require a `vtable->trace` callback to walk all stored Items. Deferred until VMaps are used in GC-triggering scenarios.
+
+### Closure Environment Tracing — Partially Deferred
+
+`gc_trace_object()` recognizes `LMD_TYPE_FUNC` with `closure_env` but cannot yet scan the env's `Item` fields without knowing the field count. Requires adding `closure_field_count` to `Function` struct and updating the transpiler (Step 6).
