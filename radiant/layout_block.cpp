@@ -2709,10 +2709,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
 
         // CSS 2.1 §10.3.5: For floats, if margin-left/right is 'auto', its used value is 0
+        // CSS 2.1 §10.3.2: For inline-level elements, auto margins resolve to 0
         // CSS 2.1 §10.3.3: For normal flow blocks, auto margins center the element
         bool is_rtl = pa_block->direction == CSS_VALUE_RTL;
-        if (is_float) {
-            // Floats: auto margins become 0
+        bool is_inline_level = (block->display.outer == CSS_VALUE_INLINE_BLOCK ||
+                                block->display.outer == CSS_VALUE_INLINE);
+        if (is_float || is_inline_level) {
+            // Floats and inline-level elements: auto margins become 0
             if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
             if (block->bound->margin.right_type == CSS_VALUE_AUTO) block->bound->margin.right = 0;
         } else if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
@@ -3480,8 +3483,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             content_last_line_ascender = lycon->line.max_ascender;
         }
         bool content_has_line_boxes = content_last_line_ascender > 0;
-        log_debug("inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d",
-            content_last_line_ascender, content_has_line_boxes);
+
+        // CSS 2.1 §10.8.1: Replaced elements (img, iframe, video, embed, object)
+        // always have their baseline at the bottom margin edge, regardless of
+        // whether their internal layout produced line boxes.
+        bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
+            block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
+            block->tag() == HTM_TAG_OBJECT);
+        if (is_replaced) {
+            content_has_line_boxes = false;
+        }
+
+        log_debug("inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d, is_replaced=%d",
+            content_last_line_ascender, content_has_line_boxes, is_replaced);
 
         log_debug("flow block in parent context, block->y before restoration: %.2f", block->y);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
@@ -3519,7 +3533,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             } else {
                 block->x = lycon->line.advance_x;
             }
-            if (block->in_line && block->in_line->vertical_align) {
+            // Determine vertical-align: use explicit value or default to baseline
+            // For inline-tables without explicit vertical-align, skip baseline alignment
+            // because their baseline computation requires first-row baseline (CSS 2.1 §17.5.1),
+            // which content_last_line_ascender doesn't capture correctly for tables.
+            bool has_explicit_valign = (block->in_line && block->in_line->vertical_align);
+            bool is_inline_table = (display.inner == CSS_VALUE_TABLE);
+
+            if (has_explicit_valign || !is_inline_table) {
+                CssEnum valign = has_explicit_valign ?
+                    block->in_line->vertical_align : CSS_VALUE_BASELINE;
+                float valign_offset = (block->in_line) ?
+                    block->in_line->vertical_align_offset : 0;
+
                 float item_height = block->height + (block->bound ?
                     block->bound->margin.top + block->bound->margin.bottom : 0);
                 // For non-replaced inline-blocks with content: baseline is at content baseline
@@ -3535,21 +3561,37 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // Replaced or no content: baseline at bottom margin edge
                     item_baseline = item_height;
                 }
-                float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
+                // CSS 2.1 §10.8.1: Use the strut's baseline as a reference for alignment
+                // when no text content has established a baseline on this line yet.
+                // The strut is a zero-width inline box with the block container's font/line-height.
+                // Only apply strut when no text has contributed to max_ascender yet,
+                // to avoid font metrics inconsistencies with text-derived ascender.
+                float baseline_ref = lycon->line.max_ascender > 0 ?
+                    lycon->line.max_ascender :
+                    lycon->block.init_ascender + lycon->block.lead_y;
+                float line_height = max(lycon->block.line_height, baseline_ref + lycon->line.max_descender);
                 float offset = calculate_vertical_align_offset(
-                    lycon, block->in_line->vertical_align, item_height, line_height,
-                    lycon->line.max_ascender, item_baseline);
-                block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
+                    lycon, valign, item_height, line_height,
+                    baseline_ref, item_baseline, valign_offset);
+                // Clamp offset to >= 0 to match view_vertical_align's behavior.
+                // This is critical because the view_vertical_align second pass may not
+                // re-process this span (start_view can advance past it after line_break),
+                // making this first-pass y the final value.
+                block->y = lycon->block.advance_y + max(offset, 0.0f);  // block->bound->margin.top will be added below
                 log_debug("valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d",
-                    offset, line_height, block->height, lycon->block.advance_y, block->y, block->in_line->vertical_align);
+                    offset, line_height, block->height, lycon->block.advance_y, block->y, valign);
                 // For TOP/BOTTOM, we handle max_descender/max_ascender specially in the section below
                 // Don't apply this generic formula which assumes baseline-relative positioning
-                if (block->in_line->vertical_align != CSS_VALUE_TOP && block->in_line->vertical_align != CSS_VALUE_BOTTOM) {
-                    lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - lycon->line.max_ascender);
+                // Only update max_descender when there's explicit vertical-align, because
+                // the default baseline case is handled by the second section below which
+                // uses the correct content baseline for max_ascender/max_descender split.
+                if (has_explicit_valign && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
+                    lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - baseline_ref);
                 }
                 log_debug("new max_descender=%f", lycon->line.max_descender);
             } else {
-                log_debug("valigned-inline-block: default baseline align");
+                // Inline-table without explicit vertical-align: place at advance_y
+                // TODO: Implement proper inline-table baseline (first-row baseline per CSS 2.1 §17.5.1)
                 block->y = lycon->block.advance_y;
             }
             lycon->line.advance_x += block->width;

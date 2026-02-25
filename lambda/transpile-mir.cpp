@@ -1518,7 +1518,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         }
     }
     // For if nodes: use effective type of branches
-    if (node->node_type == AST_NODE_IF_EXPR || node->node_type == AST_NODE_IF_STAM) {
+    if (node->node_type == AST_NODE_IF_EXPR) {
         AstIfNode* if_node = (AstIfNode*)node;
         TypeId then_eff = if_node->then ? get_effective_type(mt, if_node->then) : LMD_TYPE_ANY;
         TypeId else_eff = if_node->otherwise ? get_effective_type(mt, if_node->otherwise) : LMD_TYPE_ANY;
@@ -3008,7 +3008,7 @@ static bool is_declaration_node(int node_type) {
 
 // Check if a node type is a procedural side-effect statement.
 // These execute for side effects but do NOT produce output values.
-// NOTE: IF_STAM, WHILE_STAM, FOR_STAM can appear in functional code
+// NOTE: IF_EXPR (with block form), WHILE_STAM, FOR_STAM can appear in functional code
 // and produce values, so they are NOT included here.
 static bool is_side_effect_stam(int node_type) {
     switch (node_type) {
@@ -3029,7 +3029,7 @@ static bool is_side_effect_stam(int node_type) {
 static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
     // Detect proc context: either we're inside a pn function (mt->in_proc),
     // or the content block contains proc-only nodes like VAR_STAM.
-    // In proc context, IF_STAM/WHILE_STAM/FOR_STAM are side-effect statements,
+    // In proc context, IF_EXPR/WHILE_STAM/FOR_STAM are side-effect statements,
     // and only the LAST value expression contributes to the result.
     bool is_proc = mt->in_proc;
     if (!is_proc) {
@@ -3050,7 +3050,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         } else if (is_side_effect_stam(scan->node_type)) {
             stam_count++;
         } else if (is_proc &&
-                   (scan->node_type == AST_NODE_IF_STAM ||
+                   (scan->node_type == AST_NODE_IF_EXPR ||
                     scan->node_type == AST_NODE_WHILE_STAM ||
                     scan->node_type == AST_NODE_FOR_STAM)) {
             // In proc context, these are side-effect statements
@@ -3077,7 +3077,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 }
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item);
-            } else if (item->node_type == AST_NODE_IF_STAM ||
+            } else if (item->node_type == AST_NODE_IF_EXPR ||
                        item->node_type == AST_NODE_WHILE_STAM ||
                        item->node_type == AST_NODE_FOR_STAM) {
                 transpile_expr(mt, item);
@@ -3113,7 +3113,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item); // execute for side effects
             } else if (is_proc &&
-                       (item->node_type == AST_NODE_IF_STAM ||
+                       (item->node_type == AST_NODE_IF_EXPR ||
                         item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
                 transpile_expr(mt, item); // proc context side effect
@@ -3145,7 +3145,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item);
             } else if (is_proc &&
-                       (item->node_type == AST_NODE_IF_STAM ||
+                       (item->node_type == AST_NODE_IF_EXPR ||
                         item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
                 transpile_expr(mt, item); // proc context side effect
@@ -4749,7 +4749,6 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_SPREAD:
         return transpile_spread(mt, (AstUnaryNode*)node);
     case AST_NODE_IF_EXPR:
-    case AST_NODE_IF_STAM:
         return transpile_if(mt, (AstIfNode*)node);
     case AST_NODE_MATCH_EXPR:
         return transpile_match(mt, (AstMatchNode*)node);
@@ -5740,8 +5739,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             if (un->operand) prepass_forward_declare(mt, un->operand);
             break;
         }
-        case AST_NODE_IF_EXPR:
-        case AST_NODE_IF_STAM: {
+        case AST_NODE_IF_EXPR: {
             AstIfNode* if_node = (AstIfNode*)node;
             if (if_node->cond) prepass_forward_declare(mt, if_node->cond);
             if (if_node->then) prepass_forward_declare(mt, if_node->then);
@@ -6061,8 +6059,7 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             if (un->operand) prepass_define_functions(mt, un->operand);
             break;
         }
-        case AST_NODE_IF_EXPR:
-        case AST_NODE_IF_STAM: {
+        case AST_NODE_IF_EXPR: {
             AstIfNode* if_node = (AstIfNode*)node;
             if (if_node->cond) prepass_define_functions(mt, if_node->cond);
             if (if_node->then) prepass_define_functions(mt, if_node->then);

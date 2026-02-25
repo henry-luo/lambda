@@ -1,12 +1,12 @@
-# R7RS Benchmark Results 2026-02-22 14:28:40, runs=3
+# R7RS Benchmark Results 2026-02-25 13:59:05, runs=5
 benchmark,category,lambda_ms,lambda_typed_ms,racket_ms,guile_ms
-fib,recursive,10.616,6.660,0.703,3.081
-fibfp,recursive,14.981,7.095,3.485,15.713
-tak,recursive,6.348,4.211,0.063,0.291
-cpstak,closure,7.598,4.245,0.144,1.498
-sum,iterative,13.743,6.849,1.020,1.043
-sumfp,iterative,7.699,4.799,1.145,2.711
-nqueens,backtrack,36.602,34.181,0.098,0.334
-fft,numeric,12.066,11.186,0.475,1.693
-mbrot,numeric,14.854,7.365,3.687,13.799
-ack,recursive,28.283,12.503,3.151,13.029
+fib,recursive,7.902,5.895,0.720,0.000
+fibfp,recursive,10.824,7.133,3.700,0.000
+tak,recursive,4.095,3.931,0.080,0.000
+cpstak,closure,4.539,3.977,0.149,0.000
+sum,iterative,12.108,7.051,1.041,0.000
+sumfp,iterative,5.051,4.926,1.232,0.000
+nqueens,backtrack,35.068,33.546,0.097,0.000
+fft,numeric,10.363,9.090,0.465,0.000
+mbrot,numeric,13.692,6.871,3.789,0.000
+ack,recursive,28.390,12.317,3.266,0.000
