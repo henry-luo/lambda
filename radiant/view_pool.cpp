@@ -29,7 +29,12 @@ const char* View::view_name() {
         case RDT_VIEW_BLOCK: return "block";
         case RDT_VIEW_INLINE_BLOCK: return "inline-block";
         case RDT_VIEW_LIST_ITEM: return "list-item";
-        case RDT_VIEW_TABLE: return "table";
+        case RDT_VIEW_TABLE: {
+            // CSS 2.1 §17.2: distinguish table vs inline-table via outer display
+            // Note: inline-table gets display.outer = CSS_VALUE_INLINE_BLOCK during layout routing
+            DomElement* elem = (DomElement*)this;
+            return (elem->display.outer == CSS_VALUE_INLINE || elem->display.outer == CSS_VALUE_INLINE_BLOCK) ? "inline-table" : "table";
+        }
         case RDT_VIEW_TABLE_ROW_GROUP: return "table-row-group";
         case RDT_VIEW_TABLE_ROW: return "table-row";
         case RDT_VIEW_TABLE_CELL: return "table-cell";
@@ -1476,7 +1481,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     else if (block->view_type == RDT_VIEW_LIST_ITEM) display = "list-item";
     else if (block->view_type == RDT_VIEW_TABLE) {
         // CSS 2.1 §17.2: distinguish table vs inline-table
-        display = (block->display.outer == CSS_VALUE_INLINE) ? "inline-table" : "table";
+        // Note: inline-table gets display.outer = CSS_VALUE_INLINE_BLOCK during layout routing
+        display = (block->display.outer == CSS_VALUE_INLINE || block->display.outer == CSS_VALUE_INLINE_BLOCK) ? "inline-table" : "table";
     }
     else if (block->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
         // CSS 2.1 §17.2: use display.inner to distinguish tbody/thead/tfoot
@@ -1492,7 +1498,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     // (e.g., display:table-row nested inside a table-row gets wrapped in anon-td
     // and laid out as a block, but getComputedStyle should still report table-row)
     else if (block->display.inner == CSS_VALUE_TABLE) {
-        display = (block->display.outer == CSS_VALUE_INLINE) ? "inline-table" : "table";
+        // Note: inline-table gets display.outer = CSS_VALUE_INLINE_BLOCK during layout routing
+        display = (block->display.outer == CSS_VALUE_INLINE || block->display.outer == CSS_VALUE_INLINE_BLOCK) ? "inline-table" : "table";
     }
     else if (block->display.inner == CSS_VALUE_TABLE_ROW) display = "table-row";
     else if (block->display.inner == CSS_VALUE_TABLE_ROW_GROUP) display = "table-row-group";

@@ -60,6 +60,20 @@ typedef struct gc_header {
  */
 typedef void (*gc_collect_callback_t)(void);
 
+/**
+ * Callback type for tracing VMap entries during GC mark phase.
+ * Called with: (vmap_data_ptr, gc_heap, gc_mark_item_fn)
+ * The callback should iterate all Item keys/values in the VMap data
+ * and call gc_mark_item(gc, item) for each.
+ */
+typedef void (*gc_vmap_trace_fn)(void* data, struct gc_heap* gc);
+
+/**
+ * Callback type for destroying VMap backing data during GC sweep.
+ * Called with the VMap's opaque data pointer (HashMapData*).
+ */
+typedef void (*gc_vmap_destroy_fn)(void* data);
+
 // Default data zone usage threshold (75% of block size) to trigger GC
 #define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
 
@@ -103,6 +117,10 @@ typedef struct gc_heap {
     // Collection statistics
     size_t collections;             // number of GC collections performed
     size_t bytes_collected;         // total bytes reclaimed across all collections
+
+    // VMap tracing/finalization callbacks (set by runtime, called from GC)
+    gc_vmap_trace_fn vmap_trace;    // traces Item keys/values in VMap's HashMap
+    gc_vmap_destroy_fn vmap_destroy; // frees VMap's malloc'd backing data
 } gc_heap_t;
 
 /**
