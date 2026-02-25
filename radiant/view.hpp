@@ -481,6 +481,7 @@ typedef struct FlexItemProp {
     int needs_measurement : 1;      // True if content needs measuring
     int has_explicit_width : 1;     // True if width explicitly set in CSS
     int has_explicit_height : 1;    // True if height explicitly set in CSS
+    int main_size_from_flex : 1;    // True if parent flex grew/shrank this item's main-axis size
 } FlexItemProp;
 
 struct InlineProp {
@@ -863,6 +864,10 @@ typedef struct BlockProp {
     CssEnum given_height_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
+    float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
+    float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
+    float given_min_height_percent;  // Raw percentage if min-height: X% (NaN if not percentage)
+    float given_max_height_percent;  // Raw percentage if max-height: X% (NaN if not percentage)
 } BlockProp;
 
 typedef struct FontBox {

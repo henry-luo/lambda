@@ -3074,6 +3074,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->blk->given_min_width = resolved;
                 log_debug("[CSS] Min-width: %.2f px", block->blk->given_min_width);
             }
+            // Store raw percentage for flex item re-resolution
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                block->blk->given_min_width_percent = value->data.percentage.value;
+            } else {
+                block->blk->given_min_width_percent = NAN;
+            }
             break;
         }
 
@@ -3110,6 +3116,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
                 }
             }
+            // Store raw percentage for flex item re-resolution
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                block->blk->given_max_width_percent = value->data.percentage.value;
+            } else {
+                block->blk->given_max_width_percent = NAN;
+            }
             break;
         }
 
@@ -3134,6 +3146,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->blk->given_min_height = resolved;
                 log_debug("[CSS] Min-height: %.2f px", block->blk->given_min_height);
+            }
+            // Store raw percentage for flex item re-resolution
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                block->blk->given_min_height_percent = value->data.percentage.value;
+            } else {
+                block->blk->given_min_height_percent = NAN;
             }
             break;
         }
@@ -3163,6 +3181,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->blk->given_max_height = resolved;
                 log_debug("[CSS] Max-height: %.2f px", block->blk->given_max_height);
+            }
+            // Store raw percentage for flex item re-resolution
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                block->blk->given_max_height_percent = value->data.percentage.value;
+            } else {
+                block->blk->given_max_height_percent = NAN;
             }
             break;
         }
