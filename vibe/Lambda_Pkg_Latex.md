@@ -302,7 +302,7 @@ pub fn postprocess(html, ctx) {
 ```
 lambda/package/latex/
 ├── latex.ls              # Main entry point: pub fn render(ast, options)    (146 lines) ✅ Done
-├── render2.ls            # Core dispatcher: AST tag → handler (stateless)  (1,162 lines) ✅ Done
+├── render.ls            # Core dispatcher: AST tag → handler (stateless)  (1,162 lines) ✅ Done
 ├── analyze.ls            # Pass 1: counters, headings, labels, theorems    (355 lines) ✅ Done
 ├── normalize.ls          # Phase 1: AST cleanup and normalization          (206 lines) ✅ Done
 ├── macros.ls             # Phase 2: \newcommand expansion                  (262 lines) ✅ Done
@@ -316,16 +316,16 @@ lambda/package/latex/
 └── test_latex_pkg.ls     # Integration test script                         (58 lines) ✅ Done
 ```
 
-**Removed legacy modules** (replaced by render2.ls + analyze.ls two-pass architecture):
-- ~~`render.ls`~~ — legacy stateful dispatcher (superseded by render2.ls)
+**Removed legacy modules** (replaced by render.ls + analyze.ls two-pass architecture):
+- ~~`render.ls`~~ — legacy stateful dispatcher (superseded by render.ls)
 - ~~`context.ls`~~ — legacy context threading (superseded by analyze.ls)
-- ~~`structure.ls`~~ — legacy document structure (merged into render2.ls)
-- ~~`text.ls`~~ — legacy text formatting (merged into render2.ls)
-- ~~`elements/lists.ls`~~ — legacy list rendering (merged into render2.ls)
-- ~~`elements/environments.ls`~~ — legacy environments (merged into render2.ls)
-- ~~`elements/tables.ls`~~ — legacy tables (merged into render2.ls)
-- ~~`elements/figures.ls`~~ — never created, logic is in render2.ls
-- ~~`elements/refs.ls`~~ — never created, logic is in render2.ls
+- ~~`structure.ls`~~ — legacy document structure (merged into render.ls)
+- ~~`text.ls`~~ — legacy text formatting (merged into render.ls)
+- ~~`elements/lists.ls`~~ — legacy list rendering (merged into render.ls)
+- ~~`elements/environments.ls`~~ — legacy environments (merged into render.ls)
+- ~~`elements/tables.ls`~~ — legacy tables (merged into render.ls)
+- ~~`elements/figures.ls`~~ — never created, logic is in render.ls
+- ~~`elements/refs.ls`~~ — never created, logic is in render.ls
 
 **Not yet created:**
 - `docclass/article.ls`, `book.ls`, `report.ls` — document class modules
@@ -746,7 +746,7 @@ let SIMPLE_COMMANDS = {
 | Module | Features | Lines | Status |
 |--------|----------|-------|--------|
 | `latex.ls` | Entry point, API | 146 | ✅ Done |
-| `render2.ls` | Core dispatcher (90+ tags, stateless two-pass) | 1,162 | ✅ Done |
+| `render.ls` | Core dispatcher (90+ tags, stateless two-pass) | 1,162 | ✅ Done |
 | `analyze.ls` | Pass 1: counters, headings, labels, figures, tables, theorems, bibitems | 355 | ✅ Done |
 | `normalize.ls` | AST cleanup, ligatures, whitespace | 206 | ✅ Done |
 | `math_bridge.ls` | Delegate to math package | 47 | ✅ Done |
@@ -758,25 +758,25 @@ let SIMPLE_COMMANDS = {
 
 **Milestone test:** ✅ Renders `\documentclass{article}\begin{document}\section{Hello}\textbf{World}\end{document}` to valid HTML.
 
-### Phase 2: Environments & Lists — ✅ DONE (merged into render2.ls)
+### Phase 2: Environments & Lists — ✅ DONE (merged into render.ls)
 
 | Module | Features | Status |
 |--------|----------|--------|
-| Lists (in render2.ls) | itemize, enumerate, description | ✅ Done |
-| Environments (in render2.ls) | quote, center, verbatim, abstract, multicols, minipage | ✅ Done |
-| Tables (in render2.ls) | tabular (basic row/cell splitting) | ✅ Done |
-| Figures (in render2.ls) | figure, caption, includegraphics, auto-numbering | ✅ Done |
-| Table floats (in render2.ls) | table environment, caption, auto-numbering | ✅ Done |
-| Theorem environments (in render2.ls) | theorem, lemma, corollary, proposition, definition, example, remark, proof (8 types with auto-numbering) | ✅ Done |
+| Lists (in render.ls) | itemize, enumerate, description | ✅ Done |
+| Environments (in render.ls) | quote, center, verbatim, abstract, multicols, minipage | ✅ Done |
+| Tables (in render.ls) | tabular (basic row/cell splitting) | ✅ Done |
+| Figures (in render.ls) | figure, caption, includegraphics, auto-numbering | ✅ Done |
+| Table floats (in render.ls) | table environment, caption, auto-numbering | ✅ Done |
+| Theorem environments (in render.ls) | theorem, lemma, corollary, proposition, definition, example, remark, proof (8 types with auto-numbering) | ✅ Done |
 | Spacing (`elements/spacing.ls`) | hspace, vspace, breaks | ✅ Done |
 
-**Note:** These were implemented directly in render2.ls rather than separate element modules, since the two-pass architecture eliminated the need for context-threading callbacks.
+**Note:** These were implemented directly in render.ls rather than separate element modules, since the two-pass architecture eliminated the need for context-threading callbacks.
 
 ### Phase 3: Cross-References & Post-Processing — ✅ DONE
 
 | Module | Features | Status |
 |--------|----------|--------|
-| Cross-refs (in render2.ls + analyze.ls) | `\label`, `\ref`, `\href`, `\url`, `\footnote` | ✅ Done |
+| Cross-refs (in render.ls + analyze.ls) | `\label`, `\ref`, `\href`, `\url`, `\footnote` | ✅ Done |
 | `macros.ls` | `\newcommand` basic expansion (single/multi-param, optional args, nested) | ✅ Done (262 lines) |
 | Footnotes (in latex.ls) | Footnote section appended at end of document | ✅ Done |
 
@@ -807,7 +807,7 @@ let SIMPLE_COMMANDS = {
 | Phase | Lines | Status |
 |-------|-------|--------|
 | Phase 1: Core (latex, render2, analyze, normalize, math_bridge, symbols, css, util, to_html) | 2,590 | ✅ Done |
-| Phase 2: Environments (merged into render2.ls + elements/spacing.ls) | 105 | ✅ Done |
+| Phase 2: Environments (merged into render.ls + elements/spacing.ls) | 105 | ✅ Done |
 | Phase 3: Cross-Refs & Macros (macros.ls) | 262 | ✅ Done |
 | Phase 4: Doc Classes (docclass/article, book, report + CSS) | 284 | ✅ Done |
 | Phase 5: Advanced (tabular multicolumn/multirow, bibliography, theorems) | — | ✅ Done |
@@ -944,7 +944,7 @@ if (node is element and name(node) == 'section') ...
 if ((node is element) and name(node) == 'section') ...
 ```
 
-**Resolution:** The existing parenthesized code in macros.ls and render2.ls remains correct and is kept for readability.
+**Resolution:** The existing parenthesized code in macros.ls and render.ls remains correct and is kept for readability.
 
 **Precedent in other languages:** The fix aligns with the universal convention — every mainstream language puts type-check/membership operators above logical operators:
 
@@ -1003,7 +1003,7 @@ let m = {int: 10, float: 3.14, string: "hello"}
 m.int        // 10
 ```
 
-**Impact:** The `kind` workaround in analyze.ls and render2.ls is no longer necessary but remains harmless.
+**Impact:** The `kind` workaround in analyze.ls and render.ls is no longer necessary but remains harmless.
 
 ### 11.4 `name()` Returns a Symbol, Not a String
 
@@ -1047,7 +1047,7 @@ for (i, v in ["a", "b", "c"]) if (i == 2) "Z" else v
 // ["a", "b", "Z"]
 ```
 
-The original failures were caused by **11.4** (`name()` returning symbols, not strings), which made child-matching logic silently fail and was misattributed to indexed `for`. The recursive `build_tds` workaround in render2.ls has been simplified back to an indexed `for` comprehension.
+The original failures were caused by **11.4** (`name()` returning symbols, not strings), which made child-matching logic silently fail and was misattributed to indexed `for`. The recursive `build_tds` workaround in render.ls has been simplified back to an indexed `for` comprehension.
 
 **Note:** Indexed `for` over elements with only string children does produce unexpected results because Lambda merges adjacent string children into a single text node during element construction. This is element construction behavior, not a `for` bug.
 

@@ -2,6 +2,8 @@
 // \textcolor{color}{text}, \color{color}, \colorbox{color}{text},
 // \fcolorbox{border}{bg}{text}, \definecolor{name}{model}{spec}, \pagecolor{color}
 
+import util: .lambda.package.latex.util
+
 // ============================================================
 // Named color map (LaTeX xcolor standard named colors)
 // ============================================================
@@ -34,17 +36,24 @@ let NAMED_COLORS = {
 // ============================================================
 
 // resolve a color name/spec to a CSS color string
-// custom_colors: map of user-defined colors from \definecolor (may be null)
+// custom_colors: map or entry-list of user-defined colors from \definecolor (may be null)
 pub fn resolve_color(raw, custom_colors) {
     let trimmed = trim(raw)
-    // check custom colors first
-    if (custom_colors != null and custom_colors[trimmed] != null) custom_colors[trimmed]
+    // check custom colors first (supports both map and entry-list formats)
+    let custom_val = lookup_custom_color(custom_colors, trimmed)
+    if (custom_val != null) custom_val
     // check if already a CSS color (#hex)
     else if (len(trimmed) > 0 and slice(trimmed, 0, 1) == "#") trimmed
     // check named colors
     else if (NAMED_COLORS[trimmed] != null) NAMED_COLORS[trimmed]
     // pass through as-is (browser may know the name)
     else trimmed
+}
+
+fn lookup_custom_color(custom_colors, key) {
+    if (custom_colors == null) null
+    else if (custom_colors is array) util.lookup(custom_colors, key)
+    else custom_colors[key]
 }
 
 // parse a \definecolor{name}{model}{spec} and return {name, css_color}
@@ -94,7 +103,7 @@ fn parse_gray(spec) {
 }
 
 // ============================================================
-// Render functions — called from render2.ls dispatcher
+// Render functions — called from render.ls dispatcher
 // ============================================================
 
 // \textcolor{color}{text} → <span style="color:...">text</span>

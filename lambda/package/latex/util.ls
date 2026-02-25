@@ -285,3 +285,20 @@ fn join_skip_brack(el, i, n, acc) {
         }
     }
 }
+
+// ============================================================
+// Entry list lookup (for dynamic key-value stores)
+// ============================================================
+
+// look up a key in an entry list [{key, val}, ...]
+// returns the val of the most recently added matching entry, or null
+pub fn lookup(entries, k) {
+    if (entries == null or len(entries) == 0) { null }
+    else { lookup_rev(entries, k, len(entries) - 1) }
+}
+
+fn lookup_rev(entries, k, i) {
+    if (i < 0) { null }
+    else if (string(entries[i].key) == string(k)) { entries[i].val }
+    else { lookup_rev(entries, k, i - 1) }
+}

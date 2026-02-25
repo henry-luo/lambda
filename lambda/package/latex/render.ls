@@ -10,6 +10,7 @@ import macros: .lambda.package.latex.macros
 import boxes: .lambda.package.latex.elements.boxes
 import font_decl: .lambda.package.latex.elements.font_decl
 import color: .lambda.package.latex.elements.color
+import picture: .lambda.package.latex.elements.picture
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -158,17 +159,19 @@ fn render_element(el, info) {
         case 'lstlisting': render_verbatim_env(el)
         case 'abstract': render_abstract(el, info)
         case 'figure': render_figure(el, info)
+        case 'picture': picture.render_picture(el)
         case 'minipage': render_env_div(el, info, "latex-minipage", null)
         case 'multicols': render_multicols(el, info)
 
         // ---- theorem-like environments ----
-        case 'theorem': render_theorem_env(el, info, "Theorem", "theorem")
-        case 'lemma': render_theorem_env(el, info, "Lemma", "lemma")
-        case 'corollary': render_theorem_env(el, info, "Corollary", "corollary")
-        case 'proposition': render_theorem_env(el, info, "Proposition", "proposition")
-        case 'definition': render_theorem_env(el, info, "Definition", "definition")
-        case 'example': render_theorem_env(el, info, "Example", "example")
-        case 'remark': render_theorem_env(el, info, "Remark", "remark")
+        // check custom \newtheorem defs first (for shared counters, starred variants)
+        case 'theorem': render_theorem_like(el, info, "Theorem", "theorem")
+        case 'lemma': render_theorem_like(el, info, "Lemma", "lemma")
+        case 'corollary': render_theorem_like(el, info, "Corollary", "corollary")
+        case 'proposition': render_theorem_like(el, info, "Proposition", "proposition")
+        case 'definition': render_theorem_like(el, info, "Definition", "definition")
+        case 'example': render_theorem_like(el, info, "Example", "example")
+        case 'remark': render_theorem_like(el, info, "Remark", "remark")
         case 'proof': render_proof_env(el, info)
 
         // ---- boxes ----
@@ -215,6 +218,8 @@ fn render_element(el, info) {
         // ---- cross references ----
         case 'label': render_label(el, info)
         case 'ref': render_ref(el, info)
+        case 'autoref': render_autoref(el, info)
+        case 'nameref': render_nameref(el, info)
         case 'href': render_href(el, info)
         case 'url': render_url(el)
         case 'cite': render_cite(el, info)
@@ -282,10 +287,11 @@ let SKIP_COMMANDS = {
     "newcommand": true, "renewcommand": true, "providecommand": true,
     "setcounter": true, "newcounter": true, "addtocounter": true,
     "stepcounter": true, "comment": true,
-    "picture": true, "put": true, "line": true, "vector": true,
+    // picture sub-commands handled inside picture.render_picture
+    "put": true, "line": true, "vector": true,
     "circle": true, "oval": true, "bezier": true, "qbezier": true,
     "unitlength": true, "linethickness": true, "thinlines": true,
-    "thicklines": true
+    "thicklines": true, "multiput": true, "circle*": true
 }
 
 // Fallback: check skip commands, extended symbol map, then macro, then generic
@@ -311,7 +317,7 @@ fn resolve_extended_or_generic(tag_str, el, info) {
 
 fn render_children(el, from_idx, info) {
     let n = len(el)
-    if from_idx >= n { [] }
+    if (from_idx >= n) { [] }
     else { collect_children(el, from_idx, n, [], info) }
 }
 
@@ -322,12 +328,12 @@ fn render_children_skip_brack(el, info) {
 }
 
 fn collect_children_skip_brack(el, i, n, acc, info) {
-    if i >= n { acc }
+    if (i >= n) { acc }
     else {
         let child = el[i]
-        if (child is element and string(name(child)) == "brack_group")
+        if (child is element and string(name(child)) == "brack_group") {
             collect_children_skip_brack(el, i + 1, n, acc, info)
-        else {
+        } else {
             let rendered = render_node(child, info)
             let new_acc = if (rendered != null) acc ++ [rendered] else acc
             collect_children_skip_brack(el, i + 1, n, new_acc, info)
@@ -336,7 +342,7 @@ fn collect_children_skip_brack(el, i, n, acc, info) {
 }
 
 fn collect_children(el, i, n, acc, info) {
-    if i >= n { acc }
+    if (i >= n) { acc }
     else {
         let child = el[i]
         let rendered = render_node(child, info)
@@ -351,7 +357,7 @@ fn collect_children(el, i, n, acc, info) {
 
 fn render_document(el, info) {
     let doc_body = util.find_child(el, 'document')
-    if doc_body != null { render_body(doc_body, info) }
+    if (doc_body != null) { render_body(doc_body, info) }
     else {
         let items = render_children(el, 0, info)
         <article class: "latex-document latex-" ++ info.docclass;
@@ -372,19 +378,19 @@ fn render_maketitle(info) {
     let author_el = if (info.author != null) <div class: "author"; info.author> else null
     let date_el = if (info.date != null) <div class: "date"; info.date> else null
     <header class: "latex-title";
-        if title_el != null { title_el }
-        if author_el != null { author_el }
-        if date_el != null { date_el }
+        if (title_el != null) { title_el }
+        if (author_el != null) { author_el }
+        if (date_el != null) { date_el }
     >
 }
 
 fn render_toc(info) {
-    if len(info.headings) == 0 { null }
+    if (len(info.headings) == 0) { null }
     else {
         let items = (for (h in info.headings, let cls = "toc-l" ++ string(h.level))
             <li class: cls;
                 <a href: "#" ++ h.id;
-                    if h.number != null { <span class: "sec-num"; h.number> }
+                    if (h.number != null) { <span class: "sec-num"; h.number> }
                     h.text
                 >
             >)
@@ -405,7 +411,7 @@ fn render_heading(el, info, html_level) {
     let title_id = util.slugify(title_text)
 
     // look up pre-computed number
-    let sec_num = info.heading_nums[title_id]
+    let sec_num = util.lookup(info.heading_nums, title_id)
 
     // render title children
     let title_children =
@@ -419,12 +425,12 @@ fn render_heading(el, info, html_level) {
 
 fn build_heading_el(level, id, num_span, children) {
     match level {
-        case 1: <h1 id: id; if num_span != null { num_span } for c in children { c }>
-        case 2: <h2 id: id; if num_span != null { num_span } for c in children { c }>
-        case 3: <h3 id: id; if num_span != null { num_span } for c in children { c }>
-        case 4: <h4 id: id; if num_span != null { num_span } for c in children { c }>
-        case 5: <h5 id: id; if num_span != null { num_span } for c in children { c }>
-        default: <h6 id: id; if num_span != null { num_span } for c in children { c }>
+        case 1: <h1 id: id; if (num_span != null) { num_span } for c in children { c }>
+        case 2: <h2 id: id; if (num_span != null) { num_span } for c in children { c }>
+        case 3: <h3 id: id; if (num_span != null) { num_span } for c in children { c }>
+        case 4: <h4 id: id; if (num_span != null) { num_span } for c in children { c }>
+        case 5: <h5 id: id; if (num_span != null) { num_span } for c in children { c }>
+        default: <h6 id: id; if (num_span != null) { num_span } for c in children { c }>
     }
 }
 
@@ -435,11 +441,11 @@ fn build_heading_el(level, id, num_span, children) {
 fn render_paragraph(el, info) {
     // check for leading font/alignment declaration
     let decl_tag = find_leading_decl(el, 0, len(el))
-    if (decl_tag != null) render_paragraph_with_decl(el, info, decl_tag)
+    if (decl_tag != null) { render_paragraph_with_decl(el, info, decl_tag) }
     else {
         let items = render_children(el, 0, info)
-        if len(items) == 0 { null }
-        else if has_block_child(items) {
+        if (len(items) == 0) { null }
+        else if (has_block_child(items)) {
             let parts = split_around_blocks(items)
             if (len(parts) == 1) parts[0]
             else parts
@@ -450,7 +456,7 @@ fn render_paragraph(el, info) {
 
 fn render_paragraph_with_decl(el, info, decl_tag) {
     let items = render_children(el, 0, info)
-    if (len(items) == 0) null
+    if (len(items) == 0) { null }
     else if (font_decl.is_font_decl(decl_tag)) {
         let style = font_decl.font_decl_style(decl_tag)
         <p style: style; for c in items { c }>
@@ -470,10 +476,10 @@ fn split_around_blocks(items) {
 }
 
 fn split_blocks_rec(items, i, n, current, acc) {
-    if i >= n { flush_inline(current, acc) }
+    if (i >= n) { flush_inline(current, acc) }
     else {
         let item = items[i]
-        if is_block_element(item) {
+        if (is_block_element(item)) {
             let flushed = flush_inline(current, acc)
             split_blocks_rec(items, i + 1, n, [], flushed ++ [item])
         } else {
@@ -561,7 +567,7 @@ fn render_font(el, info, css_class) {
 fn render_size(el, info, cmd_name) {
     let size = sym.get_font_size(cmd_name)
     let items = render_children(el, 0, info)
-    if size != null { <span style: "font-size:" ++ size; for c in items { c }> }
+    if (size != null) { <span style: "font-size:" ++ size; for c in items { c }> }
     else { <span; for c in items { c }> }
 }
 
@@ -605,7 +611,7 @@ fn flatten_paragraphs(node) {
 }
 
 fn flatten_para_rec(node, i, n, acc) {
-    if i >= n { acc }
+    if (i >= n) { acc }
     else {
         let child = node[i]
         if (child is element) {
@@ -623,7 +629,7 @@ fn flatten_inner(el, i, n, acc) {
 }
 
 fn is_item_node(child) {
-    if child is element {
+    if (child is element) {
         if (string(name(child)) == "item") true else false
     } else { false }
 }
@@ -675,8 +681,8 @@ fn split_items_custom_rec(flat, i, n, current, acc, info) {
 // get custom label from \item[label] as a rendered span, or null
 fn get_item_custom_label(item_node) {
     let opt = util.find_child(item_node, 'brack_group')
-    if (opt != null) <span class: "latex-item-label"; util.text_of(opt) ++ " ">
-    else null
+    if (opt != null) { <span class: "latex-item-label"; util.text_of(opt) ++ " "> }
+    else { null }
 }
 
 fn split_desc_items(flat, info) {
@@ -684,8 +690,8 @@ fn split_desc_items(flat, info) {
 }
 
 fn split_desc_rec(flat, i, n, acc, term, content, info) {
-    if i >= n { flush_desc(acc, term, content) }
-    else if is_item_node(flat[i]) {
+    if (i >= n) { flush_desc(acc, term, content) }
+    else if (is_item_node(flat[i])) {
         let flushed = flush_desc(acc, term, content)
         let label_text = get_item_label(flat[i])
         let new_term = if (label_text != null) <dt; label_text> else <dt>
@@ -698,17 +704,17 @@ fn split_desc_rec(flat, i, n, acc, term, content, info) {
 }
 
 fn flush_desc(acc, term, content) {
-    if term != null {
+    if (term != null) {
         let dd = if (len(content) > 0) <dd; for c in content { c }> else <dd>
         acc ++ [term, dd]
-    } else if len(content) > 0 {
+    } else if (len(content) > 0) {
         acc ++ [<dd; for c in content { c }>]
     } else { acc }
 }
 
 fn get_item_label(item_node) {
     let opt = util.find_child(item_node, 'brack_group')
-    if opt != null { util.text_of(opt) }
+    if (opt != null) { util.text_of(opt) }
     else {
         if (len(item_node) > 0) util.text_of(item_node) else null
     }
@@ -764,7 +770,7 @@ fn render_figure(el, info) {
 
     <figure class: "latex-figure";
         for c in items { c }
-        if caption_el != null { caption_el }
+        if (caption_el != null) { caption_el }
     >
 }
 
@@ -806,6 +812,13 @@ fn render_theorem_env(el, info, display_name, env_type) {
         " "
         for c in items { c }
     >
+}
+
+// route theorem-like env through custom defs if available, else default numbered
+fn render_theorem_like(el, info, display_name, env_type) {
+    let thm_def = util.lookup(info.theorem_defs, env_type)
+    if (thm_def != null) render_custom_theorem(el, info, thm_def)
+    else render_theorem_env(el, info, display_name, env_type)
 }
 
 fn render_proof_env(el, info) {
@@ -851,7 +864,7 @@ fn render_table_env(el, info) {
     ) else null
 
     <div class: "latex-table-wrapper";
-        if caption_el != null { caption_el }
+        if (caption_el != null) { caption_el }
         for c in items { c }
     >
 }
@@ -941,7 +954,11 @@ fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) {
 
 fn finalize_rows(current_cells, acc_rows, col_spec) {
     let final_row = make_row(current_cells, col_spec)
-    if (final_row != null) acc_rows ++ [final_row] else acc_rows
+    if (final_row != null) {
+        append_row(acc_rows, final_row)
+    } else {
+        acc_rows
+    }
 }
 
 fn route_child(el, i, n, current_cells, acc_rows, col_spec, info) {
@@ -977,7 +994,10 @@ fn add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed) 
 fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
     let child_name = name(child)
     if (child_name == 'linebreak_command') handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
-    else if (child_name == 'hline') collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+    else if (child_name == 'hline') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-hline")
+    else if (child_name == 'toprule') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-toprule")
+    else if (child_name == 'midrule') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-midrule")
+    else if (child_name == 'bottomrule') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-bottomrule")
     else if (child_name == 'multicolumn') handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else if (child_name == 'multirow') handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
@@ -985,8 +1005,32 @@ fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child
 
 fn handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info) {
     let row = make_row(current_cells, col_spec)
-    let new_rows = if (row != null) acc_rows ++ [row] else acc_rows
-    collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
+    if (row != null) {
+        let new_rows = append_row(acc_rows, row)
+        collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
+    } else {
+        collect_rows(el, i + 1, n, [], acc_rows, col_spec, info)
+    }
+}
+
+fn append_row(rows, row) {
+    let wrapped = [row]
+    rows ++ wrapped
+}
+
+// handle \hline, \toprule, \midrule, \bottomrule — apply border to previous/next row
+fn handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, css_class) {
+    // flush current cells if any, then add rule row
+    let row = make_row(current_cells, col_spec)
+    let rule_row = <tr class: css_class>
+    if (row != null) {
+        let flushed = append_row(acc_rows, row)
+        let new_rows = append_row(flushed, rule_row)
+        collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
+    } else {
+        let new_rows = append_row(acc_rows, rule_row)
+        collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
+    }
 }
 
 fn handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
@@ -1065,15 +1109,15 @@ fn cell_to_td_aligned(c, align) {
 }
 
 fn cell_to_td_plain(c) {
-    if c is array { <td; for item in c { item }> }
-    else if c != null { <td; c> }
+    if (c is array) { <td; for item in c { item }> }
+    else if (c != null) { <td; c> }
     else { <td> }
 }
 
 fn cell_to_td_styled(c, align) {
     let style = "text-align: " ++ align
-    if c is array { <td style: style; for item in c { item }> }
-    else if c != null { <td style: style; c> }
+    if (c is array) { <td style: style; for item in c { item }> }
+    else if (c != null) { <td style: style; c> }
     else { <td style: style> }
 }
 
@@ -1175,7 +1219,7 @@ fn render_label(el, info) {
 
 fn render_ref(el, info) {
     let ref_name = trim(util.text_of(el))
-    let label_info = info.labels[ref_name]
+    let label_info = util.lookup(info.labels, ref_name)
     if (label_info != null) {
         <a class: "latex-ref", href: "#" ++ label_info.id;
             label_info.number
@@ -1185,6 +1229,60 @@ fn render_ref(el, info) {
             "??"
         >
     }
+}
+
+fn render_autoref(el, info) {
+    let ref_name = trim(util.text_of(el))
+    let label_info = util.lookup(info.labels, ref_name)
+    if (label_info != null) {
+        let prefix = autoref_prefix(label_info.type)
+        let display = prefix ++ label_info.number
+        <a class: "latex-ref latex-autoref", href: "#" ++ label_info.id;
+            display
+        >
+    } else {
+        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name);
+            "??"
+        >
+    }
+}
+
+fn autoref_prefix(label_type) {
+    if (label_type == "section") { "Section\u00A0" }
+    else if (label_type == "subsection") { "Section\u00A0" }
+    else if (label_type == "subsubsection") { "Section\u00A0" }
+    else if (label_type == "chapter") { "Chapter\u00A0" }
+    else if (label_type == "part") { "Part\u00A0" }
+    else if (label_type == "figure") { "Figure\u00A0" }
+    else if (label_type == "table") { "Table\u00A0" }
+    else if (label_type == "equation") { "Equation\u00A0" }
+    else if (label_type == "theorem") { "Theorem\u00A0" }
+    else if (label_type == "lemma") { "Lemma\u00A0" }
+    else if (label_type == "corollary") { "Corollary\u00A0" }
+    else if (label_type == "definition") { "Definition\u00A0" }
+    else { label_type ++ "\u00A0" }
+}
+
+fn render_nameref(el, info) {
+    let ref_name = trim(util.text_of(el))
+    let label_info = util.lookup(info.labels, ref_name)
+    if (label_info != null) {
+        let title_val = label_info.title
+        let display = get_nameref_display(title_val, label_info.number)
+        <a class: "latex-ref latex-nameref", href: "#" ++ label_info.id;
+            display
+        >
+    } else {
+        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name);
+            "??"
+        >
+    }
+}
+
+fn get_nameref_display(title_val, number_val) {
+    if (title_val != null and title_val is string and len(title_val) > 0) title_val
+    else if (number_val != null) string(number_val)
+    else "??"
 }
 
 fn render_href(el, info) {
@@ -1371,7 +1469,7 @@ fn render_control_symbol(el) {
 fn render_group(el, info) {
     // check for leading font/alignment declaration in this group
     let decl_tag = find_leading_decl(el, 0, len(el))
-    if (decl_tag != null) render_group_with_decl(el, info, decl_tag)
+    if (decl_tag != null) { render_group_with_decl(el, info, decl_tag) }
     else {
         let items = render_children(el, 0, info)
         if (len(items) == 0) null
@@ -1382,19 +1480,19 @@ fn render_group(el, info) {
 
 // find the first font/alignment/color declaration tag among children (skipping whitespace)
 fn find_leading_decl(el, i, n) {
-    if i >= n { null }
+    if (i >= n) { null }
     else {
         let child = el[i]
-        if (child is string and len(trim(child)) == 0)
+        if (child is string and len(trim(child)) == 0) {
             find_leading_decl(el, i + 1, n)
-        else if (child is element) {
+        } else if (child is element) {
             let tag_str = string(name(child))
             if (font_decl.is_font_decl(tag_str)) tag_str
             else if (font_decl.is_align_decl(tag_str)) tag_str
             else if (color.is_color_decl(tag_str)) tag_str
             else null
         }
-        else null
+        else { null }
     }
 }
 
@@ -1416,7 +1514,7 @@ fn find_decl_el(el, tag_str) {
 }
 
 fn find_decl_el_rec(el, i, n, tag_str) {
-    if (i >= n) el
+    if (i >= n) { el }
     else {
         let child = el[i]
         if (child is element and string(name(child)) == tag_str) child
@@ -1443,29 +1541,27 @@ fn render_includegraphics(el) {
 }
 
 fn build_img_style(opts) {
-    let parts = []
+    let parts0 = []
     // width
-    let parts = if (opts.width != null) { parts ++ ["width:" ++ opts.width] } else parts
+    let parts1 = if (opts.width != null) { parts0 ++ ["width:" ++ opts.width] } else parts0
     // height
-    let parts = if (opts.height != null) { parts ++ ["height:" ++ opts.height] } else parts
+    let parts2 = if (opts.height != null) { parts1 ++ ["height:" ++ opts.height] } else parts1
     // keepaspectratio (only meaningful with width or height)
-    let parts = if (opts.keepaspectratio != null) { parts ++ ["object-fit:contain"] } else parts
+    let parts3 = if (opts.keepaspectratio != null) { parts2 ++ ["object-fit:contain"] } else parts2
     // build transform: may combine scale and angle
-    let transforms = []
-    let transforms = if (opts.scale != null) { transforms ++ ["scale(" ++ opts.scale ++ ")"] } else transforms
-    let transforms = if (opts.angle != null) { transforms ++ ["rotate(" ++ opts.angle ++ "deg)"] } else transforms
-    let parts = if (len(transforms) > 0) { parts ++ ["transform:" ++ str_join(transforms, " ")] } else parts
+    let tx0 = []
+    let tx1 = if (opts.scale != null) { tx0 ++ ["scale(" ++ opts.scale ++ ")"] } else tx0
+    let tx2 = if (opts.angle != null) { tx1 ++ ["rotate(" ++ opts.angle ++ "deg)"] } else tx1
+    let parts4 = if (len(tx2) > 0) { parts3 ++ ["transform:" ++ str_join(tx2, " ")] } else parts3
     // trim + clip → clip-path:inset(top right bottom left)
     // LaTeX trim order: left bottom right top
-    let parts = if (opts.trim != null and opts.clip != null) {
-        let vals = split(trim(opts.trim), null)
-        if (len(vals) == 4) {
-            // LaTeX: trim=left bottom right top → CSS: inset(top right bottom left)
-            parts ++ ["clip-path:inset(" ++ vals[3] ++ " " ++ vals[2] ++ " " ++ vals[1] ++ " " ++ vals[0] ++ ")"]
-        } else parts
-    } else parts
+    let trim_vals = if (opts.trim != null) split(trim(opts.trim), null) else []
+    let parts5 = if (opts.trim != null and opts.clip != null and len(trim_vals) == 4) {
+        // LaTeX: trim=left bottom right top → CSS: inset(top right bottom left)
+        parts4 ++ ["clip-path:inset(" ++ trim_vals[3] ++ " " ++ trim_vals[2] ++ " " ++ trim_vals[1] ++ " " ++ trim_vals[0] ++ ")"]
+    } else parts4
 
-    str_join(parts, ";")
+    str_join(parts5, ";")
 }
 
 fn render_marginpar(el, info) {
@@ -1477,16 +1573,68 @@ fn render_generic(el, info) {
     // check if this element is a macro invocation
     let tag_str = string(name(el))
     let macro_def = if (info.macros != null) macros.find_macro(info.macros, tag_str) else null
-    if (macro_def != null) render_macro_invocation(el, info, macro_def)
-    else render_generic_default(el, info)
+    if (macro_def != null) { render_macro_invocation(el, info, macro_def) }
+    else {
+        // check if this is a custom theorem environment
+        let thm_def = util.lookup(info.theorem_defs, tag_str)
+        if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
+        else { render_generic_default(el, info) }
+    }
+}
+
+fn render_custom_theorem(el, info, thm_def) {
+    let items = render_children(el, 0, info)
+    let display_name = thm_def.label
+    let env_type = thm_def.env_name
+    if (thm_def.numbered) {
+        // look up counter from theorems list
+        let env_num = get_theorem_num(el, info, env_type)
+        let heading = display_name ++ " " ++ string(env_num) ++ "."
+        <div class: "latex-theorem latex-" ++ env_type;
+            <strong class: "latex-theorem-head"; heading>
+            " "
+            for c in items { c }
+        >
+    } else {
+        // unnumbered variant
+        <div class: "latex-theorem latex-" ++ env_type;
+            <strong class: "latex-theorem-head"; display_name ++ ".">
+            " "
+            for c in items { c }
+        >
+    }
 }
 
 fn render_macro_invocation(el, info, macro_def) {
-    let body_items = macros.substitute_body(macro_def.body, el)
+    let args = build_macro_args(el, macro_def)
+    let body_items = macros.substitute_body(macro_def.body, args)
     let rendered = render_items(body_items, 0, len(body_items), info, [])
     if (len(rendered) == 0) null
     else if (len(rendered) == 1) rendered[0]
     else <span; for c in rendered { c }>
+}
+
+fn build_macro_args(el, macro_def) {
+    if (macro_def.default_arg == null) { el }
+    else if (has_optional_arg(el)) { el }
+    else { prepend_default(el, macro_def.default_arg) }
+}
+
+fn has_optional_arg(el) {
+    if (len(el) > 0) {
+        let first = el[0]
+        (first is element and string(name(first)) == "brack_group")
+    }
+    else { false }
+}
+
+fn prepend_default(el, default_val) {
+    [default_val] ++ collect_el_children(el, 0, len(el), [])
+}
+
+fn collect_el_children(el, i, n, acc) {
+    if (i >= n) { acc }
+    else { collect_el_children(el, i + 1, n, acc ++ [el[i]]) }
 }
 
 fn render_items(items, i, n, info, acc) {
@@ -1501,7 +1649,7 @@ fn render_items(items, i, n, info, acc) {
 
 fn render_generic_default(el, info) {
     let n = len(el)
-    if n == 0 { null }
+    if (n == 0) { null }
     else {
         let items = render_children(el, 0, info)
         if (len(items) == 0) null

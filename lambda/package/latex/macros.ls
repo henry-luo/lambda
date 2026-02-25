@@ -4,7 +4,7 @@
 //   <newcommand; "\\name", <brack_group; "N">, <curly_group; ...body...>>
 // Macro invocations like \name{arg} become elements:
 //   <name; "arg">
-// Expansion happens at render time via render2.ls to avoid tree-rebuilding.
+// Expansion happens at render time via render.ls to avoid tree-rebuilding.
 
 import util: .lambda.package.latex.util
 
@@ -70,14 +70,21 @@ fn extract_newcommand(nc_el, nc_n) {
     // first child is the command name string (e.g. "\\greeting")
     let raw_name = get_cmd_name(nc_el[0])
     let cmd_name = strip_backslash(raw_name)
-    // find param count and body
+    // find param count, optional default, and body
     let pb = find_param_and_body(nc_el, 1, nc_n)
-    if (pb.body != null) make_def(cmd_name, pb.params, pb.body)
-    else null
+    if (pb.body != null and pb.default_arg != null) {
+        make_def_with_default(cmd_name, pb.params, pb.body, pb.default_arg)
+    }
+    else if (pb.body != null) { make_def(cmd_name, pb.params, pb.body) }
+    else { null }
 }
 
 fn make_def(cmd_name, params, body) {
-    {name: cmd_name, params: params, body: body}
+    {name: cmd_name, params: params, body: body, default_arg: null}
+}
+
+fn make_def_with_default(cmd_name, params, body, default_arg) {
+    {name: cmd_name, params: params, body: body, default_arg: default_arg}
 }
 
 fn get_cmd_name(node) {
@@ -99,29 +106,52 @@ fn find_param_and_body(nc_el, j, nc_n) {
 
 fn check_param_or_body(nc_el, j, nc_n) {
     let child = nc_el[j]
-    if (child is element and string(name(child)) == "brack_group") find_body_after_params(nc_el, j, nc_n)
+    if (child is element and string(name(child)) == "brack_group") find_default_or_body_after_params(nc_el, j, nc_n)
     else if (child is element and string(name(child)) == "curly_group") make_pb(0, child)
     else find_param_and_body(nc_el, j + 1, nc_n)
 }
 
-fn find_body_after_params(nc_el, j, nc_n) {
+fn find_default_or_body_after_params(nc_el, j, nc_n) {
     let param_text = util.text_of(nc_el[j])
     let param_count = int(trim(param_text))
-    let pc = if (param_count != null) param_count else 0
-    find_body(nc_el, j + 1, nc_n, pc)
+    let pc = if (param_count != null) { param_count } else { 0 }
+    // look for optional default [value] or body {curly_group} after param count
+    find_default_or_body(nc_el, j + 1, nc_n, pc)
 }
 
-fn find_body(nc_el, j, nc_n, pc) {
+fn find_default_or_body(nc_el, j, nc_n, pc) {
     if (j >= nc_n) { make_pb(pc, null) }
     else {
         let child = nc_el[j]
-        if (child is element and string(name(child)) == "curly_group") { make_pb(pc, child) }
-        else { find_body(nc_el, j + 1, nc_n, pc) }
+        if (child is element and string(name(child)) == "brack_group") {
+            // this is the default value for the optional argument
+            let default_text = util.text_of(child)
+            find_body_with_default(nc_el, j + 1, nc_n, pc, default_text)
+        }
+        else if (child is element and string(name(child)) == "curly_group") {
+            make_pb(pc, child)
+        }
+        else { find_default_or_body(nc_el, j + 1, nc_n, pc) }
+    }
+}
+
+fn find_body_with_default(nc_el, j, nc_n, pc, default_text) {
+    if (j >= nc_n) { make_pb_with_default(pc, null, default_text) }
+    else {
+        let child = nc_el[j]
+        if (child is element and string(name(child)) == "curly_group") {
+            make_pb_with_default(pc, child, default_text)
+        }
+        else { find_body_with_default(nc_el, j + 1, nc_n, pc, default_text) }
     }
 }
 
 fn make_pb(params, body) {
-    {params: params, body: body}
+    {params: params, body: body, default_arg: null}
+}
+
+fn make_pb_with_default(params, body, default_text) {
+    {params: params, body: body, default_arg: default_text}
 }
 
 // ============================================================
