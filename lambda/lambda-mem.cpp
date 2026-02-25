@@ -2,17 +2,69 @@
 #include "../lib/log.h"
 #include "../lib/gc_heap.h"
 #include "lambda-decimal.hpp"
+#include "lambda-stack.h"
 #include <mpdecimal.h>
 
 extern __thread EvalContext* context;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 
+// VMap GC bridge functions (defined in vmap.cpp)
+extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
+extern "C" void vmap_gc_destroy(void* data);
+
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)calloc(1, sizeof(Heap));
     context->heap->gc = gc_heap_create();
     context->heap->pool = context->heap->gc->pool;  // alias for compatibility
+
+    // register context->result as a GC root slot
+    gc_register_root(context->heap->gc, &context->result.item);
+
+    // set the auto-collection callback so GC triggers when data zone fills up
+    gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+
+    // register VMap tracing/finalization callbacks
+    context->heap->gc->vmap_trace = vmap_gc_trace;
+    context->heap->gc->vmap_destroy = vmap_gc_destroy;
+}
+
+// trigger a GC collection from the runtime.
+// gathers roots (registered slots + stack scan) and runs the collector.
+extern "C" void heap_gc_collect(void) {
+    if (!context || !context->heap || !context->heap->gc) return;
+    gc_heap_t* gc = context->heap->gc;
+
+    // get stack bounds for conservative scanning
+    uintptr_t stack_base = _lambda_stack_base;
+    uintptr_t stack_current;
+#if defined(__aarch64__)
+    __asm__ volatile("mov %0, sp" : "=r"(stack_current));
+#elif defined(__x86_64__)
+    __asm__ volatile("movq %%rsp, %0" : "=r"(stack_current));
+#else
+    // fallback: use address of a local variable
+    volatile int marker;
+    stack_current = (uintptr_t)&marker;
+#endif
+
+    log_debug("heap_gc_collect: stack_base=%p stack_current=%p",
+              (void*)stack_base, (void*)stack_current);
+
+    gc_collect(gc, NULL, 0, stack_base, stack_current);
+}
+
+// register an external root slot (e.g., BSS global address)
+extern "C" void heap_register_gc_root(uint64_t* slot) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return;
+    gc_register_root(context->heap->gc, slot);
+}
+
+// unregister an external root slot
+extern "C" void heap_unregister_gc_root(uint64_t* slot) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return;
+    gc_unregister_root(context->heap->gc, slot);
 }
 
 void* heap_alloc(int size, TypeId type_id) {
@@ -31,10 +83,29 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     void* ptr = gc_heap_calloc(gc, size, type_id);
     if (!ptr) return NULL;
     // mark containers as heap-owned so free_container can distinguish from arena-owned
-    // Note: Function has different layout (arity at offset 1 instead of flags), skip it
-    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC) {
+    // Note: Function and Type have different byte-1 layout (not Container flags), skip them
+    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
         ((Container*)ptr)->is_heap = 1;
     }
+    return ptr;
+}
+
+// allocate variable-size data (items[], data buffers) from the GC data zone
+// these are bump-allocated, not individually freeable — reclaimed at GC
+extern "C" void* heap_data_alloc(size_t size) {
+    gc_heap_t *gc = context->heap->gc;
+    void* ptr = gc_data_alloc(gc, size);
+    if (!ptr) {
+        log_error("heap_data_alloc: failed to allocate %zu bytes from data zone", size);
+        return NULL;
+    }
+    return ptr;
+}
+
+// allocate zeroed variable-size data from the GC data zone
+extern "C" void* heap_data_calloc(size_t size) {
+    void* ptr = heap_data_alloc(size);
+    if (ptr) memset(ptr, 0, size);
     return ptr;
 }
 
@@ -160,8 +231,9 @@ void heap_destroy() {
 }
 
 // finalize all GC-managed objects before pool_destroy.
-// walks all_objects and frees non-pool sub-allocations for each object.
-// does NOT free the objects themselves — pool_destroy handles that.
+// walks all_objects and frees external sub-allocations (not zone-managed).
+// items[], data buffers, closure_env are in the data zone — no free needed.
+// Only external resources (mpd_t, VMap backing HashMap) need explicit cleanup.
 static void gc_finalize_all_objects(gc_heap_t *gc) {
     gc_header_t *current = gc->all_objects;
     while (current) {
@@ -172,51 +244,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         void *obj = (void*)(current + 1);
         uint16_t tag = current->type_tag;
 
-        if (tag == LMD_TYPE_LIST || tag == LMD_TYPE_ARRAY) {
-            List *list = (List*)obj;
-            if (list->items && list->items != (Item*)(list + 1)) {
-                free(list->items);
-                list->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_ARRAY_INT) {
-            ArrayInt *arr = (ArrayInt*)obj;
-            if (arr->items && (void*)arr->items != (void*)(arr + 1)) {
-                free(arr->items);
-                arr->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_ARRAY_INT64) {
-            ArrayInt64 *arr = (ArrayInt64*)obj;
-            if (arr->items && (void*)arr->items != (void*)(arr + 1)) {
-                free(arr->items);
-                arr->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_ARRAY_FLOAT) {
-            ArrayFloat *arr = (ArrayFloat*)obj;
-            if (arr->items && (void*)arr->items != (void*)(arr + 1)) {
-                free(arr->items);
-                arr->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_MAP) {
-            Map *map = (Map*)obj;
-            if (map->data) { free(map->data); map->data = NULL; }
-        }
-        else if (tag == LMD_TYPE_ELEMENT) {
-            Element *elmt = (Element*)obj;
-            if (elmt->data) { free(elmt->data); elmt->data = NULL; }
-            if (elmt->items && elmt->items != (Item*)(elmt + 1)) {
-                free(elmt->items);
-                elmt->items = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_OBJECT) {
-            Object *obj_s = (Object*)obj;
-            if (obj_s->data) { free(obj_s->data); obj_s->data = NULL; }
-        }
-        else if (tag == LMD_TYPE_VMAP) {
+        if (tag == LMD_TYPE_VMAP) {
             VMap *vm = (VMap*)obj;
             if (vm->vtable && vm->data) {
                 vm->vtable->destroy(vm->data);
@@ -230,13 +258,8 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
                 dec->dec_val = NULL;
             }
         }
-        else if (tag == LMD_TYPE_FUNC) {
-            Function *fn = (Function*)obj;
-            if (fn->closure_env) {
-                free(fn->closure_env);
-                fn->closure_env = NULL;
-            }
-        }
+        // All other types: items[], data, closure_env are zone-managed (data zone or object zone)
+        // and will be bulk-freed by zone/pool destruction. No individual free needed.
         current = current->next;
     }
 }

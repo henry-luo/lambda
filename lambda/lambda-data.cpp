@@ -4,6 +4,13 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 
+// data zone allocation helper (defined in lambda-mem.cpp)
+// weak fallback uses malloc — overridden by real GC implementation when linked
+__attribute__((weak))
+extern "C" void* heap_data_alloc(size_t size) {
+    return malloc(size);
+}
+
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_UNDEFINED = {.type_id = LMD_TYPE_UNDEFINED};  // JavaScript undefined
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
@@ -316,18 +323,32 @@ void expand_list(List *list, Arena* arena = nullptr) {
 
     // Determine which allocator to use
     Item* old_items = list->items;
-    bool use_arena = (arena != nullptr && old_items != nullptr && arena_owns(arena, old_items));
+    bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
 
     if (use_arena) {
-        // Use arena realloc for arena-allocated buffers (MarkBuilder path)
-        list->items = (Item*)arena_realloc(arena, list->items,
-                                           (list->capacity/2) * sizeof(Item),
-                                           list->capacity * sizeof(Item));
-        log_debug("arena_realloc used for list expansion");
+        // Use arena alloc/realloc for arena-allocated buffers (MarkBuilder/Input path)
+        if (old_items == nullptr) {
+            // First allocation — use arena_alloc
+            list->items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
+        } else {
+            // Realloc existing arena buffer
+            list->items = (Item*)arena_realloc(arena, list->items,
+                                               (list->capacity/2) * sizeof(Item),
+                                               list->capacity * sizeof(Item));
+        }
+        log_debug("arena alloc used for list expansion");
     } else {
-        // Use C heap realloc for pool-allocated/runtime containers
-        list->items = (Item*)realloc(list->items, list->capacity * sizeof(Item));
-        log_debug("C heap realloc used for list expansion");
+        // Use data zone allocation for GC-managed runtime containers.
+        // Allocate new buffer; old buffer is abandoned in the data zone
+        // and will be reclaimed on next GC compaction/reset.
+        size_t old_size = (list->capacity/2) * sizeof(Item);
+        size_t new_size = list->capacity * sizeof(Item);
+        Item* new_items = (Item*)heap_data_alloc(new_size);
+        if (old_items && old_size > 0) {
+            memcpy(new_items, old_items, old_size);
+        }
+        list->items = new_items;
+        log_debug("data zone alloc used for list expansion");
     }
 
     // copy extra items to the end of the list

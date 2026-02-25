@@ -1,8 +1,8 @@
 # Proposal: Garbage Collector for Lambda Runtime
 
-## Status: Phases 1–4 Complete (In Progress)
-## Date: 2025-02-24
-## Last Updated: 2026-02-24
+Status: Phases 1–4 Complete (In Progress)
+Date: 2026-02-24
+Last Updated: 2026-02-24
 
 ---
 

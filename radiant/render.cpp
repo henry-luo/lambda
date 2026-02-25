@@ -4,7 +4,6 @@
 #include "render_background.hpp"
 #include "render_filter.hpp"
 #include "render_svg_inline.hpp"
-#include "render_texnode.hpp"
 #include "transform.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
@@ -1788,11 +1787,6 @@ void render_children(RenderContext* rdcon, View* view) {
             // List marker (bullet/number) with fixed width and vector graphics
             ViewSpan* marker = (ViewSpan*)view;
             render_marker_view(rdcon, marker);
-        }
-        else if (view->view_type == RDT_VIEW_TEXNODE) {
-            // TexNode view - renders TexNode trees directly (unified TeX pipeline)
-            DomElement* elem = static_cast<DomElement*>(view);
-            radiant::render_texnode_element(rdcon, elem);
         }
         else {
             log_debug("unknown view in rendering: %d", view->view_type);
