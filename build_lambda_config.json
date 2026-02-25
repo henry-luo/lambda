@@ -1065,6 +1065,20 @@
                         "icon": "\ud83d\udcdd"
                     },
                     {
+                        "source": "test_gc_heap_gtest.cpp",
+                        "name": "GC Heap Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_gc_heap_gtest.exe",
+                        "icon": "\u267b\ufe0f"
+                    },
+                    {
                         "source": "test_stringbuf_gtest.cpp",
                         "name": "StringBuf Tests",
                         "dependencies": [

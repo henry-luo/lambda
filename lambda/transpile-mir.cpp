@@ -34,6 +34,7 @@ void resolve_sys_paths_recursive(Item item);
 // Forward declare import resolver from mir.c
 extern "C" {
     void *import_resolver(const char *name);
+    void register_bss_gc_roots(void* mir_ctx);
 }
 
 // ============================================================================
@@ -6498,6 +6499,9 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         runner_setup_context(&runner);
         runner.context.run_main = run_main;
 
+        // Register BSS global variables as GC roots (after context/heap is created)
+        register_bss_gc_roots((void*)ctx);
+
         import_child = ast_script->child;
         while (import_child) {
             if (import_child->node_type == AST_NODE_IMPORT) {
@@ -6569,6 +6573,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     }
 
     // Execute (no imports — use standard path)
+    runner.script->jit_context = ctx;  // store for BSS root registration
     Input* output = execute_script_and_create_output(&runner, run_main);
 
     // Cleanup MIR context
