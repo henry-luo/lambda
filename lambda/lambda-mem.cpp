@@ -2,6 +2,7 @@
 #include "../lib/log.h"
 #include "../lib/gc_heap.h"
 #include "lambda-decimal.hpp"
+#include "lambda-stack.h"
 #include <mpdecimal.h>
 
 extern __thread EvalContext* context;
@@ -13,6 +14,49 @@ void heap_init() {
     context->heap = (Heap*)calloc(1, sizeof(Heap));
     context->heap->gc = gc_heap_create();
     context->heap->pool = context->heap->gc->pool;  // alias for compatibility
+
+    // register context->result as a GC root slot
+    gc_register_root(context->heap->gc, &context->result.item);
+
+    // set the auto-collection callback so GC triggers when data zone fills up
+    gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+}
+
+// trigger a GC collection from the runtime.
+// gathers roots (registered slots + stack scan) and runs the collector.
+extern "C" void heap_gc_collect(void) {
+    if (!context || !context->heap || !context->heap->gc) return;
+    gc_heap_t* gc = context->heap->gc;
+
+    // get stack bounds for conservative scanning
+    uintptr_t stack_base = _lambda_stack_base;
+    uintptr_t stack_current;
+#if defined(__aarch64__)
+    __asm__ volatile("mov %0, sp" : "=r"(stack_current));
+#elif defined(__x86_64__)
+    __asm__ volatile("movq %%rsp, %0" : "=r"(stack_current));
+#else
+    // fallback: use address of a local variable
+    volatile int marker;
+    stack_current = (uintptr_t)&marker;
+#endif
+
+    log_debug("heap_gc_collect: stack_base=%p stack_current=%p",
+              (void*)stack_base, (void*)stack_current);
+
+    gc_collect(gc, NULL, 0, stack_base, stack_current);
+}
+
+// register an external root slot (e.g., BSS global address)
+extern "C" void heap_register_gc_root(uint64_t* slot) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return;
+    gc_register_root(context->heap->gc, slot);
+}
+
+// unregister an external root slot
+extern "C" void heap_unregister_gc_root(uint64_t* slot) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return;
+    gc_unregister_root(context->heap->gc, slot);
 }
 
 void* heap_alloc(int size, TypeId type_id) {
