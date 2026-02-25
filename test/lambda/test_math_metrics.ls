@@ -42,9 +42,9 @@ import met: .lambda.package.math.metrics
 "26. at 1:"; met.at(met.quad, 1)
 "27. at 2:"; met.at(met.quad, 2)
 
-// ---- FONT_SCALE ----
-"28. font scale 5:"; met.FONT_SCALE[5]
-"29. font scale 1:"; met.FONT_SCALE[1]
+// ---- FONT_SCALE (use at() accessor to avoid cross-module array indexing issue) ----
+"28. font scale 5:"; met.at(met.FONT_SCALE, 5)
+"29. font scale 1:"; met.at(met.FONT_SCALE, 1)
 "30. DEFAULT_FONT_SIZE:"; met.DEFAULT_FONT_SIZE
 
 "===== ALL METRICS TESTS DONE ====="

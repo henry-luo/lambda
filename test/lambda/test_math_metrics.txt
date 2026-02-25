@@ -52,6 +52,10 @@
 1.171
 "27. at 2:"
 1.472
-"28. font scale 5:29. font scale 1:30. DEFAULT_FONT_SIZE:"
+"28. font scale 5:"
+1
+"29. font scale 1:"
+0.5
+"30. DEFAULT_FONT_SIZE:"
 5
 "===== ALL METRICS TESTS DONE ====="
