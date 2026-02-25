@@ -478,7 +478,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 
     // Check if container has explicit height from CSS OR was sized by a parent flex/grid layout
     bool has_explicit_height = false;
-    if (flex_container->blk && flex_container->blk->given_height > 0) {
+    if (flex_container->blk && flex_container->blk->given_height >= 0) {
         has_explicit_height = true;
     }
     // Also check if this container is a flex item whose height was set by parent flex
@@ -486,16 +486,53 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // Only check if this element is actually a flex item (has fi or is a form control in flex)
     bool is_flex_item = flex_container->fi != nullptr ||
                         (flex_container->item_prop_type == DomElement::ITEM_PROP_FORM && flex_container->form);
-    if (is_flex_item && flex_container->height > 0) {
-        // Check if parent set the height via flex sizing
-        // If this element is a flex item with flex-grow/shrink and has a non-content height,
-        // it was sized by the parent flex container
-        float fg = get_item_flex_grow(flex_container);
-        float fs = get_item_flex_shrink(flex_container);
-        if (fg > 0 || fs > 0) {
-            // The parent flex layout sized this element, don't override
+    // Check if parent is actually a flex container using display property
+    // (embed->flex may not be allocated if parent has no explicit flex CSS properties)
+    bool parent_is_flex = false;
+    DomElement* parent_elem = flex_container->parent ? flex_container->parent->as_element() : nullptr;
+    {
+        parent_is_flex = parent_elem && (parent_elem->display.inner == CSS_VALUE_FLEX);
+    }
+    if (is_flex_item && parent_is_flex && flex_container->height > 0 && flex_container->fi) {
+        // Determine parent flex direction to know what stretch affects
+        int parent_dir = DIR_ROW;  // default
+        {
+            ViewBlock* pb = parent_elem ? (ViewBlock*)(ViewElement*)parent_elem : nullptr;
+            if (pb && pb->embed && pb->embed->flex) {
+                parent_dir = pb->embed->flex->direction;
+            }
+        }
+        bool parent_is_row = (parent_dir == DIR_ROW || parent_dir == DIR_ROW_REVERSE);
+        // Check if parent flex actually set this item's height:
+        // Case 1: Parent flex grew/shrank this item on its main axis and that produced the height
+        if (flex_container->fi->main_size_from_flex) {
             has_explicit_height = true;
-            log_debug("AUTO-HEIGHT: container is a flex item with height set by parent flex");
+            log_debug("AUTO-HEIGHT: container height set by parent flex (main_size_from_flex=1)");
+        }
+        // Case 2: Parent is ROW flex and stretched this item on cross axis (cross=height)
+        // NOTE: Only row parent's stretch affects height. Column parent's stretch affects width.
+        else if (parent_is_row) {
+            int effective_align = flex_container->fi->align_self;
+            if (effective_align == ALIGN_AUTO) {
+                ViewBlock* pb = parent_elem ? (ViewBlock*)(ViewElement*)parent_elem : nullptr;
+                if (pb && pb->embed && pb->embed->flex) {
+                    effective_align = pb->embed->flex->align_items;
+                } else {
+                    effective_align = ALIGN_STRETCH;  // CSS default for align-items
+                }
+            }
+            if (effective_align == ALIGN_STRETCH) {
+                has_explicit_height = true;
+                log_debug("AUTO-HEIGHT: container height set by parent row flex (align-items:stretch)");
+            }
+        }
+        // Case 3: Parent is COLUMN flex and item has explicit flex-basis (not auto)
+        // In column flex, height IS the main axis. An explicit flex-basis means the
+        // height was definitively determined by flex, not by content.
+        else if (!parent_is_row && flex_container->fi->flex_basis >= 0) {
+            has_explicit_height = true;
+            log_debug("AUTO-HEIGHT: container height set by parent column flex (explicit flex-basis=%.1f)",
+                      flex_container->fi->flex_basis);
         }
     }
     // Check if this container is a grid item whose height was set by parent grid
@@ -999,12 +1036,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             // Keep this low since each HTTP download can take seconds
             extern __thread int iframe_depth;
             const int MAX_IFRAME_DEPTH = 3;
-            
+
             if (iframe_depth >= MAX_IFRAME_DEPTH) {
                 log_warn("flex iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
                 return;
             }
-            
+
             log_debug(">>> FLEX ITEM IFRAME: loading embedded document for %s (flex size=%.1fx%.1f, depth=%d)",
                       flex_item->node_name(), flex_item->width, flex_item->height, iframe_depth);
 
@@ -1017,10 +1054,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 const char *src_value = flex_item->get_attribute("src");
                 if (src_value) {
                     log_debug(">>> FLEX ITEM IFRAME: loading src=%s (iframe viewport=%.0fx%.0f)", src_value, flex_width, flex_height);
-                    
+
                     // Increment depth before loading
                     iframe_depth++;
-                    
+
                     // Use iframe's actual dimensions as viewport, not window dimensions
                     // This ensures the embedded document layouts to fit within the iframe
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
@@ -1172,8 +1209,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (parent_flex && !is_main_axis_horizontal(parent_flex)) {
         // Column flex: main axis is height
         // Only update if no explicit height and content is larger than current height
-        bool has_explicit_height = (flex_item->blk && flex_item->blk->given_height > 0);
-        // Skip height adjustment for replaced elements (iframe, img) that use scrolling
+        bool has_explicit_height = (flex_item->blk && flex_item->blk->given_height >= 0);
         // Their dimensions should be constrained by the flex algorithm
         bool is_replaced = (flex_item->display.inner == RDT_DISPLAY_REPLACED);
         if (!has_explicit_height && !is_replaced && flex_item->content_height > 0) {
@@ -1635,7 +1671,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // Update container height if needed (for auto-height containers)
         if (y_shift > 0.5f) {
             // Check if container has explicit height from CSS
-            bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height > 0);
+            bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height >= 0);
 
             // CRITICAL FIX: Also check if this container is a flex item whose height was
             // set by parent flex sizing. This prevents growing containers that were
@@ -1669,7 +1705,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // BUT: Do NOT expand if this container is a flex item that was sized by parent's
     // column flex layout (i.e., has flex-grow > 0 and parent is column flex).
     if (flex && is_main_axis_horizontal(flex)) {
-        bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height > 0);
+        bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height >= 0);
 
         // Also check if this element is a flex item that was sized by parent flex layout
         // If it has flex-grow > 0 and is in a column flex container, its height is constrained
@@ -1732,7 +1768,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                             ViewElement* fi = (ViewElement*)stretch_item;
 
                             // Check if item should stretch (no explicit height and align-self: stretch)
-                            bool has_item_explicit_height = (fi->blk && fi->blk->given_height > 0);
+                            bool has_item_explicit_height = (fi->blk && fi->blk->given_height >= 0);
                             // Inline check for stretch alignment (align-self or inherited align-items)
                             int align_type = (fi->fi && fi->fi->align_self != ALIGN_AUTO) ?
                                              fi->fi->align_self : flex->align_items;
