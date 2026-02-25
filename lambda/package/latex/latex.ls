@@ -9,7 +9,7 @@
 import normalize: .lambda.package.latex.normalize
 import analyzer: .lambda.package.latex.analyze
 import macros: .lambda.package.latex.macros
-import dispatcher: .lambda.package.latex.render2
+import dispatcher: .lambda.package.latex.render
 import css: .lambda.package.latex.css
 import html_ser: .lambda.package.latex.to_html
 
