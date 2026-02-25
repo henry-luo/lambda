@@ -20,137 +20,9 @@
     }
   },
   {
-    "type": "annotated_command",
-    "named": true,
-    "fields": {
-      "first": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "opt_arg": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      },
-      "second": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "ascii_operator",
     "named": true,
     "fields": {}
-  },
-  {
-    "type": "big_operator",
-    "named": true,
-    "fields": {
-      "lower": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "number",
-            "named": true
-          },
-          {
-            "type": "paren_script",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "word",
-            "named": true
-          }
-        ]
-      },
-      "upper": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "number",
-            "named": true
-          },
-          {
-            "type": "paren_script",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "word",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "boxlike_command",
-    "named": true,
-    "fields": {
-      "content": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    }
   },
   {
     "type": "brack_group",
@@ -165,23 +37,7 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
-          "named": true
-        },
-        {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -202,10 +58,6 @@
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -237,10 +89,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -257,10 +105,6 @@
           "named": true
         },
         {
-          "type": "symbol_command",
-          "named": true
-        },
-        {
           "type": "textstyle_command",
           "named": true
         },
@@ -269,32 +113,6 @@
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "color_command",
-    "named": true,
-    "fields": {
-      "color": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "content": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -366,23 +184,7 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
-          "named": true
-        },
-        {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -403,10 +205,6 @@
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -442,10 +240,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -459,10 +253,6 @@
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "symbol_command",
           "named": true
         },
         {
@@ -489,27 +279,11 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
           "named": true
         },
         {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
           "type": "col_sep",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -530,10 +304,6 @@
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -569,10 +339,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -586,10 +352,6 @@
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "symbol_command",
           "named": true
         },
         {
@@ -714,23 +476,7 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
-          "named": true
-        },
-        {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -755,10 +501,6 @@
         },
         {
           "type": "infix_frac",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -790,10 +532,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -807,10 +545,6 @@
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "symbol_command",
           "named": true
         },
         {
@@ -837,23 +571,7 @@
             "named": true
           },
           {
-            "type": "annotated_command",
-            "named": true
-          },
-          {
             "type": "ascii_operator",
-            "named": true
-          },
-          {
-            "type": "big_operator",
-            "named": true
-          },
-          {
-            "type": "boxlike_command",
-            "named": true
-          },
-          {
-            "type": "color_command",
             "named": true
           },
           {
@@ -874,10 +592,6 @@
           },
           {
             "type": "group",
-            "named": true
-          },
-          {
-            "type": "mathop_command",
             "named": true
           },
           {
@@ -909,10 +623,6 @@
             "named": true
           },
           {
-            "type": "rule_command",
-            "named": true
-          },
-          {
             "type": "sized_delimiter",
             "named": true
           },
@@ -926,10 +636,6 @@
           },
           {
             "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "symbol_command",
             "named": true
           },
           {
@@ -951,23 +657,7 @@
             "named": true
           },
           {
-            "type": "annotated_command",
-            "named": true
-          },
-          {
             "type": "ascii_operator",
-            "named": true
-          },
-          {
-            "type": "big_operator",
-            "named": true
-          },
-          {
-            "type": "boxlike_command",
-            "named": true
-          },
-          {
-            "type": "color_command",
             "named": true
           },
           {
@@ -988,10 +678,6 @@
           },
           {
             "type": "group",
-            "named": true
-          },
-          {
-            "type": "mathop_command",
             "named": true
           },
           {
@@ -1023,10 +709,6 @@
             "named": true
           },
           {
-            "type": "rule_command",
-            "named": true
-          },
-          {
             "type": "sized_delimiter",
             "named": true
           },
@@ -1040,10 +722,6 @@
           },
           {
             "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "symbol_command",
             "named": true
           },
           {
@@ -1077,23 +755,7 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
-          "named": true
-        },
-        {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -1118,10 +780,6 @@
         },
         {
           "type": "infix_frac",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -1153,10 +811,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -1173,10 +827,6 @@
           "named": true
         },
         {
-          "type": "symbol_command",
-          "named": true
-        },
-        {
           "type": "textstyle_command",
           "named": true
         },
@@ -1185,22 +835,6 @@
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "mathop_command",
-    "named": true,
-    "fields": {
-      "content": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -1216,27 +850,11 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
           "named": true
         },
         {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
           "type": "col_sep",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -1257,10 +875,6 @@
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -1296,10 +910,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -1313,10 +923,6 @@
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "symbol_command",
           "named": true
         },
         {
@@ -1380,23 +986,7 @@
           "named": true
         },
         {
-          "type": "annotated_command",
-          "named": true
-        },
-        {
           "type": "ascii_operator",
-          "named": true
-        },
-        {
-          "type": "big_operator",
-          "named": true
-        },
-        {
-          "type": "boxlike_command",
-          "named": true
-        },
-        {
-          "type": "color_command",
           "named": true
         },
         {
@@ -1417,10 +1007,6 @@
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "mathop_command",
           "named": true
         },
         {
@@ -1452,10 +1038,6 @@
           "named": true
         },
         {
-          "type": "rule_command",
-          "named": true
-        },
-        {
           "type": "sized_delimiter",
           "named": true
         },
@@ -1469,10 +1051,6 @@
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "symbol_command",
           "named": true
         },
         {
@@ -1561,42 +1139,6 @@
     "fields": {}
   },
   {
-    "type": "rule_command",
-    "named": true,
-    "fields": {
-      "height": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "raise": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      },
-      "width": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "sized_delimiter",
     "named": true,
     "fields": {
@@ -1641,23 +1183,7 @@
             "named": true
           },
           {
-            "type": "annotated_command",
-            "named": true
-          },
-          {
             "type": "ascii_operator",
-            "named": true
-          },
-          {
-            "type": "big_operator",
-            "named": true
-          },
-          {
-            "type": "boxlike_command",
-            "named": true
-          },
-          {
-            "type": "color_command",
             "named": true
           },
           {
@@ -1678,10 +1204,6 @@
           },
           {
             "type": "group",
-            "named": true
-          },
-          {
-            "type": "mathop_command",
             "named": true
           },
           {
@@ -1713,10 +1235,6 @@
             "named": true
           },
           {
-            "type": "rule_command",
-            "named": true
-          },
-          {
             "type": "sized_delimiter",
             "named": true
           },
@@ -1726,10 +1244,6 @@
           },
           {
             "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "symbol_command",
             "named": true
           },
           {
@@ -1833,11 +1347,6 @@
         ]
       }
     }
-  },
-  {
-    "type": "symbol_command",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "text_content",
@@ -1964,19 +1473,11 @@
     "named": false
   },
   {
-    "type": "\\mathop",
-    "named": false
-  },
-  {
     "type": "\\middle",
     "named": false
   },
   {
     "type": "\\right",
-    "named": false
-  },
-  {
-    "type": "\\rule",
     "named": false
   },
   {

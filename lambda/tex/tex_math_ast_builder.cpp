@@ -838,25 +838,18 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "relation") == 0) return build_relation(node);
     if (strcmp(type, "punctuation") == 0) return build_punctuation(node);
     if (strcmp(type, "command") == 0) return build_command(node);
-    if (strcmp(type, "symbol_command") == 0) return build_command(node);
     if (strcmp(type, "subsup") == 0) return build_subsup(node);
     if (strcmp(type, "frac_like") == 0) return build_frac_like(node);      // MERGED
     if (strcmp(type, "infix_frac") == 0) return build_infix_frac(node);
     if (strcmp(type, "radical") == 0) return build_radical(node);
     if (strcmp(type, "delimiter_group") == 0) return build_delimiter_group(node);
     if (strcmp(type, "sized_delimiter") == 0) return build_sized_delimiter(node);
-    if (strcmp(type, "annotated_command") == 0) return build_annotated_command(node); // MERGED
     if (strcmp(type, "accent") == 0) return build_accent(node);
-    if (strcmp(type, "boxlike_command") == 0) return build_boxlike_command(node);     // MERGED
-    if (strcmp(type, "color_command") == 0) return build_color_command(node);
-    if (strcmp(type, "rule_command") == 0) return build_rule_command(node);
-    if (strcmp(type, "big_operator") == 0) return build_big_operator(node);
     if (strcmp(type, "environment") == 0) return build_environment(node);
     if (strcmp(type, "matrix_command") == 0) return build_matrix_command(node);
     if (strcmp(type, "textstyle_command") == 0) return build_textstyle_command(node); // MERGED
     if (strcmp(type, "spacing_command") == 0) return build_spacing_command(node);     // MERGED
     if (strcmp(type, "brack_group") == 0) return build_brack_group(node);
-    if (strcmp(type, "mathop_command") == 0) return build_mathop_command(node);
     // NEW: ASCII math node types
     if (strcmp(type, "word") == 0) return build_word(node);
     if (strcmp(type, "ascii_operator") == 0) return build_ascii_operator(node);
@@ -1033,19 +1026,8 @@ MathASTNode* MathASTBuilder::build_operator(TSNode node) {
     int len;
     const char* text = node_text(node, &len);
 
-    // Check for command
-    if (text[0] == '\\' && len > 1) {
-        const char* cmd = text + 1;
-        size_t cmd_len = len - 1;
-        const char* cmd_copy = arena_copy_str(cmd, cmd_len);
-
-        const SymbolEntry* sym = lookup_symbol(cmd, cmd_len);
-        if (sym) {
-            return make_math_bin(arena, sym->code, cmd_copy);
-        }
-    }
-
-    // Single character operator
+    // Single character operator (+, -, *, /)
+    // Command operators (\pm, \times, etc.) now go through build_command()
     return make_math_bin(arena, text[0], nullptr);
 }
 
@@ -1053,6 +1035,7 @@ MathASTNode* MathASTBuilder::build_relation(TSNode node) {
     int len;
     const char* text = node_text(node, &len);
 
+    // Check for command (\uparrow etc. shared with delimiter rule)
     if (text[0] == '\\' && len > 1) {
         const char* cmd = text + 1;
         size_t cmd_len = len - 1;
@@ -1064,6 +1047,7 @@ MathASTNode* MathASTBuilder::build_relation(TSNode node) {
         }
     }
 
+    // Single character relation (=, <, >, !)
     return make_math_rel(arena, text[0], nullptr);
 }
 
@@ -1123,52 +1107,122 @@ MathASTNode* MathASTBuilder::build_punctuation(TSNode node) {
     return make_math_punct(arena, (int32_t)text[0]);
 }
 
+// Helper: collect non-command_name arg children from a command node
+static int collect_cmd_args(TSNode node, TSNode* args, int max_args) {
+    int count = 0;
+    uint32_t named = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < named && count < max_args; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        if (strcmp(ts_node_type(child), "command_name") != 0) {
+            args[count++] = child;
+        }
+    }
+    return count;
+}
+
+// Helper: check if cmd matches one of the annotated commands
+static bool is_annotated_cmd(const char* cmd, size_t len) {
+    if (len == 7 && strncmp(cmd, "overset", 7) == 0) return true;
+    if (len == 8 && strncmp(cmd, "underset", 8) == 0) return true;
+    if (len == 8 && strncmp(cmd, "stackrel", 8) == 0) return true;
+    if (cmd[0] == 'x' && len >= 7) {
+        if ((len == 11 && strncmp(cmd, "xrightarrow", 11) == 0) ||
+            (len == 10 && strncmp(cmd, "xleftarrow", 10) == 0) ||
+            (len == 11 && strncmp(cmd, "xRightarrow", 11) == 0) ||
+            (len == 10 && strncmp(cmd, "xLeftarrow", 10) == 0) ||
+            (len == 15 && strncmp(cmd, "xleftrightarrow", 15) == 0) ||
+            (len == 15 && strncmp(cmd, "xLeftrightarrow", 15) == 0) ||
+            (len == 15 && strncmp(cmd, "xhookrightarrow", 15) == 0) ||
+            (len == 14 && strncmp(cmd, "xhookleftarrow", 14) == 0) ||
+            (len == 7 && strncmp(cmd, "xmapsto", 7) == 0)) return true;
+    }
+    return false;
+}
+
+// Helper: check if cmd matches one of the boxlike commands
+static bool is_boxlike_cmd(const char* cmd, size_t len) {
+    if (len == 7 && strncmp(cmd, "phantom", 7) == 0) return true;
+    if (len == 8 && (strncmp(cmd, "hphantom", 8) == 0 || strncmp(cmd, "vphantom", 8) == 0)) return true;
+    if (len == 5 && (strncmp(cmd, "smash", 5) == 0 || strncmp(cmd, "boxed", 5) == 0)) return true;
+    if (len == 4 && (strncmp(cmd, "fbox", 4) == 0 || strncmp(cmd, "bbox", 4) == 0)) return true;
+    if (len == 4 && (strncmp(cmd, "llap", 4) == 0 || strncmp(cmd, "rlap", 4) == 0 || strncmp(cmd, "clap", 4) == 0)) return true;
+    if (len == 8 && (strncmp(cmd, "mathllap", 8) == 0 || strncmp(cmd, "mathrlap", 8) == 0 || strncmp(cmd, "mathclap", 8) == 0)) return true;
+    return false;
+}
+
+// Helper: check if cmd matches one of the color commands
+static bool is_color_cmd(const char* cmd, size_t len) {
+    return (len == 5 && strncmp(cmd, "color", 5) == 0) ||
+           (len == 9 && strncmp(cmd, "textcolor", 9) == 0) ||
+           (len == 8 && strncmp(cmd, "colorbox", 8) == 0);
+}
+
 MathASTNode* MathASTBuilder::build_command(TSNode node) {
+    // Get command name from 'name' field (not whole node text, which may include args)
+    TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
     int len;
-    const char* text = node_text(node, &len);
-
-    // Strip backslash
-    if (text[0] == '\\' && len > 1) {
-        const char* cmd = text + 1;
-        size_t cmd_len = len - 1;
-
-        // Greek letters
-        const GreekEntry* greek = lookup_greek(cmd, cmd_len);
-        if (greek) {
-            return make_math_ord(arena, greek->code, arena_copy_str(cmd, cmd_len));
-        }
-
-        // Symbols (binary/relation/ordinary operators)
-        const SymbolEntry* sym = lookup_symbol(cmd, cmd_len);
-        if (sym) {
-            if (sym->atom == AtomType::Bin) {
-                return make_math_bin(arena, sym->code, arena_copy_str(cmd, cmd_len));
-            } else if (sym->atom == AtomType::Rel) {
-                return make_math_rel(arena, sym->code, arena_copy_str(cmd, cmd_len));
-            } else if (sym->atom == AtomType::Punct) {
-                return make_math_punct(arena, (int32_t)sym->code, arena_copy_str(cmd, cmd_len));
-            } else if (sym->atom == AtomType::Ord) {
-                return make_math_ord(arena, sym->code, arena_copy_str(cmd, cmd_len));
-            }
-        }
-
-        // Big operators
-        const BigOpEntry* bigop = lookup_big_op(cmd, cmd_len);
-        if (bigop) {
-            // Use unicode_code for AST output (use large_code as fallback for text operators)
-            int codepoint = bigop->unicode_code ? bigop->unicode_code : bigop->large_code;
-            MathASTNode* op = make_math_op(arena, codepoint, arena_copy_str(cmd, cmd_len));
-            if (bigop->uses_limits) {
-                op->flags |= MathASTNode::FLAG_LIMITS;
-            }
-            return op;
-        }
-
-        // Unknown command - return as ordinary with command name
-        return make_math_ord(arena, 0, arena_copy_str(cmd, cmd_len));
+    const char* text;
+    if (!ts_node_is_null(name_node)) {
+        text = node_text(name_node, &len);
+    } else {
+        // Fallback: bare token node
+        text = node_text(node, &len);
     }
 
-    return nullptr;
+    if (!text || text[0] != '\\' || len <= 1) return nullptr;
+
+    const char* cmd = text + 1;
+    size_t cmd_len = len - 1;
+
+    // Strip trailing '*' for starred variants
+    if (cmd_len > 0 && cmd[cmd_len - 1] == '*') cmd_len--;
+
+    log_debug("tex_math_ast_builder: build_command cmd='%.*s'", (int)cmd_len, cmd);
+
+    // --- Structural command dispatch ---
+    // These commands need special argument handling. They were previously
+    // separate grammar rules, now merged into generic command.
+    if (is_annotated_cmd(cmd, cmd_len)) return build_annotated_command(node);
+    if (is_boxlike_cmd(cmd, cmd_len)) return build_boxlike_command(node);
+    if (is_color_cmd(cmd, cmd_len)) return build_color_command(node);
+    if (cmd_len == 4 && strncmp(cmd, "rule", 4) == 0) return build_rule_command(node);
+    if (cmd_len == 6 && strncmp(cmd, "mathop", 6) == 0) return build_mathop_command(node);
+
+    // --- Leaf command handling ---
+    // Greek letters
+    const GreekEntry* greek = lookup_greek(cmd, cmd_len);
+    if (greek) {
+        return make_math_ord(arena, greek->code, arena_copy_str(cmd, cmd_len));
+    }
+
+    // Symbols (binary/relation/ordinary operators)
+    const SymbolEntry* sym = lookup_symbol(cmd, cmd_len);
+    if (sym) {
+        if (sym->atom == AtomType::Bin) {
+            return make_math_bin(arena, sym->code, arena_copy_str(cmd, cmd_len));
+        } else if (sym->atom == AtomType::Rel) {
+            return make_math_rel(arena, sym->code, arena_copy_str(cmd, cmd_len));
+        } else if (sym->atom == AtomType::Punct) {
+            return make_math_punct(arena, (int32_t)sym->code, arena_copy_str(cmd, cmd_len));
+        } else if (sym->atom == AtomType::Ord) {
+            return make_math_ord(arena, sym->code, arena_copy_str(cmd, cmd_len));
+        }
+    }
+
+    // Big operators
+    const BigOpEntry* bigop = lookup_big_op(cmd, cmd_len);
+    if (bigop) {
+        // Use unicode_code for AST output (use large_code as fallback for text operators)
+        int codepoint = bigop->unicode_code ? bigop->unicode_code : bigop->large_code;
+        MathASTNode* op = make_math_op(arena, codepoint, arena_copy_str(cmd, cmd_len));
+        if (bigop->uses_limits) {
+            op->flags |= MathASTNode::FLAG_LIMITS;
+        }
+        return op;
+    }
+
+    // Unknown command - return as ordinary with command name
+    return make_math_ord(arena, 0, arena_copy_str(cmd, cmd_len));
 }
 
 MathASTNode* MathASTBuilder::build_subsup(TSNode node) {
@@ -1216,10 +1270,16 @@ MathASTNode* MathASTBuilder::build_subsup(TSNode node) {
         return base;
     }
 
+    // Check if base has FLAG_LIMITS (e.g., \sum, \prod, \lim from big operators)
+    // and no explicit \nolimits modifier — use OVERUNDER for display-style limits
+    bool base_wants_limits = (base->flags & MathASTNode::FLAG_LIMITS) && !has_nolimits;
+    if (base_wants_limits || has_limits) {
+        return make_math_overunder(arena, base, super, sub, base->atom.command);
+    }
+
     MathASTNode* scripts = make_math_scripts(arena, base, super, sub);
 
     // Apply limits/nolimits flags
-    if (has_limits) scripts->flags |= MathASTNode::FLAG_LIMITS;
     if (has_nolimits) scripts->flags |= MathASTNode::FLAG_NOLIMITS;
 
     return scripts;
@@ -1636,26 +1696,39 @@ MathASTNode* MathASTBuilder::build_sized_delimiter(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_annotated_command(TSNode node) {
-    // MERGED: handles \overset, \underset, \stackrel, \xrightarrow, \xleftarrow, etc.
-    // Grammar: annotated_command → cmd opt_arg? first second?
-    //   \overset{a}{b}        → cmd=\overset,   first={a}, second={b}
-    //   \xrightarrow[below]{above} → cmd=\xrightarrow, opt_arg=[below], first={above}
-    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
-    TSNode opt_node = ts_node_child_by_field_name(node, "opt_arg", 7);
-    TSNode first_node = ts_node_child_by_field_name(node, "first", 5);
-    TSNode second_node = ts_node_child_by_field_name(node, "second", 6);
+    // Handles \overset, \underset, \stackrel, \xrightarrow, \xleftarrow, etc.
+    // Now called from build_command() — node is a generic command node.
+    // Args are positional: command_name, then groups/brack_groups.
+    //   \overset{a}{b}              → args: [{a}, {b}]
+    //   \xrightarrow[below]{above}  → args: [[below], {above}]
 
-    // Get command name
+    // Get command name from 'name' field
+    TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
     const char* cmd_name = nullptr;
-    if (!ts_node_is_null(cmd_node)) {
+    if (!ts_node_is_null(name_node)) {
         int len;
-        const char* text = node_text(cmd_node, &len);
+        const char* text = node_text(name_node, &len);
         if (text[0] == '\\' && len > 1) {
             cmd_name = arena_copy_str(text + 1, len - 1);
         }
     }
 
-    log_debug("tex_math_ast_builder: build_annotated_command cmd='%s'", cmd_name ? cmd_name : "(null)");
+    // Collect positional args
+    TSNode args[8];
+    int arg_count = collect_cmd_args(node, args, 8);
+
+    // Separate optional brack_group from required group args
+    TSNode opt_node = {};
+    TSNode first_node = {};
+    TSNode second_node = {};
+    int idx = 0;
+    if (idx < arg_count && strcmp(ts_node_type(args[idx]), "brack_group") == 0) {
+        opt_node = args[idx++];
+    }
+    if (idx < arg_count) first_node = args[idx++];
+    if (idx < arg_count) second_node = args[idx++];
+
+    log_debug("tex_math_ast_builder: build_annotated_command cmd='%s' args=%d", cmd_name ? cmd_name : "(null)", arg_count);
 
     // Check if this is an extensible arrow command (starts with 'x')
     bool is_extensible = (cmd_name && cmd_name[0] == 'x');
@@ -1737,18 +1810,29 @@ MathASTNode* MathASTBuilder::build_accent(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_boxlike_command(TSNode node) {
-    // MERGED: handles \bbox, \fbox, \boxed, \llap, \rlap, \clap, \phantom, \hphantom, \vphantom, \smash
-    // Grammar: boxlike_command → cmd options? content
-    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
-    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+    // Handles \bbox, \fbox, \boxed, \llap, \rlap, \clap, \phantom, \hphantom, \vphantom, \smash
+    // Now called from build_command() — node is a generic command node.
+    // Args: optional [options], then {content}
 
-    // Get command name
+    // Get command name from 'name' field
+    TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
     const char* cmd = "box";
-    if (!ts_node_is_null(cmd_node)) {
+    if (!ts_node_is_null(name_node)) {
         int len;
-        const char* text = node_text(cmd_node, &len);
-        if (text[0] == '\\') {
+        const char* text = node_text(name_node, &len);
+        if (text[0] == '\\' && len > 1) {
             cmd = arena_copy_str(text + 1, len - 1);
+        }
+    }
+
+    // Collect positional args — find first group (skip brack_group options)
+    TSNode args[4];
+    int arg_count = collect_cmd_args(node, args, 4);
+    TSNode content_node = {};
+    for (int i = 0; i < arg_count; i++) {
+        if (strcmp(ts_node_type(args[i]), "group") == 0) {
+            content_node = args[i];
+            break;
         }
     }
 
@@ -1786,29 +1870,36 @@ MathASTNode* MathASTBuilder::build_boxlike_command(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
-    // color_command: \textcolor{color}{content}, \color{color}, or \colorbox{color}{content}
-    // Get the full node text to extract the command
-    int full_len;
-    const char* full_text = node_text(node, &full_len);
+    // Handles \textcolor{color}{content}, \color{color}, \colorbox{color}{content}
+    // Now called from build_command() — node is a generic command node.
+    // Args: {color} [content]
 
-    // Find the command name - starts with \ and ends before the {
+    // Get command name from 'name' field
+    TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
     const char* cmd = nullptr;
-    int cmd_len = 0;
-    if (full_text && full_text[0] == '\\') {
-        for (int i = 1; i < full_len; i++) {
-            if (!((full_text[i] >= 'a' && full_text[i] <= 'z') ||
-                  (full_text[i] >= 'A' && full_text[i] <= 'Z'))) {
-                cmd_len = i;
-                break;
-            }
-        }
-        if (cmd_len > 0) {
-            cmd = arena_copy_str(full_text + 1, cmd_len - 1);  // skip backslash
+    if (!ts_node_is_null(name_node)) {
+        int len;
+        const char* text = node_text(name_node, &len);
+        if (text[0] == '\\' && len > 1) {
+            cmd = arena_copy_str(text + 1, len - 1);
         }
     }
 
-    TSNode color_node = ts_node_child_by_field_name(node, "color", 5);
-    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+    // Collect positional args — all groups
+    TSNode args[4];
+    int arg_count = collect_cmd_args(node, args, 4);
+
+    // First group arg = color, second group arg = content (if present)
+    TSNode color_node = {};
+    TSNode content_node = {};
+    int group_idx = 0;
+    for (int i = 0; i < arg_count; i++) {
+        if (strcmp(ts_node_type(args[i]), "group") == 0) {
+            if (group_idx == 0) color_node = args[i];
+            else if (group_idx == 1) content_node = args[i];
+            group_idx++;
+        }
+    }
 
     // Get the color specification
     const char* color_str = nullptr;
@@ -1851,27 +1942,27 @@ MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_rule_command(TSNode node) {
-    // rule_command: \rule[raise]{width}{height}
-    TSNode width_node = ts_node_child_by_field_name(node, "width", 5);
-    TSNode height_node = ts_node_child_by_field_name(node, "height", 6);
+    // Handles \rule[raise]{width}{height}
+    // Now called from build_command() — node is a generic command node.
+    // Args: optional [raise], then {width}, {height}
 
-    // Parse dimensions (simplified - just store as text for now)
+    TSNode args[4];
+    int arg_count = collect_cmd_args(node, args, 4);
+
+    // Parse dimensions — find the group args (skip brack_group raise)
     const char* width_str = "1em";
     const char* height_str = "1em";
-
-    if (!ts_node_is_null(width_node)) {
-        int len;
-        const char* text = node_text(width_node, &len);
-        // Strip braces
-        if (len >= 2 && text[0] == '{') {
-            width_str = arena_copy_str(text + 1, len - 2);
-        }
-    }
-    if (!ts_node_is_null(height_node)) {
-        int len;
-        const char* text = node_text(height_node, &len);
-        if (len >= 2 && text[0] == '{') {
-            height_str = arena_copy_str(text + 1, len - 2);
+    int group_idx = 0;
+    for (int i = 0; i < arg_count; i++) {
+        if (strcmp(ts_node_type(args[i]), "group") == 0) {
+            int len;
+            const char* text = node_text(args[i], &len);
+            if (len >= 2 && text[0] == '{') {
+                const char* val = arena_copy_str(text + 1, len - 2);
+                if (group_idx == 0) width_str = val;
+                else if (group_idx == 1) height_str = val;
+            }
+            group_idx++;
         }
     }
 
@@ -2506,9 +2597,19 @@ MathASTNode* MathASTBuilder::build_spacing_command(TSNode node) {
 
 MathASTNode* MathASTBuilder::build_mathop_command(TSNode node) {
     // \mathop{content} - makes content behave as a big operator
-    // It inherits limits behavior and can use \limits or \nolimits modifiers
+    // Now called from build_command() — node is a generic command node.
+    // Args: {content}
 
-    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+    // Get first group arg as content
+    TSNode args[4];
+    int arg_count = collect_cmd_args(node, args, 4);
+    TSNode content_node = {};
+    for (int i = 0; i < arg_count; i++) {
+        if (strcmp(ts_node_type(args[i]), "group") == 0) {
+            content_node = args[i];
+            break;
+        }
+    }
 
     log_debug("tex_math_ast_builder: build_mathop_command");
 
