@@ -1488,6 +1488,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     else if (block->view_type == RDT_VIEW_TABLE_CELL) display = "table-cell";
     else if (block->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) display = "table-column-group";
     else if (block->view_type == RDT_VIEW_TABLE_COLUMN) display = "table-column";
+    // Fallback: check display.inner for orphaned table-internal elements
+    // (e.g., display:table-row nested inside a table-row gets wrapped in anon-td
+    // and laid out as a block, but getComputedStyle should still report table-row)
+    else if (block->display.inner == CSS_VALUE_TABLE) {
+        display = (block->display.outer == CSS_VALUE_INLINE) ? "inline-table" : "table";
+    }
+    else if (block->display.inner == CSS_VALUE_TABLE_ROW) display = "table-row";
+    else if (block->display.inner == CSS_VALUE_TABLE_ROW_GROUP) display = "table-row-group";
+    else if (block->display.inner == CSS_VALUE_TABLE_HEADER_GROUP) display = "table-header-group";
+    else if (block->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP) display = "table-footer-group";
+    else if (block->display.inner == CSS_VALUE_TABLE_CELL) display = "table-cell";
+    else if (block->display.inner == CSS_VALUE_TABLE_CAPTION) display = "table-caption";
+    else if (block->display.inner == CSS_VALUE_TABLE_COLUMN) display = "table-column";
+    else if (block->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) display = "table-column-group";
     strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
 
     // Add block properties if available
