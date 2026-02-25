@@ -20,6 +20,47 @@
     }
   },
   {
+    "type": "annotated_command",
+    "named": true,
+    "fields": {
+      "first": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "opt_arg": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          }
+        ]
+      },
+      "second": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "ascii_operator",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "big_operator",
     "named": true,
     "fields": {
@@ -40,7 +81,15 @@
             "named": true
           },
           {
+            "type": "paren_script",
+            "named": true
+          },
+          {
             "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -62,7 +111,15 @@
             "named": true
           },
           {
+            "type": "paren_script",
+            "named": true
+          },
+          {
             "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -70,57 +127,7 @@
     }
   },
   {
-    "type": "binomial",
-    "named": true,
-    "fields": {
-      "bottom": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "digit",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      },
-      "top": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "digit",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "box_command",
+    "type": "boxlike_command",
     "named": true,
     "fields": {
       "content": {
@@ -158,15 +165,19 @@
           "named": true
         },
         {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
           "type": "big_operator",
           "named": true
         },
         {
-          "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "box_command",
+          "type": "boxlike_command",
           "named": true
         },
         {
@@ -186,23 +197,11 @@
           "named": true
         },
         {
-          "type": "extensible_arrow",
-          "named": true
-        },
-        {
-          "type": "fraction",
-          "named": true
-        },
-        {
-          "type": "genfrac",
+          "type": "frac_like",
           "named": true
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "hspace_command",
           "named": true
         },
         {
@@ -222,15 +221,11 @@
           "named": true
         },
         {
-          "type": "overunder_command",
-          "named": true
-        },
-        {
-          "type": "phantom_command",
-          "named": true
-        },
-        {
           "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
           "named": true
         },
         {
@@ -250,15 +245,7 @@
           "named": true
         },
         {
-          "type": "skip_command",
-          "named": true
-        },
-        {
-          "type": "space_command",
-          "named": true
-        },
-        {
-          "type": "style_command",
+          "type": "spacing_command",
           "named": true
         },
         {
@@ -274,7 +261,11 @@
           "named": true
         },
         {
-          "type": "text_command",
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
           "named": true
         }
       ]
@@ -375,15 +366,19 @@
           "named": true
         },
         {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
           "type": "big_operator",
           "named": true
         },
         {
-          "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "box_command",
+          "type": "boxlike_command",
           "named": true
         },
         {
@@ -403,23 +398,11 @@
           "named": true
         },
         {
-          "type": "extensible_arrow",
-          "named": true
-        },
-        {
-          "type": "fraction",
-          "named": true
-        },
-        {
-          "type": "genfrac",
+          "type": "frac_like",
           "named": true
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "hspace_command",
           "named": true
         },
         {
@@ -443,15 +426,11 @@
           "named": true
         },
         {
-          "type": "overunder_command",
-          "named": true
-        },
-        {
-          "type": "phantom_command",
-          "named": true
-        },
-        {
           "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
           "named": true
         },
         {
@@ -471,15 +450,7 @@
           "named": true
         },
         {
-          "type": "skip_command",
-          "named": true
-        },
-        {
-          "type": "space_command",
-          "named": true
-        },
-        {
-          "type": "style_command",
+          "type": "spacing_command",
           "named": true
         },
         {
@@ -495,16 +466,15 @@
           "named": true
         },
         {
-          "type": "text_command",
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
           "named": true
         }
       ]
     }
-  },
-  {
-    "type": "dimension_unit",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "env_body",
@@ -519,15 +489,19 @@
           "named": true
         },
         {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
           "type": "big_operator",
           "named": true
         },
         {
-          "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "box_command",
+          "type": "boxlike_command",
           "named": true
         },
         {
@@ -551,23 +525,11 @@
           "named": true
         },
         {
-          "type": "extensible_arrow",
-          "named": true
-        },
-        {
-          "type": "fraction",
-          "named": true
-        },
-        {
-          "type": "genfrac",
+          "type": "frac_like",
           "named": true
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "hspace_command",
           "named": true
         },
         {
@@ -587,15 +549,11 @@
           "named": true
         },
         {
-          "type": "overunder_command",
-          "named": true
-        },
-        {
-          "type": "phantom_command",
-          "named": true
-        },
-        {
           "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
           "named": true
         },
         {
@@ -619,15 +577,7 @@
           "named": true
         },
         {
-          "type": "skip_command",
-          "named": true
-        },
-        {
-          "type": "space_command",
-          "named": true
-        },
-        {
-          "type": "style_command",
+          "type": "spacing_command",
           "named": true
         },
         {
@@ -643,7 +593,11 @@
           "named": true
         },
         {
-          "type": "text_command",
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
           "named": true
         }
       ]
@@ -720,37 +674,11 @@
     }
   },
   {
-    "type": "extensible_arrow",
+    "type": "frac_like",
     "named": true,
     "fields": {
-      "above": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "below": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "fraction",
-    "named": true,
-    "fields": {
-      "denom": {
-        "multiple": false,
+      "arg": {
+        "multiple": true,
         "required": true,
         "types": [
           {
@@ -767,118 +695,6 @@
           },
           {
             "type": "symbol",
-            "named": true
-          }
-        ]
-      },
-      "numer": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "digit",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "genfrac",
-    "named": true,
-    "fields": {
-      "denom": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "digit",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      },
-      "left_delim": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "numer": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command",
-            "named": true
-          },
-          {
-            "type": "digit",
-            "named": true
-          },
-          {
-            "type": "group",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      },
-      "right_delim": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "style": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "thickness": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
             "named": true
           }
         ]
@@ -898,15 +714,19 @@
           "named": true
         },
         {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
           "type": "big_operator",
           "named": true
         },
         {
-          "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "box_command",
+          "type": "boxlike_command",
           "named": true
         },
         {
@@ -926,23 +746,11 @@
           "named": true
         },
         {
-          "type": "extensible_arrow",
-          "named": true
-        },
-        {
-          "type": "fraction",
-          "named": true
-        },
-        {
-          "type": "genfrac",
+          "type": "frac_like",
           "named": true
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "hspace_command",
           "named": true
         },
         {
@@ -966,15 +774,11 @@
           "named": true
         },
         {
-          "type": "overunder_command",
-          "named": true
-        },
-        {
-          "type": "phantom_command",
-          "named": true
-        },
-        {
           "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
           "named": true
         },
         {
@@ -994,15 +798,7 @@
           "named": true
         },
         {
-          "type": "skip_command",
-          "named": true
-        },
-        {
-          "type": "space_command",
-          "named": true
-        },
-        {
-          "type": "style_command",
+          "type": "spacing_command",
           "named": true
         },
         {
@@ -1018,50 +814,14 @@
           "named": true
         },
         {
-          "type": "text_command",
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "hspace_command",
-    "named": true,
-    "fields": {
-      "sign": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "+",
-            "named": false
-          },
-          {
-            "type": "-",
-            "named": false
-          }
-        ]
-      },
-      "unit": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "dimension_unit",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "number",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -1077,15 +837,19 @@
             "named": true
           },
           {
+            "type": "annotated_command",
+            "named": true
+          },
+          {
+            "type": "ascii_operator",
+            "named": true
+          },
+          {
             "type": "big_operator",
             "named": true
           },
           {
-            "type": "binomial",
-            "named": true
-          },
-          {
-            "type": "box_command",
+            "type": "boxlike_command",
             "named": true
           },
           {
@@ -1105,23 +869,11 @@
             "named": true
           },
           {
-            "type": "extensible_arrow",
-            "named": true
-          },
-          {
-            "type": "fraction",
-            "named": true
-          },
-          {
-            "type": "genfrac",
+            "type": "frac_like",
             "named": true
           },
           {
             "type": "group",
-            "named": true
-          },
-          {
-            "type": "hspace_command",
             "named": true
           },
           {
@@ -1141,15 +893,11 @@
             "named": true
           },
           {
-            "type": "overunder_command",
-            "named": true
-          },
-          {
-            "type": "phantom_command",
-            "named": true
-          },
-          {
             "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "quoted_text",
             "named": true
           },
           {
@@ -1169,15 +917,7 @@
             "named": true
           },
           {
-            "type": "skip_command",
-            "named": true
-          },
-          {
-            "type": "space_command",
-            "named": true
-          },
-          {
-            "type": "style_command",
+            "type": "spacing_command",
             "named": true
           },
           {
@@ -1193,7 +933,11 @@
             "named": true
           },
           {
-            "type": "text_command",
+            "type": "textstyle_command",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -1207,15 +951,19 @@
             "named": true
           },
           {
+            "type": "annotated_command",
+            "named": true
+          },
+          {
+            "type": "ascii_operator",
+            "named": true
+          },
+          {
             "type": "big_operator",
             "named": true
           },
           {
-            "type": "binomial",
-            "named": true
-          },
-          {
-            "type": "box_command",
+            "type": "boxlike_command",
             "named": true
           },
           {
@@ -1235,23 +983,11 @@
             "named": true
           },
           {
-            "type": "extensible_arrow",
-            "named": true
-          },
-          {
-            "type": "fraction",
-            "named": true
-          },
-          {
-            "type": "genfrac",
+            "type": "frac_like",
             "named": true
           },
           {
             "type": "group",
-            "named": true
-          },
-          {
-            "type": "hspace_command",
             "named": true
           },
           {
@@ -1271,15 +1007,11 @@
             "named": true
           },
           {
-            "type": "overunder_command",
-            "named": true
-          },
-          {
-            "type": "phantom_command",
-            "named": true
-          },
-          {
             "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "quoted_text",
             "named": true
           },
           {
@@ -1299,15 +1031,7 @@
             "named": true
           },
           {
-            "type": "skip_command",
-            "named": true
-          },
-          {
-            "type": "space_command",
-            "named": true
-          },
-          {
-            "type": "style_command",
+            "type": "spacing_command",
             "named": true
           },
           {
@@ -1323,7 +1047,11 @@
             "named": true
           },
           {
-            "type": "text_command",
+            "type": "textstyle_command",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -1349,15 +1077,19 @@
           "named": true
         },
         {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
           "type": "big_operator",
           "named": true
         },
         {
-          "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "box_command",
+          "type": "boxlike_command",
           "named": true
         },
         {
@@ -1377,23 +1109,11 @@
           "named": true
         },
         {
-          "type": "extensible_arrow",
-          "named": true
-        },
-        {
-          "type": "fraction",
-          "named": true
-        },
-        {
-          "type": "genfrac",
+          "type": "frac_like",
           "named": true
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "hspace_command",
           "named": true
         },
         {
@@ -1417,15 +1137,11 @@
           "named": true
         },
         {
-          "type": "overunder_command",
-          "named": true
-        },
-        {
-          "type": "phantom_command",
-          "named": true
-        },
-        {
           "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
           "named": true
         },
         {
@@ -1445,15 +1161,7 @@
           "named": true
         },
         {
-          "type": "skip_command",
-          "named": true
-        },
-        {
-          "type": "space_command",
-          "named": true
-        },
-        {
-          "type": "style_command",
+          "type": "spacing_command",
           "named": true
         },
         {
@@ -1469,7 +1177,11 @@
           "named": true
         },
         {
-          "type": "text_command",
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
           "named": true
         }
       ]
@@ -1504,15 +1216,19 @@
           "named": true
         },
         {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
           "type": "big_operator",
           "named": true
         },
         {
-          "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "box_command",
+          "type": "boxlike_command",
           "named": true
         },
         {
@@ -1536,23 +1252,11 @@
           "named": true
         },
         {
-          "type": "extensible_arrow",
-          "named": true
-        },
-        {
-          "type": "fraction",
-          "named": true
-        },
-        {
-          "type": "genfrac",
+          "type": "frac_like",
           "named": true
         },
         {
           "type": "group",
-          "named": true
-        },
-        {
-          "type": "hspace_command",
           "named": true
         },
         {
@@ -1572,15 +1276,11 @@
           "named": true
         },
         {
-          "type": "overunder_command",
-          "named": true
-        },
-        {
-          "type": "phantom_command",
-          "named": true
-        },
-        {
           "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
           "named": true
         },
         {
@@ -1604,15 +1304,7 @@
           "named": true
         },
         {
-          "type": "skip_command",
-          "named": true
-        },
-        {
-          "type": "space_command",
-          "named": true
-        },
-        {
-          "type": "style_command",
+          "type": "spacing_command",
           "named": true
         },
         {
@@ -1628,7 +1320,11 @@
           "named": true
         },
         {
-          "type": "text_command",
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
           "named": true
         }
       ]
@@ -1672,59 +1368,131 @@
     "fields": {}
   },
   {
-    "type": "overunder_command",
+    "type": "paren_script",
     "named": true,
-    "fields": {
-      "annotation": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "base": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "phantom_command",
-    "named": true,
-    "fields": {
-      "content": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "group",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "annotated_command",
+          "named": true
+        },
+        {
+          "type": "ascii_operator",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "boxlike_command",
+          "named": true
+        },
+        {
+          "type": "color_command",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "environment",
+          "named": true
+        },
+        {
+          "type": "frac_like",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "quoted_text",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "rule_command",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
+          "named": true
+        },
+        {
+          "type": "spacing_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "symbol_command",
+          "named": true
+        },
+        {
+          "type": "textstyle_command",
+          "named": true
+        },
+        {
+          "type": "word",
+          "named": true
+        }
+      ]
     }
   },
   {
     "type": "punctuation",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "quoted_text",
     "named": true,
     "fields": {}
   },
@@ -1845,52 +1613,7 @@
     }
   },
   {
-    "type": "skip_command",
-    "named": true,
-    "fields": {
-      "sign": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "+",
-            "named": false
-          },
-          {
-            "type": "-",
-            "named": false
-          }
-        ]
-      },
-      "unit": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "dimension_unit",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "number",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "space_command",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "style_command",
+    "type": "spacing_command",
     "named": true,
     "fields": {
       "arg": {
@@ -1918,15 +1641,19 @@
             "named": true
           },
           {
+            "type": "annotated_command",
+            "named": true
+          },
+          {
+            "type": "ascii_operator",
+            "named": true
+          },
+          {
             "type": "big_operator",
             "named": true
           },
           {
-            "type": "binomial",
-            "named": true
-          },
-          {
-            "type": "box_command",
+            "type": "boxlike_command",
             "named": true
           },
           {
@@ -1946,23 +1673,11 @@
             "named": true
           },
           {
-            "type": "extensible_arrow",
-            "named": true
-          },
-          {
-            "type": "fraction",
-            "named": true
-          },
-          {
-            "type": "genfrac",
+            "type": "frac_like",
             "named": true
           },
           {
             "type": "group",
-            "named": true
-          },
-          {
-            "type": "hspace_command",
             "named": true
           },
           {
@@ -1982,15 +1697,11 @@
             "named": true
           },
           {
-            "type": "overunder_command",
-            "named": true
-          },
-          {
-            "type": "phantom_command",
-            "named": true
-          },
-          {
             "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "quoted_text",
             "named": true
           },
           {
@@ -2010,15 +1721,7 @@
             "named": true
           },
           {
-            "type": "skip_command",
-            "named": true
-          },
-          {
-            "type": "space_command",
-            "named": true
-          },
-          {
-            "type": "style_command",
+            "type": "spacing_command",
             "named": true
           },
           {
@@ -2030,7 +1733,11 @@
             "named": true
           },
           {
-            "type": "text_command",
+            "type": "textstyle_command",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -2062,7 +1769,15 @@
             "named": true
           },
           {
+            "type": "paren_script",
+            "named": true
+          },
+          {
             "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -2094,7 +1809,15 @@
             "named": true
           },
           {
+            "type": "paren_script",
+            "named": true
+          },
+          {
             "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "word",
             "named": true
           }
         ]
@@ -2117,20 +1840,9 @@
     "fields": {}
   },
   {
-    "type": "text_command",
+    "type": "text_content",
     "named": true,
-    "fields": {
-      "content": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "text_group",
-            "named": true
-          }
-        ]
-      }
-    }
+    "fields": {}
   },
   {
     "type": "text_group",
@@ -2148,7 +1860,31 @@
     }
   },
   {
+    "type": "textstyle_command",
+    "named": true,
+    "fields": {
+      "arg": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "text_group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "!",
+    "named": false
+  },
+  {
+    "type": "\"",
     "named": false
   },
   {
@@ -2224,14 +1960,6 @@
     "named": false
   },
   {
-    "type": "\\fill",
-    "named": false
-  },
-  {
-    "type": "\\genfrac",
-    "named": false
-  },
-  {
     "type": "\\left",
     "named": false
   },
@@ -2260,10 +1988,6 @@
     "named": false
   },
   {
-    "type": "\\|",
-    "named": false
-  },
-  {
     "type": "\\}",
     "named": false
   },
@@ -2284,18 +2008,6 @@
     "named": true
   },
   {
-    "type": "bp",
-    "named": false
-  },
-  {
-    "type": "cc",
-    "named": false
-  },
-  {
-    "type": "cm",
-    "named": false
-  },
-  {
     "type": "col_sep",
     "named": true
   },
@@ -2304,59 +2016,23 @@
     "named": true
   },
   {
-    "type": "dd",
-    "named": false
-  },
-  {
     "type": "digit",
     "named": true
-  },
-  {
-    "type": "em",
-    "named": false
   },
   {
     "type": "end_cmd",
     "named": true
   },
   {
-    "type": "ex",
-    "named": false
-  },
-  {
-    "type": "in",
-    "named": false
-  },
-  {
-    "type": "mm",
-    "named": false
-  },
-  {
-    "type": "mu",
-    "named": false
-  },
-  {
     "type": "number",
     "named": true
-  },
-  {
-    "type": "pc",
-    "named": false
-  },
-  {
-    "type": "pt",
-    "named": false
-  },
-  {
-    "type": "sp",
-    "named": false
   },
   {
     "type": "symbol",
     "named": true
   },
   {
-    "type": "text_content",
+    "type": "word",
     "named": true
   },
   {
