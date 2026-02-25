@@ -1,0 +1,75 @@
+\documentclass{article}
+
+% --- Milestone 7 test: newtheorem definitions ---
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem*{remark}{Remark}
+
+% --- Milestone 7 test: newcommand with optional arg ---
+\newcommand{\greeting}[1][World]{Hello, #1!}
+\newcommand{\pair}[2][default]{(#1, #2)}
+
+\begin{document}
+
+\section{Introduction}
+\label{sec:intro}
+This is the intro section.
+
+\section{Theorems}
+\label{sec:thms}
+
+\begin{theorem}
+\label{thm:first}
+Every even number greater than 2 is the sum of two primes.
+\end{theorem}
+
+\begin{lemma}
+\label{lem:helper}
+A useful helper lemma.
+\end{lemma}
+
+\begin{definition}
+\label{def:prime}
+A prime number is a natural number greater than 1.
+\end{definition}
+
+\begin{theorem}
+\label{thm:second}
+There are infinitely many primes.
+\end{theorem}
+
+\begin{remark}
+This is an unnumbered remark.
+\end{remark}
+
+\section{Tables}
+\label{sec:tables}
+
+\begin{table}
+\caption{A booktabs table}
+\label{tab:booktabs}
+\begin{tabular}{lcc}
+\toprule
+Name & Score & Grade \\
+\midrule
+Alice & 95 & A \\
+Bob & 87 & B \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Cross-references}
+See \autoref{sec:intro} for the introduction.
+See \autoref{thm:first} for the first result.
+See \autoref{def:prime} for the definition.
+See \autoref{tab:booktabs} for the table.
+See \nameref{sec:intro} for details.
+
+\section{Macros}
+\greeting
+\greeting[Alice]
+\pair{second}
+\pair[first]{second}
+
+\end{document}

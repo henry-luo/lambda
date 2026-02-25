@@ -1,0 +1,49 @@
+"===== MILESTONE 7 TESTS =====1. macro def count:"
+1
+"2. macro name:greeting3. macro params:"
+{[null nested map]
+}
+"4. macro default_arg:World5. simple def count:"
+1
+"6. simple default_arg null:"
+true
+"7. has theorem class:"
+true
+"8. has definition class:"
+true
+"9. has theorem head:"
+true
+"10. has Theorem 1:"
+true
+"11. has Theorem 3 (shared counter):"
+true
+"12. has Definition 1:"
+true
+"13. has Lemma 2 (shared):"
+true
+"13b. Remark unnumbered:"
+true
+"14. has toprule:"
+true
+"15. has midrule:"
+true
+"16. has bottomrule:"
+true
+"17. has Section autoref:"
+true
+"18. has Theorem autoref:"
+true
+"19. has Definition autoref:"
+true
+"20. has Table autoref:"
+true
+"21. has nameref link:"
+true
+"22. default expansion:"
+true
+"23. override expansion:"
+true
+"24. pair with default:"
+true
+"25. pair with override:"
+true
