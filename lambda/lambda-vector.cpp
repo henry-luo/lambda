@@ -1644,6 +1644,9 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
     TypeId type = get_type_id(vec);
 
+    // null slices to null
+    if (type == LMD_TYPE_NULL) return ItemNull;
+
     // Handle strings - delegate to fn_substring
     if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
         return fn_substring(vec, start_item, end_item);

@@ -41,7 +41,8 @@ pub fn analyze(ast) {
         bibitems: [],
         slug_counts: {},
         in_appendix: false,
-        secnumdepth: 3
+        secnumdepth: 3,
+        custom_colors: {}
     }
     let result = walk_node(ast, state)
     // return clean DocInfo (drop internal counters)
@@ -58,7 +59,8 @@ pub fn analyze(ast) {
         tables: result.tables,
         theorems: result.theorems,
         bibitems: result.bibitems,
-        secnumdepth: result.secnumdepth
+        secnumdepth: result.secnumdepth,
+        custom_colors: result.custom_colors
     }
 }
 
@@ -121,6 +123,9 @@ fn walk_element(el, state) {
         // ---- appendix & counters ----
         case 'appendix': walk_appendix(el, state)
         case 'setcounter': walk_setcounter(el, state)
+
+        // ---- color definitions ----
+        case 'definecolor': walk_definecolor(el, state)
 
         // ---- everything else: walk children ----
         default: walk_children(el, 0, len(el), state)
@@ -306,6 +311,51 @@ fn walk_setcounter(el, state) {
         else state
     }
     else state
+}
+
+fn walk_definecolor(el, state) {
+    // children: [name, model, spec]
+    let n = len(el)
+    if n >= 3 {
+        let cname = trim(string(el[0]))
+        let model = trim(string(el[1]))
+        let spec = trim(string(el[2]))
+        let css = parse_color_model(model, spec)
+        let new_colors = set_key(state.custom_colors, cname, css)
+        {state, custom_colors: new_colors}
+    }
+    else state
+}
+
+fn parse_color_model(model, spec) {
+    if (model == "HTML" or model == "html") "#" ++ spec
+    else if (model == "rgb") parse_rgb_float(spec)
+    else if (model == "RGB") parse_rgb_int(spec)
+    else if (model == "gray") parse_gray(spec)
+    else spec
+}
+
+fn parse_rgb_float(spec) {
+    let parts = split(spec, ",")
+    if (len(parts) >= 3) {
+        let r = int(float(trim(parts[0])) * 255.0)
+        let g = int(float(trim(parts[1])) * 255.0)
+        let b = int(float(trim(parts[2])) * 255.0)
+        "rgb(" ++ string(r) ++ "," ++ string(g) ++ "," ++ string(b) ++ ")"
+    }
+    else spec
+}
+
+fn parse_rgb_int(spec) {
+    let parts = split(spec, ",")
+    if (len(parts) >= 3)
+        "rgb(" ++ trim(parts[0]) ++ "," ++ trim(parts[1]) ++ "," ++ trim(parts[2]) ++ ")"
+    else spec
+}
+
+fn parse_gray(spec) {
+    let val = int(float(spec) * 255.0)
+    "rgb(" ++ string(val) ++ "," ++ string(val) ++ "," ++ string(val) ++ ")"
 }
 
 fn get_env_counter(counters, env_type) {

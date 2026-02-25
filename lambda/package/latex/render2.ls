@@ -9,6 +9,7 @@ import spacing: .lambda.package.latex.elements.spacing
 import macros: .lambda.package.latex.macros
 import boxes: .lambda.package.latex.elements.boxes
 import font_decl: .lambda.package.latex.elements.font_decl
+import color: .lambda.package.latex.elements.color
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -110,6 +111,14 @@ fn render_element(el, info) {
 
         // ---- appendix marker (handled in analyze pass) ----
         case 'appendix': null
+
+        // ---- color commands ----
+        case 'textcolor': color.render_textcolor(el, render_children(el, 1, info), info.custom_colors)
+        case 'colorbox': color.render_colorbox(el, render_children(el, 1, info), info.custom_colors)
+        case 'fcolorbox': color.render_fcolorbox(el, render_children(el, 2, info), info.custom_colors)
+        case 'definecolor': null
+        case 'pagecolor': null
+        case 'color': null
 
         // ---- font sizes ----
         case 'tiny': render_size(el, info, "tiny")
@@ -446,6 +455,10 @@ fn render_paragraph_with_decl(el, info, decl_tag) {
         let style = font_decl.font_decl_style(decl_tag)
         <p style: style; for c in items { c }>
     }
+    else if (color.is_color_decl(decl_tag)) {
+        let style = color.color_decl_style(find_decl_el(el, decl_tag), info.custom_colors)
+        <p style: style; for c in items { c }>
+    }
     else {
         let style = font_decl.align_decl_style(decl_tag)
         <p style: style; for c in items { c }>
@@ -626,12 +639,44 @@ fn split_items_rec(flat, i, n, current, acc, info) {
     } else if (is_item_node(flat[i])) {
         let flushed = if (len(current) > 0) acc ++ [<li; for c in current { c }>]
             else acc
-        split_items_rec(flat, i + 1, n, [], flushed, info)
+        // check for custom label on \item[label]
+        let custom = get_item_custom_label(flat[i])
+        if (custom != null)
+            split_items_custom_rec(flat, i + 1, n, [custom], flushed, info)
+        else
+            split_items_rec(flat, i + 1, n, [], flushed, info)
     } else {
         let rendered = render_node(flat[i], info)
         let new_current = if (rendered != null) current ++ [rendered] else current
         split_items_rec(flat, i + 1, n, new_current, acc, info)
     }
+}
+
+// handle items with custom labels — suppress default marker
+fn split_items_custom_rec(flat, i, n, current, acc, info) {
+    if (i >= n) {
+        if (len(current) > 0) acc ++ [<li style: "list-style-type:none"; for c in current { c }>]
+        else acc
+    } else if (is_item_node(flat[i])) {
+        let flushed = if (len(current) > 0) acc ++ [<li style: "list-style-type:none"; for c in current { c }>]
+            else acc
+        let custom = get_item_custom_label(flat[i])
+        if (custom != null)
+            split_items_custom_rec(flat, i + 1, n, [custom], flushed, info)
+        else
+            split_items_rec(flat, i + 1, n, [], flushed, info)
+    } else {
+        let rendered = render_node(flat[i], info)
+        let new_current = if (rendered != null) current ++ [rendered] else current
+        split_items_custom_rec(flat, i + 1, n, new_current, acc, info)
+    }
+}
+
+// get custom label from \item[label] as a rendered span, or null
+fn get_item_custom_label(item_node) {
+    let opt = util.find_child(item_node, 'brack_group')
+    if (opt != null) <span class: "latex-item-label"; util.text_of(opt) ++ " ">
+    else null
 }
 
 fn split_desc_items(flat, info) {
@@ -1335,7 +1380,7 @@ fn render_group(el, info) {
     }
 }
 
-// find the first font/alignment declaration tag among children (skipping whitespace)
+// find the first font/alignment/color declaration tag among children (skipping whitespace)
 fn find_leading_decl(el, i, n) {
     if i >= n { null }
     else {
@@ -1346,25 +1391,81 @@ fn find_leading_decl(el, i, n) {
             let tag_str = string(name(child))
             if (font_decl.is_font_decl(tag_str)) tag_str
             else if (font_decl.is_align_decl(tag_str)) tag_str
+            else if (color.is_color_decl(tag_str)) tag_str
             else null
         }
         else null
     }
 }
 
-// render a group whose first significant child is a font/alignment declaration
+// render a group whose first significant child is a font/alignment/color declaration
 fn render_group_with_decl(el, info, decl_tag) {
     // render children after the declaration (the decl itself returns null)
     let items = render_children(el, 0, info)
     if (font_decl.is_font_decl(decl_tag))
         font_decl.wrap_font_decl(decl_tag, items)
+    else if (color.is_color_decl(decl_tag))
+        color.wrap_color_decl(find_decl_el(el, decl_tag), items, info.custom_colors)
     else
         font_decl.wrap_align_decl(decl_tag, items)
 }
 
+// find the declaration element node by tag name within a parent
+fn find_decl_el(el, tag_str) {
+    find_decl_el_rec(el, 0, len(el), tag_str)
+}
+
+fn find_decl_el_rec(el, i, n, tag_str) {
+    if (i >= n) el
+    else {
+        let child = el[i]
+        if (child is element and string(name(child)) == tag_str) child
+        else find_decl_el_rec(el, i + 1, n, tag_str)
+    }
+}
+
 fn render_includegraphics(el) {
-    let src = trim(util.text_of(el))
-    <img class: "latex-image", src: src, alt: src>
+    // extract optional arguments [key=val,...] from brack_group
+    let brack = util.find_child(el, 'brack_group')
+    let opts = util.parse_kv_options(if (brack != null) util.text_of(brack) else null)
+
+    // extract src from non-brack children
+    let src = trim(util.text_of_skip_brack(el))
+
+    // build style string from options
+    let style = build_img_style(opts)
+
+    if (style != "") {
+        <img class: "latex-image", src: src, alt: src, style: style>
+    } else {
+        <img class: "latex-image", src: src, alt: src>
+    }
+}
+
+fn build_img_style(opts) {
+    let parts = []
+    // width
+    let parts = if (opts.width != null) { parts ++ ["width:" ++ opts.width] } else parts
+    // height
+    let parts = if (opts.height != null) { parts ++ ["height:" ++ opts.height] } else parts
+    // keepaspectratio (only meaningful with width or height)
+    let parts = if (opts.keepaspectratio != null) { parts ++ ["object-fit:contain"] } else parts
+    // build transform: may combine scale and angle
+    let transforms = []
+    let transforms = if (opts.scale != null) { transforms ++ ["scale(" ++ opts.scale ++ ")"] } else transforms
+    let transforms = if (opts.angle != null) { transforms ++ ["rotate(" ++ opts.angle ++ "deg)"] } else transforms
+    let parts = if (len(transforms) > 0) { parts ++ ["transform:" ++ str_join(transforms, " ")] } else parts
+    // trim + clip → clip-path:inset(top right bottom left)
+    // LaTeX trim order: left bottom right top
+    let parts = if (opts.trim != null and opts.clip != null) {
+        let vals = split(trim(opts.trim), null)
+        if (len(vals) == 4) {
+            // LaTeX: trim=left bottom right top → CSS: inset(top right bottom left)
+            parts ++ ["clip-path:inset(" ++ vals[3] ++ " " ++ vals[2] ++ " " ++ vals[1] ++ " " ++ vals[0] ++ ")"]
+        } else parts
+    } else parts
+
+    str_join(parts, ";")
 }
 
 fn render_marginpar(el, info) {
