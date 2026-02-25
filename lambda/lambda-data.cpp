@@ -323,14 +323,20 @@ void expand_list(List *list, Arena* arena = nullptr) {
 
     // Determine which allocator to use
     Item* old_items = list->items;
-    bool use_arena = (arena != nullptr && old_items != nullptr && arena_owns(arena, old_items));
+    bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
 
     if (use_arena) {
-        // Use arena realloc for arena-allocated buffers (MarkBuilder path)
-        list->items = (Item*)arena_realloc(arena, list->items,
-                                           (list->capacity/2) * sizeof(Item),
-                                           list->capacity * sizeof(Item));
-        log_debug("arena_realloc used for list expansion");
+        // Use arena alloc/realloc for arena-allocated buffers (MarkBuilder/Input path)
+        if (old_items == nullptr) {
+            // First allocation — use arena_alloc
+            list->items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
+        } else {
+            // Realloc existing arena buffer
+            list->items = (Item*)arena_realloc(arena, list->items,
+                                               (list->capacity/2) * sizeof(Item),
+                                               list->capacity * sizeof(Item));
+        }
+        log_debug("arena alloc used for list expansion");
     } else {
         // Use data zone allocation for GC-managed runtime containers.
         // Allocate new buffer; old buffer is abandoned in the data zone
