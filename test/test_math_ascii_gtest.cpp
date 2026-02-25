@@ -366,7 +366,7 @@ TEST_F(AsciiMathRoundtripTest, AsciiInlineMathRoundtrip) {
 }
 
 // Test roundtrip for pure ASCII math expressions (without markdown wrapping)
-TEST_F(AsciiMathRoundtripTest, DISABLED_AsciiPureMathRoundtrip) {
+TEST_F(AsciiMathRoundtripTest, AsciiPureMathRoundtrip) {
     // Test pure ASCII math expressions covering various mathematical expression groups
     const char* test_cases[] = {
         // Basic operators and arithmetic
