@@ -453,7 +453,9 @@ pn rbt_first(tree) {
     return r
 }
 
-pn rbt_remove_fixup(tree, xId, xParId) {
+pn rbt_remove_fixup(tree, xId_p, xParId_p) {
+    var xId = xId_p
+    var xParId = xParId_p
     var rootId = (tree.root)
     while (xId != rootId) {
         var xCol = BLACK

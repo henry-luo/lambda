@@ -30,7 +30,7 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 - **Language Type**: Pure functional scripting language with modern syntax
 - **Implementation**: Custom C/C++ runtime with Tree-sitter based parsing
 - **Compilation**: JIT compilation via MIR for near-native performance
-- **Memory Management**: Reference counting with three-tier string allocation (namepool, arena, heap)
+- **Memory Management**: Garbage collection with three-tier string allocation (namepool, arena, GC heap)
 - **Target Use Cases**: Data processing, document transformation, mathematical computation, CSS layout and rendering
 - **Input Formats**: JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, CSV, TOML, etc.
 - **Output Formats**: JSON, HTML, Markdown, YAML, PDF, SVG, PNG, etc.
@@ -42,11 +42,11 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 - **Simple scalars** (null, bool, int): packed directly with TypeId in high bits
 - **Compound scalars** (int64, float, datetime, decimal, symbol, string, binary): tagged pointers
-  - Numerics stored in `num_stack` at runtime
-  - Strings/symbols/decimals/datetimes are heap-allocated with reference counting
+  - Numerics stored in GC nursery (bump-allocated) at runtime
+  - Strings/symbols/decimals/datetimes are heap-allocated and GC-managed
 - **Container types** (list, array, map, element, range): direct pointers extending `struct Container`
   - All start with `TypeId` field for runtime type identification
-  - Heap-allocated with reference counting
+  - Heap-allocated and GC-managed
 - **Maps**: Packed structs with linked list of `ShapeEntry` defining fields
 - **Elements**: Extend lists and act as maps simultaneously (dual nature)
 

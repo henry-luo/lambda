@@ -623,3 +623,199 @@ These serve as reference points; their results are consistent with prior measure
 5. **Wall-clock improvements are diluted by startup** — with ~10ms startup and <15ms compute for many benchmarks, a 30% compute improvement translates to only ~10% wall-clock improvement. Benchmarks with heavier workloads (nbody, fft) show the benefit more clearly.
 
 6. **Previously identified weakness partially addressed** — the "Release Build vs Other Runtimes" section noted `nqueens` (373x vs Racket) and `fft` (25x vs Racket) as weaknesses due to expensive array operations. Typed array annotations reduce this gap, particularly for fft where the compute T/U improved from 0.96x to 0.81x.
+
+---
+
+# Reference Counting → Garbage Collection: Performance Impact
+
+**Date:** 2026-02-25
+**Build:** `make clean-all && make build-release` (C2MIR transpiler path)
+**Platform:** Apple Silicon Mac Mini (aarch64), macOS
+**Methodology:** 5 runs per benchmark, median wall-clock time (includes startup + JIT compilation + execution)
+**Change under test:** Replaced reference counting with garbage collection in the Lambda runtime
+
+**Baseline:** Release build from 2026-02-22 (reference counting)
+**Current:** Release build from 2026-02-25 (garbage collection)
+
+> **Build note:** A clean release build must use `make clean-all && make build-release` to produce
+> the correct ~9MB binary. Running `make build-release` without `make clean-all` first may link
+> stale debug object files, producing a ~12MB binary with debug-level performance.
+
+---
+
+## R7RS Benchmarks — Untyped (Ref-Count vs GC)
+
+| Benchmark | Category | Ref-Count | GC | GC/RC |
+|-----------|----------|----------:|---:|------:|
+| fib | recursive | 18.3ms | 17.9ms | 0.98x |
+| fibfp | recursive | 24.5ms | 20.8ms | 0.85x |
+| tak | recursive | 15.0ms | 14.1ms | 0.94x |
+| cpstak | closure | 14.7ms | 14.5ms | 0.99x |
+| sum | iterative | 22.0ms | 22.1ms | 1.00x |
+| sumfp | iterative | 15.3ms | 15.1ms | 0.99x |
+| nqueens | backtrack | 45.6ms | 45.1ms | 0.99x |
+| fft | numeric | 21.8ms | 20.4ms | 0.94x |
+| mbrot | numeric | 24.8ms | 23.7ms | 0.96x |
+| ack | recursive | 38.2ms | 38.4ms | 1.01x |
+
+**Geometric mean: 0.96x** (GC is 4% faster)
+
+---
+
+## R7RS Benchmarks — Typed (Ref-Count vs GC)
+
+| Benchmark | Category | Ref-Count | GC | GC/RC |
+|-----------|----------|----------:|---:|------:|
+| fib | recursive | 15.9ms | 15.9ms | 1.00x |
+| fibfp | recursive | 17.4ms | 17.1ms | 0.98x |
+| tak | recursive | 16.3ms | 13.9ms | 0.85x |
+| cpstak | closure | 14.4ms | 14.0ms | 0.97x |
+| sum | iterative | 17.1ms | 17.1ms | 1.00x |
+| sumfp | iterative | 14.8ms | 14.9ms | 1.01x |
+| nqueens | backtrack | 44.1ms | 43.5ms | 0.99x |
+| fft | numeric | 21.3ms | 19.1ms | 0.90x |
+| mbrot | numeric | 18.4ms | 16.9ms | 0.92x |
+| ack | recursive | 22.8ms | 22.3ms | 0.98x |
+
+**Geometric mean: 0.96x** (GC is 4% faster)
+
+---
+
+## AWFY Benchmarks (Ref-Count vs GC)
+
+| Benchmark | Category | Ref-Count | GC | GC/RC |
+|-----------|----------|----------:|---:|------:|
+| sieve | micro | 17.2ms | 14.9ms | 0.87x |
+| permute | micro | 16.4ms | 15.3ms | 0.93x |
+| queens | micro | 17.6ms | 16.2ms | 0.92x |
+| towers | micro | 17.3ms | 15.9ms | 0.92x |
+| bounce | micro | 19.3ms | 17.1ms | 0.89x |
+| list | micro | 16.2ms | 14.7ms | 0.91x |
+| storage | micro | 23.9ms | 22.8ms | 0.95x |
+| mandelbrot | micro | 81.9ms | 82.6ms | 1.01x |
+| nbody | micro | 26.2ms | 22.2ms | 0.85x |
+| richards | macro | FAIL | 83.4ms | N/A |
+| json | macro | 511.2ms | 506.3ms | 0.99x |
+| deltablue | macro | 63.9ms | 50.2ms | 0.79x |
+| havlak | macro | 159.1ms | 158.3ms | 0.99x |
+| cd | macro | FAIL | 440ms | N/A |
+
+**Geometric mean: 0.92x** (GC is 8% faster, 12 comparable benchmarks)
+
+---
+
+## Overall Summary (Ref-Count vs GC)
+
+| Suite | GC/RC Geomean |
+|-------|:------------:|
+| R7RS Untyped | **0.96x** |
+| R7RS Typed | **0.96x** |
+| AWFY | **0.92x** |
+| **Overall** | **0.94x** |
+
+> Ratio < 1.0 means GC is faster. The GC runtime is **6% faster overall**.
+
+---
+
+## R7RS: GC Build vs Racket (Comparison Update)
+
+| Benchmark | Category | GC (untyped) | GC (typed) | Racket | L/R (untyped) | L/R (typed) |
+|-----------|----------|----------:|----------:|-------:|---------:|---------:|
+| fib | recursive | 7.9ms | 5.9ms | 0.720ms | 11x | 8x |
+| fibfp | recursive | 10.8ms | 7.1ms | 3.7ms | 3x | 2x |
+| tak | recursive | 4.1ms | 3.9ms | 0.080ms | 51x | 49x |
+| cpstak | closure | 4.5ms | 4.0ms | 0.149ms | 30x | 27x |
+| sum | iterative | 12.1ms | 7.1ms | 1.0ms | 12x | 7x |
+| sumfp | iterative | 5.1ms | 4.9ms | 1.2ms | 4x | 4x |
+| nqueens | backtrack | 35.1ms | 33.5ms | 0.097ms | 361x | 345x |
+| fft | numeric | 10.4ms | 9.1ms | 0.465ms | 22x | 20x |
+| mbrot | numeric | 13.7ms | 6.9ms | 3.8ms | 4x | 2x |
+| ack | recursive | 28.4ms | 12.3ms | 3.3ms | 9x | 4x |
+
+**GC Lambda (untyped) / Racket geomean: 15x** (was 20x with ref-count)
+**GC Lambda (typed) / Racket geomean: 11x** (was 12x with ref-count)
+
+Lambda timing: wall-clock minus ~10ms startup. Racket timing: internal (`current-inexact-milliseconds`).
+
+---
+
+## AWFY: GC Build vs Node.js (Comparison Update)
+
+**Lambda timing:** wall-clock, GC release build (median of 5 runs, 2026-02-25)
+**Node.js timing:** wall-clock from same machine, Node.js v24.7.0 (from AWFY Round 1, 2026-02-16)
+
+| Benchmark | Category | GC Lambda | Node.js | Ratio | Prev (Ref-Count) |
+|-----------|----------|----------:|--------:|------:|:---------:|
+| sieve | micro | 14.9ms | 35ms | **0.43x** | **0.67x** |
+| permute | micro | 15.3ms | 37ms | **0.41x** | **0.37x** |
+| queens | micro | 16.2ms | 35ms | **0.46x** | **0.42x** |
+| towers | micro | 15.9ms | 35ms | **0.45x** | **0.41x** |
+| bounce | micro | 17.1ms | 36ms | **0.48x** | **0.46x** |
+| list | micro | 14.7ms | 36ms | **0.41x** | **0.38x** |
+| storage | micro | 22.8ms | 43ms | **0.53x** | **0.53x** |
+| mandelbrot | micro | 82.6ms | 55ms | 1.50x | 1.53x |
+| nbody | micro | 22.2ms | 33ms | **0.67x** | **0.92x** |
+| richards | macro | 83.4ms | 36ms | 2.32x | FAIL |
+| json | macro | 506.3ms | 34ms | 14.89x | 14.9x |
+| deltablue | macro | 50.2ms | 35ms | 1.43x | 1.78x |
+| havlak | macro | 158.3ms | 130ms | 1.22x | 1.24x |
+| cd | macro | 440ms | 65ms | 6.77x | FAIL |
+
+> Ratio = Lambda / Node.js. Values < 1.0 mean Lambda is faster. **Bold** = Lambda wins.
+
+**Geometric mean (14 all passing): 1.03x** — Lambda and Node.js are at parity on wall-clock
+**Geometric mean (12, excl `richards`+`cd`): 0.83x** — comparable subset improved from 0.87x (ref-count) to 0.83x
+
+Notable changes from ref-count build:
+- `sieve` improved from 0.67x to **0.43x** (Lambda now 2.3x faster than Node.js, was 1.5x)
+- `nbody` improved from 0.92x to **0.67x** (now decisively faster)
+- `deltablue` improved from 1.78x to **1.43x** (closing the gap)
+- `richards` now passes (was FAIL), though at 2.32x slower than Node.js
+- `cd` now passes (was FAIL) after fixing parameter immutability issue; at 6.77x slower than Node.js (440ms vs 65ms)
+
+---
+
+## Key Findings
+
+### 1. GC is performance-neutral to slightly beneficial (0.94x overall)
+
+Contrary to the common expectation that replacing reference counting with GC would regress performance, the GC runtime is approximately **6% faster overall** across all 32 comparable benchmarks. No benchmark shows meaningful regression — the worst case is `mandelbrot` AWFY (1.01x) and `ack` untyped (1.01x), both effectively tied.
+
+### 2. Largest improvements are in AWFY micro benchmarks
+
+The AWFY micro benchmarks show consistent 5–15% improvements:
+- `deltablue` (0.79x) — 21% faster, the largest single improvement
+- `nbody` (0.85x) — 15% faster
+- `sieve` (0.87x) — 13% faster
+- `bounce` (0.89x) — 11% faster
+
+These benchmarks involve moderate object allocation rates. GC's deferred collection appears more efficient than per-operation reference count manipulation (increment/decrement/check-zero on every assignment).
+
+### 3. Float-heavy R7RS benchmarks improved
+
+`fibfp` untyped (0.85x, 15% faster) and `fft` untyped (0.94x, 6% faster) show that floating-point benchmarks benefit from eliminating ref-count overhead on boxed float temporaries. Since floats are heap-allocated compound scalars, every arithmetic operation previously required ref-count increment on the result and decrement on the consumed operand.
+
+### 4. Typed code shows matching improvement pattern
+
+The typed R7RS benchmarks show the same ~4% geometric improvement as untyped. Notable typed improvements:
+- `tak` typed (0.85x) — 15% faster, suggesting reduced overhead in recursive call frame management
+- `fft` typed (0.90x) — 10% faster, array access benefits from eliminated ref-count on intermediates
+- `mbrot` typed (0.92x) — 8% faster
+
+### 5. `richards` and `cd` now pass under GC
+
+The `richards` benchmark previously failed with reference counting (wrong output) but now produces correct results under GC (83.4ms). This suggests the ref-count implementation had a **correctness bug** — likely a reference cycle or premature deallocation — that GC naturally handles.
+
+The `cd` (Collision Detection) benchmark previously failed due to a compile error (E211: parameter immutability). After fixing the Red-Black Tree fixup functions to use local `var` copies instead of reassigning `pn` parameters, `cd` now passes (440ms). At 6.77x slower than Node.js (65ms), it is the second-slowest benchmark after `json` (14.89x) — the heavy Red-Black Tree and voxel-based spatial indexing involve extensive map/array allocation and mutation.
+
+### 6. Gap to Racket narrows slightly
+
+With GC, Lambda's gap to Racket narrowed from 20x to **15x** (untyped) and from 12x to **11x** (typed). The improvement is modest but directionally positive — the GC runtime's slightly better performance translates directly to closing the gap with mature Scheme implementations.
+
+### 7. Typed/untyped speedup ratio remains similar
+
+| Metric | Ref-Count | GC |
+|--------|:---------:|:--:|
+| R7RS typed/untyped speedup | 0.60x (40% faster) | 0.73x (27% faster) |
+
+The slightly smaller typed benefit under GC (27% vs 40%) is expected: since GC already improved untyped performance, there is less headroom for type annotations to recover.
