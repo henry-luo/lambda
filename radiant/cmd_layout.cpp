@@ -2825,82 +2825,81 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
 
     char* latex_filepath = url_to_local_path(latex_url);
-    log_debug("[Lambda LaTeX] Loading LaTeX document: %s", latex_filepath);
+    log_info("[Lambda LaTeX] Loading LaTeX document via Lambda package pipeline: %s", latex_filepath);
 
-    // Step 1: Parse LaTeX with Lambda parser (Tree-sitter based)
-    char* latex_content = read_text_file(latex_filepath);
-    if (!latex_content) {
-        log_error("Failed to read LaTeX file: %s", latex_filepath);
+    // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
+    // Build a Lambda script that imports the LaTeX package and renders to HTML
+    char script_buf[4096];
+    snprintf(script_buf, sizeof(script_buf),
+        "import latex: .lambda.package.latex.latex\n"
+        "let ast^err = input(\"%s\", {type: \"latex\"})\n"
+        "latex.render_to_html(ast, {standalone: true})\n",
+        latex_filepath);
+
+    // Run the script using the Lambda runtime (MIR JIT for performance)
+    Runtime latex_runtime;
+    runtime_init(&latex_runtime);
+    latex_runtime.current_dir = const_cast<char*>("./");
+
+    const char* tmp_script_path = "temp/_view_latex_tmp.ls";
+    write_text_file(tmp_script_path, script_buf);
+    Input* script_result = run_script_mir(&latex_runtime, nullptr, (char*)tmp_script_path, false);
+
+    if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL
+        || get_type_id(script_result->root) == LMD_TYPE_ERROR) {
+        log_error("[Lambda LaTeX] Lambda LaTeX package - HTML rendering failed for: %s", latex_filepath);
+        runtime_cleanup(&latex_runtime);
         return nullptr;
     }
 
-    // Create type string for LaTeX
-    String* type_str = (String*)mem_alloc(sizeof(String) + 6, MEM_CAT_LAYOUT);
-    type_str->len = 5;
-    str_copy(type_str->chars, type_str->len + 1, "latex", 5);
+    // Extract the HTML string from the script result
+    StrBuf* html_buf = strbuf_new_cap(8192);
+    print_root_item(html_buf, script_result->root);
+    const char* html_doc = html_buf->str;
+    size_t html_len = html_buf->length;
 
-    // Parse LaTeX to Lambda Element tree using input_from_source
-    Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
-    free(latex_content);  // from read_text_file, uses stdlib
-
-    if (!latex_input || !latex_input->root.item) {
-        log_error("Failed to parse LaTeX file: %s", latex_filepath);
+    if (!html_doc || html_len == 0) {
+        log_error("[Lambda LaTeX] Lambda LaTeX package produced empty HTML output");
+        strbuf_free(html_buf);
+        runtime_cleanup(&latex_runtime);
         return nullptr;
     }
 
-    log_debug("[Lambda LaTeX] Parsed LaTeX document to Lambda Element tree");
-
-    // DEBUG: Dump the LaTeX tree
-    log_debug("[Lambda LaTeX] Dumping LaTeX input tree:");
-    log_root_item(latex_input->root);
-
-    // Step 2: Convert LaTeX Element tree to HTML using format_html
-    log_debug("[Lambda LaTeX] Converting LaTeX to HTML...");
-    log_info("[Lambda LaTeX] Starting LaTeX document load from %s", latex_filepath);
-
-    String* html_str = format_html(pool, latex_input->root);
-    if (!html_str || html_str->len == 0) {
-        log_error("Failed to generate HTML from LaTeX Element tree");
-        return nullptr;
-    }
-    const char* html_doc = html_str->chars;
-
-    // Log the first 100 characters to verify structure
-    size_t html_len = html_str->len;
+    // Log preview
     char html_preview[101];
     size_t preview_len = html_len < 100 ? html_len : 100;
     memcpy(html_preview, html_doc, preview_len);
     html_preview[preview_len] = '\0';
-    log_info("[Lambda LaTeX] Generated HTML (%zu bytes), starts with: %s", html_len, html_preview);
+    log_info("[Lambda LaTeX] Lambda package generated HTML (%zu bytes), starts with: %s", html_len, html_preview);
 
-    // Step 3: Parse the generated HTML for DOM construction
+    // Step 2: Parse the generated HTML for DOM construction
     log_debug("[Lambda LaTeX] Parsing generated HTML for layout...");
 
-    // Create new input for HTML parsing
     String* html_type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     html_type_str->len = 4;
     str_copy(html_type_str->chars, html_type_str->len + 1, "html", 4);
 
     Input* html_input = input_from_source(html_doc, latex_url, html_type_str, nullptr);
+    strbuf_free(html_buf);  // done with the HTML string buffer
+    runtime_cleanup(&latex_runtime);  // done with Lambda runtime
+
     if (!html_input) {
         log_error("Failed to parse generated HTML");
         return nullptr;
     }
 
     Element* html_root = get_html_root_element(html_input);
-    // Use html_input for DOM construction
-    latex_input = html_input;
 
     if (!html_root) {
         log_error("Failed to get HTML root element from LaTeX conversion");
         return nullptr;
     }
 
-    log_debug("[Lambda LaTeX] Converted LaTeX to HTML Element tree");
+    log_debug("[Lambda LaTeX] Converted LaTeX to HTML Element tree via Lambda package");
 
     // Step 3: Create DomDocument and build DomElement tree from HTML Element tree
     log_debug("[Lambda LaTeX] Building DomElement tree from HTML");
-    DomDocument* dom_doc = dom_document_create(latex_input);
+    DomDocument* dom_doc = dom_document_create(html_input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
         return nullptr;
