@@ -5598,7 +5598,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Add table border (content starts inside the border)
     int table_border_top = 0;
-    if (table->bound && table->bound->border && table->bound->border->width.top > 0) {
+    if (table->tb->border_collapse) {
+        // Border-collapse: CSS 2.1 §17.6.2
+        // Content starts at half the collapsed top border.
+        // The collapsed border may come from cells, rows, columns, or the table itself,
+        // so we use meta->collapsed_border_top (resolved in resolve_collapsed_borders)
+        // rather than checking only the table element's own border.
+        float collapsed_top = meta->collapsed_border_top;
+        if (collapsed_top <= 0 && table->bound && table->bound->border) {
+            // Fallback if no cells resolved: use table's own border
+            collapsed_top = table->bound->border->width.top;
+        }
+        if (collapsed_top > 0) {
+            table_border_top = (int)(collapsed_top / 2.0f + 0.5f);
+            current_y += table_border_top;
+            log_debug("Added collapsed table border top: +%dpx (resolved=%.1f)", table_border_top, collapsed_top);
+        }
+    } else if (table->bound && table->bound->border && table->bound->border->width.top > 0) {
         table_border_top = (int)table->bound->border->width.top;
         current_y += table_border_top;
         log_debug("Added table border top: +%dpx", table_border_top);
@@ -5621,7 +5637,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Position caption at top if caption-side is top (default)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
         caption->x = 0;
-        caption->y = 0;
+        // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
+        // The caption's margin-top pushes it down from the table wrapper's content edge.
+        float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
+        caption->y = caption_mt;
 
         // Check if caption needs re-layout due to width change
         // This happens because caption was laid out before table width was calculated
@@ -6674,7 +6693,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Position caption at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
         caption->x = 0;
-        caption->y = final_table_height;  // Position after all rows
+        // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
+        // The caption's margin-top pushes it down from the table box's bottom edge.
+        float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
+        caption->y = final_table_height + caption_mt;  // Position after all rows + margin-top
 
         // Check if caption needs re-layout due to width change (same as top caption)
         float old_width = caption->width;
@@ -6825,15 +6847,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // These were calculated in resolve_collapsed_borders() and stored in TableMetadata.
         float collapsed_left = meta->collapsed_border_left;
         float collapsed_right = meta->collapsed_border_right;
-        float collapsed_top = meta->collapsed_border_top;
         float collapsed_bottom = meta->collapsed_border_bottom;
 
-        // Add half of collapsed borders to table dimensions (for border-box reporting)
+        // Width: table_border_left (half) is NOT in table_width, so add both halves
         table_border_width = (int)(collapsed_left / 2.0f + collapsed_right / 2.0f + 0.5f);
-        table_border_height = (int)(collapsed_top / 2.0f + collapsed_bottom / 2.0f + 0.5f);
-        log_debug("Border-collapse: using max resolved borders - left=%.1f, right=%.1f, top=%.1f, bottom=%.1f",
-               collapsed_left, collapsed_right, collapsed_top, collapsed_bottom);
-        log_debug("Border-collapse: adding half of collapsed borders to dimensions: width+%d, height+%d",
+        // Height: half_top is already included in final_table_height
+        // (via current_y which starts at half_top + padding_top for row positioning),
+        // so only add half_bottom to avoid double-counting half_top.
+        // This mirrors the separate border pattern where border_top is in current_y
+        // and only border_bottom is added at the end.
+        table_border_height = (int)(collapsed_bottom / 2.0f + 0.5f);
+        log_debug("Border-collapse: using max resolved borders - left=%.1f, right=%.1f, bottom=%.1f",
+               collapsed_left, collapsed_right, collapsed_bottom);
+        log_debug("Border-collapse: adding half borders to dimensions: width+%d, height+%d (half_top already in current_y)",
                table_border_width, table_border_height);
     } else if (table->bound && table->bound->border) {
         // Separate borders: border_top is already included in final_table_height
