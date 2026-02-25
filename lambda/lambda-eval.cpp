@@ -2289,6 +2289,10 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 // contains system function - checks if a string contains a substring
 Bool fn_contains(Item str_item, Item substr_item) {
     GUARD_BOOL_ERROR2(str_item, substr_item);
+    // null doesn't contain anything, and nothing contains null
+    if (get_type_id(str_item) == LMD_TYPE_NULL || get_type_id(substr_item) == LMD_TYPE_NULL) {
+        return BOOL_FALSE;
+    }
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: first argument must be a string");
         return BOOL_ERROR;
@@ -2330,7 +2334,12 @@ Bool fn_starts_with(Item str_item, Item prefix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId prefix_type = get_type_id(prefix_item);
 
-    // null prefix (empty string "") matches any string
+    // null string doesn't start with anything
+    if (str_type == LMD_TYPE_NULL) {
+        return BOOL_FALSE;
+    }
+
+    // null prefix matches any string (like empty prefix)
     if (prefix_type == LMD_TYPE_NULL) {
         return BOOL_TRUE;
     }
@@ -2367,7 +2376,12 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId suffix_type = get_type_id(suffix_item);
 
-    // null suffix (empty string "") matches any string
+    // null string doesn't end with anything
+    if (str_type == LMD_TYPE_NULL) {
+        return BOOL_FALSE;
+    }
+
+    // null suffix matches any string (like empty suffix)
     if (suffix_type == LMD_TYPE_NULL) {
         return BOOL_TRUE;
     }
@@ -2500,6 +2514,9 @@ Item fn_trim(Item str_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
+    // null trims to empty string
+    if (str_type == LMD_TYPE_NULL) return ItemNull;
+
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_trim: argument must be a string or symbol");
         return ItemError;
@@ -2545,6 +2562,9 @@ Item fn_trim_start(Item str_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
+    // null trims to null
+    if (str_type == LMD_TYPE_NULL) return ItemNull;
+
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_trim_start: argument must be a string or symbol");
         return ItemError;
@@ -2585,6 +2605,9 @@ Item fn_trim_start(Item str_item) {
 Item fn_trim_end(Item str_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
+
+    // null trims to null
+    if (str_type == LMD_TYPE_NULL) return ItemNull;
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_trim_end: argument must be a string or symbol");
@@ -2627,6 +2650,9 @@ Item fn_trim_end(Item str_item) {
 Item fn_lower(Item str_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
+
+    // null lowercased is null
+    if (str_type == LMD_TYPE_NULL) return ItemNull;
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_lower: argument must be a string or symbol");
@@ -2679,6 +2705,9 @@ Item fn_lower(Item str_item) {
 Item fn_upper(Item str_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
+
+    // null uppercased is null
+    if (str_type == LMD_TYPE_NULL) return ItemNull;
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_upper: argument must be a string or symbol");
@@ -2787,7 +2816,10 @@ Item fn_split(Item str_item, Item sep_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
 
-    // null separator (empty string "") means split into individual characters
+    // null string splits to empty list
+    if (str_type == LMD_TYPE_NULL) return {.list = list()};
+
+    // null separator means split on whitespace (Python convention)
     bool null_sep = (sep_type == LMD_TYPE_NULL);
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
@@ -2815,8 +2847,35 @@ Item fn_split(Item str_item, Item sep_item) {
         return {.list = result};  // empty list for empty string
     }
 
+    if (null_sep) {
+        // null separator: split on whitespace (like Python str.split(None))
+        // strips leading/trailing whitespace, splits on runs of whitespace
+        const char* p = str_chars;
+        const char* end = str_chars + str_len;
+        while (p < end) {
+            // skip whitespace
+            while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v')) {
+                p++;
+            }
+            if (p >= end) break;
+            // find end of word
+            const char* word_start = p;
+            while (p < end && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
+                p++;
+            }
+            size_t word_len = p - word_start;
+            String* part = (String *)heap_alloc(sizeof(String) + word_len + 1, LMD_TYPE_STRING);
+            part->len = word_len;
+            memcpy(part->chars, word_start, word_len);
+            part->chars[word_len] = '\0';
+            list_push(result, {.item = s2it(part)});
+        }
+        if (context) { context->disable_string_merging = saved_merging; }
+        return {.list = result};
+    }
+
     if (!sep_chars || sep_len == 0) {
-        // split into individual characters
+        // empty string separator: split into individual characters
         const char* p = str_chars;
         const char* end = str_chars + str_len;
         while (p < end) {
@@ -2926,6 +2985,9 @@ Item fn_str_join(Item list_item, Item sep_item) {
     TypeId list_type = get_type_id(list_item);
     TypeId sep_type = get_type_id(sep_item);
 
+    // null list joins to null
+    if (list_type == LMD_TYPE_NULL) return ItemNull;
+
     if (list_type != LMD_TYPE_LIST && list_type != LMD_TYPE_ARRAY) {
         log_debug("fn_str_join: first argument must be a list or array");
         return ItemError;
@@ -3028,6 +3090,13 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId old_type = get_type_id(old_item);
     TypeId new_type = get_type_id(new_item);
+
+    // null string has nothing to replace
+    if (str_type == LMD_TYPE_NULL) return ItemNull;
+    // null search pattern means nothing to find — return string unchanged
+    if (old_type == LMD_TYPE_NULL) return str_item;
+    // null replacement — treat as empty string (delete matches)
+    if (new_type == LMD_TYPE_NULL) new_type = LMD_TYPE_STRING;  // fall through, handled below by !new_chars check
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (old_type != LMD_TYPE_STRING && old_type != LMD_TYPE_SYMBOL) ||

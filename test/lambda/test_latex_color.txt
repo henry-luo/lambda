@@ -1,0 +1,23 @@
+"===== COLOR COMMAND TESTS =====1. red:#d32f2f2. blue:#1976d23. green:#388e3c4. black:#0000005. white:#ffffff6. cyan:#00bcd47. magenta:#e91e638. yellow:#fbc02d9. orange:#f57c0010. purple:#7b1fa211. darkgray:#61616112. lightgray:#bdbdbd13. hex passthrough:#ff000014. custom myred:#cc000015. custom myblue:rgb(0,0,200)16. custom fallback:#d32f2f17. unknown passthrough:chartreuse18. HTML model:#FF800019. HTML name:mycolor20. textcolor tag:"
+'span'
+"21. textcolor class:latex-textcolor22. textcolor has color:"
+true
+"23. colorbox tag:"
+'span'
+"24. colorbox class:latex-colorbox25. colorbox has bg:"
+true
+"26. fcolorbox tag:"
+'span'
+"27. fcolorbox class:latex-fcolorbox28. fcolorbox has border:"
+true
+"29. fcolorbox has bg:"
+true
+"30. color is decl:"
+true
+"31. textcolor is not decl:"
+false
+"32. color decl style:color:#1976d233. wrap color tag:"
+'span'
+"34. wrap color class:latex-color35. wrap color has style:"
+true
+"36. rgb model:rgb(255,127,0)37. RGB model:rgb(255,128,0)===== ALL COLOR TESTS DONE ====="

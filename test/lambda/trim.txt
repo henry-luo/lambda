@@ -1,7 +1,7 @@
 "1. trim both sides:hello2. trim no whitespace:hello3. trim left only:hello4. trim right only:hello5. trim spaces → null:null6. trim tab → null:null7. trim newline → null:null8. trim mixed ws → null:null9. type of trimmed ws:"
 type.null
 "10. trim null → error:"
-error
+type.null
 "11. trim_start:hello  12. trim_start all ws → null:null13. type trim_start ws:"
 type.null
 "14. trim_end:  hello15. trim_end all ws → null:null16. type trim_end ws:"

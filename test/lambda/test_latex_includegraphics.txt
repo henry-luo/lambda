@@ -1,0 +1,7 @@
+"===== INCLUDEGRAPHICS OPTION TESTS =====1. width:5cm2. height:3cm3. width with spaces:10em4. scale:0.55. keepaspectratio flag:true6. width with flag:5cm7. angle:908. scale with angle:0.759. null opts is map:"
+true
+"10. empty opts is map:"
+true
+"11. trim value:0 0 5cm 012. clip flag:true13. text_of_skip_brack:image.png14. no brack:photo.jpg15. with path:path/to/img.png16. find brack:"
+true
+"17. no brack found:18. percent width:100%19. textwidth:0.5\textwidth20. extra commas width:5cm21. extra commas height:3cm===== ALL TESTS PASSED ====="
