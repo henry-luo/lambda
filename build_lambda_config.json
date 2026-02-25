@@ -19,7 +19,6 @@
         "lambda/input/markup/format",
         "lambda/format",
         "lambda/validator",
-        "lambda/tex",
         "lambda/js",
         "lambda/network",
         "radiant",
@@ -30,6 +29,8 @@
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
         "radiant/radiant.cpp",
+        "radiant/render_dvi.cpp",
+        "radiant/render_texnode.cpp",
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
         "lib/font_config.c"
@@ -1035,7 +1036,7 @@
         "test_suites": [
             {
                 "suite": "library",
-                "name": "\ud83d\udcda Library Tests",
+                "name": "📚 Library Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -1049,7 +1050,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_str_gtest.exe",
-                        "icon": "\ud83d\udcd0"
+                        "icon": "📐"
                     },
                     {
                         "source": "test_strbuf_gtest.cpp",
@@ -1062,7 +1063,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_strbuf_gtest.exe",
-                        "icon": "\ud83d\udcdd"
+                        "icon": "📝"
                     },
                     {
                         "source": "test_gc_heap_gtest.cpp",
@@ -1090,7 +1091,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_stringbuf_gtest.exe",
-                        "icon": "\ud83e\uddf5"
+                        "icon": "🧵"
                     },
                     {
                         "source": "test_strview_gtest.cpp",
@@ -1103,7 +1104,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_strview_gtest.exe",
-                        "icon": "\ud83d\udc40"
+                        "icon": "👀"
                     },
                     {
                         "source": "test_num_stack_gtest.cpp",
@@ -1116,7 +1117,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_num_stack_gtest.exe",
-                        "icon": "\ud83d\udd22"
+                        "icon": "🔢"
                     },
                     {
                         "source": "test_datetime_gtest.cpp",
@@ -1130,7 +1131,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_datetime_gtest.exe",
-                        "icon": "\ud83d\udcc5"
+                        "icon": "📅"
                     },
                     {
                         "source": "test_font_config_gtest.cpp",
@@ -1150,7 +1151,7 @@
                             "lib/hashmap.c"
                         ],
                         "binary": "test_font_config_gtest.exe",
-                        "icon": "\ud83d\udd24"
+                        "icon": "🔤"
                     },
                     {
                         "source": "test_woff2_gtest.cpp",
@@ -1183,7 +1184,7 @@
                             "lib/str.c"
                         ],
                         "binary": "test_woff2_gtest.exe",
-                        "icon": "\ud83e\uddf1"
+                        "icon": "🧱"
                     },
                     {
                         "source": "test_url_gtest.cpp",
@@ -1196,7 +1197,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_url_gtest.exe",
-                        "icon": "\ud83d\udd17"
+                        "icon": "🔗"
                     },
                     {
                         "source": "test_url_extra_gtest.cpp",
@@ -1209,7 +1210,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_url_extra_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test_cmdedit_gtest.cpp",
@@ -1224,7 +1225,7 @@
                         ],
                         "binary": "test_cmdedit_gtest.exe",
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
-                        "icon": "\u2328\ufe0f"
+                        "icon": "⌨️"
                     },
                     {
                         "source": "test_basic_gtest.cpp",
@@ -1235,7 +1236,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_basic_gtest.exe",
-                        "icon": "\ud83e\uddea"
+                        "icon": "🧪"
                     },
                     {
                         "source": "test_mempool_gtest.cpp",
@@ -1252,7 +1253,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_mempool_gtest.exe",
-                        "icon": "\ud83d\ude80"
+                        "icon": "🚀"
                     },
                     {
                         "source": "test_memtrack_gtest.cpp",
@@ -1272,7 +1273,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_memtrack_gtest.exe",
-                        "icon": "\ud83d\udd0d"
+                        "icon": "🔍"
                     },
                     {
                         "source": "test_avl_tree.cpp",
@@ -1290,7 +1291,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree.exe",
-                        "icon": "\ud83c\udf32"
+                        "icon": "🌲"
                     },
                     {
                         "source": "test_arena_gtest.cpp",
@@ -1304,7 +1305,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_arena_gtest.exe",
-                        "icon": "\ud83c\udfdf\ufe0f"
+                        "icon": "🏟️"
                     },
                     {
                         "source": "test_pdf_writer_gtest.cpp",
@@ -1318,7 +1319,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_pdf_writer_gtest.exe",
-                        "icon": "\ud83d\udcc4"
+                        "icon": "📄"
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",
@@ -1336,14 +1337,14 @@
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree_perf.exe",
-                        "icon": "\u26a1"
+                        "icon": "⚡"
                     }
                 ],
                 "type": "library"
             },
             {
                 "suite": "input",
-                "name": "\ud83d\udcc4 Input Processing Tests",
+                "name": "📄 Input Processing Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -1357,7 +1358,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_mime_detect_gtest.exe",
-                        "icon": "\ud83d\udcce"
+                        "icon": "📎"
                     },
                     {
                         "source": "test_mark_builder_gtest.cpp",
@@ -1371,7 +1372,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_builder_gtest.exe",
-                        "icon": "\ud83c\udfd7\ufe0f"
+                        "icon": "🏗️"
                     },
                     {
                         "source": "test_mark_builder_deepcopy_gtest.cpp",
@@ -1385,7 +1386,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_builder_deepcopy_gtest.exe",
-                        "icon": "\ud83d\udd04"
+                        "icon": "🔄"
                     },
                     {
                         "source": "test_mark_editor_gtest.cpp",
@@ -1399,7 +1400,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_editor_gtest.exe",
-                        "icon": "\u270f\ufe0f"
+                        "icon": "✏️"
                     },
                     {
                         "source": "test_name_pool_gtest.cpp",
@@ -1413,7 +1414,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_name_pool_gtest.exe",
-                        "icon": "\ud83d\udd24"
+                        "icon": "🔤"
                     },
                     {
                         "source": "test_namespace_gtest.cpp",
@@ -1427,7 +1428,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_namespace_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test_path_gtest.cpp",
@@ -1441,7 +1442,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_path_gtest.exe",
-                        "icon": "\ud83d\udcc2"
+                        "icon": "📂"
                     },
                     {
                         "source": "test_mark_reader_gtest.cpp",
@@ -1455,7 +1456,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_reader_gtest.exe",
-                        "icon": "\ud83d\udcd6"
+                        "icon": "📖"
                     },
                     {
                         "source": "test_error_tracking.cpp",
@@ -1469,7 +1470,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_error_tracking.exe",
-                        "icon": "\ud83d\udee1\ufe0f"
+                        "icon": "🛡️"
                     },
                     {
                         "source": "test_math_ascii_gtest.cpp",
@@ -1483,7 +1484,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_math_ascii_gtest.exe",
-                        "icon": "\ud83d\udd24"
+                        "icon": "🔤"
                     },
                     {
                         "source": "test_markup_roundtrip_gtest.cpp",
@@ -1497,7 +1498,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_markup_roundtrip_gtest.exe",
-                        "icon": "\ud83d\udcdd"
+                        "icon": "📝"
                     },
                     {
                         "source": "test_format_markup_gtest.cpp",
@@ -1511,7 +1512,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_format_markup_gtest.exe",
-                        "icon": "\ud83d\udcdd"
+                        "icon": "📝"
                     },
                     {
                         "source": "test_markup_modular_gtest.cpp",
@@ -1525,7 +1526,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_markup_modular_gtest.exe",
-                        "icon": "\ud83e\udde9"
+                        "icon": "🧩"
                     },
                     {
                         "source": "test_entity_emoji_gtest.cpp",
@@ -1539,7 +1540,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_entity_emoji_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test_input_roundtrip_gtest.cpp",
@@ -1553,7 +1554,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_input_roundtrip_gtest.exe",
-                        "icon": "\ud83d\udd04"
+                        "icon": "🔄"
                     },
                     {
                         "source": "test_yaml_suite_gtest.cpp",
@@ -1567,7 +1568,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_yaml_suite_gtest.exe",
-                        "icon": "\ud83d\udcdc"
+                        "icon": "📜"
                     },
                     {
                         "source": "test_wpt_html_parser_gtest.cpp",
@@ -1581,7 +1582,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_wpt_html_parser_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "markup/test_markdown_gtest.cpp",
@@ -1598,21 +1599,6 @@
                         "icon": "📝"
                     },
                     {
-                        "source": "test_latex_ts_gtest.cpp",
-                        "name": "LaTeX Tree-sitter Parser Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "tree-sitter-latex"
-                        ],
-                        "binary": "test_latex_ts_gtest.exe",
-                        "icon": "\ud83d\udcdd"
-                    },
-                    {
                         "source": "test_html_roundtrip_gtest.cpp",
                         "name": "HTML Roundtrip Tests",
                         "dependencies": [
@@ -1624,7 +1610,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_html_roundtrip_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test_html_gtest.cpp",
@@ -1638,7 +1624,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_html_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test_html_negative_gtest.cpp",
@@ -1652,7 +1638,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_html_negative_gtest.exe",
-                        "icon": "\ud83d\udea8"
+                        "icon": "🚨"
                     },
                     {
                         "source": "test_lambda_domnode_gtest.cpp",
@@ -1674,7 +1660,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_lambda_domnode_gtest.exe",
-                        "icon": "\ud83d\udd17"
+                        "icon": "🔗"
                     },
                     {
                         "source": "test_dir_gtest.cpp",
@@ -1687,7 +1673,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_dir_gtest.exe",
-                        "icon": "\ud83d\udcc1"
+                        "icon": "📁"
                     },
                     {
                         "source": "test_graph_parser_gtest.cpp",
@@ -1701,7 +1687,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_graph_parser_gtest.exe",
-                        "icon": "\ud83d\udcca"
+                        "icon": "📊"
                     },
                     {
                         "source": "parser/test_parser_robustness_gtest.cpp",
@@ -1715,7 +1701,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_parser_robustness_gtest.exe",
-                        "icon": "\ud83d\udee1\ufe0f"
+                        "icon": "🛡️"
                     },
                     {
                         "source": "test_validator_input_gtest.cpp",
@@ -1729,7 +1715,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_input_gtest.exe",
-                        "icon": "\u2705"
+                        "icon": "✅"
                     },
                     {
                         "source": "test_validator_features_gtest.cpp",
@@ -1743,7 +1729,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_features_gtest.exe",
-                        "icon": "\ud83d\udee0\ufe0f"
+                        "icon": "🛠️"
                     },
                     {
                         "source": "test_null_vs_missing_gtest.cpp",
@@ -1757,7 +1743,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_null_vs_missing_gtest.exe",
-                        "icon": "\u2705"
+                        "icon": "✅"
                     },
                     {
                         "source": "test_enhanced_errors.cpp",
@@ -1771,7 +1757,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_enhanced_errors.exe",
-                        "icon": "\u2728"
+                        "icon": "✨"
                     },
                     {
                         "source": "test_validation_options.cpp",
@@ -1785,7 +1771,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validation_options.exe",
-                        "icon": "\u2699\ufe0f"
+                        "icon": "⚙️"
                     },
                     {
                         "source": "test_format_validation.cpp",
@@ -1799,7 +1785,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_format_validation.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test_validator_integration.cpp",
@@ -1813,7 +1799,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_integration.exe",
-                        "icon": "\ud83e\uddea"
+                        "icon": "🧪"
                     },
                     {
                         "source": "test_type_references_simple.cpp",
@@ -1827,7 +1813,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_type_references_simple.exe",
-                        "icon": "\ud83d\udd17"
+                        "icon": "🔗"
                     },
                     {
                         "source": "test_graph_formatter_gtest.cpp",
@@ -1841,7 +1827,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_graph_formatter_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/test_sysinfo_gtest.cpp",
@@ -1855,7 +1841,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_sysinfo_gtest.exe",
-                        "icon": "\ud83d\udda5\ufe0f"
+                        "icon": "🖥️"
                     },
                     {
                         "source": "test/test_jsx_roundtrip_new_gtest.cpp",
@@ -1869,7 +1855,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_jsx_roundtrip_new_gtest.exe",
-                        "icon": "\ud83d\udd22"
+                        "icon": "🔢"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_new_gtest.cpp",
@@ -1882,7 +1868,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_mdx_roundtrip_new_gtest.exe",
-                        "icon": "\ud83d\udcdd"
+                        "icon": "📝"
                     },
                     {
                         "source": "test/css/test_css_style_node.cpp",
@@ -1906,7 +1892,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_css_style_node.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_system.cpp",
@@ -1931,7 +1917,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_css_system.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_dom_integration.cpp",
@@ -1959,7 +1945,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_dom_integration.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test/css/test_css_dom_crud.cpp",
@@ -1987,7 +1973,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_dom_crud.exe",
-                        "icon": "\u270f\ufe0f"
+                        "icon": "✏️"
                     },
                     {
                         "source": "test/css/test_css_style_application_gtest.cpp",
@@ -2015,7 +2001,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_style_application_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test_html_css_gtest.cpp",
@@ -2036,7 +2022,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_html_css_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test/css/test_css_tokenizer_gtest.cpp",
@@ -2050,7 +2036,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_tokenizer_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_tokenizer_unit.cpp",
@@ -2064,7 +2050,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_tokenizer_unit.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_parser_unit.cpp",
@@ -2078,7 +2064,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_parser_unit.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_engine_unit.cpp",
@@ -2092,7 +2078,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_engine_unit.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_engine_negative.cpp",
@@ -2106,7 +2092,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_engine_negative.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_dom_element_print.cpp",
@@ -2134,7 +2120,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_dom_element_print.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_formatter_unit.cpp",
@@ -2148,11 +2134,11 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_formatter_unit.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_roundtrip_unit.cpp",
-                        "name": "CSS Roundtrip Unit Tests (Parse\u2192Format\u2192Parse)",
+                        "name": "CSS Roundtrip Unit Tests (Parse→Format→Parse)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2162,7 +2148,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_roundtrip_unit.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_compound_descendant_selectors.cpp",
@@ -2176,7 +2162,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_compound_descendant_selectors.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_selector_groups.cpp",
@@ -2190,7 +2176,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_selector_groups.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_parser_gtest.cpp",
@@ -2204,7 +2190,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_parser_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_integration_gtest.cpp",
@@ -2218,7 +2204,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_integration_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_files_safe_gtest.cpp",
@@ -2232,7 +2218,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_files_safe_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_frameworks_gtest.cpp",
@@ -2246,7 +2232,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_frameworks_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/css/test_css_to_mark_gtest.cpp",
@@ -2260,7 +2246,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_to_mark_gtest.exe",
-                        "icon": "\ud83c\udfa8"
+                        "icon": "🎨"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_gtest.cpp",
@@ -2273,7 +2259,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_mdx_roundtrip_gtest.exe",
-                        "icon": "\ud83d\udcc4"
+                        "icon": "📄"
                     },
                     {
                         "source": "test/test_jsx_roundtrip_gtest.cpp",
@@ -2286,33 +2272,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_jsx_roundtrip_gtest.exe",
-                        "icon": "\u269b\ufe0f"
-                    },
-                    {
-                        "source": "test/test_latex_parser_gtest.cpp",
-                        "name": "LaTeX Parser Unit Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_parser_gtest.exe",
-                        "icon": "\ud83d\udcc4"
-                    },
-                    {
-                        "source": "test/test_latex_treesitter.cpp",
-                        "name": "LaTeX Tree-sitter Parser Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_treesitter.exe",
-                        "icon": "\ud83c\udf32"
+                        "icon": "⚛️"
                     }
                 ],
                 "type": "input",
@@ -2320,7 +2280,7 @@
             },
             {
                 "suite": "validator",
-                "name": "\ud83d\udd0d Validator Tests",
+                "name": "🔍 Validator Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -2335,7 +2295,7 @@
                         ],
                         "binary": "test_validator_gtest.exe",
                         "disabled": false,
-                        "icon": "\ud83d\udd0d"
+                        "icon": "🔍"
                     },
                     {
                         "source": "test/test_ast_validator_gtest.cpp",
@@ -2350,7 +2310,7 @@
                         ],
                         "binary": "test_ast_validator_gtest.exe",
                         "disabled": false,
-                        "icon": "\ud83d\udd0d"
+                        "icon": "🔍"
                     },
                     {
                         "source": "test/test_validator_path_reporting.cpp",
@@ -2365,7 +2325,7 @@
                         ],
                         "binary": "test_validator_path_reporting.exe",
                         "disabled": false,
-                        "icon": "\ud83d\udccd"
+                        "icon": "📍"
                     }
                 ],
                 "type": "validator",
@@ -2380,7 +2340,7 @@
             },
             {
                 "suite": "lambda",
-                "name": "\ud83d\udc11 Lambda Runtime Tests",
+                "name": "🐑 Lambda Runtime Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -2392,7 +2352,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "\ud83d\udc11"
+                        "icon": "🐑"
                     },
                     {
                         "source": "test/test_lambda_errors_gtest.cpp",
@@ -2405,7 +2365,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "\u26a0\ufe0f"
+                        "icon": "⚠️"
                     },
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",
@@ -2416,7 +2376,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "\ud83c\udfae"
+                        "icon": "🎮"
                     },
                     {
                         "source": "test/test_lambda_proc_gtest.cpp",
@@ -2427,7 +2387,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "\ud83d\udc11"
+                        "icon": "🐑"
                     },
                     {
                         "source": "test/test_js_gtest.cpp",
@@ -2438,7 +2398,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "\ud83d\udfe8"
+                        "icon": "🟨"
                     },
                     {
                         "source": "test/test_mir_gtest.cpp",
@@ -2450,7 +2410,7 @@
                             "gtest_main"
                         ],
                         "requires_lambda_exe": true,
-                        "icon": "\u26a1"
+                        "icon": "⚡"
                     },
                     {
                         "source": "test/test_transpile_patterns_gtest.cpp",
@@ -2461,7 +2421,7 @@
                             "gtest"
                         ],
                         "requires_lambda_exe": true,
-                        "icon": "\ud83d\udd0d"
+                        "icon": "🔍"
                     },
                     {
                         "source": "test/test_math_parser_gtest.cpp",
@@ -2475,7 +2435,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "icon": "\ud83d\udcd0"
+                        "icon": "📐"
                     },
                     {
                         "source": "test/test_lambda_std_gtest.cpp",
@@ -2486,7 +2446,7 @@
                             "gtest"
                         ],
                         "requires_lambda_exe": true,
-                        "icon": "\ud83e\uddea"
+                        "icon": "🧪"
                     }
                 ],
                 "type": "lambda",
@@ -2496,670 +2456,16 @@
             },
             {
                 "suite": "extended",
-                "name": "\ud83e\uddea Extended Development Tests",
+                "name": "🧪 Extended Development Tests",
                 "category": "extended",
-                "tests": [
-                    {
-                        "source": "test/test_latex_integration_gtest.cpp",
-                        "name": "LaTeX Integration Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_integration_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/dvi_parser.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udcdd"
-                    },
-                    {
-                        "source": "test/test_tex_node_gtest.cpp",
-                        "name": "TeX Node System Tests",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype"
-                        ],
-                        "binary": "test_tex_node_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/str.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udce6"
-                    },
-                    {
-                        "source": "test/test_tex_vlist_gtest.cpp",
-                        "name": "TeX VList & Page Breaking Tests",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype"
-                        ],
-                        "binary": "test_tex_vlist_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/str.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udcc4"
-                    },
-                    {
-                        "source": "test/test_tex_phase5_gtest.cpp",
-                        "name": "TeX Phase 5 Output Tests",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "png",
-                            "zlib",
-                            "bzip2"
-                        ],
-                        "binary": "test_tex_phase5_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_dvi_out.cpp",
-                            "lambda/tex/tex_pdf_out.cpp",
-                            "lambda/tex/tex_svg_out.cpp",
-                            "lambda/tex/tex_png_out.cpp",
-                            "lambda/tex/tex_font_adapter.cpp",
-                            "lambda/tex/dvi_parser.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/str.c",
-                            "lib/hashmap.c",
-                            "lib/arraylist.c",
-                            "lib/pdf_writer.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udce4"
-                    },
-                    {
-                        "source": "test/test_tex_phase6_gtest.cpp",
-                        "name": "TeX Phase 6 SVG/PNG Output Tests",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "png",
-                            "zlib",
-                            "bzip2"
-                        ],
-                        "binary": "test_tex_phase6_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_svg_out.cpp",
-                            "lambda/tex/tex_png_out.cpp",
-                            "lambda/tex/tex_font_adapter.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/str.c",
-                            "lib/hashmap.c",
-                            "lib/arraylist.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\uddbc\ufe0f"
-                    },
-                    {
-                        "source": "test/test_tex_hyphen_gtest.cpp",
-                        "name": "TeX Hyphenation Tests",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype"
-                        ],
-                        "binary": "test_tex_hyphen_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/str.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\u2796"
-                    },
-                    {
-                        "source": "test/test_tex_lambda_bridge_gtest.cpp",
-                        "name": "TeX Lambda Bridge Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_tex_lambda_bridge_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udd17"
-                    },
-                    {
-                        "source": "test/test_tex_latex_bridge_gtest.cpp",
-                        "name": "TeX LaTeX Bridge Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_tex_latex_bridge_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_latex_bridge.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udcdd"
-                    },
-                    {
-                        "source": "test/test_tex_dvi_generation_gtest.cpp",
-                        "name": "TeX DVI Generation Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_tex_dvi_generation_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_math_ast_builder.cpp",
-                            "lambda/tex/tex_math_ast_typeset.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_latex_bridge.cpp",
-                            "lambda/tex/tex_document_model.cpp",
-                            "lambda/tex/tex_doc_model_text.cpp",
-                            "lambda/tex/tex_doc_model_html.cpp",
-                            "lambda/tex/tex_doc_model_builder.cpp",
-                            "lambda/tex/tex_doc_model_struct.cpp",
-                            "lambda/tex/tex_doc_model_inline.cpp",
-                            "lambda/tex/tex_doc_model_commands.cpp",
-                            "lambda/tex/tex_dvi_out.cpp",
-                            "lambda/tex/tex_svg_out.cpp",
-                            "lambda/tex/tex_font_adapter.cpp",
-                            "lambda/tex/tex_html_render.cpp",
-                            "lambda/tex/dvi_parser.cpp",
-                            "lambda/tex/tex_command_registry.cpp",
-                            "lambda/tex/tex_package_loader.cpp",
-                            "lambda/tex/tex_graphics.cpp",
-                            "lambda/tex/tex_graphics_picture.cpp",
-                            "lambda/tex/tex_pgf_driver.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udd04"
-                    },
-                    {
-                        "source": "test/test_latex_dvi_compare_gtest.cpp",
-                        "name": "DVI Compare Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_dvi_compare_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/dvi_parser.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/str.c",
-                            "lib/log.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udcca"
-                    },
-                    {
-                        "source": "test/test_latex_html_gtest.cpp",
-                        "name": "TeX HTML Output Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_latex_html_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_math_ast_builder.cpp",
-                            "lambda/tex/tex_math_ast_typeset.cpp",
-                            "lambda/tex/tex_html_render.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83c\udf10"
-                    },
-                    {
-                        "source": "test/test_latex_html_compare_gtest.cpp",
-                        "name": "TeX HTML Compare Tests",
-                        "description": "Parallel HTML output tests for the same LaTeX files used by DVI compare tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_latex_html_compare_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_math_ast_builder.cpp",
-                            "lambda/tex/tex_math_ast_typeset.cpp",
-                            "lambda/tex/tex_html_render.cpp",
-                            "lambda/tex/tex_svg_out.cpp",
-                            "lambda/tex/tex_document_model.cpp",
-                            "lambda/tex/tex_doc_model_html.cpp",
-                            "lambda/tex/tex_doc_model_text.cpp",
-                            "lambda/tex/tex_doc_model_builder.cpp",
-                            "lambda/tex/tex_doc_model_struct.cpp",
-                            "lambda/tex/tex_doc_model_inline.cpp",
-                            "lambda/tex/tex_doc_model_commands.cpp",
-                            "lambda/tex/tex_command_registry.cpp",
-                            "lambda/tex/tex_package_loader.cpp",
-                            "lambda/tex/tex_latex_bridge.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_font_adapter.cpp",
-                            "lambda/tex/tex_graphics.cpp",
-                            "lambda/tex/tex_graphics_picture.cpp",
-                            "lambda/tex/tex_pgf_driver.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "📄"
-                    },
-                    {
-                        "source": "test/test_tex_pagebreak_gtest.cpp",
-                        "name": "TeX Page Breaking Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype"
-                        ],
-                        "binary": "test_tex_pagebreak_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_pagebreak.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udcc4"
-                    },
-                    {
-                        "source": "test/test_tex_math_extended_gtest.cpp",
-                        "name": "TeX Math Extended Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_tex_math_extended_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_math_ast_builder.cpp",
-                            "lambda/tex/tex_math_ast_typeset.cpp",
-                            "lambda/tex/tex_linebreak.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\u2211"
-                    },
-                    {
-                        "source": "test/test_tex_align_gtest.cpp",
-                        "name": "TeX Alignment Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype"
-                        ],
-                        "binary": "test_tex_align_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_align.cpp",
-                            "lambda/tex/tex_linebreak.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udcd0"
-                    },
-                    {
-                        "source": "test/test_tex_document_model_gtest.cpp",
-                        "name": "TeX Document Model Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_document_model_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_document_model.cpp",
-                            "lambda/tex/tex_doc_model_text.cpp",
-                            "lambda/tex/tex_doc_model_html.cpp",
-                            "lambda/tex/tex_doc_model_builder.cpp",
-                            "lambda/tex/tex_doc_model_struct.cpp",
-                            "lambda/tex/tex_doc_model_inline.cpp",
-                            "lambda/tex/tex_doc_model_commands.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/str.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "defines": [
-                            "DOC_MODEL_NO_SVG",
-                            "DOC_MODEL_MINIMAL"
-                        ],
-                        "icon": "\ud83d\udcc4"
-                    },
-                    {
-                        "source": "test/test_graphics_gtest.cpp",
-                        "name": "TeX Graphics Tests",
-                        "description": "Tests for LaTeX picture environment and TikZ/PGF graphics support",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_graphics_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_graphics.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/strbuf.c",
-                            "lib/str.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83c\udfa8"
-                    },
-                    {
-                        "source": "test/test_graphics_compare_gtest.cpp",
-                        "name": "TeX Graphics Compare Tests",
-                        "description": "Compare Lambda graphics SVG output against LaTeXML references",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_graphics_compare_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_document_model.cpp",
-                            "lambda/tex/tex_doc_model_text.cpp",
-                            "lambda/tex/tex_doc_model_html.cpp",
-                            "lambda/tex/tex_doc_model_builder.cpp",
-                            "lambda/tex/tex_doc_model_struct.cpp",
-                            "lambda/tex/tex_doc_model_inline.cpp",
-                            "lambda/tex/tex_doc_model_commands.cpp",
-                            "lambda/tex/tex_graphics.cpp",
-                            "lambda/tex/tex_graphics_picture.cpp",
-                            "lambda/tex/tex_pgf_driver.cpp",
-                            "lambda/tex/tex_latex_bridge.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_glue.hpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ast_builder.cpp",
-                            "lambda/tex/tex_math_ast_typeset.cpp",
-                            "lambda/tex/tex_svg_out.cpp",
-                            "lambda/tex/tex_html_render.cpp",
-                            "lambda/tex/tex_font_adapter.cpp",
-                            "lambda/tex/tex_event.cpp",
-                            "lambda/tex/tex_align.cpp",
-                            "lambda/tex/tex_command_registry.cpp",
-                            "lambda/tex/tex_package_loader.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\uddbc"
-                    },
-                    {
-                        "source": "test/test_latex_html_compare_gtest.cpp",
-                        "name": "LaTeX HTML Comparison Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_latex_html_compare_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_document_model.cpp",
-                            "lambda/tex/tex_doc_model_text.cpp",
-                            "lambda/tex/tex_doc_model_html.cpp",
-                            "lambda/tex/tex_doc_model_builder.cpp",
-                            "lambda/tex/tex_doc_model_struct.cpp",
-                            "lambda/tex/tex_doc_model_inline.cpp",
-                            "lambda/tex/tex_doc_model_commands.cpp",
-                            "lambda/tex/tex_latex_bridge.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_glue.hpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ast_builder.cpp",
-                            "lambda/tex/tex_math_ast_typeset.cpp",
-                            "lambda/tex/tex_svg_out.cpp",
-                            "lambda/tex/tex_html_render.cpp",
-                            "lambda/tex/tex_font_adapter.cpp",
-                            "lambda/tex/tex_event.cpp",
-                            "lambda/tex/tex_align.cpp",
-                            "lambda/tex/tex_command_registry.cpp",
-                            "lambda/tex/tex_package_loader.cpp",
-                            "lambda/tex/tex_graphics.cpp",
-                            "lambda/tex/tex_graphics_picture.cpp",
-                            "lambda/tex/tex_pgf_driver.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udd2c"
-                    }
-                ],
+                "tests": [],
                 "type": "tex",
                 "uses_build_config": true,
                 "parallel": true
             },
             {
                 "suite": "extended",
-                "name": "\ud83e\uddea Extended Development Tests",
+                "name": "🧪 Extended Development Tests",
                 "category": "extended",
                 "tests": [
                     {
@@ -3174,7 +2480,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_math_gtest.exe",
-                        "icon": "\ud83d\udd22"
+                        "icon": "🔢"
                     },
                     {
                         "source": "test/test_http_gtest.cpp",
@@ -3187,7 +2493,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_http_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test/test_network_layout_gtest.cpp",
@@ -3198,7 +2504,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_network_layout_gtest.exe",
-                        "icon": "\ud83c\udf10"
+                        "icon": "🌐"
                     },
                     {
                         "source": "test/test_lambda_extended_gtest.cpp",
@@ -3209,7 +2515,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "\ud83d\udc11"
+                        "icon": "🐑"
                     }
                 ],
                 "type": "extended",
