@@ -1,8 +1,11 @@
 # Lambda LaTeX Package — Phase 2 Enhancement Proposal
 
 **Date:** 2026-02-24  
-**Status:** Proposal  
-**Scope:** Achieve 100% LaTeX.js parity, incorporate key LaTeXML features, fully render `latex-showcase.tex`
+**Status:** In Progress  
+**Scope:** Achieve 100% LaTeX.js parity, incorporate key LaTeXML features, fully render `latex-showcase.tex`  
+**Last Updated:** 2026-02-25  
+**Baseline:** 442/442 tests passing  
+**Milestones Completed:** 1, 2, 3, 4 (of 7)
 
 ---
 
@@ -28,7 +31,26 @@ The Phase 1 package (~3,400 lines across 15 files + ~1,500 lines math package) c
 - Diacritics (15 commands), ligatures, ~30 symbol commands
 - Standalone HTML output with CSS
 
-Baseline: **434/434** unit tests passing. Full test script: `test/lambda/test_latex_pkg.ls`.
+Phase 1 baseline: **434/434** unit tests passing. Full test script: `test/lambda/test_latex_pkg.ls`.
+
+### Phase 2 Progress
+
+Milestones 1–4 are complete. Current baseline: **442/442** tests.
+
+| Phase | Status | Tests Added | Key Files |
+|-------|--------|-------------|----------|
+| 2A — Symbol Expansion | ✅ Done | 59 (`test_latex_symbols.ls`) | `symbols.ls` (+110 mappings) |
+| 2C — Spacing Commands | ✅ Done | (covered by baseline) | `elements/spacing.ls` (13 functions) |
+| 2B — Box Commands | ✅ Done | 31 (`test_latex_boxes.ls`) | `elements/boxes.ls` (new, 13 commands) |
+| 2D — Font Declarations | ✅ Done | 40 (`test_latex_font_decl.ls`) | `elements/font_decl.ls` (new), `render2.ls`, `css.ls` |
+| 2E — Appendix & Counters | ✅ Done | (in `test_latex_font_decl.ls`) | `analyze.ls`, 3 docclass files |
+| 2F — Color Support | ✅ Done | 37 (`test_latex_color.ls`) | `elements/color.ls` (new), `render2.ls`, `analyze.ls`, `css.ls` |
+| 2H — Enhanced Lists | ✅ Done | (in color tests + CSS) | `render2.ls` (custom labels), `css.ls` (nested styles) |
+| 2G — Picture Environment | ❌ Not started | — | — |
+| 2I — `\includegraphics` Options | ❌ Not started | — | — |
+| 2J — LaTeXML Features | ❌ Not started | — | — |
+
+**Bugfix applied:** Fixed `render_font()` CSS class mismatch — `textsf`/`textsc`/`textsl`/`textrm` now use `latex-sf`/`latex-sc`/`latex-sl`/`latex-rm` matching actual CSS selectors.
 
 ---
 
@@ -450,25 +472,43 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 
 ## 6. Implementation Order & Milestones
 
-### Milestone 1: Symbol & Spacing Parity (Phases 2A + 2C)
-- **Effort:** ~350 lines, ~1 session
+### Milestone 1: Symbol & Spacing Parity (Phases 2A + 2C) — ✅ COMPLETE
+- **Completed:** 2026-02-24
+- **Effort:** ~350 lines
 - **Unlocks:** Showcase §1 (Characters), §7 (Spacing), §12 (Symbols)
-- **Test:** Run showcase, verify all symbol sections render correctly
+- **Result:** 110+ symbol mappings (textgreek, textcomp, gensymb, non-ASCII), 13 spacing functions. Baseline 436/436.
+- **Tests:** `test_latex_symbols.ls` (59 tests)
 
-### Milestone 2: Box Commands (Phase 2B)
-- **Effort:** ~250 lines, ~1 session
+### Milestone 2: Box Commands (Phase 2B) — ✅ COMPLETE
+- **Completed:** 2026-02-24
+- **Effort:** ~250 lines
 - **Unlocks:** Showcase §5 (Boxes), §5.1 (Low-level boxes)
-- **Test:** All `\fbox`, `\makebox`, `\parbox` examples render with borders and alignment
+- **Result:** 13 box commands (`fbox`, `mbox`, `makebox`, `framebox`, `parbox`, `raisebox`, `frame`, `llap`, `rlap`, `smash`, `phantom`, `hphantom`, `vphantom`). Baseline 438/438.
+- **Tests:** `test_latex_boxes.ls` (31 tests)
 
-### Milestone 3: Font Declarations & Misc (Phases 2D + 2E)
-- **Effort:** ~180 lines, ~0.5 session
+### Milestone 3: Font Declarations & Misc (Phases 2D + 2E) — ✅ COMPLETE
+- **Completed:** 2026-02-25
+- **Effort:** ~180 lines
 - **Unlocks:** Showcase §8.4 (Verse — `\raggedleft`), §13 (Fonts — `\itshape`), §14 (`\appendix`), `secnumdepth`
-- **Test:** Font declaration environments work, appendix sections numbered A, B, C
+- **Result:** 9 font declarations + 3 alignment declarations with group/paragraph scoping, `\appendix` switches to A/B/C numbering, `\setcounter{secnumdepth}{N}` controls numbering depth. 16 new CSS rules. Baseline 440/440.
+- **Tests:** `test_latex_font_decl.ls` (40 tests)
+- **Implementation details:**
+  - `elements/font_decl.ls` — new module with `FONT_DECL_STYLES` (9 entries) and `ALIGN_DECL_STYLES` (3 entries)
+  - `render2.ls` — `find_leading_decl()` detects declarations in groups/paragraphs, wraps children in styled `<span>`/`<div>`/`<p>`
+  - `analyze.ls` — `walk_appendix()` resets counters and sets appendix mode; `walk_setcounter()` handles `secnumdepth`
+  - All 3 docclass files — `format_section_number()` uses letter lookup table (A–Z) in appendix mode
 
-### Milestone 4: Color & Lists (Phases 2F + 2H)
-- **Effort:** ~220 lines, ~1 session
-- **Unlocks:** Full LaTeX.js parity for text colors, proper nested list styling
-- **Test:** `\textcolor{red}{text}` renders, nested lists show correct markers per level
+### Milestone 4: Color & Lists (Phases 2F + 2H) — ✅ COMPLETE
+- **Completed:** 2026-02-25
+- **Effort:** ~220 lines
+- **Unlocks:** Showcase §4 (Colors), nested list styling with correct markers per level
+- **Result:** 6 color commands (`\textcolor`, `\color`, `\colorbox`, `\fcolorbox`, `\definecolor`, `\pagecolor`), 19 named colors, 4 color models (named, rgb float, rgb int, gray, HTML hex). Nested itemize markers (•, –, ∗, ·) and enumerate styles (decimal, lower-alpha, lower-roman, upper-alpha) via CSS nesting. Custom `\item[label]` support. Baseline 442/442.
+- **Tests:** `test_latex_color.ls` (37 tests)
+- **Implementation details:**
+  - `elements/color.ls` — new module (167 lines): `NAMED_COLORS` map (19 entries), `parse_color_model()` with rgb/gray/HTML support, `resolve_color()` with custom color map lookup, `render_textcolor()`, `render_colorbox()`, `render_fcolorbox()`, `render_pagecolor()`
+  - `analyze.ls` — `walk_definecolor()` registers custom colors during analysis pass
+  - `render2.ls` — dispatches color commands, passes `custom_colors` map from analysis
+  - `css.ls` — 4-level nested itemize markers (`disc` → `\2013` → `\2217` → `\00B7`), 4-level enumerate styles (`decimal` → `lower-alpha` → `lower-roman` → `upper-alpha`)
 
 ### Milestone 5: `\includegraphics` Options (Phase 2I)
 - **Effort:** ~60 lines, ~0.5 session
@@ -508,15 +548,15 @@ Verify:
 
 For each phase, add test cases to `test/lambda/` with `.ls` + `.txt` pairs:
 
-| Test File | Coverage |
-|-----------|----------|
-| `test_latex_symbols.ls` | All 100+ new symbol commands |
-| `test_latex_boxes.ls` | `\fbox`, `\makebox`, `\framebox`, `\parbox`, `\phantom` |
-| `test_latex_spacing.ls` | `\noindent`, `\bigskip`, `\quad`, `\\[len]`, etc. |
-| `test_latex_color.ls` | `\textcolor`, `\colorbox`, `\definecolor` |
-| `test_latex_picture.ls` | Picture env → SVG output |
-| `test_latex_appendix.ls` | `\appendix`, `secnumdepth` |
-| `test_latex_font_decl.ls` | `\itshape`, `\bfseries`, `\raggedleft` |
+| Test File | Coverage | Status |
+|-----------|----------|--------|
+| `test_latex_symbols.ls` | All 100+ new symbol commands | ✅ 59 tests |
+| `test_latex_boxes.ls` | `\fbox`, `\makebox`, `\framebox`, `\parbox`, `\phantom` | ✅ 31 tests |
+| `test_latex_font_decl.ls` | `\itshape`, `\bfseries`, `\raggedleft`, appendix numbering | ✅ 40 tests |
+| `test_latex_spacing.ls` | `\noindent`, `\bigskip`, `\quad`, `\\[len]`, etc. | planned |
+| `test_latex_color.ls` | `\textcolor`, `\colorbox`, `\definecolor`, nested list styles | ✅ 37 tests |
+| `test_latex_picture.ls` | Picture env → SVG output | planned |
+| `test_latex_appendix.ls` | `\appendix`, `secnumdepth` (expanded tests) | planned |
 
 ### 7.3 Baseline Must Pass
 
@@ -524,6 +564,8 @@ All 434 existing baseline tests must continue passing after each phase. Run:
 ```bash
 make test-lambda-baseline
 ```
+
+**Current baseline: 442/442** (434 original + 8 new test files from Phases 2A–2H).
 
 ---
 
@@ -536,7 +578,7 @@ make test-lambda-baseline
 | Symbol coverage | 100+ new symbols render as correct Unicode |
 | Box commands | All 10 box commands produce correct layout |
 | Picture environment | All 7 showcase diagrams render as SVG |
-| No regressions | 434+ baseline tests pass |
+| No regressions | 434+ baseline tests pass | ✅ 440/440 passing |
 | Code quality | All new code follows Lambda conventions (pure functional, no mutation) |
 
 ---
@@ -551,3 +593,119 @@ make test-lambda-baseline
 | Color scoping across group boundaries | Medium | Low | Wrap scoped `\color` in `<span>` within its group |
 | SVG serialization in `to_html.ls` | Low | Medium | SVG elements use same tag/attribute model; extend serializer for self-closing SVG tags |
 | Performance with 100+ symbol lookups | Low | Low | Use map lookup (O(1)) not linear search |
+
+---
+
+## Appendix A — Lambda Language Issues Encountered
+
+Issues discovered while implementing the LaTeX package (Milestones 1–4). Documented here for language improvement tracking.
+
+### A.1 Element Literal String Merging (Severity: High)
+
+Consecutive string children in element literals silently merge into a single string:
+
+```lambda
+let el = <fcolorbox "black" "white" "framed">
+len(el)   // 1, not 3
+el[0]     // "blackwhiteframed"
+```
+
+**Impact:** Makes it impossible to construct multi-argument test ASTs naturally. The real LaTeX parser produces separate string children from `{curly_group}` arguments (e.g. `\fcolorbox{black}{white}{framed}` → 3 children), so production code works correctly — but unit testing is painful.
+
+**Workaround:** Wrap each argument in a sub-element: `<fcolorbox <curly_group "black"> <curly_group "white"> <curly_group "framed">>`, then update helper functions to unwrap element children via `child_text()` that checks `string(type(child)) == "element"`.
+
+**Suggestion:** A delimiter syntax for element children (semicolons were tried but don't work) or a programmatic `element("tag", [...])` constructor would solve this.
+
+### A.2 `if/else` with `let` Bindings Requires Full Bracing (Severity: Medium)
+
+Mixed bracing style fails silently or with confusing errors when the body contains `let` bindings:
+
+```lambda
+// ERROR — else branch must also be braced
+if (cond) { let x = foo(); x } else bar()
+
+// WORKS — both branches braced
+if (cond) { let x = foo(); x } else { bar() }
+```
+
+**Impact:** Caused syntax errors in `elements/color.ls` that took trial and error to diagnose. The error messages did not clearly indicate the bracing requirement.
+
+**Suggestion:** Either allow the mixed form, or produce a clear error message like "else branch must be braced when if-branch contains let bindings".
+
+### A.3 Type Comparison — Idiomatic `is` Operator (Severity: Low, Resolved)
+
+Lambda provides an `is` operator for type checking:
+
+```lambda
+"hello" is string    // true
+42 is int            // true
+<div> is element     // true
+```
+
+This was not initially obvious, leading to a longwinded workaround:
+
+```lambda
+// WRONG — don't do this
+string(type("hello")) == "string"
+```
+
+**Resolution:** Discovered the idiomatic `x is Type` syntax. Updated `child_text()` in `elements/color.ls` to use `child is element` instead of the stringified type comparison.
+
+### A.4 String Functions on Null — Comprehensive Fix (Severity: Medium, Fixed)
+
+Previously, most string functions crashed or returned error strings when given `null` input. The most severe case was `str_join(null, ",")` which caused a **segfault** due to the JIT transpiler wrapping the return in `s2it()` (interpreting the `Item` return as a `String*` pointer).
+
+**Root cause:** Functions in `lambda-eval.cpp` checked `type != STRING` before checking for null, hitting error paths. `fn_str_join` was the only string function registered with `&TYPE_STRING` return type in `build_ast.cpp`, causing the transpiler to wrap its return in `s2it()` which treats the `Item` as a `String*` pointer. All other string functions used `&TYPE_ANY`.
+
+**`str_join` transpiler fix:** Changed the return type registration from `&TYPE_STRING` to `&TYPE_ANY` in `build_ast.cpp`, consistent with all other string functions. Now `str_join(null, sep)` safely returns `null` without special allocation.
+
+**Fix applied:** Added explicit null guards to all 13 string functions in `lambda-eval.cpp` and `lambda-vector.cpp`. Null semantics follow the principle that null behaves like an absent/empty value:
+
+| Function                 | Null behavior | Rationale                                                             |
+| ------------------------ | ------------- | --------------------------------------------------------------------- |
+| `contains(null, x)`      | `false`       | Nothing contains anything                                             |
+| `starts_with(null, x)`   | `false`       | Nothing starts with anything                                          |
+| `ends_with(null, x)`     | `false`       | Nothing ends with anything                                            |
+| `index_of(null, x)`      | `-1`          | Not found (already worked)                                            |
+| `last_index_of(null, x)` | `-1`          | Not found (already worked)                                            |
+| `trim(null)`             | `null`        | No string to trim                                                     |
+| `upper(null)`            | `null`        | No string to transform                                                |
+| `lower(null)`            | `null`        | No string to transform                                                |
+| `replace(null, a, b)`    | `null`        | No string to replace in                                               |
+| `replace(s, null, b)`    | `s`           | Nothing to find → unchanged                                           |
+| `slice(null, 0, 1)`      | `null`        | No string to slice                                                    |
+| `split(null, sep)`       | `[]`          | Empty list (no parts)                                                 |
+| `str_join(null, sep)`    | `null`        | No collection to join (return type fixed to `TYPE_ANY`)               |
+| `len(null)`              | `0`           | Zero length (already worked)                                          |
+
+**`split(str, null)` convention:** Additionally, `split(str, null)` now splits on whitespace (Python/Ruby/C# convention) — strips leading/trailing whitespace and splits on runs of whitespace. `split(str, "")` retains the split-into-characters behavior.
+
+**Tests:** 22 tests added to `test/lambda/string_funcs.ls` — 17 null-handling tests (43–59) and 5 whitespace-split tests (60–64). Baseline: 442/442 passing.
+
+### A.5 No Shared Module Between Analyze and Render Passes (Severity: Low-Medium)
+
+The 2-pass architecture (analyze → render) means `analyze.ls` and render-phase modules like `elements/color.ls` cannot share code. Pure helper functions had to be duplicated:
+
+```lambda
+// Duplicated in both analyze.ls and elements/color.ls:
+fn parse_rgb_float(spec) { ... }   // ~8 lines
+fn parse_rgb_int(spec) { ... }     // ~8 lines  
+fn parse_gray(spec) { ... }        // ~3 lines
+```
+
+**Impact:** ~30 lines of duplicated code for color model parsing. Will worsen as more features need shared logic between passes.
+
+**Suggestion:** Allow a shared utility module (e.g. `latex/util.ls`) that can be imported by both analysis and rendering modules without circular dependency issues.
+
+### A.6 Opaque Runtime Warnings (Severity: Low)
+
+During test runs, the runtime emits warnings that cannot be traced to source locations:
+
+```
+unknown type error in set_fields
+map_get ANY type is UNKNOWN: 25
+```
+
+**Impact:** These warnings appeared during color and font declaration tests but did not cause test failures. Without source line information, they are difficult to investigate or silence.
+
+**Suggestion:** Include source file and line number in runtime warning messages, or provide a `--warn-trace` flag for detailed diagnostics.

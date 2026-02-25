@@ -32,4 +32,34 @@ true
 true
 "Test Unicode:31. index_of UTF-8:"
 7
-"32. slice UTF-8:éllTest string(type(...)):33. int:int34. float:float35. string:string36. bool:bool37. null:null38. array:array[int]39. map:map40. symbol:symbol41. element:element42. list:list===== ALL TESTS PASSED ====="
+"32. slice UTF-8:éllTest string(type(...)):33. int:int34. float:float35. string:string36. bool:bool37. null:null38. array:array[int]39. map:map40. symbol:symbol41. element:element42. list:listTest null handling:43. contains(null, x):"
+false
+"44. contains(x, null):"
+false
+"45. starts_with(null, x):"
+false
+"46. starts_with(x, null):"
+true
+"47. ends_with(null, x):"
+false
+"48. ends_with(x, null):"
+true
+"49. index_of(null, x):"
+-1
+"50. last_index_of(null, x):"
+-1
+"51. trim(null):52. upper(null):53. lower(null):54. replace(null, a, b):55. replace(s, null, b):hello56. slice(null, 0, 1):57. split(null, sep):"
+0
+"58. str_join(null, sep):59. len(null):"
+0
+"Test split with null separator (whitespace split):60. split on whitespace:"
+2
+"61. split strips leading/trailing:"
+2
+"62. split single word:"
+1
+"63. split all whitespace:"
+0
+"64. split tabs/newlines:"
+3
+"===== ALL TESTS PASSED ====="
