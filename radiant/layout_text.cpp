@@ -538,8 +538,6 @@ void line_break(LayoutContext* lycon) {
         used_line_height = css_line_height;
     }
 
-    // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n",
-    //        font_line_height, css_line_height, has_mixed_fonts ? "yes" : "no", used_line_height);
     lycon->block.advance_y += used_line_height;
 
     // CSS 2.1 10.8.1: Track last line's ascender for inline-block baseline alignment
@@ -600,12 +598,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             // CSS Fonts 3: small-caps lowercase chars use ~0.7x font size
             text_width += ginfo.advance_x * (is_small_caps_lower ? 0.7f : 1.0f);
         }
-        // Apply letter-spacing between characters (not after last)
-        // CSS 2.1 §16.4: letter-spacing specifies inter-character space
+        // CSS 2.1 §16.4: letter-spacing is added after every character
+        // Browsers include trailing letter-spacing in text width (getBoundingClientRect)
+        text_width += lycon->font.style->letter_spacing;
         str++;
-        if (*str) {
-            text_width += lycon->font.style->letter_spacing;
-        }
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
@@ -1013,11 +1009,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                 }
             }
-            // CSS 2.1 §16.4: letter-spacing is inter-character space
-            // Do not add trailing letter-spacing after the last character
-            if (next_ch && *next_ch) {
-                wd += lycon->font.style->letter_spacing;
-            }
+            // CSS 2.1 §16.4: letter-spacing is added after every character
+            // Browsers include trailing letter-spacing in text node width
+            wd += lycon->font.style->letter_spacing;
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {

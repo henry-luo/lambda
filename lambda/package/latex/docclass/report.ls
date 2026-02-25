@@ -23,16 +23,18 @@ pub TOP_LEVEL = 1  // <h1> for \chapter
 // ============================================================
 
 // format section number: same as book (chapter.section.subsection)
-pub fn format_section_number(counters, counter_name) {
+// in appendix: "A", "A.1" etc.
+pub fn format_section_number(counters, counter_name, in_appendix) {
+    let chap = if (in_appendix) number_to_alph(counters.chapter) else string(counters.chapter)
     match counter_name {
         case "chapter":
-            string(counters.chapter)
+            chap
         case "section":
-            string(counters.chapter) ++ "." ++ string(counters.section)
+            chap ++ "." ++ string(counters.section)
         case "subsection":
-            string(counters.chapter) ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection)
+            chap ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection)
         case "subsubsection":
-            string(counters.chapter) ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
+            chap ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
         default: null
     }
 }
@@ -84,4 +86,15 @@ pub ABSTRACT_POSITION = "separate_page"  // report puts abstract on its own page
 
 pub fn theorem_label(env_display_name, counters, num) {
     env_display_name ++ " " ++ string(counters.chapter) ++ "." ++ string(num)
+}
+
+// ============================================================
+// Appendix letter conversion: 1→A, 2→B, ... 26→Z
+// ============================================================
+
+let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
+
+fn number_to_alph(n) {
+    if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
+    else string(n)
 }

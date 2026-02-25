@@ -22,14 +22,16 @@ pub TOP_LEVEL = 2  // <h2> for \section
 
 // format section number from counters
 // article: "1", "1.1", "1.1.1", paragraphs unnumbered
-pub fn format_section_number(counters, counter_name) {
+// in appendix: "A", "A.1", "A.1.1"
+pub fn format_section_number(counters, counter_name, in_appendix) {
+    let sec = if (in_appendix) number_to_alph(counters.section) else string(counters.section)
     match counter_name {
         case "section":
-            string(counters.section)
+            sec
         case "subsection":
-            string(counters.section) ++ "." ++ string(counters.subsection)
+            sec ++ "." ++ string(counters.subsection)
         case "subsubsection":
-            string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
+            sec ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
         default: null
     }
 }
@@ -80,4 +82,15 @@ pub ABSTRACT_POSITION = "before_body"
 
 pub fn theorem_label(env_display_name, num) {
     env_display_name ++ " " ++ string(num)
+}
+
+// ============================================================
+// Appendix letter conversion: 1→A, 2→B, ... 26→Z
+// ============================================================
+
+let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
+
+fn number_to_alph(n) {
+    if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
+    else string(n)
 }

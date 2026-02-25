@@ -35,6 +35,7 @@ extern "C" {
 #include "../lib/memtrack.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
+#include "../lib/font/font.h"
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -3572,6 +3573,8 @@ struct LayoutOptions {
     const char* output_dir;                     // output directory for batch mode
     const char* css_file;
     const char* view_output_file;  // Custom output path for view_tree.json (single file mode)
+    const char* font_dirs[16];                  // additional font scan directories
+    int font_dir_count;                         // number of font directories
     int viewport_width;
     int viewport_height;
     bool debug;
@@ -3587,6 +3590,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->output_dir = nullptr;
     opts->css_file = nullptr;
     opts->view_output_file = nullptr;  // Default to /tmp/view_tree.json
+    opts->font_dir_count = 0;
     opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
     opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
@@ -3654,6 +3658,19 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         }
         else if (strcmp(argv[i], "--summary") == 0) {
             opts->summary = true;
+        }
+        else if (strcmp(argv[i], "--font-dir") == 0) {
+            if (i + 1 < argc) {
+                if (opts->font_dir_count < 16) {
+                    opts->font_dirs[opts->font_dir_count++] = argv[++i];
+                } else {
+                    log_error("Error: too many --font-dir options (max 16)");
+                    return false;
+                }
+            } else {
+                log_error("Error: --font-dir requires an argument");
+                return false;
+            }
         }
         else if (strcmp(argv[i], "--flavor") == 0) {
             if (i + 1 < argc) {
@@ -3938,6 +3955,12 @@ int cmd_layout(int argc, char** argv) {
     if (ui_context_init(&ui_context, true) != 0) {
         log_error("Failed to initialize UI context");
         return 1;
+    }
+
+    // Add custom font scan directories (must be done before any font resolution)
+    for (int i = 0; i < opts.font_dir_count; i++) {
+        font_context_add_scan_directory(ui_context.font_ctx, opts.font_dirs[i]);
+        log_debug("[Layout] Added font directory: %s", opts.font_dirs[i]);
     }
 
     // Set viewport dimensions
