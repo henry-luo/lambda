@@ -94,6 +94,14 @@ table.latex-tabular th {
 }
 table.latex-tabular .hline-top { border-top: 1px solid black; }
 table.latex-tabular .hline-bottom { border-bottom: 1px solid black; }
+table.latex-tabular tr.latex-hline + tr > td { border-top: 1px solid black; }
+table.latex-tabular tr.latex-toprule + tr > td { border-top: 2px solid black; }
+table.latex-tabular tr.latex-midrule + tr > td { border-top: 1px solid black; }
+table.latex-tabular tr.latex-bottomrule { border-bottom: 2px solid black; }
+table.latex-tabular tr.latex-toprule,
+table.latex-tabular tr.latex-midrule,
+table.latex-tabular tr.latex-bottomrule,
+table.latex-tabular tr.latex-hline { height: 0; line-height: 0; }
 .latex-figure {
   margin: 1.5em auto;
   text-align: center;
@@ -169,10 +177,14 @@ table.latex-tabular td[rowspan] {
   margin: 1em 0;
   font-style: italic;
 }
-.latex-theorem .theorem-head {
+.latex-theorem .theorem-head,
+.latex-theorem .latex-theorem-head {
   font-weight: bold;
   font-style: normal;
   margin-right: 0.5em;
+}
+.latex-definition, .latex-example, .latex-remark {
+  font-style: normal;
 }
 .latex-proof {
   margin: 1em 0;

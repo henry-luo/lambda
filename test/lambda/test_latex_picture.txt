@@ -1,0 +1,38 @@
+"===== PICTURE ENVIRONMENT TESTS =====1. parse_coord basic:"
+["100", "50"]
+"2. parse_coord null:3. parse_coord no parens:4. circle has viewBox:"
+true
+"5. circle has cx=500:"
+true
+"6. circle has cy=250:"
+true
+"7. circle has r=150:"
+true
+"8. line has x1=100:"
+true
+"9. line has x2=700:"
+true
+"10. line y values equal (horizontal):"
+true
+"11. vector has arrowhead marker-end:"
+true
+"12. vector has arrowhead def:"
+true
+"13. oval is ellipse:"
+true
+"14. oval rx=200:"
+true
+"15. oval ry=100:"
+true
+"16. text has content:"
+true
+"17. text x=200:"
+true
+"18. qbezier is path:"
+true
+"19. qbezier has Q command:"
+true
+"20. multiput has 3 circles:"
+3
+"21. empty picture tag:"
+'svg'

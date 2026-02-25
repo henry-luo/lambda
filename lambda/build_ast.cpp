@@ -535,7 +535,9 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         AstNode* loop = for_node->loop;
         while (loop) {
             if (loop->node_type == AST_NODE_LOOP) {
-                AstNamedNode* loop_var = (AstNamedNode*)loop;
+                // Must cast to AstLoopNode (not AstNamedNode) — AstLoopNode has
+                // an extra index_name field before 'as', so the offset differs.
+                AstLoopNode* loop_var = (AstLoopNode*)loop;
                 collect_captures_from_node(tp, loop_var->as, fn_scope, global_scope, captures);
             }
             loop = loop->next;
