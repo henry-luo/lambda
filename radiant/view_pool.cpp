@@ -1474,10 +1474,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
         display = "flex";  // both flex and inline-flex report as "flex"
     } else if (block->view_type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
     else if (block->view_type == RDT_VIEW_LIST_ITEM) display = "list-item";
-    else if (block->view_type == RDT_VIEW_TABLE) display = "table";
-    else if (block->view_type == RDT_VIEW_TABLE_ROW_GROUP) display = "table-row-group";
+    else if (block->view_type == RDT_VIEW_TABLE) {
+        // CSS 2.1 §17.2: distinguish table vs inline-table
+        display = (block->display.outer == CSS_VALUE_INLINE) ? "inline-table" : "table";
+    }
+    else if (block->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+        // CSS 2.1 §17.2: use display.inner to distinguish tbody/thead/tfoot
+        if (block->display.inner == CSS_VALUE_TABLE_HEADER_GROUP) display = "table-header-group";
+        else if (block->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP) display = "table-footer-group";
+        else display = "table-row-group";
+    }
     else if (block->view_type == RDT_VIEW_TABLE_ROW) display = "table-row";
     else if (block->view_type == RDT_VIEW_TABLE_CELL) display = "table-cell";
+    else if (block->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) display = "table-column-group";
+    else if (block->view_type == RDT_VIEW_TABLE_COLUMN) display = "table-column";
     strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
 
     // Add block properties if available
