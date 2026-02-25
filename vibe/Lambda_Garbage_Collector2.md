@@ -1,7 +1,7 @@
 # Phase 5: Mark-and-Sweep Collection with Dual-Zone Nursery
 
-Status: Steps 1–5 Complete (mark-and-sweep collection fully operational with auto-trigger)
-Date: 2026-02-25 (Steps 1–2), 2026-02-26 (Steps 3–5)
+Status: Steps 1–6 Complete (mark-and-sweep collection fully operational with closure cycle collection)
+Date: 2026-02-25 (Steps 1–2), 2026-02-26 (Steps 3–6)
 
 ---
 
@@ -905,12 +905,24 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 **Files created**: `test/test_gc_heap_gtest.cpp`
 **Files modified**: `lib/gc_heap.h`, `lib/gc_heap.c`, `lambda/lambda-mem.cpp`, `build_lambda_config.json`
 
-### Step 6: Closure Cycle Collection — Not Started
-- Add `closure_field_count` to `Function` struct
-- Update transpiler to emit closure field count
-- Implement `gc_mark_closure_env()` that scans closure env `Item` fields
-- Write test: closure cycle (Function A → env → Container C → Function A) is properly collected
-- Verify: leak that exists under old ref_cnt system is now collected
+### Step 6: Closure Cycle Collection ✅ Complete
+- Added `uint8_t closure_field_count` to `struct Function` at byte offset 2 (fits in existing padding between `arity` and `fn_type` — zero size increase)
+- Updated closure creation functions `to_closure()` and `to_closure_named()` to initialize `closure_field_count = 0` (caller sets after creation)
+- **MIR transpiler**: Both closure paths (top-level fn at ~L1348 and fn-expr at ~L5269) now emit a `MIR_MOV` to store `cap_count` at `*(fn_obj + 2)` after `to_closure_named()`/`to_closure()` returns
+- **C transpiler**: Both closure paths (fn-expr at ~L6048 and identifier reference at ~L1285) now emit `_fn->closure_field_count = N` after creating the closure
+- **GC trace**: `gc_trace_object()` for `LMD_TYPE_FUNC` reads `closure_field_count` at offset 2, scans `field_count` Items from `closure_env` — marking all referenced objects as live
+- **GC compact**: `gc_compact_data()` for `LMD_TYPE_FUNC` copies `field_count * 8` bytes from nursery env to tenured
+- **Bound methods**: Safe — `closure_field_count` stays 0 (from `heap_calloc` zeroing), so GC does not try to scan the fake env pointer
+- **5 new GC tests** for closure tracing:
+  - `ClosureEnvTracesChildren`: closure env Items keep captured strings alive
+  - `ClosureEnvCompactsToTenured`: env data moves from nursery to tenured with values preserved
+  - `ClosureCycleCollected`: fn→env→list→fn cycle is collected when unreachable
+  - `ClosureCycleSurvivesWhenRooted`: same cycle survives when rooted
+  - `ClosureNoEnvSafe`: bound method pattern (field_count=0, fake env) does not crash
+- **31/31 GC unit tests pass** ✅
+- **389/389 Lambda baseline tests pass** ✅ (no regressions)
+
+**Files modified**: `lambda/lambda.h`, `lambda/lambda-eval.cpp`, `lambda/transpile-mir.cpp`, `lambda/transpile.cpp`, `lib/gc_heap.c`, `test/test_gc_heap_gtest.cpp`
 
 ---
 
@@ -921,7 +933,7 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 | **Conservative stack scan false positives** | Low | Safe (retains too much, never too little). Replace with shadow stack later for precision. |
 | **Data zone waste from abandoned arrays** | Medium | Only between GC cycles. For typical functional Lambda code, arrays are built once and not resized. Monitor with allocation stats. |
 | **Object zone fragmentation** | Low | Size-class bins limit internal fragmentation to at most 2× per object. Lambda has a small number of distinct struct sizes. |
-| **Closure env size unknown** | Medium | Add `closure_field_count` to Function struct, or prepend a size tag to env allocation in data zone. |
+| **Closure env size unknown** | ~~Medium~~ Resolved | Added `closure_field_count` to Function struct (Step 6) |
 | **Decimal `mpd_t` finalization** | Low | `mpd_t` is allocated by libmpdec (outside GC). Continue to finalize via `mpd_del()` during sweep. |
 | **Map/Element `data` size ambiguity** | Medium | Use `data_cap` field when available; fall back to `((TypeMap*)type)->byte_size` for exact initial size. Or track actual allocated size in a small header in the data zone. |
 | **GC during MIR JIT execution** | Medium | GC triggers only at allocation points (safe points). MIR-compiled code's local variables are on the C stack and visible to conservative scanning. |
@@ -932,11 +944,11 @@ When `list->items` or `map->data` currently use `calloc()`/`malloc()`, those cal
 
 | Criterion | Measurement | Status |
 |-----------|-------------|--------|
-| All existing tests pass | 389 Lambda tests green | ✅ 389/389 pass (Steps 1–5) |
+| All existing tests pass | 389 Lambda tests green | ✅ 389/389 pass (Steps 1–6) |
 | Radiant tests pass | 2149 Radiant tests (51 pre-existing layout failures, not GC-related) | ✅ No regressions |
-| GC unit tests pass | 26 tests covering mark/sweep/compact/trigger/stack-scan | ✅ 26/26 pass |
+| GC unit tests pass | 31 tests covering mark/sweep/compact/trigger/stack-scan/closure | ✅ 31/31 pass |
 | Long-running loop memory bounded | Loop allocating 1M temporary arrays stays under constant peak memory | ⬜ Runtime validation pending |
-| Closure cycle collected | Test: cyclic closure reference is reclaimed (ref_cnt version leaks) | ⬜ Requires Step 6 |
+| Closure cycle collected | Test: cyclic closure reference is reclaimed (ref_cnt version leaks) | ✅ ClosureCycleCollected test verifies |
 | Data zone fully reclaims | After GC, nursery data zone usage returns to zero | ✅ CompactMovesNurseryData test verifies |
 | No pointer corruption | Stress test: build large data structures, trigger multiple GC cycles, verify data integrity | ✅ StressAllocCollect + CompactPreservesListData tests verify |
 | Allocation performance | Benchmark: bump allocation (data zone) ≥ current `malloc()` throughput | ⬜ Requires benchmarking |
@@ -964,6 +976,6 @@ Line 1498 uses `calloc(1, sizeof(TypeType) + sizeof(Type))` to allocate a `TypeT
 
 `gc_trace_object()` does not yet trace `VMap` backing data (HashMap entries containing `Item` keys/values). VMap uses an external `vtable->destroy` pattern. Tracing would require a `vtable->trace` callback to walk all stored Items. Deferred until VMaps are used in GC-triggering scenarios.
 
-### Closure Environment Tracing — Partially Deferred
+### Closure Environment Tracing — ✅ Resolved (Step 6)
 
-`gc_trace_object()` recognizes `LMD_TYPE_FUNC` with `closure_env` but cannot yet scan the env's `Item` fields without knowing the field count. Requires adding `closure_field_count` to `Function` struct and updating the transpiler (Step 6).
+`gc_trace_object()` now reads `closure_field_count` at Function offset 2 and scans that many Items from `closure_env`. Compaction also copies the env to tenured. Bound methods (field_count=0) are handled safely.

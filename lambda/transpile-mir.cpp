@@ -1409,6 +1409,12 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     }
 
                     strbuf_free(nm_buf);
+
+                    // set closure_field_count (offset 2 in Function struct)
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
+                        MIR_new_int_op(mt->ctx, cap_count)));
+
                     return fn_obj;
                 } else {
                     // Plain function: Create Function* via to_fn_n(fn_ptr, arity)
@@ -5341,6 +5347,12 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 }
 
                 strbuf_free(name_buf);
+
+                // set closure_field_count (offset 2 in Function struct)
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
+                    MIR_new_int_op(mt->ctx, cap_count)));
+
                 return fn_obj;
             } else {
                 // Plain function: call to_fn_n(fn_ptr, arity) -> Function*

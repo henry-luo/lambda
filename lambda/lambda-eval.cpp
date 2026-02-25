@@ -454,6 +454,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
     fn->type_id = LMD_TYPE_FUNC;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
+    fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
     fn->ptr = ptr;
     fn->closure_env = env;
     fn->name = NULL;
@@ -467,6 +468,7 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     fn->type_id = LMD_TYPE_FUNC;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
+    fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
     fn->ptr = ptr;
     fn->closure_env = env;
     fn->name = name;  // should be interned string, no need to copy

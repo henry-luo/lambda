@@ -1290,9 +1290,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         write_env_name(tp->code_buf, fn_node);
                         strbuf_append_str(tp->code_buf, "), 0);\n");
 
-                        // populate captured variables
+                        // populate captured variables and count them
+                        int cap_count = 0;
                         CaptureInfo* cap = fn_node->captures;
                         while (cap) {
+                            cap_count++;
                             strbuf_append_str(tp->code_buf, "  _closure_env->");
                             strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                             strbuf_append_str(tp->code_buf, " = ");
@@ -1308,7 +1310,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             cap = cap->next;
                         }
 
-                        strbuf_append_str(tp->code_buf, "  to_closure_named(");
+                        strbuf_append_str(tp->code_buf, "  Function* _fn = to_closure_named(");
                         write_fn_name(tp->code_buf, fn_node, (AstImportNode*)ident_node->entry->import);
                         strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
                         // pass function name as string literal for stack traces
@@ -1324,7 +1326,8 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         } else {
                             strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
                         }
-                        strbuf_append_str(tp->code_buf, "); })");
+                        strbuf_append_str(tp->code_buf, ");\n");
+                        strbuf_append_format(tp->code_buf, "  _fn->closure_field_count = %d; _fn; })", cap_count);
                     } else {
                         // Regular function without captures - use to_fn_named for stack traces
                         strbuf_append_format(tp->code_buf, "to_fn_named(");
@@ -6048,16 +6051,19 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         // closure: allocate env, populate captured values, call to_closure
         // generate: ({ Env_fXXX* env = heap_calloc(sizeof(Env_fXXX), 0);
         //              env->var1 = i2it(_var1); env->var2 = s2it(_var2); ...
-        //              to_closure_named(_fXXX, arity, env, "name"); })
+        //              Function* _fn = to_closure_named(_fXXX, arity, env, "name");
+        //              _fn->closure_field_count = N; _fn; })
         strbuf_append_str(tp->code_buf, "({ ");
         write_env_name(tp->code_buf, fn_node);
         strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
         write_env_name(tp->code_buf, fn_node);
         strbuf_append_str(tp->code_buf, "), 0);\n");
 
-        // populate captured variables
+        // populate captured variables and count them
+        int cap_count = 0;
         CaptureInfo* cap = fn_node->captures;
         while (cap) {
+            cap_count++;
             strbuf_append_str(tp->code_buf, "  _closure_env->");
             strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
             strbuf_append_str(tp->code_buf, " = ");
@@ -6074,7 +6080,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
             cap = cap->next;
         }
 
-        strbuf_append_str(tp->code_buf, "  to_closure_named(");
+        strbuf_append_str(tp->code_buf, "  Function* _fn = to_closure_named(");
         write_fn_name(tp->code_buf, fn_node, NULL);
         strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
         // pass function name as string literal for stack traces
@@ -6090,7 +6096,8 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         } else {
             strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
         }
-        strbuf_append_str(tp->code_buf, "); })");
+        strbuf_append_str(tp->code_buf, ");\n");
+        strbuf_append_format(tp->code_buf, "  _fn->closure_field_count = %d; _fn; })", cap_count);
     } else {
         // regular function without captures - use to_fn_named for stack traces
         strbuf_append_format(tp->code_buf, "to_fn_named(");

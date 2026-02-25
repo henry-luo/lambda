@@ -611,3 +611,160 @@ TEST_F(GCHeapTest, StressAllocCollect) {
 
     gc_unregister_root(gc, &root);
 }
+
+// ============================================================================
+// 14. Closure Environment Tracing
+// ============================================================================
+
+// Helper: create a fake Function object with a closure env containing cap_count Items
+// Function layout: { type_id(1@0), arity(1@1), closure_field_count(1@2), pad(5),
+//                    fn_type*(8@8), ptr*(8@16), closure_env*(8@24), name*(8@32) }
+// Total: 40 bytes
+static void* make_closure(GCHeapTest* t, gc_heap_t* gc, int cap_count, uint64_t* env_items_out[]) {
+    void* fn = gc_heap_calloc(gc, 40, TEST_TYPE_FUNC);
+    EXPECT_NE(fn, nullptr);
+    uint8_t* p = (uint8_t*)fn;
+    *(uint8_t*)(p + 0) = TEST_TYPE_FUNC;       // type_id
+    *(uint8_t*)(p + 1) = 0;                     // arity
+    *(uint8_t*)(p + 2) = (uint8_t)cap_count;    // closure_field_count
+
+    if (cap_count > 0) {
+        void* env = gc_data_alloc(gc, cap_count * sizeof(uint64_t));
+        EXPECT_NE(env, nullptr);
+        memset(env, 0, cap_count * sizeof(uint64_t));
+        *(void**)(p + 24) = env;  // closure_env
+        if (env_items_out) *env_items_out = (uint64_t*)env;
+    }
+    return fn;
+}
+
+TEST_F(GCHeapTest, ClosureEnvTracesChildren) {
+    // Create a closure that captures two strings
+    void* str_a = make_string("captured_a");
+    void* str_b = make_string("captured_b");
+    void* dead_str = make_string("not captured");
+
+    uint64_t* env_items = nullptr;
+    void* fn = make_closure(this, gc, 2, &env_items);
+    ASSERT_NE(env_items, nullptr);
+
+    // Store tagged string Items in the closure env
+    env_items[0] = string_item(str_a);
+    env_items[1] = string_item(str_b);
+
+    // Root only the function — strings should survive via env tracing
+    uint64_t root = list_item(fn);  // Function is a container (raw pointer)
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // fn + 2 captured strings survive, dead_str is collected
+    EXPECT_EQ(gc->object_count, 3u);
+
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, ClosureEnvCompactsToTenured) {
+    // Create closure with env in nursery data zone
+    uint64_t* env_items = nullptr;
+    void* fn = make_closure(this, gc, 2, &env_items);
+    ASSERT_NE(env_items, nullptr);
+
+    // Put known values in env
+    env_items[0] = int_item(42);
+    env_items[1] = int_item(99);
+
+    // Verify env is in nursery
+    EXPECT_TRUE(gc_is_nursery_data(gc, env_items));
+
+    // Root the function and collect
+    uint64_t root = list_item(fn);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // After compaction, env should be in tenured (not nursery)
+    uint8_t* p = (uint8_t*)fn;
+    uint64_t* new_env = (uint64_t*)(*(void**)(p + 24));
+    EXPECT_FALSE(gc_is_nursery_data(gc, new_env));
+    EXPECT_NE((void*)new_env, (void*)env_items);  // pointer changed
+
+    // Values preserved after compaction
+    EXPECT_EQ(new_env[0], int_item(42));
+    EXPECT_EQ(new_env[1], int_item(99));
+
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, ClosureCycleCollected) {
+    // Build a cycle: Function -> env -> List -> [Function]
+    // When neither is rooted, GC should collect the entire cycle.
+
+    // Create a list (will hold a reference to the function)
+    void* list = make_list(1, 2);
+
+    // Create a closure that captures the list
+    uint64_t* env_items = nullptr;
+    void* fn = make_closure(this, gc, 1, &env_items);
+    ASSERT_NE(env_items, nullptr);
+    env_items[0] = list_item(list);  // fn's env -> list
+
+    // Make the list reference the function (creating the cycle)
+    uint8_t* lp = (uint8_t*)list;
+    uint64_t* list_items = (uint64_t*)(*(void**)(lp + 8));
+    list_items[0] = list_item(fn);   // list -> fn
+
+    // We have: fn -> env -> list -> fn (cycle!)
+    // Total objects: fn + list + list's items data = 2 objects + 2 data allocations
+    EXPECT_EQ(gc->object_count, 2u);  // fn and list
+
+    // Collect with NO roots — the entire cycle should be freed
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 0u);
+}
+
+TEST_F(GCHeapTest, ClosureCycleSurvivesWhenRooted) {
+    // Same cycle as above, but root one member — all should survive
+    void* list = make_list(1, 2);
+
+    uint64_t* env_items = nullptr;
+    void* fn = make_closure(this, gc, 1, &env_items);
+    ASSERT_NE(env_items, nullptr);
+    env_items[0] = list_item(list);
+
+    uint8_t* lp = (uint8_t*)list;
+    uint64_t* list_items = (uint64_t*)(*(void**)(lp + 8));
+    list_items[0] = list_item(fn);
+
+    // Root the function
+    uint64_t root = list_item(fn);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // Both fn and list should survive (reachable through cycle from rooted fn)
+    EXPECT_EQ(gc->object_count, 2u);
+
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, ClosureNoEnvSafe) {
+    // Function with closure_field_count=0 and closure_env as a boxed Item (bound method pattern)
+    void* fn = gc_heap_calloc(gc, 40, TEST_TYPE_FUNC);
+    uint8_t* p = (uint8_t*)fn;
+    *(uint8_t*)(p + 0) = TEST_TYPE_FUNC;
+    *(uint8_t*)(p + 2) = 0;  // closure_field_count = 0
+    // Set closure_env to a non-null value (boxed Item, not a real env)
+    *(void**)(p + 24) = (void*)(uintptr_t)0xDEADBEEF;
+
+    // Root it and collect — should not crash trying to trace the fake env
+    uint64_t root = list_item(fn);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 1u);
+
+    gc_unregister_root(gc, &root);
+}
