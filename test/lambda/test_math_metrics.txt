@@ -1,0 +1,57 @@
+"===== MATH METRICS TESTS =====1. AXIS_HEIGHT:"
+0.25
+"2. X_HEIGHT:"
+0.431
+"3. PT_PER_EM:"
+10
+"4. BASELINE_SKIP:"
+1.2
+"5. DEFAULT_CHAR_HEIGHT:"
+0.7
+"6. DEFAULT_CHAR_DEPTH:"
+0.2
+"7. DEFAULT_CHAR_WIDTH:"
+0.8
+"8. idx display:"
+0
+"9. idx text:"
+0
+"10. idx script:"
+1
+"11. idx scriptscript:"
+2
+"12. idx unknown:"
+0
+"13. scale display:"
+1
+"14. scale text:"
+1
+"15. scale script:"
+0.7
+"16. scale scriptscript:"
+0.5
+"17. num1 display:"
+0.5
+"18. num1 script:"
+0.732
+"19. num1 scriptscript:"
+0.925
+"20. denom1 display:"
+0.686
+"21. sup1 display:"
+0.413
+"22. sub1 display:"
+0.15
+"23. rule display:"
+0.04
+"24. rule script:"
+0.049
+"25. at 0:"
+1
+"26. at 1:"
+1.171
+"27. at 2:"
+1.472
+"28. font scale 5:29. font scale 1:30. DEFAULT_FONT_SIZE:"
+5
+"===== ALL METRICS TESTS DONE ====="

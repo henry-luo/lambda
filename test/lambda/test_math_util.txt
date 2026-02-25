@@ -1,0 +1,21 @@
+"===== MATH UTIL TESTS =====1. fmt_num 3.14159 2:3.142. fmt_num 0.5 1:0.53. fmt_num 1.0 0:14. fmt_num 0.16667 5:0.166675. fmt_em 0.5:0.5em6. fmt_em 1.0:1em7. fmt_em 0.16667:0.16667em8. fmt_pct 0.7:70%9. fmt_pct 1.0:100%10. fmt_pct 0.5:50%11. clamp 5 0 10:"
+5
+"12. clamp -1 0 10:"
+0
+"13. clamp 15 0 10:"
+10
+"14. clamp 0 0 0:"
+0
+"15. repeat a 3:aaa16. repeat xy 2:xyxy17. repeat a 0:18. repeat a 1:a19. join abc comma:a,bc20. join one:one21. join empty:22. join space:x yz23. starts hello he:"
+true
+"24. starts hello world:"
+false
+"25. starts empty:"
+false
+"26. starts short:"
+false
+"27. attr_or has:test28. attr_or miss:default29. text_of string:hello30. text_of element:content31. PT_PER_EM:"
+10
+"32. SCRIPT_SPACE:"
+0.05
+"===== ALL UTIL TESTS DONE ====="
