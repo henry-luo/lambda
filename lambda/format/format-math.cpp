@@ -26,12 +26,9 @@ String* format_math_typst(Pool* pool, Item root_item) {
     return nullptr;
 }
 
-// Format math to ASCII
+// Format math to ASCII - delegates to the standalone MarkReader-based formatter
 String* format_math_ascii(Pool* pool, Item root_item) {
-    (void)pool;
-    (void)root_item;
-    log_debug("format_math_ascii: MathNode formatting disabled - to be reimplemented with TexNode");
-    return nullptr;
+    return format_math_ascii_standalone(pool, root_item);
 }
 
 // Format math to MathML
