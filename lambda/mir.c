@@ -658,6 +658,36 @@ void jit_cleanup(MIR_context_t ctx) {
 }
 
 // ============================================================================
+// BSS Global Root Registration for GC
+// ============================================================================
+// Walk all MIR modules to find BSS items with _gvar_ prefix (module-level
+// let bindings). Register their resolved addresses as GC root slots so the
+// garbage collector scans them during mark phase.
+
+extern void heap_register_gc_root(uint64_t* slot);
+
+void register_bss_gc_roots(void* mir_ctx) {
+    if (!mir_ctx) return;
+    MIR_context_t ctx = (MIR_context_t)mir_ctx;
+    int count = 0;
+
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+         module != NULL;
+         module = DLIST_NEXT(MIR_module_t, module)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
+             item != NULL;
+             item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type == MIR_bss_item && item->u.bss->name &&
+                strncmp(item->u.bss->name, "_gvar_", 6) == 0 && item->addr) {
+                heap_register_gc_root((uint64_t*)item->addr);
+                count++;
+            }
+        }
+    }
+    log_debug("register_bss_gc_roots: registered %d BSS global roots", count);
+}
+
+// ============================================================================
 // Debug Info Table for Native Stack Walking
 // ============================================================================
 // This code is in mir.c because it uses MIR APIs (MIR_get_module_list)

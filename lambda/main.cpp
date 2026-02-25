@@ -18,9 +18,6 @@
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
 
-// Unified LaTeX pipeline
-#include "tex/tex_document_model.hpp"
-
 // Error handling with stack traces
 #include "lambda-error.h"
 
@@ -81,18 +78,6 @@ int run_layout(const char* html_file);
 // SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f);
 
-// DVI rendering function for LaTeX files (TeX typesetting pipeline)
-int render_latex_to_dvi(const char* latex_file, const char* dvi_file);
-
-// Math formula rendering function (quick testing of single formulas)
-int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump_ast, bool dump_boxes);
-
-// Math formula HTML rendering function
-int render_math_to_html(const char* math_formula, const char* html_file, bool standalone);
-
-// Math formula AST JSON rendering function (for test framework)
-int render_math_to_ast_json(const char* math_formula, const char* json_file);
-
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
 
@@ -103,14 +88,8 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f, float pixel_ratio = 1.0f);
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
-// LaTeX flavor enum (matches window.cpp)
-enum LatexFlavorMain {
-    LATEX_FLAVOR_AUTO_M,      // Use environment variable or default
-    LATEX_FLAVOR_JS_M,        // LaTeX→HTML→CSS pipeline (latex-js)
-    LATEX_FLAVOR_TEX_PROPER_M // LaTeX→TeX→ViewTree pipeline (tex-proper)
-};
 extern int view_doc_in_window(const char* doc_file);
-extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, int flavor = LATEX_FLAVOR_AUTO_M);
+extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -1051,192 +1030,13 @@ int main(int argc, char *argv[]) {
         return exit_code;
     }
 
-    // Handle math command - quick testing of single math formulas
+    // Handle math command - moved to Lambda script
     log_debug("Checking for math command");
     if (argc >= 2 && strcmp(argv[1], "math") == 0) {
-        log_debug("Entering math command handler");
-
-        // Check for help first
-        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
-            printf("Lambda Math Formula Renderer v1.0\n\n");
-            printf("Usage: %s math \"<formula>\" [options]\n", argv[0]);
-            printf("\nDescription:\n");
-            printf("  Quickly test and debug individual LaTeX math formulas without creating\n");
-            printf("  a full .tex file. Useful for development and debugging the math typesetter.\n");
-            printf("\nOutput Options (can be combined):\n");
-            printf("  -o, --output FILE    Default output file (DVI unless --html specified)\n");
-            printf("  --output-ast FILE    Output AST as JSON file\n");
-            printf("  --output-html FILE   Output HTML to file\n");
-            printf("  --output-dvi FILE    Output DVI to file\n");
-            printf("  --html               Use HTML as default format for -o\n");
-            printf("  --standalone         Include full HTML document with CSS (for HTML output)\n");
-            printf("\nDebug Options:\n");
-            printf("  --dump-ast           Dump Math AST to stderr (Phase A output)\n");
-            printf("  --dump-boxes         Dump TexNode box structure to stderr (Phase B output)\n");
-            printf("  -h, --help           Show this help message\n");
-            printf("\nExamples:\n");
-            printf("  %s math \"\\\\frac{a}{b}\"                  # Simple fraction to DVI\n", argv[0]);
-            printf("  %s math \"\\\\frac{a}{b}\" --html           # Output HTML snippet\n", argv[0]);
-            printf("  %s math \"\\\\frac{a}{b}\" --html --standalone -o out.html  # Full HTML\n", argv[0]);
-            printf("  %s math \"\\\\sum_{i=1}^n x_i\" --dump-ast  # Show AST structure\n", argv[0]);
-            printf("  %s math \"\\\\sqrt{x^2+y^2}\" --dump-boxes  # Show box layout\n", argv[0]);
-            printf("  %s math \"\\\\int_0^1 f(x) dx\" -o out.dvi  # Custom output file\n", argv[0]);
-            printf("\nMulti-Output Mode (for testing framework):\n");
-            printf("  %s math \"\\\\frac{a}{b}\" \\\n", argv[0]);
-            printf("      --output-ast out.json \\\n");
-            printf("      --output-html out.html \\\n");
-            printf("      --output-dvi out.dvi\n");
-            printf("\nNotes:\n");
-            printf("  - Formulas are rendered in display math style\n");
-            printf("  - Use double backslashes (\\\\\\\\) on command line for LaTeX commands\n");
-            printf("  - Check log.txt for detailed [MATH] tracing output\n");
-            log_finish();
-            return 0;
-        }
-
-        // Parse arguments
-        const char* formula = NULL;
-        const char* output_file = NULL;
-        const char* ast_file = NULL;      // explicit AST output
-        const char* html_file = NULL;     // explicit HTML output
-        const char* dvi_file = NULL;      // explicit DVI output
-        bool dump_ast = false;
-        bool dump_boxes = false;
-        bool output_html = false;
-        bool standalone_html = false;
-        bool formula_taken = false;  // Track if we've taken the formula argument
-
-        for (int i = 2; i < argc; i++) {
-            // If we haven't taken the formula yet, first non-option arg is the formula
-            // (even if it starts with - like "-\bbox{...}")
-            if (!formula_taken && formula == NULL &&
-                strcmp(argv[i], "-o") != 0 && strcmp(argv[i], "--output") != 0 &&
-                strcmp(argv[i], "--output-ast") != 0 && strcmp(argv[i], "--output-html") != 0 &&
-                strcmp(argv[i], "--output-dvi") != 0 && strcmp(argv[i], "--html") != 0 &&
-                strcmp(argv[i], "--standalone") != 0 && strcmp(argv[i], "--dump-ast") != 0 &&
-                strcmp(argv[i], "--dump-boxes") != 0) {
-                formula = argv[i];
-                formula_taken = true;
-                continue;
-            }
-            if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
-                if (i + 1 < argc) {
-                    output_file = argv[++i];
-                } else {
-                    printf("Error: -o option requires an output file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--output-ast") == 0) {
-                if (i + 1 < argc) {
-                    ast_file = argv[++i];
-                } else {
-                    printf("Error: --output-ast option requires a file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--output-html") == 0) {
-                if (i + 1 < argc) {
-                    html_file = argv[++i];
-                } else {
-                    printf("Error: --output-html option requires a file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--output-dvi") == 0) {
-                if (i + 1 < argc) {
-                    dvi_file = argv[++i];
-                } else {
-                    printf("Error: --output-dvi option requires a file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--html") == 0) {
-                output_html = true;
-            } else if (strcmp(argv[i], "--standalone") == 0) {
-                standalone_html = true;
-            } else if (strcmp(argv[i], "--dump-ast") == 0) {
-                dump_ast = true;
-            } else if (strcmp(argv[i], "--dump-boxes") == 0) {
-                dump_boxes = true;
-            } else {
-                // Unknown option - but formula should already be taken
-                printf("Error: Unknown option '%s'\n", argv[i]);
-                log_finish();
-                return 1;
-            }
-        }
-
-        if (!formula) {
-            printf("Error: No math formula provided\n");
-            printf("Usage: %s math \"<formula>\" [options]\n", argv[0]);
-            printf("Try '%s math --help' for more information.\n", argv[0]);
-            log_finish();
-            return 1;
-        }
-
-        int exit_code = 0;
-
-        // Check if explicit output options are used (multi-output mode)
-        bool explicit_outputs = (ast_file || html_file || dvi_file);
-
-        if (explicit_outputs) {
-            // Multi-output mode: generate only the explicitly requested outputs
-            // 1. AST output
-            if (ast_file) {
-                exit_code = render_math_to_ast_json(formula, ast_file);
-                if (exit_code != 0) {
-                    fprintf(stderr, "Error: Failed to generate AST JSON\n");
-                    log_finish();
-                    return exit_code;
-                }
-            }
-
-            // 2. HTML output
-            if (html_file) {
-                exit_code = render_math_to_html(formula, html_file, standalone_html);
-                if (exit_code != 0) {
-                    fprintf(stderr, "Error: Failed to generate HTML\n");
-                    log_finish();
-                    return exit_code;
-                }
-            }
-
-            // 3. DVI output
-            if (dvi_file) {
-                exit_code = render_math_to_dvi(formula, dvi_file, false, false);
-                if (exit_code != 0) {
-                    fprintf(stderr, "Error: Failed to generate DVI\n");
-                    log_finish();
-                    return exit_code;
-                }
-            }
-        } else if (output_html) {
-            // Legacy HTML output mode
-            const char* html_out = output_file ? output_file : "/tmp/lambda_math.html";
-            exit_code = render_math_to_html(formula, html_out, standalone_html);
-            if (exit_code == 0) {
-                fprintf(stderr, "Math formula rendered to: %s\n", html_out);
-            }
-        } else {
-            // Legacy DVI output mode (original behavior)
-            const char* default_dvi = "/tmp/lambda_math.dvi";
-
-            // If only dumping and no output file specified, pass NULL
-            const char* dvi_out = (dump_ast || dump_boxes) && !output_file
-                                  ? NULL : (output_file ? output_file : default_dvi);
-
-            // If neither dump option and default output, still write DVI
-            if (!dump_ast && !dump_boxes && !output_file) {
-                dvi_out = default_dvi;
-            }
-
-            exit_code = render_math_to_dvi(formula, dvi_out, dump_ast, dump_boxes);
-        }
-
-        log_debug("math command completed with result: %d", exit_code);
+        printf("The 'math' command has been moved to Lambda script.\n");
+        printf("Use: %s run <script.ls> to render math formulas.\n", argv[0]);
         log_finish();
-        return exit_code;
+        return 1;
     }
 
     // Handle render command
@@ -1247,14 +1047,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg|output.dvi> [options]\n", argv[0]);
+            printf("Usage: %s render <input.html|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'render' command layouts an HTML, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
             printf("  It parses the input (converting LaTeX to HTML or evaluating Lambda script if needed), applies CSS styles,\n");
             printf("  calculates layout, and generates output in the specified format based on file extension.\n");
             printf("\nSupported Input Formats:\n");
             printf("  .html, .htm    HTML documents\n");
-            printf("  .tex, .latex   LaTeX documents (converted to HTML for svg/pdf/png/jpg, or TeX typeset for dvi)\n");
+            printf("  .tex, .latex   LaTeX documents (converted to HTML for rendering)\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("  .mmd           Mermaid diagrams (rendered via graph layout)\n");
             printf("  .d2            D2 diagrams (rendered via graph layout)\n");
@@ -1265,14 +1065,12 @@ int main(int argc, char *argv[]) {
             printf("  .png    Portable Network Graphics (PNG)\n");
             printf("  .jpg    Joint Photographic Experts Group (JPEG)\n");
             printf("  .jpeg   Joint Photographic Experts Group (JPEG)\n");
-            printf("  .dvi    DeVice Independent format (TeX output, LaTeX files only)\n");
             printf("\nOptions:\n");
             printf("  -o <output>              Output file path (required, format detected by extension)\n");
             printf("  -vw, --viewport-width    Viewport width in CSS pixels (default: auto-size to content)\n");
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              User zoom scale factor (default: 1.0)\n");
             printf("  --pixel-ratio            Device pixel ratio for HiDPI/Retina (default: 1.0, use 2.0 for crisp text)\n");
-            printf("  --flavor <flavor>        LaTeX rendering pipeline: latex-js (default), tex-proper\n");
             printf("  --theme <name>           Color theme for graph diagrams (default: zinc-dark)\n");
             printf("                           Dark: tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark\n");
             printf("                           Light: github-light, solarized-light, catppuccin-latte, zinc-light\n");
@@ -1283,7 +1081,6 @@ int main(int argc, char *argv[]) {
             printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
-            printf("  %s render paper.tex -o output.dvi         # LaTeX to DVI (TeX typesetting)\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
             printf("  %s render diagram.mmd -o out.svg --theme tokyo-night  # Graph with theme\n", argv[0]);
             printf("  %s render index.html -o out.png -s 2.0           # Render at 2x zoom\n", argv[0]);
@@ -1300,7 +1097,6 @@ int main(int argc, char *argv[]) {
         int viewport_height = 0;  // 0 means use format-specific default
         float render_scale = 1.0f;  // Default user zoom scale
         float pixel_ratio = 1.0f;  // Default device pixel ratio (use 2.0 for Retina)
-        const char* latex_flavor_str = NULL;  // LaTeX rendering flavor
         const char* theme_name = NULL;  // Graph theme name
 
         for (int i = 2; i < argc; i++) {
@@ -1365,19 +1161,6 @@ int main(int argc, char *argv[]) {
                     }
                 } else {
                     printf("Error: --pixel-ratio option requires a value\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--flavor") == 0) {
-                if (i + 1 < argc) {
-                    latex_flavor_str = argv[++i];
-                    if (strcmp(latex_flavor_str, "latex-js") != 0 && strcmp(latex_flavor_str, "tex-proper") != 0) {
-                        printf("Error: unknown flavor '%s'. Use 'latex-js' or 'tex-proper'\n", latex_flavor_str);
-                        log_finish();
-                        return 1;
-                    }
-                } else {
-                    printf("Error: --flavor option requires an argument\n");
                     log_finish();
                     return 1;
                 }
@@ -1571,35 +1354,14 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Set environment variable for LaTeX flavor (used by load_html_doc and load_doc_by_format)
-        if (latex_flavor_str) {
-            if (strcmp(latex_flavor_str, "tex-proper") == 0) {
-                setenv("LAMBDA_TEX_PIPELINE", "1", 1);
-                log_info("LaTeX flavor set to tex-proper");
-            } else {
-                setenv("LAMBDA_TEX_PIPELINE", "0", 1);
-                log_info("LaTeX flavor set to latex-js");
-            }
-        }
-
         // Determine output format based on file extension
         const char* ext = strrchr(output_file, '.');
         int exit_code;
 
         if (ext && strcmp(ext, ".dvi") == 0) {
-            // DVI output - only for LaTeX files, uses TeX typesetting pipeline
-            log_debug("Detected DVI output format");
-
-            // Check if input is LaTeX
-            const char* input_ext = strrchr(html_file, '.');
-            if (!input_ext || (strcmp(input_ext, ".tex") != 0 && strcmp(input_ext, ".latex") != 0)) {
-                printf("Error: DVI output is only supported for LaTeX input files (.tex, .latex)\n");
-                printf("Input file: %s\n", html_file);
-                log_finish();
-                return 1;
-            }
-
-            exit_code = render_latex_to_dvi(html_file, output_file);
+            printf("Error: DVI output is no longer supported. Use .svg, .pdf, .png, or .jpg instead.\n");
+            log_finish();
+            return 1;
         } else if (ext && strcmp(ext, ".pdf") == 0) {
             // Call the PDF rendering function (pass 0 for auto-sizing)
             log_debug("Detected PDF output format");
@@ -1675,7 +1437,6 @@ int main(int argc, char *argv[]) {
             printf("  .csv       Comma-separated values (source view)\n");
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
-            printf("  --flavor <flavor>          LaTeX rendering pipeline: latex-js (default), tex-proper\n");
             printf("\nExamples:\n");
             printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
@@ -1683,7 +1444,6 @@ int main(int argc, char *argv[]) {
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
             printf("  %s view script.ls                # View Lambda script result\n", argv[0]);
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
-            printf("  %s view paper.tex --flavor tex-proper  # View with TeX typesetting\n", argv[0]);
             printf("  %s view config.xml               # View XML document\n", argv[0]);
             printf("  %s view data.json                # View JSON source\n", argv[0]);
             printf("  %s view flowchart.mmd            # View Mermaid diagram\n", argv[0]);
@@ -1700,22 +1460,10 @@ int main(int argc, char *argv[]) {
         // Parse arguments for view command
         const char* filename = NULL;
         const char* event_file = NULL;
-        int latex_flavor = LATEX_FLAVOR_AUTO_M;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
                 event_file = argv[++i];
-            } else if (strcmp(argv[i], "--flavor") == 0 && i + 1 < argc) {
-                const char* flavor = argv[++i];
-                if (strcmp(flavor, "latex-js") == 0) {
-                    latex_flavor = LATEX_FLAVOR_JS_M;
-                } else if (strcmp(flavor, "tex-proper") == 0) {
-                    latex_flavor = LATEX_FLAVOR_TEX_PROPER_M;
-                } else {
-                    printf("Error: unknown flavor '%s'. Use 'latex-js' or 'tex-proper'\n", flavor);
-                    log_finish();
-                    return 1;
-                }
             } else if (argv[i][0] != '-' && filename == NULL) {
                 filename = argv[i];
             }
@@ -1903,7 +1651,7 @@ int main(int argc, char *argv[]) {
 
             // View the temp SVG file
             log_info("Opening graph SVG in viewer: %s", temp_svg);
-            exit_code = view_doc_in_window_with_events(temp_svg, event_file, latex_flavor);
+            exit_code = view_doc_in_window_with_events(temp_svg, event_file);
 
             // Clean up temp file after viewing
             unlink(temp_svg);
@@ -1928,8 +1676,8 @@ int main(int argc, char *argv[]) {
                     strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
                     strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
             // Use unified document viewer for all document types including PDF
-            log_info("Opening document file: %s (event_file: %s, flavor: %d)", filename, event_file ? event_file : "none", latex_flavor);
-            exit_code = view_doc_in_window_with_events(filename, event_file, latex_flavor);
+            log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
+            exit_code = view_doc_in_window_with_events(filename, event_file);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");

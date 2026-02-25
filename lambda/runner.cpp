@@ -848,6 +848,9 @@ void runner_cleanup(Runner* runner) {
 // Only handles List/Array since those are the common containers for script results
 extern "C" Item path_resolve_for_iteration(Path* path);
 
+// Forward declare BSS root registration from mir.c
+extern "C" void register_bss_gc_roots(void* mir_ctx);
+
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_PATH) {
@@ -889,6 +892,11 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     log_notice("Executing JIT compiled code...");
     runner_setup_context(runner);
+
+    // Register BSS global variables as GC roots (module-level let bindings)
+    if (runner->script->jit_context) {
+        register_bss_gc_roots((void*)runner->script->jit_context);
+    }
 
     // set the run_main flag in the execution context
     runner->context.run_main = run_main;

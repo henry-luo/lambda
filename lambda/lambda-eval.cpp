@@ -46,6 +46,9 @@ extern "C" bool path_is_absolute(Path* path);
 #define Malloc malloc
 #define Realloc realloc
 
+extern "C" void* heap_data_alloc(size_t size);
+extern "C" void* heap_data_calloc(size_t size);
+
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 
 // =============================================================================
@@ -252,7 +255,7 @@ Item fn_join(Item left, Item right) {
                 ArrayInt *result = (ArrayInt *)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
                 result->type_id = LMD_TYPE_ARRAY_INT;
                 result->length = total;  result->capacity = total;
-                result->items = (int64_t*)malloc(total * sizeof(int64_t));
+                result->items = (int64_t*)heap_data_alloc(total * sizeof(int64_t));
                 memcpy(result->items, la->items, sizeof(int64_t)*la->length);
                 memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
                 return {.array_int = result};
@@ -263,7 +266,7 @@ Item fn_join(Item left, Item right) {
                 ArrayInt64 *result = (ArrayInt64 *)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
                 result->type_id = LMD_TYPE_ARRAY_INT64;
                 result->length = total;  result->capacity = total;
-                result->items = (int64_t*)malloc(total * sizeof(int64_t));
+                result->items = (int64_t*)heap_data_alloc(total * sizeof(int64_t));
                 memcpy(result->items, la->items, sizeof(int64_t)*la->length);
                 memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
                 return {.array_int64 = result};
@@ -274,7 +277,7 @@ Item fn_join(Item left, Item right) {
                 ArrayFloat *result = (ArrayFloat *)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
                 result->type_id = LMD_TYPE_ARRAY_FLOAT;
                 result->length = total;  result->capacity = total;
-                result->items = (double*)malloc(total * sizeof(double));
+                result->items = (double*)heap_data_alloc(total * sizeof(double));
                 memcpy(result->items, la->items, sizeof(double)*la->length);
                 memcpy(result->items + la->length, ra->items, sizeof(double)*ra->length);
                 return {.array_float = result};
@@ -451,6 +454,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
     fn->type_id = LMD_TYPE_FUNC;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
+    fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
     fn->ptr = ptr;
     fn->closure_env = env;
     fn->name = NULL;
@@ -464,6 +468,7 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     fn->type_id = LMD_TYPE_FUNC;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
+    fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
     fn->ptr = ptr;
     fn->closure_env = env;
     fn->name = name;  // should be interned string, no need to copy
@@ -1495,7 +1500,7 @@ TypePattern* const_pattern(int pattern_index) {
 }
 
 Type* fn_type(Item item) {
-    TypeType *type = (TypeType *)calloc(1, sizeof(TypeType) + sizeof(Type));
+    TypeType *type = (TypeType *)heap_calloc(sizeof(TypeType) + sizeof(Type), LMD_TYPE_TYPE);
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     if (item._type_id) {
@@ -3518,7 +3523,7 @@ static void convert_specialized_to_generic(Array* arr) {
     int64_t new_capacity = len * 2 + 4;
     if (new_capacity < 8) new_capacity = 8;
 
-    Item* new_items = (Item*)calloc(new_capacity, sizeof(Item));
+    Item* new_items = (Item*)heap_data_calloc(new_capacity * sizeof(Item));
     if (!new_items) {
         log_error("convert_specialized_to_generic: allocation failed");
         return;
@@ -3530,7 +3535,7 @@ static void convert_specialized_to_generic(Array* arr) {
         for (int64_t i = 0; i < len; i++) {
             new_items[i] = {.item = i2it(old_items[i])};
         }
-        free(old_items);
+        // old_items abandoned in data zone — reclaimed by GC
     } else if (old_type == LMD_TYPE_ARRAY_INT64) {
         int64_t* old_items = ((ArrayInt64*)arr)->items;
         // int64 values need to be stored in the extra area (end of buffer)
@@ -3542,7 +3547,7 @@ static void convert_specialized_to_generic(Array* arr) {
             extra_count++;
         }
         arr->extra = extra_count;
-        free(old_items);
+        // old_items abandoned in data zone — reclaimed by GC
     } else if (old_type == LMD_TYPE_ARRAY_FLOAT) {
         double* old_items = ((ArrayFloat*)arr)->items;
         // double values need to be stored in the extra area (end of buffer)
@@ -3554,10 +3559,9 @@ static void convert_specialized_to_generic(Array* arr) {
             extra_count++;
         }
         arr->extra = extra_count;
-        free(old_items);
+        // old_items abandoned in data zone — reclaimed by GC
     } else {
         // shouldn't happen — caller should only call for specialized types
-        free(new_items);
         return;
     }
 
@@ -3775,7 +3779,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     if (use_pool) {
         new_data = pool_calloc(context->pool, new_byte_size > 0 ? new_byte_size : 1);
     } else {
-        new_data = calloc(1, new_byte_size > 0 ? new_byte_size : 1);
+        new_data = heap_data_calloc(new_byte_size > 0 ? new_byte_size : 1);
     }
     if (!new_data) {
         log_error("map_rebuild: data allocation failed");
@@ -3839,7 +3843,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // free old data buffer with correct allocator
     if (old_data) {
         if (container->is_heap) {
-            free(old_data);
+            // old_data is in GC data zone — abandoned, reclaimed by GC
         } else if (container->is_data_migrated) {
             // previous mutation already migrated data to runtime pool
             pool_free(context->pool, old_data);

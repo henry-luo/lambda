@@ -34,6 +34,7 @@ void resolve_sys_paths_recursive(Item item);
 // Forward declare import resolver from mir.c
 extern "C" {
     void *import_resolver(const char *name);
+    void register_bss_gc_roots(void* mir_ctx);
 }
 
 // ============================================================================
@@ -1408,6 +1409,12 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     }
 
                     strbuf_free(nm_buf);
+
+                    // set closure_field_count (offset 2 in Function struct)
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
+                        MIR_new_int_op(mt->ctx, cap_count)));
+
                     return fn_obj;
                 } else {
                     // Plain function: Create Function* via to_fn_n(fn_ptr, arity)
@@ -5340,6 +5347,12 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 }
 
                 strbuf_free(name_buf);
+
+                // set closure_field_count (offset 2 in Function struct)
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
+                    MIR_new_int_op(mt->ctx, cap_count)));
+
                 return fn_obj;
             } else {
                 // Plain function: call to_fn_n(fn_ptr, arity) -> Function*
@@ -6498,6 +6511,9 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         runner_setup_context(&runner);
         runner.context.run_main = run_main;
 
+        // Register BSS global variables as GC roots (after context/heap is created)
+        register_bss_gc_roots((void*)ctx);
+
         import_child = ast_script->child;
         while (import_child) {
             if (import_child->node_type == AST_NODE_IMPORT) {
@@ -6569,6 +6585,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     }
 
     // Execute (no imports — use standard path)
+    runner.script->jit_context = ctx;  // store for BSS root registration
     Input* output = execute_script_and_create_output(&runner, run_main);
 
     // Cleanup MIR context
