@@ -109,7 +109,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
         log_debug("measure_content_height_recursive: checking elem %s, blk=%p height=%.1f",
                   elem->tag_name ? elem->tag_name : "(null)",
                   (void*)elem->blk, elem->height);
-        if (elem->blk && elem->blk->given_height > 0) {
+        if (elem->blk && elem->blk->given_height >= 0) {
             log_debug("measure_content_height_recursive: elem %s has given_height=%.1f",
                       elem->tag_name ? elem->tag_name : "(null)", elem->blk->given_height);
             return elem->blk->given_height;
@@ -170,7 +170,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
                 ViewElement* child_view = (ViewElement*)child->as_element();
                 if (child_view) {
                     // Check for explicit height first
-                    if (child_view->blk && child_view->blk->given_height > 0) {
+                    if (child_view->blk && child_view->blk->given_height >= 0) {
                         child_height = child_view->blk->given_height;
                         log_debug("measure_content_height_recursive: child %s explicit height=%.1f",
                                   child->node_name(), child_height);
@@ -687,7 +687,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // CRITICAL FIX: For elements without explicit width, measured_width should be based
         // on content, not container. Only use container_width if the element has explicit width.
         ViewElement* elem = (ViewElement*)child->as_element();
-        bool has_explicit_width = (elem && elem->blk && elem->blk->given_width > 0);
+        bool has_explicit_width = (elem && elem->blk && elem->blk->given_width >= 0);
 
         if (has_explicit_width) {
             measured_width = (int)elem->blk->given_width;
@@ -1078,9 +1078,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 float h = img->height * lycon->ui_context->pixel_ratio;
 
                 // Check for explicit CSS dimensions
-                float explicit_width = (item->blk && item->blk->given_width > 0) ?
+                float explicit_width = (item->blk && item->blk->given_width >= 0) ?
                     item->blk->given_width : -1;
-                float explicit_height = (item->blk && item->blk->given_height > 0) ?
+                float explicit_height = (item->blk && item->blk->given_height >= 0) ?
                     item->blk->given_height : -1;
 
                 // Also check max-width as constraint
@@ -1227,14 +1227,14 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         }
 
         // Use explicit dimensions if specified, otherwise use pseudo-element content size
-        if (item->blk && item->blk->given_width > 0) {
+        if (item->blk && item->blk->given_width >= 0) {
             min_width = max_width = item->blk->given_width;
         } else if (has_pseudo_content) {
             min_width = max_width = pseudo_width;
         } else {
             min_width = max_width = 0;
         }
-        if (item->blk && item->blk->given_height > 0) {
+        if (item->blk && item->blk->given_height >= 0) {
             min_height = max_height = item->blk->given_height;
         } else if (has_pseudo_content) {
             min_height = max_height = pseudo_height;
@@ -1410,8 +1410,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // CRITICAL FIX: For items without explicit dimensions, the cached values may be
         // based on container size, not intrinsic size. In such cases, we should NOT use
         // the cache for the axis that doesn't have an explicit size.
-        bool has_explicit_width = (item->blk && item->blk->given_width > 0);
-        bool has_explicit_height = (item->blk && item->blk->given_height > 0);
+        bool has_explicit_width = (item->blk && item->blk->given_width >= 0);
+        bool has_explicit_height = (item->blk && item->blk->given_height >= 0);
 
         // Check if this item is a row flex container
         // For row flex containers, the cached height from measure_flex_child_content might be incorrect
@@ -1478,7 +1478,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             if (lycon) {
                 // Get item's explicit height (from CSS or resolved)
                 float item_height = -1;
-                if (item->blk && item->blk->given_height > 0) {
+                if (item->blk && item->blk->given_height >= 0) {
                     item_height = item->blk->given_height;
                 } else {
                     // Try to get from CSS
@@ -1591,8 +1591,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     ViewElement* child_view = (ViewElement*)c->as_element();
                     if (child_view) {
                         // First check View-level resolved dimensions
-                        bool child_has_explicit_width = (child_view->blk && child_view->blk->given_width > 0);
-                        bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height > 0);
+                        bool child_has_explicit_width = (child_view->blk && child_view->blk->given_width >= 0);
+                        bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height >= 0);
 
                         // If View-level dimensions aren't set yet, check DOM CSS
                         // This handles the case where intrinsic sizing runs before CSS resolution
@@ -1623,7 +1623,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         // Get child width - explicit (from View or DOM) or intrinsic
                         if (child_has_explicit_width) {
                             float explicit_w = 0.0f;
-                            if (child_view->blk && child_view->blk->given_width > 0) {
+                            if (child_view->blk && child_view->blk->given_width >= 0) {
                                 explicit_w = child_view->blk->given_width;
                             } else if (dom_css_width > 0) {
                                 explicit_w = dom_css_width;
@@ -1666,7 +1666,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
                         // Get child height - explicit (from View or DOM) or intrinsic
                         if (child_has_explicit_height) {
-                            if (child_view->blk && child_view->blk->given_height > 0) {
+                            if (child_view->blk && child_view->blk->given_height >= 0) {
                                 child_height = child_view->blk->given_height;
                             } else if (dom_css_height > 0) {
                                 child_height = dom_css_height;
