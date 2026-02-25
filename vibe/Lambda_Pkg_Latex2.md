@@ -35,7 +35,7 @@ Phase 1 baseline: **434/434** unit tests passing. Full test script: `test/lambda
 
 ### Phase 2 Progress
 
-Milestones 1–4 are complete. Current baseline: **442/442** tests.
+Milestones 1–5 are complete. Current baseline: **444/444** tests.
 
 | Phase | Status | Tests Added | Key Files |
 |-------|--------|-------------|----------|
@@ -47,7 +47,7 @@ Milestones 1–4 are complete. Current baseline: **442/442** tests.
 | 2F — Color Support | ✅ Done | 37 (`test_latex_color.ls`) | `elements/color.ls` (new), `render2.ls`, `analyze.ls`, `css.ls` |
 | 2H — Enhanced Lists | ✅ Done | (in color tests + CSS) | `render2.ls` (custom labels), `css.ls` (nested styles) |
 | 2G — Picture Environment | ❌ Not started | — | — |
-| 2I — `\includegraphics` Options | ❌ Not started | — | — |
+| 2I — `\includegraphics` Options | ✅ Done | 21 (`test_latex_includegraphics.ls`) | `render2.ls`, `util.ls` (new: `parse_kv_options`, `text_of_skip_brack`) |
 | 2J — LaTeXML Features | ❌ Not started | — | — |
 
 **Bugfix applied:** Fixed `render_font()` CSS class mismatch — `textsf`/`textsc`/`textsl`/`textrm` now use `latex-sf`/`latex-sc`/`latex-sl`/`latex-rm` matching actual CSS selectors.
@@ -510,10 +510,16 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
   - `render2.ls` — dispatches color commands, passes `custom_colors` map from analysis
   - `css.ls` — 4-level nested itemize markers (`disc` → `\2013` → `\2217` → `\00B7`), 4-level enumerate styles (`decimal` → `lower-alpha` → `lower-roman` → `upper-alpha`)
 
-### Milestone 5: `\includegraphics` Options (Phase 2I)
-- **Effort:** ~60 lines, ~0.5 session
-- **Unlocks:** `width`, `height`, `scale` on images
-- **Test:** Images render with specified dimensions
+### Milestone 5: `\includegraphics` Options (Phase 2I) — ✅ COMPLETE
+- **Completed:** 2026-02-25
+- **Effort:** ~90 lines
+- **Unlocks:** `width`, `height`, `scale`, `angle`, `keepaspectratio`, `trim`+`clip` on images
+- **Result:** `\includegraphics[width=5cm,height=3cm]{img.png}` renders `<img>` with CSS styles. Supports 6 options: `width`, `height`, `scale`, `angle`, `keepaspectratio`, `trim`+`clip`. Baseline 444/444.
+- **Tests:** `test_latex_includegraphics.ls` (21 tests)
+- **Implementation details:**
+  - `util.ls` — new `parse_kv_options(text)` parses comma-separated `key=value` pairs into a map via `map([k1, v1, k2, v2, ...])`, handles flags (e.g. `keepaspectratio` → `"true"`), trims whitespace, skips empty parts
+  - `util.ls` — new `text_of_skip_brack(el)` extracts text from element children while skipping `brack_group` elements
+  - `render2.ls` — `render_includegraphics()` extracts `brack_group` optional args, parses key-value options, builds CSS `style` attribute with width/height/transform(scale+rotate)/object-fit/clip-path
 
 ### Milestone 6: Picture Environment (Phase 2G)
 - **Effort:** ~400 lines, ~2 sessions
@@ -555,6 +561,7 @@ For each phase, add test cases to `test/lambda/` with `.ls` + `.txt` pairs:
 | `test_latex_font_decl.ls` | `\itshape`, `\bfseries`, `\raggedleft`, appendix numbering | ✅ 40 tests |
 | `test_latex_spacing.ls` | `\noindent`, `\bigskip`, `\quad`, `\\[len]`, etc. | planned |
 | `test_latex_color.ls` | `\textcolor`, `\colorbox`, `\definecolor`, nested list styles | ✅ 37 tests |
+| `test_latex_includegraphics.ls` | `parse_kv_options`, `text_of_skip_brack`, option parsing edge cases | ✅ 21 tests |
 | `test_latex_picture.ls` | Picture env → SVG output | planned |
 | `test_latex_appendix.ls` | `\appendix`, `secnumdepth` (expanded tests) | planned |
 
@@ -565,7 +572,7 @@ All 434 existing baseline tests must continue passing after each phase. Run:
 make test-lambda-baseline
 ```
 
-**Current baseline: 442/442** (434 original + 8 new test files from Phases 2A–2H).
+**Current baseline: 444/444** (434 original + 10 new test files from Phases 2A–2I).
 
 ---
 

@@ -1425,8 +1425,47 @@ fn find_decl_el_rec(el, i, n, tag_str) {
 }
 
 fn render_includegraphics(el) {
-    let src = trim(util.text_of(el))
-    <img class: "latex-image", src: src, alt: src>
+    // extract optional arguments [key=val,...] from brack_group
+    let brack = util.find_child(el, 'brack_group')
+    let opts = util.parse_kv_options(if (brack != null) util.text_of(brack) else null)
+
+    // extract src from non-brack children
+    let src = trim(util.text_of_skip_brack(el))
+
+    // build style string from options
+    let style = build_img_style(opts)
+
+    if (style != "") {
+        <img class: "latex-image", src: src, alt: src, style: style>
+    } else {
+        <img class: "latex-image", src: src, alt: src>
+    }
+}
+
+fn build_img_style(opts) {
+    let parts = []
+    // width
+    let parts = if (opts.width != null) { parts ++ ["width:" ++ opts.width] } else parts
+    // height
+    let parts = if (opts.height != null) { parts ++ ["height:" ++ opts.height] } else parts
+    // keepaspectratio (only meaningful with width or height)
+    let parts = if (opts.keepaspectratio != null) { parts ++ ["object-fit:contain"] } else parts
+    // build transform: may combine scale and angle
+    let transforms = []
+    let transforms = if (opts.scale != null) { transforms ++ ["scale(" ++ opts.scale ++ ")"] } else transforms
+    let transforms = if (opts.angle != null) { transforms ++ ["rotate(" ++ opts.angle ++ "deg)"] } else transforms
+    let parts = if (len(transforms) > 0) { parts ++ ["transform:" ++ str_join(transforms, " ")] } else parts
+    // trim + clip → clip-path:inset(top right bottom left)
+    // LaTeX trim order: left bottom right top
+    let parts = if (opts.trim != null and opts.clip != null) {
+        let vals = split(trim(opts.trim), null)
+        if (len(vals) == 4) {
+            // LaTeX: trim=left bottom right top → CSS: inset(top right bottom left)
+            parts ++ ["clip-path:inset(" ++ vals[3] ++ " " ++ vals[2] ++ " " ++ vals[1] ++ " " ++ vals[0] ++ ")"]
+        } else parts
+    } else parts
+
+    str_join(parts, ";")
 }
 
 fn render_marginpar(el, info) {
