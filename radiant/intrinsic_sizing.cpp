@@ -1148,6 +1148,36 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     sizes.min_content += horiz_padding + horiz_border;
     sizes.max_content += horiz_padding + horiz_border;
 
+    // CSS 2.1 §10.4: Apply max-width constraint to intrinsic sizes.
+    // max-width constrains the preferred (max-content) width.
+    // Note: min-width is NOT applied here — it's a layout-time concern that
+    // affects used width but should not inflate intrinsic preferred widths,
+    // which could prevent flex/grid stretching.
+    ViewBlock* view_for_minmax = (ViewBlock*)element;
+    float given_max_width = -1;
+    if (view_for_minmax->blk) {
+        given_max_width = view_for_minmax->blk->given_max_width;
+    }
+    // Fallback: check CSS if blk hasn't been set up yet
+    if (given_max_width < 0 && element->specified_style) {
+        CssDeclaration* mw_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_MAX_WIDTH);
+        if (mw_decl && mw_decl->value && mw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, mw_decl->value);
+        }
+    }
+    if (given_max_width >= 0) {
+        // For content-box: max-width is content width, so add padding+border for comparison
+        float max_border_box = given_max_width + horiz_padding + horiz_border;
+        if (sizes.max_content > max_border_box) {
+            sizes.max_content = max_border_box;
+            log_debug("  -> max-width constraint: clamped max_content to %.1f", sizes.max_content);
+        }
+        if (sizes.min_content > max_border_box) {
+            sizes.min_content = max_border_box;
+        }
+    }
+
     // Restore parent font context
     if (font_changed) {
         lycon->font = saved_font;
