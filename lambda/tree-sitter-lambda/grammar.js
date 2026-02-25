@@ -141,12 +141,16 @@ module.exports = grammar({
     [$._expr, $.query_expr],                       // expr ? could end expr or start query
     [$._expr, $.direct_query_expr],                // expr .? could end expr or start direct query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
+    [$._attr_expr, $._expr],                       // else { expr } in if_expr: block content vs map
+    [$.attr_binary_expr, $._expr],                 // else { expr + ... } binary in block vs map
+    [$._statement, $._expr],                       // else { stam } in if_expr: statement vs expr in block
+    [$.raise_expr, $.raise_stam],                  // else { raise expr } in block
+    [$.let_expr, $.let_stam],                      // else { let x = ... } in block
     [$._quantified_type, $.occurrence_type],       // unary_type + [n] could be occurrence or end of type
     [$._compound_type, $.concat_type],             // _quantified_type could be complete or start of concat
     [$._compound_type, $.constrained_type],        // _quantified_type could be complete or base of constrained
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
     [$.attr_type, $.binary_expr],                  // attr_type default `= expr >` vs binary `expr > expr`
-    [$.map, $.object_literal],                     // {Identifier} could be map with expr or object literal
   ],
 
   precedences: $ => [[
@@ -653,18 +657,27 @@ module.exports = grammar({
       'pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
+    // Expression-form if: if (cond) expr else expr | else { stam }
+    // Condition always in parens. Else is REQUIRED (ternary-style).
+    // New: else can be a block { content } (preferred over map via prec.dynamic).
     if_expr: $ => prec.right(seq(
       'if', '(', field('cond', $._expr), ')', field('then', $._expr),
-      // 'else' clause is not optional for if_expr
-      seq('else', field('else', $._expr)),
+      'else', choice(
+        prec.dynamic(1, seq('{', field('else', $.content), '}')),
+        field('else', $._expr),
+      ),
     )),
 
+    // Block-form if: if cond { stam } [else { stam } | else if_stam | else expr]
+    // Condition without required parens. Block body. Else can be expr (NEW).
     if_stam: $ => prec.right(seq(
-      'if', field('cond', $._expr), '{', field('then', $.content), '}',
-      optional(choice(
-        seq('else', field('else', $.if_stam)),
-        seq('else', '{', field('else', $.content), '}'),
-      )),
+      'if', field('cond', $._expr),
+      '{', field('then', $.content), '}',
+      optional(seq('else', choice(
+        prec.dynamic(1, seq('{', field('else', $.content), '}')),
+        field('else', $.if_stam),
+        field('else', $._expr),
+      ))),
     )),
 
     // Match expression — unified form with required braces
@@ -1053,40 +1066,6 @@ module.exports = grammar({
 
     // top-level type defintions: type_stam | entity_type | object_type
 
-    // Module Imports
-
-    relative_name: $ => repeat1(seq(
-      choice('.', '\\'), $.identifier
-    )),
-
-    absolute_name: $ => seq(
-      $.identifier, repeat(seq(choice('.', '\\'), $.identifier))
-    ),
-
-    import_module: $ => choice(
-        field('module', choice($.absolute_name, $.relative_name, $.symbol)),
-        seq(field('alias', $.identifier), ':',
-          field('module', choice($.absolute_name, $.relative_name, $.symbol)))
-    ),
-
-    _import_stam: $ => choice(
-      seq('import', $.import_module, repeat(seq(',', $.import_module))),
-      $.namespace_decl,
-    ),
-
-    // Namespace declaration: namespace ns1 : 'url', ns2 : "url", ns3: path, ...;
-    namespace_decl: $ => seq(
-      'namespace',
-      $.namespace_binding,
-      repeat(seq(',', $.namespace_binding)),
-    ),
-
-    namespace_binding: $ => seq(
-      field('prefix', $.identifier),
-      ':',
-      field('uri', choice($.string, $.symbol, $.identifier)),
-    ),
-
     // ==================== String/Symbol Pattern Definitions ====================
     // Pattern atoms are unified into the type system. String/symbol pattern bodies
     // use _type_expr directly. The AST builder validates that only pattern-valid
@@ -1119,7 +1098,39 @@ module.exports = grammar({
       field('name', $.identifier),
       '=',
       field('pattern', $._type_expr),
+    )),    
+
+    // ==================== Module Imports ====================
+    relative_name: $ => repeat1(seq(
+      choice('.', '\\'), $.identifier
     )),
 
+    absolute_name: $ => seq(
+      $.identifier, repeat(seq(choice('.', '\\'), $.identifier))
+    ),
+
+    import_module: $ => choice(
+        field('module', choice($.absolute_name, $.relative_name, $.symbol)),
+        seq(field('alias', $.identifier), ':',
+          field('module', choice($.absolute_name, $.relative_name, $.symbol)))
+    ),
+
+    _import_stam: $ => choice(
+      seq('import', $.import_module, repeat(seq(',', $.import_module))),
+      $.namespace_decl,
+    ),
+
+    // Namespace declaration: namespace ns1 : 'url', ns2 : "url", ns3: path, ...;
+    namespace_decl: $ => seq(
+      'namespace',
+      $.namespace_binding,
+      repeat(seq(',', $.namespace_binding)),
+    ),
+
+    namespace_binding: $ => seq(
+      field('prefix', $.identifier),
+      ':',
+      field('uri', choice($.string, $.symbol, $.identifier)),
+    ),
   },
 });

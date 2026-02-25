@@ -523,6 +523,162 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
     return cell_height;
 }
 
+// CSS 2.1 §17.5.4: Find the baseline of a table cell.
+// "The baseline of a cell is the baseline of the first in-flow line box in the cell,
+// or the first in-flow table-row in the cell, whichever comes first. If a cell has
+// no line box and no in-flow table row, the baseline is the bottom of the content edge."
+// Returns distance from the view's top to the first text baseline, or -1 if none found.
+static float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y) {
+    for (View* child = ((ViewElement*)parent)->first_child; child; child = child->next_sibling) {
+        if (!child->view_type) continue;
+
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)child;
+            // Get font ascent for this text node
+            float ascent = 0;
+            if (text->font) {
+                FontBox fbox = {};
+                setup_font(lycon->ui_context, &fbox, text->font);
+                if (fbox.font_handle) {
+                    TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
+                    if (typo.valid && typo.use_typo_metrics) {
+                        ascent = typo.ascender;
+                    } else {
+                        const FontMetrics* m = font_get_metrics(fbox.font_handle);
+                        if (m) ascent = m->hhea_ascender;
+                    }
+                }
+            }
+            // Baseline = accumulated Y offset + text's Y position + font ascent
+            float baseline = cumulative_y + child->y + ascent;
+            log_debug("find_first_baseline: found text at cumulative_y=%.1f, text.y=%.1f, ascent=%.1f -> baseline=%.1f",
+                      cumulative_y, child->y, ascent, baseline);
+            return baseline;
+        }
+
+        // Recurse into block-level children to find text inside them
+        if (child->view_type == RDT_VIEW_BLOCK ||
+            child->view_type == RDT_VIEW_INLINE ||
+            child->view_type == RDT_VIEW_INLINE_BLOCK ||
+            child->view_type == RDT_VIEW_LIST_ITEM) {
+            float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
+            if (result >= 0) return result;
+        }
+    }
+    return -1.0f;
+}
+
+// Find the baseline of a table cell (distance from cell's border-box top to first text baseline)
+// Returns -1 if no in-flow line box baseline is found (e.g., cell contains only tables/images).
+// CSS 2.1 §17.5.4: If no baseline found, the caller decides the fallback behavior.
+static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
+    float baseline = find_first_baseline_recursive(lycon, (View*)tcell, 0);
+    log_debug("find_cell_baseline: cell col=%d row=%d -> baseline=%.1f",
+              tcell->td->col_index, tcell->td->row_index, baseline);
+    return baseline;
+}
+
+// CSS 2.1 §17.5.4: Apply baseline alignment across all cells in a row.
+// This must be called after all cells in the row are laid out but before
+// the final row height is determined.
+// Returns the extra height added to the row from baseline alignment.
+static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* trow, float* row_height) {
+    // Step 1: Check if any cells have baseline alignment
+    bool has_baseline_cells = false;
+    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+        if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
+            !tcell->td->is_empty && tcell->td->row_span <= 1) {
+            has_baseline_cells = true;
+            break;
+        }
+    }
+    if (!has_baseline_cells) return 0;
+
+    log_debug("apply_row_baseline_alignment: processing row with baseline-aligned cells");
+
+    // Step 2: Find each baseline-aligned cell's baseline (only cells with real baselines)
+    float max_baseline = 0;
+    int baseline_cell_count = 0;
+    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+        if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
+            !tcell->td->is_empty && tcell->td->row_span <= 1) {
+            float baseline = find_cell_baseline(lycon, tcell);
+            if (baseline >= 0) {
+                if (baseline > max_baseline) max_baseline = baseline;
+                baseline_cell_count++;
+            }
+        }
+    }
+    log_debug("  row baseline = %.1f (%d cells with real baselines)", max_baseline, baseline_cell_count);
+
+    // Need at least 2 cells with real baselines for alignment to make sense
+    if (baseline_cell_count < 2) return 0;
+
+    // Step 3: Shift content in each baseline-aligned cell to align baselines
+    // Only shift cells that have a real text baseline (skip cells with no line box)
+    float extra_height = 0;
+    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+        if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
+            !tcell->td->is_empty && tcell->td->row_span <= 1) {
+            float cell_baseline = find_cell_baseline(lycon, tcell);
+            if (cell_baseline < 0) continue;  // Skip cells without real baselines
+            float shift = max_baseline - cell_baseline;
+
+            if (shift > 0.5f) {
+                log_debug("  cell col=%d: baseline=%.1f, shift=%.1f", tcell->td->col_index, cell_baseline, shift);
+
+                // Shift all children down
+                for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+                    if (!child->view_type) continue;
+                    child->y += shift;
+                    // Also update TextRect positions for ViewText nodes
+                    if (child->view_type == RDT_VIEW_TEXT) {
+                        ViewText* text = (ViewText*)child;
+                        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                            rect->y += shift;
+                        }
+                    }
+                }
+
+                // The cell now needs more height to accommodate the shifted content
+                float content_height = measure_cell_content_height(lycon, tcell);
+                float needed_height = content_height;
+                // Add padding
+                if (tcell->bound) {
+                    needed_height += tcell->bound->padding.top + tcell->bound->padding.bottom;
+                }
+                // Add border
+                if (tcell->bound && tcell->bound->border) {
+                    float bt = (tcell->bound->border->top_style != CSS_VALUE_NONE) ? tcell->bound->border->width.top : 0;
+                    float bb = (tcell->bound->border->bottom_style != CSS_VALUE_NONE) ? tcell->bound->border->width.bottom : 0;
+                    needed_height += bt + bb;
+                }
+                // Account for the shift (extra space above content)
+                needed_height += shift;
+
+                if (needed_height > tcell->height) {
+                    tcell->height = needed_height;
+                }
+            }
+        }
+    }
+
+    // Step 4: Recalculate row height considering baseline-adjusted cells
+    float new_row_height = *row_height;
+    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+        if (tcell->td && tcell->td->row_span <= 1 && tcell->height > new_row_height) {
+            new_row_height = tcell->height;
+        }
+    }
+
+    if (new_row_height > *row_height) {
+        log_debug("  row height increased: %.1f -> %.1f (baseline alignment)", *row_height, new_row_height);
+        *row_height = new_row_height;
+    }
+
+    return new_row_height - *row_height;
+}
+
 // Apply vertical alignment to cell children
 static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, float content_height) {
     log_debug("apply_cell_vertical_align: valign=%d, cell_height=%.1f, content_height=%.1f, is_empty=%d",
@@ -537,6 +693,12 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, f
 
     if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_TOP) {
         return; // No adjustment needed
+    }
+
+    // CSS 2.1 §17.5.4: Baseline alignment is handled by apply_row_baseline_alignment()
+    // at the row level, since it requires cross-cell coordination.
+    if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE) {
+        return;
     }
 
     // Calculate content area by subtracting actual border and padding
@@ -2103,13 +2265,25 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     }
 
     // CSS 2.1 Section 17.2.1: Anonymous boxes inherit inheritable properties
-    // Copy inherited properties from parent (font properties are inheritable)
+    // CSS 2.1 §17.2.1: Anonymous boxes inherit inheritable properties from parent.
+    // Only inherit from parent->font (not lycon->font.style) because this function is
+    // called during anonymous box generation before child style resolution.
+    // Font context propagation through lycon->font happens later in mark_table_node.
     if (parent->font) {
         anon->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
         if (anon->font) {
-            memcpy(anon->font, parent->font, sizeof(FontProp));
-            // Font family string needs to be copied or shared
+            // Copy only specified font properties, not derived/cached fields
             anon->font->family = parent->font->family;  // Share the string
+            anon->font->font_size = parent->font->font_size;
+            anon->font->font_style = parent->font->font_style;
+            anon->font->font_weight = parent->font->font_weight;
+            anon->font->font_variant = parent->font->font_variant;
+            anon->font->text_deco = parent->font->text_deco;
+            anon->font->letter_spacing = parent->font->letter_spacing;
+            anon->font->word_spacing = parent->font->word_spacing;
+            // Derived fields (space_width, ascender, descender, font_height,
+            // has_kerning, font_handle) are left as zero/NULL from pool_calloc.
+            // They will be resolved by setup_font() during layout.
         }
     }
 
@@ -3199,8 +3373,14 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         // NOTE: Section type is determined at runtime via get_section_type() method
         ViewTableRowGroup* group = (ViewTableRowGroup*)set_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, node);
         if (group) {
+            group->display = display;  // preserve thead/tbody/tfoot display distinction
             lycon->view = (View*)group;
             dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
+            // Propagate element font to layout context so children inherit correctly.
+            // dom_node_resolve_style may skip pre-resolved elements, leaving lycon->font stale.
+            if (group->font) {
+                setup_font(lycon->ui_context, &lycon->font, group->font);
+            }
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)group);
@@ -3211,8 +3391,13 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         // Row - mark and recurse
         ViewTableRow* row = (ViewTableRow*)set_view(lycon, RDT_VIEW_TABLE_ROW, node);
         if (row) {
+            row->display = display;
             lycon->view = (View*)row;
             dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
+            // Propagate element font to layout context so children inherit correctly.
+            if (row->font) {
+                setup_font(lycon->ui_context, &lycon->font, row->font);
+            }
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)row);
@@ -3223,6 +3408,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         // Cell - mark with styles and attributes
         ViewTableCell* cell = (ViewTableCell*)set_view(lycon, RDT_VIEW_TABLE_CELL, node);
         if (cell) {
+            cell->display = display;
             lycon->view = (View*)cell;
             dom_node_resolve_style(node, lycon);
             parse_cell_attributes(lycon, node, cell);
@@ -3233,6 +3419,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         // CSS 2.1 §17.2.1: Column groups don't generate cells, only provide metadata
         ViewBlock* colgroup = (ViewBlock*)set_view(lycon, RDT_VIEW_TABLE_COLUMN_GROUP, node);
         if (colgroup) {
+            colgroup->display = display;
             lycon->view = (View*)colgroup;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
             // Recurse to mark child column elements
@@ -3247,6 +3434,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         // CSS 2.1 §17.2.1: Columns don't generate cells, only provide metadata
         ViewBlock* col = (ViewBlock*)set_view(lycon, RDT_VIEW_TABLE_COLUMN, node);
         if (col) {
+            col->display = display;
             lycon->view = (View*)col;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
         }
@@ -3384,8 +3572,8 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
             break;
 
         case 3: // CELL_VALIGN_BASELINE
-            // Align to text baseline - simplified to top for now
-            // TODO: Implement proper baseline alignment with font metrics
+            // CSS 2.1 §17.5.4: Baseline alignment is handled at row level by
+            // apply_row_baseline_alignment(), not here in per-cell alignment.
             vertical_offset = 0;
             break;
     }
@@ -3772,6 +3960,62 @@ struct CellWidths {
     float max_width;  // Maximum content width (PCW) - preferred content width
 };
 
+// Check if an inline element's last text descendant ends with whitespace.
+// CSS 2.1: When consecutive inline elements flow on the same line, trailing whitespace
+// in one element serves as inter-word spacing before the next element. This is needed
+// for accurate max-content width calculation in anonymous table cells where inter-element
+// whitespace text nodes may not be present.
+static bool element_text_ends_with_whitespace(DomNode* element) {
+    if (!element || !element->is_element()) return false;
+
+    // Walk last children depth-first to find the last text node
+    DomNode* node = element->as_element()->last_child;
+    while (node) {
+        if (node->is_text()) {
+            const char* text = (const char*)node->text_data();
+            if (text) {
+                size_t len = strlen(text);
+                if (len > 0) {
+                    unsigned char last_char = (unsigned char)text[len - 1];
+                    return (last_char == ' ' || last_char == '\t' || last_char == '\n' ||
+                            last_char == '\r' || last_char == '\f');
+                }
+            }
+            return false;
+        }
+        if (node->is_element() && node->as_element()->last_child) {
+            node = node->as_element()->last_child;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
+// Check if an inline element's first text descendant starts with whitespace.
+static bool element_text_starts_with_whitespace(DomNode* element) {
+    if (!element || !element->is_element()) return false;
+
+    DomNode* node = element->as_element()->first_child;
+    while (node) {
+        if (node->is_text()) {
+            const char* text = (const char*)node->text_data();
+            if (text && *text) {
+                unsigned char first_char = (unsigned char)text[0];
+                return (first_char == ' ' || first_char == '\t' || first_char == '\n' ||
+                        first_char == '\r' || first_char == '\f');
+            }
+            return false;
+        }
+        if (node->is_element() && node->as_element()->first_child) {
+            node = node->as_element()->first_child;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
 // Measure cell's minimum and maximum content widths in single pass
 // This performs accurate measurement using font metrics for CSS 2.1 compliance
 // CONSOLIDATED: Combines previous measure_cell_intrinsic_width() and measure_cell_minimum_width()
@@ -3964,12 +4208,18 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                 log_debug("Cell widths: <br> breaks inline run, max_width now=%.2f", max_width);
             } else if (is_inline) {
                 // Inline elements flow with text - add to inline run
-                if (has_inline_content && prev_ended_with_space && lycon->font.style) {
+                // CSS 2.1: Account for whitespace between inline elements.
+                // When the previous inline content ended with whitespace OR this element
+                // starts with whitespace, add inter-word spacing.
+                bool starts_with_ws = element_text_starts_with_whitespace(child);
+                if (has_inline_content && (prev_ended_with_space || starts_with_ws) && lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
+                    log_debug("Cell widths: adding inter-element space width=%.2f", lycon->font.style->space_width);
                 }
                 inline_run_max += child_max;
                 has_inline_content = true;
-                prev_ended_with_space = false;
+                // Track if this element's text ends with whitespace for next sibling
+                prev_ended_with_space = element_text_ends_with_whitespace(child);
             } else {
                 // Block elements break the inline run - finalize current run first
                 if (inline_run_max > max_width) max_width = inline_run_max;
@@ -5644,6 +5894,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         }
                     }
 
+                    // CSS 2.1 §17.5.4: Apply baseline alignment across cells in this row.
+                    // This must happen after all cells are laid out but before row height is finalized,
+                    // because baseline alignment may shift content and increase cell/row heights.
+                    apply_row_baseline_alignment(lycon, trow, &row_height);
+
                     // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
                     // "The height of a 'table-row' element's box is calculated once the user
                     // agent has all the cells in the row available... Percentages for 'height'
@@ -5776,7 +6031,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (height_for_row > row_height) {
                     row_height = height_for_row;
                 }
-            }            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
+            }
+
+            // CSS 2.1 §17.5.4: Apply baseline alignment across cells in this row
+            apply_row_baseline_alignment(lycon, trow, &row_height);
+
+            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
             // "The height of a 'table-row' element's box is calculated once the user
             // agent has all the cells in the row available... Percentages for 'height'
             // on table cells, table rows, and table row groups [compute to 'auto']"
@@ -6669,24 +6929,43 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 table_wrapper->display.inner = CSS_VALUE_TABLE;  // Inner is table layout
                 table_wrapper->styles_resolved = true;
 
-                // Inherit font from parent
-                if (parent->font) {
+                // CSS 2.1 §17.2.1: Anonymous boxes inherit inheritable properties.
+                // Use parent->font if available; otherwise fall back to the current
+                // layout font context (lycon->font.style), which holds the computed
+                // inherited font for elements that don't declare font properties.
+                FontProp* inherit_font = parent->font ? parent->font : lycon->font.style;
+                if (inherit_font) {
                     table_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (table_wrapper->font) {
-                        memcpy(table_wrapper->font, parent->font, sizeof(FontProp));
+                        // Copy only specified font properties, not derived/cached fields
+                        table_wrapper->font->family = inherit_font->family;
+                        table_wrapper->font->font_size = inherit_font->font_size;
+                        table_wrapper->font->font_style = inherit_font->font_style;
+                        table_wrapper->font->font_weight = inherit_font->font_weight;
+                        table_wrapper->font->font_variant = inherit_font->font_variant;
+                        table_wrapper->font->text_deco = inherit_font->text_deco;
+                        table_wrapper->font->letter_spacing = inherit_font->letter_spacing;
+                        table_wrapper->font->word_spacing = inherit_font->word_spacing;
+                        // Derived fields left zero/NULL from pool_calloc
                     }
                 }
-                if (parent->in_line) {
+                InlineProp* inherit_inline = parent->in_line;
+                if (!inherit_inline) {
+                    // Fall back to lycon color context if parent has no explicit inline props
+                    // The color is inherited and tracked in the layout context
+                }
+                if (inherit_inline) {
                     table_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
                     if (table_wrapper->in_line) {
-                        table_wrapper->in_line->color = parent->in_line->color;
-                        table_wrapper->in_line->visibility = parent->in_line->visibility;
+                        table_wrapper->in_line->color = inherit_inline->color;
+                        table_wrapper->in_line->visibility = inherit_inline->visibility;
                         table_wrapper->in_line->opacity = 1.0f;
                     }
                 }
 
                 insertion_parent = table_wrapper;
-                log_debug("[ORPHAN-TABLE] Created anonymous table wrapper");
+                log_debug("[ORPHAN-TABLE] Created anonymous table wrapper (font from %s)",
+                          parent->font ? "parent" : "lycon context");
             }
         }
 
@@ -6707,7 +6986,16 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 if (table_wrapper->font) {
                     row_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (row_wrapper->font) {
-                        memcpy(row_wrapper->font, table_wrapper->font, sizeof(FontProp));
+                        // Copy only specified font properties, not derived/cached fields
+                        row_wrapper->font->family = table_wrapper->font->family;
+                        row_wrapper->font->font_size = table_wrapper->font->font_size;
+                        row_wrapper->font->font_style = table_wrapper->font->font_style;
+                        row_wrapper->font->font_weight = table_wrapper->font->font_weight;
+                        row_wrapper->font->font_variant = table_wrapper->font->font_variant;
+                        row_wrapper->font->text_deco = table_wrapper->font->text_deco;
+                        row_wrapper->font->letter_spacing = table_wrapper->font->letter_spacing;
+                        row_wrapper->font->word_spacing = table_wrapper->font->word_spacing;
+                        // Derived fields left zero/NULL from pool_calloc
                     }
                 }
                 if (table_wrapper->in_line) {

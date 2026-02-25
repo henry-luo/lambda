@@ -560,6 +560,26 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         } else {
             // No specified_style - still apply element default styles for HTML attributes
             apply_element_default_style(lycon, dom_elem);
+
+            // CSS 2.1: Elements without specified styles still have computed values
+            // from inheritance. Propagate font from the current layout context so
+            // computed style queries return the correct inherited font properties.
+            if (!dom_elem->font && lycon->font.style) {
+                Pool* pool = lycon->doc ? lycon->doc->view_tree->pool : nullptr;
+                if (pool) {
+                    dom_elem->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
+                    if (dom_elem->font) {
+                        dom_elem->font->family = lycon->font.style->family;
+                        dom_elem->font->font_size = lycon->font.style->font_size;
+                        dom_elem->font->font_style = lycon->font.style->font_style;
+                        dom_elem->font->font_weight = lycon->font.style->font_weight;
+                        dom_elem->font->font_variant = lycon->font.style->font_variant;
+                        dom_elem->font->text_deco = lycon->font.style->text_deco;
+                        dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
+                        dom_elem->font->word_spacing = lycon->font.style->word_spacing;
+                    }
+                }
+            }
         }
     }
 

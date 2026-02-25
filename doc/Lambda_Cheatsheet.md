@@ -305,18 +305,22 @@ Data type determines output format:
 
 ## Control Flow
 
-**If Expressions (require else):**
+**If Expressions (parenthesized condition, else required):**
 ```lambda
 if (x > 0) "positive" else "non-positive"
 if (score >= 90) "A"
 else if (score >= 80) "B" else "C"
+if (x > 0) "pos" else { log("neg"); "neg" } // block else
 ```
 
-**If Statements (optional else):**
+**If Statements (block body, else optional):**
 ```lambda
-if (x > 0) { "positive" }
-if (condition) { something() } else { otherThing() }
+if x > 0 { "positive" }
+if condition { something() } else { otherThing() }
+if x > 0 { compute() } else "default"   // expr else
 ```
+
+Both forms share the same `else` syntax: `else expr`, `else { stam }`, or `else if ...`.
 
 **Match Expressions:**
 ```lambda

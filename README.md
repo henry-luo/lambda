@@ -2,7 +2,7 @@
 
 A general-purpose, cross-platform, functional scripting language and document processing engine.
 
-Built from scratch in C/C++ with a custom and light-weight runtime (only **8 MB**), Tree-sitter parsing, MIR-based JIT compilation.
+Built from scratch in C/C++ with a custom and light-weight runtime (only **9 MB**), Tree-sitter parsing, MIR-based JIT compilation.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
 > A stable subset of the literal data model is separately formalised and released as

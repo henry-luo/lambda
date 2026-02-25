@@ -415,10 +415,10 @@ The margin collapsing improvements (Fixes 6–11) collectively fixed ~120+ tests
 | Phase | Date | Passed | Failed | Effective | Pass Rate | Delta | Key Changes |
 |-------|------|--------|--------|-----------|-----------|-------|-------------|
 | Pre-Phase 1 | — | 6,161 | 3,661 | 9,822 | 62.7% | — | Baseline |
-| Phase 1 | 2025-02-21 | 6,591 | 3,231 | 9,822 | 67.1% | +430 | Negative margins, content functions, column borders, font-variant, text-align, font-family |
-| Phase 2 | 2025-02-22 | 6,591 | 3,231 | 9,822 | 67.1% | +0 | First-letter float, replaced intrinsic sizing, list-style reassessment |
-| Phase 2.5 | 2025-02-22 | 6,622 | 3,200 | 9,822 | 67.4% | +31 | Run-in fallthrough, empty-cells inheritance |
-| Phase 3 | 2025-02-23 | 6,760 | 3,062 | 9,822 | 68.8% | +138 | Monospace 13px, CoreText fallback, border-collapse numerics, margin-collapse, text merging, attr() case |
+| Phase 1 | 2026-02-21 | 6,591 | 3,231 | 9,822 | 67.1% | +430 | Negative margins, content functions, column borders, font-variant, text-align, font-family |
+| Phase 2 | 2026-02-22 | 6,591 | 3,231 | 9,822 | 67.1% | +0 | First-letter float, replaced intrinsic sizing, list-style reassessment |
+| Phase 2.5 | 2026-02-22 | 6,622 | 3,200 | 9,822 | 67.4% | +31 | Run-in fallthrough, empty-cells inheritance |
+| Phase 3 | 2026-02-23 | 6,760 | 3,062 | 9,822 | 68.8% | +138 | Monospace 13px, CoreText fallback, border-collapse numerics, margin-collapse, text merging, attr() case |
 | Phase 5 | 2026-02-22 | 6,841 | 2,981 | 9,822 | 69.7% | +81 | Border-width medium, counter formats, inline margins, root margins, table pseudo-elements |
 | **Phase 6** | **2026-02-24** | **7,967** | **1,600** | **9,567** | **83.3%** | **+1,126** | **33 structural fixes: margin collapsing (6 fixes), direction/RTL, abspos equations, table overhaul, font-variant, vertical-align, clearance, intrinsic sizing, blockification, trailing whitespace, and more** |
 | **Cumulative** | | | | | | **+1,806** | **6,161 → 7,967 (62.7% → 83.3%)** |

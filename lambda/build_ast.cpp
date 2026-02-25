@@ -511,8 +511,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, bin->right, fn_scope, global_scope, captures);
         break;
     }
-    case AST_NODE_IF_EXPR:
-    case AST_NODE_IF_STAM: {
+    case AST_NODE_IF_EXPR: {
         AstIfNode* if_node = (AstIfNode*)node;
         collect_captures_from_node(tp, if_node->cond, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, if_node->then, fn_scope, global_scope, captures);
@@ -524,7 +523,6 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, match_node->scrutinee, fn_scope, global_scope, captures);
         AstMatchArm* arm = match_node->first_arm;
         while (arm) {
-            if (arm->pattern) collect_captures_from_node(tp, arm->pattern, fn_scope, global_scope, captures);
             collect_captures_from_node(tp, arm->body, fn_scope, global_scope, captures);
             arm = (AstMatchArm*)arm->next;
         }
@@ -2703,8 +2701,7 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_PIPE:
         return has_current_item_ref(((AstBinaryNode*)node)->left) ||
                has_current_item_ref(((AstBinaryNode*)node)->right);
-    case AST_NODE_IF_EXPR:
-    case AST_NODE_IF_STAM: {
+    case AST_NODE_IF_EXPR: {
         AstIfNode* if_node = (AstIfNode*)node;
         return has_current_item_ref(if_node->cond) ||
                has_current_item_ref(if_node->then) ||
@@ -2715,7 +2712,6 @@ bool has_current_item_ref(AstNode* node) {
         if (has_current_item_ref(match_node->scrutinee)) return true;
         AstMatchArm* arm = match_node->first_arm;
         while (arm) {
-            if (has_current_item_ref(arm->body)) return true;
             arm = (AstMatchArm*)arm->next;
         }
         return false;
@@ -2774,6 +2770,8 @@ AstNode* build_current_index(Transpiler* tp, TSNode node) {
     return ast_node;
 }
 
+// Unified build_if_expr: handles both expression and block forms
+// When a branch is a content block, creates a new scope for variable shadowing
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     log_debug("build if expr");
     AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfNode));
@@ -2787,8 +2785,19 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
+    // Build 'then' branch — create scope if it's a content block
     TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
+    bool then_is_block = (!ts_node_is_null(then_node) && ts_node_symbol(then_node) == SYM_CONTENT);
+    if (then_is_block) {
+        NameScope* then_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        then_scope->parent = tp->current_scope;
+        then_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = then_scope;
+    }
     ast_node->then = build_expr(tp, then_node);
+    if (then_is_block) {
+        tp->current_scope = tp->current_scope->parent;  // restore scope
+    }
 
     // Defensive validation: ensure then clause was built successfully
     if (!ast_node->then) {
@@ -2797,12 +2806,23 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
+    // Build 'else' branch — create scope if it's a content block
     TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
     if (ts_node_is_null(else_node)) {
         ast_node->otherwise = NULL;
     }
     else {
+        bool else_is_block = (ts_node_symbol(else_node) == SYM_CONTENT);
+        if (else_is_block) {
+            NameScope* else_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+            else_scope->parent = tp->current_scope;
+            else_scope->is_proc = tp->current_scope->is_proc;
+            tp->current_scope = else_scope;
+        }
         ast_node->otherwise = build_expr(tp, else_node);
+        if (else_is_block) {
+            tp->current_scope = tp->current_scope->parent;  // restore scope
+        }
         // Defensive validation: if else node exists, ensure it was built successfully
         if (!ast_node->otherwise) {
             log_error("Error: build_if_expr failed to build else expression");
@@ -2819,90 +2839,19 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
-    // determine the type of the if expression, should be union of then and else
+    // Determine the type of the if expression
     TypeId then_type_id = ast_node->then->type->type_id;
     TypeId else_type_id = ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL;
 
     // Check if branches have incompatible types that require coercion to ANY
     bool need_any_type = false;
     if (then_type_id != else_type_id) {
-        // check if number coercion is possible
-        // if (then_type_id == LMD_TYPE_INT && else_type_id == LMD_TYPE_FLOAT ||
-        //     then_type_id == LMD_TYPE_FLOAT && else_type_id == LMD_TYPE_INT) {
-        //     // coercion is possible
-        // } else {
-            // Incompatible types that cannot be coerced, use ANY
-        log_warn("incompatible types '%s' and '%s' in if-expression branches, coercing to ANY", get_type_name(then_type_id), get_type_name(else_type_id));
         need_any_type = true;
-        // }
     }
 
     TypeId type_id = need_any_type ? LMD_TYPE_ANY : std::max(then_type_id, else_type_id);
     ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
     log_debug("end build if expr");
-    return (AstNode*)ast_node;
-}
-
-AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
-    log_debug("build if stam");
-    AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_STAM, if_node, sizeof(AstIfNode));
-
-    TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
-    ast_node->cond = build_expr(tp, cond_node);
-
-    // Defensive validation: ensure condition was built successfully
-    if (!ast_node->cond) {
-        log_error("Error: build_if_stam failed to build condition expression");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    // Create a new scope for the 'then' branch to allow variable shadowing
-    NameScope* then_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    then_scope->parent = tp->current_scope;
-    then_scope->is_proc = tp->current_scope->is_proc;
-    tp->current_scope = then_scope;
-
-    TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
-    ast_node->then = build_expr(tp, then_node);
-
-    tp->current_scope = then_scope->parent;  // restore scope
-
-    // Defensive validation: ensure then clause was built successfully
-    if (!ast_node->then) {
-        log_error("Error: build_if_stam failed to build then expression");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
-    if (ts_node_is_null(else_node)) {
-        ast_node->otherwise = NULL;  // optional for IF statements
-    }
-    else {
-        // Create a new scope for the 'else' branch to allow variable shadowing
-        NameScope* else_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-        else_scope->parent = tp->current_scope;
-        else_scope->is_proc = tp->current_scope->is_proc;
-        tp->current_scope = else_scope;
-
-        ast_node->otherwise = build_expr(tp, else_node);
-
-        tp->current_scope = else_scope->parent;  // restore scope
-    }
-
-    // Additional validation: ensure expressions have valid types
-    if (!ast_node->cond->type || !ast_node->then->type ||
-        (ast_node->otherwise && !ast_node->otherwise->type)) {
-        log_error("Error: build_if_stam expressions missing type information");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    // if statement return type
-    ast_node->type = ast_node->otherwise && ast_node->otherwise->type &&
-        ast_node->otherwise->type->type_id == ast_node->then->type->type_id ? ast_node->then->type : &TYPE_ANY;
-    log_debug("end build if stam");
     return (AstNode*)ast_node;
 }
 
@@ -6083,9 +6032,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_ASSIGN_STAM:
         return build_assign_stam(tp, expr_node);
     case SYM_IF_EXPR:
-        return build_if_expr(tp, expr_node);
     case SYM_IF_STAM:
-        return build_if_stam(tp, expr_node);
+        return build_if_expr(tp, expr_node);
     case SYM_MATCH_EXPR:
         return build_match(tp, expr_node);
     case SYM_ASSIGN_EXPR:

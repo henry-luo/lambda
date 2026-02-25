@@ -229,53 +229,6 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
         return error;
     }
 
-    // --- Pattern 2: Mixed if-expr / if-stam syntax ---
-    // if (cond) expr else { ... } — the else branch gets parsed as a map with an ERROR inside  
-    // Walk up ancestors to find if this ERROR is within an if_expr or if_stam context
-    {
-        TSNode ancestor = parent;
-        int depth = 0;
-        while (!ts_node_is_null(ancestor) && depth < 6) {
-            const char* anc_type = ts_node_type(ancestor);
-            if (strcmp(anc_type, "if_expr") == 0) {
-                // ERROR inside if_expr — likely braced block in if-expression context
-                // Check if error contains statement-like constructs (let, var, etc.)
-                bool has_statements = node_contains_type(error_node, "let_expr") ||
-                                     node_contains_type(error_node, "let_stam") ||
-                                     node_contains_type(error_node, "var_stam") ||
-                                     node_contains_type(error_node, "assign_stam");
-                // Or the parent is a map (braces mistaken for block)
-                bool has_braces = !ts_node_is_null(parent) && 
-                                  strcmp(ts_node_type(parent), "map") == 0;
-                if (has_statements || has_braces) {
-                    snprintf(msg, sizeof(msg),
-                        "Cannot mix if-expression and if-statement syntax");
-                    help = "if-expression: both branches must be bare expressions:\n"
-                           "            if (cond) expr1 else expr2\n"
-                           "          if-statement: both branches must be braced blocks:\n"
-                           "            if cond { expr1 } else { expr2 }";
-                    LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
-                    error->help = strdup(help);
-                    return error;
-                }
-                break;
-            }
-            if (strcmp(anc_type, "if_stam") == 0) {
-                snprintf(msg, sizeof(msg),
-                    "Cannot mix if-expression and if-statement syntax");
-                help = "if-statement requires braced blocks for both branches:\n"
-                       "            if cond { expr1 } else { expr2 }\n"
-                       "          For inline expressions, use if-expression:\n"
-                       "            if (cond) expr1 else expr2";
-                LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
-                error->help = strdup(help);
-                return error;
-            }
-            ancestor = ts_node_parent(ancestor);
-            depth++;
-        }
-    }
-
     // --- Pattern 3: fn without => or { ---
     // The entire fn declaration becomes an ERROR node containing: fn, identifier, (, parameter, ...
     {

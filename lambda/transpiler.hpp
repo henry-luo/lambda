@@ -60,7 +60,6 @@ extern bool g_dry_run;
 void* alloc_const(Transpiler* tp, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_elmt(Transpiler* tp, TSNode element_node);
-AstNode* build_if_stam(Transpiler* tp, TSNode if_node);
 AstNode* build_for_stam(Transpiler* tp, TSNode for_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
