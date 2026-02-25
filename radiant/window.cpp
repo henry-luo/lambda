@@ -47,13 +47,6 @@ typedef enum {
     DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
 } DocFormat;
 
-// LaTeX rendering flavor (same as cmd_layout.cpp)
-enum LatexFlavorWindow {
-    LATEX_FLAVOR_AUTO_W,      // Use environment variable or default
-    LATEX_FLAVOR_JS_W,        // LaTeX→HTML→CSS pipeline (latex-js)
-    LATEX_FLAVOR_TEX_PROPER_W // LaTeX→TeX→ViewTree pipeline (tex-proper)
-};
-
 // Detect document format from file extension
 static DocFormat detect_doc_format(const char* filename) {
     if (!filename) return DOC_FORMAT_UNKNOWN;
@@ -97,7 +90,7 @@ static DocFormat detect_doc_format(const char* filename) {
 }
 
 // Load document based on detected format
-static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool, LatexFlavorWindow flavor = LATEX_FLAVOR_AUTO_W) {
+static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool) {
     DocFormat format = detect_doc_format(filename);
 
     switch (format) {
@@ -118,33 +111,8 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
 
         case DOC_FORMAT_LATEX: {
             log_debug("Loading as LaTeX document");
-
-            // Determine which pipeline to use
-            // Priority: flavor parameter > LAMBDA_TEX_PIPELINE env var > default (latex-js)
-            bool use_native = false;
-            if (flavor == LATEX_FLAVOR_TEX_PROPER_W) {
-                use_native = true;
-            } else if (flavor == LATEX_FLAVOR_JS_W) {
-                use_native = false;
-            } else {
-                // Auto: check environment variable
-                const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
-                use_native = (use_tex && strcmp(use_tex, "1") == 0);
-            }
-
-            if (use_native) {
-                log_info("Using TeX typesetting pipeline for LaTeX (tex-proper)");
-                Url* doc_url = url_parse_with_base(filename, base_url);
-                if (!doc_url) {
-                    log_error("Failed to parse document URL: %s", filename);
-                    return NULL;
-                }
-                extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
-                return load_latex_doc_tex(doc_url, width, height, pool, 1.0f);
-            }
-
-            // Default: use HTML conversion pipeline
-            log_info("Using LaTeX→HTML pipeline for LaTeX (latex-js)");
+            // Use HTML conversion pipeline (LaTeX→HTML)
+            log_info("Using LaTeX→HTML pipeline for LaTeX");
             return load_html_doc(base_url, (char*)filename, width, height);
         }
 
@@ -548,7 +516,7 @@ int run_layout(const char* html_file) {
         return 1;
     }
 
-    // Load document based on format (respects LAMBDA_TEX_PIPELINE for .tex files)
+    // Load document based on format
     // CSS media queries should use CSS pixels (logical pixels), not physical pixels
     int css_viewport_width = (int)(ui_context.window_width / ui_context.pixel_ratio);
     int css_viewport_height = (int)(ui_context.window_height / ui_context.pixel_ratio);
@@ -578,7 +546,7 @@ int run_layout(const char* html_file) {
 
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file, int flavor) {
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file) {
     log_init_wrapper();
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s",
              doc_file ? doc_file : "NULL", event_file ? event_file : "NULL");
@@ -656,7 +624,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         int css_height = (int)(height / ui_context.pixel_ratio);
 
         // Load document based on file extension
-        DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool, (LatexFlavorWindow)flavor);
+        DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);
@@ -789,7 +757,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, LATEX_FLAVOR_AUTO_W);
+    return view_doc_in_window_with_events(doc_file, NULL);
 }
 
 int window_main(int argc, char* argv[]) {
