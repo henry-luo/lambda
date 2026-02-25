@@ -296,10 +296,12 @@ Item item_spread(Item item);
 typedef void* (*fn_ptr)();
 
 // Function as first-class value
-// Supports both direct function references and closures (future)
+// Supports both direct function references and closures
 struct Function {
     uint8_t type_id;
-    uint8_t arity;        // number of parameters (0-255)
+    uint8_t arity;               // number of parameters (0-255)
+    uint8_t closure_field_count;  // number of Item fields in closure_env (0 if not a closure)
+    // --- 5 bytes padding --- (offset 3..7)
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)

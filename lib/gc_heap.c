@@ -535,21 +535,17 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_FUNC_: {
-        // Function: { type_id(1), arity(1), padding(6), fn_type*(8@8), ptr*(8@16),
-        //             closure_env*(8@24), name*(8@32) }
+        // Function: { type_id(1), arity(1), closure_field_count(1@2), padding(5),
+        //             fn_type*(8@8), ptr*(8@16), closure_env*(8@24), name*(8@32) }
         uint8_t* p = (uint8_t*)obj;
+        uint8_t field_count = *(uint8_t*)(p + 2);  // closure_field_count
         void* closure_env = *(void**)(p + 24);
-        if (closure_env) {
-            // Closure env is packed Item fields.
-            // We don't have the field count stored, but we can use the allocation
-            // size to infer it. The env is allocated from the data zone.
-            // For now, conservatively scan the env as packed Items.
-            // The alloc_size in the GC header tells us the env size.
-            // But env is in data zone (no GCHeader). We need another way to know size.
-            // TODO: Add closure_field_count to Function struct.
-            // For now, skip closure env tracing — will be added when
-            // closure_field_count is available.
-            log_debug("gc_trace: closure env at %p (tracing deferred)", closure_env);
+        if (closure_env && field_count > 0) {
+            // scan closure env as packed Item fields
+            uint64_t* env_items = (uint64_t*)closure_env;
+            for (int i = 0; i < (int)field_count; i++) {
+                gc_mark_item(gc, env_items[i]);
+            }
         }
         break;
     }
@@ -678,12 +674,15 @@ static void gc_compact_data(gc_heap_t* gc) {
         }
         case LMD_TYPE_FUNC_: {
             uint8_t* p = (uint8_t*)obj;
+            uint8_t field_count = *(uint8_t*)(p + 2);  // closure_field_count
             void** env_slot = (void**)(p + 24);
-            if (*env_slot && gc_data_zone_owns(gc->data_zone, *env_slot)) {
-                // env size: we don't know it precisely yet
-                // TODO: use closure_field_count * sizeof(Item) when available
-                // For now, skip env compaction for safety
-                log_debug("gc_compact: skipping closure env compaction (size unknown)");
+            if (*env_slot && field_count > 0 && gc_data_zone_owns(gc->data_zone, *env_slot)) {
+                size_t size = (size_t)field_count * sizeof(uint64_t);
+                void* new_env = gc_data_zone_copy(gc->tenured_data, *env_slot, size);
+                if (new_env) {
+                    *env_slot = new_env;
+                    compacted++;
+                }
             }
             break;
         }
