@@ -242,7 +242,6 @@ typedef enum AstNodeType {
     AST_NODE_ORDER_SPEC,    // order by specification (expr [asc|desc])
     AST_NODE_GROUP_CLAUSE,  // group by clause
     AST_NODE_IF_EXPR,
-    AST_NODE_IF_STAM,
     AST_NODE_MATCH_EXPR,
     AST_NODE_MATCH_ARM,
     AST_NODE_FOR_EXPR,

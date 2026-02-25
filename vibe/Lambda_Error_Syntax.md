@@ -186,43 +186,11 @@ test.ls:2:2: error[E100]: Unexpected '...' — not a spread operator in Lambda
           implicit: {b: 456, a} merges 'a' into the map.
 ```
 
-### Pattern 2: Mixing `if` Expression and `if` Statement Syntax
+### Pattern 2: ~~Mixing `if` Expression and `if` Statement Syntax~~ (REMOVED)
 
-**Trigger**: An `if` with parenthesized condition and bare expression body, but braced `else` body (or vice versa).
-
-Lambda has two distinct `if` forms:
-- **if-expr**: `if (cond) expr else expr` — both branches are expressions, no braces
-- **if-stam**: `if cond { stmts } else { stmts }` — both branches are braced blocks, no parens around condition
-
-They must not be mixed.
-
-```
-// WRONG — mixes expr syntax (bare then) with stam syntax (braced else):
-if (cond) expr else { ... }
-
-// WRONG — mixes stam syntax (braced then) with expr syntax (bare else):  
-if cond { ... } else expr
-
-// CORRECT — if expression (both branches are expressions):
-if (cond) expr else expr
-
-// CORRECT — if statement (both branches are braced blocks):
-if cond { ... } else { ... }
-```
-
-**Detection**: Parse tree contains an incomplete `if_expr` with an ERROR node at the `else` branch containing a brace, or an `if_stam` with an ERROR node containing a bare expression.
-
-**Output**:
-```
-script.ls:5:22: error[E100]: Cannot mix if-expression and if-statement syntax
-  |
-5 | if (x > 0) "positive" else { log("neg"); "negative" }
-  |                              ^
-  = help: if-expression: both branches must be expressions:
-            if (x > 0) "positive" else "negative"
-          if-statement: both branches must be braced blocks:
-            if x > 0 { "positive" } else { "negative" }
-```
+> **This pattern has been removed.** As of the unified `if` implementation, both
+> `if_expr` and `if_stam` accept expression or block else-branches, so mixing is
+> now valid syntax. See `vibe/Lambda_Expr_If.md` for details.
 
 ### Pattern 3: Missing Closing Delimiter
 
@@ -424,7 +392,7 @@ script.ls:1:17: error[E100]: 'return' not allowed in expression function
 |----------|---------|-----------|
 | P0 | Unified `LambdaError` output (source context + carets for ALL parse errors) | Every parse error |
 | P0 | `...` spread operator confusion | Very common (JS/Python users) |
-| P0 | Mixed if-expr / if-stam syntax | Very common |
+| ~~P0~~ | ~~Mixed if-expr / if-stam syntax~~ | Removed — now valid syntax |
 | P1 | Missing closing delimiter with opener location | Common |
 | P1 | `fn` without `=>` or `{}` | Common for new users |
 | P2 | `=` vs `==` in condition | Occasional |
