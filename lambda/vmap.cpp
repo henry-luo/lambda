@@ -6,6 +6,7 @@
 #include "lambda-data.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
+#include "../lib/gc_heap.h"
 #include "../lib/log.h"
 #include <cstdlib>
 #include <cstring>
@@ -357,4 +358,30 @@ Item vmap_get_by_str(VMap* vm, const char* key) {
 Item vmap_get_by_item(VMap* vm, Item key) {
     if (!vm || !vm->data) return ItemNull;
     return vm->vtable->get(vm->data, key);
+}
+
+// ============================================================================
+// GC Bridge: tracing and finalization for VMap backing data
+// ============================================================================
+
+// Trace all Item keys and values stored in a VMap's HashMapData.
+// Called by gc_trace_object() during the mark phase.
+extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc) {
+    HashMapData* hd = (HashMapData*)data;
+    if (!hd || !hd->table) return;
+
+    // iterate all entries in the HashMap and mark both keys and values
+    size_t iter = 0;
+    void* entry;
+    while (hashmap_iter(hd->table, &iter, &entry)) {
+        HashMapEntry* e = (HashMapEntry*)entry;
+        gc_mark_item(gc, e->key.item);
+        gc_mark_item(gc, e->value.item);
+    }
+}
+
+// Destroy VMap's HashMapData backing store.
+// Called by gc_finalize_dead_object() during the sweep phase.
+extern "C" void vmap_gc_destroy(void* data) {
+    hashmap_data_free((HashMapData*)data);
 }

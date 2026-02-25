@@ -9,6 +9,10 @@ extern __thread EvalContext* context;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 
+// VMap GC bridge functions (defined in vmap.cpp)
+extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
+extern "C" void vmap_gc_destroy(void* data);
+
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)calloc(1, sizeof(Heap));
@@ -20,6 +24,10 @@ void heap_init() {
 
     // set the auto-collection callback so GC triggers when data zone fills up
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+
+    // register VMap tracing/finalization callbacks
+    context->heap->gc->vmap_trace = vmap_gc_trace;
+    context->heap->gc->vmap_destroy = vmap_gc_destroy;
 }
 
 // trigger a GC collection from the runtime.
@@ -75,8 +83,8 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     void* ptr = gc_heap_calloc(gc, size, type_id);
     if (!ptr) return NULL;
     // mark containers as heap-owned so free_container can distinguish from arena-owned
-    // Note: Function has different layout (arity at offset 1 instead of flags), skip it
-    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC) {
+    // Note: Function and Type have different byte-1 layout (not Container flags), skip them
+    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
         ((Container*)ptr)->is_heap = 1;
     }
     return ptr;
