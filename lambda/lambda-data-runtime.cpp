@@ -3,6 +3,10 @@
 #include "../lib/log.h"
 #include "../lib/str.h"
 
+// data zone allocation helpers (defined in lambda-mem.cpp)
+extern "C" void* heap_data_alloc(size_t size);
+extern "C" void* heap_data_calloc(size_t size);
+
 extern __thread EvalContext* context;
 void array_set(Array* arr, int index, Item itm);
 void array_push(Array* arr, Item itm);
@@ -48,7 +52,7 @@ Array* array_fill(Array* arr, int count, ...) {
         va_list args;
         va_start(args, count);
         arr->capacity = count;
-        arr->items = (Item*)malloc(count * sizeof(Item));
+        arr->items = (Item*)heap_data_alloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
             array_push(arr, va_arg(args, Item));
         }
@@ -96,7 +100,7 @@ ArrayInt* array_int_new(int length) {
     ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;
     arr->length = length;  arr->capacity = length;
-    arr->items = (int64_t*)malloc(length * sizeof(int64_t));
+    arr->items = (int64_t*)heap_data_alloc(length * sizeof(int64_t));
     return arr;
 }
 
@@ -104,7 +108,7 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->items = (int64_t*)malloc(count * sizeof(int64_t));
+        arr->items = (int64_t*)heap_data_alloc(count * sizeof(int64_t));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
             arr->items[i] = va_arg(args, int64_t);
@@ -141,7 +145,7 @@ ArrayInt64* array_int64_new(int length) {
     ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
     arr->type_id = LMD_TYPE_ARRAY_INT64;
     arr->length = length;  arr->capacity = length;
-    arr->items = (int64_t*)malloc(length * sizeof(int64_t));
+    arr->items = (int64_t*)heap_data_alloc(length * sizeof(int64_t));
     return arr;
 }
 
@@ -149,7 +153,7 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->items = (int64_t*)malloc(count * sizeof(int64_t));
+        arr->items = (int64_t*)heap_data_alloc(count * sizeof(int64_t));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
             arr->items[i] = va_arg(args, int64_t);
@@ -183,7 +187,7 @@ ArrayFloat* array_float_new(int length) {
     ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
     arr->length = length;  arr->capacity = length;
-    arr->items = (double*)malloc(length * sizeof(double));
+    arr->items = (double*)heap_data_alloc(length * sizeof(double));
     return arr;
 }
 
@@ -192,7 +196,7 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
         va_list args;
         va_start(args, count);
         arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-        arr->items = (double*)malloc(count * sizeof(double));
+        arr->items = (double*)heap_data_alloc(count * sizeof(double));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
             arr->items[i] = va_arg(args, double);
@@ -480,7 +484,7 @@ Map* map(int type_index) {
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
-    map->data = calloc(1, map_type->byte_size);
+    map->data = heap_data_calloc(map_type->byte_size);
     log_debug("map byte_size: %ld", map_type->byte_size);
     // set map fields
     va_list args;
@@ -629,7 +633,7 @@ Object* object(int type_index) {
 
 Object* object_fill(Object* obj, ...) {
     TypeObject *obj_type = (TypeObject*)obj->type;
-    obj->data = calloc(1, obj_type->byte_size);
+    obj->data = heap_data_calloc(obj_type->byte_size);
     log_debug("object byte_size: %ld", obj_type->byte_size);
     // set object fields (same layout as map)
     va_list args;
@@ -699,7 +703,7 @@ void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func) {
 
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
-    elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
+    elmt->data = heap_data_calloc(elmt_type->byte_size);
     log_debug("elmt byte_size: %ld", elmt_type->byte_size);
     // set attributes
     long count = elmt_type->length;
