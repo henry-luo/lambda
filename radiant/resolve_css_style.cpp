@@ -1477,9 +1477,62 @@ static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId pr
 // resolve property 'margin', 'padding', etc.
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     const CssValue *src_space, int32_t specificity, Spacing* trg_spacing) {
-    Margin sp;  // temporal space
-    int value_cnt = 1;  bool is_margin = property == CSS_PROPERTY_MARGIN;
+    bool is_margin = property == CSS_PROPERTY_MARGIN;
+    bool is_padding = property == CSS_PROPERTY_PADDING;
     log_debug("resolve_spacing_prop with specificity %d", specificity);
+
+    // handle 'inherit' keyword for the entire shorthand
+    if (src_space->type == CSS_VALUE_TYPE_KEYWORD && src_space->data.keyword == CSS_VALUE_INHERIT) {
+        DomElement* current = (DomElement*)lycon->view;
+        if (current && current->parent && current->parent->is_element()) {
+            DomElement* parent = (DomElement*)current->parent;
+            if (parent->bound) {
+                Spacing* parent_spacing = NULL;
+                if (is_margin) {
+                    parent_spacing = &parent->bound->margin;
+                } else if (is_padding) {
+                    parent_spacing = &parent->bound->padding;
+                } else if (parent->bound->border) {
+                    // border-width inherit
+                    parent_spacing = &parent->bound->border->width;
+                }
+                if (parent_spacing) {
+                    Margin* trg_margin = is_margin ? (Margin*)trg_spacing : NULL;
+                    Margin* parent_margin = is_margin ? (Margin*)parent_spacing : NULL;
+                    if (specificity >= trg_spacing->top_specificity) {
+                        trg_spacing->top = parent_spacing->top;
+                        trg_spacing->top_specificity = specificity;
+                        if (trg_margin) trg_margin->top_type = parent_margin ? parent_margin->top_type : CSS_VALUE__UNDEF;
+                    }
+                    if (specificity >= trg_spacing->right_specificity) {
+                        trg_spacing->right = parent_spacing->right;
+                        trg_spacing->right_specificity = specificity;
+                        if (trg_margin) trg_margin->right_type = parent_margin ? parent_margin->right_type : CSS_VALUE__UNDEF;
+                    }
+                    if (specificity >= trg_spacing->bottom_specificity) {
+                        trg_spacing->bottom = parent_spacing->bottom;
+                        trg_spacing->bottom_specificity = specificity;
+                        if (trg_margin) trg_margin->bottom_type = parent_margin ? parent_margin->bottom_type : CSS_VALUE__UNDEF;
+                    }
+                    if (specificity >= trg_spacing->left_specificity) {
+                        trg_spacing->left = parent_spacing->left;
+                        trg_spacing->left_specificity = specificity;
+                        if (trg_margin) trg_margin->left_type = parent_margin ? parent_margin->left_type : CSS_VALUE__UNDEF;
+                    }
+                    log_debug("[CSS] %s: inherit from parent: top=%.2f right=%.2f bottom=%.2f left=%.2f",
+                        is_margin ? "margin" : (is_padding ? "padding" : "border-width"),
+                        parent_spacing->top, parent_spacing->right, parent_spacing->bottom, parent_spacing->left);
+                    return;
+                }
+            }
+        }
+        log_debug("[CSS] %s: inherit - no parent found, using 0",
+            is_margin ? "margin" : (is_padding ? "padding" : "border-width"));
+        return;
+    }
+
+    Margin sp;  // temporal space
+    int value_cnt = 1;
     if (src_space->type == CSS_VALUE_TYPE_LIST) {
         // Multi-value margin
         value_cnt = src_space->data.list.count;
@@ -2085,6 +2138,18 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 // Copy font-family from parent's computed font
                 span->font->family = ancestor->font->family;
                 continue;  // Move to next property
+            }
+
+            // Special handling for line-height: also check ancestor's computed blk->line_height
+            // This handles cases where font shorthand was used (sets blk->line_height without
+            // creating a CSS_PROPERTY_LINE_HEIGHT declaration)
+            if (prop_id == CSS_PROPERTY_LINE_HEIGHT && ancestor && ancestor->blk && ancestor->blk->line_height) {
+                log_debug("[CSS INHERIT] Found computed line-height in parent <%s> via font shorthand",
+                    ancestor->tag_name ? ancestor->tag_name : "?");
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (!span->blk) { span->blk = alloc_block_prop(lycon); }
+                span->blk->line_height = ancestor->blk->line_height;
+                continue;
             }
 
             // Special handling for font-size: also check ancestor's computed font->font_size

@@ -7,6 +7,9 @@ import sym: .lambda.package.latex.symbols
 import math_bridge: .lambda.package.latex.math_bridge
 import spacing: .lambda.package.latex.elements.spacing
 import macros: .lambda.package.latex.macros
+import boxes: .lambda.package.latex.elements.boxes
+import font_decl: .lambda.package.latex.elements.font_decl
+import color: .lambda.package.latex.elements.color
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -85,10 +88,37 @@ fn render_element(el, info) {
         case 'verb': render_verb(el)
 
         // ---- font families ----
-        case 'textsf': render_font(el, info, "font-sans")
-        case 'textsc': render_font(el, info, "font-smallcaps")
-        case 'textsl': render_font(el, info, "font-oblique")
-        case 'textrm': render_font(el, info, "font-serif")
+        case 'textsf': render_font(el, info, "latex-sf")
+        case 'textsc': render_font(el, info, "latex-sc")
+        case 'textsl': render_font(el, info, "latex-sl")
+        case 'textrm': render_font(el, info, "latex-rm")
+
+        // ---- font declarations (handled in render_group, standalone = no-op) ----
+        case 'itshape': null
+        case 'bfseries': null
+        case 'ttfamily': null
+        case 'rmfamily': null
+        case 'sffamily': null
+        case 'scshape': null
+        case 'slshape': null
+        case 'upshape': null
+        case 'mdseries': null
+
+        // ---- alignment declarations (handled in render_group, standalone = no-op) ----
+        case 'centering': null
+        case 'raggedright': null
+        case 'raggedleft': null
+
+        // ---- appendix marker (handled in analyze pass) ----
+        case 'appendix': null
+
+        // ---- color commands ----
+        case 'textcolor': color.render_textcolor(el, render_children(el, 1, info), info.custom_colors)
+        case 'colorbox': color.render_colorbox(el, render_children(el, 1, info), info.custom_colors)
+        case 'fcolorbox': color.render_fcolorbox(el, render_children(el, 2, info), info.custom_colors)
+        case 'definecolor': null
+        case 'pagecolor': null
+        case 'color': null
 
         // ---- font sizes ----
         case 'tiny': render_size(el, info, "tiny")
@@ -141,6 +171,21 @@ fn render_element(el, info) {
         case 'remark': render_theorem_env(el, info, "Remark", "remark")
         case 'proof': render_proof_env(el, info)
 
+        // ---- boxes ----
+        case 'fbox': boxes.render_fbox(render_children(el, 0, info))
+        case 'mbox': boxes.render_mbox(render_children(el, 0, info))
+        case 'frame': boxes.render_frame(render_children(el, 0, info))
+        case 'makebox': boxes.render_makebox(el, render_children_skip_brack(el, info))
+        case 'framebox': boxes.render_framebox(el, render_children_skip_brack(el, info))
+        case 'parbox': boxes.render_parbox(el, render_children_skip_brack(el, info))
+        case 'raisebox': boxes.render_raisebox(el, render_children_skip_brack(el, info))
+        case 'llap': boxes.render_llap(render_children(el, 0, info))
+        case 'rlap': boxes.render_rlap(render_children(el, 0, info))
+        case 'smash': boxes.render_smash(render_children(el, 0, info))
+        case 'phantom': boxes.render_phantom(render_children(el, 0, info))
+        case 'hphantom': boxes.render_hphantom(render_children(el, 0, info))
+        case 'vphantom': boxes.render_vphantom(render_children(el, 0, info))
+
         // ---- tables ----
         case 'table': render_table_env(el, info)
         case 'tabular': render_tabular(el, info)
@@ -154,6 +199,18 @@ fn render_element(el, info) {
         case 'newpage': <hr class: "latex-pagebreak">
         case 'clearpage': <hr class: "latex-pagebreak">
         case 'hfill': <span class: "latex-hfill">
+        case 'bigskip': spacing.render_bigskip_el()
+        case 'medskip': spacing.render_medskip_el()
+        case 'smallskip': spacing.render_smallskip_el()
+        case 'bigbreak': spacing.render_bigbreak_el()
+        case 'medbreak': spacing.render_medbreak_el()
+        case 'smallbreak': spacing.render_smallbreak_el()
+        case 'quad': spacing.render_quad_el()
+        case 'qquad': spacing.render_qquad_el()
+        case 'enspace': spacing.render_enspace_el()
+        case 'thinspace': spacing.render_thinspace_el()
+        case 'negthinspace': spacing.render_negthinspace_el()
+        case 'noindent': spacing.render_noindent_el()
 
         // ---- cross references ----
         case 'label': render_label(el, info)
@@ -215,34 +272,37 @@ fn render_element(el, info) {
         case 'i': "\u0131"
         case 'j': "\u0237"
 
-        // ---- skip commands ----
-        case 'newcommand': null
-        case 'renewcommand': null
-        case 'providecommand': null
-        case 'setcounter': null
-        case 'newcounter': null
-        case 'addtocounter': null
-        case 'stepcounter': null
-        case 'comment': null
-        case 'picture': null
-        case 'put': null
-        case 'line': null
-        case 'vector': null
-        case 'circle': null
-        case 'oval': null
-        case 'bezier': null
-        case 'qbezier': null
-        case 'unitlength': null
-        case 'linethickness': null
-        case 'thinlines': null
-        case 'thicklines': null
-
-        // ---- other ----
-        case 'includegraphics': render_includegraphics(el)
-        case 'marginpar': render_marginpar(el, info)
-
-        default: render_generic(el, info)
+        // ---- extended symbols (textgreek, textcomp, gensymb) ----
+        default: render_extended_or_generic(el, info)
     }
+}
+
+// skip commands that produce null output
+let SKIP_COMMANDS = {
+    "newcommand": true, "renewcommand": true, "providecommand": true,
+    "setcounter": true, "newcounter": true, "addtocounter": true,
+    "stepcounter": true, "comment": true,
+    "picture": true, "put": true, "line": true, "vector": true,
+    "circle": true, "oval": true, "bezier": true, "qbezier": true,
+    "unitlength": true, "linethickness": true, "thinlines": true,
+    "thicklines": true
+}
+
+// Fallback: check skip commands, extended symbol map, then macro, then generic
+fn render_extended_or_generic(el, info) {
+    let tag_str = string(name(el))
+    // skip commands that are no-ops
+    if (SKIP_COMMANDS[tag_str] == true) { null }
+    // other specific commands
+    else if (tag_str == "includegraphics") { render_includegraphics(el) }
+    else if (tag_str == "marginpar") { render_marginpar(el, info) }
+    else { resolve_extended_or_generic(tag_str, el, info) }
+}
+
+fn resolve_extended_or_generic(tag_str, el, info) {
+    let ext = sym.resolve_extended(tag_str)
+    if (ext != null) { ext }
+    else { render_generic(el, info) }
 }
 
 // ============================================================
@@ -253,6 +313,26 @@ fn render_children(el, from_idx, info) {
     let n = len(el)
     if from_idx >= n { [] }
     else { collect_children(el, from_idx, n, [], info) }
+}
+
+// render children but skip brack_group elements (used by box commands)
+fn render_children_skip_brack(el, info) {
+    let n = len(el)
+    collect_children_skip_brack(el, 0, n, [], info)
+}
+
+fn collect_children_skip_brack(el, i, n, acc, info) {
+    if i >= n { acc }
+    else {
+        let child = el[i]
+        if (child is element and string(name(child)) == "brack_group")
+            collect_children_skip_brack(el, i + 1, n, acc, info)
+        else {
+            let rendered = render_node(child, info)
+            let new_acc = if (rendered != null) acc ++ [rendered] else acc
+            collect_children_skip_brack(el, i + 1, n, new_acc, info)
+        }
+    }
 }
 
 fn collect_children(el, i, n, acc, info) {
@@ -353,14 +433,36 @@ fn build_heading_el(level, id, num_span, children) {
 // ============================================================
 
 fn render_paragraph(el, info) {
-    let items = render_children(el, 0, info)
-    if len(items) == 0 { null }
-    else if has_block_child(items) {
-        let parts = split_around_blocks(items)
-        if (len(parts) == 1) parts[0]
-        else parts
+    // check for leading font/alignment declaration
+    let decl_tag = find_leading_decl(el, 0, len(el))
+    if (decl_tag != null) render_paragraph_with_decl(el, info, decl_tag)
+    else {
+        let items = render_children(el, 0, info)
+        if len(items) == 0 { null }
+        else if has_block_child(items) {
+            let parts = split_around_blocks(items)
+            if (len(parts) == 1) parts[0]
+            else parts
+        }
+        else { <p; for c in items { c }> }
     }
-    else { <p; for c in items { c }> }
+}
+
+fn render_paragraph_with_decl(el, info, decl_tag) {
+    let items = render_children(el, 0, info)
+    if (len(items) == 0) null
+    else if (font_decl.is_font_decl(decl_tag)) {
+        let style = font_decl.font_decl_style(decl_tag)
+        <p style: style; for c in items { c }>
+    }
+    else if (color.is_color_decl(decl_tag)) {
+        let style = color.color_decl_style(find_decl_el(el, decl_tag), info.custom_colors)
+        <p style: style; for c in items { c }>
+    }
+    else {
+        let style = font_decl.align_decl_style(decl_tag)
+        <p style: style; for c in items { c }>
+    }
 }
 
 fn split_around_blocks(items) {
@@ -537,12 +639,44 @@ fn split_items_rec(flat, i, n, current, acc, info) {
     } else if (is_item_node(flat[i])) {
         let flushed = if (len(current) > 0) acc ++ [<li; for c in current { c }>]
             else acc
-        split_items_rec(flat, i + 1, n, [], flushed, info)
+        // check for custom label on \item[label]
+        let custom = get_item_custom_label(flat[i])
+        if (custom != null)
+            split_items_custom_rec(flat, i + 1, n, [custom], flushed, info)
+        else
+            split_items_rec(flat, i + 1, n, [], flushed, info)
     } else {
         let rendered = render_node(flat[i], info)
         let new_current = if (rendered != null) current ++ [rendered] else current
         split_items_rec(flat, i + 1, n, new_current, acc, info)
     }
+}
+
+// handle items with custom labels — suppress default marker
+fn split_items_custom_rec(flat, i, n, current, acc, info) {
+    if (i >= n) {
+        if (len(current) > 0) acc ++ [<li style: "list-style-type:none"; for c in current { c }>]
+        else acc
+    } else if (is_item_node(flat[i])) {
+        let flushed = if (len(current) > 0) acc ++ [<li style: "list-style-type:none"; for c in current { c }>]
+            else acc
+        let custom = get_item_custom_label(flat[i])
+        if (custom != null)
+            split_items_custom_rec(flat, i + 1, n, [custom], flushed, info)
+        else
+            split_items_rec(flat, i + 1, n, [], flushed, info)
+    } else {
+        let rendered = render_node(flat[i], info)
+        let new_current = if (rendered != null) current ++ [rendered] else current
+        split_items_custom_rec(flat, i + 1, n, new_current, acc, info)
+    }
+}
+
+// get custom label from \item[label] as a rendered span, or null
+fn get_item_custom_label(item_node) {
+    let opt = util.find_child(item_node, 'brack_group')
+    if (opt != null) <span class: "latex-item-label"; util.text_of(opt) ++ " ">
+    else null
 }
 
 fn split_desc_items(flat, info) {
@@ -1235,15 +1369,103 @@ fn render_control_symbol(el) {
 }
 
 fn render_group(el, info) {
+    // check for leading font/alignment declaration in this group
+    let decl_tag = find_leading_decl(el, 0, len(el))
+    if (decl_tag != null) render_group_with_decl(el, info, decl_tag)
+    else {
+        let items = render_children(el, 0, info)
+        if (len(items) == 0) null
+        else if (len(items) == 1) items[0]
+        else <span; for c in items { c }>
+    }
+}
+
+// find the first font/alignment/color declaration tag among children (skipping whitespace)
+fn find_leading_decl(el, i, n) {
+    if i >= n { null }
+    else {
+        let child = el[i]
+        if (child is string and len(trim(child)) == 0)
+            find_leading_decl(el, i + 1, n)
+        else if (child is element) {
+            let tag_str = string(name(child))
+            if (font_decl.is_font_decl(tag_str)) tag_str
+            else if (font_decl.is_align_decl(tag_str)) tag_str
+            else if (color.is_color_decl(tag_str)) tag_str
+            else null
+        }
+        else null
+    }
+}
+
+// render a group whose first significant child is a font/alignment/color declaration
+fn render_group_with_decl(el, info, decl_tag) {
+    // render children after the declaration (the decl itself returns null)
     let items = render_children(el, 0, info)
-    if (len(items) == 0) null
-    else if (len(items) == 1) items[0]
-    else <span; for c in items { c }>
+    if (font_decl.is_font_decl(decl_tag))
+        font_decl.wrap_font_decl(decl_tag, items)
+    else if (color.is_color_decl(decl_tag))
+        color.wrap_color_decl(find_decl_el(el, decl_tag), items, info.custom_colors)
+    else
+        font_decl.wrap_align_decl(decl_tag, items)
+}
+
+// find the declaration element node by tag name within a parent
+fn find_decl_el(el, tag_str) {
+    find_decl_el_rec(el, 0, len(el), tag_str)
+}
+
+fn find_decl_el_rec(el, i, n, tag_str) {
+    if (i >= n) el
+    else {
+        let child = el[i]
+        if (child is element and string(name(child)) == tag_str) child
+        else find_decl_el_rec(el, i + 1, n, tag_str)
+    }
 }
 
 fn render_includegraphics(el) {
-    let src = trim(util.text_of(el))
-    <img class: "latex-image", src: src, alt: src>
+    // extract optional arguments [key=val,...] from brack_group
+    let brack = util.find_child(el, 'brack_group')
+    let opts = util.parse_kv_options(if (brack != null) util.text_of(brack) else null)
+
+    // extract src from non-brack children
+    let src = trim(util.text_of_skip_brack(el))
+
+    // build style string from options
+    let style = build_img_style(opts)
+
+    if (style != "") {
+        <img class: "latex-image", src: src, alt: src, style: style>
+    } else {
+        <img class: "latex-image", src: src, alt: src>
+    }
+}
+
+fn build_img_style(opts) {
+    let parts = []
+    // width
+    let parts = if (opts.width != null) { parts ++ ["width:" ++ opts.width] } else parts
+    // height
+    let parts = if (opts.height != null) { parts ++ ["height:" ++ opts.height] } else parts
+    // keepaspectratio (only meaningful with width or height)
+    let parts = if (opts.keepaspectratio != null) { parts ++ ["object-fit:contain"] } else parts
+    // build transform: may combine scale and angle
+    let transforms = []
+    let transforms = if (opts.scale != null) { transforms ++ ["scale(" ++ opts.scale ++ ")"] } else transforms
+    let transforms = if (opts.angle != null) { transforms ++ ["rotate(" ++ opts.angle ++ "deg)"] } else transforms
+    let parts = if (len(transforms) > 0) { parts ++ ["transform:" ++ str_join(transforms, " ")] } else parts
+    // trim + clip → clip-path:inset(top right bottom left)
+    // LaTeX trim order: left bottom right top
+    let parts = if (opts.trim != null and opts.clip != null) {
+        let vals = split(trim(opts.trim), null)
+        if (len(vals) == 4) {
+            // LaTeX: trim=left bottom right top → CSS: inset(top right bottom left)
+            parts ++ ["clip-path:inset(" ++ vals[3] ++ " " ++ vals[2] ++ " " ++ vals[1] ++ " " ++ vals[0] ++ ")"]
+        } else parts
+    } else parts
+
+    str_join(parts, ";")
 }
 
 fn render_marginpar(el, info) {

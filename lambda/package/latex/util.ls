@@ -234,3 +234,54 @@ fn get_child_text(child) {
     else if (child is element) text_of(child)
     else string(child)
 }
+
+// ============================================================
+// Key-value option parsing (for \includegraphics[key=val,...])
+// ============================================================
+
+// parse "key1=val1, key2=val2, flag" → {key1: "val1", key2: "val2", flag: "true"}
+pub fn parse_kv_options(text) {
+    if (text == null) { {} }
+    else {
+        let parts = split(trim(text), ",")
+        let pairs = build_kv_pairs(parts, 0, len(parts), [])
+        map(pairs)
+    }
+}
+
+fn build_kv_pairs(parts, i, n, acc) {
+    if (i >= n) { acc }
+    else {
+        let part = trim(parts[i])
+        if (part == "") { build_kv_pairs(parts, i + 1, n, acc) }
+        else {
+            let eq_pos = index_of(part, "=")
+            if (eq_pos < 0) {
+                // flag without value: keepaspectratio → "true"
+                build_kv_pairs(parts, i + 1, n, acc ++ [part, "true"])
+            } else {
+                let key = trim(slice(part, 0, eq_pos))
+                let val = trim(slice(part, eq_pos + 1, len(part)))
+                build_kv_pairs(parts, i + 1, n, acc ++ [key, val])
+            }
+        }
+    }
+}
+
+// extract text from element children, skipping brack_group elements
+pub fn text_of_skip_brack(el) {
+    let n = len(el)
+    join_skip_brack(el, 0, n, "")
+}
+
+fn join_skip_brack(el, i, n, acc) {
+    if (i >= n) { acc }
+    else {
+        let child = el[i]
+        if (child is element and string(name(child)) == "brack_group") {
+            join_skip_brack(el, i + 1, n, acc)
+        } else {
+            join_skip_brack(el, i + 1, n, acc ++ text_of(child))
+        }
+    }
+}
