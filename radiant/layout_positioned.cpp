@@ -198,22 +198,29 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     // CSS 2.1 Section 10.1: For absolutely positioned elements, if the containing block is
     // the initial containing block (ICB - i.e., the root element with no positioned ancestors),
-    // then cb_height should be the viewport height, not the root element's content height.
-    // The ICB has dimensions equal to the viewport.
+    // the ICB is the viewport rectangle at (0,0) with viewport dimensions.
+    // It is NOT the root element's padding box — the root element's borders must not be subtracted.
     bool is_icb = (containing_block->parent_view() == nullptr);
-    if (is_icb && lycon->ui_context && lycon->ui_context->viewport_height > 0) {
-        // Use viewport height for ICB when the root has auto height
-        cb_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
-        log_debug("[ABS POS] Using viewport height for ICB: %.1f (viewport=%.1f, pixel_ratio=%.2f)",
-                  cb_height, lycon->ui_context->viewport_height, lycon->ui_context->pixel_ratio);
+    if (is_icb && lycon->ui_context) {
+        // ICB = viewport: origin at (0,0), size = viewport dimensions
+        cb_x = 0;
+        cb_y = 0;
+        if (lycon->ui_context->viewport_width > 0) {
+            cb_width = lycon->ui_context->viewport_width * lycon->ui_context->pixel_ratio;
+        }
+        if (lycon->ui_context->viewport_height > 0) {
+            cb_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
+        }
+        log_debug("[ABS POS] Using viewport as ICB: (0, 0) size (%.1f, %.1f)", cb_width, cb_height);
     }
 
     // Calculate border offset - the absolute element is positioned relative to padding box,
     // but block->x/y are stored relative to containing block's origin (border box)
     float border_offset_x = 0, border_offset_y = 0;
 
-    // update to padding box dimensions
-    if (containing_block->bound) {
+    // For positioned ancestors (not ICB), use the padding box dimensions
+    // For ICB, skip border adjustment — the viewport has no borders
+    if (!is_icb && containing_block->bound) {
         if (containing_block->bound->border) {
             border_offset_x = containing_block->bound->border->width.left;
             border_offset_y = containing_block->bound->border->width.top;
@@ -658,6 +665,12 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // Note: pa_line->left and pa_block->advance_y are already relative to the parent's
     // content area (they include padding/border offsets), so we only need to add
     // the parent's position relative to the containing block.
+    //
+    // IMPORTANT: For positioned ancestors (absolute/fixed), their x/y coordinates are
+    // relative to their own containing block (not their DOM parent). When we encounter
+    // such an ancestor, we must jump to its containing block rather than continuing
+    // the DOM parent chain — the intermediate non-positioned ancestors are already
+    // accounted for in the positioned ancestor's coordinates.
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
     ViewElement* parent = block->parent_view();
     if (parent && parent->is_block()) {
@@ -667,6 +680,40 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             parent_to_cb_offset_x += p->x;
             parent_to_cb_offset_y += p->y;
             log_debug("[STATIC POS] Adding parent %s offset: (%f, %f)", p->node_name(), p->x, p->y);
+
+            // Check if this ancestor is positioned — if so, its coordinates are
+            // relative to its own CB, not its DOM parent. Jump to that CB.
+            if (p->position && p->position->position == CSS_VALUE_FIXED) {
+                // Fixed: coordinates are viewport-relative, done
+                log_debug("[STATIC POS] Encountered fixed ancestor %s, stopping walk", p->node_name());
+                break;
+            }
+            if (p->position && p->position->position == CSS_VALUE_ABSOLUTE) {
+                // Absolute: coordinates are relative to p's containing block.
+                // Find p's CB and jump there, skipping intermediate DOM ancestors.
+                ViewElement* ancestor = p->parent_view();
+                ViewBlock* p_cb = nullptr;
+                while (ancestor) {
+                    if (ancestor->is_block()) {
+                        ViewBlock* ab = (ViewBlock*)ancestor;
+                        if (ab->position && ab->position->position != CSS_VALUE_STATIC) {
+                            p_cb = ab;
+                            break;
+                        }
+                    }
+                    ancestor = ancestor->parent_view();
+                }
+                if (p_cb) {
+                    log_debug("[STATIC POS] Absolute ancestor %s: jumping to its CB %s", p->node_name(), p_cb->node_name());
+                    p = p_cb;
+                    continue;  // Continue walk from p's containing block
+                }
+                // No positioned ancestor: p's coordinates are relative to ICB (root)
+                log_debug("[STATIC POS] Absolute ancestor %s: CB is ICB, stopping walk", p->node_name());
+                break;
+            }
+
+            // Normal flow or relative: coordinates are relative to DOM parent, continue walk
             ViewElement* gp = p->parent_view();
             if (gp && gp->is_block()) {
                 p = (ViewBlock*)gp;
@@ -674,7 +721,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 break;
             }
         }
-        // Note: Don't add parent's padding/border here - pa_line->left already includes them
     }
 
     // CSS 2.1 §9.3.1: For fixed positioning, the containing block is the viewport (ICB),
