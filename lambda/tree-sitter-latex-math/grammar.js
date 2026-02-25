@@ -53,9 +53,8 @@ module.exports = grammar({
       $.symbol,              // [a-zA-Z@]
       $.word,                // bare multi-letter identifier (ASCII math)
       $.number,              // digits
-      $.symbol_command,      // \infty, \exists, \cdots, ...
-      $.operator,            // +, -, *, /, \pm, \times, ...
-      $.relation,            // =, <, >, \leq, \rightarrow, ...
+      $.operator,            // +, -, *, /
+      $.relation,            // =, <, >, !, \uparrow, \downarrow
       $.ascii_operator,      // <=, ->, xx, +-, etc. (ASCII math)
       $.punctuation,         // , ; : . ( ) [ ] | ...
       $.quoted_text,         // "quoted text" (ASCII math)
@@ -64,18 +63,12 @@ module.exports = grammar({
       $.radical,
       $.delimiter_group,
       $.sized_delimiter,     // \big, \Big, ...
-      $.annotated_command,   // \overset, \xrightarrow       (MERGED)
       $.accent,
-      $.boxlike_command,     // \fbox, \phantom, \smash       (MERGED)
-      $.color_command,       // \color, \textcolor
-      $.rule_command,        // \rule
-      $.big_operator,        // \sum, \int, \lim, ...
-      $.mathop_command,      // \mathop{...}
       $.matrix_command,      // \matrix{...}
       $.environment,
       $.textstyle_command,   // \text, \mathrm, \displaystyle (MERGED)
       $.spacing_command,     // \, \quad \hspace \kern         (MERGED)
-      $.command,             // fallback
+      $.command,             // fallback (handles \sum, \overset, \phantom, etc.)
     ),
 
     // ========================================================================
@@ -84,27 +77,14 @@ module.exports = grammar({
     // The runtime reads the actual text content to determine the specific command.
     // ========================================================================
 
-    // Symbol commands: \infty, \exists, \forall, \cdots, \ldots, etc.
-    // prec(1) ensures these match before operator/relation/big_operator prefixes
-    _symbol_cmd: $ => token(prec(1, /\\(infinity|varnothing|emptyset|nexists|partial|exists|forall|cdots|ldots|vdots|ddots|infty|imath|jmath|nabla|aleph|dotsb|dotsc|dotsi|dotsm|dotso|dots|hbar|ell|Re|Im)/)),
-
-    // Operator commands: \pm, \mp, \times, \cdot, etc.
-    _operator_cmd: $ => token(/\\(pm|mp|times|div|cdot|ast|star|circ|bullet|oplus|ominus|otimes|oslash|odot|cup|cap|sqcup|sqcap|vee|wedge|setminus)/),
-
-    // Relation commands (non-arrow): \leq, \geq, \equiv, \subset, etc.
-    _relation_cmd: $ => token(/\\(leq|le|geq|ge|neq|ne|equiv|sim|simeq|approx|cong|propto|asymp|subset|supset|subseteq|supseteq|in|ni|notin|ll|gg|prec|succ|preceq|succeq|perp|parallel|mid|vdash|dashv|models)/),
-
-    // Arrow commands: \leftarrow, \rightarrow, \Rightarrow, \mapsto, etc.
-    // Note: \uparrow, \downarrow, \updownarrow and their uppercase variants are
-    // kept as string literals because they're shared with the delimiter rule.
-    _arrow_cmd: $ => token(/\\(leftrightarrows|leftleftarrows|leftrightsquigarrow|longleftrightarrow|Longleftrightarrow|nleftrightarrow|nLeftrightarrow|leftrightharpoons|rightleftharpoons|leftrightarrow|Leftrightarrow|leftharpoondown|longleftarrow|Longleftarrow|leftharpoonup|hookleftarrow|leftarrow|Leftarrow|curvearrowright|curvearrowleft|rightrightarrows|rightharpoondown|circlearrowright|circlearrowleft|looparrowright|looparrowleft|rightharpoonup|hookrightarrow|longrightarrow|Longrightarrow|nRightarrow|nrightarrow|rightarrow|Rightarrow|longmapsto|nearrow|searrow|nwarrow|swarrow|mapsto|gets|to)/),
+    // NOTE: Symbol commands (\infty, \exists, etc.), operator commands (\pm, \times, etc.),
+    // relation commands (\leq, \rightarrow, etc.), and big operators (\sum, \int, etc.)
+    // are handled by the generic command_name fallback. The AST builder uses table lookups
+    // to determine the correct atom type (ORD, BIN, REL, OP) from the command text.
 
     // Delimiter commands: \lbrace, \rbrace, \langle, \rangle, \vert, etc.
     // Note: \uparrow etc. kept as string literals (shared with relation rule)
     _delimiter_cmd: $ => token(/\\(lmoustache|rmoustache|backslash|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|vert|Vert)/),
-
-    // Big operator commands: \sum, \prod, \int, \lim, etc.
-    _big_operator_cmd: $ => token(/\\(bigsqcup|bigotimes|bigoplus|bigwedge|bigvee|bigcap|bigcup|coprod|liminf|limsup|iiint|iint|oint|prod|sum|lim|max|min|sup|inf|int|det|gcd|Pr)/),
 
     // Accent commands: \hat, \bar, \vec, \widehat, \overline, etc.
     _accent_cmd: $ => token(/\\(overleftrightarrow|underleftrightarrow|overrightarrow|underrightarrow|overleftarrow|underleftarrow|widetilde|underbrace|underline|overbrace|overline|widehat|ddddot|dddot|acute|breve|check|grave|tilde|ddot|dot|hat|bar|vec)/),
@@ -115,17 +95,8 @@ module.exports = grammar({
     // MERGED: style + text commands → textstyle
     _textstyle_cmd: $ => token(/\\(scriptscriptstyle|operatorname|displaystyle|mathnormal|scriptstyle|textstyle|mathfrak|mathscr|mathcal|mathrm|mathit|mathbf|mathsf|mathtt|mathbb|textrm|textit|textbf|textsf|texttt|text|mbox|hbox)/),
 
-    // MERGED: extensible arrow + overunder → annotated
-    _annotated_cmd: $ => token(/\\(xLeftrightarrow|xleftrightarrow|xhookrightarrow|xhookleftarrow|xRightarrow|xrightarrow|xLeftarrow|xleftarrow|xmapsto|overset|underset|stackrel)/),
-
-    // MERGED: box + phantom → boxlike
-    _boxlike_cmd: $ => token(/\\(mathllap|mathrlap|mathclap|boxed|bbox|fbox|llap|rlap|clap|hphantom|vphantom|phantom|smash)/),
-
     // MERGED: frac + binom + genfrac → frac_like
     _frac_like_cmd: $ => token(/\\([dtc]?(frac|binom)|genfrac)/),
-
-    // Color commands: \textcolor, \color, \colorbox
-    _color_cmd: $ => token(/\\(textcolor|colorbox|color)/),
 
     // Matrix commands (plain TeX): \matrix, \pmatrix, \bordermatrix
     _matrix_cmd: $ => token(/\\(bordermatrix|pmatrix|matrix)/),
@@ -153,9 +124,6 @@ module.exports = grammar({
     // Atoms using the consolidated tokens
     // ========================================================================
 
-    // Symbol commands that need higher precedence than operators/relations
-    symbol_command: $ => $._symbol_cmd,
-
     // Single letter variable (a-z, A-Z, Greek via commands, @ symbol)
     symbol: $ => /[a-zA-Z@]/,
 
@@ -165,17 +133,13 @@ module.exports = grammar({
     // Numeric literal - lower precedence so 'digit' can match first in _frac_arg
     number: $ => token(prec(-1, /[0-9]+\.?[0-9]*/)),
 
-    // Binary operators: +, -, *, etc. and command operators via regex
-    operator: $ => choice(
-      '+', '-', '*', '/',
-      $._operator_cmd,
-    ),
+    // Binary operators: +, -, *, / (command operators like \pm handled by generic command)
+    operator: $ => choice('+', '-', '*', '/'),
 
-    // Relations: =, <, >, etc. and command relations/arrows via regex
+    // Relations: =, <, >, ! and vertical arrows (shared with delimiter rule)
+    // Command relations like \leq, \rightarrow handled by generic command
     relation: $ => choice(
       '=', '<', '>', '!',
-      $._relation_cmd,
-      $._arrow_cmd,
       $._updown_arrow_cmd,
     ),
 
@@ -306,35 +270,12 @@ module.exports = grammar({
     ),
 
     // ========================================================================
-    // Annotated Commands — MERGED: overunder_command + extensible_arrow
-    // ========================================================================
-
-    annotated_command: $ => prec.right(seq(
-      field('cmd', $._annotated_cmd),
-      optional(field('opt_arg', $.brack_group)),
-      field('first', $.group),
-      optional(field('second', $.group)),
-    )),
-
-    // ========================================================================
     // Accents
     // ========================================================================
 
     accent: $ => prec.right(1, seq(
       field('cmd', $._accent_cmd),
       optional(field('base', choice($.group, $.symbol))),
-    )),
-
-    // ========================================================================
-    // Big Operators (with limits)
-    // ========================================================================
-
-    big_operator: $ => prec.right(seq(
-      field('op', $._big_operator_cmd),
-      optional(choice(
-        seq('_', field('lower', $._script_arg), optional(seq('^', field('upper', $._script_arg)))),
-        seq('^', field('upper', $._script_arg), optional(seq('_', field('lower', $._script_arg)))),
-      )),
     )),
 
     // ========================================================================
@@ -401,51 +342,9 @@ module.exports = grammar({
 
     // (merged into textstyle_command above)
 
-    // ========================================================================
-    // Mathop command: \mathop{...} - makes content behave like an operator
-    // ========================================================================
-
-    mathop_command: $ => seq(
-      '\\mathop',
-      field('content', $.group),
-    ),
-
-    // ========================================================================
-    // Box-like Commands — MERGED: box_command + phantom_command
-    // ========================================================================
-
-    boxlike_command: $ => seq(
-      field('cmd', $._boxlike_cmd),
-      optional(field('options', $.brack_group)),
-      field('content', $.group),
-    ),
-
-    // ========================================================================
-    // Color commands: \textcolor, \color, \colorbox
-    // ========================================================================
-
-    color_command: $ => prec.right(seq(
-      field('cmd', $._color_cmd),
-      field('color', $.group),
-      optional(field('content', $.group)),
-    )),
-
-    // ========================================================================
-    // Rule command: \rule[raise]{width}{height}
-    // ========================================================================
-
-    rule_command: $ => seq(
-      '\\rule',
-      optional(field('raise', $.brack_group)),
-      field('width', $.group),
-      field('height', $.group),
-    ),
-
-    // ========================================================================
-    // Phantom commands (merged into boxlike_command above)
-    // ========================================================================
-
-    // (phantom_command merged into boxlike_command)
+    // NOTE: \mathop, \phantom, \fbox, \boxed, \color, \textcolor, \rule, \overset,
+    // \xrightarrow, etc. are handled by the generic command fallback.
+    // The AST builder dispatches them by checking the command name.
 
     // ========================================================================
     // Spacing Commands — MERGED: space_command + hspace_command + skip_command
