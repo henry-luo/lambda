@@ -151,6 +151,7 @@ html[body]?<p>                   // child then recursive
 
 // If expressions
 if (x > 0) "positive" else "negative"
+if x > 0 { compute(x) } else "default"   // block form, expr else
 ```
 
 #### Functions (see [Lambda_Func.md](Lambda_Func.md))
