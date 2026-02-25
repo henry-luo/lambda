@@ -181,6 +181,23 @@ table.latex-tabular td[rowspan] {
   font-style: italic;
   margin-right: 0.5em;
 }
+.latex-textcolor, .latex-color { }
+.latex-colorbox { padding: 0.1em 0.2em; }
+.latex-fcolorbox { padding: 0.1em 0.2em; }
+.latex-itemize { padding-left: 2em; }
+.latex-enumerate { padding-left: 2em; }
+.latex-description { padding-left: 2em; }
+.latex-description dt { font-weight: bold; }
+.latex-description dd { margin-left: 1.5em; margin-bottom: 0.3em; }
+.latex-itemize { list-style-type: disc; }
+.latex-itemize .latex-itemize { list-style-type: '\\2013\\0020'; }
+.latex-itemize .latex-itemize .latex-itemize { list-style-type: '\\2217\\0020'; }
+.latex-itemize .latex-itemize .latex-itemize .latex-itemize { list-style-type: '\\00B7\\0020'; }
+.latex-enumerate { list-style-type: decimal; }
+.latex-enumerate .latex-enumerate { list-style-type: lower-alpha; }
+.latex-enumerate .latex-enumerate .latex-enumerate { list-style-type: lower-roman; }
+.latex-enumerate .latex-enumerate .latex-enumerate .latex-enumerate { list-style-type: upper-alpha; }
+.latex-item-label { font-weight: normal; margin-right: 0.3em; }
 "
 
 // return the stylesheet

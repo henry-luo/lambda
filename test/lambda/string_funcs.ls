@@ -76,4 +76,30 @@ let sym1 = 'hello_world'
 "41. element:"; string(type(<div "hello">))
 "42. list:"; string(type((1, 2, 3)))
 
+"Test null handling:"
+"43. contains(null, x):"; contains(null, "x")
+"44. contains(x, null):"; contains("hello", null)
+"45. starts_with(null, x):"; starts_with(null, "x")
+"46. starts_with(x, null):"; starts_with("hello", null)
+"47. ends_with(null, x):"; ends_with(null, "x")
+"48. ends_with(x, null):"; ends_with("hello", null)
+"49. index_of(null, x):"; index_of(null, "x")
+"50. last_index_of(null, x):"; last_index_of(null, "x")
+"51. trim(null):"; trim(null)
+"52. upper(null):"; upper(null)
+"53. lower(null):"; lower(null)
+"54. replace(null, a, b):"; replace(null, "a", "b")
+"55. replace(s, null, b):"; replace("hello", null, "b")
+"56. slice(null, 0, 1):"; slice(null, 0, 1)
+"57. split(null, sep):"; len(split(null, ","))
+"58. str_join(null, sep):"; str_join(null, ",")
+"59. len(null):"; len(null)
+
+"Test split with null separator (whitespace split):"
+"60. split on whitespace:"; len(split("hello world", null))
+"61. split strips leading/trailing:"; len(split("  hello   world  ", null))
+"62. split single word:"; len(split("hello", null))
+"63. split all whitespace:"; len(split("   ", null))
+"64. split tabs/newlines:"; len(split("a\tb\nc", null))
+
 "===== ALL TESTS PASSED ====="
