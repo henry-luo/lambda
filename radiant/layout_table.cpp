@@ -3321,10 +3321,22 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;  // Large enough for content
             lycon->block.advance_y = 0;
-            lycon->line.left = 0;
-            lycon->line.right = (int)content_width;
-            lycon->line.advance_x = 0;
-            lycon->line.is_line_start = true;
+
+            // Calculate inner content bounds from border and padding (same as layout_block)
+            // line.left/right include border+padding so child positions are correct
+            // advance_y includes border-top+padding-top so child y positions are correct
+            float inner_left = 0;
+            if (caption->bound) {
+                if (caption->bound->border) {
+                    inner_left += caption->bound->border->width.left;
+                    lycon->block.advance_y += caption->bound->border->width.top;
+                }
+                inner_left += caption->bound->padding.left;
+                lycon->block.advance_y += caption->bound->padding.top;
+            }
+            lycon->line.left = (int)inner_left;
+            lycon->line.right = (int)(inner_left + content_width);
+            line_reset(lycon);  // reset start_view, advance_x, etc. for fresh line
 
             // Propagate text-align from caption's resolved style (default: center)
             if (caption->blk && caption->blk->text_align) {
@@ -3344,18 +3356,26 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             log_debug("Caption after line_break: advance_y=%.1f", lycon->block.advance_y);
 
             // Determine caption height: use given_height if specified, otherwise content flow height
+            // advance_y already includes border-top + padding-top, so only add bottom
             float caption_content_height = lycon->block.advance_y;
             float caption_given_height = (caption->blk && caption->blk->given_height >= 0) ? caption->blk->given_height : -1;
             if (caption_given_height >= 0) {
                 caption->height = caption_given_height;
+                // given_height is content height only, add all padding and border
+                if (caption->bound) {
+                    caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                    }
+                }
             } else {
                 caption->height = caption_content_height;
-            }
-            // Add padding and border to height
-            if (caption->bound) {
-                caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
-                if (caption->bound->border) {
-                    caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                // advance_y includes border-top+padding-top, only add bottom
+                if (caption->bound) {
+                    caption->height += caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        caption->height += caption->bound->border->width.bottom;
+                    }
                 }
             }
             caption->width = (float)caption_width;  // Also set width explicitly
@@ -4412,13 +4432,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             if (caption->height > 0) {
                 float margin_v = 0;
                 if (caption->bound) {
-                    // Include margin - caption-side:top means margin-bottom adds space,
-                    // caption-side:bottom means margin-top adds space
-                    if (table->tb && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-                        margin_v = caption->bound->margin.bottom; // Space between caption and table
-                    } else {
-                        margin_v = caption->bound->margin.top; // Space between table and caption
-                    }
+                    // Include both vertical margins of the caption in the height contribution.
+                    // CSS 2.1 §17.4: The caption box occupies space including its margins.
+                    float mt = caption->bound->margin.top > 0 ? caption->bound->margin.top : 0;
+                    float mb = caption->bound->margin.bottom > 0 ? caption->bound->margin.bottom : 0;
+                    margin_v = mt + mb;
                 }
                 caption_height = (int)(caption->height + margin_v);
                 log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total=%d",
@@ -4813,20 +4831,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
         }
 
-        // Fallback to lycon->block.given_width or container
+        // Fallback to lycon->block.given_width (e.g., from HTML width attribute)
         if (fixed_explicit_width == 0 && lycon->block.given_width > 0) {
             fixed_explicit_width = lycon->block.given_width;
             log_debug("FIXED LAYOUT - using given_width: %dpx", fixed_explicit_width);
-        } else if (fixed_explicit_width == 0) {
-            // CSS 2.1 Section 17.5.2.1: When width is 'auto', the table width is
-            // determined by content (shrink-to-fit). Use PCW sum as content width.
-            // Calculate preferred width from column max widths
-            int pref_content_width = 0;
-            for (int i = 0; i < columns; i++) {
-                pref_content_width += meta->col_max_widths[i];
-            }
-            fixed_explicit_width = pref_content_width;
-            log_debug("FIXED LAYOUT - width:auto, using content-based sizing: %dpx (from PCW)", fixed_explicit_width);
+        }
+
+        // CSS 2.1 §17.5.2.1: "A value of 'auto' (for both 'display: table' and
+        // 'display: inline-table') means use the automatic table layout algorithm."
+        // If no explicit width is available, fall back to the auto layout algorithm.
+        if (fixed_explicit_width == 0) {
+            log_debug("FIXED LAYOUT skipped: width:auto, falling back to auto layout");
         }
 
         // Store for later use
@@ -4835,6 +4850,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("FIXED LAYOUT - stored fixed_table_width: %dpx", fixed_table_width);
         }
 
+      if (fixed_explicit_width > 0) {
         // STEP 2: Calculate available content width (subtract borders and spacing)
         int content_width = fixed_explicit_width;
 
@@ -4893,13 +4909,37 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         }
                     }
 
+                    // CSS 2.1 §17.5.2.1: Column width includes cell padding and borders
+                    // (in separate-border mode). CSS width is content-box by default.
+                    // For border-box cells, the CSS width already includes padding+border.
                     if (cell_width > 0.0f) {
-                        explicit_col_widths[col] = cell_width;
-                        total_explicit += cell_width;
-                        log_debug("  Column %d: explicit width %.1fpx", col, cell_width);
+                        bool is_border_box = (cell->blk && cell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                        if (!is_border_box) {
+                            if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
+                                cell_width += cell->bound->padding.left + cell->bound->padding.right;
+                            }
+                            if (!table->tb->border_collapse && cell->bound && cell->bound->border) {
+                                if (cell->bound->border->left_style != CSS_VALUE_NONE)
+                                    cell_width += cell->bound->border->width.left;
+                                if (cell->bound->border->right_style != CSS_VALUE_NONE)
+                                    cell_width += cell->bound->border->width.right;
+                            }
+                        }
+                    }
+
+                    if (cell_width > 0.0f) {
+                        // CSS 2.1 §17.5.2.1: If cell spans more than one column,
+                        // divide the width evenly among the spanned columns.
+                        int span = cell->td->col_span;
+                        float per_col_width = cell_width / span;
+                        for (int c = col; c < col + span && c < columns; c++) {
+                            explicit_col_widths[c] = per_col_width;
+                            total_explicit += per_col_width;
+                        }
+                        log_debug("  Column %d (span=%d): %.1fpx each (total=%.1fpx)", col, span, per_col_width, cell_width);
                     } else {
-                        unspecified_cols++;
-                        log_debug("  Column %d: no explicit width", col);
+                        unspecified_cols += cell->td->col_span;
+                        log_debug("  Column %d (span=%d): no explicit width", col, cell->td->col_span);
                     }
                     col += cell->td->col_span;
             }
@@ -5020,12 +5060,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table->tb->fixed_row_height = height_per_row;
             log_debug("=== FIXED LAYOUT HEIGHT DISTRIBUTION COMPLETE ===");
         }
+      } // end if (fixed_explicit_width > 0)
     }
 
     // Step 3: CSS 2.1 Table Layout Algorithm - Width Distribution (Section 17.5.2)
-    // ONLY run auto algorithm if we're NOT using fixed layout
-    // Fixed layout already set column widths above
-    if (table->tb->table_layout != TableProp::TABLE_LAYOUT_FIXED) {
+    // Run auto algorithm if NOT using fixed layout, or if fixed layout was skipped (width:auto)
+    if (table->tb->table_layout != TableProp::TABLE_LAYOUT_FIXED || fixed_table_width == 0) {
         log_debug("===== CSS 2.1 AUTO TABLE LAYOUT ALGORITHM =====");
 
     // Calculate minimum and preferred table widths (including borders and spacing)
@@ -5324,12 +5364,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                table_padding_horizontal, table->bound->padding.left, table->bound->padding.right);
     }
 
-    // CRITICAL FIX: For fixed layout, override calculated width with CSS width
+    // CSS 2.1 §17.5.2.1: For fixed layout, "the width of the table is then the
+    // greater of the value of the 'width' property for the table element and the
+    // sum of the column widths (plus cell spacing or borders)."
+    // fixed_table_width is the raw CSS value (border-box per CSS 2.1 table model).
+    // table_width (from content-outward) is already the correct padding-box minimum.
+    // Convert CSS width to padding-box by subtracting border, then take max.
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
-        log_debug("Fixed layout override - changing table_width from %d to %d",
-               table_width, fixed_table_width);
-        table_width = fixed_table_width;
-        log_debug("Fixed layout override - using CSS width: %dpx", table_width);
+        float css_padding_box = (float)fixed_table_width;
+        if (table->bound && table->bound->border) {
+            css_padding_box -= (table->bound->border->width.left + table->bound->border->width.right);
+        }
+        log_debug("Fixed layout: css_padding_box=%.0f, min_padding_box=%.0f",
+               css_padding_box, table_width);
+        if (css_padding_box > table_width) {
+            table_width = css_padding_box;
+        }
+        log_debug("Fixed layout: final table_width=%.0f", table_width);
     }
     // For auto layout with explicit CSS width in border-collapse mode,
     // use the explicit width as-is (borders collapse into the table area)
@@ -5622,10 +5673,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;
             lycon->block.advance_y = 0;
-            lycon->line.left = 0;
-            lycon->line.right = (int)content_width;
-            lycon->line.advance_x = 0;
-            lycon->line.is_line_start = true;
+
+            // Calculate inner content bounds from border and padding
+            float inner_left = 0;
+            if (caption->bound) {
+                if (caption->bound->border) {
+                    inner_left += caption->bound->border->width.left;
+                    lycon->block.advance_y += caption->bound->border->width.top;
+                }
+                inner_left += caption->bound->padding.left;
+                lycon->block.advance_y += caption->bound->padding.top;
+            }
+            lycon->line.left = (int)inner_left;
+            lycon->line.right = (int)(inner_left + content_width);
             line_reset(lycon);
 
             // Propagate text-align from caption's resolved style
@@ -5647,19 +5707,27 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Determine caption height: use given_height if specified, otherwise content flow height
+            // advance_y already includes border-top + padding-top, so only add bottom
             float caption_content_height = lycon->block.advance_y;
             float caption_given_height = (caption->blk && caption->blk->given_height >= 0)
                 ? caption->blk->given_height : -1;
             if (caption_given_height >= 0) {
                 caption->height = caption_given_height;
+                // given_height is content height only, add all padding and border
+                if (caption->bound) {
+                    caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                    }
+                }
             } else {
                 caption->height = caption_content_height;
-            }
-            // Add padding and border to height (advance_y/given_height is content height only)
-            if (caption->bound) {
-                caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
-                if (caption->bound->border) {
-                    caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                // advance_y includes border-top+padding-top, only add bottom
+                if (caption->bound) {
+                    caption->height += caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        caption->height += caption->bound->border->width.bottom;
+                    }
                 }
             }
             log_debug("Caption re-layout complete: width=%.1f, height=%.1f (content+padding+border)", table_width, caption->height);
@@ -5668,11 +5736,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Note: caption->height now includes content + padding + border
             float margin_v = 0;
             if (caption->bound) {
-                if (table->tb && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-                    margin_v = caption->bound->margin.bottom;
-                } else {
-                    margin_v = caption->bound->margin.top;
-                }
+                float mt = caption->bound->margin.top > 0 ? caption->bound->margin.top : 0;
+                float mb = caption->bound->margin.bottom > 0 ? caption->bound->margin.bottom : 0;
+                margin_v = mt + mb;
             }
             caption_height = (int)(caption->height + margin_v);
             log_debug("Caption height recalculated after re-layout: %d (height includes padding+border)", caption_height);
@@ -5691,12 +5757,24 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         } else {
             // Just re-align caption text content for centering
             if (caption->blk && caption->blk->text_align == CSS_VALUE_CENTER) {
+                // Calculate content area offset from border and padding
+                float inner_left = 0;
+                float caption_content_w = table_width;
+                if (caption->bound) {
+                    if (caption->bound->border) {
+                        inner_left += caption->bound->border->width.left;
+                        caption_content_w -= caption->bound->border->width.left + caption->bound->border->width.right;
+                    }
+                    inner_left += caption->bound->padding.left;
+                    caption_content_w -= caption->bound->padding.left + caption->bound->padding.right;
+                }
+                if (caption_content_w < 0) caption_content_w = 0;
                 for (View* child = caption->first_child; child; child = child->next_sibling) {
                     if (child->view_type == RDT_VIEW_TEXT) {
                         ViewText* text = (ViewText*)child;
-                        // Center the text within the caption width
+                        // Center the text within the caption content area
                         float text_width = text->width;
-                        float offset = (table_width - text_width) / 2.0f;
+                        float offset = inner_left + (caption_content_w - text_width) / 2.0f;
                         if (offset > 0) {
                             text->x = offset;
                             if (text->rect) {
@@ -6641,10 +6719,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;
             lycon->block.advance_y = 0;
-            lycon->line.left = 0;
-            lycon->line.right = (int)content_width;
-            lycon->line.advance_x = 0;
-            lycon->line.is_line_start = true;
+
+            // Calculate inner content bounds from border and padding
+            float inner_left = 0;
+            if (caption->bound) {
+                if (caption->bound->border) {
+                    inner_left += caption->bound->border->width.left;
+                    lycon->block.advance_y += caption->bound->border->width.top;
+                }
+                inner_left += caption->bound->padding.left;
+                lycon->block.advance_y += caption->bound->padding.top;
+            }
+            lycon->line.left = (int)inner_left;
+            lycon->line.right = (int)(inner_left + content_width);
             line_reset(lycon);
 
             // Propagate text-align from caption's resolved style
@@ -6662,25 +6749,38 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Determine caption height: use given_height if specified, otherwise content flow height
+            // advance_y already includes border-top + padding-top, so only add bottom
             float caption_content_height = lycon->block.advance_y;
             float caption_given_height = (caption->blk && caption->blk->given_height >= 0)
                 ? caption->blk->given_height : -1;
             if (caption_given_height >= 0) {
                 caption->height = caption_given_height;
+                // given_height is content height only, add all padding and border
+                if (caption->bound) {
+                    caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                    }
+                }
             } else {
                 caption->height = caption_content_height;
-            }
-            // Add padding and border to height (advance_y/given_height is content height only)
-            if (caption->bound) {
-                caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
-                if (caption->bound->border) {
-                    caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
+                // advance_y includes border-top+padding-top, only add bottom
+                if (caption->bound) {
+                    caption->height += caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        caption->height += caption->bound->border->width.bottom;
+                    }
                 }
             }
             log_debug("Bottom caption re-layout complete: width=%.1f, height=%.1f (content+padding+border)", table_width, caption->height);
 
-            // Recalculate caption_height
-            float margin_v = caption->bound ? caption->bound->margin.top : 0;  // Bottom caption uses top margin (space above)
+            // Recalculate caption_height with both margins
+            float margin_v = 0;
+            if (caption->bound) {
+                float mt = caption->bound->margin.top > 0 ? caption->bound->margin.top : 0;
+                float mb = caption->bound->margin.bottom > 0 ? caption->bound->margin.bottom : 0;
+                margin_v = mt + mb;
+            }
             caption_height = (int)(caption->height + margin_v);
             log_debug("Bottom caption height recalculated after re-layout: %d", caption_height);
 
@@ -6694,13 +6794,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Override calculated height with explicit height if set and larger than content height
-    // CSS 2.2 Section 17.5.3: If the table has an explicit height, use it
+    // CSS 2.1 Section 17.5.3: If the table has an explicit height, use it
     // Note: The height distribution to rows was already done above (around line 4731)
-    // Here we just ensure final_table_height respects the explicit height constraint
-    if (explicit_css_height > 0 && explicit_css_height > final_table_height) {
-        log_debug("Explicit height override - changing final_table_height from %d to %d",
-               final_table_height, explicit_css_height);
-        final_table_height = explicit_css_height;
+    // Here we just ensure final_table_height respects the explicit height constraint.
+    // CSS height for tables is border-box (CSS 2.1 §17.5.2.1).
+    // final_table_height includes border_top (via current_y) but NOT border_bottom
+    // (added separately below). Subtract border_bottom for correct comparison.
+    if (explicit_css_height > 0) {
+        int css_height_comparable = explicit_css_height;
+        if (!table->tb->border_collapse && table->bound && table->bound->border) {
+            css_height_comparable -= (int)table->bound->border->width.bottom;
+        }
+        if (css_height_comparable > final_table_height) {
+            log_debug("Explicit height override - changing final_table_height from %d to %d",
+                   final_table_height, css_height_comparable);
+            final_table_height = css_height_comparable;
+        }
     }
 
     // CRITICAL FIX: Handle table border dimensions correctly for each border model

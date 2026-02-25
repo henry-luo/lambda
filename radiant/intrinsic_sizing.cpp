@@ -667,6 +667,124 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // normal measurement — they already have intrinsic sizing via FormControlProp
     }
 
+    // ========================================================================
+    // Table element special handling: table intrinsic width = sum of cell widths
+    // CSS Tables §4.1: Table min/max content width is the maximum over all rows
+    // of the sum of cell min/max content widths in that row + border-spacing.
+    // ========================================================================
+    {
+        ViewBlock* tbl_view = (ViewBlock*)element;
+        bool is_table_element = (tbl_view->display.inner == CSS_VALUE_TABLE);
+        if (!is_table_element) {
+            uintptr_t etag = element->tag();
+            if (etag == HTM_TAG_TABLE) is_table_element = true;
+        }
+        if (!is_table_element && element->specified_style) {
+            CssDeclaration* dd = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_DISPLAY);
+            if (dd && dd->value && dd->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum dv = dd->value->data.keyword;
+                if (dv == CSS_VALUE_TABLE || dv == CSS_VALUE_INLINE_TABLE) is_table_element = true;
+            }
+        }
+
+        if (is_table_element) {
+            float border_spacing = 0;
+            if (element->tb) {
+                border_spacing = element->tb->border_spacing_h;
+            }
+
+            // Helper lambda: measure cells in a row and sum horizontally
+            auto measure_row = [&](DomElement* row_elem) {
+                float row_min = 0, row_max = 0;
+                int cell_count = 0;
+                for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
+                    if (!cell->is_element()) continue;
+                    DomElement* cell_elem = cell->as_element();
+                    ViewBlock* cell_view = (ViewBlock*)cell_elem;
+                    bool is_cell = (cell_view->display.inner == CSS_VALUE_TABLE_CELL ||
+                                    cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
+                    if (!is_cell) continue;
+                    IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
+                    // ceil each cell width to match table layout's integer-pixel allocation
+                    row_min += ceilf(cell_sizes.min_content);
+                    row_max += ceilf(cell_sizes.max_content);
+                    cell_count++;
+                }
+                if (cell_count > 1) {
+                    row_min += border_spacing * (cell_count - 1);
+                    row_max += border_spacing * (cell_count - 1);
+                }
+                sizes.min_content = max(sizes.min_content, row_min);
+                sizes.max_content = max(sizes.max_content, row_max);
+                log_debug("  table row: %d cells, min=%.1f, max=%.1f", cell_count, row_min, row_max);
+            };
+
+            for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                if (!child->is_element()) continue;
+                DomElement* child_elem = child->as_element();
+                ViewBlock* child_view = (ViewBlock*)child_elem;
+                uintptr_t ctag = child_elem->tag();
+
+                bool is_row = (child_view->display.inner == CSS_VALUE_TABLE_ROW || ctag == HTM_TAG_TR);
+                bool is_row_group = (!is_row && (
+                    child_view->display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
+                    child_view->display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
+                    child_view->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
+                    ctag == HTM_TAG_TBODY || ctag == HTM_TAG_THEAD || ctag == HTM_TAG_TFOOT));
+
+                if (is_row) {
+                    measure_row(child_elem);
+                } else if (is_row_group) {
+                    for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
+                        if (!row->is_element()) continue;
+                        DomElement* row_elem = row->as_element();
+                        ViewBlock* row_view = (ViewBlock*)row_elem;
+                        if (row_view->display.inner == CSS_VALUE_TABLE_ROW || row_elem->tag() == HTM_TAG_TR) {
+                            measure_row(row_elem);
+                        }
+                    }
+                }
+                // Captions: treat like block children (take max)
+                bool is_caption = (child_view->display.inner == CSS_VALUE_TABLE_CAPTION || ctag == HTM_TAG_CAPTION);
+                if (is_caption) {
+                    IntrinsicSizes cap = measure_element_intrinsic_widths(lycon, child_elem);
+                    sizes.min_content = max(sizes.min_content, cap.min_content);
+                    sizes.max_content = max(sizes.max_content, cap.max_content);
+                }
+            }
+
+            // Add table's own padding and border
+            float pad_left = 0, pad_right = 0, bdr_left = 0, bdr_right = 0;
+            if (tbl_view->bound) {
+                if (tbl_view->bound->padding.left >= 0) pad_left = tbl_view->bound->padding.left;
+                if (tbl_view->bound->padding.right >= 0) pad_right = tbl_view->bound->padding.right;
+                if (tbl_view->bound->border) {
+                    bdr_left = tbl_view->bound->border->width.left;
+                    bdr_right = tbl_view->bound->border->width.right;
+                }
+            }
+
+            // Only use table-specific result if we actually found table rows/cells.
+            // Tables with only text/block children (no row structure) should fall
+            // through to the generic block measurement below (CSS anonymous box wrapping
+            // will create rows/cells at layout time, but for measurement we use generic).
+            if (sizes.min_content > 0 || sizes.max_content > 0) {
+                sizes.min_content += pad_left + pad_right + bdr_left + bdr_right;
+                sizes.max_content += pad_left + pad_right + bdr_left + bdr_right;
+
+                log_debug("measure_element_intrinsic: TABLE %s: min=%.1f, max=%.1f",
+                          element->node_name(), sizes.min_content, sizes.max_content);
+
+                // Restore font if changed
+                if (font_changed) lycon->font = saved_font;
+                return sizes;
+            }
+            // No table structure found — fall through to generic measurement
+            log_debug("measure_element_intrinsic: TABLE %s has no row structure, falling through",
+                      element->node_name());
+        }
+    }
+
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Sum of min-content widths for inline children
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children

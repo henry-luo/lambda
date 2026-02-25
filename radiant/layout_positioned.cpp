@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
 #include "available_space.hpp"
+#include "intrinsic_sizing.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
@@ -357,11 +358,37 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         content_width = 0;
         log_debug("Using intrinsic sizing for absolutely positioned element: content_width=0 (shrink-to-fit)");
     } else {
-        // shrink-to-fit: will be determined by content (start with 0, let content grow it)
-        // For now, fall back to containing block width minus margins
+        // CSS 2.1 §10.3.7: width is auto, at most one of left/right specified (non-replaced)
+        // Use shrink-to-fit width = min(max(preferred_minimum_width, available_width), preferred_width)
+        // where preferred_minimum_width = min-content, preferred_width = max-content,
+        // available_width = cb_width - margins (border-box available space)
         float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
         float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
-        content_width = max(cb_width - margin_left - margin_right, 0.0f);
+        float available_width = max(cb_width - margin_left - margin_right, 0.0f);
+
+        // Measure intrinsic widths (returns border-box sizes including element's padding+border)
+        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(lycon, (DomElement*)block);
+        float preferred_minimum = intrinsic.min_content;  // min-content width (border-box)
+        float preferred = intrinsic.max_content;          // max-content width (border-box)
+
+        // shrink-to-fit = min(max(min_content, available), max_content) — all in border-box
+        // ceil to account for fractional text measurement vs integer table/block allocation
+        float shrink_to_fit = ceilf(min(max(preferred_minimum, available_width), preferred));
+
+        // The later box-sizing adjustment (line ~558) converts border-box → content-box
+        // for border-box elements. So we must set content_width appropriately:
+        // - border-box: content_width = border-box value (adjustment will subtract border+padding)
+        // - content-box: content_width = content-box value (no adjustment)
+        bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        if (is_border_box) {
+            content_width = max(shrink_to_fit, 0.0f);
+        } else {
+            content_width = max(shrink_to_fit - h_border_padding, 0.0f);
+        }
+
+        log_debug("[ABS POS] shrink-to-fit: min_content=%.1f, max_content=%.1f, available=%.1f, "
+                  "border_box=%.1f, content_width=%.1f, is_border_box=%d",
+                  preferred_minimum, preferred, available_width, shrink_to_fit, content_width, is_border_box);
     }
 
     // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
