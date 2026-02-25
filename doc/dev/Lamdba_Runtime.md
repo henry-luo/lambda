@@ -6,12 +6,12 @@ Lambda runtime uses the following design/convention to represent and manage its 
 	- they are packed into Item, with high bits set to TypeId;
 - for compound scalar types: LMD_TYPE_INT64, LMD_TYPE_FLOAT, LMD_TYPE_DTIME, LMD_TYPE_DECIMAL, LMD_TYPE_SYMBOL, LMD_TYPE_STRING, LMD_TYPE_BINARY
 	- they are packed into item as a tagged pointer. It's a pointer to the actual data, with high bits set to TypeId.
-	- LMD_TYPE_INT64, LMD_TYPE_FLOAT, LMD_TYPE_DTIME are stored in a special num_stack at runtime;
-	- LMD_TYPE_DECIMAL, LMD_TYPE_SYMBOL, LMD_TYPE_STRING, LMD_TYPE_BINARY are allocated from heap, and reference counted;
+	- LMD_TYPE_INT64, LMD_TYPE_FLOAT, LMD_TYPE_DTIME are stored in GC nursery (bump-allocated numeric slots);
+	- LMD_TYPE_DECIMAL, LMD_TYPE_SYMBOL, LMD_TYPE_STRING, LMD_TYPE_BINARY are allocated from GC heap;
 - for container types: LMD_TYPE_LIST, LMD_TYPE_RANGE, LMD_TYPE_ARRAY_INT, LMD_TYPE_ARRAY_INT64, LMD_TYPE_ARRAY_FLOAT, LMD_TYPE_ARRAY, LMD_TYPE_MAP, LMD_TYPE_VMAP, LMD_TYPE_ELEMENT
 	- they are direct pointers to the container data.
 	- all containers extends struct Container, that starts with field TypeId;
-	- they are heap allocated, and reference counted;
+	- they are heap allocated and GC-managed;
 - Lambda map/LMD_TYPE_MAP, uses a packed struct:
 	- its list of fields are defined as a linked list of ShapeEntry;
 	- and the actual data are stored as a packed struct;
@@ -49,11 +49,11 @@ The `type_id()` method first checks `_type_id`; if zero, dereferences the pointe
 | 1 | `LMD_TYPE_NULL` | inline scalar |
 | 2 | `LMD_TYPE_BOOL` | inline scalar |
 | 3 | `LMD_TYPE_INT` | inline scalar (int56) |
-| 4 | `LMD_TYPE_INT64` | tagged pointer (num_stack) |
-| 5 | `LMD_TYPE_FLOAT` | tagged pointer (num_stack) |
+| 4 | `LMD_TYPE_INT64` | tagged pointer (GC nursery) |
+| 5 | `LMD_TYPE_FLOAT` | tagged pointer (GC nursery) |
 | 6 | `LMD_TYPE_DECIMAL` | tagged pointer (heap) |
 | 7 | `LMD_TYPE_NUMBER` | abstract type (union of int/int64/float/decimal) |
-| 8 | `LMD_TYPE_DTIME` | tagged pointer (num_stack) |
+| 8 | `LMD_TYPE_DTIME` | tagged pointer (GC nursery) |
 | 9 | `LMD_TYPE_SYMBOL` | tagged pointer (heap, pooled ≤32 chars) |
 | 10 | `LMD_TYPE_STRING` | tagged pointer (heap) |
 | 11 | `LMD_TYPE_BINARY` | tagged pointer (heap) |
@@ -80,15 +80,15 @@ When the transpiler emits unboxed (native) C code for typed variables and parame
 | `null` | `LMD_TYPE_NULL` | `Item` | packed | high bits = TypeId, value = 0 |
 | `bool` | `LMD_TYPE_BOOL` | `bool` | packed | `b2it()` / `it2b()` |
 | `int` | `LMD_TYPE_INT` | `int64_t` | packed (int56) | `i2it()` / `it2i()`. **Changed from `int32_t` to `int64_t`** to support full 56-bit range without truncation |
-| `int64` | `LMD_TYPE_INT64` | `int64_t` | tagged pointer | `l2it()` / `it2l()`, stored in num_stack |
-| `float` | `LMD_TYPE_FLOAT` | `double` | tagged pointer | `d2it()` / `it2d()`, stored in num_stack |
-| `datetime` | `LMD_TYPE_DTIME` | `DateTime` | tagged pointer | stored in num_stack |
-| `decimal` | `LMD_TYPE_DECIMAL` | `Decimal*` | tagged pointer | heap-allocated, ref-counted |
-| `symbol` | `LMD_TYPE_SYMBOL` | `String*` | tagged pointer | heap-allocated, ref-counted |
-| `string` | `LMD_TYPE_STRING` | `String*` | tagged pointer | heap-allocated, ref-counted |
-| `binary` | `LMD_TYPE_BINARY` | `String*` | tagged pointer | heap-allocated, ref-counted |
-| `list` | `LMD_TYPE_LIST` | `List*` | direct pointer | container, ref-counted |
-| `array` | `LMD_TYPE_ARRAY` | `Array*` | direct pointer | container, ref-counted |
+| `int64` | `LMD_TYPE_INT64` | `int64_t` | tagged pointer | `l2it()` / `it2l()`, stored in GC nursery |
+| `float` | `LMD_TYPE_FLOAT` | `double` | tagged pointer | `d2it()` / `it2d()`, stored in GC nursery |
+| `datetime` | `LMD_TYPE_DTIME` | `DateTime` | tagged pointer | stored in GC nursery |
+| `decimal` | `LMD_TYPE_DECIMAL` | `Decimal*` | tagged pointer | heap-allocated, GC-managed |
+| `symbol` | `LMD_TYPE_SYMBOL` | `String*` | tagged pointer | heap-allocated, GC-managed |
+| `string` | `LMD_TYPE_STRING` | `String*` | tagged pointer | heap-allocated, GC-managed |
+| `binary` | `LMD_TYPE_BINARY` | `String*` | tagged pointer | heap-allocated, GC-managed |
+| `list` | `LMD_TYPE_LIST` | `List*` | direct pointer | container, GC-managed |
+| `array` | `LMD_TYPE_ARRAY` | `Array*` | direct pointer | container, GC-managed |
 | `array_int` | `LMD_TYPE_ARRAY_INT` | `ArrayInt*` | direct pointer | container, int56 elements |
 | `array_int64` | `LMD_TYPE_ARRAY_INT64` | `ArrayInt64*` | direct pointer | container, int64 elements |
 | `array_float` | `LMD_TYPE_ARRAY_FLOAT` | `ArrayFloat*` | direct pointer | container, double elements |
@@ -146,10 +146,10 @@ This table documents which boxing operations are safe to apply multiple times (i
 | ---------------------------------- | --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | STRING / SYMBOL / DECIMAL / BINARY | inline OR tag on pointer                            | ✅ Yes       | OR-ing the same tag is a no-op                                                                                                                   |
 | INT                                | `i2it()` / `emit_box_int` (range check + mask + OR) | ⚠️ Mostly   | mask56 strips any existing tag, then adds INT tag. But a boxed INT64 pointer value (≈2.88e17) exceeds INT56_MAX range check → returns ITEM_ERROR |
-| INT64                              | `push_l()` (allocates on num_stack)                 | ❌ No        | Each call allocates new storage; double-boxing creates a pointer-to-a-tagged-pointer                                                             |
+| INT64                              | `push_l()` (allocates in GC nursery)                | ❌ No        | Each call allocates new storage; double-boxing creates a pointer-to-a-tagged-pointer                                                             |
 | INT64                              | `push_l_safe()`                                     | ✅ Yes       | Checks high byte tag first: if already boxed INT64, returns as-is; if boxed INT, extracts and re-boxes                                           |
-| FLOAT                              | `push_d()` (allocates on num_stack)                 | ❌ No        | Same allocation issue as INT64                                                                                                                   |
-| DTIME                              | `push_k()` (allocates on num_stack)                 | ❌ No        | Same allocation issue as INT64                                                                                                                   |
+| FLOAT                              | `push_d()` (allocates in GC nursery)                | ❌ No        | Same allocation issue as INT64                                                                                                                   |
+| DTIME                              | `push_k()` (allocates in GC nursery)                | ❌ No        | Same allocation issue as INT64                                                                                                                   |
 | BOOL                               | `b2it()` / `emit_box_bool`                          | ✅ Yes       | Tag is in high bits, value is in low bits                                                                                                        |
 
 ### Header Files
@@ -175,9 +175,9 @@ Lambda header files defined the runtime data. They are layer one up on the other
 - *transpiler.hpp*:
 	- the full Lambda transpiler and code runner;
 
-## num_stack: Numeric Value Storage
+## GC Nursery: Numeric Value Storage
 
-The `num_stack` (defined in `lib/num_stack.h`, `lib/num_stack.c`) is a chunked linked-list stack used to store compound scalar values (int64, double, DateTime) that are too large to inline in the 56-bit Item payload.
+The GC nursery (defined in `lib/gc_nursery.h`, `lib/gc_nursery.c`) is a bump-allocated block chain used to store compound scalar values (int64, double, DateTime) that are too large to inline in the 56-bit Item payload. It replaces the previous `num_stack` implementation.
 
 ### Data Structures
 
@@ -186,45 +186,43 @@ typedef union {
     int64_t as_long;
     double as_double;
     DateTime as_datetime;
-} num_value_t;                          // 8 bytes per value
+} gc_num_value_t;                       // 8 bytes per value
 
-struct num_chunk {
-    num_value_t *data;                  // array of elements
-    size_t capacity;                    // max elements in this chunk
+typedef struct gc_nursery_block {
+    gc_num_value_t *data;               // array of elements
+    size_t capacity;                    // max elements in this block
     size_t used;                        // currently used elements
-    struct num_chunk *next, *prev;      // doubly-linked
-    int index;                          // chunk index for debug
-};
+    struct gc_nursery_block *next;      // singly-linked
+} gc_nursery_block_t;
 
-typedef struct num_stack_t {
-    num_chunk_t *head, *tail;           // first/last chunks
-    num_chunk_t *current_chunk;         // current write chunk
-    size_t current_chunk_position;      // position within current chunk
-    size_t total_length;                // total elements across all chunks
-    size_t initial_chunk_size;          // initial chunk capacity
-} num_stack_t;
+typedef struct gc_nursery {
+    gc_nursery_block_t *head;           // first block
+    gc_nursery_block_t *current;        // current write block
+    size_t block_size;                  // elements per block
+    size_t total_allocated;             // total elements allocated
+} gc_nursery_t;
 ```
 
 ### Growth Strategy
 
-When the current chunk is full, `allocate_new_chunk()` creates a new chunk with **double the capacity** of the previous one. Default initial capacity is 16 elements.
+When the current block is full, a new block of the same `block_size` capacity is allocated and linked. Default block size is `GC_NURSERY_BLOCK_SIZE / sizeof(gc_num_value_t)` (~4096 values).
 
 ### Push Functions
 
-Defined in `lambda-mem.cpp`. Each allocates a slot on the num_stack and returns a tagged Item:
+Defined in `lambda-mem.cpp`. Each bump-allocates a slot in the GC nursery and returns a tagged Item:
 
 | Function | Signature | Semantics |
 |---|---|---|
-| `push_d(double)` | `double → Item` | Pushes to `num_stack`, returns `{.item = d2it(ptr)}` |
-| `push_l(int64_t)` | `int64_t → Item` | Pushes to `num_stack`, returns `{.item = l2it(ptr)}`. Returns `ItemError` if `val == INT64_ERROR` |
+| `push_d(double)` | `double → Item` | Allocates in nursery via `gc_nursery_alloc_double()`, returns `{.item = d2it(ptr)}` |
+| `push_l(int64_t)` | `int64_t → Item` | Allocates in nursery via `gc_nursery_alloc_long()`, returns `{.item = l2it(ptr)}`. Returns `ItemError` if `val == INT64_ERROR` |
 | `push_l_safe(int64_t)` | `int64_t → Item` | **MIR JIT workaround**: checks high byte first — if already-boxed INT64, returns as-is; if boxed INT, extracts via `get_int56()` and re-boxes as INT64; otherwise delegates to `push_l()` |
-| `push_k(DateTime)` | `DateTime → Item` | Checks for `DATETIME_IS_ERROR()` sentinel first. Pushes to `num_stack`, returns `{.item = k2it(ptr)}` |
+| `push_k(DateTime)` | `DateTime → Item` | Checks for `DATETIME_IS_ERROR()` sentinel first. Allocates in nursery via `gc_nursery_alloc_datetime()`, returns `{.item = k2it(ptr)}` |
 
-All push functions check `context->num_stack != NULL` and return `ItemError` on failure.
+All push functions check `context->nursery != NULL` and return `ItemError` on failure.
 
 ### Lifecycle
 
-The `num_stack` lives in `EvalContext` and persists for the duration of script execution. `num_stack_reset_to_index(stack, index)` is used for frame-level cleanup, traversing from the tail and freeing chunks beyond the target index.
+The GC nursery lives in `EvalContext` and persists for the duration of script execution. All nursery blocks are bulk-freed when the nursery is destroyed at context cleanup.
 
 ## Two Transpiler Architectures
 
@@ -431,19 +429,31 @@ NamePools support parent-child relationships for schema inheritance:
 
 ## Memory Management
 
-Lambda Script uses automatic memory management with reference counting and memory pools:
+Lambda Script uses automatic memory management with a garbage collector (GC) and memory pools:
 
-### Reference Counting
+### GC Heap
 
-- All values are automatically reference counted
-- Memory is freed when reference count reaches zero
+All heap-allocated runtime objects (strings, symbols, decimals, containers, functions) are managed by the GC heap (`lib/gc_heap.h`, `lib/gc_heap.c`):
+
+- Each allocation is prepended with a `GCHeader` and linked into an intrusive singly-linked list
+- All GC-managed memory is pool-allocated via `pool_alloc()` for efficiency
+- At context end, `gc_heap_destroy()` calls `pool_destroy()` to bulk-free all memory
 - No manual memory management required
+
+### GC Nursery
+
+Compound scalar values (int64, double, DateTime) are stored in the GC nursery (`lib/gc_nursery.h`, `lib/gc_nursery.c`):
+
+- Bump-allocated blocks for fast numeric value storage
+- All nursery memory bulk-freed at context end
+- Replaces the previous `num_stack` implementation
 
 ### Memory Pools
 
-- Objects are allocated from memory pools for efficiency
+- Objects are allocated from memory pools (rpmalloc-based) for efficiency
 - Pools are automatically managed by the runtime
 - Reduces fragmentation and improves performance
+- `pool_destroy()` bulk-frees all pool memory at context end as a safety net
 
 ### Immutability
 
@@ -485,7 +495,7 @@ The core challenge in the MIR transpiler is that `transpile_expr()` returns **in
 | INT64 binary (e.g., `a + b`) | boxed Item | generic fallback through `fn_add` |
 | System func returning INT64 | boxed Item | `fn_sum`, `fn_min1`, etc. return Item |
 
-When a boxed INT64 Item is passed to `push_l()` (which expects a raw int64), it allocates a new num_stack entry with the **tagged pointer** as the "value", producing garbage.
+When a boxed INT64 Item is passed to `push_l()` (which expects a raw int64), it allocates a new GC nursery entry with the **tagged pointer** as the "value", producing garbage.
 
 **Solution**: `push_l_safe()` detects already-boxed Items by checking the high byte tag before allocating:
 ```cpp

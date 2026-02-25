@@ -1,11 +1,11 @@
 # Lambda LaTeX Package — Phase 2 Enhancement Proposal
 
 **Date:** 2026-02-24  
-**Status:** In Progress  
+**Status:** Complete  
 **Scope:** Achieve 100% LaTeX.js parity, incorporate key LaTeXML features, fully render `latex-showcase.tex`  
-**Last Updated:** 2026-02-25  
-**Baseline:** 442/442 tests passing  
-**Milestones Completed:** 1, 2, 3, 4 (of 7)
+**Last Updated:** 2026-02-26  
+**Baseline:** 448/448 tests passing  
+**Milestones Completed:** 1, 2, 3, 4, 5, 6, 7 (of 7)
 
 ---
 
@@ -35,22 +35,27 @@ Phase 1 baseline: **434/434** unit tests passing. Full test script: `test/lambda
 
 ### Phase 2 Progress
 
-Milestones 1–5 are complete. Current baseline: **444/444** tests.
+All 7 milestones are complete. Current baseline: **448/448** tests.
 
-| Phase | Status | Tests Added | Key Files |
-|-------|--------|-------------|----------|
-| 2A — Symbol Expansion | ✅ Done | 59 (`test_latex_symbols.ls`) | `symbols.ls` (+110 mappings) |
-| 2C — Spacing Commands | ✅ Done | (covered by baseline) | `elements/spacing.ls` (13 functions) |
-| 2B — Box Commands | ✅ Done | 31 (`test_latex_boxes.ls`) | `elements/boxes.ls` (new, 13 commands) |
-| 2D — Font Declarations | ✅ Done | 40 (`test_latex_font_decl.ls`) | `elements/font_decl.ls` (new), `render2.ls`, `css.ls` |
-| 2E — Appendix & Counters | ✅ Done | (in `test_latex_font_decl.ls`) | `analyze.ls`, 3 docclass files |
-| 2F — Color Support | ✅ Done | 37 (`test_latex_color.ls`) | `elements/color.ls` (new), `render2.ls`, `analyze.ls`, `css.ls` |
-| 2H — Enhanced Lists | ✅ Done | (in color tests + CSS) | `render2.ls` (custom labels), `css.ls` (nested styles) |
-| 2G — Picture Environment | ❌ Not started | — | — |
-| 2I — `\includegraphics` Options | ✅ Done | 21 (`test_latex_includegraphics.ls`) | `render2.ls`, `util.ls` (new: `parse_kv_options`, `text_of_skip_brack`) |
-| 2J — LaTeXML Features | ❌ Not started | — | — |
+| Phase                           | Status        | Tests Added                          | Key Files                                                                                                                      |
+| ------------------------------- | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| 2A — Symbol Expansion           | ✅ Done        | 59 (`test_latex_symbols.ls`)         | `symbols.ls` (+110 mappings)                                                                                                   |
+| 2C — Spacing Commands           | ✅ Done        | (covered by baseline)                | `elements/spacing.ls` (13 functions)                                                                                           |
+| 2B — Box Commands               | ✅ Done        | 31 (`test_latex_boxes.ls`)           | `elements/boxes.ls` (new, 13 commands)                                                                                         |
+| 2D — Font Declarations          | ✅ Done        | 40 (`test_latex_font_decl.ls`)       | `elements/font_decl.ls` (new), `render.ls`, `css.ls`                                                                           |
+| 2E — Appendix & Counters        | ✅ Done        | (in `test_latex_font_decl.ls`)       | `analyze.ls`, 3 docclass files                                                                                                 |
+| 2F — Color Support              | ✅ Done        | 37 (`test_latex_color.ls`)           | `elements/color.ls` (new), `render.ls`, `analyze.ls`, `css.ls`                                                                 |
+| 2H — Enhanced Lists             | ✅ Done        | (in color tests + CSS)               | `render.ls` (custom labels), `css.ls` (nested styles)                                                                          |
+| 2G — Picture Environment        | ✅ Done        | 21 (`test_latex_picture.ls`)         | `elements/picture.ls` (new, ~525 lines — SVG rendering for circle, line, vector, oval, qbezier, text, multiput, linethickness) |
+| 2I — `\includegraphics` Options | ✅ Done        | 21 (`test_latex_includegraphics.ls`) | `render.ls`, `util.ls` (new: `parse_kv_options`, `text_of_skip_brack`)                                                         |
+| 2J — LaTeXML Features           | ✅ Done        | 26 (`test_latex_m7.ls`)              | `analyze.ls`, `render.ls`, `macros.ls`, `css.ls`, `util.ls`, `elements/color.ls`                                                |
 
-**Bugfix applied:** Fixed `render_font()` CSS class mismatch — `textsf`/`textsc`/`textsl`/`textrm` now use `latex-sf`/`latex-sc`/`latex-sl`/`latex-rm` matching actual CSS selectors.
+**Bugfixes applied:**
+- Fixed `render_font()` CSS class mismatch — `textsf`/`textsc`/`textsl`/`textrm` now use `latex-sf`/`latex-sc`/`latex-sl`/`latex-rm` matching actual CSS selectors.
+- Fixed `to_html.ls` segfault during transpilation — root cause was `collect_captures_from_node` in `build_ast.cpp` casting `AstLoopNode*` to `AstNamedNode*`, reading `index_name` field as `AstNode*` pointer for `for (k, v at el)` two-variable iteration. Fix: use correct `AstLoopNode*` cast.
+- Fixed 6 syntax errors in `analyze.ls` — stray `}`, missing parentheses on `if` conditions, mixed if-expression/if-statement syntax in `walk_setcounter`/`walk_definecolor`/`parse_rgb_float`.
+
+**Math integration verified:** Full LaTeX → HTML pipeline now works end-to-end including math rendering. Inline math (e.g. `$x^2 + y^2 = z^2$`) is dispatched through `math_bridge.ls` to the math package (`lambda/package/math/math.ls`), producing KaTeX-compatible HTML with proper superscripts, spacing, and font classes. Tested via `latex.render_file_to_html("test.tex")`.
 
 ---
 
@@ -159,7 +164,7 @@ Misc: `\checkmark` → ✓, `\textreferencemark` → ※, `\textordfeminine` →
 - `\char"XX` — same, TeX-style
 - `^^XX` / `^^^^XXXX` — character code input (may need parser support)
 
-**Files modified:** `symbols.ls` (add mappings), `render2.ls` (add dispatch cases for new symbol commands)
+**Files modified:** `symbols.ls` (add mappings), `render.ls` (add dispatch cases for new symbol commands)
 
 ---
 
@@ -196,7 +201,7 @@ Low-level boxes:
 3. Map vertical `pos`: `t` → top, `b` → bottom, `c`/`m` → middle → CSS `vertical-align`
 4. Recursively render inner content via `dispatcher.render_children_of()`
 
-**Files:** Create `elements/boxes.ls`, update `render2.ls` dispatch table
+**Files:** Create `elements/boxes.ls`, update `render.ls` dispatch table
 
 ---
 
@@ -224,7 +229,7 @@ Update `elements/spacing.ls`:
 | `\/` | Zero-width (italic correction, ligature break) |
 | `\ ` (backslash-space) | Normal space (already handled?) |
 
-**Files:** Update `elements/spacing.ls`, `render2.ls` dispatch
+**Files:** Update `elements/spacing.ls`, `render.ls` dispatch
 
 ---
 
@@ -258,7 +263,7 @@ Alignment declarations:
 | `\raggedright` | `text-align:left` |
 | `\raggedleft` | `text-align:right` |
 
-**Files:** Update `render2.ls` dispatch, possibly new `elements/font_decl.ls`
+**Files:** Update `render.ls` dispatch, possibly new `elements/font_decl.ls`
 
 ---
 
@@ -285,7 +290,7 @@ Alignment declarations:
 - `\Alph{counter}` → "A", "B", "C"
 - `\fnsymbol{counter}` → *, †, ‡, §, ¶
 
-**Files:** `analyze.ls` (appendix detection, secnumdepth), `render2.ls` (dispatch `\appendix`), docclass modules (counter formatting)
+**Files:** `analyze.ls` (appendix detection, secnumdepth), `render.ls` (dispatch `\appendix`), docclass modules (counter formatting)
 
 ---
 
@@ -307,7 +312,7 @@ Alignment declarations:
 - RGB: `{R,G,B}` where values are 0–1 → `rgb(R*255, G*255, B*255)`
 - HTML: `{RRGGBB}` → `#RRGGBB`
 
-**Files:** New `elements/color.ls`, update `render2.ls` dispatch
+**Files:** New `elements/color.ls`, update `render.ls` dispatch
 
 ---
 
@@ -355,7 +360,7 @@ picture AST → walk children → build SVG elements → output <svg>
 
 Note: Y-axis in LaTeX picture is bottom-up; SVG is top-down. Apply `transform="scale(1,-1)"` or flip coordinates.
 
-**Files:** New `elements/picture.ls` (~300 lines), update `render2.ls` dispatch, add SVG-aware serialization to `to_html.ls`
+**Files:** New `elements/picture.ls` (~300 lines), update `render.ls` dispatch, add SVG-aware serialization to `to_html.ls`
 
 ---
 
@@ -381,7 +386,7 @@ enumerate levels:
 
 **Custom item labels:** `\item[-]` → render with specified label instead of default marker.
 
-**Files:** Update list rendering in `render2.ls`, add CSS rules to `css.ls`
+**Files:** Update list rendering in `render.ls`, add CSS rules to `css.ls`
 
 ---
 
@@ -400,7 +405,7 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 | `keepaspectratio` | Add `object-fit:contain` |
 | `trim=l b r t`, `clip` | `style="clip-path:inset(t r b l)"` (approximate) |
 
-**Files:** Update `render2.ls` `render_includegraphics()`, add option parser to `util.ls`
+**Files:** Update `render.ls` `render_includegraphics()`, add option parser to `util.ls`
 
 ---
 
@@ -445,7 +450,7 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 - `\nameref{sec:intro}` → "Introduction" (uses the section title)
 - Requires label-to-type mapping in analysis pass
 
-**Files:** `analyze.ls` (theorem defs, `\autoref` labels), `render2.ls` (new dispatches), `macros.ls` (optional args)
+**Files:** `analyze.ls` (theorem defs, `\autoref` labels), `render.ls` (new dispatches), `macros.ls` (optional args)
 
 ---
 
@@ -454,7 +459,7 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 | File | Changes |
 |------|---------|
 | `symbols.ls` | +100 symbol mappings (textgreek, textcomp, gensymb, non-ASCII) |
-| `render2.ls` | ~40 new dispatch cases (boxes, spacing, font decls, colors, picture, symbols) |
+| `render.ls` | ~40 new dispatch cases (boxes, spacing, font decls, colors, picture, symbols) |
 | `elements/spacing.ls` | Add `\noindent`, `\bigskip`, `\medskip`, `\smallskip`, breaks, `\quad`, `\qquad`, `\enspace`, `\\[len]` |
 | `elements/boxes.ls` | **New file** — `\fbox`, `\mbox`, `\makebox`, `\framebox`, `\parbox`, `\raisebox`, `\llap`, `\rlap`, `\smash`, `\phantom` |
 | `elements/picture.ls` | **New file** — Picture environment → SVG rendering |
@@ -494,7 +499,7 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 - **Tests:** `test_latex_font_decl.ls` (40 tests)
 - **Implementation details:**
   - `elements/font_decl.ls` — new module with `FONT_DECL_STYLES` (9 entries) and `ALIGN_DECL_STYLES` (3 entries)
-  - `render2.ls` — `find_leading_decl()` detects declarations in groups/paragraphs, wraps children in styled `<span>`/`<div>`/`<p>`
+  - `render.ls` — `find_leading_decl()` detects declarations in groups/paragraphs, wraps children in styled `<span>`/`<div>`/`<p>`
   - `analyze.ls` — `walk_appendix()` resets counters and sets appendix mode; `walk_setcounter()` handles `secnumdepth`
   - All 3 docclass files — `format_section_number()` uses letter lookup table (A–Z) in appendix mode
 
@@ -507,7 +512,7 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 - **Implementation details:**
   - `elements/color.ls` — new module (167 lines): `NAMED_COLORS` map (19 entries), `parse_color_model()` with rgb/gray/HTML support, `resolve_color()` with custom color map lookup, `render_textcolor()`, `render_colorbox()`, `render_fcolorbox()`, `render_pagecolor()`
   - `analyze.ls` — `walk_definecolor()` registers custom colors during analysis pass
-  - `render2.ls` — dispatches color commands, passes `custom_colors` map from analysis
+  - `render.ls` — dispatches color commands, passes `custom_colors` map from analysis
   - `css.ls` — 4-level nested itemize markers (`disc` → `\2013` → `\2217` → `\00B7`), 4-level enumerate styles (`decimal` → `lower-alpha` → `lower-roman` → `upper-alpha`)
 
 ### Milestone 5: `\includegraphics` Options (Phase 2I) — ✅ COMPLETE
@@ -519,17 +524,62 @@ Parse optional arguments `[key=value,...]` from the `\includegraphics` node:
 - **Implementation details:**
   - `util.ls` — new `parse_kv_options(text)` parses comma-separated `key=value` pairs into a map via `map([k1, v1, k2, v2, ...])`, handles flags (e.g. `keepaspectratio` → `"true"`), trims whitespace, skips empty parts
   - `util.ls` — new `text_of_skip_brack(el)` extracts text from element children while skipping `brack_group` elements
-  - `render2.ls` — `render_includegraphics()` extracts `brack_group` optional args, parses key-value options, builds CSS `style` attribute with width/height/transform(scale+rotate)/object-fit/clip-path
+  - `render.ls` — `render_includegraphics()` extracts `brack_group` optional args, parses key-value options, builds CSS `style` attribute with width/height/transform(scale+rotate)/object-fit/clip-path
 
-### Milestone 6: Picture Environment (Phase 2G)
-- **Effort:** ~400 lines, ~2 sessions
-- **Unlocks:** Showcase §9 (Picture) — all 7 diagrams
-- **Test:** SVG output matches picture geometry; lines, circles, vectors, Bézier curves visible
+### Milestone 6: Picture Environment (Phase 2G) ✅ COMPLETE
+- **Effort:** ~525 lines in `elements/picture.ls`, 2 sessions
+- **Baseline:** 446/446 (was 444 before picture test added)
+- **Test:** 21 assertions in `test_latex_picture.ls` covering parse_coord, circle, line, vector, oval, text, qbezier, multiput, empty picture
+- **Key design decisions:**
+  - Coordinates returned as `["x_str", "y_str"]` string arrays (not `[float, float]`) to avoid transpiler map-inference bug
+  - If-expressions extracted into helper functions (`pic_dim`, `safe_int`, `line_dx`, `line_dy`, `strip_unit`, `float_or`) to work around transpiler wrapping if-expr results as Map type
+  - Dynamic SVG children via `for child in items { child }` — `format('xml')` correctly flattens the list wrapper
+  - Y-axis flip: `flip_y(y, ht) = ht - y` with scale factor `sc = 10.0`
+  - Arrow markers via `<defs><marker id="arrowhead">` with `marker-end:url(#arrowhead)`
+  - `render.ls` dispatch: `case 'picture': picture.render_picture(el)`
+- **E2E pipeline:** Full pipeline (`latex.render_file_to_html`) now works end-to-end including math rendering, after fixing `build_ast.cpp` segfault (AstLoopNode cast) and 6 syntax errors in `analyze.ls`
 
-### Milestone 7: LaTeXML Features (Phase 2J)
-- **Effort:** ~200 lines, ~1 session
-- **Unlocks:** `\newtheorem`, booktabs, optional macro args, `\input`, `\autoref`
-- **Test:** Custom theorem envs render with correct labels and numbering
+### Milestone 7: LaTeXML Features (Phase 2J) — ✅ COMPLETE
+- **Completed:** 2026-02-26
+- **Effort:** ~400 lines across 6 files, 2 sessions
+- **Baseline:** 448/448 (was 446 before M7 tests added)
+- **Tests:** 26 assertions in `test_latex_m7.ls` covering macro parsing, theorem numbering, booktabs, autoref, nameref, optional arg expansion
+- **Features implemented:**
+
+**2J.1 — `\newtheorem` (custom theorem definitions)**
+- `\newtheorem{thm}{Theorem}` — registers named environment with display label
+- `\newtheorem{lem}[thm]{Lemma}` — shares counter with another theorem type (Theorem 1 → Lemma 2 → Theorem 3)
+- `\newtheorem*{remark}{Remark}` — unnumbered variant (no counter)
+- `\newtheorem{defn}{Definition}` — independent counter (Definition 1, Definition 2, …)
+- Analysis pass (`analyze.ls`): `walk_newtheorem()` and `walk_newtheorem_star()` store defs as entry-lists with `{name, label, counter, numbered}` fields; `walk_theorem_like()` checks custom defs before falling back to built-in theorem dispatch
+- Render pass (`render.ls`): `render_theorem_like()` checks custom defs first; `render_custom_theorem()` handles both numbered and unnumbered display with `<span class="latex-theorem-head">`
+- CSS (`css.ls`): Added per-theorem-type styling rules
+
+**2J.2 — Booktabs table rules**
+- `\toprule` → `<tr class="latex-booktabs-toprule">` with `border-top: 2px solid`
+- `\midrule` → `<tr class="latex-booktabs-midrule">` with `border-top: 1px solid`
+- `\bottomrule` → `<tr class="latex-booktabs-bottomrule">` with `border-bottom: 2px solid`
+- Implementation: `handle_hline_child()` in `render.ls` detects booktabs commands and applies CSS classes to the next table row; `append_row()` helper accumulates rows to work around JIT array concat issues
+
+**2J.3 — `\newcommand` optional arguments**
+- `\newcommand{\cmd}[2][default]{body}` — macro with required arg count and default value for optional first arg
+- `macros.ls`: `make_def_with_default()` stores `default_arg` in macro definition; `find_body_with_default()` chain detects second `brack_group` as default value
+- `render.ls`: `build_macro_args()` checks `has_optional_arg()` on call site — if present, uses it; otherwise calls `prepend_default()` to insert the default value
+
+**2J.4 — `\autoref` / `\nameref`**
+- `\autoref{label}` → "Section 1", "Theorem 1", "Figure 2", "Table 1" (auto-generates type prefix from label info)
+- `\nameref{label}` → "Introduction" (uses the heading/environment title text)
+- `render.ls`: `render_autoref()` with `autoref_prefix()` mapping (section→"Section\u00A0", figure→"Figure\u00A0", table→"Table\u00A0", theorem→"Theorem\u00A0", etc.); `render_nameref()` with `get_nameref_display()` extracting title from label info
+- `analyze.ls`: `walk_label()` stores heading title text in label info for nameref lookup
+
+**Entry-list pattern:**
+All dynamic key-value stores in the analyze pass use entry-lists `[{key: k, val: v}, ...]` with `util.lookup(entries, key)` for retrieval. This works around a fundamental JIT bug where `{m, map([k, v])}` spread-merge doesn't preserve dynamically-added entries. Affected stores: `labels`, `heading_nums`, `heading_titles`, `footnote_map`, `slug_counts`, `custom_colors`, `theorem_defs`, `custom_counters`.
+
+**Key design decisions:**
+- Separate `walk_newtheorem()` / `walk_newtheorem_star()` functions (not a boolean flag in if-expression) to avoid JIT mixed-type issues
+- `step_and_get_fixed()` / `step_and_get_custom()` separate functions for counter stepping — JIT if-expressions with mixed counter types produce corrupted values
+- `lookup_custom_color()` in `color.ls` checks `custom_colors is array` to handle both entry-list format (from live analysis) and regular map format (from unit tests)
+- Inlined CSS class strings in `handle_hline_child()` instead of symbol lookup — works around JIT symbol comparison bug in multi-branch if-chains
 
 ---
 
@@ -559,11 +609,12 @@ For each phase, add test cases to `test/lambda/` with `.ls` + `.txt` pairs:
 | `test_latex_symbols.ls` | All 100+ new symbol commands | ✅ 59 tests |
 | `test_latex_boxes.ls` | `\fbox`, `\makebox`, `\framebox`, `\parbox`, `\phantom` | ✅ 31 tests |
 | `test_latex_font_decl.ls` | `\itshape`, `\bfseries`, `\raggedleft`, appendix numbering | ✅ 40 tests |
+| `test_latex_m7.ls` | `\newtheorem`, booktabs, `\autoref`, `\nameref`, optional macro args | ✅ 26 tests |
 | `test_latex_spacing.ls` | `\noindent`, `\bigskip`, `\quad`, `\\[len]`, etc. | planned |
 | `test_latex_color.ls` | `\textcolor`, `\colorbox`, `\definecolor`, nested list styles | ✅ 37 tests |
 | `test_latex_includegraphics.ls` | `parse_kv_options`, `text_of_skip_brack`, option parsing edge cases | ✅ 21 tests |
-| `test_latex_picture.ls` | Picture env → SVG output | planned |
-| `test_latex_appendix.ls` | `\appendix`, `secnumdepth` (expanded tests) | planned |
+| `test_latex_picture.ls` | Picture env → SVG output | ✅ 21 tests |
+| `test_latex_appendix.ls` | `\appendix`, `secnumdepth` (expanded tests) | planned (covered in `test_latex_font_decl.ls`) |
 
 ### 7.3 Baseline Must Pass
 
@@ -572,7 +623,7 @@ All 434 existing baseline tests must continue passing after each phase. Run:
 make test-lambda-baseline
 ```
 
-**Current baseline: 444/444** (434 original + 10 new test files from Phases 2A–2I).
+**Current baseline: 448/448** (434 original + 14 new from Phases 2A–2J).
 
 ---
 
@@ -585,7 +636,7 @@ make test-lambda-baseline
 | Symbol coverage | 100+ new symbols render as correct Unicode |
 | Box commands | All 10 box commands produce correct layout |
 | Picture environment | All 7 showcase diagrams render as SVG |
-| No regressions | 434+ baseline tests pass | ✅ 440/440 passing |
+| No regressions | 434+ baseline tests pass | ✅ 448/448 passing |
 | Code quality | All new code follows Lambda conventions (pure functional, no mutation) |
 
 ---
@@ -716,3 +767,76 @@ map_get ANY type is UNKNOWN: 25
 **Impact:** These warnings appeared during color and font declaration tests but did not cause test failures. Without source line information, they are difficult to investigate or silence.
 
 **Suggestion:** Include source file and line number in runtime warning messages, or provide a `--warn-trace` flag for detailed diagnostics.
+
+### A.7 JIT `set_key` / Map Spread-Merge Broken for Dynamic Keys (Severity: Critical)
+
+The spread-merge pattern `{m, map([k, v])}` where `k` is a runtime-computed variable does not preserve the new entry in the resulting map. This makes it impossible to build maps with dynamic keys incrementally in JIT-compiled code.
+
+```lambda
+let m = {}
+let k = "foo"
+let m2 = {m, map([k, "bar"])}   // EXPECTED: {foo: "bar"}
+m2["foo"]                         // ACTUAL: null (entry lost)
+```
+
+**Impact:** This is the most severe JIT bug encountered. Every dynamic key-value store in the LaTeX package had to be redesigned.
+
+**Workaround:** Entry-list pattern — store key-value pairs as `[{key: k, val: v}, ...]` arrays with linear lookup via `util.lookup(entries, key)`. An `add_entry(entries, k, v)` helper appends new entries. All 8 dynamic stores in `analyze.ls` use this pattern: `labels`, `heading_nums`, `heading_titles`, `footnote_map`, `slug_counts`, `custom_colors`, `theorem_defs`, `custom_counters`.
+
+### A.8 JIT Symbol Comparison in Multi-Branch If-Chains (Severity: High)
+
+When a function uses multiple `if ... else if ...` branches comparing a parameter against different symbol values, the JIT may always return the result from the first branch:
+
+```lambda
+fn classify(name) =
+  if (name == 'toprule') "top"
+  else if (name == 'midrule') "mid"
+  else if (name == 'bottomrule') "bottom"
+  else ""
+
+classify('midrule')    // EXPECTED: "mid", ACTUAL: "top"
+```
+
+**Impact:** Caused booktabs table rules to all render with the same CSS class.
+
+**Workaround:** Inline the result strings at the call site rather than dispatching through a classifier function. Or use a map lookup instead of branching.
+
+### A.9 JIT Array Concatenation in If-Expression Branches (Severity: High)
+
+Using `acc ++ [item]` inside branches of an if-expression causes type corruption — the result may be wrapped as a map instead of an array:
+
+```lambda
+let rows = if (has_class) { acc ++ [<tr class=cls>] } else { acc ++ [<tr>] }
+// ACTUAL: rows becomes {[null nested map]} instead of array
+```
+
+**Impact:** Caused empty table bodies in booktabs rendering.
+
+**Workaround:** Extract the conditional accumulation into a helper function that uses if-statements (not if-expressions):
+
+```lambda
+fn append_row(acc, cls) = {
+  if (cls != "") { acc ++ [<tr class=cls>] }
+  else { acc ++ [<tr>] }
+}
+```
+
+### A.10 JIT Mixed-Type If-Expressions (Severity: Medium)
+
+If-expressions where both branches produce values through different code paths (e.g., one branch steps a fixed counter, the other steps a custom counter) may produce corrupted values like `{[null nested map]}`:
+
+```lambda
+let num = if (is_fixed) { step_fixed(state, name) } else { step_custom(state, name) }
+// ACTUAL: num may be {[null nested map]}
+```
+
+**Impact:** Caused theorem numbers to display as garbage text instead of "1", "2", "3".
+
+**Workaround:** Dispatch to entirely separate functions rather than using conditional branching:
+
+```lambda
+fn get_number(state, def) = {
+  if (def.counter == def.name) { step_and_get_fixed(state, def.name) }
+  else { step_and_get_custom(state, def.counter) }
+}
+```
