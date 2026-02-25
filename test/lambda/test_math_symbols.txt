@@ -1,0 +1,9 @@
+"===== MATH SYMBOL TESTS =====1. alpha:α2. beta:β3. gamma:γ4. omega:ω5. theta:θ6. Gamma:Γ7. Delta:Δ8. Sigma:Σ9. Omega:Ω10. \alpha:α11. \infty:∞12. times:×13. cdot:⋅14. pm:±15. cup:∪16. cap:∩17. leq:≤18. geq:≥19. neq:≠20. equiv:≡21. subset:⊂22. in:∈23. rightarrow:→24. Rightarrow:⇒25. mapsto:↦26. iff:⟺27. infty:∞28. nabla:∇29. partial:∂30. forall:∀31. exists:∃32. emptyset:∅33. sum:∑34. prod:∏35. int:∫36. bigcup:⋃37. unknown:38. classify times:mbin39. classify leq:mrel40. classify rightarrow:mrel41. classify sum:mop42. classify alpha:mord43. classify sin:mop44. classify unknown:mord45. classify \pm:mbin46. classify \equiv:mrel47. op sin:sin48. op cos:cos49. op lim:lim50. op limsup:lim sup51. op det:det52. op unknown:53. accent hat:̂54. accent tilde:̃55. accent vec:⃗56. accent bar:̄57. accent unknown:58. delim big:"
+1.2
+"59. delim Big:"
+1.8
+"60. delim bigg:"
+2.4
+"61. delim Bigg:"
+3
+"===== ALL SYMBOL TESTS DONE ====="

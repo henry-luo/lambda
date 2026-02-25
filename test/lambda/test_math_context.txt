@@ -1,0 +1,41 @@
+"===== MATH CONTEXT TESTS =====1. display style:display2. display size:"
+1
+"3. display font:mathit4. display cramped:"
+false
+"5. display phantom:"
+false
+"6. text style:text7. text size:"
+1
+"8. text cramped:"
+false
+"9. dc is_display:"
+true
+"10. tc is_display:"
+false
+"11. derive color:#ff000012. derive keeps style:display13. derive keeps font:mathit14. derive font:mathbf15. derive cramped:"
+true
+"16. derive keeps color:17. numer of display:text18. numer cramped:"
+false
+"19. numer of text:script20. numer of script:scriptscript21. denom of display:text22. denom cramped:"
+true
+"23. denom of text:script24. denom of text cramped:"
+true
+"25. sup of display:script26. sup of text:script27. sup of script:scriptscript28. sub of display:script29. sub cramped:"
+true
+"30. sub of text:script31. display is_script:"
+false
+"32. text is_script:"
+false
+"33. script is_script:"
+true
+"34. scriptscript is_script:"
+true
+"35. display scale:"
+1
+"36. text scale:"
+1
+"37. script scale:"
+0.7
+"38. scriptscript scale:"
+0.5
+"39. display font_css:40. script font_css:70%41. scriptscript font_css:50%===== ALL CONTEXT TESTS DONE ====="
