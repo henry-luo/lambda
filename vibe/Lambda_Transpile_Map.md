@@ -484,10 +484,78 @@ When any condition fails, the transpiler falls back to the existing runtime path
 
 | Phase | Description | Status |
 |---|---|---|
-| Phase 1 | C struct typedef emission (`_type_Point`) | Not started — current implementation uses inline byte offsets instead |
-| Phase 4 | Map literal construction optimization (`map_fill` bypass) | Not started |
 | Phase 5 | Object method field loading (`_self_data->field`) | Not started |
 | Phase 6 | Object method field write-back | Not started |
 | Phase 7 | Typed function parameter passing (`Map*` signatures) | Not started |
 | — | Chained member access (`a.b.c` direct access) | Not started — requires propagating native pointer through chain |
 | — | Unboxed context reads (no boxing when target is native type) | Not started |
+
+### Completed: Phase 1 (Struct Typedef Emission) and Phase 4 (Direct Map Construction)
+
+Building on the Phase 2/3 inline byte-offset work, Phase 1 emits proper C struct typedefs for named map/object types in the transpiled preamble, and Phase 4 replaces `map_fill()` varargs with direct byte-offset writes during map literal construction.
+
+#### Phase 1: Struct Typedef Emission
+
+Named map types (from `type Name = {…}`) now generate C struct typedefs in the transpiled preamble:
+
+```c
+typedef struct _type_Point {
+  int64_t x;
+  int64_t y;
+} _type_Point;
+typedef struct _type_Person {
+  String* name;
+  int64_t age;
+  bool active;
+} _type_Person;
+```
+
+**Implementation**: `emit_struct_typedefs()` iterates `type_list`, finds `TypeMap`/`TypeObject` entries with non-NULL `struct_name`, and emits a C typedef matching the packed data layout. Called once in `transpile_ast_root` between closure env pre-defines and function forward declarations.
+
+**Helper**: `write_c_field_type()` maps Lambda `TypeId` → C type names (bool, int64_t, double, String*, Symbol*, void*, etc.).
+
+#### Phase 4: Direct Map Literal Construction
+
+Map literals with known shapes now bypass `map_fill()` (which uses va_list + per-field type-switch) and instead write directly to the allocated data buffer at compile-time-known byte offsets.
+
+**Before (all maps):**
+```c
+({Map* m = map(2);
+ map_fill(m, i2it(10), i2it(20));})
+```
+
+**After (maps with valid shapes):**
+```c
+({Map* m = map(2);
+ m->data=heap_data_calloc(16);
+ *(int64_t*)((char*)(m)->data+0)=it2i(i2it(10));
+ *(int64_t*)((char*)(m)->data+8)=it2i(i2it(20));
+ m->data_cap=16; m;})
+```
+
+**Eligibility**: Works for ALL map literals with valid shapes (named or anonymous), not just named types. Requirements: shape is non-null, all fields named (no spreads), all byte offsets aligned, byte_size > 0, all field types are concrete.
+
+#### Files Modified (Phase 1 + Phase 4)
+
+| File | Changes |
+|---|---|
+| `lambda/transpile.cpp` | Added `write_c_field_type()`, `emit_struct_typedefs()` functions; modified `transpile_map_expr()` for direct construction; added `unwrap_type_type` parameter to `resolve_field_type_id()` |
+| `lambda/lambda.h` | Added `heap_data_calloc()` declaration in `extern "C"` block |
+| `lambda/mir.c` | Added `heap_data_calloc` to MIR native function resolution table |
+
+#### Bugs Found and Fixed (Phase 1 + Phase 4)
+
+1. **Missing `m;` return value** — Statement expression `({Map* m = map(...); ...; m->data_cap=N;})` returned the integer `N` instead of `Map* m`, causing null pointer crashes. **Fix**: Added `m;` at end of direct construction block.
+
+2. **`heap_data_calloc` not resolvable by MIR** — Declared in `lambda.h` but not registered in MIR's native function table, causing "failed to resolve native fn/pn: heap_data_calloc" error. **Fix**: Added to `mir.c` function registration table.
+
+3. **Symbol/binary fields stored as null** — Used `it2s()` to unbox symbol/binary Items, but `it2s()` only handles `LMD_TYPE_STRING` and returns nullptr for other types. **Fix**: Changed all pointer-type fields (string, symbol, binary, decimal, containers) to use generic tag-stripping: `(void*)((uint64_t)(item) & 0x00FFFFFFFFFFFFFFULL)`.
+
+4. **DateTime fields stored as pointer instead of value** — Default case stored the tagged pointer as `void*`, but DateTime is a value type (stored as uint64_t in the packed struct, not a pointer). **Fix**: Added dedicated `LMD_TYPE_DTIME` case that dereferences the heap pointer: `*(DateTime*)((uint64_t)(item) & mask)`.
+
+5. **`resolve_field_type_id` crash on anonymous maps** — Function blindly cast `Type*` with `type_id == LMD_TYPE_TYPE` to `TypeType*` and accessed `->type`. Anonymous map shape entries store plain `Type` structs (smaller than `TypeType`), causing out-of-bounds memory access. **Fix**: Added `unwrap_type_type` parameter; only unwrap for named types (where shape entries are proper `TypeType` structs).
+
+#### Test Coverage
+
+- **467/467** baseline tests pass
+- Direct construction verified on typed_map_direct_access.ls: all 6 map literals use `heap_data_calloc` + byte-offset writes instead of `map_fill`
