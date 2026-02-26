@@ -1124,8 +1124,43 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         // else { ast_node->type = nested ? nested : &TYPE_ANY; }
         ast_node->type = &TYPE_ANY;
     }
-    else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
-        ast_node->type = &TYPE_ANY;  // todo: derive field type
+    else if (ast_node->object->type->type_id == LMD_TYPE_MAP
+          || ast_node->object->type->type_id == LMD_TYPE_OBJECT) {
+        // resolve field type from map/object shape for unboxed access optimization
+        TypeMap* map_type = (TypeMap*)ast_node->object->type;
+        if (map_type->struct_name && map_type->shape
+            && ast_node->field && ast_node->field->node_type == AST_NODE_IDENT) {
+            AstIdentNode* field_id = (AstIdentNode*)ast_node->field;
+            Type* resolved_type = NULL;
+            ShapeEntry* se = map_type->shape;
+            while (se) {
+                if (se->name && (int)se->name->length == (int)field_id->name->len
+                    && strncmp(se->name->str, field_id->name->chars, se->name->length) == 0) {
+                    // found — unwrap TypeType for type-defined maps
+                    Type* ft = se->type;
+                    if (ft && ft->type_id == LMD_TYPE_TYPE) {
+                        ft = ((TypeType*)ft)->type;
+                    }
+                    resolved_type = ft;
+                    break;
+                }
+                se = se->next;
+            }
+            if (resolved_type) {
+                TypeId rid = resolved_type->type_id;
+                // only resolve scalar types that have matching unbox functions
+                if (rid == LMD_TYPE_INT || rid == LMD_TYPE_INT64 || rid == LMD_TYPE_FLOAT
+                    || rid == LMD_TYPE_BOOL || rid == LMD_TYPE_STRING) {
+                    ast_node->type = alloc_type(tp->pool, rid, sizeof(Type));
+                } else {
+                    ast_node->type = &TYPE_ANY;
+                }
+            } else {
+                ast_node->type = &TYPE_ANY;  // field not in shape (e.g. method name)
+            }
+        } else {
+            ast_node->type = &TYPE_ANY;
+        }
     }
     else {
         ast_node->type = &TYPE_ANY;
@@ -1586,13 +1621,17 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             log_debug("Debug: entry->node->type is %p for identifier %.*s",
                 entry->node->type, (int)entry->name->len, entry->name->chars);
             ast_node->type = entry->node->type;
-            // For function parameters with TypeUnary annotation (int[], float[]),
-            // use the full_type pointer to get the real TypeUnary (not the TypeParam copy)
-            if (entry->node->node_type == AST_NODE_PARAM && entry->node->type &&
-                entry->node->type->kind == TYPE_KIND_UNARY) {
-                TypeParam* pt = (TypeParam*)entry->node->type;
-                if (pt->full_type) {
-                    ast_node->type = pt->full_type;
+            // For function parameters with complex type annotations,
+            // use the full_type pointer to get the real type (not the TypeParam copy).
+            // This enables direct struct access (Phase 2/3/7) on typed params.
+            if (entry->node->node_type == AST_NODE_PARAM && entry->node->type) {
+                TypeId ptid = entry->node->type->type_id;
+                if (entry->node->type->kind == TYPE_KIND_UNARY ||
+                    ptid == LMD_TYPE_MAP || ptid == LMD_TYPE_OBJECT || ptid == LMD_TYPE_ELEMENT) {
+                    TypeParam* pt = (TypeParam*)entry->node->type;
+                    if (pt->full_type) {
+                        ast_node->type = pt->full_type;
+                    }
                 }
             }
             if (!ast_node->type) {
@@ -3068,6 +3107,14 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             ast_node->as = type_expr;
             if (type_expr && type_expr->type) {
                 ast_node->type = type_expr->type;  // Keep as TypeType* wrapper
+                // propagate declaration name to TypeMap for direct field access optimization
+                Type* inner = type_expr->type;
+                if (inner && inner->type_id == LMD_TYPE_TYPE) {
+                    Type* actual = ((TypeType*)inner)->type;
+                    if (actual && actual->type_id == LMD_TYPE_MAP && ast_node->name) {
+                        ((TypeMap*)actual)->struct_name = ast_node->name->chars;
+                    }
+                }
             } else {
                 log_warn("type definition: failed to build type expression");
                 ast_node->type = &TYPE_ANY;
@@ -3620,6 +3667,8 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     ast_node->name = name_pool_create_strview(tp->name_pool, name);
     obj_type->type_name.str = ast_node->name->chars;
     obj_type->type_name.length = ast_node->name->len;
+    // set struct_name for direct field access optimization (Phase 5/6)
+    obj_type->struct_name = ast_node->name->chars;
     log_debug("build_object_type: name='%.*s'", (int)name.length, name.str);
 
     // get optional base type (inheritance)
@@ -5301,13 +5350,21 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
             if (type_type->type) {
                 // Copy base Type fields
                 *(Type*)param_type = *type_type->type;
-                // For complex types (TypeBinary, TypeUnary), store pointer to full type
+                // For complex types (TypeBinary, TypeUnary) and named map/object types,
+                // store pointer to full type so that downstream code can access
+                // extended fields (shape, struct_name, methods, etc.)
                 if (type_type->type->kind == TYPE_KIND_BINARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has union type, storing full_type pointer");
                 } else if (type_type->type->kind == TYPE_KIND_UNARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has occurrence type, storing full_type pointer");
+                } else if (type_type->type->type_id == LMD_TYPE_MAP ||
+                           type_type->type->type_id == LMD_TYPE_OBJECT ||
+                           type_type->type->type_id == LMD_TYPE_ELEMENT) {
+                    // Phase 7: store full TypeMap/TypeObject/TypeElmt so direct
+                    // struct access (Phase 2/3) works on typed function params
+                    param_type->full_type = type_type->type;
                 } else {
                     param_type->full_type = NULL;
                 }
@@ -5779,6 +5836,8 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry->node;
                 TypeType* tt = (TypeType*)obj_node->type;
                 TypeObject* obj_type = (TypeObject*)tt->type;
+                // set struct_name for direct field access optimization (Phase 5/6)
+                obj_type->struct_name = obj_node->name->chars;
                 log_debug("pass 2: completing object type '%.*s'", (int)obj_name.length, obj_name.str);
 
                 // get optional base type

@@ -218,6 +218,12 @@ int js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 Item js_array_pop(Item array);
 
+// String, Array, Math method dispatchers (v3)
+Item js_string_method(Item str, Item method_name, Item* args, int argc);
+Item js_array_method(Item arr, Item method_name, Item* args, int argc);
+Item js_math_method(Item method_name, Item* args, int argc);
+Item js_math_property(Item prop_name);
+
 // Prototype and inheritance
 Item js_prototype_lookup(Item object, Item property);
 Item js_get_prototype(Item object);

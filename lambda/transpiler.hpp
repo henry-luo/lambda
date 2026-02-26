@@ -52,6 +52,7 @@ struct Runtime {
     unsigned int optimize_level;  // MIR JIT optimization level (0-2, default: 2)
     const char* transpile_dir;   // directory for transpiled C output files (NULL = current dir)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
+    void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)

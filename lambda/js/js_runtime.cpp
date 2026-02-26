@@ -5,6 +5,7 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "js_runtime.h"
+#include "js_dom.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -211,40 +212,32 @@ extern "C" Item js_add(Item left, Item right) {
         return fn_join(left_str, right_str);
     }
 
-    // Numeric addition
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l + r);
+    // Numeric addition — delegate to Lambda fn_add after coercion
+    return fn_add(js_to_number(left), js_to_number(right));
 }
 
 extern "C" Item js_subtract(Item left, Item right) {
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l - r);
+    return fn_sub(js_to_number(left), js_to_number(right));
 }
 
 extern "C" Item js_multiply(Item left, Item right) {
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l * r);
+    return fn_mul(js_to_number(left), js_to_number(right));
 }
 
 extern "C" Item js_divide(Item left, Item right) {
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l / r);  // JS division always produces float
+    return fn_div(js_to_number(left), js_to_number(right));
 }
 
 extern "C" Item js_modulo(Item left, Item right) {
+    // fn_mod does not support float types, so keep custom implementation
+    // that handles JS numeric coercion correctly
     double l = js_get_number(left);
     double r = js_get_number(right);
     return js_make_number(fmod(l, r));
 }
 
 extern "C" Item js_power(Item left, Item right) {
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(pow(l, r));
+    return fn_pow(js_to_number(left), js_to_number(right));
 }
 
 // =============================================================================
@@ -301,6 +294,17 @@ extern "C" Item js_not_equal(Item left, Item right) {
 extern "C" Item js_strict_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
+
+    // In JS, all numeric types (int, int64, float) are the same "number" type
+    // so int 0 === float 0.0 should be true (strict equality within number)
+    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
+    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    if (left_is_num && right_is_num) {
+        double l = js_get_number(left);
+        double r = js_get_number(right);
+        if (isnan(l) || isnan(r)) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(l == r)};
+    }
 
     // Different types are never strictly equal
     if (left_type != right_type) {
@@ -465,8 +469,7 @@ extern "C" Item js_unary_plus(Item operand) {
 }
 
 extern "C" Item js_unary_minus(Item operand) {
-    double val = js_get_number(operand);
-    return js_make_number(-val);
+    return fn_neg(js_to_number(operand));
 }
 
 extern "C" Item js_typeof(Item value) {
@@ -548,6 +551,10 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
+        if (js_is_dom_node(object)) {
+            return js_dom_get_property(object, key);
+        }
         // Check if this is a JS object (indicated by NULL type)
         if (m->type == NULL && m->data != NULL) {
             // This is a JS object using hashmap
@@ -787,4 +794,583 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             log_error("js_call_function: too many arguments (%d)", arg_count);
             return ItemNull;
     }
+}
+
+// =============================================================================
+// Helper: convert a JS number arg (typically float from push_d) to an int Item
+// Lambda fn_substring requires LMD_TYPE_INT, but JS literals arrive as floats.
+// =============================================================================
+static Item js_arg_to_int(Item arg) {
+    TypeId tid = get_type_id(arg);
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) return arg;
+    if (tid == LMD_TYPE_FLOAT) {
+        double d = arg.get_double();
+        return (Item){.item = i2it((int64_t)d)};
+    }
+    // fallback: try js_get_number
+    double d = js_get_number(arg);
+    return (Item){.item = i2it((int64_t)d)};
+}
+
+// =============================================================================
+// String Method Dispatcher
+// =============================================================================
+
+extern "C" Item js_string_method(Item str, Item method_name, Item* args, int argc) {
+    if (get_type_id(str) != LMD_TYPE_STRING || get_type_id(method_name) != LMD_TYPE_STRING) {
+        return ItemNull;
+    }
+    String* method = it2s(method_name);
+    if (!method) return ItemNull;
+
+    // match method name and delegate to Lambda fn_* functions
+    if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
+        if (argc < 1) return (Item){.item = i2it(-1)};
+        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+    }
+    if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
+        if (argc < 1) return (Item){.item = i2it(-1)};
+        return (Item){.item = i2it(fn_last_index_of(str, args[0]))};
+    }
+    if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
+        if (argc < 1) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(fn_contains(str, args[0]))};
+    }
+    if (method->len == 10 && strncmp(method->chars, "startsWith", 10) == 0) {
+        if (argc < 1) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(fn_starts_with(str, args[0]))};
+    }
+    if (method->len == 8 && strncmp(method->chars, "endsWith", 8) == 0) {
+        if (argc < 1) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(fn_ends_with(str, args[0]))};
+    }
+    if (method->len == 4 && strncmp(method->chars, "trim", 4) == 0) {
+        return fn_trim(str);
+    }
+    if (method->len == 9 && strncmp(method->chars, "trimStart", 9) == 0) {
+        return fn_trim_start(str);
+    }
+    if (method->len == 7 && strncmp(method->chars, "trimEnd", 7) == 0) {
+        return fn_trim_end(str);
+    }
+    if (method->len == 11 && strncmp(method->chars, "toLowerCase", 11) == 0) {
+        return fn_lower(str);
+    }
+    if (method->len == 11 && strncmp(method->chars, "toUpperCase", 11) == 0) {
+        return fn_upper(str);
+    }
+    if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
+        Item sep = argc > 0 ? args[0] : (Item){.item = s2it(heap_create_name(""))};
+        return fn_split(str, sep);
+    }
+    if (method->len == 9 && strncmp(method->chars, "substring", 9) == 0) {
+        if (argc < 1) return str;
+        Item start = js_arg_to_int(args[0]);
+        Item end_item;
+        if (argc > 1) {
+            end_item = js_arg_to_int(args[1]);
+        } else {
+            // JS substring(start) means from start to end of string
+            int64_t len = fn_len(str);
+            end_item = (Item){.item = i2it(len)};
+        }
+        return fn_substring(str, start, end_item);
+    }
+    if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+        if (argc < 1) return str;
+        Item start = js_arg_to_int(args[0]);
+        Item end_item;
+        if (argc > 1) {
+            end_item = js_arg_to_int(args[1]);
+        } else {
+            int64_t len = fn_len(str);
+            end_item = (Item){.item = i2it(len)};
+        }
+        return fn_substring(str, start, end_item);
+    }
+    if (method->len == 7 && strncmp(method->chars, "replace", 7) == 0) {
+        if (argc < 2) return str;
+        return fn_replace(str, args[0], args[1]);
+    }
+    if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        return fn_index(str, args[0]);
+    }
+    if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
+        Item result = str;
+        for (int i = 0; i < argc; i++) {
+            Item arg_str = js_to_string(args[i]);
+            result = fn_join(result, arg_str);
+        }
+        return result;
+    }
+    if (method->len == 6 && strncmp(method->chars, "repeat", 6) == 0) {
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        String* s = it2s(str);
+        int count = (int)js_get_number(args[0]);
+        if (count <= 0 || !s) return (Item){.item = s2it(heap_create_name(""))};
+        // build repeated string
+        StrBuf* buf = strbuf_new();
+        for (int i = 0; i < count; i++) {
+            strbuf_append_str_n(buf, s->chars, s->len);
+        }
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
+
+    log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
+    return ItemNull;
+}
+
+// =============================================================================
+// Array Method Dispatcher
+// =============================================================================
+
+extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
+    if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
+    String* method = it2s(method_name);
+    if (!method) return ItemNull;
+    TypeId arr_type = get_type_id(arr);
+
+    // push - mutating
+    if (method->len == 4 && strncmp(method->chars, "push", 4) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
+        for (int i = 0; i < argc; i++) {
+            list_push(arr.array, args[i]);
+        }
+        return (Item){.item = i2it(arr.array->length)};
+    }
+    // pop - mutating
+    if (method->len == 3 && strncmp(method->chars, "pop", 3) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY || arr.array->length == 0) return ItemNull;
+        Item last = arr.array->items[arr.array->length - 1];
+        arr.array->length--;
+        return last;
+    }
+    // length property (handled as method for convenience)
+    if (method->len == 6 && strncmp(method->chars, "length", 6) == 0) {
+        return (Item){.item = i2it(fn_len(arr))};
+    }
+    // indexOf
+    if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        Array* a = arr.array;
+        for (int i = 0; i < a->length; i++) {
+            if (it2b(js_strict_equal(a->items[i], args[0]))) return (Item){.item = i2it(i)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+    // includes
+    if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+        Array* a = arr.array;
+        for (int i = 0; i < a->length; i++) {
+            if (it2b(js_strict_equal(a->items[i], args[0]))) return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
+    }
+    // join - converts all elements to strings and joins them
+    if (method->len == 4 && strncmp(method->chars, "join", 4) == 0) {
+        Item sep = argc > 0 ? args[0] : (Item){.item = s2it(heap_create_name(","))};
+        String* sep_str = it2s(sep);
+        const char* sep_chars = sep_str ? sep_str->chars : ",";
+        size_t sep_len = sep_str ? sep_str->len : 1;
+        
+        Array* a = arr.array;
+        StrBuf* buf = strbuf_new();
+        for (int i = 0; i < a->length; i++) {
+            if (i > 0 && sep_len > 0) {
+                strbuf_append_str_n(buf, sep_chars, sep_len);
+            }
+            Item elem_str = js_to_string(a->items[i]);
+            String* s = it2s(elem_str);
+            if (s && s->len > 0) {
+                strbuf_append_str_n(buf, s->chars, s->len);
+            }
+        }
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
+    // reverse - returns new reversed array (keeping as Array type)
+    if (method->len == 7 && strncmp(method->chars, "reverse", 7) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* src = arr.array;
+        Item result = js_array_new(src->length);
+        Array* dst = result.array;
+        for (int i = 0; i < src->length; i++) {
+            dst->items[i] = src->items[src->length - 1 - i];
+        }
+        dst->length = src->length;
+        return result;
+    }
+    // slice - returns new Array with elements from start to end
+    if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* src = arr.array;
+        int start = argc > 0 ? (int)js_get_number(args[0]) : 0;
+        int end = argc > 1 ? (int)js_get_number(args[1]) : src->length;
+        if (start < 0) start = src->length + start;
+        if (end < 0) end = src->length + end;
+        if (start < 0) start = 0;
+        if (end > src->length) end = src->length;
+        if (start >= end) return js_array_new(0);
+        Item result = js_array_new(0);
+        Array* dst = result.array;
+        for (int i = start; i < end; i++) {
+            array_push(dst, src->items[i]);
+        }
+        return result;
+    }
+    // concat - returns new array that is the concatenation
+    if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* src = arr.array;
+        // calculate total length
+        int total = src->length;
+        for (int i = 0; i < argc; i++) {
+            if (get_type_id(args[i]) == LMD_TYPE_ARRAY) {
+                total += args[i].array->length;
+            } else {
+                total++;
+            }
+        }
+        Item result = js_array_new(0);
+        Array* dst = result.array;
+        for (int i = 0; i < src->length; i++) {
+            array_push(dst, src->items[i]);
+        }
+        for (int i = 0; i < argc; i++) {
+            if (get_type_id(args[i]) == LMD_TYPE_ARRAY) {
+                Array* other = args[i].array;
+                for (int j = 0; j < other->length; j++) {
+                    array_push(dst, other->items[j]);
+                }
+            } else {
+                array_push(dst, args[i]);
+            }
+        }
+        return result;
+    }
+    // map - uses callback as first arg (must be a JsFunction)
+    if (method->len == 3 && strncmp(method->chars, "map", 3) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return arr;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return arr;
+        Array* src = arr.array;
+        Item result = js_array_new(0);
+        Array* dst = result.array;
+        for (int i = 0; i < src->length; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            Item mapped;
+            JsFunction* fn = (JsFunction*)callback.function;
+            if (fn->param_count >= 2) {
+                mapped = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
+            } else {
+                mapped = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+            list_push(dst, mapped);
+        }
+        return result;
+    }
+    // filter
+    if (method->len == 6 && strncmp(method->chars, "filter", 6) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return arr;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return arr;
+        Array* src = arr.array;
+        Item result = js_array_new(0);
+        Array* dst = result.array;
+        for (int i = 0; i < src->length; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            Item pred;
+            JsFunction* fn = (JsFunction*)callback.function;
+            if (fn->param_count >= 2) {
+                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
+            } else {
+                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+            if (js_is_truthy(pred)) {
+                list_push(dst, src->items[i]);
+            }
+        }
+        return result;
+    }
+    // reduce
+    if (method->len == 6 && strncmp(method->chars, "reduce", 6) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        Item accumulator;
+        int start_idx;
+        if (argc >= 2) {
+            accumulator = args[1];
+            start_idx = 0;
+        } else {
+            if (src->length == 0) return ItemNull;
+            accumulator = src->items[0];
+            start_idx = 1;
+        }
+        for (int i = start_idx; i < src->length; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            if (fn->param_count >= 3) {
+                accumulator = ((Item (*)(Item, Item, Item))fn->func_ptr)(accumulator, src->items[i], idx);
+            } else {
+                accumulator = ((Item (*)(Item, Item))fn->func_ptr)(accumulator, src->items[i]);
+            }
+        }
+        return accumulator;
+    }
+    // forEach
+    if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        for (int i = 0; i < src->length; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            if (fn->param_count >= 2) {
+                ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
+            } else {
+                ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+        }
+        return ItemNull;
+    }
+    // find
+    if (method->len == 4 && strncmp(method->chars, "find", 4) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        for (int i = 0; i < src->length; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            Item pred;
+            if (fn->param_count >= 2) {
+                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
+            } else {
+                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+            if (js_is_truthy(pred)) return src->items[i];
+        }
+        return ItemNull;
+    }
+    // findIndex
+    if (method->len == 9 && strncmp(method->chars, "findIndex", 9) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = i2it(-1)};
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        for (int i = 0; i < src->length; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            Item pred;
+            if (fn->param_count >= 2) {
+                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
+            } else {
+                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+            if (js_is_truthy(pred)) return (Item){.item = i2it(i)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+    // some
+    if (method->len == 4 && strncmp(method->chars, "some", 4) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        for (int i = 0; i < src->length; i++) {
+            Item pred;
+            if (fn->param_count >= 2) {
+                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], (Item){.item = i2it(i)});
+            } else {
+                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+            if (js_is_truthy(pred)) return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
+    }
+    // every
+    if (method->len == 5 && strncmp(method->chars, "every", 5) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(true)};
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        for (int i = 0; i < src->length; i++) {
+            Item pred;
+            if (fn->param_count >= 2) {
+                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], (Item){.item = i2it(i)});
+            } else {
+                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
+            }
+            if (!js_is_truthy(pred)) return (Item){.item = b2it(false)};
+        }
+        return (Item){.item = b2it(true)};
+    }
+    // sort
+    if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
+        return fn_sort1(arr);
+    }
+    // flat
+    if (method->len == 4 && strncmp(method->chars, "flat", 4) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Item result = js_array_new(0);
+        Array* src = arr.array;
+        Array* dst = result.array;
+        for (int i = 0; i < src->length; i++) {
+            if (get_type_id(src->items[i]) == LMD_TYPE_ARRAY) {
+                Array* inner = src->items[i].array;
+                for (int j = 0; j < inner->length; j++) {
+                    list_push(dst, inner->items[j]);
+                }
+            } else {
+                list_push(dst, src->items[i]);
+            }
+        }
+        return result;
+    }
+
+    log_debug("js_array_method: unknown method '%.*s'", (int)method->len, method->chars);
+    return ItemNull;
+}
+
+// =============================================================================
+// Math Object Methods
+// =============================================================================
+
+extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
+    if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
+    String* method = it2s(method_name);
+    if (!method) return ItemNull;
+
+    // Math.abs
+    if (method->len == 3 && strncmp(method->chars, "abs", 3) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_abs(js_to_number(args[0]));
+    }
+    // Math.floor
+    if (method->len == 5 && strncmp(method->chars, "floor", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_floor(js_to_number(args[0]));
+    }
+    // Math.ceil
+    if (method->len == 4 && strncmp(method->chars, "ceil", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_ceil(js_to_number(args[0]));
+    }
+    // Math.round
+    if (method->len == 5 && strncmp(method->chars, "round", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_round(js_to_number(args[0]));
+    }
+    // Math.sqrt
+    if (method->len == 4 && strncmp(method->chars, "sqrt", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_sqrt(js_to_number(args[0]));
+    }
+    // Math.pow
+    if (method->len == 3 && strncmp(method->chars, "pow", 3) == 0) {
+        if (argc < 2) return ItemNull;
+        return fn_pow(js_to_number(args[0]), js_to_number(args[1]));
+    }
+    // Math.min
+    if (method->len == 3 && strncmp(method->chars, "min", 3) == 0) {
+        if (argc < 2) return ItemNull;
+        return fn_min2(js_to_number(args[0]), js_to_number(args[1]));
+    }
+    // Math.max
+    if (method->len == 3 && strncmp(method->chars, "max", 3) == 0) {
+        if (argc < 2) return ItemNull;
+        return fn_max2(js_to_number(args[0]), js_to_number(args[1]));
+    }
+    // Math.log
+    if (method->len == 3 && strncmp(method->chars, "log", 3) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_log(js_to_number(args[0]));
+    }
+    // Math.log10
+    if (method->len == 5 && strncmp(method->chars, "log10", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_log10(js_to_number(args[0]));
+    }
+    // Math.exp
+    if (method->len == 3 && strncmp(method->chars, "exp", 3) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_exp(js_to_number(args[0]));
+    }
+    // Math.sin
+    if (method->len == 3 && strncmp(method->chars, "sin", 3) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_sin(js_to_number(args[0]));
+    }
+    // Math.cos
+    if (method->len == 3 && strncmp(method->chars, "cos", 3) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_cos(js_to_number(args[0]));
+    }
+    // Math.tan
+    if (method->len == 3 && strncmp(method->chars, "tan", 3) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_tan(js_to_number(args[0]));
+    }
+    // Math.sign
+    if (method->len == 4 && strncmp(method->chars, "sign", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_sign(js_to_number(args[0]));
+    }
+    // Math.trunc
+    if (method->len == 5 && strncmp(method->chars, "trunc", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return fn_int(js_to_number(args[0]));
+    }
+    // Math.random
+    if (method->len == 6 && strncmp(method->chars, "random", 6) == 0) {
+        double r = (double)rand() / (double)RAND_MAX;
+        return js_make_number(r);
+    }
+
+    log_debug("js_math_method: unknown method '%.*s'", (int)method->len, method->chars);
+    return ItemNull;
+}
+
+// Math constants as properties
+extern "C" Item js_math_property(Item prop_name) {
+    if (get_type_id(prop_name) != LMD_TYPE_STRING) return ItemNull;
+    String* prop = it2s(prop_name);
+    if (!prop) return ItemNull;
+
+    if (prop->len == 2 && strncmp(prop->chars, "PI", 2) == 0) {
+        return js_make_number(M_PI);
+    }
+    if (prop->len == 1 && prop->chars[0] == 'E') {
+        return js_make_number(M_E);
+    }
+    if (prop->len == 4 && strncmp(prop->chars, "LN2", 3) == 0) {
+        return js_make_number(M_LN2);
+    }
+    if (prop->len == 4 && strncmp(prop->chars, "LN10", 4) == 0) {
+        return js_make_number(M_LN10);
+    }
+    if (prop->len == 5 && strncmp(prop->chars, "LOG2E", 5) == 0) {
+        return js_make_number(M_LOG2E);
+    }
+    if (prop->len == 6 && strncmp(prop->chars, "LOG10E", 6) == 0) {
+        return js_make_number(M_LOG10E);
+    }
+    if (prop->len == 5 && strncmp(prop->chars, "SQRT2", 5) == 0) {
+        return js_make_number(M_SQRT2);
+    }
+    if (prop->len == 7 && strncmp(prop->chars, "SQRT1_2", 7) == 0) {
+        return js_make_number(M_SQRT1_2);
+    }
+
+    return ItemNull;
 }

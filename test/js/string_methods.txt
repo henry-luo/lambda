@@ -1,0 +1,23 @@
+hello
+hello world
+HELLO WORLD
+true
+false
+true
+true
+false
+0
+12
+-1
+hello
+world
+hello lambda
+h
+o
+3
+hello world
+5
+0
+hello  
+  hello
+null
