@@ -382,6 +382,11 @@ func_obj_t func_list[] = {
     {"js_new_function", (fn_ptr) js_new_function},
     {"js_call_function", (fn_ptr) js_call_function},
     {"js_console_log", (fn_ptr) js_console_log},
+    // v3: String, Array, Math method dispatchers
+    {"js_string_method", (fn_ptr) js_string_method},
+    {"js_array_method", (fn_ptr) js_array_method},
+    {"js_math_method", (fn_ptr) js_math_method},
+    {"js_math_property", (fn_ptr) js_math_property},
     // StringBuf functions for template literals
     {"stringbuf_new", (fn_ptr) stringbuf_new},
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},

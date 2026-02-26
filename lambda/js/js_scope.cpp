@@ -327,74 +327,77 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     
     // Set up a minimal evaluation context for JS runtime
     // The push_d/push_l functions use the global 'context' variable
+    //
+    // GC Integration (v3): If the caller already has an active context with heap,
+    // reuse it so that complex return values (strings, arrays, objects) survive.
+    // Otherwise create a new persistent context.
     EvalContext js_context;
     memset(&js_context, 0, sizeof(EvalContext));
-    js_context.nursery = gc_nursery_create(0);  // create nursery for push_d/push_l
     
-    // Save old context and set new one
+    // Save old context
     EvalContext* old_context = context;
-    context = &js_context;
+    bool reusing_context = false;
     
-    // Initialize heap for JS execution
-    heap_init();
-    context->pool = context->heap->pool;
-    
-    // Initialize name_pool for string interning (required for heap_create_name)
-    log_debug("Creating name_pool with pool=%p", (void*)context->pool);
-    context->name_pool = name_pool_create(context->pool, nullptr);
-    log_debug("name_pool_create returned: %p", (void*)context->name_pool);
-    if (!context->name_pool) {
-        log_error("Failed to create JS runtime name_pool");
+    if (old_context && old_context->heap) {
+        // Reuse the caller's heap — all allocations are GC-managed
+        context = old_context;
+        reusing_context = true;
+        // ensure nursery exists for push_d/push_l
+        if (!context->nursery) {
+            context->nursery = gc_nursery_create(0);
+        }
+        log_debug("JS reusing existing heap context=%p, pool=%p", (void*)context, (void*)context->pool);
+    } else {
+        // Standalone JS execution — create new heap (persists after this call)
+        js_context.nursery = gc_nursery_create(0);
+        context = &js_context;
+        heap_init();
+        context->pool = context->heap->pool;
+        context->name_pool = name_pool_create(context->pool, nullptr);
+        if (!context->name_pool) {
+            log_error("Failed to create JS runtime name_pool");
+        }
+        log_debug("JS created new heap context=%p, pool=%p, name_pool=%p",
+                  (void*)context, (void*)context->pool, (void*)context->name_pool);
     }
-    
-    log_debug("JS context setup: context=%p, pool=%p, name_pool=%p", 
-              (void*)context, (void*)context->pool, (void*)context->name_pool);
     
     // Set up _lambda_rt for JIT code to access the runtime context
     // The JIT code uses 'rt' macro which points to _lambda_rt
-    _lambda_rt = (Context*)&js_context;
+    _lambda_rt = (Context*)context;
     
     // Execute the JIT compiled JavaScript code
     log_notice("Executing JIT compiled JavaScript code...");
-    // Pass the JS context (not _lambda_rt which is for Lambda scripts)
-    Item result = js_main((Context*)&js_context);
+    Item result = js_main((Context*)context);
     
-    // Copy the result value before destroying the heap
-    // For simple scalars (int, bool), the value is in the Item itself
-    // For float, we need to copy the double value (it's on nursery which we're about to destroy)
-    Item copied_result;
+    // v3: No longer destroy heap — complex types survive as return values.
+    // The GC will collect unreachable objects during normal collection cycles.
+    // Nursery floats for the result still need special handling if we created
+    // a new standalone context (since the nursery is ephemeral).
+    Item final_result;
     TypeId type_id = get_type_id(result);
-    if (type_id == LMD_TYPE_FLOAT) {
-        // Float values are stored on nursery - need to copy the actual value
-        double value = it2d(result);
-        log_debug("JS result: float = %g", value);
-        // For now, return an int representation if it's a whole number
-        if (value == (int)value && value >= INT32_MIN && value <= INT32_MAX) {
-            copied_result = (Item){.item = i2it((int)value)};
-        } else {
-            // For true floats, we can't easily preserve them without heap
-            // Print and return null for now
-            printf("%g", value);
-            copied_result = (Item){.item = ITEM_NULL};
-        }
-    } else if (type_id == LMD_TYPE_INT) {
-        // Int values are stored directly in the Item
-        copied_result = result;
-    } else if (type_id == LMD_TYPE_BOOL) {
-        copied_result = result;
-    } else if (type_id == LMD_TYPE_NULL) {
-        copied_result = result;
-    } else {
-        // For complex types, we can't preserve across heap destruction
-        log_debug("JS result has complex type %d, returning null", type_id);
-        copied_result = (Item){.item = ITEM_NULL};
-    }
     
-    // Clean up JS context
-    if (js_context.nursery) {
-        gc_nursery_destroy(js_context.nursery);
+    if (reusing_context) {
+        // caller owns the heap, all values are valid
+        final_result = result;
+    } else {
+        // standalone mode: floats on nursery need copying
+        if (type_id == LMD_TYPE_FLOAT) {
+            double value = it2d(result);
+            log_debug("JS result: float = %g", value);
+            if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
+                final_result = (Item){.item = i2it((int64_t)value)};
+            } else {
+                // allocate float on heap so it survives nursery reset
+                double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+                *ptr = value;
+                final_result = (Item){.item = d2it(ptr)};
+            }
+        } else {
+            final_result = result;
+        }
+        // Don't destroy the heap — it persists for the process lifetime.
+        // In a future version, the caller can explicitly free it.
     }
-    heap_destroy();
     
     // Restore old context
     context = old_context;
@@ -402,7 +405,7 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     // Clean up MIR context
     MIR_finish(jit_ctx);
     
-    return copied_result;
+    return final_result;
 }
 
 // Main entry point

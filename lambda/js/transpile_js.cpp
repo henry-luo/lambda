@@ -488,6 +488,29 @@ static bool is_console_log_call(JsCallNode* call_node) {
            strncmp(prop->name->chars, "log", prop->name->len) == 0;
 }
 
+// Check if a call expression is Math.<method>(...)
+static bool is_math_call(JsCallNode* call_node) {
+    if (!call_node->callee) return false;
+    if (call_node->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    JsMemberNode* member = (JsMemberNode*)call_node->callee;
+    if (!member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    return obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Math", 4) == 0;
+}
+
+// Check if a call expression is a method call on a non-special object (obj.method())
+static bool is_method_call(JsCallNode* call_node) {
+    if (!call_node->callee) return false;
+    return call_node->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION;
+}
+
+// Helper: count arguments in a linked list
+static int count_js_args(JsAstNode* arg) {
+    int count = 0;
+    while (arg) { count++; arg = arg->next; }
+    return count;
+}
+
 // Transpile JavaScript call expression
 void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
     // Special handling for console.log
@@ -507,6 +530,98 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
             strbuf_append_str(tp->code_buf, "(js_console_log(ITEM_NULL), ITEM_NULL)");
         }
         return;
+    }
+    
+    // Special handling for Math.<method>() calls
+    if (is_math_call(call_node)) {
+        JsMemberNode* member = (JsMemberNode*)call_node->callee;
+        JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+        int arg_count = count_js_args(call_node->arguments);
+        
+        strbuf_append_str(tp->code_buf, "({\n");
+        // build args array
+        if (arg_count > 0) {
+            strbuf_append_str(tp->code_buf, "  Item _m_args[");
+            strbuf_append_int(tp->code_buf, arg_count);
+            strbuf_append_str(tp->code_buf, "] = {");
+            JsAstNode* arg = call_node->arguments;
+            for (int i = 0; i < arg_count; i++) {
+                if (i > 0) strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, arg);
+                arg = arg->next;
+            }
+            strbuf_append_str(tp->code_buf, "};\n");
+        }
+        strbuf_append_str(tp->code_buf, "  js_math_method(s2it(heap_create_name(\"");
+        strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
+        strbuf_append_str(tp->code_buf, "\")), ");
+        if (arg_count > 0) {
+            strbuf_append_str(tp->code_buf, "_m_args, ");
+        } else {
+            strbuf_append_str(tp->code_buf, "((void*)0), ");
+        }
+        strbuf_append_int(tp->code_buf, arg_count);
+        strbuf_append_str(tp->code_buf, ");\n})");
+        return;
+    }
+    
+    // Generic method call: obj.method(args) -> dispatch to string/array method
+    if (is_method_call(call_node) && !is_console_log_call(call_node)) {
+        JsMemberNode* member = (JsMemberNode*)call_node->callee;
+        if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+            int arg_count = count_js_args(call_node->arguments);
+            
+            // Generate: check type at runtime and dispatch to js_string_method or js_array_method
+            strbuf_append_str(tp->code_buf, "({\n");
+            // evaluate the receiver
+            strbuf_append_str(tp->code_buf, "  Item _recv = ");
+            transpile_js_box_item(tp, member->object);
+            strbuf_append_str(tp->code_buf, ";\n");
+            // evaluate method name as string
+            strbuf_append_str(tp->code_buf, "  Item _mname = s2it(heap_create_name(\"");
+            strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
+            strbuf_append_str(tp->code_buf, "\"));\n");
+            // build args array
+            if (arg_count > 0) {
+                strbuf_append_str(tp->code_buf, "  Item _m_args[");
+                strbuf_append_int(tp->code_buf, arg_count);
+                strbuf_append_str(tp->code_buf, "] = {");
+                JsAstNode* arg = call_node->arguments;
+                for (int i = 0; i < arg_count; i++) {
+                    if (i > 0) strbuf_append_str(tp->code_buf, ", ");
+                    transpile_js_box_item(tp, arg);
+                    arg = arg->next;
+                }
+                strbuf_append_str(tp->code_buf, "};\n");
+            }
+            // dispatch based on receiver type
+            strbuf_append_str(tp->code_buf, "  TypeId _rtype = item_type_id(_recv);\n");
+            strbuf_append_str(tp->code_buf, "  Item _mresult;\n");
+            strbuf_append_str(tp->code_buf, "  if (_rtype == LMD_TYPE_STRING) {\n");
+            strbuf_append_str(tp->code_buf, "    _mresult = js_string_method(_recv, _mname, ");
+            if (arg_count > 0) strbuf_append_str(tp->code_buf, "_m_args, ");
+            else strbuf_append_str(tp->code_buf, "((void*)0), ");
+            strbuf_append_int(tp->code_buf, arg_count);
+            strbuf_append_str(tp->code_buf, ");\n");
+            strbuf_append_str(tp->code_buf, "  } else if (_rtype == LMD_TYPE_ARRAY) {\n");
+            strbuf_append_str(tp->code_buf, "    _mresult = js_array_method(_recv, _mname, ");
+            if (arg_count > 0) strbuf_append_str(tp->code_buf, "_m_args, ");
+            else strbuf_append_str(tp->code_buf, "((void*)0), ");
+            strbuf_append_int(tp->code_buf, arg_count);
+            strbuf_append_str(tp->code_buf, ");\n");
+            strbuf_append_str(tp->code_buf, "  } else {\n");
+            // fall back: get the method as a property and call it as function
+            strbuf_append_str(tp->code_buf, "    Item _fn = js_property_access(_recv, _mname);\n");
+            strbuf_append_str(tp->code_buf, "    _mresult = js_call_function(_fn, _recv, ");
+            if (arg_count > 0) strbuf_append_str(tp->code_buf, "_m_args, ");
+            else strbuf_append_str(tp->code_buf, "((void*)0), ");
+            strbuf_append_int(tp->code_buf, arg_count);
+            strbuf_append_str(tp->code_buf, ");\n");
+            strbuf_append_str(tp->code_buf, "  }\n");
+            strbuf_append_str(tp->code_buf, "  _mresult;\n})");
+            return;
+        }
     }
     
     // Check if callee is a simple identifier that might be a user-defined function
@@ -579,6 +694,32 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
 
 // Transpile JavaScript member expression
 void transpile_js_member_expression(JsTranspiler* tp, JsMemberNode* member_node) {
+    // Special case: Math.PI, Math.E, etc.
+    if (!member_node->computed && member_node->object &&
+        member_node->object->node_type == JS_AST_NODE_IDENTIFIER &&
+        member_node->property && member_node->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* obj = (JsIdentifierNode*)member_node->object;
+        JsIdentifierNode* prop = (JsIdentifierNode*)member_node->property;
+        if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Math", 4) == 0) {
+            strbuf_append_str(tp->code_buf, "js_math_property(s2it(heap_create_name(\"");
+            strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
+            strbuf_append_str(tp->code_buf, "\")))");
+            return;
+        }
+    }
+
+    // Special case: str.length / arr.length
+    if (!member_node->computed && member_node->property &&
+        member_node->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* prop = (JsIdentifierNode*)member_node->property;
+        if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "length", 6) == 0) {
+            strbuf_append_str(tp->code_buf, "i2it(fn_len(");
+            transpile_js_box_item(tp, member_node->object);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+    }
+
     strbuf_append_str(tp->code_buf, "js_property_access(");
     transpile_js_box_item(tp, member_node->object);
     strbuf_append_char(tp->code_buf, ',');
@@ -1278,6 +1419,14 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, "extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);\n");
     // Lambda runtime functions needed for JS
     strbuf_append_str(tp->code_buf, "extern String* heap_create_name(const char* name);\n");
+    // String, Array, Math method dispatchers
+    strbuf_append_str(tp->code_buf, "extern Item js_string_method(Item str, Item method_name, Item* args, int argc);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_array_method(Item arr, Item method_name, Item* args, int argc);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_math_method(Item method_name, Item* args, int argc);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_math_property(Item prop_name);\n");
+    // Lambda runtime functions used by codegen
+    strbuf_append_str(tp->code_buf, "extern int64_t fn_len(Item item);\n");
+    strbuf_append_str(tp->code_buf, "extern TypeId item_type_id(Item item);\n");
     // StringBuf functions for template literals
     strbuf_append_str(tp->code_buf, "typedef struct StringBuf StringBuf;\n");
     strbuf_append_str(tp->code_buf, "extern StringBuf* stringbuf_new(Pool *pool);\n");
@@ -1324,10 +1473,30 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     
     // Second pass: transpile all statements except function declarations
     // (function declarations were already emitted outside js_main)
+    // But emit variable bindings for named function declarations so they can
+    // be referenced as first-class values (e.g., passed as callbacks)
     stmt = program->body;
     while (stmt) {
-        // Skip function declarations (already transpiled)
+        // For function declarations, emit a variable binding instead of skipping
         if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* func = (JsFunctionNode*)stmt;
+            if (func->name && func->name->chars) {
+                // Count parameters
+                int param_count = 0;
+                JsAstNode* param = func->params;
+                while (param) {
+                    param_count++;
+                    param = param->next;
+                }
+                // Emit: Item _js_<name> = js_new_function((void*)_js_<name><offset>, <param_count>);
+                strbuf_append_str(tp->code_buf, "\n  Item ");
+                write_js_var_name(tp->code_buf, func->name);
+                strbuf_append_str(tp->code_buf, " = js_new_function((void*)");
+                write_js_fn_name(tp->code_buf, func, 0);
+                strbuf_append_str(tp->code_buf, ", ");
+                strbuf_append_int(tp->code_buf, param_count);
+                strbuf_append_str(tp->code_buf, ");");
+            }
             stmt = stmt->next;
             continue;
         }

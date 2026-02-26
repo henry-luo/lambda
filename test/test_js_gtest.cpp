@@ -262,6 +262,19 @@ TEST(JavaScriptTests, DISABLED_test_array_methods) {
     test_js_script_against_file("test/js/array_methods.js", "test/js/array_methods.txt");
 }
 
+// v3 tests: String methods, Math object, Array methods
+TEST(JavaScriptTests, test_string_methods) {
+    test_js_script_against_file("test/js/string_methods.js", "test/js/string_methods.txt");
+}
+
+TEST(JavaScriptTests, test_math_object) {
+    test_js_script_against_file("test/js/math_object.js", "test/js/math_object.txt");
+}
+
+TEST(JavaScriptTests, test_array_methods_v3) {
+    test_js_script_against_file("test/js/array_methods_v3.js", "test/js/array_methods_v3.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
