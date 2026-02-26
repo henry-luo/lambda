@@ -1124,8 +1124,43 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         // else { ast_node->type = nested ? nested : &TYPE_ANY; }
         ast_node->type = &TYPE_ANY;
     }
-    else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
-        ast_node->type = &TYPE_ANY;  // todo: derive field type
+    else if (ast_node->object->type->type_id == LMD_TYPE_MAP
+          || ast_node->object->type->type_id == LMD_TYPE_OBJECT) {
+        // resolve field type from map/object shape for unboxed access optimization
+        TypeMap* map_type = (TypeMap*)ast_node->object->type;
+        if (map_type->struct_name && map_type->shape
+            && ast_node->field && ast_node->field->node_type == AST_NODE_IDENT) {
+            AstIdentNode* field_id = (AstIdentNode*)ast_node->field;
+            Type* resolved_type = NULL;
+            ShapeEntry* se = map_type->shape;
+            while (se) {
+                if (se->name && (int)se->name->length == (int)field_id->name->len
+                    && strncmp(se->name->str, field_id->name->chars, se->name->length) == 0) {
+                    // found — unwrap TypeType for type-defined maps
+                    Type* ft = se->type;
+                    if (ft && ft->type_id == LMD_TYPE_TYPE) {
+                        ft = ((TypeType*)ft)->type;
+                    }
+                    resolved_type = ft;
+                    break;
+                }
+                se = se->next;
+            }
+            if (resolved_type) {
+                TypeId rid = resolved_type->type_id;
+                // only resolve scalar types that have matching unbox functions
+                if (rid == LMD_TYPE_INT || rid == LMD_TYPE_INT64 || rid == LMD_TYPE_FLOAT
+                    || rid == LMD_TYPE_BOOL || rid == LMD_TYPE_STRING) {
+                    ast_node->type = alloc_type(tp->pool, rid, sizeof(Type));
+                } else {
+                    ast_node->type = &TYPE_ANY;
+                }
+            } else {
+                ast_node->type = &TYPE_ANY;  // field not in shape (e.g. method name)
+            }
+        } else {
+            ast_node->type = &TYPE_ANY;
+        }
     }
     else {
         ast_node->type = &TYPE_ANY;

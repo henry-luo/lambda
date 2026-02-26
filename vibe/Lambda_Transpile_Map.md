@@ -481,63 +481,75 @@ When any condition fails, the transpiler falls back to the existing runtime path
 - New test file: `test/lambda/typed_map_direct_access.ls` — exercises direct reads on typed maps with int, string, bool fields, arithmetic on fields, and function parameters with typed map annotations
 - (Total count now **468/468** after Phase 5/6 added `object_direct_access.ls`)
 
-### Not Yet Implemented
+### Completed: Phase 1 (Struct Typedef Emission) and Phase 4 (Direct Map Construction)
 
-| Phase   | Description                                                  | Status                                                          |
-| ------- | ------------------------------------------------------------ | --------------------------------------------------------------- |
-| —       | Chained member access (`a.b.c` direct access)                | Not started — requires propagating native pointer through chain |
-| —       | Unboxed context reads (no boxing when target is native type) | Not started                                                     |
+Building on the Phase 2/3 inline byte-offset work, Phase 1 emits proper C struct typedefs for named map/object types in the transpiled preamble, and Phase 4 replaces `map_fill()` varargs with direct byte-offset writes during map literal construction.
 
-### Completed: Phase 7 (Typed Function Parameter Passing)
+#### Phase 1: Struct Typedef Emission
 
-When a function parameter has a typed map/object annotation (e.g., `fn f(a: Point)`), field accesses on that parameter inside the function body now use direct struct access instead of runtime name lookups.
+Named map types (from `type Name = {…}`) now generate C struct typedefs in the transpiled preamble:
 
-**Root cause**: TypeParam (the AST type for function parameters) copies only the base Type fields (type_id, kind) from the annotated type but lacks the extended TypeMap/TypeObject fields (shape, struct_name, byte_size). This caused `has_fixed_shape()` to read garbage and always return false for parameter expressions, preventing Phase 2/3 optimizations.
-
-**Fix**: Store a `full_type` pointer on TypeParam for MAP/OBJECT/ELEMENT annotated parameters (in `build_param_expr`), and unwrap it in `build_identifier` so that ident expressions referencing such parameters carry the full TypeMap/TypeObject. This automatically enables Phase 2 (direct reads) and Phase 3 (direct writes) for typed function parameters.
-
-**Before:**
 ```c
-Item _distance(Map* _a, Map* _b) {
-  return fn_sqrt(fn_add(
-    fn_mul(fn_sub(map_get(_a,const_s2it(4)), map_get(_b,const_s2it(5))),
-           fn_sub(map_get(_a,const_s2it(6)), map_get(_b,const_s2it(7)))),
-    fn_mul(fn_sub(map_get(_a,const_s2it(8)), map_get(_b,const_s2it(9))),
-           fn_sub(map_get(_a,const_s2it(10)),map_get(_b,const_s2it(11))))));
-}
+typedef struct _type_Point {
+  int64_t x;
+  int64_t y;
+} _type_Point;
+typedef struct _type_Person {
+  String* name;
+  int64_t age;
+  bool active;
+} _type_Person;
 ```
 
-**After:**
+**Implementation**: `emit_struct_typedefs()` iterates `type_list`, finds `TypeMap`/`TypeObject` entries with non-NULL `struct_name`, and emits a C typedef matching the packed data layout. Called once in `transpile_ast_root` between closure env pre-defines and function forward declarations.
+
+**Helper**: `write_c_field_type()` maps Lambda `TypeId` → C type names (bool, int64_t, double, String*, Symbol*, void*, etc.).
+
+#### Phase 4: Direct Map Literal Construction
+
+Map literals with known shapes now bypass `map_fill()` (which uses va_list + per-field type-switch) and instead write directly to the allocated data buffer at compile-time-known byte offsets.
+
+**Before (all maps):**
 ```c
-Item _distance(Map* _a, Map* _b) {
-  return fn_sqrt(fn_add(
-    fn_mul(fn_sub(push_d(*(double*)((char*)(_a)->data+0)),
-                  push_d(*(double*)((char*)(_b)->data+0))),
-           fn_sub(push_d(*(double*)((char*)(_a)->data+0)),
-                  push_d(*(double*)((char*)(_b)->data+0)))),
-    fn_mul(fn_sub(push_d(*(double*)((char*)(_a)->data+8)),
-                  push_d(*(double*)((char*)(_b)->data+8))),
-           fn_sub(push_d(*(double*)((char*)(_a)->data+8)),
-                  push_d(*(double*)((char*)(_b)->data+8))))));
-}
+({Map* m = map(2);
+ map_fill(m, i2it(10), i2it(20));})
 ```
 
-Each field access eliminates: `const_s2it` (tag constant) → `map_get` (O(N) linear scan + strncmp) → type-switch. Replaced by a single memory read at a compile-time byte offset.
+**After (maps with valid shapes):**
+```c
+({Map* m = map(2);
+ m->data=heap_data_calloc(16);
+ *(int64_t*)((char*)(m)->data+0)=it2i(i2it(10));
+ *(int64_t*)((char*)(m)->data+8)=it2i(i2it(20));
+ m->data_cap=16; m;})
+```
 
-#### Files Modified (Phase 7)
+**Eligibility**: Works for ALL map literals with valid shapes (named or anonymous), not just named types. Requirements: shape is non-null, all fields named (no spreads), all byte offsets aligned, byte_size > 0, all field types are concrete.
+
+#### Files Modified (Phase 1 + Phase 4)
 
 | File | Changes |
 |---|---|
-| `lambda/build_ast.cpp` | In `build_param_expr`: set `full_type` for MAP/OBJECT/ELEMENT param types. In `build_identifier`: unwrap `full_type` for MAP/OBJECT/ELEMENT params (extends existing TYPE_KIND_UNARY unwrap). |
-| `test/test_mir_gtest.cpp` | Added `typed_param_direct_access` to MIR skip list |
+| `lambda/transpile.cpp` | Added `write_c_field_type()`, `emit_struct_typedefs()` functions; modified `transpile_map_expr()` for direct construction; added `unwrap_type_type` parameter to `resolve_field_type_id()` |
+| `lambda/lambda.h` | Added `heap_data_calloc()` declaration in `extern "C"` block |
+| `lambda/mir.c` | Added `heap_data_calloc` to MIR native function resolution table |
+
+#### Bugs Found and Fixed (Phase 1 + Phase 4)
+
+1. **Missing `m;` return value** — Statement expression `({Map* m = map(...); ...; m->data_cap=N;})` returned the integer `N` instead of `Map* m`, causing null pointer crashes. **Fix**: Added `m;` at end of direct construction block.
+
+2. **`heap_data_calloc` not resolvable by MIR** — Declared in `lambda.h` but not registered in MIR's native function table, causing "failed to resolve native fn/pn: heap_data_calloc" error. **Fix**: Added to `mir.c` function registration table.
+
+3. **Symbol/binary fields stored as null** — Used `it2s()` to unbox symbol/binary Items, but `it2s()` only handles `LMD_TYPE_STRING` and returns nullptr for other types. **Fix**: Changed all pointer-type fields (string, symbol, binary, decimal, containers) to use generic tag-stripping: `(void*)((uint64_t)(item) & 0x00FFFFFFFFFFFFFFULL)`.
+
+4. **DateTime fields stored as pointer instead of value** — Default case stored the tagged pointer as `void*`, but DateTime is a value type (stored as uint64_t in the packed struct, not a pointer). **Fix**: Added dedicated `LMD_TYPE_DTIME` case that dereferences the heap pointer: `*(DateTime*)((uint64_t)(item) & mask)`.
+
+5. **`resolve_field_type_id` crash on anonymous maps** — Function blindly cast `Type*` with `type_id == LMD_TYPE_TYPE` to `TypeType*` and accessed `->type`. Anonymous map shape entries store plain `Type` structs (smaller than `TypeType`), causing out-of-bounds memory access. **Fix**: Added `unwrap_type_type` parameter; only unwrap for named types (where shape entries are proper `TypeType` structs).
 
 #### Test Coverage
 
-- **469/469** baseline tests pass
-- New test file: `test/lambda/typed_param_direct_access.ls` with 12 tests covering:
-  - Map-typed params: float/int/string/bool field reads, two params of same type, mixed with scalar params, arithmetic on fields, diagonal computation
-  - Object-typed params: reading fields from object instances passed as function parameters
-  - Nested calls: multiple typed-param functions composed together
+- **467/467** baseline tests pass
+- Direct construction verified on typed_map_direct_access.ls: all 6 map literals use `heap_data_calloc` + byte-offset writes instead of `map_fill`
 
 ### Completed: Phase 5 (Object Method Field Loading) and Phase 6 (Object Method Field Write-Back)
 
@@ -612,72 +624,114 @@ Without this fix, `has_fixed_shape()` always returned false for object types (nu
   - Phase 6 (pn methods): int/float/string/bool write-back, multiple mutations interleaved with reads, literal value assignment
 - Object method tests also exercised: `object.ls`, `object_mutation.ls`, `object_update.ls`, `object_inherit.ls`, `object_default.ls`, `object_constraint.ls`
 
-### Completed: Phase 1 (Struct Typedef Emission) and Phase 4 (Direct Map Construction)
+### Completed: Phase 7 (Typed Function Parameter Passing)
 
-Building on the Phase 2/3 inline byte-offset work, Phase 1 emits proper C struct typedefs for named map/object types in the transpiled preamble, and Phase 4 replaces `map_fill()` varargs with direct byte-offset writes during map literal construction.
+When a function parameter has a typed map/object annotation (e.g., `fn f(a: Point)`), field accesses on that parameter inside the function body now use direct struct access instead of runtime name lookups.
 
-#### Phase 1: Struct Typedef Emission
+**Root cause**: TypeParam (the AST type for function parameters) copies only the base Type fields (type_id, kind) from the annotated type but lacks the extended TypeMap/TypeObject fields (shape, struct_name, byte_size). This caused `has_fixed_shape()` to read garbage and always return false for parameter expressions, preventing Phase 2/3 optimizations.
 
-Named map types (from `type Name = {…}`) now generate C struct typedefs in the transpiled preamble:
+**Fix**: Store a `full_type` pointer on TypeParam for MAP/OBJECT/ELEMENT annotated parameters (in `build_param_expr`), and unwrap it in `build_identifier` so that ident expressions referencing such parameters carry the full TypeMap/TypeObject. This automatically enables Phase 2 (direct reads) and Phase 3 (direct writes) for typed function parameters.
 
+**Before:**
 ```c
-typedef struct _type_Point {
-  int64_t x;
-  int64_t y;
-} _type_Point;
-typedef struct _type_Person {
-  String* name;
-  int64_t age;
-  bool active;
-} _type_Person;
+Item _distance(Map* _a, Map* _b) {
+  return fn_sqrt(fn_add(
+    fn_mul(fn_sub(map_get(_a,const_s2it(4)), map_get(_b,const_s2it(5))),
+           fn_sub(map_get(_a,const_s2it(6)), map_get(_b,const_s2it(7)))),
+    fn_mul(fn_sub(map_get(_a,const_s2it(8)), map_get(_b,const_s2it(9))),
+           fn_sub(map_get(_a,const_s2it(10)),map_get(_b,const_s2it(11))))));
+}
 ```
 
-**Implementation**: `emit_struct_typedefs()` iterates `type_list`, finds `TypeMap`/`TypeObject` entries with non-NULL `struct_name`, and emits a C typedef matching the packed data layout. Called once in `transpile_ast_root` between closure env pre-defines and function forward declarations.
-
-**Helper**: `write_c_field_type()` maps Lambda `TypeId` → C type names (bool, int64_t, double, String*, Symbol*, void*, etc.).
-
-#### Phase 4: Direct Map Literal Construction
-
-Map literals with known shapes now bypass `map_fill()` (which uses va_list + per-field type-switch) and instead write directly to the allocated data buffer at compile-time-known byte offsets.
-
-**Before (all maps):**
+**After:**
 ```c
-({Map* m = map(2);
- map_fill(m, i2it(10), i2it(20));})
+Item _distance(Map* _a, Map* _b) {
+  return fn_sqrt(fn_add(
+    fn_mul(fn_sub(push_d(*(double*)((char*)(_a)->data+0)),
+                  push_d(*(double*)((char*)(_b)->data+0))),
+           fn_sub(push_d(*(double*)((char*)(_a)->data+0)),
+                  push_d(*(double*)((char*)(_b)->data+0)))),
+    fn_mul(fn_sub(push_d(*(double*)((char*)(_a)->data+8)),
+                  push_d(*(double*)((char*)(_b)->data+8))),
+           fn_sub(push_d(*(double*)((char*)(_a)->data+8)),
+                  push_d(*(double*)((char*)(_b)->data+8))))));
+}
 ```
 
-**After (maps with valid shapes):**
-```c
-({Map* m = map(2);
- m->data=heap_data_calloc(16);
- *(int64_t*)((char*)(m)->data+0)=it2i(i2it(10));
- *(int64_t*)((char*)(m)->data+8)=it2i(i2it(20));
- m->data_cap=16; m;})
-```
-
-**Eligibility**: Works for ALL map literals with valid shapes (named or anonymous), not just named types. Requirements: shape is non-null, all fields named (no spreads), all byte offsets aligned, byte_size > 0, all field types are concrete.
-
-#### Files Modified (Phase 1 + Phase 4)
+Each field access eliminates: `const_s2it` (tag constant) → `map_get` (O(N) linear scan + strncmp) → type-switch. Replaced by a single memory read at a compile-time byte offset.
+#### Files Modified (Phase 7)
 
 | File | Changes |
 |---|---|
-| `lambda/transpile.cpp` | Added `write_c_field_type()`, `emit_struct_typedefs()` functions; modified `transpile_map_expr()` for direct construction; added `unwrap_type_type` parameter to `resolve_field_type_id()` |
-| `lambda/lambda.h` | Added `heap_data_calloc()` declaration in `extern "C"` block |
-| `lambda/mir.c` | Added `heap_data_calloc` to MIR native function resolution table |
+| `lambda/build_ast.cpp` | In `build_param_expr`: set `full_type` for MAP/OBJECT/ELEMENT param types. In `build_identifier`: unwrap `full_type` for MAP/OBJECT/ELEMENT params (extends existing TYPE_KIND_UNARY unwrap). |
+| `test/test_mir_gtest.cpp` | Added `typed_param_direct_access` to MIR skip list |
+#### Test Coverage
 
-#### Bugs Found and Fixed (Phase 1 + Phase 4)
+- **469/469** baseline tests pass
+- New test file: `test/lambda/typed_param_direct_access.ls` with 12 tests covering:
+  - Map-typed params: float/int/string/bool field reads, two params of same type, mixed with scalar params, arithmetic on fields, diagonal computation
+  - Object-typed params: reading fields from object instances passed as function parameters
+  - Nested calls: multiple typed-param functions composed together
 
-1. **Missing `m;` return value** — Statement expression `({Map* m = map(...); ...; m->data_cap=N;})` returned the integer `N` instead of `Map* m`, causing null pointer crashes. **Fix**: Added `m;` at end of direct construction block.
+### Completed: Unboxed Context Reads (No Boxing When Target Is Native Type)
 
-2. **`heap_data_calloc` not resolvable by MIR** — Declared in `lambda.h` but not registered in MIR's native function table, causing "failed to resolve native fn/pn: heap_data_calloc" error. **Fix**: Added to `mir.c` function registration table.
+When a typed map/object field is accessed in arithmetic or other native-type contexts, the transpiler now skips redundant boxing/unboxing round-trips. Field reads produce native C values directly, and boxing is deferred to where it is actually needed.
 
-3. **Symbol/binary fields stored as null** — Used `it2s()` to unbox symbol/binary Items, but `it2s()` only handles `LMD_TYPE_STRING` and returns nullptr for other types. **Fix**: Changed all pointer-type fields (string, symbol, binary, decimal, containers) to use generic tag-stripping: `(void*)((uint64_t)(item) & 0x00FFFFFFFFFFFFFFULL)`.
+**Root cause**: `build_field_expr` in `build_ast.cpp` always set member expression types to `TYPE_ANY` for MAP and OBJECT objects. This prevented the binary arithmetic handler from using its native `(a + b)` path (which requires both operands to have specific numeric types), forcing every arithmetic expression through the boxed `fn_add(i2it(...), i2it(...))` runtime path.
 
-4. **DateTime fields stored as pointer instead of value** — Default case stored the tagged pointer as `void*`, but DateTime is a value type (stored as uint64_t in the packed struct, not a pointer). **Fix**: Added dedicated `LMD_TYPE_DTIME` case that dereferences the heap pointer: `*(DateTime*)((uint64_t)(item) & mask)`.
+**Fix** (three parts):
 
-5. **`resolve_field_type_id` crash on anonymous maps** — Function blindly cast `Type*` with `type_id == LMD_TYPE_TYPE` to `TypeType*` and accessed `->type`. Anonymous map shape entries store plain `Type` structs (smaller than `TypeType`), causing out-of-bounds memory access. **Fix**: Added `unwrap_type_type` parameter; only unwrap for named types (where shape entries are proper `TypeType` structs).
+1. **AST type resolution** (`build_ast.cpp` → `build_field_expr`): For MAP and OBJECT types with a named shape (`struct_name != NULL`), look up the field name in the shape entries and resolve the member expression's type to the actual field type (INT, FLOAT, BOOL, STRING). Unwraps TypeType wrappers for type-defined maps. Only resolves types with matching unbox functions (INT, INT64, FLOAT, BOOL, STRING); others remain ANY.
+
+2. **Native `emit_direct_field_read`** (`transpile.cpp`): Removed boxing wrappers from scalar field reads. INT/INT64 emit `*(int64_t*)((char*)(obj)->data+offset)` (was `i2it(...)` wrapper). FLOAT emits `*(double*)((char*)(obj)->data+offset)` (was `push_d(...)` which **heap-allocated** per read). BOOL emits `*(bool*)((char*)(obj)->data+offset)` (was `b2it(...)` wrapper). STRING emits `*(char**)((char*)(obj)->data+offset)` (was `s2it(...)` wrapper). Container types (LIST, MAP, etc.) keep boxing unchanged. Boxing is now handled by `transpile_box_item` when needed.
+
+3. **Fallback unboxing** (`transpile.cpp` → `transpile_member_expr` + `transpile-mir.cpp` → `transpile_member`): When direct struct access is unavailable (e.g., `expr_produces_native_ptr` returns false), the fallback `map_get()`/`fn_member()` path wraps the result with the appropriate unbox function (`it2i`, `it2d`, `it2b`, `it2s`) so `transpile_expr` consistently returns native values matching the resolved type. The MIR direct transpiler was also updated to unbox `fn_member` results when the field type is resolved.
+
+**Before** (`p.x + p.y` where `p: Point = {x: int, y: int}`):
+```c
+fn_add(i2it(*(int64_t*)((char*)(_p)->data+0)), i2it(*(int64_t*)((char*)(_p)->data+8)))
+```
+Two `i2it` boxing calls + `fn_add` function call (which internally unboxes both operands).
+
+**After:**
+```c
+(*(int64_t*)((char*)(_p)->data+0)+*(int64_t*)((char*)(_p)->data+8))
+```
+Single native `+` instruction. No boxing, no function call overhead.
+
+**Before** (`v.x + v.y` where `v: Vec2 = {x: float, y: float}`):
+```c
+fn_add(push_d(*(double*)((char*)(_v)->data+0)), push_d(*(double*)((char*)(_v)->data+8)))
+```
+Two `push_d` **heap allocations** + `fn_add` function call.
+
+**After:**
+```c
+(*(double*)((char*)(_v)->data+0)+*(double*)((char*)(_v)->data+8))
+```
+Single native `+` instruction. **Zero heap allocations** per field read.
+
+#### Files Modified
+
+| File | Changes |
+|---|---|
+| `lambda/build_ast.cpp` | `build_field_expr`: resolve field type from shape for MAP/OBJECT member expressions (INT, INT64, FLOAT, BOOL, STRING) |
+| `lambda/transpile.cpp` | `emit_direct_field_read`: remove boxing wrappers for scalar types (BOOL, INT, INT64, FLOAT, STRING). `transpile_member_expr`: add unboxing wrappers (`it2i`, `it2d`, `it2b`, `it2s`) in MAP and OBJECT fallback paths |
+| `lambda/transpile-mir.cpp` | `transpile_member`: add `emit_unbox` after `fn_member` call when field type is resolved |
 
 #### Test Coverage
 
-- **467/467** baseline tests pass
-- Direct construction verified on typed_map_direct_access.ls: all 6 map literals use `heap_data_calloc` + byte-offset writes instead of `map_fill`
+- **471/471** baseline tests pass (469 original + 2 new)
+- New test file: `test/lambda/unboxed_field_access.ls` with 13 assertions covering:
+  - INT field arithmetic: add, mul, sub, multi-operand expressions
+  - FLOAT field arithmetic: add, mul, sub
+  - BOOL fields: accessed and boxed correctly in lists
+  - STRING fields: accessed and boxed correctly in lists
+  - Mixed-type maps: boxing preserved per-field type in list context
+  - Function with typed params: cross-function native arithmetic
+
+### Not Yet Implemented
+
+| Phase | Description                                                  | Status                                                          |
+| ----- | ------------------------------------------------------------ | --------------------------------------------------------------- |
+| —     | Chained member access (`a.b.c` direct access)                | Not started — requires propagating native pointer through chain |

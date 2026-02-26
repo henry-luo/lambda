@@ -5585,7 +5585,8 @@ static TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
     return t ? t->type_id : LMD_TYPE_ANY;
 }
 
-// Emit direct field read that produces an Item value
+// Emit direct field read that produces a native (unboxed) value for scalar types.
+// Boxing is handled by transpile_box_item when needed.
 // object must be an expression that evaluates to Map*, Object*, or Element*
 static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field) {
     TypeId type_id = resolve_field_type_id(field, true);
@@ -5593,24 +5594,20 @@ static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* 
 
     switch (type_id) {
     case LMD_TYPE_BOOL:
-        strbuf_append_str(tp->code_buf, "b2it(*(bool*)((char*)(");
+        strbuf_append_str(tp->code_buf, "*(bool*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
         break;
     case LMD_TYPE_INT:
-        strbuf_append_str(tp->code_buf, "i2it(*(int64_t*)((char*)(");
-        transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
-        break;
     case LMD_TYPE_INT64:
-        strbuf_append_str(tp->code_buf, "push_l(*(int64_t*)((char*)(");
+        strbuf_append_str(tp->code_buf, "*(int64_t*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
         break;
     case LMD_TYPE_FLOAT:
-        strbuf_append_str(tp->code_buf, "push_d(*(double*)((char*)(");
+        strbuf_append_str(tp->code_buf, "*(double*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
         break;
     case LMD_TYPE_DTIME:
         strbuf_append_str(tp->code_buf, "push_k(*(DateTime*)((char*)(");
@@ -5623,9 +5620,9 @@ static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* 
         strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
         break;
     case LMD_TYPE_STRING:
-        strbuf_append_str(tp->code_buf, "s2it(*(char**)((char*)(");
+        strbuf_append_str(tp->code_buf, "*(char**)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
         break;
     case LMD_TYPE_SYMBOL:
         strbuf_append_str(tp->code_buf, "y2it(*(char**)((char*)(");
@@ -5714,6 +5711,9 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         return;
     }
 
+    // track whether fallback path needs unboxing to match resolved field type
+    bool needs_unbox = false;
+
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
         // try direct field access optimization for typed maps
         TypeMap* map_type = (TypeMap*)field_node->object->type;
@@ -5727,7 +5727,19 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
                 return;
             }
         }
-        // fall back to runtime map_get
+        // fall back to runtime map_get — add unboxing when field type is resolved
+        {
+            TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
+            if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_INT64) {
+                strbuf_append_str(tp->code_buf, "it2i("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "it2d("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_BOOL) {
+                strbuf_append_str(tp->code_buf, "it2b("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_STRING) {
+                strbuf_append_str(tp->code_buf, "it2s("); needs_unbox = true;
+            }
+        }
         strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
     }
@@ -5745,6 +5757,19 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
             }
         }
         // fall back to fn_member — handles both field access and method lookup
+        // add unboxing when field type is resolved
+        {
+            TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
+            if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_INT64) {
+                strbuf_append_str(tp->code_buf, "it2i("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "it2d("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_BOOL) {
+                strbuf_append_str(tp->code_buf, "it2b("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_STRING) {
+                strbuf_append_str(tp->code_buf, "it2s("); needs_unbox = true;
+            }
+        }
         strbuf_append_str(tp->code_buf, "fn_member(");
         transpile_box_item(tp, field_node->object);
     }
@@ -5808,6 +5833,7 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_box_item(tp, field_node->field);
     }
     strbuf_append_char(tp->code_buf, ')');
+    if (needs_unbox) strbuf_append_char(tp->code_buf, ')');
 }
 
 // transpile parent access: expr.. → fn_member(expr, "parent")

@@ -3409,9 +3409,18 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
         boxed_field = transpile_box_item(mt, field);
     }
 
-    return emit_call_2(mt, "fn_member", MIR_T_I64,
+    MIR_reg_t result = emit_call_2(mt, "fn_member", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
+
+    // when the member expression has a resolved field type, unbox the fn_member
+    // result so that transpile_expr returns a native value matching the type
+    TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
+    if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_FLOAT || mem_tid == LMD_TYPE_BOOL
+        || mem_tid == LMD_TYPE_STRING || mem_tid == LMD_TYPE_INT64) {
+        result = emit_unbox(mt, result, mem_tid);
+    }
+    return result;
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
