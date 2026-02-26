@@ -23,6 +23,16 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
 void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 
+// forward declarations for direct map/object field access optimization
+static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
+static bool has_fixed_shape(TypeMap* map_type);
+static bool is_direct_access_type(TypeId type_id);
+static bool expr_produces_native_ptr(AstNode* expr);
+static TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
+static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field);
+static void emit_direct_field_write(Transpiler* tp, AstNode* object, ShapeEntry* field, AstNode* value);
+static void emit_struct_typedefs(Transpiler* tp);
+
 // hashmap comparison and hashing functions for func_name_map
 static int func_name_cmp(const void *a, const void *b, void *udata) {
     (void)udata;
@@ -3323,7 +3333,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     // close with ) for store function call, or ; for regular assignment
     strbuf_append_str(tp->code_buf, use_store_func ? ");" : ";");
 
-    // pn method: write field back to object via fn_map_set
+    // pn method: write field back to object
     if (tp->pn_method_obj_type) {
         TypeObject* obj_type = tp->pn_method_obj_type;
         ShapeEntry* se = obj_type->shape;
@@ -3331,28 +3341,38 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
             if (se->name && assign_node->target &&
                 (int)se->name->length == assign_node->target->len &&
                 strncmp(se->name->str, assign_node->target->chars, se->name->length) == 0) {
-                // write back: fn_map_set(_self_item, field_key, boxed_value)
-                strbuf_append_str(tp->code_buf, "\n fn_map_set(_self_item, s2it(heap_create_name(\"");
-                strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
-                strbuf_append_str(tp->code_buf, "\")), ");
-                // box the local variable for fn_map_set
-                TypeId ftype = se->type ? se->type->type_id : LMD_TYPE_ANY;
-                if (ftype == LMD_TYPE_INT) {
-                    strbuf_append_str(tp->code_buf, "i2it(_");
-                } else if (ftype == LMD_TYPE_INT64) {
-                    strbuf_append_str(tp->code_buf, "l2it(_");
-                } else if (ftype == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "push_d(_");
-                } else if (ftype == LMD_TYPE_BOOL) {
-                    strbuf_append_str(tp->code_buf, "b2it(_");
+                // Phase 6: direct struct write for fixed-shape object types
+                if (has_fixed_shape((TypeMap*)obj_type)) {
+                    // emit: _self_data->field = _field;
+                    strbuf_append_str(tp->code_buf, "\n _self_data->");
+                    strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+                    strbuf_append_str(tp->code_buf, " = _");
+                    strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+                    strbuf_append_str(tp->code_buf, ";");
                 } else {
-                    strbuf_append_str(tp->code_buf, "_");
+                    // fallback: fn_map_set(_self_item, field_key, boxed_value)
+                    strbuf_append_str(tp->code_buf, "\n fn_map_set(_self_item, s2it(heap_create_name(\"");
+                    strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+                    strbuf_append_str(tp->code_buf, "\")), ");
+                    // box the local variable for fn_map_set
+                    TypeId ftype = se->type ? se->type->type_id : LMD_TYPE_ANY;
+                    if (ftype == LMD_TYPE_INT) {
+                        strbuf_append_str(tp->code_buf, "i2it(_");
+                    } else if (ftype == LMD_TYPE_INT64) {
+                        strbuf_append_str(tp->code_buf, "l2it(_");
+                    } else if (ftype == LMD_TYPE_FLOAT) {
+                        strbuf_append_str(tp->code_buf, "push_d(_");
+                    } else if (ftype == LMD_TYPE_BOOL) {
+                        strbuf_append_str(tp->code_buf, "b2it(_");
+                    } else {
+                        strbuf_append_str(tp->code_buf, "_");
+                    }
+                    strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+                    if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 || ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_BOOL) {
+                        strbuf_append_char(tp->code_buf, ')');
+                    }
+                    strbuf_append_str(tp->code_buf, ");");
                 }
-                strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
-                if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 || ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_BOOL) {
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                strbuf_append_str(tp->code_buf, ");");
                 break;
             }
             se = se->next;
@@ -3441,6 +3461,25 @@ void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node) {
         return;
     }
 
+    // try direct field write optimization for typed maps/objects
+    if (node->object->type && node->key->node_type == AST_NODE_IDENT
+        && expr_produces_native_ptr(node->object)) {
+        TypeId obj_type_id = node->object->type->type_id;
+        if (obj_type_id == LMD_TYPE_MAP || obj_type_id == LMD_TYPE_OBJECT) {
+            TypeMap* map_type = (TypeMap*)node->object->type;
+            if (has_fixed_shape(map_type)) {
+                AstIdentNode* ident = (AstIdentNode*)node->key;
+                ShapeEntry* se = find_shape_field_by_name(map_type,
+                    ident->name->chars, ident->name->len);
+                if (se && se->type && is_direct_access_type(resolve_field_type_id(se, true))) {
+                    emit_direct_field_write(tp, node->object, se, node->value);
+                    return;
+                }
+            }
+        }
+    }
+
+    // fall back to runtime fn_map_set
     strbuf_append_str(tp->code_buf, "\n fn_map_set(");
     transpile_box_item(tp, node->object);
     strbuf_append_str(tp->code_buf, ",");
@@ -3983,28 +4022,113 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
         return;
     }
 
+    TypeMap* map_type = (TypeMap*)map_node->type;
+
     strbuf_append_str(tp->code_buf, "({Map* m = map(");
-    strbuf_append_int(tp->code_buf, ((TypeMap*)map_node->type)->type_index);
+    strbuf_append_int(tp->code_buf, map_type->type_index);
     strbuf_append_str(tp->code_buf, ");");
     AstNode *item = map_node->item;
     if (item) {
-        strbuf_append_str(tp->code_buf, "\n map_fill(m,");
-        while (item) {
-            if (item->node_type == AST_NODE_KEY_EXPR) {
-                AstNamedNode* key_expr = (AstNamedNode*)item;
-                if (key_expr->as) {
-                    transpile_box_item(tp, key_expr->as);  // use box_item to wrap with i2it() etc.
-                } else {
-                    log_error("Error: transpile_map_expr key expression missing assignment");
-                    strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-                }
-            } else {
-                transpile_box_item(tp, item);
+        // Phase 4: try direct byte-offset construction for typed maps with known shapes
+        // Requires: shape is non-null, all fields have known types and aligned offsets, byte_size > 0
+        bool is_named = (map_type->struct_name != NULL);
+        bool can_direct = (map_type->shape && map_type->length > 0 && map_type->byte_size > 0);
+        if (can_direct) {
+            ShapeEntry* check = map_type->shape;
+            while (check) {
+                if (!check->name) { can_direct = false; break; }  // spread entry
+                if (check->byte_offset % sizeof(void*) != 0) { can_direct = false; break; }  // unaligned
+                TypeId ft = resolve_field_type_id(check, is_named);
+                if (!is_direct_access_type(ft)) { can_direct = false; break; }
+                check = check->next;
             }
-            if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-            item = item->next;
         }
-        strbuf_append_str(tp->code_buf, ");");
+        if (can_direct) {
+            // allocate data buffer directly
+            strbuf_append_format(tp->code_buf,
+                "\n m->data=heap_data_calloc(%lld);", (long long)map_type->byte_size);
+            // store each field value directly at its byte offset
+            ShapeEntry* se = map_type->shape;
+            while (se && item) {
+                TypeId ftype = resolve_field_type_id(se, is_named);
+                AstNode* val_expr = NULL;
+                if (item->node_type == AST_NODE_KEY_EXPR) {
+                    val_expr = ((AstNamedNode*)item)->as;
+                } else {
+                    val_expr = item;
+                }
+                if (val_expr && se->name) {
+                    int64_t off = se->byte_offset;
+                    // emit: *(CType*)((char*)(m)->data+OFFSET)=unbox(value);
+                    switch (ftype) {
+                    case LMD_TYPE_BOOL:
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(bool*)((char*)(m)->data+%lld)=it2b(", (long long)off);
+                        transpile_box_item(tp, val_expr);
+                        strbuf_append_str(tp->code_buf, ");");
+                        break;
+                    case LMD_TYPE_INT:
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(int64_t*)((char*)(m)->data+%lld)=it2i(", (long long)off);
+                        transpile_box_item(tp, val_expr);
+                        strbuf_append_str(tp->code_buf, ");");
+                        break;
+                    case LMD_TYPE_INT64:
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(int64_t*)((char*)(m)->data+%lld)=it2l(", (long long)off);
+                        transpile_box_item(tp, val_expr);
+                        strbuf_append_str(tp->code_buf, ");");
+                        break;
+                    case LMD_TYPE_FLOAT:
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(double*)((char*)(m)->data+%lld)=it2d(", (long long)off);
+                        transpile_box_item(tp, val_expr);
+                        strbuf_append_str(tp->code_buf, ");");
+                        break;
+                    case LMD_TYPE_DTIME:
+                        // datetime: tagged pointer to heap-allocated DateTime (uint64_t)
+                        // dereference the pointer to get the actual value
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(DateTime*)((char*)(m)->data+%lld)=*(DateTime*)((uint64_t)(", (long long)off);
+                        transpile_box_item(tp, val_expr);
+                        strbuf_append_str(tp->code_buf, ")&0x00FFFFFFFFFFFFFFULL);");
+                        break;
+                    default:
+                        // pointer types (string, symbol, binary, decimal, containers):
+                        // strip tag bits and store the raw pointer
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(void**)((char*)(m)->data+%lld)=(void*)((uint64_t)(", (long long)off);
+                        transpile_box_item(tp, val_expr);
+                        strbuf_append_str(tp->code_buf, ")&0x00FFFFFFFFFFFFFFULL);");
+                        break;
+                    }
+                }
+                se = se->next;
+                item = item->next;
+            }
+            strbuf_append_format(tp->code_buf,
+                "\n m->data_cap=%lld;", (long long)map_type->byte_size);
+            strbuf_append_str(tp->code_buf, " m;");
+        } else {
+            // fall back to map_fill for untyped/anonymous maps
+            strbuf_append_str(tp->code_buf, "\n map_fill(m,");
+            while (item) {
+                if (item->node_type == AST_NODE_KEY_EXPR) {
+                    AstNamedNode* key_expr = (AstNamedNode*)item;
+                    if (key_expr->as) {
+                        transpile_box_item(tp, key_expr->as);  // use box_item to wrap with i2it() etc.
+                    } else {
+                        log_error("Error: transpile_map_expr key expression missing assignment");
+                        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+                    }
+                } else {
+                    transpile_box_item(tp, item);
+                }
+                if (item->next) { strbuf_append_char(tp->code_buf, ','); }
+                item = item->next;
+            }
+            strbuf_append_str(tp->code_buf, ");");
+        }
     }
     else {
         strbuf_append_str(tp->code_buf, "m;");
@@ -5304,6 +5428,276 @@ void transpile_path_index_expr(Transpiler* tp, AstPathIndexNode *node) {
     strbuf_append_str(tp->code_buf, "))");
 }
 
+// ============================================================================
+// Direct map/object field access optimization helpers
+// ============================================================================
+
+// Check if an expression, when transpiled, produces a native pointer (Map*, Object*)
+// rather than a boxed Item (uint64_t). Only native pointers can use ->data access.
+// Returns false for member expressions, parent expressions, function calls returning
+// ANY, etc. which produce Item through boxing.
+static bool expr_produces_native_ptr(AstNode* expr) {
+    if (!expr || !expr->type) return false;
+    TypeId tid = expr->type->type_id;
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT && tid != LMD_TYPE_ELEMENT) return false;
+
+    // simple variable reference — produces native pointer when typed as Map*/Object*
+    if (expr->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)expr;
+        if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+            return true;
+        }
+    }
+    // map/object literal expressions produce native pointers
+    if (expr->node_type == AST_NODE_MAP || expr->node_type == AST_NODE_OBJECT_LITERAL) {
+        return true;
+    }
+    return false;
+}
+
+// Find a named field in a map shape at compile time
+static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (field->name && (int)field->name->length == name_len &&
+            strncmp(field->name->str, name, name_len) == 0) {
+            return field;
+        }
+        field = field->next;
+    }
+    return NULL;
+}
+
+// Check if a map type has a fixed shape suitable for direct access:
+// - must be a named type (from `type Name = { ... }` declaration) so field types
+//   are guaranteed stable at runtime. Map literals can have fields mutated to a
+//   different type via fn_map_set, which rebuilds the shape and invalidates
+//   compile-time offsets/types.
+// - all fields are named (no spread entries)
+// - all byte offsets are 8-byte aligned (map type defs use sizeof(void*) stride;
+//   map literals may use packed offsets which can cause unaligned access issues in MIR)
+static bool has_fixed_shape(TypeMap* map_type) {
+    if (!map_type->struct_name) return false;
+    if (!map_type->shape || map_type->length == 0) return false;
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (!field->name) return false;
+        if (field->byte_offset % sizeof(void*) != 0) return false;
+        field = field->next;
+    }
+    return true;
+}
+
+// Write the C type name for a struct member field.
+// Maps Lambda TypeId to the C type used in the packed struct layout.
+static void write_c_field_type(StrBuf* buf, TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_BOOL:    strbuf_append_str(buf, "bool");      break;
+    case LMD_TYPE_INT:     strbuf_append_str(buf, "int64_t");   break;
+    case LMD_TYPE_INT64:   strbuf_append_str(buf, "int64_t");   break;
+    case LMD_TYPE_FLOAT:   strbuf_append_str(buf, "double");    break;
+    case LMD_TYPE_DTIME:   strbuf_append_str(buf, "DateTime");  break;
+    case LMD_TYPE_STRING:  strbuf_append_str(buf, "String*");   break;
+    case LMD_TYPE_SYMBOL:  strbuf_append_str(buf, "Symbol*");   break;
+    case LMD_TYPE_BINARY:  strbuf_append_str(buf, "String*");   break;
+    case LMD_TYPE_DECIMAL: strbuf_append_str(buf, "Decimal*");  break;
+    default:               strbuf_append_str(buf, "void*");     break;  // all containers & pointer types
+    }
+}
+
+// Emit C struct typedefs for all named map/object types registered in the type_list.
+// Called once during transpile_ast_root preamble, before any function definitions.
+// Each typedef matches the packed data layout at runtime, enabling direct field access.
+static void emit_struct_typedefs(Transpiler* tp) {
+    ArrayList* type_list = tp->type_list;
+    if (!type_list) return;
+    bool emitted_any = false;
+    for (int i = 0; i < type_list->length; i++) {
+        Type* t = (Type*)type_list->data[i];
+        if (!t) continue;
+        // unwrap TypeType wrapper to get actual map/object type
+        TypeMap* map_type = NULL;
+        if (t->type_id == LMD_TYPE_TYPE) {
+            Type* inner = ((TypeType*)t)->type;
+            if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT)) {
+                map_type = (TypeMap*)inner;
+            }
+        } else if (t->type_id == LMD_TYPE_MAP || t->type_id == LMD_TYPE_OBJECT) {
+            map_type = (TypeMap*)t;
+        }
+        if (!map_type || !map_type->struct_name || !map_type->shape) continue;
+        // check that shape is valid for direct access (all aligned, all named)
+        bool valid = true;
+        ShapeEntry* se = map_type->shape;
+        while (se) {
+            if (!se->name || se->byte_offset % sizeof(void*) != 0) { valid = false; break; }
+            se = se->next;
+        }
+        if (!valid) continue;
+        if (!emitted_any) {
+            strbuf_append_str(tp->code_buf, "\n// struct typedefs for direct field access\n");
+            emitted_any = true;
+        }
+        // emit: typedef struct _type_Name { fields... } _type_Name;
+        strbuf_append_format(tp->code_buf, "typedef struct _type_%s {\n", map_type->struct_name);
+        se = map_type->shape;
+        while (se) {
+            TypeId ftype = resolve_field_type_id(se, true);
+            strbuf_append_str(tp->code_buf, "  ");
+            write_c_field_type(tp->code_buf, ftype);
+            strbuf_append_str(tp->code_buf, " ");
+            strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+            strbuf_append_str(tp->code_buf, ";\n");
+            se = se->next;
+        }
+        strbuf_append_format(tp->code_buf, "} _type_%s;\n", map_type->struct_name);
+    }
+}
+
+// Check if a field type is eligible for direct access optimization
+static bool is_direct_access_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
+    case LMD_TYPE_PATH:
+        return true;
+    default:
+        return false;  // skip ANY, NULL, ERROR types
+    }
+}
+
+// Resolve the stored-data type for a shape field.
+// Type-defined maps (from `type Name = {x: int}`) have LMD_TYPE_TYPE wrapper
+// on shape entries; unwrap to get the actual data type (e.g., LMD_TYPE_INT).
+// For anonymous maps the shape entry type may be a plain Type — only unwrap
+// when struct_name is set on the map type (indicating it came from a type definition).
+static TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
+    Type* t = field->type;
+    if (unwrap_type_type && t && t->type_id == LMD_TYPE_TYPE) {
+        Type* inner = ((TypeType*)t)->type;
+        if (inner) return inner->type_id;
+    }
+    return t ? t->type_id : LMD_TYPE_ANY;
+}
+
+// Emit direct field read that produces a native (unboxed) value for scalar types.
+// Boxing is handled by transpile_box_item when needed.
+// object must be an expression that evaluates to Map*, Object*, or Element*
+static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field) {
+    TypeId type_id = resolve_field_type_id(field, true);
+    int64_t offset = field->byte_offset;
+
+    switch (type_id) {
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "*(bool*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
+        break;
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+        strbuf_append_str(tp->code_buf, "*(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "*(double*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
+        break;
+    case LMD_TYPE_DTIME:
+        strbuf_append_str(tp->code_buf, "push_k(*(DateTime*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_DECIMAL:
+        strbuf_append_str(tp->code_buf, "c2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_STRING:
+        strbuf_append_str(tp->code_buf, "*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
+        break;
+    case LMD_TYPE_SYMBOL:
+        strbuf_append_str(tp->code_buf, "y2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_BINARY:
+        strbuf_append_str(tp->code_buf, "x2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    // container and pointer types: raw pointer IS the Item value (no tagging)
+    default:
+        strbuf_append_str(tp->code_buf, "(Item)(*(void**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    }
+}
+
+// Emit direct field write from an Item value
+// object expression evaluates to Map*, Object*, or Element*
+static void emit_direct_field_write(Transpiler* tp, AstNode* object,
+    ShapeEntry* field, AstNode* value) {
+    TypeId type_id = resolve_field_type_id(field, true);
+    int64_t offset = field->byte_offset;
+
+    // store the native value at the field's byte offset
+    switch (type_id) {
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "\n *(bool*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2b(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "\n *(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2i(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_INT64:
+        strbuf_append_str(tp->code_buf, "\n *(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2l(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "\n *(double*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2d(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_STRING:
+        strbuf_append_str(tp->code_buf, "\n *(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2s(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    default:
+        // container and pointer types: store raw pointer from Item
+        strbuf_append_str(tp->code_buf, "\n *(void**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=(void*)(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    }
+}
+
 void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     // defensive check: if object or field is null, emit error and skip
     if (!field_node->object || !field_node->field) {
@@ -5317,12 +5711,65 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         return;
     }
 
+    // track whether fallback path needs unboxing to match resolved field type
+    bool needs_unbox = false;
+
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
+        // try direct field access optimization for typed maps
+        TypeMap* map_type = (TypeMap*)field_node->object->type;
+        if (field_node->field->node_type == AST_NODE_IDENT
+            && expr_produces_native_ptr(field_node->object)
+            && has_fixed_shape(map_type)) {
+            AstIdentNode* id = (AstIdentNode*)field_node->field;
+            ShapeEntry* se = find_shape_field_by_name(map_type, id->name->chars, id->name->len);
+            if (se && se->type && is_direct_access_type(resolve_field_type_id(se, true))) {
+                emit_direct_field_read(tp, field_node->object, se);
+                return;
+            }
+        }
+        // fall back to runtime map_get — add unboxing when field type is resolved
+        {
+            TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
+            if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_INT64) {
+                strbuf_append_str(tp->code_buf, "it2i("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "it2d("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_BOOL) {
+                strbuf_append_str(tp->code_buf, "it2b("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_STRING) {
+                strbuf_append_str(tp->code_buf, "it2s("); needs_unbox = true;
+            }
+        }
         strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
     }
     else if (field_node->object->type->type_id == LMD_TYPE_OBJECT) {
-        // use fn_member for objects — handles both field access and method lookup
+        // try direct field access optimization for typed objects
+        TypeObject* obj_type = (TypeObject*)field_node->object->type;
+        if (field_node->field->node_type == AST_NODE_IDENT
+            && expr_produces_native_ptr(field_node->object)
+            && has_fixed_shape((TypeMap*)obj_type)) {
+            AstIdentNode* id = (AstIdentNode*)field_node->field;
+            ShapeEntry* se = find_shape_field_by_name((TypeMap*)obj_type, id->name->chars, id->name->len);
+            if (se && se->type && is_direct_access_type(resolve_field_type_id(se, true))) {
+                emit_direct_field_read(tp, field_node->object, se);
+                return;
+            }
+        }
+        // fall back to fn_member — handles both field access and method lookup
+        // add unboxing when field type is resolved
+        {
+            TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
+            if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_INT64) {
+                strbuf_append_str(tp->code_buf, "it2i("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "it2d("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_BOOL) {
+                strbuf_append_str(tp->code_buf, "it2b("); needs_unbox = true;
+            } else if (mem_tid == LMD_TYPE_STRING) {
+                strbuf_append_str(tp->code_buf, "it2s("); needs_unbox = true;
+            }
+        }
         strbuf_append_str(tp->code_buf, "fn_member(");
         transpile_box_item(tp, field_node->object);
     }
@@ -5386,6 +5833,7 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_box_item(tp, field_node->field);
     }
     strbuf_append_char(tp->code_buf, ')');
+    if (needs_unbox) strbuf_append_char(tp->code_buf, ')');
 }
 
 // transpile parent access: expr.. → fn_member(expr, "parent")
@@ -5596,46 +6044,85 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, " Item _self_item = (uint64_t)(uintptr_t)_self;\n");
         // make ~ refer to self inside method bodies (pipe expressions will shadow _pipe_item)
         strbuf_append_str(tp->code_buf, " Item _pipe_item = _self_item;\n");
-        // iterate ALL fields of the object type (including inherited) via shape entries
-        ShapeEntry* se = obj_type->shape;
-        while (se) {
-            if (se->name) {
-                const char* fname = se->name->str;
-                int flen = (int)se->name->length;
-                Type* field_type = se->type;
-                // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_name("field"))));
-                strbuf_append_str(tp->code_buf, " ");
-                if (field_type) {
-                    write_type(tp->code_buf, field_type);
-                } else {
-                    strbuf_append_str(tp->code_buf, "Item");
+
+        // Phase 5: direct struct field reads for fixed-shape object types
+        if (has_fixed_shape((TypeMap*)obj_type)) {
+            const char* sname = ((TypeMap*)obj_type)->struct_name;
+            // emit: _type_Name* _self_data = (_type_Name*)((Object*)_self)->data;
+            strbuf_append_str(tp->code_buf, " _type_");
+            strbuf_append_str(tp->code_buf, sname);
+            strbuf_append_str(tp->code_buf, "* _self_data = (_type_");
+            strbuf_append_str(tp->code_buf, sname);
+            strbuf_append_str(tp->code_buf, "*)((Object*)_self)->data;\n");
+            ShapeEntry* se = obj_type->shape;
+            while (se) {
+                if (se->name) {
+                    const char* fname = se->name->str;
+                    int flen = (int)se->name->length;
+                    Type* field_type = se->type;
+                    TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
+                    // emit: TYPE _fieldname = _self_data->fieldname;
+                    strbuf_append_str(tp->code_buf, " ");
+                    if (field_type) {
+                        write_type(tp->code_buf, field_type);
+                    } else {
+                        strbuf_append_str(tp->code_buf, "Item");
+                    }
+                    strbuf_append_str(tp->code_buf, " _");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, " = ");
+                    if (ftid == LMD_TYPE_ANY || ftid == LMD_TYPE_NULL || ftid == LMD_TYPE_ERROR) {
+                        // void* → Item requires explicit cast
+                        strbuf_append_str(tp->code_buf, "(Item)(uintptr_t)");
+                    }
+                    strbuf_append_str(tp->code_buf, "_self_data->");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, ";\n");
                 }
-                strbuf_append_str(tp->code_buf, " _");
-                strbuf_append_str_n(tp->code_buf, fname, flen);
-                strbuf_append_str(tp->code_buf, " = ");
-                // unbox based on type
-                TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
-                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64) {
-                    strbuf_append_str(tp->code_buf, "it2i(");
-                } else if (ftid == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "it2d(");
-                } else if (ftid == LMD_TYPE_BOOL) {
-                    strbuf_append_str(tp->code_buf, "it2b(");
-                } else if (ftid == LMD_TYPE_STRING) {
-                    strbuf_append_str(tp->code_buf, "it2s(");
-                } else {
-                    // no unboxing for Item or complex types
-                }
-                strbuf_append_str(tp->code_buf, "fn_member(_self_item, s2it(heap_create_name(\"");
-                strbuf_append_str_n(tp->code_buf, fname, flen);
-                strbuf_append_str(tp->code_buf, "\")))");
-                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
-                    ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
-                    strbuf_append_char(tp->code_buf, ')');  // close unbox call
-                }
-                strbuf_append_str(tp->code_buf, ";\n");
+                se = se->next;
             }
-            se = se->next;
+        } else {
+            // fallback: load fields via fn_member (runtime name lookup)
+            ShapeEntry* se = obj_type->shape;
+            while (se) {
+                if (se->name) {
+                    const char* fname = se->name->str;
+                    int flen = (int)se->name->length;
+                    Type* field_type = se->type;
+                    // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_name("field"))));
+                    strbuf_append_str(tp->code_buf, " ");
+                    if (field_type) {
+                        write_type(tp->code_buf, field_type);
+                    } else {
+                        strbuf_append_str(tp->code_buf, "Item");
+                    }
+                    strbuf_append_str(tp->code_buf, " _");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, " = ");
+                    // unbox based on type
+                    TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
+                    if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64) {
+                        strbuf_append_str(tp->code_buf, "it2i(");
+                    } else if (ftid == LMD_TYPE_FLOAT) {
+                        strbuf_append_str(tp->code_buf, "it2d(");
+                    } else if (ftid == LMD_TYPE_BOOL) {
+                        strbuf_append_str(tp->code_buf, "it2b(");
+                    } else if (ftid == LMD_TYPE_STRING) {
+                        strbuf_append_str(tp->code_buf, "it2s(");
+                    } else {
+                        // no unboxing for Item or complex types
+                    }
+                    strbuf_append_str(tp->code_buf, "fn_member(_self_item, s2it(heap_create_name(\"");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, "\")))");
+                    if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
+                        ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
+                        strbuf_append_char(tp->code_buf, ')');  // close unbox call
+                    }
+                    strbuf_append_str(tp->code_buf, ";\n");
+                }
+                se = se->next;
+            }
         }
     }
 
@@ -6877,6 +7364,9 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         }
         child = child->next;
     }
+
+    // Emit C struct typedefs for named map/object types (Phase 1: direct field access)
+    emit_struct_typedefs(tp);
 
     // Forward declare all top-level functions to support out-of-order definitions
     child = script->child;

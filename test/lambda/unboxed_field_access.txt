@@ -1,0 +1,13 @@
+7
+12
+-1
+25
+8
+15.75
+-1
+[true, false]
+["Alice", "Smith"]
+["Alice", 35, true]
+[3, 4]
+["Alice", 30, true]
+23

@@ -271,6 +271,7 @@ func_obj_t func_list[] = {
     {"to_closure", (fn_ptr) to_closure},
     {"to_closure_named", (fn_ptr) to_closure_named},
     {"heap_calloc", (fn_ptr) heap_calloc},
+    {"heap_data_calloc", (fn_ptr) heap_data_calloc},
     {"heap_create_name", (fn_ptr) heap_create_name},
     {"heap_create_symbol", (fn_ptr) heap_create_symbol},
     {"heap_strcpy", (fn_ptr) heap_strcpy},  // for creating runtime strings
