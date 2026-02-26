@@ -243,7 +243,7 @@ Key characteristics:
 - For-loop iteration dispatches on typed arrays for unboxed element access
 - More mature, feature-complete
 - This is the **default** path when running `./lambda.exe script.ls`
-- Generated C code can be inspected in `./_transpiled*.c` for debugging
+- Generated C code can be inspected in `./temp/_transpiled*.c` for debugging
 
 ### MIR Direct Transpiler (`transpile-mir.cpp`)
 
@@ -277,7 +277,7 @@ Key characteristics:
 | Module imports | ✅ Full support | ✅ Supported (cross-module calls with wrapper resolution) |
 | Proc support | ✅ Supported | ✅ Supported (`in_proc` flag, multi-value return) |
 | Bitwise operators | ✅ Supported | ✅ Native int arg dispatch (band/bor/bxor/bnot/shl/shr) |
-| Debugging | Check `_transpiled*.c` | No intermediate output |
+| Debugging | Check `temp/_transpiled*.c` | No intermediate output |
 
 **Test coverage**: 113/113 tests pass (90 functional + 26 procedural + 3 chart tests, minus 6 excluded). All tests produce identical output to the C2MIR path.
 
@@ -478,7 +478,7 @@ let arr = [1, 2, 3];
 - **Back up the file** before major refactoring or rewrite. Remove the backup at the end of successful refactoring or rewrite.
 
 ### Debugging Transpiled Code
-- Check `./_transpiled.c` for the generated C code from the last Lambda script execution
+- Check `./temp/_transpiled*.c` for the generated C code from the last Lambda script execution
 - Useful for debugging type mismatches, boxing/unboxing issues, and function call generation
 - Shows how Lambda expressions map to C runtime calls (e.g., `fn_eq()`, `list_push()`, `i2it()`)
 
