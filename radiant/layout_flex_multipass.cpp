@@ -560,6 +560,12 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         while (child) {
             if (child->is_element()) {
                 ViewElement* item = (ViewElement*)child->as_element();
+                // CSS Flexbox §4: Skip absolutely positioned children (out-of-flow)
+                if (item && item->position &&
+                    (item->position->position == CSS_VALUE_ABSOLUTE || item->position->position == CSS_VALUE_FIXED)) {
+                    child = child->next_sibling;
+                    continue;
+                }
                 if (item && item->fi && item->height > 0) {
                     if ((int)item->height > max_item_height) {
                         max_item_height = (int)item->height;
@@ -1482,8 +1488,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     log_debug("FLEX TEXT: final position: x=%.1f, y=%.1f", text_x, text_y);
 
                     // Set up line context for this text at the calculated position
+                    // Use container's content width for line breaking, not max-content text width.
+                    // CSS Flexbox §9.4: text wraps at the item's determined main size.
                     lycon->line.left = text_x;
-                    lycon->line.right = text_x + text_width;
+                    lycon->line.right = text_x + container_content_width;
                     lycon->line.advance_x = text_x;
                     lycon->block.advance_y = text_y;
                     lycon->block.max_width = text_width;
@@ -1610,6 +1618,39 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             }
             child = child->next_sibling;
         }
+
+        // CSS Flexbox §4: Text nodes are anonymous flex items, they should
+        // contribute to the container's auto-height. After processing text,
+        // update the container height if it has auto height and text content
+        // makes it taller than the current height (from element flex items).
+        bool has_explicit_height = flex_container->blk && flex_container->blk->given_height >= 0;
+        if (!has_explicit_height) {
+            // Find the maximum text bottom edge (text_y + text_height)
+            float max_text_bottom = 0;
+            DomNode* scan = flex_container->first_child;
+            while (scan) {
+                if (scan->is_text() && scan->view_type == RDT_VIEW_TEXT) {
+                    ViewText* tv = (ViewText*)scan;
+                    float bottom = tv->y + tv->height;
+                    if (bottom > max_text_bottom) max_text_bottom = bottom;
+                }
+                scan = scan->next_sibling;
+            }
+            // Also compute padding+border to add to content height
+            float pad_border_h = 0;
+            if (flex_container->bound) {
+                pad_border_h += flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                if (flex_container->bound->border) {
+                    pad_border_h += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
+                }
+            }
+            float text_total_height = max_text_bottom + pad_border_h;
+            if (text_total_height > flex_container->height) {
+                log_debug("FLEX TEXT: Updating auto-height container from %.1f to %.1f (text content)",
+                          flex_container->height, text_total_height);
+                flex_container->height = text_total_height;
+            }
+        }
     }
 
     // For column flex, we need to track height changes to shift subsequent items
@@ -1725,7 +1766,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // (in Phase 7) happens before nested content is laid out, so items may have
     // grown taller than their initial hypothetical cross size.
     // BUT: Do NOT expand if this container is a flex item that was sized by parent's
-    // column flex layout (i.e., has flex-grow > 0 and parent is column flex).
+    // column flex layout (i.e., has flex-grow > 0 and parent is column flex),
+    // or if this container was stretched by a parent ROW flex layout.
     if (flex && is_main_axis_horizontal(flex)) {
         bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height >= 0);
 
@@ -1738,6 +1780,38 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 has_explicit_height = true;
                 log_debug("ROW FLEX HEIGHT FIX: skipping %s - height was set by parent flex-grow (fg=%.1f)",
                           flex_container->node_name(), fg);
+            }
+        }
+
+        // Check if this container was stretched by a parent ROW flex layout
+        // CSS Flexbox §9.4: Stretched items have definite cross size from the line cross size.
+        // We must NOT override this with content-based height.
+        if (!has_explicit_height && flex_container->fi) {
+            DomElement* parent_elem = flex_container->parent ? flex_container->parent->as_element() : nullptr;
+            if (parent_elem && parent_elem->display.inner == CSS_VALUE_FLEX) {
+                // Check parent flex direction
+                int parent_dir = DIR_ROW;
+                ViewBlock* pb = (ViewBlock*)(ViewElement*)parent_elem;
+                if (pb && pb->embed && pb->embed->flex) {
+                    parent_dir = pb->embed->flex->direction;
+                }
+                bool parent_is_row = (parent_dir == DIR_ROW || parent_dir == DIR_ROW_REVERSE);
+                if (parent_is_row) {
+                    // Check alignment - stretch is the default
+                    int effective_align = flex_container->fi->align_self;
+                    if (effective_align == ALIGN_AUTO) {
+                        if (pb && pb->embed && pb->embed->flex) {
+                            effective_align = pb->embed->flex->align_items;
+                        } else {
+                            effective_align = ALIGN_STRETCH;
+                        }
+                    }
+                    if (effective_align == ALIGN_STRETCH) {
+                        has_explicit_height = true;
+                        log_debug("ROW FLEX HEIGHT FIX: skipping %s - height was set by parent row flex stretch",
+                                  flex_container->node_name());
+                    }
+                }
             }
         }
 
@@ -1770,6 +1844,25 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
                 }
                 float new_height = max_item_height + padding_height;
+
+                // CSS §10.7: Respect max-height constraint on the container.
+                // Phase 7c already clamped container->height to max-height,
+                // so we must not expand beyond it.
+                if (flex_container->blk && flex_container->blk->given_max_height > 0) {
+                    float max_box = flex_container->blk->given_max_height;
+                    // For content-box, max-height is content-only; add padding+border for outer comparison
+                    if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                        max_box += padding_height;
+                        if (flex_container->bound && flex_container->bound->border) {
+                            max_box += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
+                        }
+                    }
+                    if (new_height > max_box) {
+                        log_debug("ROW FLEX HEIGHT FIX: clamping new_height %.1f to max-height %.1f",
+                                  new_height, max_box);
+                        new_height = max_box;
+                    }
+                }
 
                 if (new_height > flex_container->height + 0.5f) {
                     log_debug("ROW FLEX HEIGHT FIX: container %s height: %.1f -> %.1f (max_item=%.1f + padding=%.1f)",
