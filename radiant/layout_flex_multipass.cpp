@@ -591,22 +591,44 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         }
     } else if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_height) {
         // Column flex with auto height: calculate height from flex items
+        // For column flex, main axis = height, so each item's contribution is:
+        //   1. Explicit height if set
+        //   2. Explicit flex-basis if set (flex-basis replaces height for main axis sizing)
+        //   3. Measured content height from cache
         log_debug("AUTO-HEIGHT: column flex with auto-height, calculating from items");
         int total_height = 0;
         DomNode* child = flex_container->first_child;
         while (child) {
             if (child->is_element()) {
                 ViewElement* item = (ViewElement*)child->as_element();
-                if (item && item->fi && item->height > 0) {
-                    total_height += (int)item->height;
-                    log_debug("AUTO-HEIGHT: column flex item height = %d, total = %d", (int)item->height, total_height);
-                } else if (item) {
-                    // Try measured content height from cache
-                    MeasurementCacheEntry* cached = get_from_measurement_cache(child);
-                    if (cached && cached->measured_height > 0) {
-                        total_height += cached->measured_height;
-                        log_debug("AUTO-HEIGHT: column flex item cached height = %d, total = %d", cached->measured_height, total_height);
+                if (item && item->fi) {
+                    float item_contribution = 0;
+                    // Priority 1: flex-basis (if explicit, it defines the main-axis starting size)
+                    if (item->fi->flex_basis >= 0) {
+                        item_contribution = item->fi->flex_basis;
+                        log_debug("AUTO-HEIGHT: column flex item flex-basis = %.1f, total = %d",
+                                  item_contribution, total_height + (int)item_contribution);
                     }
+                    // Priority 2: explicit height
+                    else if (item->height > 0) {
+                        item_contribution = item->height;
+                        log_debug("AUTO-HEIGHT: column flex item height = %d, total = %d",
+                                  (int)item->height, total_height + (int)item_contribution);
+                    }
+                    // Priority 3: measured content from cache
+                    else {
+                        MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+                        if (cached && cached->measured_height > 0) {
+                            item_contribution = cached->measured_height;
+                            log_debug("AUTO-HEIGHT: column flex item cached height = %d, total = %d",
+                                      cached->measured_height, total_height + (int)item_contribution);
+                        }
+                    }
+                    total_height += (int)item_contribution;
+                } else if (item && item->height > 0) {
+                    total_height += (int)item->height;
+                    log_debug("AUTO-HEIGHT: column flex item (no fi) height = %d, total = %d",
+                              (int)item->height, total_height);
                 }
             }
             child = child->next_sibling;

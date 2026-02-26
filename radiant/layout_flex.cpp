@@ -1239,6 +1239,75 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
+    // Phase 7c: Apply max-height/max-width clamping for auto-sized flex containers
+    // Per CSS Flexbox §9.2 + CSS Box Model §10.7: after calculating auto-height,
+    // if the result exceeds max-height, clamp to max-height and re-run flex distribution
+    // so items shrink to fit within the clamped size.
+    // Same logic applies to max-width for row flex with auto-width.
+    {
+        float max_main = -1;
+        float max_cross = -1;
+        bool is_horizontal = is_main_axis_horizontal(flex_layout);
+
+        // Get max-height and max-width constraints
+        if (container->blk) {
+            if (container->blk->given_max_height > 0) {
+                if (is_horizontal) {
+                    max_cross = container->blk->given_max_height;
+                } else {
+                    max_main = container->blk->given_max_height;
+                }
+            }
+            if (container->blk->given_max_width > 0) {
+                if (is_horizontal) {
+                    max_main = container->blk->given_max_width;
+                } else {
+                    max_cross = container->blk->given_max_width;
+                }
+            }
+        }
+
+        // Check main-axis max constraint (e.g., max-height for column flex, max-width for row flex)
+        if (max_main > 0 && flex_layout->main_axis_size > max_main) {
+            log_debug("Phase 7c: main_axis_size %.1f exceeds max %.1f, clamping and re-distributing",
+                      flex_layout->main_axis_size, max_main);
+            flex_layout->main_axis_size = max_main;
+            flex_layout->main_axis_is_indefinite = false;
+
+            // Update container dimension
+            if (is_horizontal) {
+                container->width = max_main;
+            } else {
+                container->height = max_main;
+            }
+
+            // Re-run flex distribution with the clamped definite size
+            for (int i = 0; i < line_count; i++) {
+                resolve_flexible_lengths(flex_layout, &flex_layout->lines[i]);
+            }
+
+            // Re-run main-axis alignment with new sizes
+            for (int i = 0; i < line_count; i++) {
+                align_items_main_axis(flex_layout, &flex_layout->lines[i]);
+            }
+        }
+
+        // Check cross-axis max constraint (e.g., max-height for row flex)
+        if (max_cross > 0) {
+            if (is_horizontal && container->height > max_cross) {
+                log_debug("Phase 7c: cross_axis height %.1f exceeds max %.1f, clamping",
+                          container->height, max_cross);
+                container->height = max_cross;
+                flex_layout->cross_axis_size = max_cross;
+            } else if (!is_horizontal && container->width > max_cross) {
+                log_debug("Phase 7c: cross_axis width %.1f exceeds max %.1f, clamping",
+                          container->width, max_cross);
+                container->width = max_cross;
+                flex_layout->cross_axis_size = max_cross;
+            }
+        }
+    }
+
     // Phase 8: Align content (distribute space among lines)
     // Note: align-content applies to flex containers with flex-wrap: wrap or wrap-reverse
     // CRITICAL: This must happen BEFORE align_items_cross_axis so line cross-sizes are final
