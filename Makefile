@@ -660,7 +660,7 @@ clean:
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
 	@rm -f lambda-linux.exe
-	@rm -f _transpiled.c
+	@rm -f temp/_transpiled*.c
 	@echo "Build artifacts and executables cleaned."
 
 clean-test:
@@ -722,7 +722,7 @@ distclean: clean-all clean-grammar clean-test
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
 	@rm -f lambda-linux.exe
-	@rm -f _transpiled.c
+	@rm -f temp/_transpiled*.c
 	@rm -f *.exe
 	@echo "Complete cleanup finished."
 
