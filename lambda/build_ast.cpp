@@ -3628,6 +3628,8 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     ast_node->name = name_pool_create_strview(tp->name_pool, name);
     obj_type->type_name.str = ast_node->name->chars;
     obj_type->type_name.length = ast_node->name->len;
+    // set struct_name for direct field access optimization (Phase 5/6)
+    obj_type->struct_name = ast_node->name->chars;
     log_debug("build_object_type: name='%.*s'", (int)name.length, name.str);
 
     // get optional base type (inheritance)
@@ -5787,6 +5789,8 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry->node;
                 TypeType* tt = (TypeType*)obj_node->type;
                 TypeObject* obj_type = (TypeObject*)tt->type;
+                // set struct_name for direct field access optimization (Phase 5/6)
+                obj_type->struct_name = obj_node->name->chars;
                 log_debug("pass 2: completing object type '%.*s'", (int)obj_name.length, obj_name.str);
 
                 // get optional base type

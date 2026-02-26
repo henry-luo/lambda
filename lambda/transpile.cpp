@@ -5477,12 +5477,12 @@ static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name,
 // - all byte offsets are 8-byte aligned (map type defs use sizeof(void*) stride;
 //   map literals may use packed offsets which can cause unaligned access issues in MIR)
 static bool has_fixed_shape(TypeMap* map_type) {
-    if (!map_type->struct_name) return false;   // only typed maps
+    if (!map_type->struct_name) return false;
     if (!map_type->shape || map_type->length == 0) return false;
     ShapeEntry* field = map_type->shape;
     while (field) {
-        if (!field->name) return false;  // spread entry
-        if (field->byte_offset % sizeof(void*) != 0) return false;  // unaligned
+        if (!field->name) return false;
+        if (field->byte_offset % sizeof(void*) != 0) return false;
         field = field->next;
     }
     return true;
