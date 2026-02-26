@@ -1541,3 +1541,339 @@ Full Lambda baseline: 407/407 PASS
 | **DOM Selectors** | ~100 lines wrapping existing CSS selector engine | Full CSS3/4 `querySelector`/`querySelectorAll` for free |
 
 The v3 proposal leverages Lambda's existing infrastructure wherever possible — the runtime functions, the GC, the Element data model, and the CSS selector engine — to deliver maximum capability with minimal new code.
+
+---
+
+## 11. JavaScript Feature Coverage Audit
+
+Comprehensive audit of what the Lambda JS transpiler supports, what's partially supported, and what's missing entirely. Organized by language syntax features and built-in API surface.
+
+### 11.1 Language Syntax — Fully Supported
+
+| Category | Features |
+|----------|----------|
+| **Literals** | Numbers (int, float, NaN, Infinity), strings (`"..."`, `'...'`), booleans, `null`, `undefined` |
+| **Variables** | `var`, `let`, `const` declarations with initializers |
+| **Arithmetic** | `+` (numeric & string concat), `-`, `*`, `/`, `%`, `**` |
+| **Comparison** | `==`, `!=` (with coercion), `===`, `!==` (strict), `<`, `<=`, `>`, `>=` |
+| **Logical** | `&&` (short-circuit, returns operand), `\|\|` (short-circuit), `!` |
+| **Bitwise** | `&`, `\|`, `^`, `~`, `<<`, `>>`, `>>>` |
+| **Unary** | `+x`, `-x`, `++x`, `--x`, `typeof`, `void` |
+| **Assignment** | `=`, `+=`, `-=`, `*=`, `/=`, `%=` (simple variable LHS only) |
+| **Control Flow** | `if`/`else if`/`else`, `while`, C-style `for(init; cond; update)`, `break`, `continue`, `return` |
+| **Functions** | `function` declarations, `function` expressions, arrow `() => expr`, arrow `() => { ... }` |
+| **Expressions** | Function calls, ternary `? :`, grouping `(expr)`, comma in function args |
+| **Objects** | Object literals `{key: value}`, property access `obj.prop`, bracket access `obj[key]` |
+| **Arrays** | Array literals `[1, 2, 3]`, indexed access `arr[i]`, `.length` |
+| **Template Literals** | String interpolation `` `hello ${name}` `` with nested expressions |
+| **Error Handling** | `try`/`catch(e)`/`finally`, `throw expr` (via `setjmp`/`longjmp`) |
+| **Block Scoping** | `{ ... }` block statements |
+
+### 11.2 Language Syntax — Partially Supported
+
+| Feature | Limitation |
+|---------|-----------|
+| **Member assignment** (`obj.prop = val`) | AST node exists but transpiler emits `ITEM_NULL` with error log; workaround: use `setAttribute` for DOM |
+| **Bracket assignment** (`arr[i] = val`) | Same LHS limitation as member assignment |
+| **Class declarations** | Constructor body is compiled, but class methods are emitted as comments only — no prototype chain, no `super`, no static members |
+| **`delete` operator** | Always returns `true` (stub); doesn't actually delete properties |
+| **`this` keyword** | Parsed as an identifier; no binding semantics (no method `this`, no constructor `this`, no `call`/`apply`/`bind`) |
+| **Compound assignment** | Only `+=`, `-=`, `*=`, `/=`, `%=`; missing `**=`, `&=`, `\|=`, `^=`, `<<=`, `>>=`, `>>>=`, `&&=`, `\|\|=`, `??=` |
+| **`sort()` comparator** | `arr.sort()` works but custom `arr.sort((a,b) => a-b)` is not wired |
+| **`Math.min`/`Math.max`** | Only accept 2 arguments; variadic `Math.max(1,2,3)` is not handled |
+| **`console.log`** | Only this method; no `console.warn`, `console.error`, `console.info`, `console.table` |
+| **`js_call_function`** | Max 4 arguments dispatched; functions with 5+ arguments silently return `ITEM_NULL` |
+
+### 11.3 Language Syntax — Not Supported
+
+#### Control Flow
+| Feature | Example | Notes |
+|---------|---------|-------|
+| `switch`/`case`/`default` | `switch(x) { case 1: ... }` | Not in AST enum |
+| `do...while` | `do { } while(cond)` | Not in AST enum |
+| `for...in` | `for (let k in obj)` | Not in AST enum |
+| `for...of` | `for (let v of arr)` | Not in AST enum |
+| Labeled statements | `outer: for(...)` | Not in AST enum |
+| `with` statement | `with(obj) { ... }` | Not in AST enum (deprecated in strict mode) |
+
+#### Destructuring & Patterns
+| Feature | Example | Notes |
+|---------|---------|-------|
+| Array destructuring | `const [a, b] = arr` | AST enum exists, not built/handled |
+| Object destructuring | `const {x, y} = obj` | AST enum exists, not built/handled |
+| Default parameters | `function(a = 1)` | AST enum exists, not built/handled |
+| Rest parameters | `function(...args)` | AST enum exists, not built/handled |
+| Rest properties | `const {...rest} = obj` | AST enum exists, not built/handled |
+| Spread syntax | `[...arr]`, `fn(...args)` | AST enum exists, not built/handled |
+| Computed property names | `{ [expr]: val }` | `computed` flag exists but not fully wired |
+| Shorthand properties | `{ a }` → `{ a: a }` | Not handled |
+| Method shorthand | `{ foo() {} }` | `method` flag exists but no codegen |
+
+#### Async & Generators
+| Feature | Example | Notes |
+|---------|---------|-------|
+| `async function` | `async function f() {}` | Flag exists in struct, never checked |
+| `await` expression | `await promise` | No AST node type |
+| Generator `function*` | `function* gen() {}` | Flag exists in struct, never checked |
+| `yield` expression | `yield value` | No AST node type |
+
+#### ES6+ Operators & Expressions
+| Feature | Example | Notes |
+|---------|---------|-------|
+| Optional chaining | `obj?.prop` | Not in AST or operator list |
+| Nullish coalescing | `a ?? b` | Not in AST or operator list |
+| `instanceof` operator | `obj instanceof Class` | Not in operator list |
+| `in` operator | `'key' in obj` | Not in operator list |
+| Comma operator | `(a, b, c)` as expression | Not in AST enum |
+| Tagged templates | `` tag`...` `` | Not handled |
+| `new` expression | `new Foo(args)` | Not in AST enum |
+| Class expressions | `const C = class {}` | AST enum exists, not built/handled |
+| Logical assignment | `a &&= b`, `a \|\|= b`, `a ??= b` | Not in operator list |
+
+#### Modules
+| Feature | Example | Notes |
+|---------|---------|-------|
+| `import` declarations | `import { x } from 'mod'` | Not in AST enum |
+| `export` declarations | `export function f(){}` | Not in AST enum |
+| Dynamic `import()` | `import('mod')` | Not supported |
+
+### 11.4 Built-in APIs — Supported
+
+#### String Methods (17)
+`indexOf`, `lastIndexOf`, `includes`, `startsWith`, `endsWith`, `trim`, `trimStart`, `trimEnd`, `toLowerCase`, `toUpperCase`, `split`, `substring`, `slice`, `replace` (first occurrence), `charAt`, `concat`, `repeat`
+
+#### Array Methods (19)
+`push`, `pop`, `indexOf`, `includes`, `join`, `reverse`, `slice`, `concat`, `map`, `filter`, `reduce`, `forEach`, `find`, `findIndex`, `some`, `every`, `sort` (no custom comparator), `flat` (1-level), `length`
+
+#### Math (17 methods + 8 constants)
+**Methods**: `abs`, `floor`, `ceil`, `round`, `sqrt`, `pow`, `min` (2-arg), `max` (2-arg), `log`, `log10`, `exp`, `sin`, `cos`, `tan`, `sign`, `trunc`, `random`
+**Constants**: `PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`, `SQRT2`, `SQRT1_2`
+
+#### DOM API (7 document methods + 4 properties + 13 element properties + 11 element methods)
+See §10 Phase 3d–3e for full list.
+
+#### Other
+- `console.log(value)` — single-argument print
+- `typeof` operator — returns correct JS type strings
+- Type coercion: `ToNumber`, `ToString`, `ToBoolean` with JS semantics
+- Objects: `{key: value}` creation, `.prop` and `["key"]` access
+- Functions: declaration, expression, arrow, closures via `js_new_function`/`js_call_function`
+
+### 11.5 Built-in APIs — Not Supported
+
+#### Critical (commonly used in typical JS code)
+
+| API | Notes |
+|-----|-------|
+| **`JSON.parse(str)`** | No JSON parsing from JS |
+| **`JSON.stringify(value)`** | No JSON serialization from JS |
+| **`parseInt(str, radix)`** | No global or `Number.parseInt` |
+| **`parseFloat(str)`** | No global or `Number.parseFloat` |
+| **`isNaN(value)`** | Neither global nor `Number.isNaN` |
+| **`isFinite(value)`** | Neither global nor `Number.isFinite` |
+| **`Object.keys(obj)`** | No way to enumerate object keys |
+| **`Object.values(obj)`** | No way to enumerate object values |
+| **`Object.entries(obj)`** | No key-value pair enumeration |
+| **`Array.isArray(value)`** | No array type check from JS |
+| **`array.splice(start, del, ...items)`** | Very commonly used for in-place insertion/removal |
+| **`string.replaceAll(search, repl)`** | Only `replace` (first occurrence) exists |
+| **`new Date()` / `Date.now()`** | No date/time access |
+
+#### High Priority (frequently used)
+
+| API | Notes |
+|-----|-------|
+| `new Error(message)` / error types | `throw` works but no `Error` constructor |
+| `array.shift()` / `array.unshift()` | Common queue operations |
+| `string.match(regex)` / `regex.test(str)` | No RegExp support at all |
+| `string.charCodeAt(i)` / `String.fromCharCode(n)` | No char code access |
+| `string.padStart(len)` / `string.padEnd(len)` | No padding functions |
+| `number.toFixed(digits)` | No number formatting |
+| `Number(value)` / `String(value)` / `Boolean(value)` | Constructor-as-converter pattern |
+| `Object.assign(target, ...sources)` | No object merging |
+| `Object.hasOwn(obj, key)` / `obj.hasOwnProperty(key)` | No property existence check |
+| `console.warn` / `console.error` / `console.info` | Only `console.log` |
+| `array.sort(compareFn)` | Custom comparator not wired |
+| `Math.min(a,b,c,...)` / `Math.max(a,b,c,...)` (variadic) | Only 2-arg supported |
+
+#### Medium Priority
+
+| API | Notes |
+|-----|-------|
+| `new Map()` / `new Set()` | No ES6 Map/Set collections |
+| `Promise` / `async`/`await` | No async runtime / event loop |
+| `setTimeout` / `setInterval` | No timer API |
+| `Math.atan2`, `Math.asin`, `Math.acos`, `Math.atan` | Missing trig inverse functions |
+| `Math.log2`, `Math.cbrt`, `Math.hypot` | Missing math functions |
+| `array.flatMap`, `array.fill`, `array.at` | Missing array methods |
+| `string.at(index)` | Missing string method |
+| `encodeURIComponent` / `decodeURIComponent` | No URI encoding |
+| `Proxy` / `Reflect` | Metaprogramming APIs |
+| `Symbol()` / well-known symbols | Only `typeof` returns `"symbol"` |
+| `RegExp` literals and constructor | No regex support |
+
+### 11.6 Coverage Summary
+
+| Category | Supported | Partially | Missing | Coverage |
+|----------|-----------|-----------|---------|----------|
+| **Core Syntax** (literals, vars, operators) | 27 features | 3 | 0 | ~90% |
+| **Control Flow** | 5 (if/while/for/break/continue/return) | 0 | 6 (switch/do-while/for-in/for-of/labels/with) | ~45% |
+| **Functions** | 4 (decl/expr/arrow/closures) | 1 (this) | 3 (async/generators/default params) | ~50% |
+| **Destructuring & Patterns** | 0 | 0 | 7 (array/object/rest/spread/defaults/computed/shorthand) | 0% |
+| **Classes & OOP** | 0 | 1 (class stub) | 5 (methods/static/super/new/instanceof) | ~5% |
+| **Modules** | 0 | 0 | 3 (import/export/dynamic) | 0% |
+| **Async** | 0 | 0 | 4 (async/await/generators/yield) | 0% |
+| **Error Handling** | 3 (try/catch/throw) | 0 | 1 (Error constructor) | ~75% |
+| **ES6+ Operators** | 0 | 0 | 4 (?./??\|in/instanceof) | 0% |
+| **String Methods** | 17 | 0 | ~10 (regex-based, padStart, charCodeAt, replaceAll) | ~60% |
+| **Array Methods** | 19 | 1 (sort) | ~10 (splice, shift, unshift, flatMap, at, etc.) | ~60% |
+| **Math** | 17+8 | 2 (min/max 2-arg) | ~10 (atan2, asin, log2, etc.) | ~70% |
+| **DOM API** | 35 | 0 | ~10 (classList, innerHTML, style, events) | ~75% |
+| **Built-in Objects** | 1 (Math) | 0 | 8+ (JSON, Date, RegExp, Map, Set, Error, Number, Promise) | ~5% |
+| **Global Functions** | 1 (typeof) | 0 | 6+ (parseInt, parseFloat, isNaN, etc.) | ~10% |
+
+**Overall**: The transpiler covers a **solid ES5 core** (variables, operators, functions, control flow, objects, arrays, try/catch) with select ES6 features (arrow functions, template literals, `let`/`const`). The biggest gaps are destructuring, `switch`/`for-of`/`for-in`, modules, async, classes beyond constructors, and commonly-used built-in objects (`JSON`, `Date`, `RegExp`, `Map`/`Set`).
+
+---
+
+## 12. Object & Prototype Chain Support
+
+Detailed analysis of how JavaScript objects, property access, and prototype chains are currently implemented in the Lambda JS transpiler and runtime.
+
+### 12.1 Object Storage — Three Map Variants
+
+All three variants use the same `Map` C struct (`lambda.h`) but are distinguished by the `type` pointer field:
+
+```
+struct Map {
+    TypeId type_id;   // always LMD_TYPE_MAP
+    uint8_t flags;
+    void* type;       // TypeMap* — or NULL (JS obj) — or &js_dom_type_marker (DOM)
+    void* data;       // packed data — or HashMap* — or DomElement*
+    int data_cap;
+};
+```
+
+| Variant | `Map.type` | `Map.data` | Used By |
+|---------|-----------|-----------|---------|
+| **JS Object** | `NULL` | `HashMap*` (open-addressing hash table) | `js_new_object()`, object literals |
+| **Lambda Map** | valid `TypeMap*` | packed byte buffer + `ShapeEntry` linked list | Input parsers, Lambda engine |
+| **DOM Wrapper** | `&js_dom_type_marker` | `DomElement*` | DOM bridge (`js_dom_wrap_element`) |
+
+### 12.2 Object Creation
+
+**`js_new_object()`** (`js_runtime.cpp`) allocates a `HashMap` (from `lib/hashmap.h`, initial capacity 4) and wraps it in a GC-heap-allocated `Map` with `type = NULL` as the sentinel that distinguishes JS objects from Lambda maps. Each entry is a `JsObjectEntry { String* key; Item value; }`.
+
+**Object literals** `{a: 1, b: 2}` transpile via `transpile_js_object_expression()` to a GCC statement expression:
+
+```c
+({
+  Item obj = js_new_object();
+  js_property_set(obj, s2it(heap_create_name("a")), i2it(1));
+  js_property_set(obj, s2it(heap_create_name("b")), i2it(2));
+  obj;
+})
+```
+
+Property keys that are identifiers are converted to heap-allocated `String*` via `s2it(heap_create_name("..."))`. Computed keys are transpiled as expressions.
+
+### 12.3 Property Access
+
+**`js_property_get()`** (`js_runtime.cpp`) dispatches on `get_type_id(object)`:
+
+1. **`LMD_TYPE_MAP`**:
+   - DOM node (`type == &js_dom_type_marker`) → `js_dom_get_property()` (strcmp dispatch over ~20 DOM property names, fallback to `getAttribute`)
+   - JS object (`type == NULL`) → `hashmap_get()` lookup
+   - Lambda map (valid `TypeMap*`) → `map_get()` (linear scan of `ShapeEntry` linked list)
+2. **`LMD_TYPE_ELEMENT`** → `elmt_get()`
+3. **`LMD_TYPE_ARRAY`** → `"length"` check or numeric index
+
+**Transpiler output for `obj.prop`**:
+```c
+js_property_access(<transpiled obj>, s2it(heap_create_name("prop")))
+```
+
+**Special fast-paths** (checked before general dispatch):
+- `document.prop` → `js_document_get_property(s2it(heap_create_name("prop")))`
+- `Math.PI` etc. → `js_math_property(s2it(heap_create_name("PI")))`
+- `.length` → `i2it(fn_len(obj))` (short-circuits to Lambda's built-in length)
+
+**Bracket access** `obj["key"]` uses the same `js_property_access()` with the key expression transpiled inline.
+
+### 12.4 Property Assignment — Gap
+
+**Runtime function exists**: `js_property_set()` (`js_runtime.cpp`) works correctly via `hashmap_set()` on JS objects. It is used during object literal construction (see §12.2).
+
+**Transpiler does NOT emit it** for `obj.prop = val` assignments. The assignment expression handler has a TODO:
+
+```cpp
+} else {
+    // For member expression assignment (obj.prop = expr, arr[i] = expr)
+    // TODO: implement property/element assignment
+    log_error("Complex assignment targets not yet supported");
+    strbuf_append_str(tp->code_buf, "ITEM_NULL");
+}
+```
+
+**Workaround**: For DOM elements, use `setAttribute("prop", val)` instead.
+
+### 12.5 Prototype Chain — Not Implemented
+
+**There is zero prototype chain infrastructure.** When `hashmap_get()` finds no matching key, `ItemNull` is returned immediately. Specifics:
+
+- No `__proto__` link on objects
+- No `[[Prototype]]` traversal on property miss
+- No `prototype` property on functions
+- No `Object.create(proto)` or `Object.getPrototypeOf(obj)`
+- No `instanceof` operator support
+- No method resolution order / delegation
+
+This means:
+- Object methods must be stored directly on each instance (no shared method table)
+- `"foo".toUpperCase()` works only because string methods are hard-coded in `js_property_get`, not via `String.prototype`
+- Array methods like `.push()`, `.map()` are similarly hard-coded dispatches, not prototype lookups
+
+### 12.6 Classes — Constructor Stub Only
+
+Class declarations (`transpile_js_class_declaration`) emit a `_constructor()` function:
+
+```c
+Item _js_ClassName_constructor() {
+  Item instance = js_new_object();
+  // Constructor body transpiled here
+  // TODO: Process class methods and add them to prototype
+  // Method bodies appear as comments only: // Method: name
+  return instance;
+}
+```
+
+**Limitations**:
+- Constructor **parameters are not wired through** to the generated function
+- Class **methods** are recognized in the AST but generate only `// Method: name` comments — not added to the instance or any prototype
+- No `new` expression AST node handling in the transpiler's expression dispatch
+- No `super` keyword support
+- No static members or getters/setters
+
+### 12.7 DOM Wrappers — Working
+
+DOM nodes use a **zero-overhead wrapper pattern**: a `Map` with `type = &js_dom_type_marker` (unique address as sentinel) and `data = DomElement*`. No HashMap allocation per DOM node.
+
+- **Identification**: `js_is_dom_node()` checks `m->type == &js_dom_type_marker` (pointer comparison)
+- **Property access**: `js_dom_get_property()` — `strcmp` dispatch over ~20 DOM property names (`tagName`, `id`, `className`, `textContent`, `children`, `parentElement`, `firstElementChild`, `nextElementSibling`, etc.), unrecognized properties fall back to `dom_element_get_attribute()`
+- **Method calls**: `js_dom_element_method()` — handles `getAttribute`, `setAttribute`, `appendChild`, `removeChild`, `querySelector`, `querySelectorAll`, etc.
+
+### 12.8 Summary
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Object creation (`{}`, `js_new_object`) | **Working** | HashMap-backed, GC-tracked |
+| Property get (`obj.prop`, `obj["key"]`) | **Working** | hashmap_get dispatch |
+| Property set in object literals | **Working** | js_property_set during construction |
+| Property set via assignment (`obj.prop = x`) | **Runtime ready, transpiler TODO** | js_property_set exists but not emitted |
+| Prototype chain (`__proto__`, `[[Prototype]]`) | **Not implemented** | No traversal, no links |
+| `new Constructor()` expression | **Not implemented** | No AST dispatch |
+| Class methods on instances | **Not implemented** | Comment stubs only |
+| `Object.keys/values/entries` | **Not implemented** | No key enumeration |
+| `Object.create(proto)` | **Not implemented** | No prototype creation |
+| `instanceof` operator | **Not implemented** | No prototype chain to walk |
+| DOM wrapper objects | **Working** | Sentinel-based, zero-overhead |
