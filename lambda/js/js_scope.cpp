@@ -1,4 +1,5 @@
 #include "js_transpiler.hpp"
+#include "js_dom.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
@@ -366,6 +367,12 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     // Set up _lambda_rt for JIT code to access the runtime context
     // The JIT code uses 'rt' macro which points to _lambda_rt
     _lambda_rt = (Context*)context;
+    
+    // Set up DOM document context if available
+    if (runtime->dom_doc) {
+        js_dom_set_document(runtime->dom_doc);
+        log_debug("JS DOM document context set from runtime");
+    }
     
     // Execute the JIT compiled JavaScript code
     log_notice("Executing JIT compiled JavaScript code...");

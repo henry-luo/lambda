@@ -498,6 +498,23 @@ static bool is_math_call(JsCallNode* call_node) {
     return obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Math", 4) == 0;
 }
 
+// Check if a call expression is document.<method>(...)
+static bool is_document_call(JsCallNode* call_node) {
+    if (!call_node->callee) return false;
+    if (call_node->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    JsMemberNode* member = (JsMemberNode*)call_node->callee;
+    if (!member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    return obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0;
+}
+
+// Check if a member expression has 'document' as the object
+static bool is_document_member(JsMemberNode* member) {
+    if (!member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    return obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0;
+}
+
 // Check if a call expression is a method call on a non-special object (obj.method())
 static bool is_method_call(JsCallNode* call_node) {
     if (!call_node->callee) return false;
@@ -532,6 +549,39 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
         return;
     }
     
+    // Special handling for document.<method>() calls
+    if (is_document_call(call_node)) {
+        JsMemberNode* member = (JsMemberNode*)call_node->callee;
+        JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+        int arg_count = count_js_args(call_node->arguments);
+
+        strbuf_append_str(tp->code_buf, "({\n");
+        // build args array
+        if (arg_count > 0) {
+            strbuf_append_str(tp->code_buf, "  Item _d_args[");
+            strbuf_append_int(tp->code_buf, arg_count);
+            strbuf_append_str(tp->code_buf, "] = {");
+            JsAstNode* arg = call_node->arguments;
+            for (int i = 0; i < arg_count; i++) {
+                if (i > 0) strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, arg);
+                arg = arg->next;
+            }
+            strbuf_append_str(tp->code_buf, "};\n");
+        }
+        strbuf_append_str(tp->code_buf, "  js_document_method(s2it(heap_create_name(\"");
+        strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
+        strbuf_append_str(tp->code_buf, "\")), ");
+        if (arg_count > 0) {
+            strbuf_append_str(tp->code_buf, "_d_args, ");
+        } else {
+            strbuf_append_str(tp->code_buf, "((void*)0), ");
+        }
+        strbuf_append_int(tp->code_buf, arg_count);
+        strbuf_append_str(tp->code_buf, ");\n})");
+        return;
+    }
+
     // Special handling for Math.<method>() calls
     if (is_math_call(call_node)) {
         JsMemberNode* member = (JsMemberNode*)call_node->callee;
@@ -606,6 +656,12 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
             strbuf_append_str(tp->code_buf, ");\n");
             strbuf_append_str(tp->code_buf, "  } else if (_rtype == LMD_TYPE_ARRAY) {\n");
             strbuf_append_str(tp->code_buf, "    _mresult = js_array_method(_recv, _mname, ");
+            if (arg_count > 0) strbuf_append_str(tp->code_buf, "_m_args, ");
+            else strbuf_append_str(tp->code_buf, "((void*)0), ");
+            strbuf_append_int(tp->code_buf, arg_count);
+            strbuf_append_str(tp->code_buf, ");\n");
+            strbuf_append_str(tp->code_buf, "  } else if (_rtype == LMD_TYPE_MAP && js_is_dom_node(_recv)) {\n");
+            strbuf_append_str(tp->code_buf, "    _mresult = js_dom_element_method(_recv, _mname, ");
             if (arg_count > 0) strbuf_append_str(tp->code_buf, "_m_args, ");
             else strbuf_append_str(tp->code_buf, "((void*)0), ");
             strbuf_append_int(tp->code_buf, arg_count);
@@ -694,6 +750,16 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
 
 // Transpile JavaScript member expression
 void transpile_js_member_expression(JsTranspiler* tp, JsMemberNode* member_node) {
+    // Special case: document.property (e.g., document.body, document.title)
+    if (!member_node->computed && is_document_member(member_node) &&
+        member_node->property && member_node->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* prop = (JsIdentifierNode*)member_node->property;
+        strbuf_append_str(tp->code_buf, "js_document_get_property(s2it(heap_create_name(\"");
+        strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
+        strbuf_append_str(tp->code_buf, "\")))");
+        return;
+    }
+
     // Special case: Math.PI, Math.E, etc.
     if (!member_node->computed && member_node->object &&
         member_node->object->node_type == JS_AST_NODE_IDENTIFIER &&
@@ -1424,6 +1490,12 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, "extern Item js_array_method(Item arr, Item method_name, Item* args, int argc);\n");
     strbuf_append_str(tp->code_buf, "extern Item js_math_method(Item method_name, Item* args, int argc);\n");
     strbuf_append_str(tp->code_buf, "extern Item js_math_property(Item prop_name);\n");
+    // DOM API functions
+    strbuf_append_str(tp->code_buf, "extern Item js_document_method(Item method_name, Item* args, int argc);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_document_get_property(Item prop_name);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_dom_get_property(Item elem, Item prop_name);\n");
+    strbuf_append_str(tp->code_buf, "extern _Bool js_is_dom_node(Item item);\n");
     // Lambda runtime functions used by codegen
     strbuf_append_str(tp->code_buf, "extern int64_t fn_len(Item item);\n");
     strbuf_append_str(tp->code_buf, "extern TypeId item_type_id(Item item);\n");

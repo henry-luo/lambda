@@ -194,6 +194,87 @@ char* execute_js_builtin_tests() {
     return full_output;
 }
 
+// Helper function to execute a JavaScript file with --document flag and capture output
+char* execute_js_script_with_doc(const char* script_path, const char* html_path) {
+    char command[512];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --document \"%s\"", script_path, html_path);
+#else
+    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --document \"%s\"", script_path, html_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        fprintf(stderr, "Error: Could not execute command: %s\n", command);
+        return nullptr;
+    }
+
+    // Read output in chunks
+    char buffer[1024];
+    size_t total_size = 0;
+    char* full_output = nullptr;
+
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        size_t len = strlen(buffer);
+        char* new_output = (char*)realloc(full_output, total_size + len + 1);
+        if (!new_output) {
+            free(full_output);
+            pclose(pipe);
+            return nullptr;
+        }
+        full_output = new_output;
+        strcpy(full_output + total_size, buffer);
+        total_size += len;
+    }
+
+    int exit_code = pclose(pipe);
+    if (WEXITSTATUS(exit_code) != 0) {
+        fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s --document %s\n",
+                WEXITSTATUS(exit_code), script_path, html_path);
+        free(full_output);
+        return nullptr;
+    }
+
+    // Extract result from "##### Script" marker (same as Lambda tests)
+    if (!full_output) {
+        return nullptr;
+    }
+    char* marker = strstr(full_output, "##### Script");
+    if (marker) {
+        char* result_start = strchr(marker, '\n');
+        if (result_start) {
+            result_start++; // Skip the newline
+            char* result = strdup(result_start);
+            free(full_output);
+            return result;
+        }
+    }
+
+    return full_output;
+}
+
+// Helper function to test JavaScript DOM script against expected output file
+void test_js_dom_script_against_file(const char* script_path, const char* html_path, const char* expected_file_path) {
+    const char* script_name = strrchr(script_path, '/');
+    script_name = script_name ? script_name + 1 : script_path;
+
+    char* expected_output = read_expected_output(expected_file_path);
+    ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
+
+    char* actual_output = execute_js_script_with_doc(script_path, html_path);
+    ASSERT_NE(actual_output, nullptr) << "Could not execute JavaScript DOM script: " << script_path;
+
+    trim_trailing_whitespace(actual_output);
+
+    ASSERT_STREQ(expected_output, actual_output)
+        << "Output mismatch for JavaScript DOM script: " << script_path
+        << "\nExpected (" << strlen(expected_output) << " chars): " << expected_output
+        << "\nActual (" << strlen(actual_output) << " chars): " << actual_output;
+
+    free(expected_output);
+    free(actual_output);
+}
+
 // JavaScript Test Cases
 TEST(JavaScriptTests, test_js_command_interface) {
     // Test that the JavaScript command interface works
@@ -273,6 +354,11 @@ TEST(JavaScriptTests, test_math_object) {
 
 TEST(JavaScriptTests, test_array_methods_v3) {
     test_js_script_against_file("test/js/array_methods_v3.js", "test/js/array_methods_v3.txt");
+}
+
+// v3 Phase 3d tests: DOM API
+TEST(JavaScriptTests, test_dom_basic) {
+    test_js_dom_script_against_file("test/js/dom_basic.js", "test/js/dom_basic.html", "test/js/dom_basic.txt");
 }
 
 int main(int argc, char **argv) {
