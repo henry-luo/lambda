@@ -5,6 +5,7 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "js_runtime.h"
+#include "js_dom.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -550,6 +551,10 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
+        if (js_is_dom_node(object)) {
+            return js_dom_get_property(object, key);
+        }
         // Check if this is a JS object (indicated by NULL type)
         if (m->type == NULL && m->data != NULL) {
             // This is a JS object using hashmap
