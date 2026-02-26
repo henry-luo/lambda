@@ -744,6 +744,14 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
         sibling = (View*)sibling->next_sibling;
     }
 
+    // CSS 2.1 §8.3.1: If the last child's margin chain includes a self-collapsing
+    // element with clearance, that margin must NOT collapse with the parent's
+    // bottom margin. Return 0 to prevent the collapse.
+    if (last->bound->clearance_in_margin_chain) {
+        log_debug("[CLEARANCE] Last child has clearance_in_margin_chain — not collapsing with parent bottom margin");
+        return 0;
+    }
+
     return last->bound->margin.bottom;
 }
 
@@ -2287,7 +2295,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (parent_bfc && (parent_bfc->left_float_count > 0 || parent_bfc->right_float_count > 0)) {
             // Calculate this block's position in BFC coordinates
             // block->y is relative to parent's content area, need to convert to BFC coordinates
-            float y_in_bfc = block->y;
+            // CSS 2.1 §9.5: Float avoidance is based on the border edge, so include margin-top
+            // (margin is not yet added to block->y at this point — it's added later)
+            float block_margin_top = block->bound ? block->bound->margin.top : 0;
+            float y_in_bfc = block->y + block_margin_top;
             float x_in_bfc = block->x;
 
             // Walk up from parent to BFC establishing element, accumulating offsets
@@ -3096,6 +3107,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
                 if (has_content_after) {
                     log_debug("NOT collapsing bottom margin - content exists after last block child");
+                } else if (last_child_block->bound->clearance_in_margin_chain) {
+                    // CSS 2.1 §8.3.1: If the last child's margin chain includes a
+                    // self-collapsing element with clearance, the resulting margin
+                    // does NOT collapse with the parent block's bottom margin.
+                    log_debug("[CLEARANCE] NOT collapsing bottom margin - last child has clearance_in_margin_chain");
                 } else {
                     float parent_margin = block->bound ? block->bound->margin.bottom : 0;
                     float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
@@ -3906,6 +3922,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // the preceding sibling's margins, not the element's own top/bottom margins.
                 bool is_self_collapsing = is_block_self_collapsing(block);
 
+                // CSS 2.1 §8.3.1: Track if this block (or its margin chain) includes
+                // a self-collapsing element with clearance. Such margins must NOT
+                // collapse with the parent's bottom margin.
+                bool block_has_clearance = (lycon->block.saved_clear_y >= 0);
+
                 if (is_self_collapsing) {
                     if (parent_child_collapsed) {
                         // CSS 2.1 §8.3.1: Parent-child collapse already absorbed both
@@ -3920,6 +3941,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // CSS 2.1 §8.3.1: The element's own margins merge via collapse_margins
                         // This merged margin then participates in sibling collapsing
                         float prev_mb = 0;
+                        bool prev_has_clearance_chain = false;
                         {
                             View* pv = block->prev_placed_view();
                             while (pv && pv->is_block()) {
@@ -3931,17 +3953,39 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             }
                             if (pv && pv->is_block() && pv->view_type != RDT_VIEW_INLINE_BLOCK && ((ViewBlock*)pv)->bound) {
                                 prev_mb = ((ViewBlock*)pv)->bound->margin.bottom;
+                                prev_has_clearance_chain = ((ViewBlock*)pv)->bound->clearance_in_margin_chain;
                             }
                         }
 
                         float self_collapsed = collapse_margins(original_margin_top, block->bound->margin.bottom);
-                        float new_pending = collapse_margins(prev_mb, self_collapsed);
-                        float contribution = max(0.f, new_pending - prev_mb);
+                        float new_pending, contribution;
+
+                        if (block_has_clearance) {
+                            // CSS 2.1 §8.3.1 + §9.5.2: Clearance separates this element's
+                            // margins from the preceding sibling's margins. The self-collapsed
+                            // margin stands alone — it does NOT collapse with prev_mb.
+                            new_pending = self_collapsed;
+                            contribution = self_collapsed;
+                        } else {
+                            new_pending = collapse_margins(prev_mb, self_collapsed);
+                            contribution = max(0.f, new_pending - prev_mb);
+                        }
                         lycon->block.advance_y += contribution;
                         // expose the merged margin to next sibling via margin.bottom
                         block->bound->margin.bottom = new_pending;
-                        log_debug("self-collapsing block: original_mt=%f, mb=%f, self_collapsed=%f, prev_mb=%f, contribution=%f, new_pending=%f",
-                            original_margin_top, block->bound->margin.bottom, self_collapsed, prev_mb, contribution, new_pending);
+
+                        // CSS 2.1 §8.3.1: Propagate clearance flag through the margin chain.
+                        // If this block has clearance, or the previous sibling's margin chain
+                        // included a cleared element, the resulting margin must not collapse
+                        // with the parent's bottom margin.
+                        if (block_has_clearance || prev_has_clearance_chain) {
+                            block->bound->clearance_in_margin_chain = true;
+                            log_debug("[CLEARANCE] Self-collapsing block: marking clearance_in_margin_chain=true "
+                                      "(has_clearance=%d, prev_chain=%d)", block_has_clearance, prev_has_clearance_chain);
+                        }
+
+                        log_debug("self-collapsing block: original_mt=%f, mb=%f, self_collapsed=%f, prev_mb=%f, contribution=%f, new_pending=%f, has_clearance=%d",
+                            original_margin_top, block->bound->margin.bottom, self_collapsed, prev_mb, contribution, new_pending, block_has_clearance);
                     }
                 } else {
                     lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
