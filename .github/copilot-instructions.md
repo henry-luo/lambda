@@ -4,7 +4,7 @@
 
 These rules MUST be followed. Violations are considered errors.
 
-1. **NEVER write files to `/tmp`**. Use `./temp/` for ALL temporary files.
+1. **NEVER write files to `/tmp`**. Use `./temp/` dir for ALL temporary files.
 2. **NEVER use `std::string`, `std::vector`, `std::map`**, or any other `std::` types. Use `./lib` equivalents (`Str`, `ArrayList`, `HashMap`, etc.).
 3. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`.
 4. **NEVER manually edit `parser.c`**. Grammar regeneration is automatic from `grammar.js` via `make generate-grammar`.
