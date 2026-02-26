@@ -484,11 +484,69 @@ When any condition fails, the transpiler falls back to the existing runtime path
 
 | Phase | Description | Status |
 |---|---|---|
-| Phase 5 | Object method field loading (`_self_data->field`) | Not started |
-| Phase 6 | Object method field write-back | Not started |
 | Phase 7 | Typed function parameter passing (`Map*` signatures) | Not started |
 | — | Chained member access (`a.b.c` direct access) | Not started — requires propagating native pointer through chain |
 | — | Unboxed context reads (no boxing when target is native type) | Not started |
+
+### Completed: Phase 5 (Object Method Field Loading) and Phase 6 (Object Method Field Write-Back)
+
+Building on Phase 1's struct typedefs, Phase 5 replaces `fn_member(_self_item, ...)` field loads in object method preambles with direct struct reads, and Phase 6 replaces `fn_map_set(_self_item, ...)` write-backs in `pn` method assignments with direct struct writes.
+
+#### Phase 5: Object Method Field Loading
+
+Method preambles for fixed-shape object types now load fields via direct struct access instead of runtime name lookups.
+
+**Before:**
+```c
+Item _self_item = (uint64_t)(uintptr_t)_self;
+Item _pipe_item = _self_item;
+int64_t _count = it2i(fn_member(_self_item, s2it(heap_create_name("count"))));
+```
+
+**After:**
+```c
+Item _self_item = (uint64_t)(uintptr_t)_self;
+Item _pipe_item = _self_item;
+_type_Counter* _self_data = (_type_Counter*)((Object*)_self)->data;
+int64_t _count = _self_data->count;
+```
+
+Each field load eliminates: `heap_create_name` (allocation) → `s2it` (tag) → `fn_member` (O(N) linear scan) → `it2i`/`it2d`/`it2b`/`it2s` (unbox). Replaced with a single struct field read at a known compile-time offset.
+
+**Type handling**: For scalar types (bool, int, int64, float, string, symbol, binary, decimal, datetime), the struct field type from `write_c_field_type()` matches the local variable type from `write_type()` — no casts needed. For container types (List*, Map*, etc.), the struct stores `void*` which implicitly converts to the specific pointer type in C. For ANY/NULL/ERROR types (rare in named types), an explicit `(Item)(uintptr_t)` cast converts `void*` to `uint64_t`.
+
+**Fallback**: When `has_fixed_shape()` returns false (no struct_name, spread entries, unaligned offsets), the existing `fn_member` path is preserved unchanged.
+
+#### Phase 6: Object Method Field Write-Back
+
+`pn` method assignment write-backs for fixed-shape object types now use direct struct writes instead of `fn_map_set`.
+
+**Before:**
+```c
+_count = _count + 1;
+fn_map_set(_self_item, s2it(heap_create_name("count")), i2it(_count));
+```
+
+**After:**
+```c
+_count = _count + 1;
+_self_data->count = _count;
+```
+
+Each write-back eliminates: `heap_create_name` (allocation) → `s2it` (tag) → `fn_map_set` (O(N) scan + `strncmp` + type-check + store). Replaced with a direct struct field assignment. No boxing/unboxing is needed since the local variable type already matches the struct field type.
+
+**Fallback**: When `has_fixed_shape()` returns false, the existing `fn_map_set` path with boxing is preserved.
+
+#### Files Modified (Phase 5 + Phase 6)
+
+| File | Changes |
+|---|---|
+| `lambda/transpile.cpp` | Modified `define_func` method preamble: added `has_fixed_shape` branch for direct struct reads via `_self_data->field`; modified `transpile_assign_stam` write-back: added `has_fixed_shape` branch for direct struct writes |
+
+#### Test Coverage
+
+- **467/467** baseline tests pass
+- Object method tests exercised: `object.ls` (fn methods), `object_mutation.ls` (pn methods with write-back), `object_update.ls`, `object_inherit.ls`, `object_default.ls`, `object_constraint.ls`
 
 ### Completed: Phase 1 (Struct Typedef Emission) and Phase 4 (Direct Map Construction)
 
