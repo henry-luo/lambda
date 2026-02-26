@@ -3333,7 +3333,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     // close with ) for store function call, or ; for regular assignment
     strbuf_append_str(tp->code_buf, use_store_func ? ");" : ";");
 
-    // pn method: write field back to object via fn_map_set
+    // pn method: write field back to object
     if (tp->pn_method_obj_type) {
         TypeObject* obj_type = tp->pn_method_obj_type;
         ShapeEntry* se = obj_type->shape;
@@ -3341,28 +3341,38 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
             if (se->name && assign_node->target &&
                 (int)se->name->length == assign_node->target->len &&
                 strncmp(se->name->str, assign_node->target->chars, se->name->length) == 0) {
-                // write back: fn_map_set(_self_item, field_key, boxed_value)
-                strbuf_append_str(tp->code_buf, "\n fn_map_set(_self_item, s2it(heap_create_name(\"");
-                strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
-                strbuf_append_str(tp->code_buf, "\")), ");
-                // box the local variable for fn_map_set
-                TypeId ftype = se->type ? se->type->type_id : LMD_TYPE_ANY;
-                if (ftype == LMD_TYPE_INT) {
-                    strbuf_append_str(tp->code_buf, "i2it(_");
-                } else if (ftype == LMD_TYPE_INT64) {
-                    strbuf_append_str(tp->code_buf, "l2it(_");
-                } else if (ftype == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "push_d(_");
-                } else if (ftype == LMD_TYPE_BOOL) {
-                    strbuf_append_str(tp->code_buf, "b2it(_");
+                // Phase 6: direct struct write for fixed-shape object types
+                if (has_fixed_shape((TypeMap*)obj_type)) {
+                    // emit: _self_data->field = _field;
+                    strbuf_append_str(tp->code_buf, "\n _self_data->");
+                    strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+                    strbuf_append_str(tp->code_buf, " = _");
+                    strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+                    strbuf_append_str(tp->code_buf, ";");
                 } else {
-                    strbuf_append_str(tp->code_buf, "_");
+                    // fallback: fn_map_set(_self_item, field_key, boxed_value)
+                    strbuf_append_str(tp->code_buf, "\n fn_map_set(_self_item, s2it(heap_create_name(\"");
+                    strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
+                    strbuf_append_str(tp->code_buf, "\")), ");
+                    // box the local variable for fn_map_set
+                    TypeId ftype = se->type ? se->type->type_id : LMD_TYPE_ANY;
+                    if (ftype == LMD_TYPE_INT) {
+                        strbuf_append_str(tp->code_buf, "i2it(_");
+                    } else if (ftype == LMD_TYPE_INT64) {
+                        strbuf_append_str(tp->code_buf, "l2it(_");
+                    } else if (ftype == LMD_TYPE_FLOAT) {
+                        strbuf_append_str(tp->code_buf, "push_d(_");
+                    } else if (ftype == LMD_TYPE_BOOL) {
+                        strbuf_append_str(tp->code_buf, "b2it(_");
+                    } else {
+                        strbuf_append_str(tp->code_buf, "_");
+                    }
+                    strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+                    if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 || ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_BOOL) {
+                        strbuf_append_char(tp->code_buf, ')');
+                    }
+                    strbuf_append_str(tp->code_buf, ");");
                 }
-                strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
-                if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 || ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_BOOL) {
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                strbuf_append_str(tp->code_buf, ");");
                 break;
             }
             se = se->next;
@@ -6008,46 +6018,85 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, " Item _self_item = (uint64_t)(uintptr_t)_self;\n");
         // make ~ refer to self inside method bodies (pipe expressions will shadow _pipe_item)
         strbuf_append_str(tp->code_buf, " Item _pipe_item = _self_item;\n");
-        // iterate ALL fields of the object type (including inherited) via shape entries
-        ShapeEntry* se = obj_type->shape;
-        while (se) {
-            if (se->name) {
-                const char* fname = se->name->str;
-                int flen = (int)se->name->length;
-                Type* field_type = se->type;
-                // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_name("field"))));
-                strbuf_append_str(tp->code_buf, " ");
-                if (field_type) {
-                    write_type(tp->code_buf, field_type);
-                } else {
-                    strbuf_append_str(tp->code_buf, "Item");
+
+        // Phase 5: direct struct field reads for fixed-shape object types
+        if (has_fixed_shape((TypeMap*)obj_type)) {
+            const char* sname = ((TypeMap*)obj_type)->struct_name;
+            // emit: _type_Name* _self_data = (_type_Name*)((Object*)_self)->data;
+            strbuf_append_str(tp->code_buf, " _type_");
+            strbuf_append_str(tp->code_buf, sname);
+            strbuf_append_str(tp->code_buf, "* _self_data = (_type_");
+            strbuf_append_str(tp->code_buf, sname);
+            strbuf_append_str(tp->code_buf, "*)((Object*)_self)->data;\n");
+            ShapeEntry* se = obj_type->shape;
+            while (se) {
+                if (se->name) {
+                    const char* fname = se->name->str;
+                    int flen = (int)se->name->length;
+                    Type* field_type = se->type;
+                    TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
+                    // emit: TYPE _fieldname = _self_data->fieldname;
+                    strbuf_append_str(tp->code_buf, " ");
+                    if (field_type) {
+                        write_type(tp->code_buf, field_type);
+                    } else {
+                        strbuf_append_str(tp->code_buf, "Item");
+                    }
+                    strbuf_append_str(tp->code_buf, " _");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, " = ");
+                    if (ftid == LMD_TYPE_ANY || ftid == LMD_TYPE_NULL || ftid == LMD_TYPE_ERROR) {
+                        // void* → Item requires explicit cast
+                        strbuf_append_str(tp->code_buf, "(Item)(uintptr_t)");
+                    }
+                    strbuf_append_str(tp->code_buf, "_self_data->");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, ";\n");
                 }
-                strbuf_append_str(tp->code_buf, " _");
-                strbuf_append_str_n(tp->code_buf, fname, flen);
-                strbuf_append_str(tp->code_buf, " = ");
-                // unbox based on type
-                TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
-                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64) {
-                    strbuf_append_str(tp->code_buf, "it2i(");
-                } else if (ftid == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "it2d(");
-                } else if (ftid == LMD_TYPE_BOOL) {
-                    strbuf_append_str(tp->code_buf, "it2b(");
-                } else if (ftid == LMD_TYPE_STRING) {
-                    strbuf_append_str(tp->code_buf, "it2s(");
-                } else {
-                    // no unboxing for Item or complex types
-                }
-                strbuf_append_str(tp->code_buf, "fn_member(_self_item, s2it(heap_create_name(\"");
-                strbuf_append_str_n(tp->code_buf, fname, flen);
-                strbuf_append_str(tp->code_buf, "\")))");
-                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
-                    ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
-                    strbuf_append_char(tp->code_buf, ')');  // close unbox call
-                }
-                strbuf_append_str(tp->code_buf, ";\n");
+                se = se->next;
             }
-            se = se->next;
+        } else {
+            // fallback: load fields via fn_member (runtime name lookup)
+            ShapeEntry* se = obj_type->shape;
+            while (se) {
+                if (se->name) {
+                    const char* fname = se->name->str;
+                    int flen = (int)se->name->length;
+                    Type* field_type = se->type;
+                    // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_name("field"))));
+                    strbuf_append_str(tp->code_buf, " ");
+                    if (field_type) {
+                        write_type(tp->code_buf, field_type);
+                    } else {
+                        strbuf_append_str(tp->code_buf, "Item");
+                    }
+                    strbuf_append_str(tp->code_buf, " _");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, " = ");
+                    // unbox based on type
+                    TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
+                    if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64) {
+                        strbuf_append_str(tp->code_buf, "it2i(");
+                    } else if (ftid == LMD_TYPE_FLOAT) {
+                        strbuf_append_str(tp->code_buf, "it2d(");
+                    } else if (ftid == LMD_TYPE_BOOL) {
+                        strbuf_append_str(tp->code_buf, "it2b(");
+                    } else if (ftid == LMD_TYPE_STRING) {
+                        strbuf_append_str(tp->code_buf, "it2s(");
+                    } else {
+                        // no unboxing for Item or complex types
+                    }
+                    strbuf_append_str(tp->code_buf, "fn_member(_self_item, s2it(heap_create_name(\"");
+                    strbuf_append_str_n(tp->code_buf, fname, flen);
+                    strbuf_append_str(tp->code_buf, "\")))");
+                    if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
+                        ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
+                        strbuf_append_char(tp->code_buf, ')');  // close unbox call
+                    }
+                    strbuf_append_str(tp->code_buf, ";\n");
+                }
+                se = se->next;
+            }
         }
     }
 
