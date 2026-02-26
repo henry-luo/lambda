@@ -3,6 +3,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/file_utils.h"
 #include "../tree-sitter-javascript/bindings/c/tree-sitter-javascript.h"
 #include "../transpiler.hpp"
 #include <cstring>
@@ -293,11 +294,12 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     log_debug("Generated JavaScript C code (length: %zu)", code_len);
     
     // Write generated C code to file for debugging
-    FILE* debug_file = fopen("_transpiled_js.c", "w");
+    create_dir_recursive("temp");
+    FILE* debug_file = fopen("temp/_transpiled_js.c", "w");
     if (debug_file) {
         fwrite(c_code, 1, code_len, debug_file);
         fclose(debug_file);
-        log_debug("Wrote generated C code to _transpiled_js.c");
+        log_debug("Wrote generated C code to temp/_transpiled_js.c");
     }
     
     // Initialize MIR JIT context

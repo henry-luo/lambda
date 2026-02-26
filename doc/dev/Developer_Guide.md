@@ -415,7 +415,7 @@ make test-mir                    # Run MIR JIT test suite
 ### Debugging JIT Code
 
 1. Check `./log.txt` for execution trace — JIT operations are logged.
-2. The generated C source (C2MIR path) is written to `_transpiled_*.c` files in the project root for inspection.
+2. The generated C source (C2MIR path) is written to `temp/_transpiled_*.c` files for inspection.
 3. Use `lldb` for native debugging:
    ```bash
    lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- script.ls
