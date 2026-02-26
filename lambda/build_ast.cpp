@@ -3068,6 +3068,14 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             ast_node->as = type_expr;
             if (type_expr && type_expr->type) {
                 ast_node->type = type_expr->type;  // Keep as TypeType* wrapper
+                // propagate declaration name to TypeMap for direct field access optimization
+                Type* inner = type_expr->type;
+                if (inner && inner->type_id == LMD_TYPE_TYPE) {
+                    Type* actual = ((TypeType*)inner)->type;
+                    if (actual && actual->type_id == LMD_TYPE_MAP && ast_node->name) {
+                        ((TypeMap*)actual)->struct_name = ast_node->name->chars;
+                    }
+                }
             } else {
                 log_warn("type definition: failed to build type expression");
                 ast_node->type = &TYPE_ANY;

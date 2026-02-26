@@ -270,6 +270,40 @@ struct Container {
         int _alloced;
     };
 
+    // Map, Object, Element struct definitions for direct field access optimization
+    // Layout must match the C++ structs in lambda.hpp exactly
+    struct Map {
+        TypeId type_id;
+        uint8_t flags;
+        //---------------------
+        void* type;       // TypeMap* — shape/type info
+        void* data;       // packed data struct of the map fields
+        int data_cap;     // capacity of the data buffer
+    };
+
+    struct Object {
+        TypeId type_id;
+        uint8_t flags;
+        //---------------------
+        void* type;       // TypeObject* — shape + methods + type_name
+        void* data;       // packed field data (same layout as Map)
+        int data_cap;     // data buffer capacity
+    };
+
+    struct Element {
+        TypeId type_id;
+        uint8_t flags;
+        //---------------------
+        Item* items;       // list content items
+        int64_t length;    // number of content items
+        int64_t extra;     // count of extra items
+        int64_t capacity;  // allocated capacity
+        //---------------------
+        void* type;        // TypeElmt* — attr type/shape
+        void* data;        // packed data struct of the attrs
+        int data_cap;      // capacity of the data buffer
+    };
+
 #endif
 
 Range* range();
