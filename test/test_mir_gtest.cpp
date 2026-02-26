@@ -35,6 +35,7 @@ static const char* MIR_SKIP_TESTS[] = {
     "object_mutation",  // object mutation methods not yet supported in MIR transpiler
     "object_pattern",   // object pattern matching not yet supported in MIR transpiler
     "object_constraint", // object constraint checking not yet supported in MIR transpiler
+    "object_direct_access", // object direct struct access (C2MIR only, uses TypeObject features)
 };
 static const size_t NUM_MIR_SKIP_TESTS = sizeof(MIR_SKIP_TESTS) / sizeof(MIR_SKIP_TESTS[0]);
 

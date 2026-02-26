@@ -479,6 +479,7 @@ When any condition fails, the transpiler falls back to the existing runtime path
 
 - **467/467** baseline tests pass (465 pre-existing + 2 new from `typed_map_direct_access.ls`)
 - New test file: `test/lambda/typed_map_direct_access.ls` — exercises direct reads on typed maps with int, string, bool fields, arithmetic on fields, and function parameters with typed map annotations
+- (Total count now **468/468** after Phase 5/6 added `object_direct_access.ls`)
 
 ### Not Yet Implemented
 
@@ -542,11 +543,24 @@ Each write-back eliminates: `heap_create_name` (allocation) → `s2it` (tag) →
 | File | Changes |
 |---|---|
 | `lambda/transpile.cpp` | Modified `define_func` method preamble: added `has_fixed_shape` branch for direct struct reads via `_self_data->field`; modified `transpile_assign_stam` write-back: added `has_fixed_shape` branch for direct struct writes |
+| `lambda/build_ast.cpp` | Set `struct_name` on object types in two locations: `build_object_type` (non-global objects) and pass 2 completion (global objects). Previously only map types (`type Name = {...}`) had `struct_name` set. |
+| `test/test_mir_gtest.cpp` | Added `object_direct_access` to MIR skip list (object tests use C2MIR-only features) |
+
+#### Bug Fix: struct_name Not Set on Object Types
+
+Object types (`type Name { ... }`) go through different code paths than map types (`type Name = { ... }`):
+- Non-global objects: `build_object_type()` — now sets `obj_type->struct_name = ast_node->name->chars`
+- Global objects: two-pass build in `build_ast_list` — pass 1 creates a zeroed placeholder, pass 2 fills shape/methods. Now sets `obj_type->struct_name = obj_node->name->chars` in pass 2.
+
+Without this fix, `has_fixed_shape()` always returned false for object types (null struct_name), causing Phase 5/6 to silently fall back to the `fn_member`/`fn_map_set` runtime path.
 
 #### Test Coverage
 
-- **467/467** baseline tests pass
-- Object method tests exercised: `object.ls` (fn methods), `object_mutation.ls` (pn methods with write-back), `object_update.ls`, `object_inherit.ls`, `object_default.ls`, `object_constraint.ls`
+- **468/468** baseline tests pass
+- New test file: `test/lambda/object_direct_access.ls` with 12 tests covering:
+  - Phase 5 (fn methods): float field reads, mixed-type fields, methods with parameters, multiple fn methods, bool conditions
+  - Phase 6 (pn methods): int/float/string/bool write-back, multiple mutations interleaved with reads, literal value assignment
+- Object method tests also exercised: `object.ls`, `object_mutation.ls`, `object_update.ls`, `object_inherit.ls`, `object_default.ls`, `object_constraint.ls`
 
 ### Completed: Phase 1 (Struct Typedef Emission) and Phase 4 (Direct Map Construction)
 
