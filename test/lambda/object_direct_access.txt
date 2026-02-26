@@ -1,0 +1,20 @@
+5
+"hits:42"
+true
+15
+30
+[40, 30]
+"openclosed"
+3
+[1.5, 2.5]
+[1, 6]
+20
+false
+true
+false
+100
+70
+120
+"helloworld"
+0
+6
