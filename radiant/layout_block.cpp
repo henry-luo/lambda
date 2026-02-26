@@ -1918,6 +1918,19 @@ float adjust_min_max_width(ViewBlock* block, float width) {
             width = block->blk->given_min_width;
             log_debug("[ADJUST] Clamped to min: %.2f", width);
         }
+        // CSS Box Model: In border-box, the box width cannot be smaller than
+        // its padding+border. If min/max clamping reduces below padding+border,
+        // floor at padding+border (content area becomes 0).
+        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX && block->bound) {
+            float pad_border = block->bound->padding.left + block->bound->padding.right;
+            if (block->bound->border) {
+                pad_border += block->bound->border->width.left + block->bound->border->width.right;
+            }
+            if (width < pad_border) {
+                log_debug("[ADJUST] border-box floor: %.2f → %.2f (padding+border)", width, pad_border);
+                width = pad_border;
+            }
+        }
     }
     log_debug("[ADJUST] adjust_min_max_width: output=%.2f", width);
     return width;
@@ -1931,6 +1944,18 @@ float adjust_min_max_height(ViewBlock* block, float height) {
         // Note: given_min_height overrides given_max_height if both are specified
         if (block->blk->given_min_height >= 0 && height < block->blk->given_min_height) {
             height = block->blk->given_min_height;
+        }
+        // CSS Box Model: In border-box, the box height cannot be smaller than
+        // its padding+border. If min/max clamping reduces below padding+border,
+        // floor at padding+border (content area becomes 0).
+        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX && block->bound) {
+            float pad_border = block->bound->padding.top + block->bound->padding.bottom;
+            if (block->bound->border) {
+                pad_border += block->bound->border->width.top + block->bound->border->width.bottom;
+            }
+            if (height < pad_border) {
+                height = pad_border;
+            }
         }
     }
     return height;

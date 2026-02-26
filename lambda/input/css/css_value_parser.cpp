@@ -353,6 +353,10 @@ CssValue* css_parse_single_value(CssPropertyValueParser* parser,
             return css_value_create_number(parser->pool, token->data.number_value);
 
         case CSS_TOKEN_DIMENSION:
+            // reject dimension tokens with unknown/invalid units (e.g. "300x")
+            if (token->data.dimension.unit == CSS_UNIT_NONE) {
+                return NULL;
+            }
             return css_value_create_length(parser->pool, token->data.dimension.value, token->data.dimension.unit);
 
         case CSS_TOKEN_PERCENTAGE:
