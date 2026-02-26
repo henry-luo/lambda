@@ -483,11 +483,61 @@ When any condition fails, the transpiler falls back to the existing runtime path
 
 ### Not Yet Implemented
 
-| Phase | Description | Status |
-|---|---|---|
-| Phase 7 | Typed function parameter passing (`Map*` signatures) | Not started |
-| — | Chained member access (`a.b.c` direct access) | Not started — requires propagating native pointer through chain |
-| — | Unboxed context reads (no boxing when target is native type) | Not started |
+| Phase   | Description                                                  | Status                                                          |
+| ------- | ------------------------------------------------------------ | --------------------------------------------------------------- |
+| —       | Chained member access (`a.b.c` direct access)                | Not started — requires propagating native pointer through chain |
+| —       | Unboxed context reads (no boxing when target is native type) | Not started                                                     |
+
+### Completed: Phase 7 (Typed Function Parameter Passing)
+
+When a function parameter has a typed map/object annotation (e.g., `fn f(a: Point)`), field accesses on that parameter inside the function body now use direct struct access instead of runtime name lookups.
+
+**Root cause**: TypeParam (the AST type for function parameters) copies only the base Type fields (type_id, kind) from the annotated type but lacks the extended TypeMap/TypeObject fields (shape, struct_name, byte_size). This caused `has_fixed_shape()` to read garbage and always return false for parameter expressions, preventing Phase 2/3 optimizations.
+
+**Fix**: Store a `full_type` pointer on TypeParam for MAP/OBJECT/ELEMENT annotated parameters (in `build_param_expr`), and unwrap it in `build_identifier` so that ident expressions referencing such parameters carry the full TypeMap/TypeObject. This automatically enables Phase 2 (direct reads) and Phase 3 (direct writes) for typed function parameters.
+
+**Before:**
+```c
+Item _distance(Map* _a, Map* _b) {
+  return fn_sqrt(fn_add(
+    fn_mul(fn_sub(map_get(_a,const_s2it(4)), map_get(_b,const_s2it(5))),
+           fn_sub(map_get(_a,const_s2it(6)), map_get(_b,const_s2it(7)))),
+    fn_mul(fn_sub(map_get(_a,const_s2it(8)), map_get(_b,const_s2it(9))),
+           fn_sub(map_get(_a,const_s2it(10)),map_get(_b,const_s2it(11))))));
+}
+```
+
+**After:**
+```c
+Item _distance(Map* _a, Map* _b) {
+  return fn_sqrt(fn_add(
+    fn_mul(fn_sub(push_d(*(double*)((char*)(_a)->data+0)),
+                  push_d(*(double*)((char*)(_b)->data+0))),
+           fn_sub(push_d(*(double*)((char*)(_a)->data+0)),
+                  push_d(*(double*)((char*)(_b)->data+0)))),
+    fn_mul(fn_sub(push_d(*(double*)((char*)(_a)->data+8)),
+                  push_d(*(double*)((char*)(_b)->data+8))),
+           fn_sub(push_d(*(double*)((char*)(_a)->data+8)),
+                  push_d(*(double*)((char*)(_b)->data+8))))));
+}
+```
+
+Each field access eliminates: `const_s2it` (tag constant) → `map_get` (O(N) linear scan + strncmp) → type-switch. Replaced by a single memory read at a compile-time byte offset.
+
+#### Files Modified (Phase 7)
+
+| File | Changes |
+|---|---|
+| `lambda/build_ast.cpp` | In `build_param_expr`: set `full_type` for MAP/OBJECT/ELEMENT param types. In `build_identifier`: unwrap `full_type` for MAP/OBJECT/ELEMENT params (extends existing TYPE_KIND_UNARY unwrap). |
+| `test/test_mir_gtest.cpp` | Added `typed_param_direct_access` to MIR skip list |
+
+#### Test Coverage
+
+- **469/469** baseline tests pass
+- New test file: `test/lambda/typed_param_direct_access.ls` with 12 tests covering:
+  - Map-typed params: float/int/string/bool field reads, two params of same type, mixed with scalar params, arithmetic on fields, diagonal computation
+  - Object-typed params: reading fields from object instances passed as function parameters
+  - Nested calls: multiple typed-param functions composed together
 
 ### Completed: Phase 5 (Object Method Field Loading) and Phase 6 (Object Method Field Write-Back)
 
