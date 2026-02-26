@@ -23,6 +23,15 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
 void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 
+// forward declarations for direct map/object field access optimization
+static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
+static bool has_fixed_shape(TypeMap* map_type);
+static bool is_direct_access_type(TypeId type_id);
+static bool expr_produces_native_ptr(AstNode* expr);
+static TypeId resolve_field_type_id(ShapeEntry* field);
+static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field);
+static void emit_direct_field_write(Transpiler* tp, AstNode* object, ShapeEntry* field, AstNode* value);
+
 // hashmap comparison and hashing functions for func_name_map
 static int func_name_cmp(const void *a, const void *b, void *udata) {
     (void)udata;
@@ -3441,6 +3450,25 @@ void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node) {
         return;
     }
 
+    // try direct field write optimization for typed maps/objects
+    if (node->object->type && node->key->node_type == AST_NODE_IDENT
+        && expr_produces_native_ptr(node->object)) {
+        TypeId obj_type_id = node->object->type->type_id;
+        if (obj_type_id == LMD_TYPE_MAP || obj_type_id == LMD_TYPE_OBJECT) {
+            TypeMap* map_type = (TypeMap*)node->object->type;
+            if (has_fixed_shape(map_type)) {
+                AstIdentNode* ident = (AstIdentNode*)node->key;
+                ShapeEntry* se = find_shape_field_by_name(map_type,
+                    ident->name->chars, ident->name->len);
+                if (se && se->type && is_direct_access_type(resolve_field_type_id(se))) {
+                    emit_direct_field_write(tp, node->object, se, node->value);
+                    return;
+                }
+            }
+        }
+    }
+
+    // fall back to runtime fn_map_set
     strbuf_append_str(tp->code_buf, "\n fn_map_set(");
     transpile_box_item(tp, node->object);
     strbuf_append_str(tp->code_buf, ",");
@@ -5304,6 +5332,211 @@ void transpile_path_index_expr(Transpiler* tp, AstPathIndexNode *node) {
     strbuf_append_str(tp->code_buf, "))");
 }
 
+// ============================================================================
+// Direct map/object field access optimization helpers
+// ============================================================================
+
+// Check if an expression, when transpiled, produces a native pointer (Map*, Object*)
+// rather than a boxed Item (uint64_t). Only native pointers can use ->data access.
+// Returns false for member expressions, parent expressions, function calls returning
+// ANY, etc. which produce Item through boxing.
+static bool expr_produces_native_ptr(AstNode* expr) {
+    if (!expr || !expr->type) return false;
+    TypeId tid = expr->type->type_id;
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT && tid != LMD_TYPE_ELEMENT) return false;
+
+    // simple variable reference — produces native pointer when typed as Map*/Object*
+    if (expr->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)expr;
+        if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+            return true;
+        }
+    }
+    // map/object literal expressions produce native pointers
+    if (expr->node_type == AST_NODE_MAP || expr->node_type == AST_NODE_OBJECT_LITERAL) {
+        return true;
+    }
+    return false;
+}
+
+// Find a named field in a map shape at compile time
+static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (field->name && (int)field->name->length == name_len &&
+            strncmp(field->name->str, name, name_len) == 0) {
+            return field;
+        }
+        field = field->next;
+    }
+    return NULL;
+}
+
+// Check if a map type has a fixed shape suitable for direct access:
+// - must be a named type (from `type Name = { ... }` declaration) so field types
+//   are guaranteed stable at runtime. Map literals can have fields mutated to a
+//   different type via fn_map_set, which rebuilds the shape and invalidates
+//   compile-time offsets/types.
+// - all fields are named (no spread entries)
+// - all byte offsets are 8-byte aligned (map type defs use sizeof(void*) stride;
+//   map literals may use packed offsets which can cause unaligned access issues in MIR)
+static bool has_fixed_shape(TypeMap* map_type) {
+    if (!map_type->struct_name) return false;   // only typed maps
+    if (!map_type->shape || map_type->length == 0) return false;
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (!field->name) return false;  // spread entry
+        if (field->byte_offset % sizeof(void*) != 0) return false;  // unaligned
+        field = field->next;
+    }
+    return true;
+}
+
+// Check if a field type is eligible for direct access optimization
+static bool is_direct_access_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
+    case LMD_TYPE_PATH:
+        return true;
+    default:
+        return false;  // skip ANY, NULL, ERROR types
+    }
+}
+
+// Resolve the stored-data type for a shape field.
+// Type-defined maps (from `type Name = {x: int}`) have LMD_TYPE_TYPE wrapper
+// on shape entries; unwrap to get the actual data type (e.g., LMD_TYPE_INT).
+static TypeId resolve_field_type_id(ShapeEntry* field) {
+    Type* t = field->type;
+    if (t && t->type_id == LMD_TYPE_TYPE) {
+        Type* inner = ((TypeType*)t)->type;
+        if (inner) return inner->type_id;
+    }
+    return t ? t->type_id : LMD_TYPE_ANY;
+}
+
+// Emit direct field read that produces an Item value
+// object must be an expression that evaluates to Map*, Object*, or Element*
+static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field) {
+    TypeId type_id = resolve_field_type_id(field);
+    int64_t offset = field->byte_offset;
+
+    switch (type_id) {
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "b2it(*(bool*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "i2it(*(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_INT64:
+        strbuf_append_str(tp->code_buf, "push_l(*(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "push_d(*(double*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_DTIME:
+        strbuf_append_str(tp->code_buf, "push_k(*(DateTime*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_DECIMAL:
+        strbuf_append_str(tp->code_buf, "c2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_STRING:
+        strbuf_append_str(tp->code_buf, "s2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_SYMBOL:
+        strbuf_append_str(tp->code_buf, "y2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    case LMD_TYPE_BINARY:
+        strbuf_append_str(tp->code_buf, "x2it(*(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    // container and pointer types: raw pointer IS the Item value (no tagging)
+    default:
+        strbuf_append_str(tp->code_buf, "(Item)(*(void**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
+        break;
+    }
+}
+
+// Emit direct field write from an Item value
+// object expression evaluates to Map*, Object*, or Element*
+static void emit_direct_field_write(Transpiler* tp, AstNode* object,
+    ShapeEntry* field, AstNode* value) {
+    TypeId type_id = resolve_field_type_id(field);
+    int64_t offset = field->byte_offset;
+
+    // store the native value at the field's byte offset
+    switch (type_id) {
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "\n *(bool*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2b(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "\n *(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2i(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_INT64:
+        strbuf_append_str(tp->code_buf, "\n *(int64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2l(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "\n *(double*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2d(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    case LMD_TYPE_STRING:
+        strbuf_append_str(tp->code_buf, "\n *(char**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2s(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    default:
+        // container and pointer types: store raw pointer from Item
+        strbuf_append_str(tp->code_buf, "\n *(void**)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)=(void*)(", (long long)offset);
+        transpile_box_item(tp, value);
+        strbuf_append_str(tp->code_buf, ");");
+        break;
+    }
+}
+
 void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     // defensive check: if object or field is null, emit error and skip
     if (!field_node->object || !field_node->field) {
@@ -5318,11 +5551,36 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
 
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
+        // try direct field access optimization for typed maps
+        TypeMap* map_type = (TypeMap*)field_node->object->type;
+        if (field_node->field->node_type == AST_NODE_IDENT
+            && expr_produces_native_ptr(field_node->object)
+            && has_fixed_shape(map_type)) {
+            AstIdentNode* id = (AstIdentNode*)field_node->field;
+            ShapeEntry* se = find_shape_field_by_name(map_type, id->name->chars, id->name->len);
+            if (se && se->type && is_direct_access_type(resolve_field_type_id(se))) {
+                emit_direct_field_read(tp, field_node->object, se);
+                return;
+            }
+        }
+        // fall back to runtime map_get
         strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
     }
     else if (field_node->object->type->type_id == LMD_TYPE_OBJECT) {
-        // use fn_member for objects — handles both field access and method lookup
+        // try direct field access optimization for typed objects
+        TypeObject* obj_type = (TypeObject*)field_node->object->type;
+        if (field_node->field->node_type == AST_NODE_IDENT
+            && expr_produces_native_ptr(field_node->object)
+            && has_fixed_shape((TypeMap*)obj_type)) {
+            AstIdentNode* id = (AstIdentNode*)field_node->field;
+            ShapeEntry* se = find_shape_field_by_name((TypeMap*)obj_type, id->name->chars, id->name->len);
+            if (se && se->type && is_direct_access_type(resolve_field_type_id(se))) {
+                emit_direct_field_read(tp, field_node->object, se);
+                return;
+            }
+        }
+        // fall back to fn_member — handles both field access and method lookup
         strbuf_append_str(tp->code_buf, "fn_member(");
         transpile_box_item(tp, field_node->object);
     }
