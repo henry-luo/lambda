@@ -3,6 +3,7 @@
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
+#include "../lib/file_utils.h"
 
 #if _WIN32
 #include <windows.h>
@@ -659,6 +660,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // Write transpiled code for debugging (module index as suffix)
     char transpiled_filename[256];
     if (tp->runtime->transpile_dir) {
+        create_dir_recursive(tp->runtime->transpile_dir);
         snprintf(transpiled_filename, sizeof(transpiled_filename), "%s/_transpiled_%d.c", tp->runtime->transpile_dir, script->index);
     } else {
         snprintf(transpiled_filename, sizeof(transpiled_filename), "_transpiled_%d.c", script->index);
@@ -1019,7 +1021,7 @@ void runtime_init(Runtime* runtime) {
     runtime->scripts = arraylist_new(16);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
-    runtime->transpile_dir = NULL;  // default: write to current directory
+    runtime->transpile_dir = "temp";  // default: write to ./temp/ directory
     runtime->dry_run = false;  // default: real IO
 }
 

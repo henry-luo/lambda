@@ -1,0 +1,27 @@
+HTML
+BODY
+DOM Test Page
+main
+container active
+DIV
+null
+Welcome to the test page.
+3
+3
+Item 1
+Item 3
+container active
+true
+false
+3
+Item 2
+Item 1
+UL
+1
+Item 3
+true
+true
+main
+2
+3
+"DOM tests complete"

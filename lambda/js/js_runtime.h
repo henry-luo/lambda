@@ -113,6 +113,25 @@ Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 
 void js_console_log(Item value);
 
+// =============================================================================
+// String Method Dispatcher (delegates to Lambda fn_* functions)
+// =============================================================================
+
+Item js_string_method(Item str, Item method_name, Item* args, int argc);
+
+// =============================================================================
+// Array Method Dispatcher (map, filter, reduce, forEach, find, etc.)
+// =============================================================================
+
+Item js_array_method(Item arr, Item method_name, Item* args, int argc);
+
+// =============================================================================
+// Math Object Methods & Properties
+// =============================================================================
+
+Item js_math_method(Item method_name, Item* args, int argc);
+Item js_math_property(Item prop_name);
+
 #ifdef __cplusplus
 }
 #endif
