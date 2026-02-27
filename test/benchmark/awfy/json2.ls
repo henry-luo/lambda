@@ -193,10 +193,11 @@ pn jv_is_array(v) {
 // Parser state map. "~" is EOF sentinel (since "" is null in pn mode).
 // cbf: capture buffer flag (0=empty, 1=has accumulated content in cb)
 
-type Parser = {inp: string, idx: int, ln: int, col: int, cs: int, cb: string, cbf: int, cur: string}
+type Parser = {inp: string, idx: int, inplen: int, ln: int, col: int, cs: int, cb: string, cbf: int, cur: string}
 
 pn p_new(input: string) {
-    var p: Parser = { inp: input, idx: 0, ln: 1, col: 0, cs: 0, cb: "_", cbf: 0, cur: "~" }
+    var il: int = len(input)
+    var p: Parser = { inp: input, idx: 0, inplen: il, ln: 1, col: 0, cs: 0, cb: "_", cbf: 0, cur: "~" }
     p.idx = -1
     p.cs = -1
     return p
@@ -212,13 +213,12 @@ pn p_read(p: Parser) {
     var idx: int = (p.idx) + 1
     p.idx = idx
     var inp: string = (p.inp)
-    var inplen: int = len(inp)
+    var inplen: int = (p.inplen)
     if (idx < inplen) {
         var ch: string = inp[idx]
         p.cur = ch
     }
     if (idx >= inplen) {
-        var _d: int = 0
         p.cur = "~"
     }
 }
