@@ -1120,13 +1120,13 @@ pn cd(numAircraft: int) {
 
 pn verify_result(collisions: int, numAircraft: int) {
     if (numAircraft == 100) {
-        if (collisions == 1015202) { return 1 }
+        if (collisions == 4305) { return 1 }
     }
     if (numAircraft == 10) {
-        if (collisions == 21660) { return 1 }
+        if (collisions == 390) { return 1 }
     }
     if (numAircraft == 2) {
-        if (collisions == 90) { return 1 }
+        if (collisions == 42) { return 1 }
     }
     print("Unexpected: collisions=")
     print(collisions)
