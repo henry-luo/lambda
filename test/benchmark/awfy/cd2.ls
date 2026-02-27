@@ -1121,6 +1121,9 @@ pn verify_result(collisions: int, numAircraft: int) {
 
 pn main() {
     var collisions: int = cd(100)
+    print("collisions=")
+    print(collisions)
+    print("\n")
     var ok: int = verify_result(collisions, 100)
     if (ok == 1) {
         print("CD: PASS\n")

@@ -24,12 +24,12 @@ pn main() {
     let expected = 5000050000.0
     let diff = abs(result - expected)
     if (diff < 1.0) {
-        print("sumfp: PASS  ")
+        print("sumfp: PASS\n")
     } else {
         print("sumfp: FAIL result=")
         print(result)
-        print(" ")
+        print("\n")
     }
-    print(elapsed)
-    print(" ms\n")
+    // print(elapsed)
+    // print(" ms\n")
 }

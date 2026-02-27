@@ -136,5 +136,15 @@ int main(int argc, char **argv) {
     printf("\n");
     
     ::testing::InitGoogleTest(&argc, argv);
+
+    // In batch mode (no filter), disable logging for speed.
+    // In filtered mode, keep logging enabled for debugging.
+    std::string gtest_filter = GTEST_FLAG_GET(filter);
+    if (gtest_filter == "*") {
+        setenv("LAMBDA_NO_LOG", "1", 1);
+    } else {
+        unsetenv("LAMBDA_NO_LOG");
+    }
+
     return RUN_ALL_TESTS();
 }

@@ -19,12 +19,12 @@ pn main() {
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
     if (result == 196418) {
-        print("fib: PASS  ")
+        print("fib: PASS\n")
     } else {
         print("fib: FAIL result=")
         print(result)
-        print(" ")
+        print("\n")
     }
-    print(elapsed)
-    print(" ms\n")
+    // print(elapsed)
+    // print(" ms\n")
 }

@@ -91,12 +91,12 @@ pn main() {
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
     if (result == 0.0) {
-        print("fft: PASS  ")
+        print("fft: PASS\n")
     } else {
         print("fft: FAIL result=")
         print(result)
-        print(" ")
+        print("\n")
     }
-    print(elapsed)
-    print(" ms\n")
+    // print(elapsed)
+    // print(" ms\n")
 }
