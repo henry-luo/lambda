@@ -1452,11 +1452,6 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             }
         }
     }
-    else if (block->embed && block->embed->img) {
-        // render embedded image for blocks without children (e.g., SVG document root)
-        log_debug("render embedded image in block without children");
-        render_image_content(rdcon, block);
-    }
     else {
         log_debug("view has no child");
     }
@@ -1617,7 +1612,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_enter();
     // render border and background, etc.
     render_block_view(rdcon, (ViewBlock*)view);
-    // render the image content
+    // render the image content (using parent coordinates restored by render_block_view)
     render_image_content(rdcon, view);
     log_debug("end of image render");
     log_leave();
