@@ -36,3 +36,8 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
+// Re-resolve percentage-based vertical dimensions for abs children after containing block height is known
+// CSS 2.1 §10.5: For absolutely positioned elements, percentage heights resolve
+// against the containing block's used height. When the CB has auto height, this
+// must be deferred until after auto height is finalized.
+void re_resolve_abs_children_vertical(ViewBlock* containing_block);

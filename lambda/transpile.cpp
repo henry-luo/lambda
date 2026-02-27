@@ -32,6 +32,7 @@ static TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field);
 static void emit_direct_field_write(Transpiler* tp, AstNode* object, ShapeEntry* field, AstNode* value);
 static void emit_struct_typedefs(Transpiler* tp);
+static bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type);
 
 // hashmap comparison and hashing functions for func_name_map
 static int func_name_cmp(const void *a, const void *b, void *udata) {
@@ -201,6 +202,28 @@ static inline bool is_numeric_type(TypeId t) {
 // Helper to check if type is integer (int or int64)
 static inline bool is_integer_type(TypeId t) {
     return t == LMD_TYPE_INT || t == LMD_TYPE_INT64;
+}
+
+// Helper to check if an expression produces a native C type (not a tagged Item).
+// Native types are emitted as raw C int64_t/double/bool by transpile_expr.
+// Item (ANY) types need it2l() to extract the integer value from the tagged representation.
+static inline bool is_native_type(AstNode* arg) {
+    if (!arg->type) return false;
+    TypeId t = arg->type->type_id;
+    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_BOOL;
+}
+
+// Emit a bitwise operation argument as int64_t.
+// For native-typed expressions: use (int64_t) cast (already raw C values).
+// For Item-typed expressions: use it2l() to properly unbox the tagged Item.
+static void emit_bitwise_arg(Transpiler* tp, AstNode* arg) {
+    if (is_native_type(arg)) {
+        strbuf_append_str(tp->code_buf, "(int64_t)(");
+    } else {
+        strbuf_append_str(tp->code_buf, "it2l(");
+    }
+    transpile_expr(tp, arg);
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 // Check if a sys func call can use native C math function
@@ -4059,31 +4082,36 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                 }
                 if (val_expr && se->name) {
                     int64_t off = se->byte_offset;
-                    // emit: *(CType*)((char*)(m)->data+OFFSET)=unbox(value);
+                    bool native = value_emits_native_type(tp, val_expr, ftype);
+                    // emit: *(CType*)((char*)(m)->data+OFFSET)=value;
                     switch (ftype) {
                     case LMD_TYPE_BOOL:
                         strbuf_append_format(tp->code_buf,
-                            "\n *(bool*)((char*)(m)->data+%lld)=it2b(", (long long)off);
-                        transpile_box_item(tp, val_expr);
-                        strbuf_append_str(tp->code_buf, ");");
+                            "\n *(bool*)((char*)(m)->data+%lld)=", (long long)off);
+                        if (native) { transpile_expr(tp, val_expr); }
+                        else { strbuf_append_str(tp->code_buf, "it2b("); transpile_box_item(tp, val_expr); strbuf_append_str(tp->code_buf, ")"); }
+                        strbuf_append_str(tp->code_buf, ";");
                         break;
                     case LMD_TYPE_INT:
                         strbuf_append_format(tp->code_buf,
-                            "\n *(int64_t*)((char*)(m)->data+%lld)=it2i(", (long long)off);
-                        transpile_box_item(tp, val_expr);
-                        strbuf_append_str(tp->code_buf, ");");
+                            "\n *(int64_t*)((char*)(m)->data+%lld)=", (long long)off);
+                        if (native) { transpile_expr(tp, val_expr); }
+                        else { strbuf_append_str(tp->code_buf, "it2i("); transpile_box_item(tp, val_expr); strbuf_append_str(tp->code_buf, ")"); }
+                        strbuf_append_str(tp->code_buf, ";");
                         break;
                     case LMD_TYPE_INT64:
                         strbuf_append_format(tp->code_buf,
-                            "\n *(int64_t*)((char*)(m)->data+%lld)=it2l(", (long long)off);
-                        transpile_box_item(tp, val_expr);
-                        strbuf_append_str(tp->code_buf, ");");
+                            "\n *(int64_t*)((char*)(m)->data+%lld)=", (long long)off);
+                        if (native) { transpile_expr(tp, val_expr); }
+                        else { strbuf_append_str(tp->code_buf, "it2l("); transpile_box_item(tp, val_expr); strbuf_append_str(tp->code_buf, ")"); }
+                        strbuf_append_str(tp->code_buf, ";");
                         break;
                     case LMD_TYPE_FLOAT:
                         strbuf_append_format(tp->code_buf,
-                            "\n *(double*)((char*)(m)->data+%lld)=it2d(", (long long)off);
-                        transpile_box_item(tp, val_expr);
-                        strbuf_append_str(tp->code_buf, ");");
+                            "\n *(double*)((char*)(m)->data+%lld)=", (long long)off);
+                        if (native) { transpile_expr(tp, val_expr); }
+                        else { strbuf_append_str(tp->code_buf, "it2d("); transpile_box_item(tp, val_expr); strbuf_append_str(tp->code_buf, ")"); }
+                        strbuf_append_str(tp->code_buf, ";");
                         break;
                     case LMD_TYPE_DTIME:
                         // datetime: tagged pointer to heap-allocated DateTime (uint64_t)
@@ -4092,6 +4120,22 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                             "\n *(DateTime*)((char*)(m)->data+%lld)=*(DateTime*)((uint64_t)(", (long long)off);
                         transpile_box_item(tp, val_expr);
                         strbuf_append_str(tp->code_buf, ")&0x00FFFFFFFFFFFFFFULL);");
+                        break;
+                    case LMD_TYPE_STRING:
+                        if (native) {
+                            // native String* — store pointer directly (no tag bits)
+                            strbuf_append_format(tp->code_buf,
+                                "\n *(char**)((char*)(m)->data+%lld)=", (long long)off);
+                            transpile_expr(tp, val_expr);
+                            strbuf_append_str(tp->code_buf, ";");
+                        } else {
+                            // Item with tag bits — strip tag and store
+                            strbuf_append_format(tp->code_buf,
+                                "\n *(void**)((char*)(m)->data+%lld)=(void*)((uint64_t)(", (long long)off);
+                            transpile_box_item(tp, val_expr);
+                            strbuf_append_str(tp->code_buf, ")&0x00FFFFFFFFFFFFFFULL);");
+                        }
+                        break;
                         break;
                     default:
                         // pointer types (string, symbol, binary, decimal, containers):
@@ -4420,14 +4464,19 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 strbuf_append_str(tp->code_buf, "null");
             }
         }
-        // STRING/BINARY param: always extract String* through boxing to handle both
-        // native String* and Item-returning expressions uniformly
+        // STRING/BINARY param: extract String* from Item, but skip roundtrip when
+        // value already emits native String* (e.g., typed local variable, string literal)
         // (Issue #16: `: string` annotation makes C param `String*`, but callers may pass `Item`,
         //  or the arg may be a sys func returning Item despite STRING semantic type)
         else if (param_type->type_id == LMD_TYPE_STRING || param_type->type_id == LMD_TYPE_BINARY) {
-            strbuf_append_str(tp->code_buf, "it2s(");
-            transpile_box_item(tp, value);
-            strbuf_append_char(tp->code_buf, ')');
+            if (value_emits_native_type(tp, value, param_type->type_id)) {
+                // value already produces String* — emit directly, no boxing roundtrip
+                transpile_expr(tp, value);
+            } else {
+                strbuf_append_str(tp->code_buf, "it2s(");
+                transpile_box_item(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
         }
         else if (param_type->type_id == LMD_TYPE_BOOL) {
             if (value->type->type_id == LMD_TYPE_BOOL) {
@@ -4660,9 +4709,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
             // bnot(a) — unary bitwise NOT
             if (strcmp(fn_name, "bnot") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_bnot((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_bnot(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
         }
@@ -4670,43 +4719,43 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         // ==== Bitwise binary functions: band, bor, bxor, shl, shr ====
         if (first_arg && second_arg && !second_arg->next) {
             if (strcmp(fn_name, "band") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_band((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_band(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "bor") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_bor((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_bor(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "bxor") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_bxor((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_bxor(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "shl") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_shl((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_shl(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "shr") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_shr((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_shr(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
         }
@@ -5643,49 +5692,126 @@ static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* 
     }
 }
 
+// Check if transpile_expr(value) will produce a native C value matching target_type,
+// rather than an Item that needs unboxing. Returns true when we can skip the
+// it2X(X2it(val)) boxing roundtrip in emit_direct_field_write.
+static bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type) {
+    if (!value || !value->type) return false;
+    TypeId val_type = value->type->type_id;
+
+    // type must match (INT and INT64 both stored as int64_t in direct fields)
+    if (target_type == LMD_TYPE_INT || target_type == LMD_TYPE_INT64) {
+        if (val_type != LMD_TYPE_INT && val_type != LMD_TYPE_INT64) return false;
+    } else {
+        if (val_type != target_type) return false;
+    }
+
+    // these expressions return Item even when typed — not native
+    if (is_dynamic_fn_call(value) || binary_already_returns_item(value) || direct_call_returns_item(value))
+        return false;
+
+    // CONTENT blocks have complex emit — not safe to assume native
+    if (value->node_type == AST_NODE_CONTENT) return false;
+
+    // check for widened var (stored as Item)
+    AstNode* check = value;
+    if (check->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)check;
+        if (pri->expr) check = pri->expr;
+    }
+    if (check->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)check;
+        if (ident->entry && ident->entry->type_widened) return false;
+    }
+
+    // optional params, closure params, captured vars are stored as Item
+    if (is_optional_param_ref(value)) return false;
+    if (is_closure_param_ref(tp, value)) return false;
+    if (is_captured_var_ref(tp, value)) return false;
+
+    // literals: int/bool literals are native, but string/float literals use const_X2it()
+    // which returns Item. However, transpile_expr for literals emits the raw value.
+    // Actually, the issue is transpile_box_item wraps with const_X2it — but transpile_expr
+    // for a literal int emits the raw number. So literals ARE native.
+    // String literals: transpile_expr emits const_str(N) which returns String* — native.
+
+    return true;
+}
+
 // Emit direct field write from an Item value
 // object expression evaluates to Map*, Object*, or Element*
 static void emit_direct_field_write(Transpiler* tp, AstNode* object,
     ShapeEntry* field, AstNode* value) {
     TypeId type_id = resolve_field_type_id(field, true);
     int64_t offset = field->byte_offset;
+    bool native = value_emits_native_type(tp, value, type_id);
 
     // store the native value at the field's byte offset
     switch (type_id) {
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "\n *(bool*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2b(", (long long)offset);
-        transpile_box_item(tp, value);
-        strbuf_append_str(tp->code_buf, ");");
+        if (native) {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=", (long long)offset);
+            transpile_expr(tp, value);
+        } else {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=it2b(", (long long)offset);
+            transpile_box_item(tp, value);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        strbuf_append_str(tp->code_buf, ";");
         break;
     case LMD_TYPE_INT:
         strbuf_append_str(tp->code_buf, "\n *(int64_t*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2i(", (long long)offset);
-        transpile_box_item(tp, value);
-        strbuf_append_str(tp->code_buf, ");");
+        if (native) {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=", (long long)offset);
+            transpile_expr(tp, value);
+        } else {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=it2i(", (long long)offset);
+            transpile_box_item(tp, value);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        strbuf_append_str(tp->code_buf, ";");
         break;
     case LMD_TYPE_INT64:
         strbuf_append_str(tp->code_buf, "\n *(int64_t*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2l(", (long long)offset);
-        transpile_box_item(tp, value);
-        strbuf_append_str(tp->code_buf, ");");
+        if (native) {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=", (long long)offset);
+            transpile_expr(tp, value);
+        } else {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=it2l(", (long long)offset);
+            transpile_box_item(tp, value);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        strbuf_append_str(tp->code_buf, ";");
         break;
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "\n *(double*)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2d(", (long long)offset);
-        transpile_box_item(tp, value);
-        strbuf_append_str(tp->code_buf, ");");
+        if (native) {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=", (long long)offset);
+            transpile_expr(tp, value);
+        } else {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=it2d(", (long long)offset);
+            transpile_box_item(tp, value);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        strbuf_append_str(tp->code_buf, ";");
         break;
     case LMD_TYPE_STRING:
         strbuf_append_str(tp->code_buf, "\n *(char**)((char*)(");
         transpile_expr(tp, object);
-        strbuf_append_format(tp->code_buf, ")->data+%lld)=it2s(", (long long)offset);
-        transpile_box_item(tp, value);
-        strbuf_append_str(tp->code_buf, ");");
+        if (native) {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=", (long long)offset);
+            transpile_expr(tp, value);
+        } else {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=it2s(", (long long)offset);
+            transpile_box_item(tp, value);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        strbuf_append_str(tp->code_buf, ";");
         break;
     default:
         // container and pointer types: store raw pointer from Item

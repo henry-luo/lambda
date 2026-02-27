@@ -4588,11 +4588,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (explicit_table_width > 0) {
         table_content_width = explicit_table_width;
 
-        // CSS 2.1: Table content width for percentage calculations excludes the table border.
-        // In border-collapse mode, the table border participates in collapse resolution
-        // but the CSS width still represents the outer box edge. The content area for
-        // column percentage calculations is the CSS width minus the table border.
-        if (table->bound && table->bound->border) {
+        // CSS 2.1 §17.6.2: In border-collapse mode, CSS width is border-box
+        // (includes half of outer collapsed borders), so subtract border.
+        // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box,
+        // so border is additional and must NOT be subtracted.
+        // Exception: box-sizing:border-box or native HTML <table> makes width border-box.
+        // Native HTML tables historically interpret 'width' as border-box.
+        bool table_width_is_border_box = table->tb->border_collapse ||
+            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX) ||
+            table->tag() == HTM_TAG_TABLE;
+        if (table_width_is_border_box && table->bound && table->bound->border) {
             table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
             log_debug("Subtracted table border from content width: -%dpx (left=%d, right=%d)",
                      (int)(table->bound->border->width.left + table->bound->border->width.right),
@@ -4851,15 +4856,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
 
       if (fixed_explicit_width > 0) {
-        // STEP 2: Calculate available content width (subtract borders and spacing)
+        // STEP 2: Calculate available content width (subtract spacing, and border only for border-collapse)
         int content_width = fixed_explicit_width;
 
-        // Subtract actual table border (we'll add it back later for final width)
-        int table_border_h = 0;
-        if (table->bound && table->bound->border) {
-            table_border_h = (int)(table->bound->border->width.left + table->bound->border->width.right);
+        // CSS 2.1 §17.6.2: In border-collapse mode, CSS width is border-box — subtract border.
+        // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box — border is additional.
+        // Exception: box-sizing:border-box or native HTML <table> makes width border-box.
+        bool fixed_width_is_border_box = table->tb->border_collapse ||
+            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX) ||
+            table->tag() == HTM_TAG_TABLE;
+        if (fixed_width_is_border_box) {
+            int table_border_h = 0;
+            if (table->bound && table->bound->border) {
+                table_border_h = (int)(table->bound->border->width.left + table->bound->border->width.right);
+            }
+            content_width -= table_border_h;
         }
-        content_width -= table_border_h;
 
         // For border-collapse, no additional adjustments needed
         // For separate borders, subtract border-spacing
@@ -5029,11 +5041,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int total_rows = rows;  // 'rows' variable from earlier count
             log_debug("Total rows to distribute height: %d", total_rows);
 
-            // Calculate available content height (subtract borders, padding, spacing)
+            // Calculate available content height (subtract padding, spacing, and border only for border-collapse)
             int content_height = explicit_table_height;
 
-            // Subtract table border
-            if (table->bound && table->bound->border) {
+            // CSS 2.1 §17.6.2: In border-collapse, CSS height is border-box — subtract border.
+            // CSS 2.1 §10.2: In separate borders, CSS height is content-box — border is additional.
+            // Exception: box-sizing:border-box or native HTML <table> makes height border-box.
+            bool height_is_border_box = table->tb->border_collapse ||
+                (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX) ||
+                table->tag() == HTM_TAG_TABLE;
+            if (height_is_border_box && table->bound && table->bound->border) {
                 content_height -= (int)(table->bound->border->width.top + table->bound->border->width.bottom);
             }
 
@@ -5197,15 +5214,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("Explicit content area (border-collapse, half borders %.1f+%.1f): %dpx",
                       half_left, half_right, explicit_content_area);
         } else {
-            // Subtract table border
-            if (table->bound && table->bound->border) {
+            // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box.
+            // Do NOT subtract border — it is additional to the content width.
+            // Exception: box-sizing:border-box makes CSS width border-box.
+            bool is_border_box = (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX) ||
+                table->tag() == HTM_TAG_TABLE;
+            if (is_border_box && table->bound && table->bound->border) {
                 explicit_content_area -= (int)(table->bound->border->width.left + table->bound->border->width.right);
             }
-            // Subtract table padding
+            // Subtract table padding to get the grid area for column distribution.
             if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
                 explicit_content_area -= table->bound->padding.left + table->bound->padding.right;
             }
-            log_debug("Explicit content area (after border/padding): %dpx", explicit_content_area);
+            log_debug("Explicit content area (separate borders, border_box=%d): %dpx", is_border_box, explicit_content_area);
         }
     }
 
@@ -5367,13 +5388,25 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // CSS 2.1 §17.5.2.1: For fixed layout, "the width of the table is then the
     // greater of the value of the 'width' property for the table element and the
     // sum of the column widths (plus cell spacing or borders)."
-    // fixed_table_width is the raw CSS value (border-box per CSS 2.1 table model).
-    // table_width (from content-outward) is already the correct padding-box minimum.
-    // Convert CSS width to padding-box by subtracting border, then take max.
+    // table_width is padding-box (columns + spacing + padding).
+    // Convert CSS width to padding-box for comparison:
+    //   border-collapse (§17.6.2): CSS width is border-box → subtract border
+    //   separate borders (§10.2): CSS width is content-box → add padding
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
         float css_padding_box = (float)fixed_table_width;
-        if (table->bound && table->bound->border) {
-            css_padding_box -= (table->bound->border->width.left + table->bound->border->width.right);
+        bool fixed_is_border_box = table->tb->border_collapse ||
+            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX) ||
+            table->tag() == HTM_TAG_TABLE;
+        if (fixed_is_border_box) {
+            if (table->bound && table->bound->border) {
+                css_padding_box -= (table->bound->border->width.left + table->bound->border->width.right);
+            }
+        } else {
+            // Content-box + padding = padding-box
+            if (table->bound) {
+                if (table->bound->padding.left >= 0) css_padding_box += table->bound->padding.left;
+                if (table->bound->padding.right >= 0) css_padding_box += table->bound->padding.right;
+            }
         }
         log_debug("Fixed layout: css_padding_box=%.0f, min_padding_box=%.0f",
                css_padding_box, table_width);
@@ -6424,7 +6457,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // If explicit height is larger than content, distribute extra height to rows
     // CSS 2.1 §17.5.3: Extra height is distributed to body rows only, not header/footer
     if (explicit_css_height > 0 && meta->row_count > 0) {
-        int available_for_content = explicit_css_height - table_border_vert;  // CSS height minus borders
+        // CSS 2.1 §17.6.2: In border-collapse, CSS height is border-box — subtract border.
+        // CSS 2.1 §10.2: In separate borders, CSS height is content-box — border is additional.
+        // Exception: box-sizing:border-box or native HTML <table> makes height border-box.
+        bool auto_height_is_border_box = table->tb->border_collapse ||
+            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX) ||
+            table->tag() == HTM_TAG_TABLE;
+        int available_for_content = auto_height_is_border_box
+            ? explicit_css_height - table_border_vert
+            : explicit_css_height;
         int extra_height = available_for_content - (content_only_height + table_padding_vert + table_spacing_vert);
 
         log_debug("Table height distribution: explicit=%d, available=%d, content_only=%d, initial_extra=%d, rows=%d",

@@ -440,6 +440,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Walk ShapeEntry linked list
         // ShapeEntry: { name*(8), type*(8), byte_offset(8), next*(8), ns*(8), default_value*(8) }
         uint8_t* shape = (uint8_t*)shape_ptr;
+        int field_idx = 0;
         while (shape) {
             void* field_type = *(void**)(shape + 8);   // ShapeEntry.type (Type*)
             int64_t byte_offset = *(int64_t*)(shape + 16);  // ShapeEntry.byte_offset
@@ -452,6 +453,32 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_) {
                     if (byte_offset >= 0 && byte_offset < byte_size) {
                         void* field_ptr = (uint8_t*)data_ptr + byte_offset;
+
+                        // LMD_TYPE_ANY fields use 9-byte TypedItem layout:
+                        //   byte 0: runtime TypeId (1 byte)
+                        //   bytes 1-8: value (8 bytes, packed)
+                        // Must read the embedded type tag and value separately.
+                        if (field_type_id == LMD_TYPE_ANY_) {
+                            uint8_t stored_type = *(uint8_t*)field_ptr;
+                            if (stored_type >= LMD_TYPE_INT64_ && stored_type != LMD_TYPE_BOOL_ &&
+                                byte_offset + 1 + 8 <= byte_size) {
+                                uint64_t val = *(uint64_t*)((uint8_t*)field_ptr + 1);
+                                if (val != 0) {
+                                    if (stored_type >= LMD_TYPE_LIST_) {
+                                        gc_mark_item(gc, val);
+                                    } else {
+                                        void* embedded_ptr = (void*)(uintptr_t)val;
+                                        if (is_gc_object(gc, embedded_ptr)) {
+                                            gc_header_t* h = gc_get_header(embedded_ptr);
+                                            if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
+                                                h->marked = 1;
+                                                mark_stack_push(gc, h);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
                         // read as pointer-sized value (Item or pointer depending on type)
                         uint64_t val = *(uint64_t*)field_ptr;
                         if (val != 0) {
@@ -476,9 +503,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                                 }
                             }
                         }
+                        } // end non-ANY
                     }
                 }
             }
+            field_idx++;
             shape = (uint8_t*)next_shape;
         }
         break;
@@ -515,6 +544,29 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                     uint8_t ftid = *(uint8_t*)field_type;
                     if (ftid >= LMD_TYPE_INT64_ && ftid != LMD_TYPE_BOOL_ &&
                         byte_offset >= 0 && byte_offset < byte_size) {
+                        // Handle LMD_TYPE_ANY fields: 9-byte TypedItem layout
+                        if (ftid == LMD_TYPE_ANY_) {
+                            uint8_t* fptr = (uint8_t*)data_ptr + byte_offset;
+                            uint8_t stored_type = *fptr;
+                            if (stored_type >= LMD_TYPE_INT64_ && stored_type != LMD_TYPE_BOOL_ &&
+                                byte_offset + 1 + 8 <= byte_size) {
+                                uint64_t val = *(uint64_t*)(fptr + 1);
+                                if (val != 0) {
+                                    if (stored_type >= LMD_TYPE_LIST_) {
+                                        gc_mark_item(gc, val);
+                                    } else {
+                                        void* ep = (void*)(uintptr_t)val;
+                                        if (is_gc_object(gc, ep)) {
+                                            gc_header_t* h = gc_get_header(ep);
+                                            if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
+                                                h->marked = 1;
+                                                mark_stack_push(gc, h);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
                         uint64_t val = *(uint64_t*)((uint8_t*)data_ptr + byte_offset);
                         if (val != 0) {
                             if (ftid >= LMD_TYPE_LIST_) {
@@ -530,6 +582,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                                 }
                             }
                         }
+                        } // end non-ANY
                     }
                 }
                 shape = (uint8_t*)next_shape;
@@ -573,6 +626,38 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
 // ---- Data Zone Compaction ----
 
+// Fix up embedded float/int64/datetime pointers within a compacted items[] buffer.
+// array_set() stores float/int64/datetime values at the END of the items[] buffer
+// (the "extra" area), with tagged pointers in items[0..length) pointing into
+// that same buffer. After copying the buffer to a new address, those embedded
+// pointers still reference the old location and must be updated.
+static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
+                                        int64_t length, int64_t capacity) {
+    // Compute the old buffer extent: [old_start, old_end)
+    uint8_t* old_start = (uint8_t*)old_items;
+    uint8_t* old_end   = old_start + capacity * sizeof(uint64_t);
+    ptrdiff_t offset    = (uint8_t*)new_items - (uint8_t*)old_items;
+
+    for (int64_t i = 0; i < length; i++) {
+        uint64_t item = new_items[i];
+        uint8_t item_tag = (uint8_t)(item >> 56);
+
+        // Only fix tagged pointer types that array_set stores inline:
+        // Float (5), Int64 (4), DateTime (8)
+        if (item_tag == LMD_TYPE_FLOAT_ || item_tag == LMD_TYPE_INT64_ ||
+            item_tag == LMD_TYPE_DTIME_) {
+            // Extract the raw pointer (lower 56 bits)
+            uint8_t* ptr = (uint8_t*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFFULL);
+            if (ptr >= old_start && ptr < old_end) {
+                // Pointer is inside the old buffer — rebase to new location
+                uint8_t* new_ptr = ptr + offset;
+                new_items[i] = (item & 0xFF00000000000000ULL) |
+                               ((uint64_t)(uintptr_t)new_ptr & 0x00FFFFFFFFFFFFFFULL);
+            }
+        }
+    }
+}
+
 // Compact surviving data from nursery data zone to tenured data zone.
 // For each marked object that has data pointers into the nursery data zone,
 // copy the data to tenured and update the object's pointer.
@@ -595,12 +680,20 @@ static void gc_compact_data(gc_heap_t* gc) {
             uint8_t* p = (uint8_t*)obj;
             void** items_slot = (void**)(p + 8);
             int64_t length = *(int64_t*)(p + 16);
+            int64_t extra = *(int64_t*)(p + 24);
             int64_t capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
+                uint64_t* old_items = (uint64_t*)*items_slot;
                 size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;
+                    // Fix embedded float/int64/datetime pointers that reference
+                    // the old buffer's extra area (set by array_set)
+                    if (extra > 0) {
+                        gc_fixup_embedded_pointers(old_items, (uint64_t*)new_items,
+                                                   length, capacity);
+                    }
                     compacted++;
                 }
             }
@@ -656,12 +749,20 @@ static void gc_compact_data(gc_heap_t* gc) {
             uint8_t* p = (uint8_t*)obj;
             // compact items[]
             void** items_slot = (void**)(p + 8);
-            int64_t capacity = *(int64_t*)(p + 32);
+            int64_t elmt_length = *(int64_t*)(p + 16);
+            int64_t elmt_extra = *(int64_t*)(p + 24);
+            int64_t elmt_capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                size_t size = capacity * sizeof(uint64_t);
+                uint64_t* old_elmt_items = (uint64_t*)*items_slot;
+                size_t size = elmt_capacity * sizeof(uint64_t);
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;
+                    // Fix embedded float/int64/datetime pointers
+                    if (elmt_extra > 0) {
+                        gc_fixup_embedded_pointers(old_elmt_items, (uint64_t*)new_items,
+                                                   elmt_length, elmt_capacity);
+                    }
                     compacted++;
                 }
             }
@@ -860,12 +961,18 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
     gc_scan_stack(gc, stack_base, stack_current);
 
     // Phase 1d: Process mark stack (trace gray objects until empty)
+    int traced_count = 0;
     while (gc->mark_top > 0) {
         gc_header_t* obj = mark_stack_pop(gc);
         gc_trace_object(gc, obj);
-
+        traced_count++;
         // tracing may have pushed more objects; continue until empty
     }
+    log_debug("gc_collect: traced %d objects total", traced_count);
+
+    // Measure nursery and tenured usage before compaction for adaptive threshold
+    size_t nursery_used_before = gc_data_zone_used(gc->data_zone);
+    size_t tenured_before = gc_data_zone_used(gc->tenured_data);
 
     // Phase 2: Compact — copy surviving data zone buffers to tenured
     gc_compact_data(gc);
@@ -878,6 +985,34 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
 
     gc->collections++;
     gc->collecting = 0;
+
+    // Adaptive threshold: measure how much nursery data survived compaction.
+    // If collection freed very little nursery data, it was unproductive and
+    // caused cache thrashing for no benefit — grow threshold to delay next GC.
+    size_t tenured_after = gc_data_zone_used(gc->tenured_data);
+    size_t survived_this_cycle = tenured_after - tenured_before;
+    size_t freed_this_cycle = (nursery_used_before > survived_this_cycle)
+                            ? (nursery_used_before - survived_this_cycle) : 0;
+    if (nursery_used_before > 0) {
+        size_t freed_pct = (freed_this_cycle * 100) / nursery_used_before;
+        size_t new_threshold = gc->gc_threshold;
+        if (freed_pct < 40) {
+            // unproductive: < 40% freed — grow 4x
+            new_threshold = gc->gc_threshold * 4;
+        } else if (freed_pct < 75) {
+            // somewhat unproductive: < 75% freed — grow 2x
+            new_threshold = gc->gc_threshold * 2;
+        }
+        // cap at 256 MB to prevent runaway growth
+        if (new_threshold > 256 * 1024 * 1024) new_threshold = 256 * 1024 * 1024;
+        if (new_threshold > gc->gc_threshold) {
+            log_debug("gc_collect: adaptive threshold %zu -> %zu (freed=%zu/%zu=%zu%%, survived=%zu)",
+                      gc->gc_threshold, new_threshold, freed_this_cycle, nursery_used_before,
+                      freed_pct, survived_this_cycle);
+            gc->gc_threshold = new_threshold;
+        }
+    }
+
     log_debug("gc_collect: collection #%zu complete, %zu objects remain, %zu bytes collected total",
               gc->collections, gc->object_count, gc->bytes_collected);
 }

@@ -995,3 +995,133 @@ Three sites in `mark_editor.cpp` use raw `realloc()` to grow `items[]` arrays fo
 ### Closure Environment Tracing — ✅ Resolved (Step 6)
 
 `gc_trace_object()` now reads `closure_field_count` at Function offset 2 and scans that many Items from `closure_env`. Compaction also copies the env to tenured. Bound methods (field_count=0) are handled safely.
+
+---
+
+## 12. Adaptive GC Threshold Tuning (Performance)
+
+Status: Complete
+Date: 2026-02-27
+
+### 12.1 Problem: GC-Induced Cache Thrashing
+
+After Steps 1–7, the GC was functionally correct — all tests passed. However, JIT-compiled procedural benchmarks suffered severe performance regression:
+
+| Benchmark | Pre-GC (commit `e011d3a85`) | With GC (256 KB block) | Regression |
+|-----------|----------------------------|------------------------|------------|
+| havlak.ls | 230 ms | 5000 ms | **22×** |
+
+Profiling (`sample` on macOS) showed 91% of CPU time was in JIT-compiled code (not GC itself). The GC was only 5% of samples. The paradox: GC takes almost no direct CPU time, yet removing it restores performance.
+
+### 12.2 Root Cause: CPU Cache Pollution
+
+The original configuration used 256 KB data zone blocks with a 192 KB (75%) GC threshold. For allocation-heavy workloads like Havlak (which builds thousands of arrays for a graph data structure), this meant:
+
+1. **Collection triggers every ~192 KB** of array allocation — potentially hundreds of times
+2. Each collection walks the **entire** object list (mark → compact → sweep → reset), touching memory across the full heap
+3. This evicts the JIT code's working set from L1/L2 cache
+4. Post-GC, the JIT hot loop runs with **cold caches**, causing massive slowdown from cache misses
+5. The cycle repeats: allocate 192 KB → GC thrashes cache → JIT runs slow → allocate 192 KB → ...
+
+**Proof by elimination**: Setting block size to 256 MB (effectively disabling GC) restored performance to 180 ms — even faster than pre-GC baseline, confirming the regression was purely a cache effect.
+
+### 12.3 Tuning Experiments
+
+| Block Size | GC Threshold (75%) | Havlak Time | Collections |
+|------------|--------------------|-----------:|:-----------:|
+| 256 KB | 192 KB | 5000 ms | hundreds |
+| 4 MB | 3 MB | 530 ms | ~10 |
+| 16 MB | 12 MB | 350 ms | ~5 |
+| 64 MB | 48 MB | 290 ms | ~3 |
+| 256 MB | 192 MB | 180 ms | 0–1 |
+
+The relationship is clear: fewer collections = fewer cache-thrashing events = better JIT throughput. But a fixed large block wastes memory for small scripts.
+
+### 12.4 Solution: Adaptive Threshold Growth
+
+The implemented strategy uses a **feedback-based adaptive threshold** that grows when collections are unproductive (i.e., most data survives).
+
+**Configuration** (`lib/gc_data_zone.h`, `lib/gc_heap.h`):
+
+```c
+// Initial data zone block size: 4 MB
+#define GC_DATA_ZONE_BLOCK_SIZE (4 * 1024 * 1024)
+
+// Initial threshold: 75% of block size = 3 MB
+#define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
+```
+
+**Adaptive logic** (after each `gc_collect` in `lib/gc_heap.c`):
+
+After compaction, the collector measures how much nursery data survived to tenured vs. how much was freed:
+
+```c
+size_t tenured_after = gc_data_zone_used(gc->tenured_data);
+size_t survived_this_cycle = tenured_after - tenured_before;
+size_t freed_this_cycle = nursery_used_before - survived_this_cycle;
+size_t freed_pct = (freed_this_cycle * 100) / nursery_used_before;
+```
+
+The threshold grows based on collection productivity:
+
+| Freed % | Interpretation | Action |
+|---------|---------------|--------|
+| < 40% | Unproductive — most data is live | Threshold × 4 |
+| 40–74% | Somewhat unproductive | Threshold × 2 |
+| ≥ 75% | Productive — significant garbage collected | No change |
+
+The threshold is capped at 256 MB to prevent unbounded growth.
+
+### 12.5 How It Works in Practice (Havlak)
+
+With the adaptive strategy, Havlak's GC behavior:
+
+```
+Collection #1: threshold  3 MB →  12 MB  (freed 34%, 4× growth)
+Collection #2: threshold 12 MB →  50 MB  (freed 32%, 4× growth)
+                                          — no more collections —
+```
+
+Only **2 collections** total. The threshold quickly escalates past the working set size. Compare to the original fixed threshold which would trigger hundreds of collections at 192 KB.
+
+**GC log detail** (debug build):
+```
+gc_collect: adaptive threshold 3145728 -> 12582912 (freed=1095776/3145728=34%, survived=2049952)
+gc_collect: collection #1 complete, 12677 objects remain, 8976 bytes freed
+gc_collect: adaptive threshold 12582912 -> 50331648 (freed=4104096/12583152=32%, survived=8479056)
+gc_collect: collection #2 complete, 72747 objects remain, 8976 bytes freed
+```
+
+### 12.6 Results
+
+| Configuration | Havlak Time | Collections | Notes |
+|--------------|------------:|:-----------:|-------|
+| Original (256 KB fixed) | 5000 ms | hundreds | 22× regression |
+| 2 MB + adaptive 2× | 330 ms | 5 | First adaptive attempt |
+| **4 MB + adaptive 4×/2×** | **210–220 ms** | **2** | **Final configuration** |
+| Pre-GC baseline | 230 ms | N/A | No GC at all |
+| 256 MB (GC disabled) | 180 ms | 0 | Theoretical minimum |
+
+The final adaptive configuration achieves **210–220 ms** — actually **faster** than the pre-GC baseline (230 ms), likely because the 4 MB bump allocator provides better allocation locality than the previous `malloc()`-based sub-allocations.
+
+**Full AWFY benchmark suite** (28 benchmarks, typed + untyped): 24/28 PASS. The 4 failures (cd, cd2, richards, richards2) are pre-existing correctness issues unrelated to GC tuning.
+
+### 12.7 Design Rationale
+
+**Why per-cycle measurement, not cumulative**: The adaptive logic measures `tenured_after - tenured_before` (data promoted this cycle), not total tenured size. This correctly distinguishes:
+- A cycle that promoted 3 MB from a 4 MB nursery (75% survived → unproductive, grow threshold)
+- A cycle where only 500 KB of 4 MB survived (87% freed → productive, keep threshold)
+
+**Why 4× for < 40% freed**: Aggressive growth is critical for workloads that build large live data structures. Each unnecessary GC cycle costs ~100 ms in cache-thrashing overhead for a large heap. Getting to the right threshold quickly (in 2 collections instead of 5) saves significant wall-clock time.
+
+**Why 4 MB initial block (not 256 KB)**: Most Lambda scripts that use `pn` procedures allocate meaningful amounts of data. A 4 MB nursery delays the first GC until there is enough data to make collection worthwhile. For trivial scripts, the 4 MB is allocated lazily (pool-backed) and freed at context teardown with negligible overhead.
+
+**Why cap at 256 MB**: Prevents runaway memory consumption for pathological allocation patterns. At 256 MB threshold, GC will still collect eventually — just infrequently enough to avoid cache pollution for any realistic workload.
+
+### 12.8 Files Modified
+
+| File | Change |
+|------|--------|
+| `lib/gc_data_zone.h` | `GC_DATA_ZONE_BLOCK_SIZE`: 256 KB → 4 MB |
+| `lib/gc_heap.h` | `GC_DATA_ZONE_THRESHOLD`: unchanged formula (75% of block size), now 3 MB |
+| `lib/gc_heap.c` | Adaptive threshold logic in `gc_collect()`: measure per-cycle freed %, grow 4×/2×/hold |

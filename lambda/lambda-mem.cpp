@@ -1,9 +1,11 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "../lib/gc_heap.h"
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include <mpdecimal.h>
+#include <setjmp.h>
 
 extern __thread EvalContext* context;
 
@@ -12,6 +14,33 @@ static void gc_finalize_all_objects(gc_heap_t *gc);
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void vmap_gc_destroy(void* data);
+
+// ── Interned single-char ASCII strings (Optimization 4) ──────────────
+// Pre-allocated table of 128 String objects for ASCII chars 0-127.
+// These are statically allocated (not GC-managed) and never freed.
+// Each entry is sizeof(String) + 2 bytes (1 char + null terminator).
+#define ASCII_CHAR_ENTRY_SIZE (sizeof(String) + 2)
+static char ascii_char_storage[128 * ASCII_CHAR_ENTRY_SIZE];
+static String* ascii_char_table[128];
+static bool ascii_char_table_initialized = false;
+
+static void init_ascii_char_table() {
+    for (int i = 0; i < 128; i++) {
+        String* s = (String*)(ascii_char_storage + i * ASCII_CHAR_ENTRY_SIZE);
+        s->len = 1;
+        s->is_ascii = 1;
+        s->chars[0] = (char)i;
+        s->chars[1] = '\0';
+        ascii_char_table[i] = s;
+    }
+    ascii_char_table_initialized = true;
+}
+
+// get interned single-char ASCII string (returns nullptr if not initialized or ch >= 128)
+extern "C" String* get_ascii_char_string(unsigned char ch) {
+    if (ch >= 128 || !ascii_char_table_initialized) return nullptr;
+    return ascii_char_table[ch];
+}
 
 void heap_init() {
     log_debug("heap init: %p", context);
@@ -28,23 +57,35 @@ void heap_init() {
     // register VMap tracing/finalization callbacks
     context->heap->gc->vmap_trace = vmap_gc_trace;
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
+
+    // initialize interned single-char ASCII table (one-time, idempotent)
+    if (!ascii_char_table_initialized) {
+        init_ascii_char_table();
+    }
 }
 
 // trigger a GC collection from the runtime.
 // gathers roots (registered slots + stack scan) and runs the collector.
+// Uses setjmp to flush registers onto the stack so the conservative
+// stack scanner can find GC-managed pointers held in CPU registers.
+__attribute__((noinline))
 extern "C" void heap_gc_collect(void) {
     if (!context || !context->heap || !context->heap->gc) return;
     gc_heap_t* gc = context->heap->gc;
 
-    // get stack bounds for conservative scanning
+    // Use setjmp to flush callee-saved registers onto the stack,
+    // ensuring the conservative stack scanner can find GC pointers.
+    jmp_buf regs;
+    setjmp(regs);
+
+    // get stack bounds for conservative scanning.
     uintptr_t stack_base = _lambda_stack_base;
     uintptr_t stack_current;
 #if defined(__aarch64__)
-    __asm__ volatile("mov %0, sp" : "=r"(stack_current));
+    asm volatile("mov %0, sp" : "=r"(stack_current));
 #elif defined(__x86_64__)
-    __asm__ volatile("movq %%rsp, %0" : "=r"(stack_current));
+    asm volatile("movq %%rsp, %0" : "=r"(stack_current));
 #else
-    // fallback: use address of a local variable
     volatile int marker;
     stack_current = (uintptr_t)&marker;
 #endif
@@ -117,6 +158,7 @@ extern "C" String* heap_strcpy(char* src, int len) {
     memcpy(str->chars, src, len);  // Safe copy with explicit length
     str->chars[len] = '\0';        // Explicit null termination
     str->len = len;
+    str->is_ascii = str_is_ascii(str->chars, len) ? 1 : 0;
     return str;
 }
 

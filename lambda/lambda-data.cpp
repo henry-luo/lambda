@@ -288,7 +288,7 @@ String* it2s(Item itm) {
         return itm.get_string();
     }
     if (itm._type_id == LMD_TYPE_ERROR) {
-        static String str_err = {.len = 7, .chars = "<error>"};
+        static String str_err = {.len = 7, .is_ascii = 1, .chars = "<error>"};
         return &str_err;
     }
     // For other types, we'd need to convert to string
@@ -323,6 +323,13 @@ void expand_list(List *list, Arena* arena = nullptr) {
 
     // Determine which allocator to use
     Item* old_items = list->items;
+
+    // If no arena explicitly passed, check input_context for arena fallback
+    // (input parsing path where GC heap is not initialized)
+    if (!arena && input_context && input_context->arena) {
+        arena = input_context->arena;
+    }
+
     bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
 
     if (use_arena) {
@@ -344,6 +351,10 @@ void expand_list(List *list, Arena* arena = nullptr) {
         size_t old_size = (list->capacity/2) * sizeof(Item);
         size_t new_size = list->capacity * sizeof(Item);
         Item* new_items = (Item*)heap_data_alloc(new_size);
+        // Re-read old_items after allocation: GC may have fired during
+        // heap_data_alloc, compacting list->items from nursery to tenured.
+        // The local old_items would then point to freed nursery memory.
+        old_items = list->items;
         if (old_items && old_size > 0) {
             memcpy(new_items, old_items, old_size);
         }
@@ -903,6 +914,9 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result = typeditem_to_item((TypedItem*)field_ptr);
         break;
     }
+    case LMD_TYPE_ERROR:
+        // field was stored with error type — return null
+        return ItemNull;
     default:
         log_error("unknown map item type %s", get_type_name(type_id));
         return ItemError;

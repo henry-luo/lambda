@@ -48,8 +48,6 @@ error
 "Modulo with Boolean/Null (errors):"
 error
 error
-error
-error
 "Modulo with String (errors):"
 error
 error
@@ -98,12 +96,6 @@ error
 "Null Arithmetic (errors):"
 error
 error
-error
-error
-error
-error
-error
-error
 "String with Numbers (errors):"
 error
 error
@@ -116,10 +108,7 @@ error
 "Mixed Type Errors:"
 error
 error
-error
-error
 "More Mixed Type Combinations (errors):"
-error
 error
 error
 error

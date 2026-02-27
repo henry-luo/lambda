@@ -1,6 +1,8 @@
 // AWFY Benchmark: Towers of Hanoi (Typed version)
 // Expected result: 8191
 
+type TState = {moves: int}
+
 pn make_array(n: int, val) {
     var arr = [val, val, val, val, val, val, val, val, val, val]
     var sz: int = 10
@@ -34,13 +36,13 @@ pn pop_disk_from(piles: int[], tops: int[], pile: int) {
     return disk_size
 }
 
-pn move_top_disk(piles: int[], tops: int[], state, from_pile: int, to_pile: int) {
+pn move_top_disk(piles: int[], tops: int[], state: TState, from_pile: int, to_pile: int) {
     let disk = pop_disk_from(piles, tops, from_pile)
     push_disk(piles, tops, disk, to_pile)
     state.moves = state.moves + 1
 }
 
-pn move_disks(piles: int[], tops: int[], state, disks: int, from_pile: int, to_pile: int) {
+pn move_disks(piles: int[], tops: int[], state: TState, disks: int, from_pile: int, to_pile: int) {
     if (disks == 1) {
         move_top_disk(piles, tops, state, from_pile, to_pile)
         return 0

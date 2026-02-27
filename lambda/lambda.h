@@ -182,8 +182,9 @@ typedef struct Item Item;
 // a fat string with prefixed length and flags
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
-    uint32_t len;  // string length
-    char chars[];
+    uint32_t len;       // byte length of the string
+    uint8_t is_ascii;   // 1 if all bytes < 0x80, 0 otherwise (enables O(1) indexing)
+    char chars[];       // UTF-8 string data (null-terminated)
 } String;
 #define STRING_STRUCT_DEFINED
 #endif
@@ -630,12 +631,14 @@ Element* elmt_fill(Element *elmt, ...);
 
 typedef struct Url Url;
 typedef struct Pool Pool;
+typedef struct Arena Arena;
 
 // Forward declaration of ArrayList (defined in lib/arraylist.h)
 typedef struct _ArrayList ArrayList;
 
 typedef struct Context {
     Pool* pool;
+    Arena* arena;  // arena allocator (for input parsing path)
     void** consts;
     void* type_list;  // type definitions list (ArrayList* at runtime, void* for JIT access)
     Url* cwd;  // current working directory
@@ -713,6 +716,11 @@ typedef struct Context {
     // Since these are external functions, MIR can't inline or reorder them.
     void _store_i64(int64_t* dst, int64_t val);
     void _store_f64(double* dst, double val);
+
+    // Safe unbox to int64_t for bitwise operation arguments.
+    // Handles both tagged Items (type tag in high byte) and raw int64_t values
+    // (from other bitwise ops or literals, with high byte == 0).
+    int64_t _barg(Item v);
 
     // generic field access function
     Item fn_index(Item item, Item index);
