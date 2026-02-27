@@ -41,8 +41,17 @@ extern double round(double x);
 extern bool g_dry_run;
 #endif
 
+// Stack overflow protection (callable from JIT-compiled code)
+extern void lambda_stack_overflow_error(const char* func_name);
+
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
+
+// TCO (Tail Call Optimization) iteration limit
+// Guards against infinite loops from tail-recursive functions that never terminate.
+// TCO converts tail calls into goto loops, bypassing signal-based stack overflow
+// detection, so we use an explicit counter.
+#define LAMBDA_TCO_MAX_ITERATIONS 1000000
 
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,

@@ -6299,9 +6299,28 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // Phase 2: No per-function stack check — signal handler catches overflow at OS level
 
-    // TCO: Add loop label at start of function body for goto target
+    // TCO: Add iteration counter and loop label for goto target
+    // The counter guards against infinite tail recursion (which bypasses signal-based
+    // stack overflow detection since TCO converts tail calls into flat goto loops).
+    // The check is placed after the label so every iteration hits it.
     if (use_tco) {
+        strbuf_append_str(tp->code_buf, " int _tco_count = 0;\n");
         strbuf_append_str(tp->code_buf, " _tco_start:;\n");
+        strbuf_append_str(tp->code_buf, " if (++_tco_count > LAMBDA_TCO_MAX_ITERATIONS) { lambda_stack_overflow_error(\"");
+        strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+        strbuf_append_str(tp->code_buf, "\"); ");
+        // Return error value matching the function's return type
+        Type* fn_ret = fn_type ? fn_type->returned : nullptr;
+        TypeId ret_tid = fn_ret ? fn_ret->type_id : LMD_TYPE_ANY;
+        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
+            strbuf_append_str(tp->code_buf, "return 0; }\n");
+        } else if (ret_tid == LMD_TYPE_FLOAT) {
+            strbuf_append_str(tp->code_buf, "return 0.0; }\n");
+        } else if (ret_tid == LMD_TYPE_BOOL) {
+            strbuf_append_str(tp->code_buf, "return false; }\n");
+        } else {
+            strbuf_append_str(tp->code_buf, "return ITEM_ERROR; }\n");
+        }
     }
 
     // set vargs before function body for variadic functions
