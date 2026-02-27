@@ -55,17 +55,18 @@ struct LambdaTestInfo {
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
     char command[512];
     const char* mir_flag = use_mir ? " --mir" : "";
+    const char* no_log_flag = getenv("LAMBDA_NO_LOG") ? " --no-log" : "";
 #ifdef _WIN32
     if (is_procedural) {
-        snprintf(command, sizeof(command), "lambda.exe run%s \"%s\"", mir_flag, script_path);
+        snprintf(command, sizeof(command), "lambda.exe run%s%s \"%s\"", no_log_flag, mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "lambda.exe%s \"%s\"", mir_flag, script_path);
+        snprintf(command, sizeof(command), "lambda.exe%s%s \"%s\"", no_log_flag, mir_flag, script_path);
     }
 #else
     if (is_procedural) {
-        snprintf(command, sizeof(command), "./lambda.exe run%s \"%s\"", mir_flag, script_path);
+        snprintf(command, sizeof(command), "./lambda.exe run%s%s \"%s\"", no_log_flag, mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "./lambda.exe%s \"%s\"", mir_flag, script_path);
+        snprintf(command, sizeof(command), "./lambda.exe%s%s \"%s\"", no_log_flag, mir_flag, script_path);
     }
 #endif
 
