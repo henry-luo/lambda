@@ -714,6 +714,11 @@ typedef struct Context {
     void _store_i64(int64_t* dst, int64_t val);
     void _store_f64(double* dst, double val);
 
+    // Safe unbox to int64_t for bitwise operation arguments.
+    // Handles both tagged Items (type tag in high byte) and raw int64_t values
+    // (from other bitwise ops or literals, with high byte == 0).
+    int64_t _barg(Item v);
+
     // generic field access function
     Item fn_index(Item item, Item index);
     Item fn_member(Item item, Item key);

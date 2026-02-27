@@ -32,8 +32,8 @@ extern "C" {
 #include <stdint.h>
 #include "mempool.h"
 
-// Default data zone block size: 256 KB
-#define GC_DATA_ZONE_BLOCK_SIZE (256 * 1024)
+// Default data zone block size: 4 MB
+#define GC_DATA_ZONE_BLOCK_SIZE (4 * 1024 * 1024)
 
 // Alignment for all data zone allocations (cache-line friendly)
 #define GC_DATA_ZONE_ALIGN 16

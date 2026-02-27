@@ -4,6 +4,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include <mpdecimal.h>
+#include <setjmp.h>
 
 extern __thread EvalContext* context;
 
@@ -32,19 +33,26 @@ void heap_init() {
 
 // trigger a GC collection from the runtime.
 // gathers roots (registered slots + stack scan) and runs the collector.
+// Uses setjmp to flush registers onto the stack so the conservative
+// stack scanner can find GC-managed pointers held in CPU registers.
+__attribute__((noinline))
 extern "C" void heap_gc_collect(void) {
     if (!context || !context->heap || !context->heap->gc) return;
     gc_heap_t* gc = context->heap->gc;
 
-    // get stack bounds for conservative scanning
+    // Use setjmp to flush callee-saved registers onto the stack,
+    // ensuring the conservative stack scanner can find GC pointers.
+    jmp_buf regs;
+    setjmp(regs);
+
+    // get stack bounds for conservative scanning.
     uintptr_t stack_base = _lambda_stack_base;
     uintptr_t stack_current;
 #if defined(__aarch64__)
-    __asm__ volatile("mov %0, sp" : "=r"(stack_current));
+    asm volatile("mov %0, sp" : "=r"(stack_current));
 #elif defined(__x86_64__)
-    __asm__ volatile("movq %%rsp, %0" : "=r"(stack_current));
+    asm volatile("movq %%rsp, %0" : "=r"(stack_current));
 #else
-    // fallback: use address of a local variable
     volatile int marker;
     stack_current = (uintptr_t)&marker;
 #endif
