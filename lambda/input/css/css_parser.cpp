@@ -452,6 +452,10 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             break;
 
         case CSS_TOKEN_DIMENSION:
+            // reject dimension tokens with unknown/invalid units (e.g. "300x")
+            if (token->data.dimension.unit == CSS_UNIT_NONE) {
+                return NULL;
+            }
             value->type = CSS_VALUE_TYPE_LENGTH;
             value->data.length.value = token->data.dimension.value;
             value->data.length.unit = token->data.dimension.unit;
@@ -1655,6 +1659,13 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         }
 
         decl->value = list_value;
+    }
+
+    // reject declaration if no valid value was parsed (e.g. unknown unit like "300x")
+    if (!decl->value) {
+        log_debug("[CSS Parse] Rejecting declaration for property '%s': no valid value parsed",
+                  property_name);
+        return NULL;
     }
 
     // Debug: print the value type

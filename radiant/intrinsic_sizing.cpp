@@ -230,6 +230,150 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 }
 
 // ============================================================================
+// Text Height at Constrained Width (CSS Flexbox §9.4)
+// ============================================================================
+// Simulates line breaking at a given available width to compute the resulting
+// text height. This is needed for hypothetical cross size determination when
+// the item's main size (width) is smaller than the text's max-content width.
+//
+// Algorithm: Walk through text tracking break-unit (word/ZWSP-segment) widths,
+// pack them into lines greedily at the available width, count lines.
+float compute_text_height_at_width(LayoutContext* lycon,
+                                    const char* text,
+                                    size_t length,
+                                    float available_width,
+                                    float line_height,
+                                    CssEnum text_transform) {
+    if (!text || length == 0 || available_width <= 0 || line_height <= 0) {
+        return line_height;  // at least one line
+    }
+
+    int line_count = 1;
+    float current_line_width = 0;
+    float current_word_width = 0;
+
+    // Use font metrics if available, otherwise rough estimate
+    bool has_font = lycon->font.font_handle != nullptr;
+    bool has_kerning = has_font ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
+    uint32_t prev_glyph = 0;
+    bool is_word_start = true;
+
+    const unsigned char* str = (const unsigned char*)text;
+
+    for (size_t i = 0; i < length; ) {
+        unsigned char ch = str[i];
+
+        // Check for zero-width space (U+200B) - break opportunity
+        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && str[i+2] == 0x8B) {
+            // end of break unit - try to fit on current line
+            if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
+                line_count++;
+                current_line_width = current_word_width;
+            } else {
+                current_line_width += current_word_width;
+            }
+            current_word_width = 0;
+            prev_glyph = 0;
+            is_word_start = true;
+            i += 3;
+            continue;
+        }
+
+        // Skip ZWNBSP (U+FEFF), ZWNJ (U+200C), ZWJ (U+200D) - zero width, no break
+        if (ch == 0xEF && i + 2 < length && str[i+1] == 0xBB && str[i+2] == 0xBF) {
+            prev_glyph = 0; i += 3; continue;
+        }
+        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
+            prev_glyph = 0; i += 3; continue;
+        }
+
+        // Regular space/whitespace - break opportunity
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+            if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
+                line_count++;
+                current_line_width = current_word_width;
+            } else {
+                current_line_width += current_word_width;
+            }
+            current_word_width = 0;
+            // add space width
+            float space_width = 4.0f;
+            if (lycon->font.style && lycon->font.style->space_width > 0) {
+                space_width = lycon->font.style->space_width;
+            }
+            if (lycon->font.style) {
+                space_width += lycon->font.style->word_spacing;
+            }
+            current_line_width += space_width;
+            prev_glyph = has_font ? font_get_glyph_index(lycon->font.font_handle, ch) : 0;
+            is_word_start = true;
+            i++;
+            continue;
+        }
+
+        // Decode UTF-8 codepoint and measure glyph
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)&str[i], length - i, &codepoint);
+        if (bytes <= 0) {
+            current_word_width += has_font ? 11.0f : 11.0f;
+            prev_glyph = 0;
+            i++;
+            is_word_start = false;
+            continue;
+        }
+
+        if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
+            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        }
+        is_word_start = false;
+
+        float advance = 0;
+        if (has_font) {
+            uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
+            if (glyph_index) {
+                float kerning = 0;
+                if (has_kerning && prev_glyph) {
+                    kerning = font_get_kerning_by_index(lycon->font.font_handle, prev_glyph, glyph_index);
+                }
+                GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
+                advance = (ginfo.id != 0) ? ginfo.advance_x + kerning : 11.0f;
+            } else {
+                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
+                if (glyph) {
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                    advance = glyph->advance_x / pixel_ratio;
+                } else {
+                    advance = 11.0f;
+                }
+            }
+            // letter-spacing between characters (not after last)
+            if (i + bytes < length && lycon->font.style) {
+                advance += lycon->font.style->letter_spacing;
+            }
+            prev_glyph = font_get_glyph_index(lycon->font.font_handle, codepoint);
+        } else {
+            advance = 11.0f;
+        }
+
+        current_word_width += advance;
+        i += bytes;
+    }
+
+    // flush last word
+    if (current_word_width > 0) {
+        if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
+            line_count++;
+        }
+    }
+
+    float result = line_count * line_height;
+    log_debug("compute_text_height_at_width: available=%.1f, line_height=%.1f, lines=%d, height=%.1f",
+              available_width, line_height, line_count, result);
+    return result;
+}
+
+// ============================================================================
 // Element Measurement (Recursive)
 // ============================================================================
 
@@ -336,7 +480,8 @@ static CssEnum get_element_text_transform(DomElement* element) {
     return CSS_VALUE_NONE;
 }
 
-IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element) {
+IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
+                                                bool content_only) {
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
@@ -435,7 +580,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
               ((ViewBlock*)element)->display.outer);
 
     // Check for explicit CSS width first
-    if (element->specified_style) {
+    // When content_only is true, skip this early return to measure content-only min-content.
+    // This is needed for CSS Flexbox §4.5 content_size_suggestion which represents the
+    // min-content of the element's content, NOT the specified CSS width.
+    if (element->specified_style && !content_only) {
         CssDeclaration* width_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_WIDTH);
         if (width_decl && width_decl->value &&
@@ -503,7 +651,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     log_debug("  -> explicit width: %d (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
                               explicit_width, pad_left, pad_right, border_left, border_right);
                 } else {
-                    log_debug("  -> explicit width: %d (border-box, no adjustment)", explicit_width);
+                    // border-box: floor at padding+border (content-box >= 0)
+                    ViewBlock* view_for_pb = (ViewBlock*)element;
+                    if (view_for_pb->bound) {
+                        float pb_w = view_for_pb->bound->padding.left + view_for_pb->bound->padding.right;
+                        if (view_for_pb->bound->border) {
+                            pb_w += view_for_pb->bound->border->width.left + view_for_pb->bound->border->width.right;
+                        }
+                        if (explicit_width < (int)pb_w) {
+                            log_debug("  -> explicit width: %d floored to %d (border-box, padding+border)", explicit_width, (int)pb_w);
+                            explicit_width = (int)pb_w;
+                        }
+                    }
+                    log_debug("  -> explicit width: %d (border-box)", explicit_width);
                 }
 
                 sizes.min_content = explicit_width;
@@ -1051,6 +1211,30 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // In a flex container, both text and element children are flex items
         // They should NOT go through the inline content path
         if (is_flex_container) {
+            // CSS Flexbox §4: Absolutely positioned children are out-of-flow
+            // and do not participate in flex layout or contribute to intrinsic size
+            if (child->is_element()) {
+                DomElement* child_elem = child->as_element();
+                ViewBlock* child_block = (ViewBlock*)child_elem;
+                bool child_is_absolute = false;
+                if (child_block && child_block->position &&
+                    (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                     child_block->position->position == CSS_VALUE_FIXED)) {
+                    child_is_absolute = true;
+                } else if (child_elem->specified_style) {
+                    CssDeclaration* pos_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_POSITION);
+                    if (pos_decl && pos_decl->value && pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum pos_val = pos_decl->value->data.keyword;
+                        child_is_absolute = (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED);
+                    }
+                }
+                if (child_is_absolute) {
+                    log_debug("  skipping absolute child %s in flex intrinsic sizing", child_elem->node_name());
+                    continue;
+                }
+            }
+
             if (is_row_flex) {
                 // Row flex: sum widths horizontally
                 sizes.min_content += child_sizes.min_content;
@@ -1244,12 +1428,44 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        // Also check for border
+        // Also check for border-width (handles both single value and multi-value shorthand)
+        bool border_width_found = false;
         CssDeclaration* border_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-        if (border_decl && border_decl->value && border_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            float border_width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, border_decl->value);
-            border_left = border_right = border_width;
-        } else {
+        if (border_decl && border_decl->value) {
+            if (border_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                // Single value: applies to all sides
+                float border_width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, border_decl->value);
+                border_left = border_right = border_width;
+                border_width_found = true;
+            } else if (border_decl->value->type == CSS_VALUE_TYPE_LIST && border_decl->value->data.list.count >= 1) {
+                // Multi-value: border-width: top right [bottom] [left]
+                int cnt = border_decl->value->data.list.count;
+                CssValue** vals = border_decl->value->data.list.values;
+                if (cnt == 1) {
+                    float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[0]);
+                    border_left = border_right = bw;
+                } else if (cnt == 2) {
+                    // vals[1] = left/right
+                    float lr = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
+                    border_left = border_right = lr;
+                } else if (cnt == 3) {
+                    // vals[1] = left/right
+                    float lr = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
+                    border_left = border_right = lr;
+                } else if (cnt >= 4) {
+                    // vals[1] = right, vals[3] = left
+                    border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
+                    border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[3]);
+                }
+                border_width_found = true;
+                log_debug("  -> multi-value border-width: left=%.1f, right=%.1f", border_left, border_right);
+            }
+        }
+        // Fallback to individual border-*-width if shorthand not found
+        // IMPORTANT: Only fall back when border-width was NOT found at all.
+        // When border-width IS found (even with value 0), it takes precedence
+        // over individual properties and the border shorthand per CSS cascade.
+        if (!border_width_found && border_left == 0 && border_right == 0) {
             CssDeclaration* bl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_LEFT_WIDTH);
             if (bl && bl->value && bl->value->type == CSS_VALUE_TYPE_LENGTH) {
                 border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, bl->value);
@@ -1257,6 +1473,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             CssDeclaration* br = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
             if (br && br->value && br->value->type == CSS_VALUE_TYPE_LENGTH) {
                 border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, br->value);
+            }
+        }
+        // Also check border shorthand (border: width style color)
+        // Only if neither border-width nor individual properties were found
+        if (!border_width_found && border_left == 0 && border_right == 0) {
+            CssDeclaration* b_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER);
+            if (b_decl && b_decl->value && b_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                b_decl->value->data.list.count >= 1) {
+                CssValue* width_val = b_decl->value->data.list.values[0];
+                if (width_val && width_val->type == CSS_VALUE_TYPE_LENGTH) {
+                    float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, width_val);
+                    border_left = border_right = bw;
+                }
             }
         }
     }

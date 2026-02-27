@@ -987,6 +987,18 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         }
                     }
 
+                    // CSS Values Level 4: parse scientific notation exponent (e.g., 3.68e+19)
+                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
+                        size_t exp_start = pos;
+                        pos++;
+                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
+                        if (pos < length && isdigit(input[pos])) {
+                            while (pos < length && isdigit(input[pos])) pos++;
+                        } else {
+                            pos = exp_start;  // not a valid exponent, rollback
+                        }
+                    }
+
                     // Check for dimension unit or percentage
                     size_t number_end = pos;
                     if (pos < length && input[pos] == '%') {
@@ -1059,6 +1071,18 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         pos++;
                         while (pos < length && isdigit(input[pos])) {
                             pos++;
+                        }
+                    }
+
+                    // CSS Values Level 4: parse scientific notation exponent (e.g., 3.68e+19)
+                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
+                        size_t exp_start = pos;
+                        pos++;
+                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
+                        if (pos < length && isdigit(input[pos])) {
+                            while (pos < length && isdigit(input[pos])) pos++;
+                        } else {
+                            pos = exp_start;  // not a valid exponent, rollback
                         }
                     }
 
@@ -1135,6 +1159,18 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         }
                     }
 
+                    // CSS Values Level 4: parse scientific notation exponent (e.g., 3.68e+19)
+                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
+                        size_t exp_start = pos;
+                        pos++;
+                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
+                        if (pos < length && isdigit(input[pos])) {
+                            while (pos < length && isdigit(input[pos])) pos++;
+                        } else {
+                            pos = exp_start;  // not a valid exponent, rollback
+                        }
+                    }
+
                     // Check for dimension unit or percentage
                     size_t number_end = pos;
                     if (pos < length && input[pos] == '%') {
@@ -1175,6 +1211,18 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     // Parse decimal digits
                     while (pos < length && isdigit(input[pos])) {
                         pos++;
+                    }
+
+                    // CSS Values Level 4: parse scientific notation exponent (e.g., .5e+3)
+                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
+                        size_t exp_start = pos;
+                        pos++;
+                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
+                        if (pos < length && isdigit(input[pos])) {
+                            while (pos < length && isdigit(input[pos])) pos++;
+                        } else {
+                            pos = exp_start;  // not a valid exponent, rollback
+                        }
                     }
 
                     // Check for dimension unit or percentage
