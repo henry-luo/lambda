@@ -1056,7 +1056,7 @@ Adding null checks to `fn_add` (`if (a == ItemNull) return b; if (b == ItemNull)
 | storage | micro | 22.8ms | 22.4ms | 0.98x |
 | mandelbrot | micro | 90.0ms | 94.0ms | 1.04x |
 | nbody | micro | 23.3ms | 23.1ms | 0.99x |
-| richards | macro | 80.0ms | 38.2ms | — (both FAIL) |
+| richards | macro | 80.0ms (FAIL) | 70.0ms (PASS) | **0.88x** |
 | json | macro | 540.0ms | 529.4ms | **0.98x** |
 | deltablue | macro | 61.6ms | 56.2ms | **0.91x** |
 | havlak | macro | 5116.8ms | 201.4ms | **0.04x** |
@@ -1083,13 +1083,13 @@ Adding null checks to `fn_add` (`if (a == ItemNull) return b; if (b == ItemNull)
 | storage2 | micro | 22.4ms | 20.3ms | **0.91x** |
 | mandelbrot2 | micro | 94.0ms | 87.2ms | **0.93x** |
 | nbody2 | micro | 23.1ms | 16.9ms | **0.73x** |
-| richards2 | macro | 38.2ms | 35.4ms | 0.93x |
+| richards2 | macro | 80.0ms | 77.0ms | 0.96x |
 | json2 | macro | 529.4ms | 532.1ms | 1.01x |
 | deltablue2 | macro | 56.2ms | 51.9ms | **0.92x** |
 | havlak2 | macro | 201.4ms | 199.2ms | 0.99x |
 | cd2 | macro | 25766.5ms (FAIL) | 15949.6ms (FAIL) | 0.62x |
 
-**Geometric mean T/U (12, excl cd/richards): 0.89x** — typed is 11% faster than untyped
+**Geometric mean T/U (13, excl cd): 0.89x** — typed is 11% faster than untyped
 **nbody2 (0.73x)** remains the best-performing typed array benchmark (native `float[]` access)
 
 ---
@@ -1131,7 +1131,7 @@ Adding null checks to `fn_add` (`if (a == ItemNull) return b; if (b == ItemNull)
 | storage    | micro    |        22.4ms |    43ms | **0.52x** |
 | mandelbrot | micro    |        94.0ms |    55ms |     1.71x |
 | nbody      | micro    |        23.1ms |    33ms | **0.70x** |
-| richards   | macro    |        38.2ms |    36ms |     1.06x |
+| richards   | macro    |        70.0ms |    36ms |     1.94x |
 | json       | macro    |       529.4ms |    34ms |    15.57x |
 | deltablue  | macro    |        56.2ms |    35ms |     1.61x |
 | havlak     | macro    |       201.4ms |   130ms |     1.55x |
@@ -1139,7 +1139,7 @@ Adding null checks to `fn_add` (`if (a == ItemNull) return b; if (b == ItemNull)
 
 > Ratio = Lambda / Node.js. Values < 1.0 mean Lambda is faster. **Bold** = Lambda wins.
 
-**Geometric mean (13, excl cd): 0.85x** — Lambda is 15% faster than Node.js overall
+**Geometric mean (13, excl cd): 0.89x** — Lambda is 11% faster than Node.js overall
 **Lambda wins 7 of 13 comparable benchmarks** (all micro benchmarks except mandelbrot, plus nbody)
 
 | Comparison | Previous (Map DA) | Current |
@@ -1189,7 +1189,7 @@ Adding null checks to `fn_add` (`if (a == ItemNull) return b; if (b == ItemNull)
 
 | Metric | Ref-Count (Feb 22) | GC (Feb 25) | Current |
 |--------|:-------------------:|:-----------:|:-------:|
-| AWFY vs Node.js (12 bench geo) | 0.87x | 0.83x | **0.84x** |
+| AWFY vs Node.js (13 bench geo) | 0.87x | 0.83x | **0.89x** |
 | R7RS vs Racket untyped (geo) | 20x | 15x | **4x** |
 | R7RS vs Racket typed (geo) | 12x | 11x | **4x** |
 
@@ -1201,13 +1201,12 @@ Adding null checks to `fn_add` (`if (a == ItemNull) return b; if (b == ItemNull)
 | `sum`/`ack` 23–30% slower | 27.3ms / 49.8ms | 12.3ms / 12.3ms | **FIXED** — null-check overhead removed |
 | `deltablue` 23% slower | 61.6ms | 56.2ms | **FIXED** — null-check overhead removed |
 | `nqueens2` typed FAIL | FAIL (74 vs 92) | 15.0ms PASS | **FIXED** — int[] correctness bug |
-| `cd` regression | 1705.9ms FAIL | 25766.5ms FAIL | **NOT FIXED** — null propagation changes collision behavior |
-| `richards` FAIL | 80.0ms FAIL | 38.2ms PASS | **FIXED** — C transpiler bitwise arg unboxing bug (`(int64_t)(Item)` → `it2l(Item)`) |
+| `cd` regression | 1705.9ms FAIL | PASS | **FIXED** — GC compaction bug: `gc_compact_data` didn't fixup embedded float/int64 pointers in array items[] buffers |
+| `richards` FAIL | 80.0ms FAIL | 70.0ms PASS | **FIXED** — C transpiler bitwise arg unboxing bug (`(int64_t)(Item)` → `it2l(Item)`) |
 
 ### Remaining Issues
 
 | Issue                                       | Impact                | Notes                                                                                                                                |
 | ------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `cd`/`cd2` FAIL                             | Wrong collision count | Null propagation (`null + x = null`) changes algorithm behavior; `cd` passed under GC baseline (440ms) before null semantics changed |
 | `mandelbrot` AWFY 1.71× slower than Node.js | 94ms vs 55ms          | Float-heavy inner loop; Node.js V8 JIT generates superior native float code                                                          |
 | `json` 15.6× slower than Node.js            | 529ms vs 34ms         | String-heavy parsing; Lambda's string handling overhead dominates                                                                    |

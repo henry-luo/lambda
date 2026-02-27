@@ -626,6 +626,38 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
 // ---- Data Zone Compaction ----
 
+// Fix up embedded float/int64/datetime pointers within a compacted items[] buffer.
+// array_set() stores float/int64/datetime values at the END of the items[] buffer
+// (the "extra" area), with tagged pointers in items[0..length) pointing into
+// that same buffer. After copying the buffer to a new address, those embedded
+// pointers still reference the old location and must be updated.
+static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
+                                        int64_t length, int64_t capacity) {
+    // Compute the old buffer extent: [old_start, old_end)
+    uint8_t* old_start = (uint8_t*)old_items;
+    uint8_t* old_end   = old_start + capacity * sizeof(uint64_t);
+    ptrdiff_t offset    = (uint8_t*)new_items - (uint8_t*)old_items;
+
+    for (int64_t i = 0; i < length; i++) {
+        uint64_t item = new_items[i];
+        uint8_t item_tag = (uint8_t)(item >> 56);
+
+        // Only fix tagged pointer types that array_set stores inline:
+        // Float (5), Int64 (4), DateTime (8)
+        if (item_tag == LMD_TYPE_FLOAT_ || item_tag == LMD_TYPE_INT64_ ||
+            item_tag == LMD_TYPE_DTIME_) {
+            // Extract the raw pointer (lower 56 bits)
+            uint8_t* ptr = (uint8_t*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFFULL);
+            if (ptr >= old_start && ptr < old_end) {
+                // Pointer is inside the old buffer — rebase to new location
+                uint8_t* new_ptr = ptr + offset;
+                new_items[i] = (item & 0xFF00000000000000ULL) |
+                               ((uint64_t)(uintptr_t)new_ptr & 0x00FFFFFFFFFFFFFFULL);
+            }
+        }
+    }
+}
+
 // Compact surviving data from nursery data zone to tenured data zone.
 // For each marked object that has data pointers into the nursery data zone,
 // copy the data to tenured and update the object's pointer.
@@ -648,12 +680,20 @@ static void gc_compact_data(gc_heap_t* gc) {
             uint8_t* p = (uint8_t*)obj;
             void** items_slot = (void**)(p + 8);
             int64_t length = *(int64_t*)(p + 16);
+            int64_t extra = *(int64_t*)(p + 24);
             int64_t capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
+                uint64_t* old_items = (uint64_t*)*items_slot;
                 size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;
+                    // Fix embedded float/int64/datetime pointers that reference
+                    // the old buffer's extra area (set by array_set)
+                    if (extra > 0) {
+                        gc_fixup_embedded_pointers(old_items, (uint64_t*)new_items,
+                                                   length, capacity);
+                    }
                     compacted++;
                 }
             }
@@ -709,12 +749,20 @@ static void gc_compact_data(gc_heap_t* gc) {
             uint8_t* p = (uint8_t*)obj;
             // compact items[]
             void** items_slot = (void**)(p + 8);
-            int64_t capacity = *(int64_t*)(p + 32);
+            int64_t elmt_length = *(int64_t*)(p + 16);
+            int64_t elmt_extra = *(int64_t*)(p + 24);
+            int64_t elmt_capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                size_t size = capacity * sizeof(uint64_t);
+                uint64_t* old_elmt_items = (uint64_t*)*items_slot;
+                size_t size = elmt_capacity * sizeof(uint64_t);
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;
+                    // Fix embedded float/int64/datetime pointers
+                    if (elmt_extra > 0) {
+                        gc_fixup_embedded_pointers(old_elmt_items, (uint64_t*)new_items,
+                                                   elmt_length, elmt_capacity);
+                    }
                     compacted++;
                 }
             }
