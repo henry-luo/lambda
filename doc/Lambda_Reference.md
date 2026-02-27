@@ -67,6 +67,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 
 | Document | Description |
 |----------|-------------|
+| **[Lambda_CLI.md](Lambda_CLI.md)** | **CLI Reference** — Commands, flags, and usage for the Lambda command-line interface |
 | **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** | **System Functions** — Complete reference for all built-in functions (type, math, string, collection, I/O, date/time) |
 | **[Lambda_Validator_Guide.md](Lambda_Validator_Guide.md)** | **Validation** — Schema-based validation for data structures |
 

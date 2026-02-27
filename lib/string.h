@@ -12,7 +12,8 @@ extern "C" {
 // Only define if not already defined by the Lambda engine
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
-    uint32_t len;             // string length
+    uint32_t len;             // byte length of the string
+    uint8_t is_ascii;         // 1 if all bytes < 0x80, 0 otherwise
     char chars[];             // flexible array member
 } String;
 #define STRING_STRUCT_DEFINED

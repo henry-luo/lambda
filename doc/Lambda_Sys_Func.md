@@ -467,6 +467,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(@./a.txt, @./b.txt)` |
 | `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(@https://api.example.com, {method: 'POST})` |
 | `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
+| `clock()` | Monotonic clock in seconds | `clock()` |
 
 ### print(x)
 
@@ -672,6 +673,20 @@ pn run_commands() {
 }
 ```
 
+### clock()
+
+Returns the current value of a monotonic clock as a `float` in seconds. Useful for measuring elapsed time in benchmarks and performance profiling. The returned value has nanosecond precision and is not related to wall-clock time.
+
+```lambda
+pn benchmark() {
+    var t0 = clock()
+    // ... work to measure ...
+    var t1 = clock()
+    var elapsed_ms = (t1 - t0) * 1000.0
+    print("Elapsed: " + string(elapsed_ms) + " ms")
+}
+```
+
 ---
 
 ## Error Handling
@@ -794,6 +809,7 @@ if (result is error) {
 | `io.rename` | 2 | Rename file/directory |
 | `io.fetch` | 2 | HTTP request |
 | `cmd` | 1+ | Shell command |
+| `clock` | 0 | Monotonic clock (seconds) |
 
 ### Date/Time Functions
 | Function | Args | Description |
