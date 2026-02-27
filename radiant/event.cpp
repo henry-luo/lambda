@@ -132,6 +132,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             if (evcon->target && evcon->target != prev_target) {
                 log_debug("found target inside iframe: %s",
                     evcon->target->is_element() ? ((ViewElement*)evcon->target)->node_name() : "text");
+                // Record the iframe block so events can propagate across
+                // the iframe boundary back into the parent document
+                evcon->iframe_container = (View*)block;
                 goto RETURN;
             }
 
@@ -2041,9 +2044,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
-            // fire event to views in the stack
+            // fire event to views in the stack (inside iframe if applicable)
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
+
+            // If the target was inside an iframe, also propagate the scroll
+            // event through the parent document's view stack so that the
+            // iframe block (or its scrollable ancestors) can handle scrolling
+            if (evcon.iframe_container) {
+                log_debug("propagating scroll event across iframe boundary");
+                ArrayList* parent_list = build_view_stack(&evcon, evcon.iframe_container);
+                fire_events(&evcon, parent_list);
+                arraylist_free(parent_list);
+            }
         } else {
             log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
         }
