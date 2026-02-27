@@ -412,6 +412,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = false;
     lycon->line.has_replaced_content = false;
+    lycon->line.has_expanded_inline_lh = false;
     lycon->line.max_normal_line_height = 0;
     lycon->line.last_text_rect = NULL;
     lycon->line.trailing_space_width = 0;
@@ -519,9 +520,19 @@ void line_break(LayoutContext* lycon) {
     }
 
     if (has_mixed_fonts) {
-        // Mixed content: expand to fit inline replaced elements (images, inline-blocks)
-        // but not for text-only lines where the inflation comes from max_descender clamping
-        if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal) {
+        // CSS 2.1 §10.8.1: The line box height is the distance between the
+        // uppermost box top and the lowermost box bottom. Each inline box's
+        // height equals its own line-height (via half-leading), so max_ascender
+        // + max_descender already reflects the correct line box extent.
+        // The block's line-height contributes only through the strut, not as a cap.
+        //
+        // However, when all inlines share the parent's line-height, the
+        // max_ascender/max_descender sum may overstate the actual line box height
+        // due to different ascender/descender ratios across fonts (both values
+        // are clamped ≥0, so they can't represent overlapping extents).
+        // In that case, css_line_height is the correct used line height.
+        if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
+            lycon->line.has_expanded_inline_lh) {
             used_line_height = max(css_line_height, font_line_height);
             // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box
             // contributes its own font's normal line-height (including lineGap).
@@ -530,7 +541,9 @@ void line_break(LayoutContext* lycon) {
                 used_line_height = lycon->line.max_normal_line_height;
             }
         } else {
-            // Text-only with explicit line-height smaller than font: trust css_line_height
+            // Text-only with explicit line-height and no per-inline expansion:
+            // trust css_line_height (max_ascender + max_descender can overstate
+            // due to clamping ≥0 when half-leading produces negative descenders)
             used_line_height = css_line_height;
         }
     } else {

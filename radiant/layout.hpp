@@ -148,6 +148,7 @@ typedef struct Linebox {
     bool has_space;                 // whether last layout character is a space
     bool has_float_intrusion;       // true if floats affect this line
     bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
+    bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
