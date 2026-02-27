@@ -102,6 +102,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     if (span->bound) {
         pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
         pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
+        pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
+        pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
     }
 
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
@@ -115,15 +117,15 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     if (is_multi_line) {
         // Multi-line: don't add horizontal border+padding to union bounding box
         span->x = min_x;
-        span->y = min_y - (int)border_top;
+        span->y = min_y - (int)border_top - (int)pad_top;
         span->width = max_x - min_x;
-        span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
+        span->height = (max_y - min_y) + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
     } else {
         // Single-line: include horizontal border+padding in bounding box
         span->x = min_x - (int)left_edge;
-        span->y = min_y - (int)border_top;
+        span->y = min_y - (int)border_top - (int)pad_top;
         span->width = (max_x - min_x) + (int)left_edge + (int)right_edge;
-        span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
+        span->height = (max_y - min_y) + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
     }
 }
 
