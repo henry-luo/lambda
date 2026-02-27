@@ -182,8 +182,9 @@ typedef struct Item Item;
 // a fat string with prefixed length and flags
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
-    uint32_t len;  // string length
-    char chars[];
+    uint32_t len;       // byte length of the string
+    uint8_t is_ascii;   // 1 if all bytes < 0x80, 0 otherwise (enables O(1) indexing)
+    char chars[];       // UTF-8 string data (null-terminated)
 } String;
 #define STRING_STRUCT_DEFINED
 #endif

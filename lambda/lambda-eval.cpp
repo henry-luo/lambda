@@ -3,6 +3,7 @@
 #include "lambda-error.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
+#include "../lib/str.h"
 #include "utf_string.h"
 #include "re2_wrapper.hpp"
 #include <mpdecimal.h>  // needed for inline decimal operations
@@ -174,6 +175,7 @@ String *fn_strcat(String *left, String *right) {
     }
     log_debug("str result %p", result);
     result->len = left_len + right_len;
+    result->is_ascii = left->is_ascii && right->is_ascii;
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
@@ -317,6 +319,7 @@ String *str_repeat(String *str, int64_t times) {
         // Return empty string
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         result->len = 0;
+        result->is_ascii = 1;
         result->chars[0] = '\0';
         return result;
     }
@@ -325,6 +328,7 @@ String *str_repeat(String *str, int64_t times) {
     size_t total_len = str_len * times;
     String *result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
     result->len = total_len;
+    result->is_ascii = str->is_ascii;
 
     for (long i = 0; i < times; i++) {
         memcpy(result->chars + (i * str_len), str->chars, str_len);
@@ -377,6 +381,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     // Create new string with normalized content
     String* result = (String*)heap_alloc(sizeof(String) + normalized_len + 1, LMD_TYPE_STRING);
     result->len = normalized_len;
+    result->is_ascii = str_is_ascii((const char*)normalized, normalized_len) ? 1 : 0;
     memcpy(result->chars, normalized, normalized_len);
     result->chars[normalized_len] = '\0';
 
@@ -853,9 +858,11 @@ Bool fn_eq(Item a_item, Item b_item) {
         return (datetime_compare(&dt_a, &dt_b) == 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_BINARY) {
+        // pointer identity fast-path (interned strings, same allocation)
+        if (a_item.string_ptr == b_item.string_ptr) return BOOL_TRUE;
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
         uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
-        bool result = (len_a == len_b && strncmp(chars_a, chars_b, len_a) == 0);
+        bool result = (len_a == len_b && memcmp(chars_a, chars_b, len_a) == 0);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_SYMBOL) {
@@ -1301,10 +1308,10 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-String STR_NULL = {.len = 4, .chars = "null"};
-String STR_TRUE = {.len = 4, .chars = "true"};
-String STR_FALSE = {.len = 5, .chars = "false"};
-String STR_ERROR = {.len = 7, .chars = "<error>"};
+String STR_NULL = {.len = 4, .is_ascii = 1, .chars = "null"};
+String STR_TRUE = {.len = 4, .is_ascii = 1, .chars = "true"};
+String STR_FALSE = {.len = 5, .is_ascii = 1, .chars = "false"};
+String STR_ERROR = {.len = 7, .is_ascii = 1, .chars = "<error>"};
 
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
@@ -1744,6 +1751,7 @@ String* fn_format2(Item item, Item type) {
         size_t len = buf->length;
         String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
         result->len = len;
+        result->is_ascii = 1;  // datetime format strings are always ASCII
         memcpy(result->chars, buf->str, len);
         result->chars[len] = '\0';
         strbuf_free(buf);
@@ -1816,8 +1824,6 @@ String* fn_format2(Item item, Item type) {
 String* fn_format1(Item item) {
     return fn_format2(item, ItemNull);
 }
-
-#include "../lib/str.h"
 
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
@@ -2191,7 +2197,9 @@ int64_t fn_len(Item item) {
         // returns the length of the string
         // todo: binary length
         const char* chars = item.get_chars();
-        size = chars ? (int64_t)str_utf8_count(chars, item.get_len()) : 0;
+        if (!chars) { size = 0; break; }
+        String* str = item.get_string();
+        size = str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(chars, str->len);
         break;
     }
     case LMD_TYPE_PATH: {
@@ -2256,6 +2264,29 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     int64_t start = it2l(start_item);
     int64_t end = it2l(end_item);
 
+    // ASCII fast path: char index == byte index
+    if (str->is_ascii) {
+        int64_t char_len = (int64_t)str->len;
+        if (start < 0) start = char_len + start;
+        if (end < 0) end = char_len + end;
+        if (start < 0) start = 0;
+        if (end > char_len) end = char_len;
+        if (start >= end) {
+            String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+            empty->len = 0;
+            empty->is_ascii = 1;
+            empty->chars[0] = '\0';
+            return {.item = s2it(empty)};
+        }
+        long result_len = (long)(end - start);
+        String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
+        result->len = result_len;
+        result->is_ascii = 1;
+        memcpy(result->chars, str->chars + start, result_len);
+        result->chars[result_len] = '\0';
+        return {.item = s2it(result)};
+    }
+
     // handle negative indices (count from end)
     int64_t char_len = (int64_t)str_utf8_count(str->chars, str->len);
     if (start < 0) start = char_len + start;
@@ -2268,6 +2299,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         // return empty string
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
+        empty->is_ascii = 1;
         empty->chars[0] = '\0';
         return {.item = s2it(empty)};
     }
@@ -2280,6 +2312,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         // return empty string
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
+        empty->is_ascii = 1;
         empty->chars[0] = '\0';
         return {.item = s2it(empty)};
     }
@@ -2287,6 +2320,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     long result_len = byte_end - byte_start;
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
+    result->is_ascii = 0;  // UTF-8 path — not necessarily ASCII
     memcpy(result->chars, str->chars + byte_start, result_len);
     result->chars[result_len] = '\0';
 
@@ -2453,10 +2487,11 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     }
 
     // byte-based search, then convert byte offset to char offset
+    bool is_ascii = str_item.get_string()->is_ascii;
     for (size_t i = 0; i <= str_len - sub_len; i++) {
         if (memcmp(str_chars + i, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
-            int64_t char_index = (int64_t)str_utf8_count(str_chars, i);
+            int64_t char_index = is_ascii ? (int64_t)i : (int64_t)str_utf8_count(str_chars, i);
             return char_index;
         }
     }
@@ -2490,7 +2525,8 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
 
     if (sub_len == 0) {
         // empty substring is at the end
-        int64_t char_len = (int64_t)str_utf8_count(str_chars, str_len);
+        String* str = str_item.get_string();
+        int64_t char_len = str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str_chars, str_len);
         return char_len;
     }
 
@@ -2499,11 +2535,12 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
     }
 
     // search from end to beginning
+    bool is_ascii = str_item.get_string()->is_ascii;
     for (size_t i = str_len - sub_len + 1; i > 0; i--) {
         size_t pos = i - 1;
         if (memcmp(str_chars + pos, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
-            int64_t char_index = (int64_t)str_utf8_count(str_chars, pos);
+            int64_t char_index = is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(str_chars, pos);
             return char_index;
         }
     }
@@ -2559,6 +2596,7 @@ Item fn_trim(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
+    result->is_ascii = str_is_ascii(chars + start, result_len) ? 1 : 0;
     memcpy(result->chars, chars + start, result_len);
     result->chars[result_len] = '\0';
     return {.item = s2it(result)};
@@ -2603,6 +2641,7 @@ Item fn_trim_start(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
+    result->is_ascii = str_is_ascii(chars + start, result_len) ? 1 : 0;
     memcpy(result->chars, chars + start, result_len);
     result->chars[result_len] = '\0';
     return {.item = s2it(result)};
@@ -2648,6 +2687,7 @@ Item fn_trim_end(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + end + 1, LMD_TYPE_STRING);
     result->len = end;
+    result->is_ascii = str_is_ascii(chars, end) ? 1 : 0;
     memcpy(result->chars, chars, end);
     result->chars[end] = '\0';
     return {.item = s2it(result)};
@@ -2700,6 +2740,7 @@ Item fn_lower(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->is_ascii = str_item.get_string()->is_ascii;  // case conversion preserves ASCII status
     for (uint32_t i = 0; i < len; i++) {
         char c = chars[i];
         result->chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
@@ -2755,6 +2796,7 @@ Item fn_upper(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->is_ascii = str_item.get_string()->is_ascii;  // case conversion preserves ASCII status
     for (uint32_t i = 0; i < len; i++) {
         char c = chars[i];
         result->chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
@@ -2809,6 +2851,7 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     uint32_t len = (uint32_t)strlen(href);
     String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->is_ascii = 1;  // URLs are ASCII
     memcpy(result->chars, href, len);
     result->chars[len] = '\0';
 
@@ -2873,6 +2916,7 @@ Item fn_split(Item str_item, Item sep_item) {
             size_t word_len = p - word_start;
             String* part = (String *)heap_alloc(sizeof(String) + word_len + 1, LMD_TYPE_STRING);
             part->len = word_len;
+            part->is_ascii = str_is_ascii(word_start, word_len) ? 1 : 0;
             memcpy(part->chars, word_start, word_len);
             part->chars[word_len] = '\0';
             list_push(result, {.item = s2it(part)});
@@ -2891,6 +2935,7 @@ Item fn_split(Item str_item, Item sep_item) {
 
             String* part = (String *)heap_alloc(sizeof(String) + char_len + 1, LMD_TYPE_STRING);
             part->len = char_len;
+            part->is_ascii = (char_len == 1 && (unsigned char)*p < 128) ? 1 : 0;
             memcpy(part->chars, p, char_len);
             part->chars[char_len] = '\0';
 
@@ -2912,6 +2957,7 @@ Item fn_split(Item str_item, Item sep_item) {
             size_t part_len = p - start;
             String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
             part->len = part_len;
+            part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
             memcpy(part->chars, start, part_len);
             part->chars[part_len] = '\0';
 
@@ -2928,6 +2974,7 @@ Item fn_split(Item str_item, Item sep_item) {
     size_t part_len = end - start;
     String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
     part->len = part_len;
+    part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
     memcpy(part->chars, start, part_len);
     part->chars[part_len] = '\0';
 
@@ -3045,6 +3092,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
     // allocate result
     String* result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
     result->len = total_len;
+    result->is_ascii = 0;  // safe default for join
 
     // build result
     char* p = result->chars;
@@ -3174,6 +3222,7 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
     result->len = new_len;
+    result->is_ascii = 0;  // safe default for replace
 
     // build result
     char* dest = result->chars;

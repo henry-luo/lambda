@@ -13,6 +13,7 @@ String* create_string(Pool* pool, const char* str) {
     if (!string) return NULL;
 
     string->len = (uint32_t)len;
+    string->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     str_copy(string->chars, len + 1, str, len);
 
     return string;
@@ -28,8 +29,10 @@ String* string_from_strview(StrView view, Pool* pool) {
 
     string->len = (uint32_t)view.length;
     if (view.length > 0) {
+        string->is_ascii = str_is_ascii(view.str, view.length) ? 1 : 0;
         str_copy(string->chars, view.length + 1, view.str, view.length);
     } else {
+        string->is_ascii = 1;  // empty string is ascii
         string->chars[0] = '\0';
     }
 

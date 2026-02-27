@@ -1695,6 +1695,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         memcpy(str->chars, tp->source + start, content_len);
         str->chars[content_len] = '\0';
         str->len = content_len;
+        str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
 
         arraylist_append(tp->const_list, str);
         str_type->const_index = tp->const_list->length - 1;
@@ -1751,6 +1752,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
             memcpy(str->chars, content_start, content_len);
             str->chars[content_len] = '\0';
             str->len = content_len;
+            str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
         }
         str_type->string = str;
     }
@@ -1931,6 +1933,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
         // Convert StringBuf to String
         str = stringbuf_to_string(str_buf);
+        str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
         log_debug("final string: %.*s", str->len, str->chars);
 
         // Check if the processed string is empty - return null type

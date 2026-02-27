@@ -789,6 +789,7 @@ String* escape_shell_arg(String* arg) {
 
     String* escaped = (String*)heap_alloc(sizeof(String) + escaped_len + 1, LMD_TYPE_STRING);
     escaped->len = escaped_len;
+    escaped->is_ascii = 1;  // shell escaping produces ASCII
 
     char* dst = escaped->chars;
     *dst++ = '\''; // Opening quote
