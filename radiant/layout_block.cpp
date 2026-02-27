@@ -32,6 +32,43 @@ static inline float collapse_margins(float a, float b) {
     return a + b;
 }
 
+// CSS 2.1 §8.3.1: Retrieve margin chain components from a block's margin.bottom.
+// When margin.bottom resulted from collapsing multiple margins (through self-collapsing
+// elements), the chain fields track the max positive and most negative individual margins.
+// This allows correct multi-way collapse — without it, intermediate scalar results lose
+// information (e.g., collapse(+16,-16)=0 then collapse(0,+16)=16 instead of correct 0).
+static inline void get_margin_chain(ViewBlock* block, float* out_pos, float* out_neg) {
+    if (!block || !block->bound) { *out_pos = 0; *out_neg = 0; return; }
+    if (block->bound->margin_chain_positive != 0 || block->bound->margin_chain_negative != 0) {
+        *out_pos = block->bound->margin_chain_positive;
+        *out_neg = block->bound->margin_chain_negative;
+    } else {
+        *out_pos = max(block->bound->margin.bottom, 0.f);
+        *out_neg = min(block->bound->margin.bottom, 0.f);
+    }
+}
+
+// CSS 2.1 §8.3.1: Store a margin value along with its chain components.
+// The scalar (positive + negative) goes in margin.bottom; the components are
+// preserved for future multi-way collapse.
+static inline void set_margin_chain(BoundaryProp* bound, float positive, float negative) {
+    bound->margin.bottom = positive + negative;
+    bound->margin_chain_positive = positive;
+    bound->margin_chain_negative = negative;
+}
+
+// CSS 2.1 §8.3.1: Get chain components for a single margin value (not chained yet).
+static inline void margin_to_chain(float margin, float* out_pos, float* out_neg) {
+    *out_pos = max(margin, 0.f);
+    *out_neg = min(margin, 0.f);
+}
+
+// CSS 2.1 §8.3.1: Check if a block's margin chain has non-trivial components
+// (i.e., it was built from collapsing multiple margins, not a simple scalar).
+static inline bool has_margin_chain(BoundaryProp* bound) {
+    return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
+}
+
 // DEBUG: Global for tracking table height between calls
 // WORKAROUND: Table height gets corrupted between layout_block_content return and caller
 // This is a mysterious issue that needs further investigation
@@ -702,7 +739,8 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
         if (effective_last->is_block()) {
             ViewBlock* vb = (ViewBlock*)effective_last;
             float mb = vb->bound ? vb->bound->margin.bottom : 0;
-            if (mb == 0 && is_block_self_collapsing(vb)) {
+            bool has_chain = vb->bound && has_margin_chain(vb->bound);
+            if (mb == 0 && !has_chain && is_block_self_collapsing(vb)) {
                 effective_last = effective_last->prev_placed_view();
                 continue;
             }
@@ -719,7 +757,9 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
 
     if (!effective_last || !effective_last->is_block()) return 0;
     ViewBlock* last = (ViewBlock*)effective_last;
-    if (!last->bound || last->bound->margin.bottom <= 0) return 0;
+    // CSS 2.1 §8.3.1: Bottom margins collapse regardless of sign.
+    // Negative margins participate in collapsing (result = max_positive + min_negative).
+    if (!last->bound || (last->bound->margin.bottom == 0 && !has_margin_chain(last->bound))) return 0;
 
     // Check for in-flow content after the last block child
     // (content that separates the child's margin from the parent's margin)
@@ -2944,7 +2984,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("min-content width: using min_content=%.1f", fit_content);
         }
 
-        if (fit_content > 0 && fit_content < block->width) {
+        if (fit_content >= 0 && fit_content < block->width) {
             log_debug("Shrink-to-fit (%s): fit_content=%.1f, old_width=%.1f, available=%.1f",
                 is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" : "float"),
                 fit_content, block->width, available);
@@ -3042,7 +3082,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (effective_last->is_block()) {
                 ViewBlock* vb = (ViewBlock*)effective_last;
                 float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
-                if (margin_bottom == 0 && is_block_self_collapsing(vb)) {
+                bool has_chain_mb = vb->bound && has_margin_chain(vb->bound);
+                if (margin_bottom == 0 && !has_chain_mb && is_block_self_collapsing(vb)) {
                     log_debug("skipping self-collapsing block for bottom margin collapsing");
                     View* prev = effective_last->prev_placed_view();
                     effective_last = prev;
@@ -3061,7 +3102,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         if (effective_last && effective_last->is_block() && ((ViewBlock*)effective_last)->bound) {
             ViewBlock* last_child_block = (ViewBlock*)effective_last;
-            if (last_child_block->bound->margin.bottom > 0) {
+            // CSS 2.1 §8.3.1: Check if last child has margin to collapse with parent.
+            // Also check chain components — a scalar 0 may represent mixed-sign margins
+            // (e.g., {+16, -16}) that need to participate in further collapse.
+            if (last_child_block->bound->margin.bottom != 0 || has_margin_chain(last_child_block->bound)) {
+                // CSS 2.1 §8.3.1: Bottom margins collapse regardless of sign (positive or negative).
                 // CSS 2.2 Section 8.3.1: Margins collapse only if there's NO content separating them.
                 // Check if there's any inline-level content (inline-blocks, text) AFTER the last
                 // block-level child. If so, this content separates the child's margin from the
@@ -3114,7 +3159,20 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     log_debug("[CLEARANCE] NOT collapsing bottom margin - last child has clearance_in_margin_chain");
                 } else {
                     float parent_margin = block->bound ? block->bound->margin.bottom : 0;
-                    float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
+                    // CSS 2.1 §8.3.1: Use chain-aware collapse when the child has chain components.
+                    // This preserves mixed-sign information through parent-child bottom collapse.
+                    float margin_bottom;
+                    float chain_pos = 0, chain_neg = 0;
+                    if (has_margin_chain(last_child_block->bound)) {
+                        float parent_pos, parent_neg;
+                        margin_to_chain(parent_margin, &parent_pos, &parent_neg);
+                        chain_pos = max(parent_pos, last_child_block->bound->margin_chain_positive);
+                        chain_neg = min(parent_neg, last_child_block->bound->margin_chain_negative);
+                        margin_bottom = chain_pos + chain_neg;
+                    } else {
+                        margin_bottom = collapse_margins(parent_margin, last_child_block->bound->margin.bottom);
+                        margin_to_chain(margin_bottom, &chain_pos, &chain_neg);
+                    }
                     // CSS 2.1 §10.6.3 + erratum q313: The collapsible margin was already
                     // excluded from auto height in finalize_block_flow (before min/max
                     // constraints). Don't subtract from height again — just transfer
@@ -3130,9 +3188,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     // the grandparent's auto height calculation (§10.6.3 "However" clause).
                     float own_mb = block->bound->margin.bottom;
                     block->bound->margin.bottom = margin_bottom;
-                    block->bound->collapsed_through_mb = margin_bottom - own_mb;
+                    block->bound->margin_chain_positive = chain_pos;
+                    block->bound->margin_chain_negative = chain_neg;
+                    block->bound->collapsed_through_mb = max(0.f, margin_bottom - own_mb);
                     last_child_block->bound->margin.bottom = 0;
-                    log_debug("collapsed bottom margin %f between block and last child (height unchanged at %f)", margin_bottom, block->height);
+                    last_child_block->bound->margin_chain_positive = 0;
+                    last_child_block->bound->margin_chain_negative = 0;
+                    log_debug("collapsed bottom margin %f (chain pos=%f neg=%f) between block and last child (height unchanged at %f)",
+                        margin_bottom, chain_pos, chain_neg, block->height);
                 }
             }
         }
@@ -3200,6 +3263,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     log_debug("BFC updated clip.bottom to %.1f", block->height);
                 }
             }
+        }
+    }
+
+    // CSS 2.1 §10.5: Re-resolve percentage heights for absolutely positioned children.
+    // When this block is a containing block (has position:relative/absolute/fixed) with
+    // auto height, abs children' percentage heights were initially resolved against 0
+    // because the auto height wasn't known yet. Now that it's finalized, re-resolve them.
+    if (block->position && block->position->first_abs_child) {
+        bool had_auto_height = !(block->blk && block->blk->given_height >= 0);
+        if (had_auto_height) {
+            re_resolve_abs_children_vertical(block);
         }
     }
 
@@ -3719,6 +3793,46 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line.reset_space();
         }
         else { // normal block
+            // CSS 2.1 §8.3.1: Propagate first-child margin through pass-through blocks.
+            // When a block has no border, padding, or margin (no bound), its first
+            // child's top margin collapses "through" it. layout_block_content()
+            // handles this by shifting parent->y, but the margin isn't stored — so
+            // it can't participate in further parent-child collapse with the
+            // grandparent.  Convert the y-shift into a proper margin.top ONLY when
+            // this block is the first in-flow child of its parent (the only case
+            // where further parent-child collapse is needed). For non-first-child
+            // blocks, the y-shift alone is correct because it implicitly provides
+            // sibling spacing that matches the collapsed margin.
+            {
+                float stored_mt = block->bound ? block->bound->margin.top : 0;
+                float y_shift = block->y - pa_block.advance_y;
+                float unaccounted = y_shift - stored_mt;
+                if (fabsf(unaccounted) > 0.01f) {
+                    ViewBlock* gp = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
+                    if (gp) {
+                        View* first = gp->first_placed_child();
+                        while (first && first->is_block()) {
+                            ViewBlock* fvb = (ViewBlock*)first;
+                            if (fvb->position && element_has_float(fvb)) {
+                                first = (View*)first->next_sibling;
+                                while (first && !first->view_type) first = (View*)first->next_sibling;
+                                continue;
+                            }
+                            break;
+                        }
+                        if (first == (View*)block) {
+                            if (!block->bound) {
+                                block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                                memset(block->bound, 0, sizeof(BoundaryProp));
+                            }
+                            block->bound->margin.top = y_shift;
+                            block->y = pa_block.advance_y;
+                            log_debug("propagated first-child margin through pass-through block: margin.top=%f (unaccounted=%f)", y_shift, unaccounted);
+                        }
+                    }
+                }
+            }
+
             // Check if this is a floated element - floats are out of normal flow
             // and should NOT advance the parent's advance_y
             bool is_float = block->position && element_has_float(block);
@@ -3770,8 +3884,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         float padding_bottom = vb->bound ? vb->bound->padding.bottom : 0;
                         float margin_top_val = vb->bound ? vb->bound->margin.top : 0;
                         float margin_bottom_val = vb->bound ? vb->bound->margin.bottom : 0;
+                        bool has_chain_margins = vb->bound && has_margin_chain(vb->bound);
                         if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0
-                            && margin_top_val == 0 && margin_bottom_val == 0) {
+                            && margin_top_val == 0 && margin_bottom_val == 0 && !has_chain_margins) {
                             log_debug("skipping empty zero-height block (no margins) for margin collapsing");
                             View* next = (View*)first_in_flow_child->next_sibling;
                             while (next && !next->view_type) {
@@ -3815,9 +3930,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             // Therefore all three collapse together as one set.
                             bool first_child_self_collapsing = is_block_self_collapsing(block);
                             if (first_child_self_collapsing) {
-                                margin_top = collapse_margins(margin_top, block->bound->margin.bottom);
-                                log_debug("self-collapsing first child: including mb=%f in parent collapse, margin_top=%f",
-                                    block->bound->margin.bottom, margin_top);
+                                // CSS 2.1 §8.3.1: Use chain-aware 3-way collapse to avoid
+                                // information loss from pairwise collapse_margins with mixed signs.
+                                // collapse(collapse(a,b),c) != collapse(a,b,c) for mixed signs.
+                                float chain_pos = max(max(block->bound->margin.top, parent_margin_top), 0.f);
+                                chain_pos = max(chain_pos, max(block->bound->margin.bottom, 0.f));
+                                float chain_neg = min(min(block->bound->margin.top, parent_margin_top), 0.f);
+                                chain_neg = min(chain_neg, min(block->bound->margin.bottom, 0.f));
+                                margin_top = chain_pos + chain_neg;
+                                log_debug("self-collapsing first child: including mb=%f in parent collapse, margin_top=%f (chain pos=%f neg=%f)",
+                                    block->bound->margin.bottom, margin_top, chain_pos, chain_neg);
                             }
 
                             // CSS 8.3.1: When parent has no border/padding, child margin collapses through parent
@@ -3857,9 +3979,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             parent_child_collapsed = true;
 
                             // For self-collapsing first child, set mb to carry the full
-                            // collapsed margin for the next sibling's collapse
+                            // collapsed margin for the next sibling's collapse.
+                            // CSS 2.1 §8.3.1: Track chain components (max positive, most negative)
+                            // so that subsequent siblings can correctly perform multi-way collapse.
+                            // Without chain tracking, intermediate mixed-sign collapse loses the
+                            // negative component (e.g., collapse(+16,-16)=0 stored as scalar 0,
+                            // then collapse(0,+16)=16 instead of the correct 3-way result 0).
                             if (first_child_self_collapsing) {
-                                block->bound->margin.bottom = margin_top;
+                                // Use original_margin_top (saved before block->bound->margin.top was zeroed)
+                                float chain_pos = max(max(original_margin_top, parent_margin_top), 0.f);
+                                chain_pos = max(chain_pos, max(block->bound->margin.bottom, 0.f));
+                                float chain_neg = min(min(original_margin_top, parent_margin_top), 0.f);
+                                chain_neg = min(chain_neg, min(block->bound->margin.bottom, 0.f));
+                                set_margin_chain(block->bound, chain_pos, chain_neg);
+                                log_debug("self-collapsing first child chain: pos=%f, neg=%f, mb=%f",
+                                    chain_pos, chain_neg, block->bound->margin.bottom);
                             }
 
                             log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f, sibling_collapse: %f",
@@ -3899,13 +4033,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             ViewBlock* prev_block = (ViewBlock*)prev_view;
                             float prev_mb = prev_block->bound->margin.bottom;
                             float cur_mt = block->bound->margin.top;
-                            if (prev_mb != 0 || cur_mt != 0) {
-                                float collapsed = collapse_margins(prev_mb, cur_mt);
+                            if (prev_mb != 0 || cur_mt != 0 || has_margin_chain(prev_block->bound)) {
+                                // CSS 2.1 §8.3.1: Use chain-aware collapse when previous block
+                                // has chain components (from self-collapsing elements with mixed signs).
+                                float collapsed;
+                                if (has_margin_chain(prev_block->bound)) {
+                                    float prev_pos = prev_block->bound->margin_chain_positive;
+                                    float prev_neg = prev_block->bound->margin_chain_negative;
+                                    float combined_pos = max(prev_pos, max(cur_mt, 0.f));
+                                    float combined_neg = min(prev_neg, min(cur_mt, 0.f));
+                                    collapsed = combined_pos + combined_neg;
+                                } else {
+                                    collapsed = collapse_margins(prev_mb, cur_mt);
+                                }
                                 collapse = (prev_mb + cur_mt) - collapsed;
                             }
                         }
 
-                        if (collapse > 0) {
+                        if (collapse != 0) {
                             block->y -= collapse;
                             block->bound->margin.top -= collapse;
                             log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
@@ -3942,6 +4087,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // This merged margin then participates in sibling collapsing
                         float prev_mb = 0;
                         bool prev_has_clearance_chain = false;
+                        ViewBlock* prev_block_for_chain = nullptr;
                         {
                             View* pv = block->prev_placed_view();
                             while (pv && pv->is_block()) {
@@ -3952,8 +4098,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 break;
                             }
                             if (pv && pv->is_block() && pv->view_type != RDT_VIEW_INLINE_BLOCK && ((ViewBlock*)pv)->bound) {
-                                prev_mb = ((ViewBlock*)pv)->bound->margin.bottom;
-                                prev_has_clearance_chain = ((ViewBlock*)pv)->bound->clearance_in_margin_chain;
+                                prev_block_for_chain = (ViewBlock*)pv;
+                                prev_mb = prev_block_for_chain->bound->margin.bottom;
+                                prev_has_clearance_chain = prev_block_for_chain->bound->clearance_in_margin_chain;
                             }
                         }
 
@@ -3967,12 +4114,79 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             new_pending = self_collapsed;
                             contribution = self_collapsed;
                         } else {
-                            new_pending = collapse_margins(prev_mb, self_collapsed);
-                            contribution = max(0.f, new_pending - prev_mb);
+                            // CSS 2.1 §8.3.1: Multi-way collapse using chain components.
+                            // When the previous sibling or this block has chained margins
+                            // (from prior collapsing through self-collapsing elements),
+                            // use the {max_positive, most_negative} components to avoid
+                            // information loss from intermediate scalar collapse.
+                            float prev_pos, prev_neg;
+                            if (prev_block_for_chain) {
+                                get_margin_chain(prev_block_for_chain, &prev_pos, &prev_neg);
+                            } else {
+                                prev_pos = 0; prev_neg = 0;
+                            }
+                            // Current block's chain: own margins + any chain from children
+                            float cur_pos, cur_neg;
+                            if (has_margin_chain(block->bound)) {
+                                // Block already has chain (from children's parent-child collapse)
+                                cur_pos = max(block->bound->margin_chain_positive, max(original_margin_top, 0.f));
+                                cur_neg = min(block->bound->margin_chain_negative, min(original_margin_top, 0.f));
+                            } else {
+                                cur_pos = max(max(original_margin_top, 0.f), max(block->bound->margin.bottom, 0.f));
+                                cur_neg = min(min(original_margin_top, 0.f), min(block->bound->margin.bottom, 0.f));
+                            }
+
+                            bool use_chain = (prev_neg < 0 || cur_neg < 0 ||
+                                              has_margin_chain(block->bound) ||
+                                              (prev_block_for_chain && has_margin_chain(prev_block_for_chain->bound)));
+                            if (use_chain) {
+                                float combined_pos = max(prev_pos, cur_pos);
+                                float combined_neg = min(prev_neg, cur_neg);
+                                new_pending = combined_pos + combined_neg;
+                                // CSS 2.1 §8.3.1: contribution can undo up to prev_mb
+                                // (which is already baked into advance_y), but cannot push
+                                // advance_y backward past the pre-prev position. When
+                                // new_pending < 0 and prev_mb = 0, there is nothing to
+                                // undo — the negative margin carries as pending for the
+                                // next sibling.
+                                contribution = max(0.f, new_pending) - prev_mb;
+                                log_debug("chain collapse: prev{pos=%f,neg=%f} + cur{pos=%f,neg=%f} = pending=%f, contribution=%f",
+                                    prev_pos, prev_neg, cur_pos, cur_neg, new_pending, contribution);
+                            } else {
+                                new_pending = collapse_margins(prev_mb, self_collapsed);
+                                contribution = max(0.f, new_pending - prev_mb);
+                            }
                         }
                         lycon->block.advance_y += contribution;
+                        // CSS 2.1 §8.3.1: When chain collapse produces a negative contribution,
+                        // retroactively adjust this self-collapsing block's position.
+                        // The block was placed at advance_y + margin.top, but the chain's
+                        // negative component means the effective gap is smaller.
+                        if (contribution < 0) {
+                            block->y += contribution;
+                        }
                         // expose the merged margin to next sibling via margin.bottom
-                        block->bound->margin.bottom = new_pending;
+                        if (block_has_clearance) {
+                            block->bound->margin.bottom = new_pending;
+                        } else {
+                            float prev_pos, prev_neg;
+                            if (prev_block_for_chain) {
+                                get_margin_chain(prev_block_for_chain, &prev_pos, &prev_neg);
+                            } else {
+                                prev_pos = 0; prev_neg = 0;
+                            }
+                            float cur_pos, cur_neg;
+                            if (has_margin_chain(block->bound)) {
+                                cur_pos = max(block->bound->margin_chain_positive, max(original_margin_top, 0.f));
+                                cur_neg = min(block->bound->margin_chain_negative, min(original_margin_top, 0.f));
+                            } else {
+                                cur_pos = max(max(original_margin_top, 0.f), max(block->bound->margin.bottom, 0.f));
+                                cur_neg = min(min(original_margin_top, 0.f), min(block->bound->margin.bottom, 0.f));
+                            }
+                            float combined_pos = max(prev_pos, cur_pos);
+                            float combined_neg = min(prev_neg, cur_neg);
+                            set_margin_chain(block->bound, combined_pos, combined_neg);
+                        }
 
                         // CSS 2.1 §8.3.1: Propagate clearance flag through the margin chain.
                         // If this block has clearance, or the previous sibling's margin chain

@@ -1,6 +1,8 @@
 // AWFY Benchmark: Permute (Typed version)
 // Expected result: 8660
 
+type PState = {count: int}
+
 pn make_array(n: int, val) {
     var arr = [val, val, val, val, val, val, val, val, val, val]
     var sz: int = 10
@@ -27,7 +29,7 @@ pn swap(v: int[], i: int, j: int) {
     v[j] = tmp
 }
 
-pn permute(state, v: int[], n: int) {
+pn permute(state: PState, v: int[], n: int) {
     state.count = state.count + 1
     if (n != 0) {
         var n1: int = n - 1

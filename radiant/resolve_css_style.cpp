@@ -3098,6 +3098,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 break;
             }
+            // CSS 2.1 Section 10.4: max-width 'none' means no constraint
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->given_max_width = -1;  // 'none' = unconstrained
+                log_debug("[CSS] Max-width: none (unconstrained)");
+                break;
+            }
             // CSS 2.2 Section 10.4: max-width percentage resolves against containing block width
             // If parent has 0 or auto width, percentage max-width should be treated as 'none'
             // because the containing block's width depends on this element's width
@@ -3171,6 +3177,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->blk->given_max_height = -1;  // none
                     log_debug("[CSS] Max-height: inherit but no parent value, treating as 'none'");
                 }
+                break;
+            }
+            // CSS 2.1 Section 10.7: max-height 'none' means no constraint
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->given_max_height = -1;  // 'none' = unconstrained
+                log_debug("[CSS] Max-height: none (unconstrained)");
                 break;
             }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);

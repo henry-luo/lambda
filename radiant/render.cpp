@@ -657,11 +657,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             }
         }
         // render text deco (positions in physical pixels)
-        if (rdcon->font.style->text_deco != CSS_VALUE_NONE) {
+        // skip _UNDEF (0) which means no decoration was explicitly set
+        if (rdcon->font.style->text_deco != CSS_VALUE_NONE && rdcon->font.style->text_deco != CSS_VALUE__UNDEF) {
             const FontMetrics* _deco_m = font_get_metrics(rdcon->font.font_handle);
             float thinkness = max(_deco_m ? _deco_m->underline_thickness : 1.0, 1.0);
-            Rect rect;
-            // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
+            Rect rect = {0, 0, 0, 0};
+            bool draw_deco = true;
+            // todo: underline probably should draw below/before the text, and leaves a gap where text has descender
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // underline drawn at baseline, with a gap of thickness
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s +
@@ -673,10 +675,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s + (text_rect->height * s) / 2;
             }
-            rect.width = text_rect->width * s;  rect.height = thinkness; // corrected the variable name from h to height
-            log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
-                rect.x, rect.y, rect.width, rect.height); // corrected w to width
-            fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
+            else {
+                draw_deco = false;  // unknown decoration type, skip rendering
+            }
+            if (draw_deco) {
+                rect.width = text_rect->width * s;  rect.height = thinkness;
+                log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
+                    rect.x, rect.y, rect.width, rect.height);
+                fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
+            }
         }
         text_rect = text_rect->next;
     }
@@ -1445,11 +1452,6 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             }
         }
     }
-    else if (block->embed && block->embed->img) {
-        // render embedded image for blocks without children (e.g., SVG document root)
-        log_debug("render embedded image in block without children");
-        render_image_content(rdcon, block);
-    }
     else {
         log_debug("view has no child");
     }
@@ -1610,7 +1612,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_enter();
     // render border and background, etc.
     render_block_view(rdcon, (ViewBlock*)view);
-    // render the image content
+    // render the image content (using parent coordinates restored by render_block_view)
     render_image_content(rdcon, view);
     log_debug("end of image render");
     log_leave();

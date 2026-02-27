@@ -18,6 +18,9 @@ Item fn_input1(Item url);
 extern "C" Item path_resolve_for_iteration(Path* path);
 extern "C" void path_load_metadata(Path* path);
 
+// External: interned ASCII char table (implemented in lambda-mem.cpp)
+extern "C" String* get_ascii_char_string(unsigned char ch);
+
 // VMap access helpers (implemented in vmap.cpp)
 Item vmap_get_by_str(VMap* vm, const char* key);
 Item vmap_get_by_item(VMap* vm, Item key);
@@ -64,9 +67,8 @@ Array* array_fill(Array* arr, int count, ...) {
 }
 
 Item array_get(Array *array, int index) {
-    log_debug("array_get: index: %d, length: %ld", index, array->length);
+    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     if (index < 0 || index >= array->length) {
-        log_warn("array_get: index out of bounds: %d", index);
         return ItemNull;  // return null instead of error
     }
     Item item = array->items[index];
@@ -84,7 +86,6 @@ Item array_get(Array *array, int index) {
         return push_k(dtval); // need to push to num_stack, as datetime values are not ref counted
     }
     default:
-        log_debug("array_get returning: type: %d, item: %p", item._type_id, item.item);
         return item;
     }
 }
@@ -120,7 +121,7 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
 }
 
 Item array_int_get(ArrayInt *array, int index) {
-    log_debug("array_int_get: index: %d, length: %ld", index, array->length);
+    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
     if (array->type_id != LMD_TYPE_ARRAY_INT)
         return array_get((Array*)array, index);
@@ -165,6 +166,7 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
 }
 
 Item array_int64_get(ArrayInt64* array, int index) {
+    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
     if (array->type_id != LMD_TYPE_ARRAY_INT64)
         return array_get((Array*)array, index);
@@ -208,6 +210,7 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
 }
 
 Item array_float_get(ArrayFloat* array, int index) {
+    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
     if (array->type_id != LMD_TYPE_ARRAY_FLOAT)
         return array_get((Array*)array, index);
@@ -455,6 +458,7 @@ Item list_fill(List *list, int count, ...) {
 }
 
 Item list_get(List *list, int index) {
+    if (!list || ((uintptr_t)list >> 56)) { return ItemNull; }
     if (index < 0 || index >= list->length) { return ItemNull; }
     Item item = list->items[index];
     switch (item._type_id) {
@@ -472,7 +476,6 @@ Item list_get(List *list, int index) {
 }
 
 Map* map(int type_index) {
-    log_debug("map with type %d", type_index);
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -485,14 +488,11 @@ Map* map(int type_index) {
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
     map->data = heap_data_calloc(map_type->byte_size);
-    log_debug("map byte_size: %ld", map_type->byte_size);
     // set map fields
     va_list args;
     va_start(args, map_type->length);
     set_fields(map_type, map->data, args);
     va_end(args);
-    log_debug("map_filled");
-    log_debug("map filled with type: %d, length: %ld", map_type->type_id, map_type->length);
     return map;
 }
 
@@ -500,8 +500,6 @@ Map* map_fill(Map* map, ...) {
 static Item _map_read_field(ShapeEntry* field, void* map_data) {
     TypeId type_id = field->type->type_id;
     void* field_ptr = (char*)map_data + field->byte_offset;
-    log_debug("map_get found field: %.*s, type: %d, ptr: %p",
-        (int)field->name->length, field->name->str, type_id, field_ptr);
     switch (type_id) {
     case LMD_TYPE_NULL: {
         void* ptr = *(void**)field_ptr;
@@ -538,7 +536,6 @@ static Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         Container* container = *(Container**)field_ptr;
         if (!container) return ItemNull;
-        log_debug("map_get container: %p, type_id: %d", container, container->type_id);
         return {.container = container};
     }
     case LMD_TYPE_TYPE:
@@ -548,9 +545,11 @@ static Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_PATH:
         return {.path = *(Path**)field_ptr};
     case LMD_TYPE_ANY: {
-        log_debug("map_get ANY type, pointer: %p", field_ptr);
         return typeditem_to_item((TypedItem*)field_ptr);
     }
+    case LMD_TYPE_ERROR:
+        // field was stored with error type (e.g., from failed arithmetic) — return null
+        return ItemNull;
     default:
         log_error("unknown map item type %s", get_type_name(type_id));
         return ItemError;
@@ -593,7 +592,6 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
 }
 
 Item map_get(Map* map, Item key) {
-    log_debug("map_get %p", map);
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
@@ -603,7 +601,6 @@ Item map_get(Map* map, Item key) {
         log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;  // only string or symbol keys are supported
     }
-    log_debug("map_get key:'%s'", key_str);
     return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
@@ -752,6 +749,10 @@ Item item_at(Item data, int index) {
     // note: for out of bound access, we return null instead of error
     TypeId type_id = get_type_id(data);
     switch (type_id) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_ERROR:
+        return ItemNull;  // indexing scalars returns null silently
     case LMD_TYPE_ARRAY:
         return array_get(data.array, index);
     case LMD_TYPE_ARRAY_INT:
@@ -775,10 +776,26 @@ Item item_at(Item data, int index) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
         const char* chars = data.get_chars();
         uint32_t byte_len = data.get_len();
-        // use UTF-8 character count for bounds checking
-        size_t char_count = str_utf8_count(chars, byte_len);
-        if (index < 0 || (size_t)index >= char_count) { return ItemNull; }
-        // convert character index to byte offset
+        if (index < 0) { return ItemNull; }
+        String* str = data.get_string();
+
+        // ASCII fast-path: byte index == char index, O(1)
+        if (str->is_ascii) {
+            if ((uint32_t)index >= byte_len) { return ItemNull; }
+            if (type_id == LMD_TYPE_SYMBOL) {
+                Symbol* ch_sym = heap_create_symbol(chars + index, 1);
+                return {.item = y2it(ch_sym)};
+            }
+            // return interned single-char string if available
+            unsigned char ch = (unsigned char)chars[index];
+            String* interned = get_ascii_char_string(ch);
+            if (interned) return {.item = s2it(interned)};
+            String *ch_str = heap_strcpy((char*)(chars + index), 1);
+            return {.item = s2it(ch_str)};
+        }
+
+        // UTF-8 path: combined bounds check + char-to-byte in a single pass
+        // str_utf8_char_to_byte returns STR_NPOS if index is out of range
         size_t byte_offset = str_utf8_char_to_byte(chars, byte_len, (size_t)index);
         if (byte_offset == STR_NPOS) { return ItemNull; }
         // get the UTF-8 character length (1-4 bytes)
@@ -789,6 +806,11 @@ Item item_at(Item data, int index) {
         if (type_id == LMD_TYPE_SYMBOL) {
             Symbol* ch_sym = heap_create_symbol(chars + byte_offset, ch_len);
             return {.item = y2it(ch_sym)};
+        }
+        // for single-byte ASCII chars in a UTF-8 string, use interned table
+        if (ch_len == 1 && (unsigned char)chars[byte_offset] < 128) {
+            String* interned = get_ascii_char_string((unsigned char)chars[byte_offset]);
+            if (interned) return {.item = s2it(interned)};
         }
         String *ch_str = heap_strcpy((char*)(chars + byte_offset), (int)ch_len);
         return {.item = s2it(ch_str)};
