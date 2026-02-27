@@ -203,6 +203,28 @@ static inline bool is_integer_type(TypeId t) {
     return t == LMD_TYPE_INT || t == LMD_TYPE_INT64;
 }
 
+// Helper to check if an expression produces a native C type (not a tagged Item).
+// Native types are emitted as raw C int64_t/double/bool by transpile_expr.
+// Item (ANY) types need it2l() to extract the integer value from the tagged representation.
+static inline bool is_native_type(AstNode* arg) {
+    if (!arg->type) return false;
+    TypeId t = arg->type->type_id;
+    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_BOOL;
+}
+
+// Emit a bitwise operation argument as int64_t.
+// For native-typed expressions: use (int64_t) cast (already raw C values).
+// For Item-typed expressions: use it2l() to properly unbox the tagged Item.
+static void emit_bitwise_arg(Transpiler* tp, AstNode* arg) {
+    if (is_native_type(arg)) {
+        strbuf_append_str(tp->code_buf, "(int64_t)(");
+    } else {
+        strbuf_append_str(tp->code_buf, "it2l(");
+    }
+    transpile_expr(tp, arg);
+    strbuf_append_char(tp->code_buf, ')');
+}
+
 // Check if a sys func call can use native C math function
 // Returns the C function name if applicable, NULL otherwise
 static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg) {
@@ -4660,9 +4682,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
             // bnot(a) — unary bitwise NOT
             if (strcmp(fn_name, "bnot") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_bnot((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_bnot(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
         }
@@ -4670,43 +4692,43 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         // ==== Bitwise binary functions: band, bor, bxor, shl, shr ====
         if (first_arg && second_arg && !second_arg->next) {
             if (strcmp(fn_name, "band") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_band((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_band(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "bor") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_bor((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_bor(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "bxor") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_bxor((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_bxor(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "shl") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_shl((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_shl(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
             if (strcmp(fn_name, "shr") == 0) {
-                strbuf_append_str(tp->code_buf, "fn_shr((int64_t)(");
-                transpile_expr(tp, first_arg);
-                strbuf_append_str(tp->code_buf, "),(int64_t)(");
-                transpile_expr(tp, second_arg);
-                strbuf_append_str(tp->code_buf, "))");
+                strbuf_append_str(tp->code_buf, "fn_shr(");
+                emit_bitwise_arg(tp, first_arg);
+                strbuf_append_char(tp->code_buf, ',');
+                emit_bitwise_arg(tp, second_arg);
+                strbuf_append_char(tp->code_buf, ')');
                 return;
             }
         }
