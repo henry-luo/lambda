@@ -5825,10 +5825,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Visibility applies to all elements, stored in ViewSpan
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum visibility_value = value->data.keyword;
-                if (visibility_value > 0) {
-                    span->in_line->visibility = visibility_value;
-                    log_debug("[CSS] Visibility: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, visibility_value);
+                // Map CssEnum to Visibility enum used by layout
+                if (visibility_value == CSS_VALUE_HIDDEN) {
+                    span->in_line->visibility = VIS_HIDDEN;
+                } else if (visibility_value == CSS_VALUE_COLLAPSE) {
+                    span->in_line->visibility = VIS_COLLAPSE;
+                } else {
+                    span->in_line->visibility = VIS_VISIBLE;
                 }
+                log_debug("[CSS] Visibility: %s -> %d", css_enum_info(value->data.keyword)->name, span->in_line->visibility);
             }
             break;
         }

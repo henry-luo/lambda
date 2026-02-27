@@ -1298,6 +1298,71 @@ static CollapsedBorder get_row_border(ViewTableRow* row, int side) {
     return border;
 }
 
+// Extract border info from a row-group element (tbody/thead/tfoot)
+// CSS 2.1 §17.6.2: row groups participate in border conflict resolution
+static CollapsedBorder get_rowgroup_border(ViewBlock* rg, int side) {
+    CollapsedBorder border;
+    if (!rg || !rg->bound || !rg->bound->border) return border;
+
+    const BorderProp* bp = rg->bound->border;
+    switch (side) {
+        case 0: // top
+            border.width = bp->width.top;
+            border.style = bp->top_style;
+            border.color = bp->top_color;
+            break;
+        case 1: // right
+            border.width = bp->width.right;
+            border.style = bp->right_style;
+            border.color = bp->right_color;
+            break;
+        case 2: // bottom
+            border.width = bp->width.bottom;
+            border.style = bp->bottom_style;
+            border.color = bp->bottom_color;
+            break;
+        case 3: // left
+            border.width = bp->width.left;
+            border.style = bp->left_style;
+            border.color = bp->left_color;
+            break;
+    }
+    border.priority = get_border_style_priority(border.style);
+    return border;
+}
+
+// Find the row-group (ViewBlock*) that contains a given row index.
+// Also outputs the first and last row indices within that group.
+// Returns nullptr if no row-group found (e.g., table acts as tbody).
+static ViewBlock* find_rowgroup_for_row(ViewTable* table, int target_row,
+                                        int* out_first_row_in_group, int* out_last_row_in_group) {
+    int row_idx = 0;
+    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            int first_in_group = row_idx;
+            ViewTableRowGroup* rg = (ViewTableRowGroup*)child;
+            for (ViewTableRow* r = rg->first_row(); r; r = rg->next_row(r)) {
+                row_idx++;
+            }
+            int last_in_group = row_idx - 1;
+            if (target_row >= first_in_group && target_row <= last_in_group) {
+                if (out_first_row_in_group) *out_first_row_in_group = first_in_group;
+                if (out_last_row_in_group) *out_last_row_in_group = last_in_group;
+                return child;
+            }
+        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            if (row_idx == target_row) {
+                // row is direct child of table (no row-group wrapper)
+                if (out_first_row_in_group) *out_first_row_in_group = -1;
+                if (out_last_row_in_group) *out_last_row_in_group = -1;
+                return nullptr;
+            }
+            row_idx++;
+        }
+    }
+    return nullptr;
+}
+
 // Extract border info from a column or colgroup element (ViewBlock)
 // CSS 2.1 §17.6.2: columns and column groups participate in border conflict resolution
 static CollapsedBorder get_column_border(ViewBlock* col, int side) {
@@ -1486,6 +1551,34 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
+            // Row-group borders (CSS 2.1 §17.6.2: row groups participate in conflict resolution)
+            // Row-group top border at the top edge of its first row
+            if (row < meta->row_count) {
+                int first_in_group = -1, last_in_group = -1;
+                ViewBlock* rg = find_rowgroup_for_row(table, row, &first_in_group, &last_in_group);
+                if (rg && row == first_in_group) {
+                    CollapsedBorder cb = get_rowgroup_border(rg, 0); // top
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+            }
+            // Row-group bottom border at the bottom edge of its last row
+            if (row > 0) {
+                int first_in_group = -1, last_in_group = -1;
+                ViewBlock* rg = find_rowgroup_for_row(table, row - 1, &first_in_group, &last_in_group);
+                if (rg && (row - 1) == last_in_group) {
+                    CollapsedBorder cb = get_rowgroup_border(rg, 2); // bottom
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
+                }
+            }
+
             // Column/colgroup top/bottom borders at table edges (CSS 2.1 §17.6.2)
             if (row == 0 || row == meta->row_count) {
                 ViewBlock* col_elem = find_column_element(table, col);
@@ -1597,6 +1690,21 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                         break;
                     }
                     curr++;
+                }
+            }
+
+            // Row-group borders at left and right edges (CSS 2.1 §17.6.2)
+            if (col == 0 || col == meta->column_count) {
+                int first_in_group = -1, last_in_group = -1;
+                ViewBlock* rg = find_rowgroup_for_row(table, row, &first_in_group, &last_in_group);
+                if (rg) {
+                    int side = (col == 0) ? 3 : 1; // left or right
+                    CollapsedBorder cb = get_rowgroup_border(rg, side);
+                    if (cb.style != CSS_VALUE_NONE) {
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = cb;
+                        arraylist_append(candidates, border);
+                    }
                 }
             }
 

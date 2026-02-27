@@ -819,17 +819,25 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // CSS 2.1 §12.5: List-items with visible markers generate at least one line box,
     // even when the list-item has no content. Default list-style-type is 'disc',
     // so all list-items get minimum height unless explicitly set to 'none'.
-    if (block->view_type == RDT_VIEW_LIST_ITEM && flow_height == 0) {
-        bool has_marker = true;
-        if (block->blk && block->blk->list_style_type == CSS_VALUE_NONE) {
-            has_marker = false;
+    // Check actual content height (advance_y minus border/padding top) to detect empty content.
+    if (block->view_type == RDT_VIEW_LIST_ITEM) {
+        float content_area_height = lycon->block.advance_y;
+        if (block->bound) {
+            content_area_height -= block->bound->padding.top;
+            if (block->bound->border) content_area_height -= block->bound->border->width.top;
         }
-        if (has_marker) {
-            float min_line_height = lycon->block.line_height;
-            if (min_line_height <= 0) min_line_height = lycon->font.current_font_size > 0 ? lycon->font.current_font_size * 1.2f : 18.0f;
-            flow_height = min_line_height;
-            block->content_height = min_line_height;
-            log_debug("list-item: empty content, setting min height from marker line-height: %.1f", min_line_height);
+        if (content_area_height <= 0) {
+            bool has_marker = true;
+            if (block->blk && block->blk->list_style_type == CSS_VALUE_NONE) {
+                has_marker = false;
+            }
+            if (has_marker) {
+                float min_line_height = lycon->block.line_height;
+                if (min_line_height <= 0) min_line_height = lycon->font.current_font_size > 0 ? lycon->font.current_font_size * 1.2f : 18.0f;
+                flow_height += min_line_height;
+                block->content_height += min_line_height;
+                log_debug("list-item: empty content, setting min height from marker line-height: %.1f", min_line_height);
+            }
         }
     }
 
