@@ -602,6 +602,87 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->x, block->y, block->width, block->height, lycon->block.content_width, lycon->block.content_height, cb_x, cb_y, cb_width, cb_height);
 }
 
+// Re-resolve percentage-based vertical dimensions for absolutely positioned children
+// after the containing block's auto height has been finalized.
+//
+// CSS 2.1 §10.5: For absolutely positioned elements, percentage heights resolve
+// against the containing block's used (final) height. When the containing block has
+// height:auto, its used height isn't known until all in-flow children are laid out.
+// Abs children are laid out eagerly in DOM order, so their percentage heights
+// initially resolve against 0. This function corrects them after the final height is known.
+void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
+    if (!containing_block->position || !containing_block->position->first_abs_child) return;
+
+    // Compute containing block's padding box height (CSS 2.1 §10.1)
+    float cb_height = containing_block->height;
+    if (containing_block->bound && containing_block->bound->border) {
+        cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
+    }
+    if (cb_height <= 0) return;
+
+    ViewBlock* child = containing_block->position->first_abs_child;
+    while (child) {
+        bool changed = false;
+
+        // Re-resolve percentage height
+        if (child->blk && !isnan(child->blk->given_height_percent) && child->blk->given_height <= 0) {
+            float new_given_height = child->blk->given_height_percent * cb_height / 100.0f;
+            new_given_height = adjust_min_max_height(child, new_given_height);
+            child->blk->given_height = new_given_height;
+
+            float content_height = new_given_height;
+            bool is_border_box = child->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+            if (is_border_box && child->bound) {
+                content_height = adjust_border_padding_height(child, content_height);
+            }
+
+            if (child->bound) {
+                child->height = content_height + child->bound->padding.top + child->bound->padding.bottom +
+                    (child->bound->border ? child->bound->border->width.top + child->bound->border->width.bottom : 0);
+            } else {
+                child->height = content_height;
+            }
+            changed = true;
+            log_debug("[ABS RE-RESOLVE] height for %s: %.1f%% of %.1f = %.1f, block->height=%.1f",
+                child->node_name(), child->blk->given_height_percent, cb_height, new_given_height, child->height);
+        }
+
+        // Re-resolve percentage top
+        if (child->position && child->position->has_top && !isnan(child->position->top_percent)) {
+            float old_top = child->position->top;
+            child->position->top = child->position->top_percent * cb_height / 100.0f;
+            if (child->position->top != old_top) {
+                float border_offset_y = 0;
+                if (containing_block->bound && containing_block->bound->border) {
+                    border_offset_y = containing_block->bound->border->width.top;
+                }
+                child->y = border_offset_y + child->position->top + (child->bound ? child->bound->margin.top : 0);
+                changed = true;
+                log_debug("[ABS RE-RESOLVE] top for %s: %.1f%% of %.1f = %.1f, y=%.1f",
+                    child->node_name(), child->position->top_percent, cb_height, child->position->top, child->y);
+            }
+        }
+
+        // Re-resolve percentage bottom
+        if (child->position && child->position->has_bottom && !isnan(child->position->bottom_percent)) {
+            child->position->bottom = child->position->bottom_percent * cb_height / 100.0f;
+        }
+
+        // If bottom is specified but not top, recompute y from bottom edge
+        if (changed && child->position && child->position->has_bottom && !child->position->has_top) {
+            float border_offset_y = 0;
+            if (containing_block->bound && containing_block->bound->border) {
+                border_offset_y = containing_block->bound->border->width.top;
+            }
+            child->y = border_offset_y + cb_height - child->position->bottom
+                - (child->bound ? child->bound->margin.bottom : 0) - child->height;
+            log_debug("[ABS RE-RESOLVE] bottom-positioned y for %s: y=%.1f", child->node_name(), child->y);
+        }
+
+        child = child->position ? child->position->next_abs_sibling : nullptr;
+    }
+}
+
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     log_debug("layout_abs_block");  log_enter();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", elmt->node_name(), block->x, block->y, pa_block->advance_y);

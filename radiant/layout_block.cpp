@@ -719,7 +719,9 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
 
     if (!effective_last || !effective_last->is_block()) return 0;
     ViewBlock* last = (ViewBlock*)effective_last;
-    if (!last->bound || last->bound->margin.bottom <= 0) return 0;
+    // CSS 2.1 §8.3.1: Bottom margins collapse regardless of sign.
+    // Negative margins participate in collapsing (result = max_positive + min_negative).
+    if (!last->bound || last->bound->margin.bottom == 0) return 0;
 
     // Check for in-flow content after the last block child
     // (content that separates the child's margin from the parent's margin)
@@ -2944,7 +2946,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("min-content width: using min_content=%.1f", fit_content);
         }
 
-        if (fit_content > 0 && fit_content < block->width) {
+        if (fit_content >= 0 && fit_content < block->width) {
             log_debug("Shrink-to-fit (%s): fit_content=%.1f, old_width=%.1f, available=%.1f",
                 is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" : "float"),
                 fit_content, block->width, available);
@@ -3061,7 +3063,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         if (effective_last && effective_last->is_block() && ((ViewBlock*)effective_last)->bound) {
             ViewBlock* last_child_block = (ViewBlock*)effective_last;
-            if (last_child_block->bound->margin.bottom > 0) {
+            if (last_child_block->bound->margin.bottom != 0) {
+                // CSS 2.1 §8.3.1: Bottom margins collapse regardless of sign (positive or negative).
                 // CSS 2.2 Section 8.3.1: Margins collapse only if there's NO content separating them.
                 // Check if there's any inline-level content (inline-blocks, text) AFTER the last
                 // block-level child. If so, this content separates the child's margin from the
@@ -3114,7 +3117,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     log_debug("[CLEARANCE] NOT collapsing bottom margin - last child has clearance_in_margin_chain");
                 } else {
                     float parent_margin = block->bound ? block->bound->margin.bottom : 0;
-                    float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
+                    // CSS 2.1 §8.3.1: Use standard collapse algorithm (handles mixed signs)
+                    float margin_bottom = collapse_margins(parent_margin, last_child_block->bound->margin.bottom);
                     // CSS 2.1 §10.6.3 + erratum q313: The collapsible margin was already
                     // excluded from auto height in finalize_block_flow (before min/max
                     // constraints). Don't subtract from height again — just transfer
@@ -3200,6 +3204,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     log_debug("BFC updated clip.bottom to %.1f", block->height);
                 }
             }
+        }
+    }
+
+    // CSS 2.1 §10.5: Re-resolve percentage heights for absolutely positioned children.
+    // When this block is a containing block (has position:relative/absolute/fixed) with
+    // auto height, abs children' percentage heights were initially resolved against 0
+    // because the auto height wasn't known yet. Now that it's finalized, re-resolve them.
+    if (block->position && block->position->first_abs_child) {
+        bool had_auto_height = !(block->blk && block->blk->given_height >= 0);
+        if (had_auto_height) {
+            re_resolve_abs_children_vertical(block);
         }
     }
 
@@ -3719,6 +3734,46 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line.reset_space();
         }
         else { // normal block
+            // CSS 2.1 §8.3.1: Propagate first-child margin through pass-through blocks.
+            // When a block has no border, padding, or margin (no bound), its first
+            // child's top margin collapses "through" it. layout_block_content()
+            // handles this by shifting parent->y, but the margin isn't stored — so
+            // it can't participate in further parent-child collapse with the
+            // grandparent.  Convert the y-shift into a proper margin.top ONLY when
+            // this block is the first in-flow child of its parent (the only case
+            // where further parent-child collapse is needed). For non-first-child
+            // blocks, the y-shift alone is correct because it implicitly provides
+            // sibling spacing that matches the collapsed margin.
+            {
+                float stored_mt = block->bound ? block->bound->margin.top : 0;
+                float y_shift = block->y - pa_block.advance_y;
+                float unaccounted = y_shift - stored_mt;
+                if (fabsf(unaccounted) > 0.01f) {
+                    ViewBlock* gp = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
+                    if (gp) {
+                        View* first = gp->first_placed_child();
+                        while (first && first->is_block()) {
+                            ViewBlock* fvb = (ViewBlock*)first;
+                            if (fvb->position && element_has_float(fvb)) {
+                                first = (View*)first->next_sibling;
+                                while (first && !first->view_type) first = (View*)first->next_sibling;
+                                continue;
+                            }
+                            break;
+                        }
+                        if (first == (View*)block) {
+                            if (!block->bound) {
+                                block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                                memset(block->bound, 0, sizeof(BoundaryProp));
+                            }
+                            block->bound->margin.top = y_shift;
+                            block->y = pa_block.advance_y;
+                            log_debug("propagated first-child margin through pass-through block: margin.top=%f (unaccounted=%f)", y_shift, unaccounted);
+                        }
+                    }
+                }
+            }
+
             // Check if this is a floated element - floats are out of normal flow
             // and should NOT advance the parent's advance_y
             bool is_float = block->position && element_has_float(block);
@@ -3905,7 +3960,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             }
                         }
 
-                        if (collapse > 0) {
+                        if (collapse != 0) {
                             block->y -= collapse;
                             block->bound->margin.top -= collapse;
                             log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
