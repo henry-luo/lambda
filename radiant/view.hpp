@@ -759,6 +759,14 @@ typedef struct BoundaryProp {
                                      // includes contribution from a self-collapsing element
                                      // with clearance. Such margins must NOT collapse with
                                      // the parent block's bottom margin.
+    // CSS 2.1 §8.3.1: Chain tracking for multi-way margin collapse.
+    // When multiple margins collapse (especially through self-collapsing elements),
+    // preserving the max positive and most negative components is required for
+    // correct mixed-sign collapse. Without this, intermediate scalar results
+    // lose negative-margin information (e.g., collapse(+16,-16)=0 then
+    // collapse(0,+16)=16 instead of the correct 3-way result of 0).
+    float margin_chain_positive;  // max positive margin in the pending collapse chain
+    float margin_chain_negative;  // most negative margin in the pending collapse chain
 } BoundaryProp;
 
 // Vector path segment for PDF/SVG path rendering
