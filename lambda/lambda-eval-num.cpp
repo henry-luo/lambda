@@ -1,7 +1,6 @@
 
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
-#include <mpdecimal.h>  // needed for inline decimal operations
 #include "../lib/log.h"
 #include <stdarg.h>
 #include <time.h>
@@ -16,65 +15,13 @@ String* str_repeat(String* str, int64_t times);
 String* fn_strcat(String* left, String* right);
 
 // Helper functions for decimal operations
-Item push_decimal(mpd_t* dec_val) {
-    if (!dec_val) return ItemError;
-
-    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
-    if (!decimal) {
-        mpd_del(dec_val);
-        return ItemError;
-    }
-
-    decimal->dec_val = dec_val;
-
-    Item result;
-    result.item = c2it(decimal);
-    return result;
-}
+// push_decimal, convert_to_decimal, cleanup_temp_decimal are now centralized in lambda-decimal.cpp
 
 Item push_c(int64_t cval) {
     if (cval == INT64_ERROR) { return ItemError; }
-    mpd_t* result = mpd_new(context->decimal_ctx);
-    if (!result) return ItemError;
-    mpd_set_ssize(result, cval, context->decimal_ctx);
-    return push_decimal(result);
+    return decimal_from_int64(cval, context);
 }
-
-mpd_t* convert_to_decimal(Item item, mpd_context_t* ctx) {
-    if (item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_ptr = item.get_decimal();
-        return dec_ptr->dec_val;
-    }
-
-    mpd_t* result = mpd_new(ctx);
-    if (!result) return NULL;
-
-    if (item._type_id == LMD_TYPE_INT) {
-        mpd_set_ssize(result, item.get_int56(), ctx);
-    }
-    else if (item._type_id == LMD_TYPE_INT64) {
-        int64_t val = item.get_int64();
-        mpd_set_ssize(result, val, ctx);
-    }
-    else if (item._type_id == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
-        char str_buf[64];
-        snprintf(str_buf, sizeof(str_buf), "%.17g", val);
-        mpd_set_string(result, str_buf, ctx);
-    }
-    else {
-        mpd_del(result);
-        return NULL;
-    }
-    return result;
-}
-
-void cleanup_temp_decimal(mpd_t* dec_val, bool is_original_decimal) {
-    // Only delete if this was a temporary decimal we created
-    if (!is_original_decimal && dec_val) {
-        mpd_del(dec_val);
-    }
-}
+// Use decimal_add/sub/mul/div/mod/pow from lambda-decimal.hpp instead.
 
 // decimal_is_zero is now in lambda-decimal.cpp
 
@@ -133,6 +80,9 @@ Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
 
+    // null propagation: null + x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+
     // vector operations: scalar+vector, vector+scalar, or vector+vector
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
@@ -186,37 +136,10 @@ Item fn_add(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
         return push_d(item_a.get_double() + (double)item_b.get_int64());
     }
-    // decimal support
+    // decimal support - delegate to centralized decimal handling
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         log_debug("fn_add: decimal addition");
-        mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
-
-        if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            log_error("decimal conversion failed in fn_add");
-            return ItemError;
-        }
-
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) {
-            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        mpd_add(result, a_dec, b_dec, context->decimal_ctx);
-
-        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_error("decimal addition failed");
-            return ItemError;
-        }
-        return push_decimal(result);
+        return decimal_add(item_a, item_b, context);
     }
 
     // vectorized addition for Arrays
@@ -275,6 +198,9 @@ Item fn_add(Item item_a, Item item_b) {
 Item fn_mul(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    // null propagation: null * x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -339,37 +265,9 @@ Item fn_mul(Item item_a, Item item_b) {
     //     String* result = str_repeat(str_b, item_a.int_val);
     //     return { .item = s2it(result) };
     // }
-    // Add libmpdec decimal support
+    // decimal support - delegate to centralized decimal handling
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
-
-        if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            log_error("decimal conversion failed in fn_mul");
-            return ItemError;
-        }
-
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) {
-            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        mpd_mul(result, a_dec, b_dec, context->decimal_ctx);
-
-        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_error("decimal multiplication failed");
-            return ItemError;
-        }
-
-        return push_decimal(result);
+        return decimal_mul(item_a, item_b, context);
     }
     else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr_a = item_a.array_int;
@@ -419,6 +317,9 @@ Item fn_mul(Item item_a, Item item_b) {
 Item fn_sub(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    // null propagation: null - x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -471,37 +372,9 @@ Item fn_sub(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
         return push_d(item_a.get_double() - (double)item_b.get_int64());
     }
-    // Add libmpdec decimal support
+    // decimal support - delegate to centralized decimal handling
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
-
-        if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            log_error("decimal conversion failed in fn_sub");
-            return ItemError;
-        }
-
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) {
-            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        mpd_sub(result, a_dec, b_dec, context->decimal_ctx);
-
-        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_error("decimal subtraction failed");
-            return ItemError;
-        }
-
-        return push_decimal(result);
+        return decimal_sub(item_a, item_b, context);
     }
     else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr_a = item_a.array_int;
@@ -551,6 +424,9 @@ Item fn_sub(Item item_a, Item item_b) {
 Item fn_div(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    // null propagation: null / x = null, x / null = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -629,65 +505,9 @@ Item fn_div(Item item_a, Item item_b) {
         }
         return push_d((double)item_a.get_int64() / (double)b);
     }
-    // Add libmpdec decimal support
+    // decimal support - delegate to centralized decimal handling
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
-
-        if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            log_error("decimal conversion failed in fn_div");
-            return ItemError;
-        }
-
-        // Check for division by zero
-        log_debug(" Checking division by zero, b_dec=%p\n", b_dec);
-        if (b_dec) {
-            char* b_str = mpd_to_sci(b_dec, 1);
-            log_debug(" b_dec value as string: '%s'\n", b_str ? b_str : "NULL");
-            log_debug(" mpd_iszero result: %d\n", mpd_iszero(b_dec));
-            if (b_str) mpd_free(b_str);
-        }
-        if (b_dec && decimal_is_zero(b_dec)) {
-            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            log_error("decimal division by zero error");
-            return ItemError;
-        }
-        log_debug(" Division by zero check passed\n");
-
-        // Debug the values and context before division
-        if (a_dec && b_dec) {
-            char* a_str = mpd_to_sci(a_dec, 1);
-            char* b_str = mpd_to_sci(b_dec, 1);
-            log_debug(" About to divide '%s' / '%s'\n", a_str ? a_str : "NULL", b_str ? b_str : "NULL");
-            log_debug(" Context prec=%lld, emax=%lld, emin=%lld\n", (long long)context->decimal_ctx->prec, (long long)context->decimal_ctx->emax, (long long)context->decimal_ctx->emin);
-            if (a_str) mpd_free(a_str);
-            if (b_str) mpd_free(b_str);
-        }
-
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) {
-            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        log_debug(" Calling mpd_div...\n");
-        mpd_div(result, a_dec, b_dec, context->decimal_ctx);
-        log_debug(" mpd_div completed\n");
-
-        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
-
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_error("decimal division failed");
-            return ItemError;
-        }
-
-        return push_decimal(result);
+        return decimal_div(item_a, item_b, context);
     }
     else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr_a = item_a.array_int;
@@ -751,6 +571,11 @@ Item fn_div(Item item_a, Item item_b) {
 
 Item fn_idiv(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+
+    // null propagation: null // x = null
+    TypeId ta = get_type_id(item_a), tb = get_type_id(item_b);
+    if (ta == LMD_TYPE_NULL || tb == LMD_TYPE_NULL) return ItemNull;
+
     // Check for division by zero
     bool is_zero = false;
     if (item_b._type_id == LMD_TYPE_INT) {
@@ -813,73 +638,7 @@ Item fn_pow(Item item_a, Item item_b) {
     }
 
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
-        // For now, convert decimals to double for power operations
-        // This is a limitation of libmpdec - it doesn't have general power operations
-        double base = 0.0, exponent = 0.0;
-
-        if (item_a._type_id == LMD_TYPE_DECIMAL) {
-            Decimal* dec_ptr = item_a.get_decimal();
-            // Convert decimal to string then to double (preserves precision better)
-            char* str = mpd_to_sci(dec_ptr->dec_val, 1);
-            base = strtod(str, NULL);
-            mpd_free(str);
-        }
-        else {
-            // Convert non-decimal to double
-            if (item_a._type_id == LMD_TYPE_INT) {
-                base = (double)item_a.get_int56();
-            }
-            else if (item_a._type_id == LMD_TYPE_INT64) {
-                base = (double)item_a.get_int64();
-            }
-            else if (item_a._type_id == LMD_TYPE_FLOAT) {
-                base = item_a.get_double();
-            }
-            else {
-                log_error("unsupported pow base type with decimal: %d", item_a._type_id);
-                return ItemError;
-            }
-        }
-
-        if (item_b._type_id == LMD_TYPE_DECIMAL) {
-            Decimal* dec_ptr = item_b.get_decimal();
-            char* str = mpd_to_sci(dec_ptr->dec_val, 1);
-            exponent = strtod(str, NULL);
-            mpd_free(str);
-        }
-        else {
-            // Convert non-decimal to double
-            if (item_b._type_id == LMD_TYPE_INT) {
-                exponent = (double)item_b.get_int56();
-            }
-            else if (item_b._type_id == LMD_TYPE_INT64) {
-                exponent = (double)item_b.get_int64();
-            }
-            else if (item_b._type_id == LMD_TYPE_FLOAT) {
-                exponent = item_b.get_double();
-            }
-            else {
-                log_error("unsupported pow exponent type with decimal: %d", item_b._type_id);
-                return ItemError;
-            }
-        }
-
-        // For decimal operations, return a decimal result
-        double result_val = pow(base, exponent);
-
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) return ItemError;
-
-        char str_buf[64];
-        snprintf(str_buf, sizeof(str_buf), "%.17g", result_val);
-        mpd_set_string(result, str_buf, context->decimal_ctx);
-
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_debug("decimal power operation failed");
-            return ItemError;
-        }
-        return push_decimal(result);
+        return decimal_pow(item_a, item_b, context);
     }
 
     // non-decimal logic
@@ -922,6 +681,9 @@ Item fn_mod(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
+    // null propagation: null % x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
@@ -929,45 +691,9 @@ Item fn_mod(Item item_a, Item item_b) {
         return vec_mod(item_a, item_b);
     }
 
-    // Handle decimal types first
+    // Handle decimal types - delegate to centralized decimal handling
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
-        mpd_t* val_a = convert_to_decimal(item_a, context->decimal_ctx);
-        if (!val_a) return ItemError;
-
-        mpd_t* val_b = convert_to_decimal(item_b, context->decimal_ctx);
-        if (!val_b) {
-            cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        // Check for division by zero
-        if (decimal_is_zero(val_b)) {
-            log_error("modulo by zero error");
-            cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(val_b, item_b._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) {
-            cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(val_b, item_b._type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-
-        mpd_rem(result, val_a, val_b, context->decimal_ctx);
-
-        // Clean up temporary decimals
-        cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(val_b, item_b._type_id == LMD_TYPE_DECIMAL);
-
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_debug("decimal modulo operation failed");
-            return ItemError;
-        }
-
-        return push_decimal(result);
+        return decimal_mod(item_a, item_b, context);
     }
 
     // Original non-decimal logic for integer mod
@@ -1060,6 +786,9 @@ Item fn_abs(Item item) {
         }
         return { .array_float = result };
     }
+    else if (type == LMD_TYPE_DECIMAL) {
+        return decimal_abs(item, context);
+    }
     else {
         log_error("abs not supported for type: %d", type);
         return ItemError;
@@ -1104,6 +833,9 @@ Item fn_round(Item item) {
         }
         return { .array_float = result };
     }
+    else if (type == LMD_TYPE_DECIMAL) {
+        return decimal_round(item, context);
+    }
     else {
         log_debug("round not supported for type: %d", type);
         return ItemError;
@@ -1147,6 +879,9 @@ Item fn_floor(Item item) {
         }
         return { .array_float = result };
     }
+    else if (type == LMD_TYPE_DECIMAL) {
+        return decimal_floor(item, context);
+    }
     else {
         log_debug("floor not supported for type: %d", type);
         return ItemError;
@@ -1189,6 +924,9 @@ Item fn_ceil(Item item) {
             }
         }
         return { .array_float = result };
+    }
+    else if (type == LMD_TYPE_DECIMAL) {
+        return decimal_ceil(item, context);
     }
     else {
         log_debug("ceil not supported for type: %d", type);
@@ -1884,18 +1622,7 @@ Item fn_neg(Item item) {
         return push_d(-val);
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
-        // negate decimal: get mpd value, negate, push result
-        Decimal* dec_ptr = item.get_decimal();
-        if (!dec_ptr || !dec_ptr->dec_val) {
-            log_debug("fn_neg: invalid decimal pointer");
-            return ItemError;
-        }
-        mpd_context_t* dec_ctx = (dec_ptr->unlimited) ?
-            decimal_unlimited_context() : decimal_fixed_context();
-        mpd_t* result = mpd_new(dec_ctx);
-        if (!result) return ItemError;
-        mpd_minus(result, dec_ptr->dec_val, dec_ctx);
-        return push_decimal(result);
+        return decimal_neg(item, context);
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
@@ -1955,8 +1682,13 @@ Item fn_int(Item item) {
         return {.item = i2it((int32_t)dval)};
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
-        // todo: truncate any fractional part
-        return item;  // keep it as it is
+        // truncate fractional part and convert to int64
+        int64_t result = decimal_to_int64(item);
+        if (result == INT64_ERROR) return ItemError;
+        if (result > INT32_MAX || result < INT32_MIN) {
+            return push_l(result);
+        }
+        return {.item = i2it((int32_t)result)};
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
@@ -1975,19 +1707,8 @@ Item fn_int(Item item) {
         // check for overflow - if errno is set or we couldn't parse the full string
         if (errno == ERANGE || (*endptr != '\0')) {
             // try to parse as decimal
-            mpd_t* dec_val = mpd_new(context->decimal_ctx);
-            if (!dec_val) {
-                log_debug("Failed to allocate decimal for string conversion");
-                return ItemError;
-            }
-            mpd_set_string(dec_val, chars, context->decimal_ctx);
-            if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-                log_debug("Cannot convert string '%s' to decimal", chars);
-                mpd_del(dec_val);
-                return ItemError;
-            }
             log_debug("promote string to decimal: %s", chars);
-            return push_decimal(dec_val);
+            return decimal_from_string(chars, context);
         }
         return (Item) { .item = i2it(val) };
     }
@@ -2017,27 +1738,8 @@ int64_t fn_int64(Item item) {
         return truncated;
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
-        // Convert decimal to int64
-        Decimal* dec_ptr = item.get_decimal();
-        mpd_t* dec = dec_ptr->dec_val;
-        if (!dec) {
-            log_debug("decimal pointer is NULL");
-            return INT64_ERROR;
-        }
-        char* endptr;
-        char* dec_str = mpd_to_sci(dec, 1);
-        if (!dec_str) {
-            log_debug("mpd_to_sci failed");
-            return INT64_ERROR;
-        }
-        log_debug("convert decimal to int64: %s", dec_str);
-        val = strtoll(dec_str, &endptr, 10);
-        mpd_free(dec_str);
-        if (endptr == dec_str) {
-            log_debug("Cannot convert decimal to int64");
-            return INT64_ERROR;
-        }
-        return val;
+        // Convert decimal to int64 using centralized function
+        return decimal_to_int64(item);
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
@@ -2068,40 +1770,18 @@ int64_t fn_int64(Item item) {
 
 Item fn_decimal(Item item) {
     GUARD_ERROR1(item);
-    // Convert item to decimal type
+    // Convert item to decimal type using centralized decimal API
     if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // Already a decimal
     }
     else if (item._type_id == LMD_TYPE_INT) {
-        mpd_t* dec_val = mpd_new(context->decimal_ctx);
-        if (!dec_val) {
-            log_debug("Failed to allocate decimal");
-            return ItemError;
-        }
-        mpd_set_ssize(dec_val, item.get_int56(), context->decimal_ctx);
-        return push_decimal(dec_val);
+        return decimal_from_int64(item.get_int56(), context);
     }
     else if (item._type_id == LMD_TYPE_INT64) {
-        mpd_t* dec_val = mpd_new(context->decimal_ctx);
-        if (!dec_val) {
-            log_debug("Failed to allocate decimal");
-            return ItemError;
-        }
-        int64_t val = item.get_int64();
-        mpd_set_i64(dec_val, val, context->decimal_ctx);
-        return push_decimal(dec_val);
+        return decimal_from_int64(item.get_int64(), context);
     }
     else if (item._type_id == LMD_TYPE_FLOAT) {
-        mpd_t* dec_val = mpd_new(context->decimal_ctx);
-        if (!dec_val) {
-            log_debug("Failed to allocate decimal");
-            return ItemError;
-        }
-        double val = item.get_double();
-        char str_buf[64];
-        snprintf(str_buf, sizeof(str_buf), "%.17g", val);
-        mpd_set_string(dec_val, str_buf, context->decimal_ctx);
-        return push_decimal(dec_val);
+        return decimal_from_double(item.get_double(), context);
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
@@ -2110,33 +1790,17 @@ Item fn_decimal(Item item) {
             log_debug("Cannot convert empty string/symbol to decimal");
             return ItemError;
         }
-
-        mpd_t* dec_val = mpd_new(context->decimal_ctx);
-        if (!dec_val) {
-            log_debug("Failed to allocate decimal");
-            return ItemError;
-        }
-
-        // Create null-terminated string for mpd_set_string
+        // decimal_from_string needs null-terminated string
         char* null_term_str = (char*)malloc(len + 1);
         if (!null_term_str) {
-            mpd_del(dec_val);
             log_debug("Failed to allocate string buffer");
             return ItemError;
         }
         memcpy(null_term_str, chars, len);
         null_term_str[len] = '\0';
-
-        mpd_set_string(dec_val, null_term_str, context->decimal_ctx);
+        Item result = decimal_from_string(null_term_str, context);
         free(null_term_str);
-
-        if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-            log_debug("Cannot convert string '%.*s' to decimal", (int)len, chars);
-            mpd_del(dec_val);
-            return ItemError;
-        }
-
-        return push_decimal(dec_val);
+        return result;
     }
     else {
         log_debug("Cannot convert type %d to decimal", item._type_id);
@@ -2415,33 +2079,13 @@ Item fn_float(Item item) {
         return (Item) { .item = d2it(val) };
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_ptr = item.get_decimal();
-        mpd_t* dec_val = dec_ptr->dec_val;
-        char* dec_str = mpd_to_sci(dec_val, 1);
-        if (!dec_str) {
-            log_debug("Failed to convert decimal to string");
-            return ItemError;
-        }
-        log_debug("fn_float: decimal string = '%s'", dec_str);
-        char* endptr;
-        errno = 0;
-        double dval = strtod(dec_str, &endptr);
-        int saved_errno = errno;
-        bool fully_parsed = (*endptr == '\0');
-        mpd_free(dec_str);
-
-        if (saved_errno != 0 || !fully_parsed) {
-            log_debug("fn_float: failed to convert decimal to float");
-            return ItemError;
-        }
-
+        double dval = decimal_to_double(item);
         double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         if (!val) {
             log_debug("Failed to allocate float");
             return ItemError;
         }
         *val = dval;
-
         return (Item) { .item = d2it(val) };
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
@@ -2599,6 +2243,31 @@ extern "C" int64_t fn_round_i(int64_t x) {
 // ============================================================================
 // BITWISE OPERATIONS
 // ============================================================================
+
+// Safe unbox to int64_t for bitwise operation arguments.
+// Handles both tagged Items (type tag in high byte) and raw int64_t values
+// (from other bitwise ops or literals, with high byte == 0).
+extern "C" int64_t _barg(Item v) {
+    uint8_t tag = v._type_id;
+    switch (tag) {
+    case LMD_TYPE_INT:
+        return v.get_int56();
+    case LMD_TYPE_INT64:
+        return v.get_int64();
+    case LMD_TYPE_FLOAT:
+        return (int64_t)v.get_double();
+    case LMD_TYPE_BOOL:
+        return v.bool_val ? 1 : 0;
+    case LMD_TYPE_RAW_POINTER:
+        // raw int64_t (high byte == 0): from other bitwise ops or literals
+        return (int64_t)v.item;
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_ERROR:
+        return 0;
+    default:
+        return 0;
+    }
+}
 
 extern "C" int64_t fn_band(int64_t a, int64_t b) {
     return a & b;

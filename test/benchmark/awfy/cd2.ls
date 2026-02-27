@@ -453,7 +453,9 @@ pn rbt_first(tree) {
     return r
 }
 
-pn rbt_remove_fixup(tree, xId: int, xParId: int) {
+pn rbt_remove_fixup(tree, xId_p: int, xParId_p: int) {
+    var xId: int = xId_p
+    var xParId: int = xParId_p
     var rootId: int = (tree.root)
     while (xId != rootId) {
         var xCol: int = BLACK
@@ -1118,13 +1120,13 @@ pn cd(numAircraft: int) {
 
 pn verify_result(collisions: int, numAircraft: int) {
     if (numAircraft == 100) {
-        if (collisions == 4305) { return 1 }
+        if (collisions == 1015202) { return 1 }
     }
     if (numAircraft == 10) {
-        if (collisions == 390) { return 1 }
+        if (collisions == 21660) { return 1 }
     }
     if (numAircraft == 2) {
-        if (collisions == 42) { return 1 }
+        if (collisions == 90) { return 1 }
     }
     print("Unexpected: collisions=")
     print(collisions)

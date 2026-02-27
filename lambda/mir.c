@@ -412,6 +412,7 @@ func_obj_t func_list[] = {
     {"fn_array_set", (fn_ptr) fn_array_set},
     {"fn_map_set", (fn_ptr) fn_map_set},
     // bitwise operations
+    {"_barg", (fn_ptr) _barg},
     {"fn_band", (fn_ptr) fn_band},
     {"fn_bor", (fn_ptr) fn_bor},
     {"fn_bxor", (fn_ptr) fn_bxor},

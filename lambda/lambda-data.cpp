@@ -344,6 +344,10 @@ void expand_list(List *list, Arena* arena = nullptr) {
         size_t old_size = (list->capacity/2) * sizeof(Item);
         size_t new_size = list->capacity * sizeof(Item);
         Item* new_items = (Item*)heap_data_alloc(new_size);
+        // Re-read old_items after allocation: GC may have fired during
+        // heap_data_alloc, compacting list->items from nursery to tenured.
+        // The local old_items would then point to freed nursery memory.
+        old_items = list->items;
         if (old_items && old_size > 0) {
             memcpy(new_items, old_items, old_size);
         }
@@ -903,6 +907,9 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result = typeditem_to_item((TypedItem*)field_ptr);
         break;
     }
+    case LMD_TYPE_ERROR:
+        // field was stored with error type — return null
+        return ItemNull;
     default:
         log_error("unknown map item type %s", get_type_name(type_id));
         return ItemError;

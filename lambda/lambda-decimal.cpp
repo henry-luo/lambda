@@ -27,8 +27,11 @@ void decimal_init() {
     // Initialize fixed-precision context (38 digits, matches Python default)
     mpd_defaultcontext(&g_fixed_ctx);
     
-    // Initialize unlimited-precision context (maximum precision)
+    // Initialize unlimited-precision context (high but practical precision)
+    // mpd_maxcontext has absurdly high precision (10^18) which crashes mpd_pow.
+    // Use 200 digits which is far more than needed for any practical computation.
     mpd_maxcontext(&g_unlimited_ctx);
+    g_unlimited_ctx.prec = 200;
     
     g_initialized = true;
     log_debug("decimal_init: fixed_prec=%d, unlimited_prec=%d",
@@ -215,10 +218,8 @@ void decimal_big_print(StrBuf* strbuf, Decimal* decimal) {
 // External heap allocation function
 // We provide a weak default that returns NULL for libraries that don't link heap.
 // The actual implementation in lambda-mem.cpp will override this.
-#ifdef __cplusplus
-extern "C" {
-#endif
-
+// weak fallback for heap_alloc - real implementation in lambda-mem.cpp
+// This allows lambda-decimal.cpp to be linked into libraries that don't include lambda-mem
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((weak)) void* heap_alloc(int size, TypeId type_id) {
     (void)size;
@@ -227,10 +228,6 @@ __attribute__((weak)) void* heap_alloc(int size, TypeId type_id) {
 }
 #else
 extern void* heap_alloc(int size, TypeId type_id);
-#endif
-
-#ifdef __cplusplus
-}
 #endif
 
 Decimal* decimal_create(mpd_t* mpd_val) {
@@ -756,4 +753,98 @@ char* decimal_to_string(Item item) {
 char* decimal_to_string(Decimal* decimal) {
     if (!decimal || !decimal->dec_val) return NULL;
     return mpd_to_sci(decimal->dec_val, 1);  // caller must free with decimal_free_string
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Rounding Operations (floor, ceil, round, trunc)
+// ─────────────────────────────────────────────────────────────────────
+
+Item decimal_floor(Item a, EvalContext* ctx) {
+    if (!decimal_is_any(a)) return ItemError;
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+    
+    Decimal* dec_ptr = a.get_decimal();
+    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
+    
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) return ItemError;
+    
+    mpd_floor(result, dec_ptr->dec_val, dec_ctx);
+    return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_ceil(Item a, EvalContext* ctx) {
+    if (!decimal_is_any(a)) return ItemError;
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+    
+    Decimal* dec_ptr = a.get_decimal();
+    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
+    
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) return ItemError;
+    
+    mpd_ceil(result, dec_ptr->dec_val, dec_ctx);
+    return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_round(Item a, EvalContext* ctx) {
+    if (!decimal_is_any(a)) return ItemError;
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+    
+    Decimal* dec_ptr = a.get_decimal();
+    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
+    
+    // round to nearest integer using quantize with exponent 0
+    mpd_t* one = mpd_new(dec_ctx);
+    if (!one) return ItemError;
+    mpd_set_string(one, "1", dec_ctx);
+    
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) { mpd_del(one); return ItemError; }
+    
+    mpd_quantize(result, dec_ptr->dec_val, one, dec_ctx);
+    mpd_del(one);
+    
+    if (mpd_isnan(result)) {
+        mpd_del(result);
+        return ItemError;
+    }
+    return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_trunc(Item a, EvalContext* ctx) {
+    if (!decimal_is_any(a)) return ItemError;
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+    
+    Decimal* dec_ptr = a.get_decimal();
+    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
+    
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) return ItemError;
+    
+    mpd_trunc(result, dec_ptr->dec_val, dec_ctx);
+    return decimal_push_result(result, is_unlimited);
+}
+
+// Convert decimal Item to int64 (truncates toward zero)
+int64_t decimal_to_int64(Item item) {
+    if (!decimal_is_any(item)) return 0;
+    Decimal* dec_ptr = item.get_decimal();
+    if (!dec_ptr || !dec_ptr->dec_val) return 0;
+    
+    mpd_context_t* dec_ctx = dec_ptr->unlimited ?
+        decimal_unlimited_context() : decimal_fixed_context();
+    
+    // truncate first, then convert
+    mpd_t* truncated = mpd_new(dec_ctx);
+    if (!truncated) return 0;
+    mpd_trunc(truncated, dec_ptr->dec_val, dec_ctx);
+    
+    int64_t result = mpd_get_ssize(truncated, dec_ctx);
+    mpd_del(truncated);
+    return result;
 }
