@@ -150,8 +150,15 @@ typedef struct Linebox {
     bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
+    // CSS 2.1 §10.8.1: parent font metrics for vertical-align keywords (text-top, text-bottom, etc.)
+    // Set by span_vertical_align before recursing into children; defaults to block init values.
+    float parent_font_ascender;     // parent element's font ascender (pixels)
+    float parent_font_descender;    // parent element's font descender (pixels)
+    float parent_font_size;         // parent element's font size (pixels)
+    struct FontHandle* parent_font_handle; // parent element's font handle (for x-height)
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
+    bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
 

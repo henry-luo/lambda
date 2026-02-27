@@ -190,6 +190,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum text_transform = CSS_VALUE_NONE);
 
 /**
+ * Walk up DOM tree to find inherited text-transform value from specified_style.
+ * Safe to call during intrinsic sizing (does not use the view tree).
+ */
+CssEnum get_element_text_transform(DomElement* element);
+
+/**
  * Compute text height when constrained to a given width (CSS Flexbox §9.4).
  * Simulates line breaking to determine how many lines the text would wrap into.
  */

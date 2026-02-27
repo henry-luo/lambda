@@ -29,9 +29,16 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     }
 
     // map CssEnum weight/style → FontWeight/FontSlant
+    // CSS 2.1 §15.6: Use numeric weight for precise matching (100-900)
     FontWeight fw = FONT_WEIGHT_NORMAL;
-    if (fprop->font_weight == CSS_VALUE_BOLD || fprop->font_weight == CSS_VALUE_BOLDER) fw = FONT_WEIGHT_BOLD;
-    else if (fprop->font_weight == CSS_VALUE_LIGHTER) fw = FONT_WEIGHT_LIGHT;
+    if (fprop->font_weight_numeric > 0) {
+        // Use precise numeric weight from CSS (100-900)
+        fw = (FontWeight)fprop->font_weight_numeric;
+    } else if (fprop->font_weight == CSS_VALUE_BOLD || fprop->font_weight == CSS_VALUE_BOLDER) {
+        fw = FONT_WEIGHT_BOLD;
+    } else if (fprop->font_weight == CSS_VALUE_LIGHTER) {
+        fw = FONT_WEIGHT_LIGHT;
+    }
 
     FontSlant fs = FONT_SLANT_NORMAL;
     if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;

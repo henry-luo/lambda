@@ -1822,6 +1822,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     } while (child);
                     // handle last line
                     if (!lycon->line.is_line_start) {
+                        lycon->line.is_last_line = true;
                         line_break(lycon);
                     }
                 }
@@ -1948,6 +1949,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 
         // Final line break after all content
         if (!lycon->line.is_line_start) {
+            lycon->line.is_last_line = true;
             line_break(lycon);
         }
 

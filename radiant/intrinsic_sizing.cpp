@@ -127,8 +127,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 space_width += lycon->font.style->word_spacing;
             }
             // Apply letter-spacing to spaces as well (matching layout_text.cpp)
-            // letter-spacing is applied after each character including spaces, except the last
-            if (i + 1 < length && lycon->font.style) {
+            // CSS 2.1 §16.4: letter-spacing is added after every character
+            // Browsers include trailing letter-spacing in measured width
+            if (lycon->font.style) {
                 space_width += lycon->font.style->letter_spacing;
             }
 
@@ -173,7 +174,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                 float advance = glyph->advance_x / pixel_ratio;
                 // Apply letter-spacing
-                if (i + bytes < length && lycon->font.style) {
+                // CSS 2.1 §16.4: letter-spacing after every character (including last)
+                if (lycon->font.style) {
                     advance += lycon->font.style->letter_spacing;
                 }
                 current_word += advance;
@@ -199,9 +201,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if (ginfo.id != 0) {
             float advance = ginfo.advance_x + kerning;
 
-            // Apply letter-spacing (CSS spec: applied between characters, not after last)
-            // Check if there are more characters after this one
-            if (i + bytes < length && lycon->font.style) {
+            // Apply letter-spacing (CSS 2.1 §16.4: after every character including last)
+            if (lycon->font.style) {
                 advance += lycon->font.style->letter_spacing;
             }
 
@@ -347,8 +348,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
                     advance = 11.0f;
                 }
             }
-            // letter-spacing between characters (not after last)
-            if (i + bytes < length && lycon->font.style) {
+            // letter-spacing after every character (CSS 2.1 §16.4, matching layout_text.cpp)
+            if (lycon->font.style) {
                 advance += lycon->font.style->letter_spacing;
             }
             prev_glyph = font_get_glyph_index(lycon->font.font_handle, codepoint);
@@ -452,24 +453,20 @@ static bool is_inline_level_element(DomElement* element) {
 
 // Helper to get text-transform property from an element, traversing parent chain
 // since text-transform is an inherited property
-static CssEnum get_element_text_transform(DomElement* element) {
+CssEnum get_element_text_transform(DomElement* element) {
+    // Walk up the DOM tree to find inherited text-transform value.
+    // During intrinsic sizing, the view tree hasn't been created yet,
+    // so we ONLY check specified_style on DOM elements (not ViewBlock).
     DomNode* node = element;
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            // First check resolved blk property
-            ViewBlock* view = (ViewBlock*)elem;
-            if (view->blk && view->blk->text_transform != 0 &&
-                view->blk->text_transform != CSS_VALUE_INHERIT) {
-                return view->blk->text_transform;
-            }
-            // Fall back to specified_style
             if (elem->specified_style) {
                 CssDeclaration* decl = style_tree_get_declaration(
                     elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
                 if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                     CssEnum val = decl->value->data.keyword;
-                    if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                    if (val != CSS_VALUE_INHERIT && val != CSS_VALUE__UNDEF) {
                         return val;
                     }
                 }
@@ -1391,11 +1388,29 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                   flex_child_count, flex_gap, total_gap);
     }
 
+    // CSS 2.1 §16.1: text-indent applies to the first formatted line of a block container.
+    // Add text-indent to inline max-content width (it contributes to preferred width).
+    float text_indent = 0.0f;
+    if (has_inline_content && view_block->blk && view_block->blk->text_indent != 0.0f) {
+        text_indent = view_block->blk->text_indent;
+    } else if (has_inline_content && element->specified_style) {
+        CssDeclaration* ti_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_TEXT_INDENT);
+        if (ti_decl && ti_decl->value && ti_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, ti_decl->value);
+        }
+    }
+
     // Merge inline content measurements
     if (has_inline_content) {
+        if (text_indent > 0) {
+            inline_max_sum += text_indent;
+            inline_min_sum += text_indent;
+        }
         sizes.min_content = max(sizes.min_content, inline_min_sum);
         sizes.max_content = max(sizes.max_content, inline_max_sum);
-        log_debug("  inline_max_sum=%.1f, inline_min_sum=%.1f", inline_max_sum, inline_min_sum);
+        log_debug("  inline_max_sum=%.1f, inline_min_sum=%.1f, text_indent=%.1f",
+                  inline_max_sum, inline_min_sum, text_indent);
     }
 
     // Add padding and border
@@ -1489,6 +1504,42 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             CssDeclaration* br = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
             if (br && br->value && br->value->type == CSS_VALUE_TYPE_LENGTH) {
                 border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, br->value);
+            }
+        }
+        // Check border-left/border-right side shorthands (border-left: width style color)
+        // These store the value as a list with length, keyword (style), and color components
+        if (!border_width_found && border_left == 0) {
+            CssDeclaration* bl_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_LEFT);
+            if (bl_decl && bl_decl->value) {
+                const CssValue* v = bl_decl->value;
+                if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                    border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, v);
+                } else if (v->type == CSS_VALUE_TYPE_LIST) {
+                    for (int i = 0; i < v->data.list.count; i++) {
+                        CssValue* item = v->data.list.values[i];
+                        if (item && item->type == CSS_VALUE_TYPE_LENGTH) {
+                            border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, item);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!border_width_found && border_right == 0) {
+            CssDeclaration* br_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_RIGHT);
+            if (br_decl && br_decl->value) {
+                const CssValue* v = br_decl->value;
+                if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                    border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, v);
+                } else if (v->type == CSS_VALUE_TYPE_LIST) {
+                    for (int i = 0; i < v->data.list.count; i++) {
+                        CssValue* item = v->data.list.values[i];
+                        if (item && item->type == CSS_VALUE_TYPE_LENGTH) {
+                            border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, item);
+                            break;
+                        }
+                    }
+                }
             }
         }
         // Also check border shorthand (border: width style color)
