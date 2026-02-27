@@ -3147,6 +3147,50 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                 if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
                     ast_node->type = ((TypeType*)type_expr->type)->type;
 
+                    // for named map types: build direct-access shape entries on the
+                    // map literal's own TypeMap.  The named type definition has
+                    // TypeType wrappers on its shape entries; unwrap them so that
+                    // the transpiler's can_direct check sees raw types and emits
+                    // direct byte-offset construction with proper conversions.
+                    {
+                        Type* ann = ast_node->type;
+                        AstNode* rhs = ast_node->as;
+                        if (rhs && rhs->node_type == AST_NODE_PRIMARY)
+                            rhs = ((AstPrimaryNode*)rhs)->expr;
+                        if (ann && ann->type_id == LMD_TYPE_MAP
+                            && ((TypeMap*)ann)->struct_name
+                            && rhs && rhs->node_type == AST_NODE_MAP
+                            && rhs->type && rhs->type->type_id == LMD_TYPE_MAP) {
+                            TypeMap* named = (TypeMap*)ann;
+                            TypeMap* literal = (TypeMap*)rhs->type;
+                            // copy byte_size and length from named type
+                            literal->byte_size = named->byte_size;
+                            literal->length = named->length;
+                            // rebuild shape entries with unwrapped types
+                            ShapeEntry* src = named->shape;
+                            ShapeEntry* prev = nullptr;
+                            ShapeEntry* first = nullptr;
+                            while (src) {
+                                ShapeEntry* dst = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+                                dst->name = src->name;
+                                dst->byte_offset = src->byte_offset;
+                                // unwrap TypeType wrapper to get the actual storage type
+                                Type* ft = src->type;
+                                if (ft && ft->type_id == LMD_TYPE_TYPE) {
+                                    Type* inner = ((TypeType*)ft)->type;
+                                    if (inner) ft = inner;
+                                }
+                                dst->type = ft;
+                                dst->next = nullptr;
+                                if (!first) first = dst;
+                                if (prev) prev->next = dst;
+                                prev = dst;
+                                src = src->next;
+                            }
+                            literal->shape = first;
+                        }
+                    }
+
                     // compile-time type check: annotation vs RHS type
                     // when the annotation is an occurrence type (e.g., int[], float+)
                     // and the RHS is a literal array with known element types, verify compatibility

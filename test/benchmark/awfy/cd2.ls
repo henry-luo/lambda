@@ -70,10 +70,18 @@ pn null32() {
 }
 
 // =====================================================
+// Type definitions for annotated map field access
+// =====================================================
+type Arr = {l0: list, sz: int}
+type Vec = {chunks: list, sz: int}
+type RbtTree = {root: int, cnt: int, nd: map}
+type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
+
+// =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
 pn arr_new() {
-    var a = { l0: null16(), sz: 0 }
+    var a: Arr = { l0: null16(), sz: 0 }
     return a
 }
 
@@ -118,7 +126,7 @@ pn arr_set(a, idx: int, val) {
 // Small vector: 16x16=256
 // =====================================================
 pn vec_new() {
-    var v = { chunks: null16(), sz: 0 }
+    var v: Vec = { chunks: null16(), sz: 0 }
     return v
 }
 
@@ -150,11 +158,6 @@ pn vec_at(v, idx: int) {
     return r
 }
 
-pn vec_size(v) {
-    var r: int = (v.sz)
-    return r
-}
-
 // =====================================================
 // Red-Black Tree (integer keys)
 // Node = array: [key, val, left_id, right_id, parent_id, color]
@@ -162,27 +165,18 @@ pn vec_size(v) {
 // =====================================================
 
 pn rbt_new() {
-    var nd = arr_new()
-    var t = { root: -1, cnt: 0, nd: null }
-    t.nd = nd
+    var nd: Arr = arr_new()
+    var t: RbtTree = { root: -1, cnt: 0, nd: nd }
     return t
 }
 
 pn rbt_nd(tree, id: int) {
-    var nd = (tree.nd)
-    var n = arr_get(nd, id)
-    return n
+    return arr_get(tree.nd, id)
 }
 
 pn rbt_mk_node(tree, key: int, val) {
     var c: int = (tree.cnt)
-    var n = [null, null, null, null, null, null]
-    n[0] = key
-    n[1] = val
-    n[2] = NIL
-    n[3] = NIL
-    n[4] = NIL
-    n[5] = RED
+    var n = [key, val, NIL, NIL, NIL, RED]
     var nd = (tree.nd)
     arr_set(nd, c, n)
     var nc: int = c + 1
@@ -723,11 +717,7 @@ pn v2d_key(x: int, y: int) {
 // Vector3D operations
 // =====================================================
 pn v3d_new(x, y, z) {
-    var v = [null, null, null]
-    v[0] = x
-    v[1] = y
-    v[2] = z
-    return v
+    return [x, y, z]
 }
 
 // =====================================================
@@ -814,8 +804,13 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
 
 // =====================================================
 // Recurse: draw motion into voxel map
+// ctx: DrawCtx — typed map for direct field-offset access
 // =====================================================
-pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int) {
+pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, ctx: DrawCtx) {
+    var p1x: float = (ctx.p1x)
+    var p1y: float = (ctx.p1y)
+    var p2x: float = (ctx.p2x)
+    var p2y: float = (ctx.p2y)
     var inV: int = is_in_voxel(vx, vy, p1x, p1y, p2x, p2y)
     if (inV == 0) { return 0 }
 
@@ -828,17 +823,18 @@ pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, p1x: float, p1y: float, p2
         existVec = vec_new()
         rbt_put(voxelMap, vk, existVec)
     }
+    var motionIdx: int = (ctx.motionIdx)
     vec_add(existVec, motionIdx)
 
     var gs: int = GOOD_VOXEL_SIZE
-    recurse_draw(voxelMap, seenTree, vx - gs, vy, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx, vy - gs, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx, vy + gs, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx - gs, vy - gs, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx - gs, vy + gs, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy - gs, p1x, p1y, p2x, p2y, motionIdx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy + gs, p1x, p1y, p2x, p2y, motionIdx)
+    recurse_draw(voxelMap, seenTree, vx - gs, vy, ctx)
+    recurse_draw(voxelMap, seenTree, vx + gs, vy, ctx)
+    recurse_draw(voxelMap, seenTree, vx, vy - gs, ctx)
+    recurse_draw(voxelMap, seenTree, vx, vy + gs, ctx)
+    recurse_draw(voxelMap, seenTree, vx - gs, vy - gs, ctx)
+    recurse_draw(voxelMap, seenTree, vx - gs, vy + gs, ctx)
+    recurse_draw(voxelMap, seenTree, vx + gs, vy - gs, ctx)
+    recurse_draw(voxelMap, seenTree, vx + gs, vy + gs, ctx)
     return 0
 }
 
@@ -968,15 +964,7 @@ pn find_intersection(m1, m2) {
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
 pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) {
-    var m = [null, null, null, null, null, null, null]
-    m[0] = cs
-    m[1] = p1x
-    m[2] = p1y
-    m[3] = p1z
-    m[4] = p2x
-    m[5] = p2y
-    m[6] = p2z
-    return m
+    return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 
 // =====================================================
@@ -984,36 +972,29 @@ pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) {
 // =====================================================
 
 pn simulate_frame(numAircraft: int, tval) {
-    var frame = vec_new()
+    var frame: Vec = vec_new()
     var i: int = 0
     while (i < numAircraft) {
         var cs1: int = i
         var px1 = tval
         var py1 = cos(tval) * 2 + i * 3
         var pz1: int = 10
-        var a1 = [null, null, null, null]
-        a1[0] = cs1
-        a1[1] = px1
-        a1[2] = py1
-        a1[3] = pz1
+        var a1 = [cs1, px1, py1, pz1]
         vec_add(frame, a1)
         var cs2: int = i + 1
         var py2 = sin(tval) * 2 + i * 3
-        var a2 = [null, null, null, null]
-        a2[0] = cs2
-        a2[1] = px1
-        a2[2] = py2
-        a2[3] = pz1
+        var a2 = [cs2, px1, py2, pz1]
         vec_add(frame, a2)
         i = i + 2
     }
     return frame
 }
 
-pn handle_new_frame(stateTree, frame) {
-    var motions = vec_new()
-    var seenTree = rbt_new()
-    var frameSz: int = vec_size(frame)
+pn handle_new_frame(stateTree, frame: Vec) {
+    var motions: Vec = vec_new()
+    // Use flat arr for aircraft seen set (IDs are 0-99, well within arr capacity)
+    var seenArr: Arr = arr_new()
+    var frameSz: int = (frame.sz)
     var i: int = 0
     while (i < frameSz) {
         var aircraft = vec_at(frame, i)
@@ -1023,7 +1004,7 @@ pn handle_new_frame(stateTree, frame) {
         var npz = aircraft[3]
         var newPos = v3d_new(npx, npy, npz)
         var oldPos = rbt_put(stateTree, csId, newPos)
-        rbt_put(seenTree, csId, 1)
+        arr_set(seenArr, csId, 1)
         var usePos = get_old_or_new(oldPos, newPos)
         var opx = usePos[0]
         var opy = usePos[1]
@@ -1034,18 +1015,18 @@ pn handle_new_frame(stateTree, frame) {
     }
 
     // Remove aircraft no longer present
-    var toRemove = vec_new()
+    var toRemove: Vec = vec_new()
     var curId: int = rbt_first(stateTree)
     while (curId != NIL) {
         var curN = rbt_nd(stateTree, curId)
         var ck: int = curN[NK]
-        var inSeen = rbt_get(seenTree, ck)
+        var inSeen = arr_get(seenArr, ck)
         if (inSeen == null) {
             vec_add(toRemove, ck)
         }
         curId = rbt_successor(stateTree, curId)
     }
-    var trSz: int = vec_size(toRemove)
+    var trSz: int = (toRemove.sz)
     var ri: int = 0
     while (ri < trSz) {
         var rk: int = vec_at(toRemove, ri)
@@ -1055,7 +1036,7 @@ pn handle_new_frame(stateTree, frame) {
 
     // Reduce collision set
     var voxelMap = rbt_new()
-    var motionsSz: int = vec_size(motions)
+    var motionsSz: int = (motions.sz)
     var vxy = [null, null]
     var mi: int = 0
     while (mi < motionsSz) {
@@ -1068,7 +1049,9 @@ pn handle_new_frame(stateTree, frame) {
         var vvx: int = vxy[0]
         var vvy: int = vxy[1]
         var motSeen = rbt_new()
-        recurse_draw(voxelMap, motSeen, vvx, vvy, mp1x, mp1y, mp2x, mp2y, mi)
+        // Bundle invariant params as typed DrawCtx map
+        var ctx: DrawCtx = { p1x: mp1x, p1y: mp1y, p2x: mp2x, p2y: mp2y, motionIdx: mi }
+        recurse_draw(voxelMap, motSeen, vvx, vvy, ctx)
         mi = mi + 1
     }
 
@@ -1077,8 +1060,8 @@ pn handle_new_frame(stateTree, frame) {
     var vmCur: int = rbt_first(voxelMap)
     while (vmCur != NIL) {
         var vmN = rbt_nd(voxelMap, vmCur)
-        var motVec = vmN[NV]
-        var mvsz: int = vec_size(motVec)
+        var motVec: Vec = vmN[NV]
+        var mvsz: int = (motVec.sz)
         if (mvsz > 1) {
             var ii: int = 0
             while (ii < mvsz) {
@@ -1105,7 +1088,7 @@ pn handle_new_frame(stateTree, frame) {
 
 pn cd(numAircraft: int) {
     var numFrames: int = 200
-    var stateTree = rbt_new()
+    var stateTree: RbtTree = rbt_new()
     var actualCollisions: int = 0
     var i: int = 0
     while (i < numFrames) {

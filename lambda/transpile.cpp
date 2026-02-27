@@ -398,7 +398,9 @@ bool has_typed_params(AstFuncNode* fn_node) {
                 tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
                 tid == LMD_TYPE_STRING || tid == LMD_TYPE_BINARY ||
                 tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_DECIMAL ||
-                tid == LMD_TYPE_DTIME) {
+                tid == LMD_TYPE_DTIME ||
+                tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT ||
+                tid == LMD_TYPE_ELEMENT) {
                 return true;
             }
             // typed array parameters (int[], float[], etc.)
@@ -4408,8 +4410,12 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
     else if (param_type) {
         if (param_type->type_id == value->type->type_id &&
             param_type->type_id != LMD_TYPE_STRING &&
-            param_type->type_id != LMD_TYPE_BINARY) {
-            // Fast path: same type, not STRING/BINARY (which may have Item vs String* mismatch)
+            param_type->type_id != LMD_TYPE_BINARY &&
+            param_type->type_id != LMD_TYPE_MAP &&
+            param_type->type_id != LMD_TYPE_OBJECT &&
+            param_type->type_id != LMD_TYPE_ELEMENT) {
+            // Fast path: same type, not STRING/BINARY/MAP/OBJECT/ELEMENT
+            // (container pointer types may have Item vs Map*/Object*/Element* mismatch)
             transpile_expr(tp, value);
         }
         else if (param_type->type_id == LMD_TYPE_FLOAT) {
@@ -4488,6 +4494,22 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 strbuf_append_char(tp->code_buf, ')');
             }
             else {
+                transpile_box_item(tp, value);
+            }
+        }
+        // container pointer types: cast Item to Map*/Object*/Element*
+        // (MIR JIT uses different calling conv for pointer vs uint64_t params)
+        else if (param_type->type_id == LMD_TYPE_MAP ||
+                 param_type->type_id == LMD_TYPE_OBJECT ||
+                 param_type->type_id == LMD_TYPE_ELEMENT) {
+            if (value_emits_native_type(tp, value, param_type->type_id)) {
+                // value already produces native pointer — emit directly
+                transpile_expr(tp, value);
+            } else {
+                // value produces Item — cast to container pointer type
+                strbuf_append_str(tp->code_buf, "(");
+                write_type(tp->code_buf, (Type*)param_type);
+                strbuf_append_str(tp->code_buf, ")");
                 transpile_box_item(tp, value);
             }
         }
@@ -4583,7 +4605,25 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
                     strbuf_append_str(tp->code_buf, "it2b(");
                     transpile_expr(tp, arg);
                     strbuf_append_char(tp->code_buf, ')');
+                } else if (param_tid == LMD_TYPE_MAP || param_tid == LMD_TYPE_OBJECT ||
+                           param_tid == LMD_TYPE_ELEMENT) {
+                    // cast Item to container pointer
+                    strbuf_append_str(tp->code_buf, "(");
+                    write_type(tp->code_buf, param_type);
+                    strbuf_append_str(tp->code_buf, ")");
+                    transpile_expr(tp, arg);
                 } else {
+                    transpile_expr(tp, arg);
+                }
+            } else if (param_tid == LMD_TYPE_MAP || param_tid == LMD_TYPE_OBJECT ||
+                       param_tid == LMD_TYPE_ELEMENT) {
+                // same type but may need Item→pointer cast
+                if (value_emits_native_type(tp, arg, param_tid)) {
+                    transpile_expr(tp, arg);
+                } else {
+                    strbuf_append_str(tp->code_buf, "(");
+                    write_type(tp->code_buf, param_type);
+                    strbuf_append_str(tp->code_buf, ")");
                     transpile_expr(tp, arg);
                 }
             } else {
