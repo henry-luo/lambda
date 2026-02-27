@@ -498,15 +498,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
         font_changed = true;
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
-        // Element has CSS styles but font not yet resolved - extract font-family from CSS
+        // Element has CSS styles but font not yet resolved - check font-family and font-size
+        // independently. Either property alone should trigger font setup.
+        FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
+        bool need_font_setup = false;
+        const char* css_family = NULL;
+
+        // Check for font-family change
         CssDeclaration* font_family_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_FAMILY);
 
         if (font_family_decl && font_family_decl->value) {
-            // Create temporary FontProp from CSS using alloc_font_prop for stable memory
-            FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
-            const char* css_family = NULL;
-
             // Extract font-family from CSS value
             if (font_family_decl->value->type == CSS_VALUE_TYPE_STRING) {
                 css_family = font_family_decl->value->data.string;
@@ -530,19 +532,33 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             if (css_family && css_family != lycon->font.style->family) {
                 temp_font_prop->family = (char*)css_family;
-
-                // Also check for font-size
-                CssDeclaration* font_size_decl = style_tree_get_declaration(
-                    element->specified_style, CSS_PROPERTY_FONT_SIZE);
-                if (font_size_decl && font_size_decl->value &&
-                    font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    temp_font_prop->font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
-                                                                     font_size_decl->value);
-                }
-
-                setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
-                font_changed = true;
+                need_font_setup = true;
             }
+        }
+
+        // Check for font-size change independently of font-family.
+        // CSS 2.1 §10.2: font-size can be set on any element and affects text
+        // measurement. During intrinsic sizing, we must use the element's own
+        // font-size even when font-family is inherited unchanged.
+        CssDeclaration* font_size_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_FONT_SIZE);
+        if (font_size_decl && font_size_decl->value &&
+            font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
+                                                       font_size_decl->value);
+            if (resolved_size > 0 && fabs(resolved_size - lycon->font.style->font_size) > 0.1f) {
+                temp_font_prop->font_size = resolved_size;
+                need_font_setup = true;
+            }
+        }
+
+        if (need_font_setup) {
+            // Ensure font-family is set (use parent's if not changed)
+            if (!temp_font_prop->family && lycon->font.style) {
+                temp_font_prop->family = lycon->font.style->family;
+            }
+            setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
+            font_changed = true;
         }
     }
 

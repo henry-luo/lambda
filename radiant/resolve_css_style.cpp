@@ -2508,10 +2508,43 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 // CSS 2.1 §15.8: font shorthand includes font-variant
                                 span->font->font_variant = CSS_VALUE_SMALL_CAPS;
                                 log_debug("[CSS] Font shorthand: set font-variant = small-caps");
+                            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE) {
+                                // CSS 2.1 §15.7: named font-size keywords (xx-small..xx-large)
+                                // These can appear in font shorthand as the font-size component
+                                size_value = v;
+                                // Check if next value is "/line-height"
+                                if (i + 2 < count) {
+                                    CssValue* maybe_slash = value->data.list.values[i + 1];
+                                    if (maybe_slash && maybe_slash->type == CSS_VALUE_TYPE_CUSTOM &&
+                                        maybe_slash->data.custom_property.name &&
+                                        strcmp(maybe_slash->data.custom_property.name, "/") == 0 &&
+                                        i + 2 < count) {
+                                        line_height_value = value->data.list.values[i + 2];
+                                        int next_idx = i + 3;
+                                        family_start_index = next_idx;
+                                        if (family_start_index < count) {
+                                            family_value = value->data.list.values[family_start_index];
+                                        }
+                                        break;
+                                    }
+                                }
+                                // Everything after size is font-family
+                                family_start_index = i + 1;
+                                if (family_start_index < count) {
+                                    family_value = value->data.list.values[family_start_index];
+                                }
+                                break;
                             } else if (v->data.keyword >= CSS_VALUE_SERIF && v->data.keyword <= CSS_VALUE_FANGSONG) {
                                 // Generic font family keyword
                                 family_value = v;
                             }
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                        // CSS 2.1 §15.6: numeric font-weight values (100, 200, ..., 900)
+                        int val = (int)v->data.number.value;
+                        if (val >= 1 && val <= 1000) {
+                            weight_value = v;
+                            log_debug("[CSS] Font shorthand: found numeric weight %d", val);
                         }
                     } else if (v->type == CSS_VALUE_TYPE_STRING) {
                         // String is font-family name

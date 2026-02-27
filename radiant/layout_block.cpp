@@ -2375,8 +2375,28 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     element_required_width += block->bound->margin.right;
             }
 
-            log_debug("[BFC Float Avoid] element %s: required_width=%.1f, has_explicit_width=%d, y_in_bfc=%.1f",
-                      block->node_name(), element_required_width, has_explicit_width, y_in_bfc);
+            // CSS 2.1 §9.5: "The border box... must not overlap the margin box of
+            // any floats." We must check across the element's FULL vertical extent, not
+            // just at the top edge. Compute border-box height for the space query.
+            float element_border_box_height = 1.0f;  // fallback for auto-height
+            if (block->blk && block->blk->given_height >= 0) {
+                // Explicit CSS height → compute border-box height
+                element_border_box_height = block->blk->given_height;
+                if (block->bound) {
+                    element_border_box_height += block->bound->padding.top + block->bound->padding.bottom;
+                    if (block->bound->border) {
+                        element_border_box_height += block->bound->border->width.top + block->bound->border->width.bottom;
+                    }
+                }
+            } else if (parent_bfc->lowest_float_bottom > y_in_bfc) {
+                // Auto-height: conservatively check from top to lowest float bottom.
+                // CSS 2.1 §9.5 requires no overlap with ANY float. Since we don't know
+                // the final height yet, check the entire float range to be safe.
+                element_border_box_height = parent_bfc->lowest_float_bottom - y_in_bfc;
+            }
+
+            log_debug("[BFC Float Avoid] element %s: required_width=%.1f, has_explicit_width=%d, y_in_bfc=%.1f, border_box_h=%.1f",
+                      block->node_name(), element_required_width, has_explicit_width, y_in_bfc, element_border_box_height);
 
             // For elements WITHOUT explicit width, they can shrink to fit - no need to shift down
             // For elements WITH explicit width, shift down if they don't fit
@@ -2388,7 +2408,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 int max_iterations = 100;
 
                 while (max_iterations-- > 0) {
-                    FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, 1.0f);
+                    // CSS 2.1 §9.5: Use element's full border-box height for space query
+                    // to ensure no overlap at any vertical position
+                    float query_height = element_border_box_height;
+                    if (block->blk && block->blk->given_height < 0 && parent_bfc->lowest_float_bottom > current_y) {
+                        // Auto-height: recalculate from current_y to lowest float
+                        query_height = parent_bfc->lowest_float_bottom - current_y;
+                    }
+                    FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, query_height);
 
                     // Calculate how much space is available in the PARENT's content area
                     // (not the BFC's full width, which may be much larger)
@@ -2403,8 +2430,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     float effective_right = min(local_right, parent_right_bound);
                     float available_width = max(0.0f, effective_right - effective_left);
 
-                    log_debug("[BFC Float Avoid] Checking y=%.1f: space=(%.1f,%.1f), local=(%.1f,%.1f), parent_width=%.1f, available=%.1f, needed=%.1f",
-                              current_y, space.left, space.right, local_left, local_right,
+                    log_debug("[BFC Float Avoid] Checking y=%.1f (h=%.1f): space=(%.1f,%.1f), local=(%.1f,%.1f), parent_width=%.1f, available=%.1f, needed=%.1f",
+                              current_y, query_height, space.left, space.right, local_left, local_right,
                               pa_block->content_width, available_width, element_required_width);
 
                     // Check if element fits
@@ -2445,7 +2472,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
             } else {
                 // No explicit width - element will shrink to fit, just calculate intrusion
-                FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, 1.0f);
+                // CSS 2.1 §9.5: Use full vertical extent to find the maximum float intrusion
+                FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, element_border_box_height);
                 float local_left = space.left - x_in_bfc;
                 float local_right = space.right - x_in_bfc;
                 float float_intrusion_left = max(0.0f, local_left);
@@ -2456,8 +2484,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
                 bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
 
-                log_debug("[BFC Float Avoid] Auto-width element: offset_x=%.1f, width_reduction=%.1f",
-                          bfc_float_offset_x, bfc_available_width_reduction);
+                log_debug("[BFC Float Avoid] Auto-width element (h=%.1f): offset_x=%.1f, width_reduction=%.1f",
+                          element_border_box_height, bfc_float_offset_x, bfc_available_width_reduction);
             }
 
             // Calculate total shift needed in local coordinates
@@ -2795,15 +2823,22 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
             if (block->bound->margin.right_type == CSS_VALUE_AUTO) block->bound->margin.right = 0;
         } else if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
-            block->bound->margin.left = block->bound->margin.right = max((pa_block->content_width - block->width) / 2, 0);
+            // CSS 2.1 §10.3.3 + §9.5: For BFC elements avoiding floats, auto margins
+            // resolve against the available width after float avoidance, not the full
+            // containing block width. This ensures the element is centered/aligned
+            // within the space not occupied by floats.
+            float margin_available = pa_block->content_width - bfc_available_width_reduction;
+            block->bound->margin.left = block->bound->margin.right = max((margin_available - block->width) / 2, 0);
         } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
             // CSS 2.1 §10.3.3: Single auto margin absorbs the remaining space
-            block->bound->margin.left = max(pa_block->content_width - block->width - block->bound->margin.right, 0.0f);
+            float margin_available = pa_block->content_width - bfc_available_width_reduction;
+            block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
         } else if (block->bound->margin.right_type == CSS_VALUE_AUTO) {
-            block->bound->margin.right = max(pa_block->content_width - block->width - block->bound->margin.left, 0.0f);
+            float margin_available = pa_block->content_width - bfc_available_width_reduction;
+            block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
         } else if (is_rtl) {
             // CSS 2.1 §10.3.3: Over-constrained with direction:rtl — margin-left gets the residual
-            block->bound->margin.left = pa_block->content_width - block->width - block->bound->margin.right;
+            block->bound->margin.left = pa_block->content_width - bfc_available_width_reduction - block->width - block->bound->margin.right;
             log_debug("[RTL] Over-constrained: computed margin-left=%f (containing=%f, width=%f, margin-right=%f)",
                 block->bound->margin.left, pa_block->content_width, block->width, block->bound->margin.right);
         }
@@ -3197,6 +3232,103 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     log_debug("collapsed bottom margin %f (chain pos=%f neg=%f) between block and last child (height unchanged at %f)",
                         margin_bottom, chain_pos, chain_neg, block->height);
                 }
+            }
+        }
+    }
+
+    // CSS 2.1 §8.3.1: Transitive margin adjacency through self-collapsing children.
+    // When ALL in-flow children are self-collapsing and the parent has no top/bottom
+    // border/padding (auto height), the margin chain connects:
+    //   parent.mt ↔ first_child.mt → ... sibling chain → last_child.mb ↔ parent.mb
+    // All margins form one adjoining set. The bottom margin chain already accumulated
+    // all margins through sibling collapse, so unify the top margin with it.
+    if (block->bound && block->bound->margin.bottom != block->bound->margin.top &&
+        !has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse && !has_explicit_height) {
+        bool has_border_t = block->bound->border && block->bound->border->width.top > 0;
+        bool has_padding_t = block->bound->padding.top > 0;
+        if (!has_border_t && !has_padding_t) {
+            // check if ALL in-flow children are self-collapsing
+            bool all_self_collapsing = true;
+            bool has_any_in_flow = false;
+            View* sc_child = ((ViewElement*)block)->first_placed_child();
+            while (sc_child) {
+                if (sc_child->is_block()) {
+                    ViewBlock* vb = (ViewBlock*)sc_child;
+                    bool oof = (vb->position && element_has_float(vb)) ||
+                        (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                          vb->position->position == CSS_VALUE_FIXED));
+                    if (!oof) {
+                        has_any_in_flow = true;
+                        if (!is_block_self_collapsing(vb)) {
+                            all_self_collapsing = false;
+                            break;
+                        }
+                    }
+                } else if (sc_child->view_type && sc_child->height > 0) {
+                    // non-block in-flow content (text, inline) with height breaks the chain
+                    all_self_collapsing = false;
+                    break;
+                }
+                View* next = (View*)sc_child->next_sibling;
+                while (next && !next->view_type) next = (View*)next->next_sibling;
+                sc_child = next;
+            }
+
+            if (has_any_in_flow && all_self_collapsing) {
+                float old_mt = block->bound->margin.top;
+                float new_mt = block->bound->margin.bottom;
+                float delta = new_mt - old_mt;
+                block->bound->margin.top = new_mt;
+                block->bound->margin.bottom = 0;  // consumed by unified collapse
+                block->bound->margin_chain_positive = 0;
+                block->bound->margin_chain_negative = 0;
+                block->y += delta;
+                // CSS 2.1 §8.3.1: All self-collapsing children's margins were absorbed
+                // by the unified parent margin. Reset their positions to y=0 within
+                // the parent (they are all zero-height, so this is safe).
+                View* fix_child = ((ViewElement*)block)->first_placed_child();
+                while (fix_child) {
+                    if (fix_child->is_block()) {
+                        ViewBlock* vb = (ViewBlock*)fix_child;
+                        bool oof = (vb->position && element_has_float(vb)) ||
+                            (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                              vb->position->position == CSS_VALUE_FIXED));
+                        if (!oof) {
+                            vb->y = 0;
+                            if (vb->bound) vb->bound->margin.top = 0;
+                        }
+                    }
+                    View* next = (View*)fix_child->next_sibling;
+                    while (next && !next->view_type) next = (View*)next->next_sibling;
+                    fix_child = next;
+                }
+                // CSS 2.1 §8.3.1: Floats inside this block were positioned in
+                // the parent BFC using the old block.y. Update their BFC coordinates
+                // to reflect the new position after margin unification.
+                if (delta != 0) {
+                    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                    if (bfc) {
+                        for (int pass = 0; pass < 2; pass++) {
+                            FloatBox* fb = (pass == 0) ? bfc->left_floats : bfc->right_floats;
+                            for (; fb; fb = fb->next) {
+                                if (!fb->element) continue;
+                                // check if this float is a descendant of the current block
+                                DomNode* ancestor = (DomNode*)fb->element->parent;
+                                while (ancestor) {
+                                    if (ancestor == (DomNode*)block) {
+                                        fb->margin_box_top += delta;
+                                        fb->margin_box_bottom += delta;
+                                        fb->y += delta;
+                                        break;
+                                    }
+                                    ancestor = ancestor->parent;
+                                }
+                            }
+                        }
+                    }
+                }
+                log_debug("unified margin chain: all children self-collapsing, mt %f -> %f, y adjusted by %f",
+                    old_mt, new_mt, delta);
             }
         }
     }
@@ -3638,7 +3770,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.advance_x = effective_left;
             }
 
-            if (lycon->line.advance_x + block->width > effective_right) {
+            if (lycon->line.advance_x + block->width > effective_right && !lycon->line.is_line_start) {
+                // CSS 2.1 §9.4.2: Only break if there's prior content on this line.
+                // If the inline-block is the first item on the line, it cannot be made
+                // to fit by wrapping, so it stays on this line and overflows.
                 line_break(lycon);
                 // After line break, update effective bounds for new Y
                 update_line_for_bfc_floats(lycon);
@@ -3917,7 +4052,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     float parent_border_top = parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0;
                     float parent_margin_top = parent && parent->bound ? parent->bound->margin.top : 0;
 
-                    if (!has_clearance && block->bound->margin.top != 0) {
+                    // CSS 2.1 §8.3.1: Parent-child top margin collapse.
+                    // Enter when child has non-zero mt, OR when the child is self-collapsing
+                    // with non-zero mb or margin chain (the mb is adjoining to mt through
+                    // self-collapsing, so it participates in the parent-child collapse).
+                    bool first_child_self_collapsing = is_block_self_collapsing(block);
+                    bool has_self_collapsing_margins = first_child_self_collapsing &&
+                        (block->bound->margin.bottom != 0 || has_margin_chain(block->bound));
+                    if (!has_clearance && (block->bound->margin.top != 0 || has_self_collapsing_margins)) {
                         if (parent && parent->parent && !parent_creates_bfc &&
                             parent_padding_top == 0 && parent_border_top == 0) {
                             // CSS 2.1 §8.3.1: collapse child and parent margins
@@ -3928,7 +4070,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             //   parent.mt <-> child.mt (first-child rule)
                             //   child.mt <-> child.mb (self-collapsing rule)
                             // Therefore all three collapse together as one set.
-                            bool first_child_self_collapsing = is_block_self_collapsing(block);
                             if (first_child_self_collapsing) {
                                 // CSS 2.1 §8.3.1: Use chain-aware 3-way collapse to avoid
                                 // information loss from pairwise collapse_margins with mixed signs.
@@ -3937,6 +4078,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 chain_pos = max(chain_pos, max(block->bound->margin.bottom, 0.f));
                                 float chain_neg = min(min(block->bound->margin.top, parent_margin_top), 0.f);
                                 chain_neg = min(chain_neg, min(block->bound->margin.bottom, 0.f));
+                                // CSS 2.1 §8.3.1: If child has a margin chain from its own
+                                // self-collapsing descendants (propagated via bottom margin
+                                // collapse), incorporate those values into the collapse set.
+                                if (has_margin_chain(block->bound)) {
+                                    chain_pos = max(chain_pos, block->bound->margin_chain_positive);
+                                    chain_neg = min(chain_neg, block->bound->margin_chain_negative);
+                                }
                                 margin_top = chain_pos + chain_neg;
                                 log_debug("self-collapsing first child: including mb=%f in parent collapse, margin_top=%f (chain pos=%f neg=%f)",
                                     block->bound->margin.bottom, margin_top, chain_pos, chain_neg);
@@ -3991,6 +4139,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 chain_pos = max(chain_pos, max(block->bound->margin.bottom, 0.f));
                                 float chain_neg = min(min(original_margin_top, parent_margin_top), 0.f);
                                 chain_neg = min(chain_neg, min(block->bound->margin.bottom, 0.f));
+                                // CSS 2.1 §8.3.1: Incorporate child's existing margin chain
+                                // from descendants (propagated via bottom margin collapse).
+                                if (has_margin_chain(block->bound)) {
+                                    chain_pos = max(chain_pos, block->bound->margin_chain_positive);
+                                    chain_neg = min(chain_neg, block->bound->margin_chain_negative);
+                                }
                                 set_margin_chain(block->bound, chain_pos, chain_neg);
                                 log_debug("self-collapsing first child chain: pos=%f, neg=%f, mb=%f",
                                     chain_pos, chain_neg, block->bound->margin.bottom);
