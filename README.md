@@ -250,6 +250,7 @@ for (row in csv) {
 | Document | Description |
 |----------|-------------|
 | [Lambda Reference](doc/Lambda_Reference.md) | Language overview, modules, I/O, and error handling |
+| [CLI Reference](doc/Lambda_CLI.md) | Commands, flags, and usage for the Lambda CLI |
 | [Data & Collections](doc/Lambda_Data.md) | Literals, arrays, lists, maps, elements, and ranges |
 | [Type System](doc/Lambda_Type.md) | Types, unions, patterns, and type declarations |
 | [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, control flow, and comprehensions |
