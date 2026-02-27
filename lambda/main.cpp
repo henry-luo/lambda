@@ -781,6 +781,10 @@ int main(int argc, char *argv[]) {
     }
     log_init("");  // Initialize with parsed config or defaults
 
+#ifndef NDEBUG
+    log_notice("Running DEBUG build of lambda.exe");
+#endif
+
     // Add trace statement at start of main
     log_debug("main() started with %d arguments", argc);
 
