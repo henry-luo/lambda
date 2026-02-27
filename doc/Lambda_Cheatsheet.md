@@ -28,7 +28,7 @@ range, 1 to 10          // Range (inclusive both ends)
 array, [123, true]      // Array of values
 list, (0.5, "string")   // List
 map, {key: 'symbol'}    // Map
-object, {Point x: 1, y: 2}  // Object (nominally-typed map)
+object, {point x: 1, y: 2}  // Object (nominally-typed)
 element, <div class: bold; "text" <br>>  // Element
 ```
 
@@ -58,23 +58,23 @@ type Result = int | error;              // Union type
 
 **Definition:**
 ```lambda
-type Point { x: float, y: float }           // Fields only
+type Point { x: float, y: float }     // Fields only
 type Counter {
-    value: int = 0;                          // Default value
-    fn double() => value * 2                 // Functional
+    value: int = 0;                   // Default value
+    fn double() => value * 2          // Functional
     fn add(n: int) => value + n
-    pn increment() { value = value + 1 }     // Procedural
+    pn inc() { value = value + 1 }    // Procedural
 }
-type Circle : Shape { radius: float; }      // Inheritance
+type Circle : Shape { radius: float; }  // Inheritance
 ```
 
 **Literals & Access:**
 ```lambda
-let p = {Point x: 1.0, y: 2.0}    // Object literal
-let c = {Counter}                  // All defaults
-p.x                                // Field access
-c.double()                         // Method call
-{Point p, x: 5.0}                  // Update (copy + override)
+let p = {Point x: 1.0, y: 2.0}   // Object literal
+let c = {Counter}                // All defaults
+p.x                              // Field access
+c.double()                       // Method call
+{Point p, x: 5.0}                // Wrap and override
 ```
 
 **Type Checking (nominal only):**
@@ -88,17 +88,17 @@ p is map       // true (objects are map-compatible)
 **Constraints:**
 ```lambda
 type User {
-    name: string that (len(~) > 0),        // Field constraint
-    age: int that (0 <= ~ and ~ <= 150);
-    that (~.name != "admin")               // Object constraint
+  name: string that (len(~) > 1),  // Field constraint
+  age: int that (0 <= ~ <= 150);
+  that (~.name != "admin")         // Object constraint
 }
 ```
 
 **Self reference `~`:**
 ```lambda
 type Vec { x: float, y: float;
-    fn len() => sqrt(x**2 + y**2)
-    fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
+  fn len() => sqrt(x**2 + y**2)
+  fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
 }
 ```
 
@@ -109,7 +109,8 @@ type Vec { x: float, y: float;
 42        // Integer
 3.14      // Float
 1.5e-10   // Scientific notation
-123.45n   // Decimal (arbitrary precision)
+123.45n   // Decimal128 (~34 digits)
+123.45N   // Decimal (ultra precision, 200 digits)
 inf  nan  // Special values
 ```
 
@@ -497,26 +498,26 @@ error({code: 304, message: "div by zero"})
 
 **Error Return Types (`T^E`):**
 ```lambda
-fn parse(s: string) int^ { ... }           // Return int or any error
-fn divide(a, b) int ^ DivisionError { ... }    // Specific error type
-fn load(p) Config ^ ParseError|IOError { ... } // Multiple error types
+fn parse(s: string) int^ {...}   // Return int or any error
+fn divide(a, b) int ^ DivErr {...}     // Specific error
+fn load(p) Config ^ ParseErr|IOErr {...} // Multiple errors
 ```
 
 **`raise` error , or propagate error with `^`**
 ```lambda
 fn compute(x: int) int^ {
-    if (b == 0) raise error("div by zero")  // raise error
-    let a = parse(input)^    // error → return immediately
-    let b = divide(a, x)^    // error → return immediately
-    a + b
+  if (b == 0) raise error("div by zero")  // raise error
+  let a = parse(input)^    // return immediately on error
+  let b = divide(a, x)^    // return immediately on error
+  a + b
 }
-fun()^                        // propagate error, discard value
+fun()^               // propagate error, discard value
 ```
 
 **`let a^err` — destructure value and error:**
 ```lambda
 let result^err = divide(10, x)
-if (^err) print("Err: " ++ err.message)  // ^err to check error
+if (^err) print(err.message)  // ^err to check error
 else result * 2
 ```
 

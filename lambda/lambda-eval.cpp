@@ -813,7 +813,6 @@ Bool fn_is(Item a, Item b) {
 
 // 3-states comparison
 Bool fn_eq(Item a_item, Item b_item) {
-    log_debug("equal_comp expr");
     if (a_item._type_id != b_item._type_id) {
         // special case: null comparison with any type returns false (not error)
         // this allows idiomatic null checking like: if (x == null) ...
@@ -883,21 +882,23 @@ Bool fn_ne(Item a_item, Item b_item) {
 
 // 3-state value/ordered comparison
 Bool fn_lt(Item a_item, Item b_item) {
-    log_debug("less_comp expr");
     if (a_item._type_id != b_item._type_id) {
+        // null comparison with any type returns false for ordered comparisons
+        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
+            return BOOL_FALSE;
+        }
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
-        // Note: null can only be compared to null, any other comparison is a type error
+        // Type mismatch error for ordered comparisons
         return BOOL_ERROR;
     }
 
     if (a_item._type_id == LMD_TYPE_NULL) {
-        return BOOL_ERROR;  // null does not support <, >, <=, >=
+        return BOOL_FALSE;  // null < null = false
     }
     else if (a_item._type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
@@ -932,22 +933,23 @@ Bool fn_lt(Item a_item, Item b_item) {
 
 // 3-state value/ordered comparison
 Bool fn_gt(Item a_item, Item b_item) {
-    log_debug("greater_comp expr");
     if (a_item._type_id != b_item._type_id) {
+        // null comparison with any type returns false for ordered comparisons
+        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
+            return BOOL_FALSE;
+        }
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
-            log_debug("fn_gt: a_val %f, b_val %f", a_val, b_val);
             return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
-        // Note: null can only be compared to null, any other comparison is a type error
+        // Type mismatch error for ordered comparisons
         return BOOL_ERROR;
     }
 
     if (a_item._type_id == LMD_TYPE_NULL) {
-        return BOOL_ERROR;  // null does not support <, >, <=, >=
+        return BOOL_FALSE;  // null > null = false
     }
     else if (a_item._type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
@@ -981,9 +983,7 @@ Bool fn_gt(Item a_item, Item b_item) {
 }
 
 Bool fn_le(Item a_item, Item b_item) {
-    log_debug("fn_le expr");
     Bool result = fn_gt(a_item, b_item);
-    log_debug("fn_le result %d", result);
     if (result == BOOL_ERROR) return BOOL_ERROR;
     return !result;
 }
@@ -1826,6 +1826,14 @@ String* fn_format1(Item item) {
 
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
+    // Quick null/error guard: indexing null returns null to propagate
+    // null safely through algorithms. Operations like null[field]
+    // should not crash or return a wrong result.
+    TypeId item_type = get_type_id(item);
+    if (item_type == LMD_TYPE_NULL || item_type == LMD_TYPE_ERROR) {
+        return ItemNull;
+    }
+
     // Determine the type and delegate to appropriate getter
     int64_t index = -1;
     switch (index_item._type_id) {
@@ -1866,7 +1874,6 @@ Item fn_index(Item item, Item index_item) {
     }
     }
 
-    log_debug("fn_index item index: %ld", index);
     return item_at(item, index);
 }
 
@@ -3574,8 +3581,13 @@ static void convert_specialized_to_generic(Array* arr) {
 // array indexed assignment: arr[i] = val
 // Handles Array, ArrayInt, ArrayInt64, ArrayFloat
 void fn_array_set(Array* arr, int index, Item value) {
-    if (!arr) {
-        log_error("fn_array_set: null array");
+    if (!arr || ((uintptr_t)arr >> 56)) {
+        static int _err_count = 0;
+        _err_count++;
+        if (_err_count <= 10) {
+            log_error("fn_array_set: null or invalid array pointer (ptr=%p, idx=%d, val_type=%d, count=%d)",
+                      (void*)arr, index, get_type_id(value), _err_count);
+        }
         return;
     }
     TypeId arr_type = arr->type_id;
@@ -3709,6 +3721,16 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         *(Container**)field_ptr = c;
         break;
     }
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_TYPE: {
+        // store as opaque pointer (low 56 bits)
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFF);
+        break;
+    }
+    case LMD_TYPE_ERROR:
+        // store error as null to prevent cascading corruption
+        *(void**)field_ptr = NULL;
+        break;
     default:
         log_error("map_field_store: unsupported type %d", value_type);
         break;
@@ -3785,6 +3807,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         log_error("map_rebuild: data allocation failed");
         return;
     }
+
+    // Re-read old_data after allocation: GC may have fired during
+    // heap_data_calloc, compacting *data_slot from nursery to tenured.
+    // The local old_data would then point to freed nursery memory.
+    old_data = *data_slot;
 
     // copy field values from old buffer to new buffer
     ShapeEntry* old_e = old_map_type->shape;
