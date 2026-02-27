@@ -25,12 +25,12 @@ pn main() {
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
     if (result == 7) {
-        print("cpstak: PASS  ")
+        print("cpstak: PASS\n")
     } else {
         print("cpstak: FAIL result=")
         print(result)
-        print(" ")
+        print("\n")
     }
-    print(elapsed)
-    print(" ms\n")
+    // print(elapsed)
+    // print(" ms\n")
 }

@@ -781,6 +781,14 @@ int main(int argc, char *argv[]) {
     }
     log_init("");  // Initialize with parsed config or defaults
 
+    // Check for --no-log flag early (before any logging)
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--no-log") == 0) {
+            log_disable_all();
+            break;
+        }
+    }
+
 #ifndef NDEBUG
     log_notice("Running DEBUG build of lambda.exe");
 #endif
@@ -1935,6 +1943,8 @@ int main(int argc, char *argv[]) {
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--mir") == 0) {
                 use_mir = true;
+            } else if (strcmp(argv[i], "--no-log") == 0) {
+                // already handled early in main()
             } else if (strcmp(argv[i], "--transpile-dir") == 0) {
                 if (i + 1 < argc) {
                     runtime.transpile_dir = argv[++i];
@@ -2044,6 +2054,9 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--dry-run") == 0) {
             runtime.dry_run = true;
             g_dry_run = true;
+        }
+        else if (strcmp(argv[i], "--no-log") == 0) {
+            // already handled early in main()
         }
         else if (argv[i][0] != '-') {
             // This is a script file
