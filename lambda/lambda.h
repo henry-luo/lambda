@@ -630,12 +630,14 @@ Element* elmt_fill(Element *elmt, ...);
 
 typedef struct Url Url;
 typedef struct Pool Pool;
+typedef struct Arena Arena;
 
 // Forward declaration of ArrayList (defined in lib/arraylist.h)
 typedef struct _ArrayList ArrayList;
 
 typedef struct Context {
     Pool* pool;
+    Arena* arena;  // arena allocator (for input parsing path)
     void** consts;
     void* type_list;  // type definitions list (ArrayList* at runtime, void* for JIT access)
     Url* cwd;  // current working directory
