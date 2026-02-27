@@ -323,6 +323,13 @@ void expand_list(List *list, Arena* arena = nullptr) {
 
     // Determine which allocator to use
     Item* old_items = list->items;
+
+    // If no arena explicitly passed, check input_context for arena fallback
+    // (input parsing path where GC heap is not initialized)
+    if (!arena && input_context && input_context->arena) {
+        arena = input_context->arena;
+    }
+
     bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
 
     if (use_arena) {
