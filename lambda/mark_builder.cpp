@@ -22,6 +22,7 @@
 #include "lambda-data.hpp"
 #include "lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
 #include "mark_reader.hpp"  // for ArrayReader
+#include "../lib/str.h"
 #include "input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
@@ -122,6 +123,7 @@ String* MarkBuilder::createString(const char* str, size_t len) {
     // Allocate from arena (fast sequential allocation, no deduplication)
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
     s->len = len;
+    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     memcpy(s->chars, str, len);
     s->chars[len] = '\0';
     return s;

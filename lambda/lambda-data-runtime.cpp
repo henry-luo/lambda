@@ -18,6 +18,9 @@ Item fn_input1(Item url);
 extern "C" Item path_resolve_for_iteration(Path* path);
 extern "C" void path_load_metadata(Path* path);
 
+// External: interned ASCII char table (implemented in lambda-mem.cpp)
+extern "C" String* get_ascii_char_string(unsigned char ch);
+
 // VMap access helpers (implemented in vmap.cpp)
 Item vmap_get_by_str(VMap* vm, const char* key);
 Item vmap_get_by_item(VMap* vm, Item key);
@@ -773,10 +776,26 @@ Item item_at(Item data, int index) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
         const char* chars = data.get_chars();
         uint32_t byte_len = data.get_len();
-        // use UTF-8 character count for bounds checking
-        size_t char_count = str_utf8_count(chars, byte_len);
-        if (index < 0 || (size_t)index >= char_count) { return ItemNull; }
-        // convert character index to byte offset
+        if (index < 0) { return ItemNull; }
+        String* str = data.get_string();
+
+        // ASCII fast-path: byte index == char index, O(1)
+        if (str->is_ascii) {
+            if ((uint32_t)index >= byte_len) { return ItemNull; }
+            if (type_id == LMD_TYPE_SYMBOL) {
+                Symbol* ch_sym = heap_create_symbol(chars + index, 1);
+                return {.item = y2it(ch_sym)};
+            }
+            // return interned single-char string if available
+            unsigned char ch = (unsigned char)chars[index];
+            String* interned = get_ascii_char_string(ch);
+            if (interned) return {.item = s2it(interned)};
+            String *ch_str = heap_strcpy((char*)(chars + index), 1);
+            return {.item = s2it(ch_str)};
+        }
+
+        // UTF-8 path: combined bounds check + char-to-byte in a single pass
+        // str_utf8_char_to_byte returns STR_NPOS if index is out of range
         size_t byte_offset = str_utf8_char_to_byte(chars, byte_len, (size_t)index);
         if (byte_offset == STR_NPOS) { return ItemNull; }
         // get the UTF-8 character length (1-4 bytes)
@@ -787,6 +806,11 @@ Item item_at(Item data, int index) {
         if (type_id == LMD_TYPE_SYMBOL) {
             Symbol* ch_sym = heap_create_symbol(chars + byte_offset, ch_len);
             return {.item = y2it(ch_sym)};
+        }
+        // for single-byte ASCII chars in a UTF-8 string, use interned table
+        if (ch_len == 1 && (unsigned char)chars[byte_offset] < 128) {
+            String* interned = get_ascii_char_string((unsigned char)chars[byte_offset]);
+            if (interned) return {.item = s2it(interned)};
         }
         String *ch_str = heap_strcpy((char*)(chars + byte_offset), (int)ch_len);
         return {.item = s2it(ch_str)};

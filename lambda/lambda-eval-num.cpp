@@ -2,6 +2,7 @@
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include <stdarg.h>
 #include <time.h>
 #include <cstdlib>  // for abs function
@@ -1830,6 +1831,7 @@ Item fn_binary(Item item) {
         }
 
         str->len = len;
+        str->is_ascii = str_is_ascii(chars, len) ? 1 : 0;
         memcpy(str->chars, chars, len);
         str->chars[len] = '\0';
 
@@ -1851,6 +1853,7 @@ Item fn_binary(Item item) {
         }
 
         str->len = len;
+        str->is_ascii = 1;  // numeric strings are always ASCII
         memcpy(str->chars, buf, len);
         str->chars[len] = '\0';
 
@@ -1873,6 +1876,7 @@ Item fn_binary(Item item) {
         }
 
         str->len = len;
+        str->is_ascii = 1;  // numeric strings are always ASCII
         memcpy(str->chars, buf, len);
         str->chars[len] = '\0';
 
@@ -1895,6 +1899,7 @@ Item fn_binary(Item item) {
         }
 
         str->len = len;
+        str->is_ascii = 1;  // numeric strings are always ASCII
         memcpy(str->chars, buf, len);
         str->chars[len] = '\0';
 

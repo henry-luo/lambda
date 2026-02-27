@@ -43,6 +43,7 @@ protected:
     Item parse_latex(const char* latex_source) {
         String* type_str = (String*)pool_alloc(pool, sizeof(String) + 6);
         type_str->len = 5;
+        type_str->is_ascii = 1;
         strcpy(type_str->chars, "latex");
 
         Input* input = input_from_source(latex_source, nullptr, type_str, nullptr);
