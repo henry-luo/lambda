@@ -755,6 +755,10 @@ typedef struct BoundaryProp {
     BoxShadow* box_shadow;       // Linked list of box shadows
     float collapsed_through_mb;  // CSS 2.1 §8.3.1: margin transferred from descendants via
                                  // parent-child bottom margin collapse (the inflated portion)
+    bool clearance_in_margin_chain;  // CSS 2.1 §8.3.1: true if this element's bottom margin
+                                     // includes contribution from a self-collapsing element
+                                     // with clearance. Such margins must NOT collapse with
+                                     // the parent block's bottom margin.
 } BoundaryProp;
 
 // Vector path segment for PDF/SVG path rendering

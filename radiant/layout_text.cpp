@@ -564,9 +564,11 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
         // Get the codepoint and apply text-transform
         uint32_t codepoint = *str;
+        int char_bytes = 1;
         if (codepoint >= 128) {
             int bytes = str_utf8_decode((const char*)str, (size_t)(text_end - str), &codepoint);
             if (bytes <= 0) codepoint = *str;
+            else char_bytes = bytes;
         }
         codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         // CSS font-variant: small-caps — convert lowercase to uppercase
@@ -582,8 +584,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // Check for Unicode space characters with defined widths
         float unicode_space_em = get_unicode_space_width_em(codepoint);
         if (unicode_space_em < 0.0f) {
-            // Zero-width character - skip with no width contribution
-            // (e.g., U+200B ZWSP, U+FEFF ZWNBSP/BOM)
+            // Zero-width character — U+200B (ZWSP) is a break opportunity like space
+            if (codepoint == 0x200B) return RDT_LINE_NOT_FILLED;
+            // Other zero-width chars (BOM, ZWJ, ZWNJ): skip with no width
         } else if (unicode_space_em > 0.0f) {
             // Use Unicode-specified width (fraction of em)
             float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
@@ -601,7 +604,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // CSS 2.1 §16.4: letter-spacing is added after every character
         // Browsers include trailing letter-spacing in text width (getBoundingClientRect)
         text_width += lycon->font.style->letter_spacing;
-        str++;
+        str += char_bytes;
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
@@ -965,7 +968,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             float unicode_space_em = get_unicode_space_width_em(codepoint);
             if (unicode_space_em < 0.0f) {
                 // Zero-width character (e.g., U+200B ZWSP, U+FEFF ZWNBSP/BOM)
-                // Skip with no width contribution, just advance the string pointer
+                // U+200B ZWSP is a line-break opportunity per Unicode Line Breaking Algorithm
+                // U+FEFF BOM/ZWNBSP and U+200C/U+200D ZWJ/ZWNJ are NOT break opportunities
+                if (codepoint == 0x200B && wrap_lines) {
+                    // ZWSP: record as break opportunity with zero width
+                    str = next_ch;
+                    lycon->line.last_space = str;
+                    lycon->line.last_space_pos = rect->width;
+                    lycon->line.last_space_is_hyphen = false;
+                    lycon->line.is_line_start = false;
+                    lycon->line.has_space = false;
+                    lycon->line.trailing_space_width = 0;
+                    continue;
+                }
+                // Other zero-width characters: skip with no width contribution
                 str = next_ch;
                 lycon->line.is_line_start = false;
                 lycon->line.has_space = false;

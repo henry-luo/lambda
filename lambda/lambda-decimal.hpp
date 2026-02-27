@@ -149,6 +149,25 @@ Item decimal_neg(Item a, EvalContext* ctx);
 Item decimal_abs(Item a, EvalContext* ctx);
 
 // ─────────────────────────────────────────────────────────────────────
+// Rounding Operations
+// ─────────────────────────────────────────────────────────────────────
+
+// Floor: round toward negative infinity
+Item decimal_floor(Item a, EvalContext* ctx);
+
+// Ceil: round toward positive infinity
+Item decimal_ceil(Item a, EvalContext* ctx);
+
+// Round: round to nearest integer
+Item decimal_round(Item a, EvalContext* ctx);
+
+// Truncate: round toward zero (removes fractional part)
+Item decimal_trunc(Item a, EvalContext* ctx);
+
+// Convert decimal Item to int64 (truncates toward zero)
+int64_t decimal_to_int64(Item item);
+
+// ─────────────────────────────────────────────────────────────────────
 // Comparison
 // ─────────────────────────────────────────────────────────────────────
 

@@ -28,6 +28,7 @@
 #include "../radiant/layout_graph.hpp"
 #include "../radiant/graph_to_svg.hpp"
 #include "../radiant/graph_theme.hpp"
+#include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/input-graph.h"
 
 // Network module includes
@@ -95,6 +96,11 @@ extern int view_doc_in_window_with_events(const char* doc_file, const char* even
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
 void transpile_ast_root(Transpiler* tp, AstScript *script);
+
+// DOM functions from radiant (for JS --document support)
+extern Element* get_html_root_element(Input* input);
+extern DomDocument* dom_document_create(Input* input);
+extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // External function declarations
 extern "C" {
@@ -882,16 +888,18 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda JavaScript Transpiler v1.0\n\n");
-            printf("Usage: %s js [file.js]\n", argv[0]);
+            printf("Usage: %s js [file.js] [--document page.html]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'js' command runs the JavaScript transpiler.\n");
             printf("  If no file is provided, it runs built-in test cases.\n");
             printf("  If a file is provided, it transpiles and executes the JavaScript.\n");
             printf("\nOptions:\n");
-            printf("  -h, --help     Show this help message\n");
+            printf("  -h, --help              Show this help message\n");
+            printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("\nExamples:\n");
             printf("  %s js                             # Run built-in tests\n", argv[0]);
             printf("  %s js test.js                     # Transpile and run test.js\n", argv[0]);
+            printf("  %s js script.js --document page.html  # Run JS with DOM access\n", argv[0]);
             log_finish();
             return 0;
         }
@@ -900,14 +908,58 @@ int main(int argc, char *argv[]) {
         runtime_init(&runtime);
 
         if (argc >= 3) {
-            // Test specific JavaScript file
+            // Parse arguments: js file.js [--document page.html]
             const char* js_file = argv[2];
+            const char* html_file = NULL;
+            for (int i = 3; i < argc; i++) {
+                if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) {
+                    html_file = argv[++i];
+                }
+            }
+
             char* js_source = read_text_file(js_file);
             if (!js_source) {
                 printf("Error: Could not read file '%s'\n", js_file);
                 runtime_cleanup(&runtime);
                 log_finish();
                 return 1;
+            }
+
+            // If --document is provided, load HTML and set up DOM context
+            if (html_file) {
+                // Parse HTML into Lambda Element tree
+                char* html_content = read_text_file(html_file);
+                if (!html_content) {
+                    printf("Error: Could not read HTML file '%s'\n", html_file);
+                    free(js_source);
+                    runtime_cleanup(&runtime);
+                    log_finish();
+                    return 1;
+                }
+
+                // Use heap-allocated String* for type param (flexible array member)
+                String* html_type = (String*)malloc(sizeof(String) + 5);
+                html_type->len = 4;
+                memcpy(html_type->chars, "html", 5);  // includes null terminator
+                Input* input = input_from_source(html_content, NULL, html_type, NULL);
+                free(html_content);
+                free(html_type);
+
+                if (input) {
+                    Element* html_root = get_html_root_element(input);
+                    if (html_root) {
+                        DomDocument* dom_doc = dom_document_create(input);
+                        if (dom_doc) {
+                            DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, NULL);
+                            if (dom_root) {
+                                dom_doc->root = dom_root;
+                                dom_doc->html_root = html_root;
+                                runtime.dom_doc = (void*)dom_doc;
+                                log_debug("Loaded HTML document: root=<%s>", dom_root->tag_name);
+                            }
+                        }
+                    }
+                }
             }
 
             Item result = transpile_js_to_c(&runtime, js_source, js_file);
