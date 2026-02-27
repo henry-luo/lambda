@@ -599,7 +599,8 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             log_error("input_from_source: Failed to create input for type '%s'", effective_type);
             return NULL;
         }
-        context.pool = input->pool;  context.consts = NULL;
+        context.pool = input->pool;  context.arena = input->arena;
+        context.consts = NULL;
         context.cwd = NULL;  context.run_main = false;
         context.disable_string_merging = false;  // default: allow string merging
         input_context = &context;

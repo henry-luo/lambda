@@ -26,19 +26,19 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 // Detect if memory content is SVG by checking for XML/SVG signature
 static bool is_svg_content(const unsigned char* data, size_t size) {
     if (!data || size < 10) return false;
-    
+
     // Skip UTF-8 BOM if present
     size_t offset = 0;
     if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
         offset = 3;
     }
-    
+
     // Skip whitespace
-    while (offset < size && (data[offset] == ' ' || data[offset] == '\t' || 
+    while (offset < size && (data[offset] == ' ' || data[offset] == '\t' ||
                               data[offset] == '\n' || data[offset] == '\r')) {
         offset++;
     }
-    
+
     // Check for XML declaration or SVG tag
     if (size - offset >= 5) {
         if (strncmp((const char*)data + offset, "<?xml", 5) == 0 ||
@@ -59,14 +59,14 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_error("Failed to parse URL: %s", img_url);
         return NULL;
     }
-    
+
     // Check if this is an HTTP URL
     bool is_http = (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS);
     char* file_path = nullptr;
     char* temp_file_path = nullptr;
     unsigned char* downloaded_data = nullptr;
     size_t downloaded_size = 0;
-    
+
     if (is_http) {
         // Download the image from HTTP URL
         const char* url_str = url_get_href(abs_url);
@@ -110,7 +110,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     int slen = strlen(file_path);
     // load image data
     log_debug("loading image at: %s", file_path);
-    
+
     // Determine if this is an SVG - check content for HTTP, extension for local files
     bool is_svg = false;
     if (is_http && downloaded_data) {
@@ -119,7 +119,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     } else {
         is_svg = (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0);
     }
-    
+
     if (is_svg) {
         surface = (ImageSurface *)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
         surface->format = IMAGE_FORMAT_SVG;
@@ -185,11 +185,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
 /**
  * Create a ThorVG Picture from an ImageSurface
- * 
+ *
  * This provides unified image loading for ThorVG integration - images are
  * loaded once via Radiant's load_image() and can then be used with ThorVG
  * rendering without needing ThorVG's image loaders.
- * 
+ *
  * @param surface The ImageSurface containing RGBA pixel data
  * @return ThorVG Paint object (Picture) or nullptr on failure
  *         Caller is responsible for managing the ThorVG object lifecycle
@@ -199,19 +199,19 @@ Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface) {
         log_debug("create_tvg_picture_from_surface: invalid surface");
         return nullptr;
     }
-    
+
     // skip SVG surfaces - they already have a ThorVG picture
     if (surface->format == IMAGE_FORMAT_SVG && surface->pic) {
         log_debug("create_tvg_picture_from_surface: surface is SVG, returning existing pic");
         return surface->pic;
     }
-    
+
     Tvg_Paint pic = tvg_picture_new();
     if (!pic) {
         log_debug("create_tvg_picture_from_surface: failed to create picture");
         return nullptr;
     }
-    
+
     // Load raw RGBA pixels into ThorVG Picture
     // Note: TVG_COLORSPACE_ARGB8888 matches Radiant's pixel format (BGRA with alpha in high byte)
     Tvg_Result result = tvg_picture_load_raw(
@@ -222,13 +222,13 @@ Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface) {
         TVG_COLORSPACE_ABGR8888,  // Match Radiant's ABGR format (alpha, blue, green, red)
         false  // Don't copy - surface manages memory, caller must ensure surface outlives picture
     );
-    
+
     if (result != TVG_RESULT_SUCCESS) {
         log_debug("create_tvg_picture_from_surface: tvg_picture_load_raw failed (%d)", result);
         tvg_paint_unref(pic, true);
         return nullptr;
     }
-    
+
     log_debug("create_tvg_picture_from_surface: created %dx%d picture", surface->width, surface->height);
     return pic;
 }
@@ -334,7 +334,7 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     }
 }
 
-// Bilinear interpolation helper function
+// Bilinear interpolation helper function (for upscaling or 1:1)
 static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
     int x1 = (int)src_x;
     int y1 = (int)src_y;
@@ -371,6 +371,56 @@ static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
+// Area averaging helper for downscaling: averages all source pixels in the box [x0,x1) x [y0,y1)
+// This produces much better quality than bilinear when shrinking by >2x
+static uint32_t area_average(ImageSurface* src, float x0, float y0, float x1, float y1) {
+    // clamp to source bounds
+    int ix0 = std::max(0, (int)x0);
+    int iy0 = std::max(0, (int)y0);
+    int ix1 = std::min(src->width, (int)(x1 + 1.0f));
+    int iy1 = std::min(src->height, (int)(y1 + 1.0f));
+
+    if (ix0 >= ix1 || iy0 >= iy1) return 0;
+
+    float sum_r = 0, sum_g = 0, sum_b = 0, sum_a = 0;
+    float total_weight = 0;
+
+    for (int y = iy0; y < iy1; y++) {
+        // compute vertical weight: fraction of this row that falls within [y0, y1]
+        float wy = 1.0f;
+        if (y < y0) wy = 1.0f - (y0 - y);        // partial top row
+        if (y + 1 > y1) wy = y1 - y;              // partial bottom row
+        if (wy <= 0) continue;
+
+        uint8_t* row = (uint8_t*)src->pixels + y * src->pitch;
+        for (int x = ix0; x < ix1; x++) {
+            // compute horizontal weight: fraction of this column within [x0, x1]
+            float wx = 1.0f;
+            if (x < x0) wx = 1.0f - (x0 - x);    // partial left column
+            if (x + 1 > x1) wx = x1 - x;          // partial right column
+            if (wx <= 0) continue;
+
+            float w = wx * wy;
+            uint32_t pixel = *((uint32_t*)(row + x * 4));
+            sum_r += (pixel & 0xFF) * w;
+            sum_g += ((pixel >> 8) & 0xFF) * w;
+            sum_b += ((pixel >> 16) & 0xFF) * w;
+            sum_a += ((pixel >> 24) & 0xFF) * w;
+            total_weight += w;
+        }
+    }
+
+    if (total_weight <= 0) return 0;
+
+    float inv = 1.0f / total_weight;
+    uint8_t r = (uint8_t)std::min(255.0f, sum_r * inv + 0.5f);
+    uint8_t g = (uint8_t)std::min(255.0f, sum_g * inv + 0.5f);
+    uint8_t b = (uint8_t)std::min(255.0f, sum_b * inv + 0.5f);
+    uint8_t a = (uint8_t)std::min(255.0f, sum_a * inv + 0.5f);
+
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
+
 // Enhanced blit function with support for different scaling modes
 void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode) {
     Rect rect;
@@ -393,6 +443,7 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
+    bool downscaling = (x_ratio > 1.5f || y_ratio > 1.5f); // use area averaging for significant downscales
     int left = (int)std::max(clip->left, dst_rect->x);
     int right = (int)std::min(clip->right, dst_rect->x + dst_rect->width);
     int top = (int)std::max(clip->top, dst_rect->y);
@@ -408,8 +459,16 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (j * 4);
 
             uint32_t src_color;
-            if (scale_mode == SCALE_MODE_LINEAR) {
-                // Bilinear interpolation
+            if (scale_mode == SCALE_MODE_LINEAR && downscaling) {
+                // area averaging: average all source pixels mapping to this destination pixel
+                float box_x0 = src_rect->x + (j - dst_rect->x) * x_ratio;
+                float box_y0 = src_rect->y + (i - dst_rect->y) * y_ratio;
+                float box_x1 = box_x0 + x_ratio;
+                float box_y1 = box_y0 + y_ratio;
+                src_color = area_average(src, box_x0, box_y0, box_x1, box_y1);
+            }
+            else if (scale_mode == SCALE_MODE_LINEAR) {
+                // Bilinear interpolation (for upscaling or near-1:1)
                 src_color = bilinear_interpolate(src, src_x, src_y);
             }
             else { // Nearest neighbor scaling (default)

@@ -225,8 +225,8 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
     }
 
-    // Add text decoration
-    if (ctx->font.style->text_deco != CSS_VALUE_NONE) {
+    // Add text decoration (skip _UNDEF which means no decoration set)
+    if (ctx->font.style->text_deco != CSS_VALUE_NONE && ctx->font.style->text_deco != CSS_VALUE__UNDEF) {
         if (ctx->font.style->text_deco == CSS_VALUE_UNDERLINE) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"underline\"");
         } else if (ctx->font.style->text_deco == CSS_VALUE_OVERLINE) {
@@ -291,7 +291,7 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             svg_color_to_string(border->left_color, border_color);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%d\" height=\"%.2f\" fill=\"%s\" />\n",
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"%.2f\" fill=\"%s\" />\n",
                 x, y, border->width.left, height, border_color);
         }
 
@@ -301,7 +301,7 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             svg_color_to_string(border->right_color, border_color);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%d\" height=\"%.2f\" fill=\"%s\" />\n",
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"%.2f\" fill=\"%s\" />\n",
                 x + width - border->width.right, y, border->width.right, height, border_color);
         }
 
@@ -311,7 +311,7 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             svg_color_to_string(border->top_color, border_color);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%d\" fill=\"%s\" />\n",
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
                 x, y, width, border->width.top, border_color);
         }
 
@@ -321,7 +321,7 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             svg_color_to_string(border->bottom_color, border_color);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%d\" fill=\"%s\" />\n",
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
                 x, y + height - border->width.bottom, width, border->width.bottom, border_color);
         }
     }

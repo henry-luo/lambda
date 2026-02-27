@@ -22,6 +22,11 @@ typedef struct EventContext {
     char* new_target;
     bool need_repaint;
 
+    // iframe bridging: when target is inside an iframe, this points to the
+    // iframe block in the parent document so events can propagate across
+    // the iframe boundary
+    View* iframe_container;
+
     UiContext* ui_context;
 } EventContext;
 
@@ -29,7 +34,7 @@ typedef struct EventContext {
  * Calculate character offset from mouse click position within a text rect
  * Returns the character offset closest to the click position
  */
-int calculate_char_offset_from_position(EventContext* evcon, ViewText* text, 
+int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, int mouse_x, int mouse_y);
 
 /**
