@@ -1748,8 +1748,17 @@ bool dom_element_is_first_child(DomElement* element) {
         return false;
     }
 
+    // CSS 2.1 §5.11.1: :first-child matches an element that is the first
+    // child ELEMENT of its parent. Text nodes are not counted.
     DomElement* parent = static_cast<DomElement*>(element->parent);
-    return parent->first_child == element;
+    DomNode* child = parent->first_child;
+    while (child) {
+        if (child->is_element()) {
+            return child == (DomNode*)element;
+        }
+        child = child->next_sibling;
+    }
+    return false;
 }
 
 bool dom_element_is_last_child(DomElement* element) {
@@ -1757,7 +1766,16 @@ bool dom_element_is_last_child(DomElement* element) {
         return false;
     }
 
-    return element->next_sibling == NULL;
+    // CSS 2.1 §5.11.1: :last-child matches an element that is the last
+    // child ELEMENT of its parent. Text nodes after it are not counted.
+    DomNode* sibling = element->next_sibling;
+    while (sibling) {
+        if (sibling->is_element()) {
+            return false;
+        }
+        sibling = sibling->next_sibling;
+    }
+    return true;
 }
 
 bool dom_element_is_only_child(DomElement* element) {
@@ -1765,8 +1783,9 @@ bool dom_element_is_only_child(DomElement* element) {
         return false;
     }
 
-    DomElement* parent = static_cast<DomElement*>(element->parent);
-    return parent->first_child == element && element->next_sibling == NULL;
+    // CSS Selectors §6.6.1.6: :only-child matches when the element is the
+    // only child ELEMENT of its parent. Equivalent to :first-child:last-child.
+    return dom_element_is_first_child(element) && dom_element_is_last_child(element);
 }
 
 int dom_element_get_child_index(DomElement* element) {

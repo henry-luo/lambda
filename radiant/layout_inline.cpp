@@ -10,6 +10,20 @@ extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBl
 extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
 extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
 
+// Check if a view child is absolutely or fixed positioned (out of flow)
+static inline bool is_out_of_flow_child(View* child) {
+    DomNode* node = (DomNode*)child;
+    if (node->is_element()) {
+        DomElement* elem = static_cast<DomElement*>(node);
+        if (elem->position &&
+            (elem->position->position == CSS_VALUE_ABSOLUTE ||
+             elem->position->position == CSS_VALUE_FIXED)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
@@ -35,13 +49,14 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         return;
     }
 
-    // Skip nil-views (RDT_VIEW_NONE) — they don't participate in layout
-    // and have default coordinates (0,0,0,0) that would corrupt bounding box
-    while (child && child->view_type == RDT_VIEW_NONE) {
+    // Skip nil-views (RDT_VIEW_NONE) and out-of-flow children (absolute/fixed) —
+    // they don't participate in normal flow layout and have positions determined
+    // by their containing block, not the inline span (CSS 2.1 §9.3.1, §10.6.3)
+    while (child && (child->view_type == RDT_VIEW_NONE || is_out_of_flow_child(child))) {
         child = child->next();
     }
     if (!child) {
-        // All children are nil-views — treat as empty
+        // All children are nil-views or out-of-flow — treat as empty
         span->width = 0;
         span->height = 0;
         return;
@@ -56,8 +71,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     // Iterate through remaining children to find union
     child = child->next();
     while (child) {
-        // Skip nil-views
-        if (child->view_type == RDT_VIEW_NONE) {
+        // Skip nil-views and out-of-flow children (absolute/fixed positioned)
+        if (child->view_type == RDT_VIEW_NONE || is_out_of_flow_child(child)) {
             child = child->next();
             continue;
         }
@@ -345,6 +360,36 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.vertical_align = span->in_line->vertical_align;
         lycon->line.vertical_align_offset = span->in_line->vertical_align_offset;
     }
+
+    // CSS 2.1 §10.8.1: Each inline box uses its own 'line-height' property for
+    // the half-leading model, not the parent block's line-height. Save the block's
+    // line-height and resolve the inline element's own line-height if specified.
+    // Only re-resolve when the element has its own explicit line-height declaration
+    // (via CSS line-height property or font shorthand). For inherited line-heights,
+    // the parent block's already-resolved value is correct (CSS 2.1 specifies that
+    // <length>/<percentage> line-heights inherit the computed value).
+    float pa_line_height = lycon->block.line_height;
+    bool pa_line_height_is_normal = lycon->block.line_height_is_normal;
+    // Check the element's specified_style for an explicit line-height or font shorthand
+    // declaration. If neither is present, line-height is inherited and the parent's
+    // resolved value is already correct in lycon->block.line_height.
+    bool has_own_line_height = false;
+    if (elmt->is_element()) {
+        DomElement* dom_elmt = static_cast<DomElement*>(elmt);
+        if (dom_elmt->specified_style) {
+            has_own_line_height =
+                style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
+                style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_FONT) != nullptr;
+        }
+    }
+    if (has_own_line_height) {
+        setup_line_height(lycon, (ViewBlock*)span);
+        // Track if this inline's line-height exceeds the parent block's,
+        // so line_break() knows to respect the expanded line box height.
+        if (lycon->block.line_height > pa_line_height) {
+            lycon->line.has_expanded_inline_lh = true;
+        }
+    }
     // line.max_ascender and max_descender to be changed only when there's output from the span
 
     // layout inline content
@@ -416,6 +461,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         lycon->font = pa_font;
         lycon->line.vertical_align = pa_line_align;
+        lycon->block.line_height = pa_line_height;
+        lycon->block.line_height_is_normal = pa_line_height_is_normal;
         return;
     }
 
@@ -507,6 +554,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->line.vertical_align_offset = pa_valign_offset;
+    lycon->block.line_height = pa_line_height;
+    lycon->block.line_height_is_normal = pa_line_height_is_normal;
     log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
 }

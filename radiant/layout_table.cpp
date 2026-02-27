@@ -3378,7 +3378,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                     }
                 }
             }
-            caption->width = (float)caption_width;  // Also set width explicitly
+            caption->width = (float)caption_width;  // Preliminary width; final width set during positioning
             log_debug("Caption layout end: caption->height=%.1f (given=%.1f, content=%.1f), advance_y=%.1f",
                 caption->height, caption_given_height, caption_content_height, lycon->block.advance_y);
             lycon->block = saved_block;
@@ -4046,6 +4046,9 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
     DomElement* cell_elem = cell->as_element();
 
+    // CSS 2.1 §16.5: Resolve inherited text-transform for cell text measurement
+    CssEnum cell_text_transform = get_element_text_transform(cell_elem);
+
     // Check if the cell will have pseudo-element generated content (::before/::after)
     // Note: at measurement time, pseudo elements haven't been generated yet,
     // so we check the CSS styles directly via dom_element_has_before/after_content()
@@ -4154,7 +4157,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 // Use unified intrinsic sizing API - measures both widths in one call
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len);
+                    lycon, measure_text, measure_len, cell_text_transform);
 
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
@@ -4277,7 +4280,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
             size_t content_len = strlen(content);
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, content, content_len);
+                lycon, content, content_len, cell_text_transform);
 
             float text_max = (float)widths.max_content;
             float text_min = (float)widths.min_content;
@@ -5148,18 +5151,28 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (explicit_table_width == 0) {
         // Try to get container width from parent element first
         int container_width = 0;
-        ViewBlock* parent = (ViewBlock*)table->parent;
-        if (parent && parent->width > 0) {
-            // Parent width is the content area width (already excludes parent's border/padding)
-            container_width = (int)parent->width;
-            // If parent has border/padding, its content area is what's available
-            if (parent->bound) {
-                if (parent->bound->border) {
-                    container_width -= (int)(parent->bound->border->width.left + parent->bound->border->width.right);
+
+        // CSS 2.1 §9.5 + §17.5.2.2: For auto-width tables inside a BFC that avoids
+        // floats, use lycon->block.content_width which already accounts for float
+        // avoidance width reduction computed by layout_block().
+        if (lycon->block.content_width > 0) {
+            container_width = (int)lycon->block.content_width;
+            log_debug("Container width from lycon content_width (BFC float avoidance): %dpx", container_width);
+        }
+
+        // Fallback to parent element width
+        if (container_width <= 0) {
+            ViewBlock* parent = (ViewBlock*)table->parent;
+            if (parent && parent->width > 0) {
+                container_width = (int)parent->width;
+                if (parent->bound) {
+                    if (parent->bound->border) {
+                        container_width -= (int)(parent->bound->border->width.left + parent->bound->border->width.right);
+                    }
+                    container_width -= parent->bound->padding.left + parent->bound->padding.right;
                 }
-                container_width -= parent->bound->padding.left + parent->bound->padding.right;
+                log_debug("Container width from parent element: %dpx (parent->width=%.1f)", container_width, parent->width);
             }
-            log_debug("Container width from parent element: %dpx (parent->width=%.1f)", container_width, parent->width);
         }
 
         // Fallback to line bounds
@@ -5678,11 +5691,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Check if caption needs re-layout due to width change
         // This happens because caption was laid out before table width was calculated
         float old_width = caption->width;
-        caption->width = table_width;
+        // CSS 2.1 §17.4: Caption is a block box. Respect explicit CSS width if set.
+        if (caption->blk && caption->blk->given_width > 0) {
+            caption->width = caption->blk->given_width;
+            if (caption->blk->box_sizing != CSS_VALUE_BORDER_BOX && caption->bound) {
+                caption->width += caption->bound->padding.left + caption->bound->padding.right;
+                if (caption->bound->border) {
+                    caption->width += caption->bound->border->width.left + caption->bound->border->width.right;
+                }
+            }
+        } else {
+            caption->width = table_width;
+        }
 
         // If the width changed significantly, re-layout caption content to reflow text
-        if (fabs(table_width - old_width) > 0.5f) {
-            log_debug("Caption width changed: %.1f -> %.1f, re-laying out content", old_width, table_width);
+        if (fabs(caption->width - old_width) > 0.5f) {
+            log_debug("Caption width changed: %.1f -> %.1f, re-laying out content", old_width, caption->width);
 
             // Reset child views before re-layout
             // This is necessary because the DOM children still have their old view state
@@ -5709,7 +5733,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             View* saved_view = lycon->view;
 
             // Calculate content width by subtracting padding and border (CSS box model)
-            float content_width = (float)table_width;
+            float content_width = caption->width;
             if (caption->bound) {
                 content_width -= caption->bound->padding.left + caption->bound->padding.right;
                 if (caption->bound->border) {
@@ -6741,7 +6765,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // Check if caption needs re-layout due to width change (same as top caption)
         float old_width = caption->width;
-        caption->width = table_width;
+        // CSS 2.1 §17.4: Caption is a block box. Respect explicit CSS width if set.
+        if (caption->blk && caption->blk->given_width > 0) {
+            caption->width = caption->blk->given_width;
+            if (caption->blk->box_sizing != CSS_VALUE_BORDER_BOX && caption->bound) {
+                caption->width += caption->bound->padding.left + caption->bound->padding.right;
+                if (caption->bound->border) {
+                    caption->width += caption->bound->border->width.left + caption->bound->border->width.right;
+                }
+            }
+        } else {
+            caption->width = table_width;
+        }
 
         if (fabs(table_width - old_width) > 0.5f) {
             log_debug("Bottom caption width changed: %.1f -> %.1f, re-laying out content", old_width, table_width);
@@ -6766,7 +6801,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             View* saved_view = lycon->view;
 
             // Calculate content width by subtracting padding and border
-            float content_width = (float)table_width;
+            float content_width = caption->width;
             if (caption->bound) {
                 content_width -= caption->bound->padding.left + caption->bound->padding.right;
                 if (caption->bound->border) {

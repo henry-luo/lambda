@@ -448,16 +448,31 @@ CssEnum map_font_weight(const CssValue* value) {
         }
     }
     else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        // numeric weights: map to closest keyword or return as-is
+        // CSS 2.1 §15.6: numeric weights map to nearest keyword
         int weight = (int)value->data.number.value;
-        // uses enum values for numeric weights, but for simplicity
-        // we'll map common numeric values to their keyword equivalents
-        if (weight <= 350) return CSS_VALUE_LIGHTER;
-        if (weight <= 550) return CSS_VALUE_NORMAL;  // 400
-        if (weight <= 750) return CSS_VALUE_BOLD;    // 700
-        return CSS_VALUE_BOLDER;  // 900
+        if (weight <= 400) return CSS_VALUE_NORMAL;
+        if (weight <= 500) return CSS_VALUE_NORMAL;  // 500 maps to normal
+        return CSS_VALUE_BOLD;  // 600-900 maps to bold
     }
     return CSS_VALUE_NORMAL; // default
+}
+
+// Extract numeric weight (100-900) from CSS value for precise font matching
+static int16_t map_font_weight_numeric(const CssValue* value) {
+    if (!value) return 0;
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        int weight = (int)value->data.number.value;
+        if (weight >= 100 && weight <= 900) return (int16_t)weight;
+        return 0;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        switch (value->data.keyword) {
+            case CSS_VALUE_NORMAL: return 400;
+            case CSS_VALUE_BOLD: return 700;
+            default: return 0; // bolder/lighter need inheritance computation
+        }
+    }
+    return 0;
 }
 
 // Specificity Calculation
@@ -2072,6 +2087,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_FONT_SIZE,
         CSS_PROPERTY_FONT_WEIGHT,
         CSS_PROPERTY_FONT_STYLE,
+        CSS_PROPERTY_FONT_VARIANT,
         CSS_PROPERTY_COLOR,
         CSS_PROPERTY_LINE_HEIGHT,
         CSS_PROPERTY_TEXT_ALIGN,
@@ -2084,6 +2100,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_VISIBILITY,
         CSS_PROPERTY_EMPTY_CELLS,
         CSS_PROPERTY_DIRECTION,
+        CSS_PROPERTY_LIST_STYLE_POSITION,
+        CSS_PROPERTY_LIST_STYLE_TYPE,
+        CSS_PROPERTY_LIST_STYLE,
     };
     static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
 
@@ -2508,10 +2527,43 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 // CSS 2.1 §15.8: font shorthand includes font-variant
                                 span->font->font_variant = CSS_VALUE_SMALL_CAPS;
                                 log_debug("[CSS] Font shorthand: set font-variant = small-caps");
+                            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE) {
+                                // CSS 2.1 §15.7: named font-size keywords (xx-small..xx-large)
+                                // These can appear in font shorthand as the font-size component
+                                size_value = v;
+                                // Check if next value is "/line-height"
+                                if (i + 2 < count) {
+                                    CssValue* maybe_slash = value->data.list.values[i + 1];
+                                    if (maybe_slash && maybe_slash->type == CSS_VALUE_TYPE_CUSTOM &&
+                                        maybe_slash->data.custom_property.name &&
+                                        strcmp(maybe_slash->data.custom_property.name, "/") == 0 &&
+                                        i + 2 < count) {
+                                        line_height_value = value->data.list.values[i + 2];
+                                        int next_idx = i + 3;
+                                        family_start_index = next_idx;
+                                        if (family_start_index < count) {
+                                            family_value = value->data.list.values[family_start_index];
+                                        }
+                                        break;
+                                    }
+                                }
+                                // Everything after size is font-family
+                                family_start_index = i + 1;
+                                if (family_start_index < count) {
+                                    family_value = value->data.list.values[family_start_index];
+                                }
+                                break;
                             } else if (v->data.keyword >= CSS_VALUE_SERIF && v->data.keyword <= CSS_VALUE_FANGSONG) {
                                 // Generic font family keyword
                                 family_value = v;
                             }
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                        // CSS 2.1 §15.6: numeric font-weight values (100, 200, ..., 900)
+                        int val = (int)v->data.number.value;
+                        if (val >= 1 && val <= 1000) {
+                            weight_value = v;
+                            log_debug("[CSS] Font shorthand: found numeric weight %d", val);
                         }
                     } else if (v->type == CSS_VALUE_TYPE_STRING) {
                         // String is font-family name
@@ -2565,7 +2617,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Apply font-weight if specified
                 if (weight_value) {
                     span->font->font_weight = map_font_weight(weight_value);
-                    log_debug("[CSS] Font shorthand: set font-weight");
+                    span->font->font_weight_numeric = map_font_weight_numeric(weight_value);
+                    log_debug("[CSS] Font shorthand: set font-weight (numeric=%d)", span->font->font_weight_numeric);
                 }
 
                 // Apply font-style if specified
@@ -2647,8 +2700,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->font = alloc_font_prop(lycon);
                 log_debug("[CSS]   Created new FontProp with defaults");
             }
-            // map CSS font weight to enum
+            // map CSS font weight to enum and preserve numeric value
             span->font->font_weight = map_font_weight(value);
+            span->font->font_weight_numeric = map_font_weight_numeric(value);
             break;
         }
 
@@ -7640,10 +7694,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LIST_STYLE_POSITION: {
             log_debug("[CSS] Processing list-style-position property");
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                if (!block->blk) {
-                    block->blk = alloc_block_prop(lycon);
-                }
                 CssEnum position = value->data.keyword;
                 block->blk->list_style_position = position;
                 if (position > 0) {
@@ -7652,6 +7706,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 } else {
                     const CssEnumInfo* info = css_enum_info(position);
                     log_debug("[CSS] list-style-position: %s (stored)", info ? info->name : "unknown");
+                }
+            }
+            // CSS 2.1 §12.5.1: "inside" and "outside" may arrive as CSS_VALUE_TYPE_CUSTOM
+            // when not in the CssEnum table. Handle them by name comparison.
+            else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                const char* name = value->data.custom_property.name;
+                if (strcmp(name, "inside") == 0) {
+                    block->blk->list_style_position = (CssEnum)1;  // 1 = inside
+                    log_debug("[CSS] list-style-position: inside (from custom)");
+                } else if (strcmp(name, "outside") == 0) {
+                    block->blk->list_style_position = (CssEnum)2;  // 2 = outside
+                    log_debug("[CSS] list-style-position: outside (from custom)");
                 }
             }
             break;
@@ -7849,7 +7915,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Parse list of name-value pairs
                 log_debug("[CSS] counter-reset list with %d items", value->data.list.count);
-                StringBuf* sb = stringbuf_new(lycon->pool);
+                StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
 
                 if (!sb) {
                     log_error("[CSS] counter-reset: stringbuf_new failed!");
@@ -7911,7 +7977,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 int count = value->data.list.count;
                 log_debug("[CSS] counter-increment: list.count=%d", count);
                 log_debug("[CSS] counter-increment: about to call stringbuf_new");
-                StringBuf* sb = stringbuf_new(lycon->pool);
+                StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
                 log_debug("[CSS] counter-increment: stringbuf created at %p", (void*)sb);
 
                 if (!sb) {
