@@ -190,6 +190,17 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum text_transform = CSS_VALUE_NONE);
 
 /**
+ * Compute text height when constrained to a given width (CSS Flexbox §9.4).
+ * Simulates line breaking to determine how many lines the text would wrap into.
+ */
+float compute_text_height_at_width(LayoutContext* lycon,
+                                    const char* text,
+                                    size_t length,
+                                    float available_width,
+                                    float line_height,
+                                    CssEnum text_transform = CSS_VALUE_NONE);
+
+/**
  * Measure element intrinsic widths recursively.
  *
  * Traverses child elements and computes aggregate intrinsic widths
@@ -199,7 +210,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
  * @param element DOM element to measure
  * @return IntrinsicSizes with min and max content widths
  */
-IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element);
+IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
+                                                 bool content_only = false);
 
 // ============================================================================
 // Unified Intrinsic Sizing API (Section 4.2)

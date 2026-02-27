@@ -391,6 +391,13 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
                   preferred_minimum, preferred, available_width, shrink_to_fit, content_width, is_border_box);
     }
 
+    // CSS 2.1 §10.4: Apply min-width/max-width constraints BEFORE position calculation.
+    // Per spec, min-width overrides max-width when they conflict.
+    // This must happen before computing x position, because right-positioned elements
+    // use the element's own width to determine x (x = cb_width - right - margin - width).
+    // If we clamp after position, right/bottom-positioned elements get wrong offsets.
+    content_width = adjust_min_max_width(block, content_width);
+
     // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
     // When left, right, and width are all NOT auto, the equation is over-constrained.
     // Auto margins absorb the remaining space; if both are auto, they split it equally (centering).
@@ -505,6 +512,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         content_height = 0;
         log_debug("[ABS POS] using auto height (shrink-to-fit)");
     }
+
+    // CSS 2.1 §10.7: Apply min-height/max-height constraints BEFORE position calculation.
+    // Same rationale as horizontal: bottom-positioned elements need the clamped height.
+    content_height = adjust_min_max_height(block, content_height);
 
     // CSS 2.1 §10.6.4: Solve auto margins for vertical axis
     // When top, bottom, and height are all NOT auto, auto margins absorb remaining space.
@@ -922,9 +933,28 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // Note: max_width already includes left border + left padding from setup_inline
             // So we only need to add right padding and right border
             float flow_width = lycon->block.max_width;
+            float padding_left = block->bound ? block->bound->padding.left : 0;
+            float border_left = (block->bound && block->bound->border) ? block->bound->border->width.left : 0;
             float padding_right = block->bound ? block->bound->padding.right : 0;
             float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
-            block->width = flow_width + padding_right + border_right;
+
+            // flow_width includes left pad+border from setup_inline
+            float border_box_width = flow_width + padding_right + border_right;
+
+            // CSS 2.1 §10.4: Apply min/max-width constraints to auto-sized width.
+            // Must handle border-box vs content-box correctly:
+            // - border-box: min/max are in border-box terms, compare against border-box
+            // - content-box: min/max are in content terms, extract content first
+            bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+            if (is_border_box) {
+                border_box_width = adjust_min_max_width(block, border_box_width);
+            } else {
+                float total_pad_border = padding_left + border_left + padding_right + border_right;
+                float content_width = max(border_box_width - total_pad_border, 0.0f);
+                content_width = adjust_min_max_width(block, content_width);
+                border_box_width = content_width + total_pad_border;
+            }
+            block->width = border_box_width;
 
             // CRITICAL FIX: Re-align text after shrink-to-fit width calculation
             // Text alignment during layout used the large initial width, so rect->x may have
