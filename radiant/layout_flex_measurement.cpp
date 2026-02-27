@@ -95,6 +95,46 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
     return -1;
 }
 
+// Helper to get the resolved CSS margin for a specific side from an element's specified_style
+// Returns 0 if margin is auto, percentage, or not set
+static float get_css_margin(LayoutContext* lycon, ViewElement* elem, CssPropertyId property_id) {
+    if (!elem) return 0;
+
+    // First check if bound is already resolved
+    if (elem->bound) {
+        float val = 0;
+        switch (property_id) {
+            case CSS_PROPERTY_MARGIN_LEFT:   val = elem->bound->margin.left; break;
+            case CSS_PROPERTY_MARGIN_RIGHT:  val = elem->bound->margin.right; break;
+            case CSS_PROPERTY_MARGIN_TOP:    val = elem->bound->margin.top; break;
+            case CSS_PROPERTY_MARGIN_BOTTOM: val = elem->bound->margin.bottom; break;
+        }
+        if (!std::isnan(val) && val >= 0) return val;
+    }
+
+    // Fall back to CSS declaration
+    if (!elem->specified_style || !lycon) return 0;
+    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
+    if (!decl || !decl->value) return 0;
+    if (decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        float val = resolve_length_value(lycon, property_id, decl->value);
+        if (!isnan(val) && val >= 0) return val;
+    }
+    return 0;
+}
+
+// Helper to get horizontal margins (left + right) for an element
+static float get_child_horizontal_margins(LayoutContext* lycon, ViewElement* elem) {
+    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_LEFT)
+         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_RIGHT);
+}
+
+// Helper to get vertical margins (top + bottom) for an element
+static float get_child_vertical_margins(LayoutContext* lycon, ViewElement* elem) {
+    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_TOP)
+         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_BOTTOM);
+}
+
 // ============================================================================
 // Recursive DOM-based content height measurement for nested flex containers
 // ============================================================================
@@ -524,10 +564,24 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 }
                             } else {
                                 // Has content (text or elements) but no explicit heights
-                                // Use text_line_height as a reasonable estimate
-                                elem_height = text_line_height;
-                                has_explicit_height_css = false;
-                                log_debug("Nested flex container with content: using text_line_height=%d", elem_height);
+                                // Try recursive measurement first for accurate sizing
+                                float recursive_height = measure_content_height_recursive((DomNode*)elem, lycon);
+                                if (recursive_height > 0) {
+                                    elem_height = (int)recursive_height;
+                                    has_explicit_height_css = true;  // Measured height is reliable
+                                    log_debug("Nested flex container with content: recursive measured height=%d", elem_height);
+                                } else if (has_text_content) {
+                                    // Only use text_line_height if there's actual text content
+                                    elem_height = text_line_height;
+                                    has_explicit_height_css = false;
+                                    log_debug("Nested flex container with text content: using text_line_height=%d", elem_height);
+                                } else {
+                                    // Element children only, but recursive measurement returned 0
+                                    // Children are likely empty flex containers — use 0
+                                    elem_height = 0;
+                                    has_explicit_height_css = true;
+                                    log_debug("Nested flex container: element children but recursive=0, using 0");
+                                }
                             }
                         } else {
                             // Non-flex container div - distinguish text-only vs. nested elements
@@ -1226,21 +1280,21 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             }
         }
 
-        // Use explicit dimensions if specified, otherwise use pseudo-element content size
-        if (item->blk && item->blk->given_width >= 0) {
-            min_width = max_width = item->blk->given_width;
-        } else if (has_pseudo_content) {
+        // Intrinsic content size for empty elements = content-based measurement only.
+        // Explicit CSS width/height are NOT intrinsic content sizes — they are extrinsic
+        // "specified sizes" and are handled separately (e.g., in calculate_flex_basis for
+        // the flex base size, and in resolve_flex_item_constraints as specified_size_suggestion
+        // per CSS Flexbox §4.5). Using given_width/given_height here would conflate the
+        // content_size_suggestion with the specified_size_suggestion, preventing items from
+        // shrinking below their explicit size even when content is empty.
+        if (has_pseudo_content) {
             min_width = max_width = pseudo_width;
-        } else {
-            min_width = max_width = 0;
-        }
-        if (item->blk && item->blk->given_height >= 0) {
-            min_height = max_height = item->blk->given_height;
-        } else if (has_pseudo_content) {
             min_height = max_height = pseudo_height;
         } else {
+            min_width = max_width = 0;
             min_height = max_height = 0;
         }
+
         log_debug("Empty element intrinsic sizes: width=%.1f, height=%.1f (pseudo_content=%d)",
                   min_width, min_height, has_pseudo_content);
     } else if (child->is_text() && !child->next_sibling) {
@@ -1419,7 +1473,34 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         bool is_row_flex_container = false;
         bool is_flex_container = false;
         // Check both block and inline-block view types for flex detection
-        if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
+        // Also check display.inner for flex containers whose embed->flex isn't allocated yet
+        // (e.g., nested flex items measured during parent's resolve_flex_item_constraints
+        // before their own flex layout starts)
+        if (item->display.inner == CSS_VALUE_FLEX) {
+            is_flex_container = true;
+            // Try to get direction from embed->flex if available
+            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
+                ViewBlock* block_view = (ViewBlock*)item;
+                if (block_view->embed && block_view->embed->flex) {
+                    int dir = block_view->embed->flex->direction;
+                    is_row_flex_container = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+                } else {
+                    // embed->flex not yet allocated - resolve direction from CSS
+                    // Default is row per CSS spec
+                    is_row_flex_container = true;
+                    if (item->specified_style) {
+                        CssDeclaration* dir_decl = style_tree_get_declaration(
+                            item->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
+                        if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                            CssEnum dir_val = dir_decl->value->data.keyword;
+                            is_row_flex_container = (dir_val == CSS_VALUE_ROW || dir_val == CSS_VALUE_ROW_REVERSE);
+                        }
+                    }
+                }
+            }
+            log_debug("calculate_item_intrinsic_sizes: is_flex_container=1, is_row=%d (display.inner=flex)",
+                      is_row_flex_container);
+        } else if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block_view = (ViewBlock*)item;
             if (block_view->embed && block_view->embed->flex) {
                 is_flex_container = true;
@@ -1434,12 +1515,18 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // use measure_element_intrinsic_widths which correctly sums inline children's widths.
         // The manual child iteration below doesn't handle inline content properly - it takes
         // max of children's widths instead of summing for inline elements.
+        // IMPORTANT: Use content_only=true to get CONTENT-BASED min-content, excluding the
+        // element's own explicit CSS width. This is critical for CSS Flexbox §4.5's
+        // content_size_suggestion: the intrinsic width should represent how much space the
+        // content needs, NOT the specified CSS width (which is handled separately as
+        // specified_size_suggestion in resolve_flex_item_constraints).
         LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
         if (!is_flex_container && lycon) {
-            IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
+            IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item,
+                                                                         /*content_only=*/true);
             min_width = item_sizes.min_content;
             max_width = item_sizes.max_content;
-            log_debug("calculate_item_intrinsic_sizes: non-flex container, using measure_element_intrinsic_widths: min=%.1f, max=%.1f",
+            log_debug("calculate_item_intrinsic_sizes: non-flex container, using measure_element_intrinsic_widths (content_only): min=%.1f, max=%.1f",
                       min_width, max_width);
 
             // For height, calculate from children or use cached value
@@ -1458,12 +1545,35 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             goto store_results;
         }
 
+        // CSS Flexbox §9.9.1: Detect flex-wrap to compute min-content correctly.
+        // - nowrap: min-content = sum of item outer min-content sizes
+        // - wrap: min-content = max of individual item outer min-content sizes
+        bool is_wrapping_flex = false;
+        if (is_flex_container && is_row_flex_container) {
+            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
+                ViewBlock* block_view = (ViewBlock*)item;
+                if (block_view->embed && block_view->embed->flex) {
+                    int wrap = block_view->embed->flex->wrap;
+                    is_wrapping_flex = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
+                }
+            }
+            if (!is_wrapping_flex && item->specified_style) {
+                CssDeclaration* wrap_decl = style_tree_get_declaration(
+                    item->specified_style, CSS_PROPERTY_FLEX_WRAP);
+                if (wrap_decl && wrap_decl->value && wrap_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum wrap_val = wrap_decl->value->data.keyword;
+                    is_wrapping_flex = (wrap_val == CSS_VALUE_WRAP || wrap_val == CSS_VALUE_WRAP_REVERSE);
+                }
+            }
+        }
+
         // First, try to calculate intrinsic sizes from children
         // This handles both width and height by traversing child elements
         // Track min and max content widths separately per CSS intrinsic sizing spec
         float min_child_width = 0.0f;  // For min-content: max of children's min-content
         float max_child_width = 0.0f;  // For max-content: max of children's max-content
         float total_child_width = 0.0f;  // For row flex containers: sum of child widths
+        float max_single_child_width = 0.0f;  // For wrapping row flex: max of individual items
         float total_child_height = 0.0f;
         int child_count = 0;  // Count children for gap calculation
 
@@ -1701,21 +1811,29 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             }
                         }
 
+                        // CSS Flexbox §9.9.1: Each flex item's contribution to the container's
+                        // intrinsic size is its outer size (content + padding + border + margin).
+                        // Add child margins to width/height for proper intrinsic sizing.
+                        float child_h_margin = get_child_horizontal_margins(lycon, child_view);
+                        float child_v_margin = get_child_vertical_margins(lycon, child_view);
+
                         // For width: row flex sums widths, column flex takes max
                         // Track both min and max content widths separately
                         if (is_row_flex_container) {
-                            total_child_width += child_max_width;  // Row flex: sum for max-content
+                            float outer_width = child_max_width + child_h_margin;
+                            total_child_width += outer_width;  // Row flex: sum for max-content
+                            max_single_child_width = max(max_single_child_width, child_min_width + child_h_margin);
                         } else {
-                            min_child_width = max(min_child_width, child_min_width);
-                            max_child_width = max(max_child_width, child_max_width);
+                            min_child_width = max(min_child_width, child_min_width + child_h_margin);
+                            max_child_width = max(max_child_width, child_max_width + child_h_margin);
                         }
                         child_count++;
 
                         // For height, column flex containers sum heights, row flex takes max
                         if (is_row_flex_container) {
-                            total_child_height = max(total_child_height, child_height);
+                            total_child_height = max(total_child_height, child_height + child_v_margin);
                         } else {
-                            total_child_height += child_height;
+                            total_child_height += child_height + child_v_margin;
                         }
 
                         log_debug("Child element: min_width=%.1f, max_width=%.1f, height=%.1f (explicit=%d/%d)",
@@ -1749,16 +1867,24 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             }
         }
 
-        // Use cached width if available and item has explicit width, otherwise use calculated
-        if (cached && cached->measured_width > 0 && has_explicit_width) {
-            min_width = cached->measured_width;
-            max_width = cached->measured_width;
-            log_debug("Using cached width for complex content (has explicit width): width=%.1f", min_width);
-        } else if (is_row_flex_container && total_child_width > 0.0f) {
-            // Row flex container: use sum of child widths + gaps
-            min_width = total_child_width;
-            max_width = total_child_width;
-            log_debug("Using sum of child widths for row flex container: width=%.1f", min_width);
+        // Determine intrinsic width from children or cache.
+        // IMPORTANT: When the element has explicit CSS width, do NOT use cached->measured_width
+        // as the intrinsic width. The cache stores the layout-result width (which includes the
+        // explicit CSS width), but intrinsic width should represent the CONTENT-ONLY min-content
+        // for CSS Flexbox §4.5's content_size_suggestion. Using the explicit width as intrinsic
+        // would make auto min-width = min(explicit, explicit) = explicit, preventing shrinking.
+        if (is_row_flex_container && total_child_width > 0.0f) {
+            // CSS Flexbox §9.9.1: Row flex container intrinsic sizes
+            max_width = total_child_width;  // max-content = sum of outer max-content contributions
+            if (is_wrapping_flex) {
+                // Wrapping: min-content = largest single item outer min-content
+                min_width = max_single_child_width;
+                log_debug("Using wrapping row flex widths: min=%.1f (max single), max=%.1f (sum)", min_width, max_width);
+            } else {
+                // Nowrap: min-content = sum of outer min-content contributions
+                min_width = total_child_width;
+                log_debug("Using nowrap row flex widths: min=max=%.1f (sum)", min_width);
+            }
         } else if (min_child_width > 0.0f || max_child_width > 0.0f) {
             // Use properly tracked min and max content widths
             min_width = min_child_width;

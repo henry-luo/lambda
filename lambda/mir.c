@@ -11,6 +11,7 @@
 #include "lambda.h"
 #include "lambda-error.h"
 #include "js/js_runtime.h"
+#include "js/js_dom.h"
 
 // Stack overflow protection functions
 extern void lambda_stack_overflow_error(const char* func_name);
@@ -388,6 +389,14 @@ func_obj_t func_list[] = {
     {"js_array_method", (fn_ptr) js_array_method},
     {"js_math_method", (fn_ptr) js_math_method},
     {"js_math_property", (fn_ptr) js_math_property},
+    // v3: DOM API dispatchers
+    {"js_document_method", (fn_ptr) js_document_method},
+    {"js_document_get_property", (fn_ptr) js_document_get_property},
+    {"js_dom_element_method", (fn_ptr) js_dom_element_method},
+    {"js_dom_get_property", (fn_ptr) js_dom_get_property},
+    {"js_dom_wrap_element", (fn_ptr) js_dom_wrap_element},
+    {"js_dom_unwrap_element", (fn_ptr) js_dom_unwrap_element},
+    {"js_is_dom_node", (fn_ptr) js_is_dom_node},
     // StringBuf functions for template literals
     {"stringbuf_new", (fn_ptr) stringbuf_new},
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},

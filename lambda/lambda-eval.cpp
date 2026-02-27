@@ -845,11 +845,8 @@ Bool fn_eq(Item a_item, Item b_item) {
         return (a_item.get_double() == b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_a = a_item.get_decimal();  Decimal* dec_b = b_item.get_decimal();
-        int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
-        if (cmp < 0) return BOOL_FALSE;
-        else if (cmp > 0) return BOOL_FALSE;
-        else return BOOL_TRUE;
+        int cmp = decimal_cmp_items(a_item, b_item);
+        return (cmp == 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
@@ -913,8 +910,7 @@ Bool fn_lt(Item a_item, Item b_item) {
         return (a_item.get_double() < b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_a = a_item.get_decimal();  Decimal* dec_b = b_item.get_decimal();
-        int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
+        int cmp = decimal_cmp_items(a_item, b_item);
         return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
@@ -964,8 +960,7 @@ Bool fn_gt(Item a_item, Item b_item) {
         return (a_item.get_double() > b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_a = a_item.get_decimal();  Decimal* dec_b = b_item.get_decimal();
-        int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
+        int cmp = decimal_cmp_items(a_item, b_item);
         return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {

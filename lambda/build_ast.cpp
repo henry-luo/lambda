@@ -2051,7 +2051,12 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
-    // Initialize the decimal with reference counting and libmpdec
+    // Set unlimited flag based on suffix case: 'N' = unlimited, 'n' = fixed
+    // Note: suffix character was already stripped above, but we check the original
+    char suffix_char = num_sv.str[num_sv.length - 1];
+    decimal->unlimited = (suffix_char == 'N') ? 1 : 0;
+
+    // Initialize the decimal with libmpdec
     // Use transpiler's decimal context via centralized function
     decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
     if (!decimal->dec_val) {
