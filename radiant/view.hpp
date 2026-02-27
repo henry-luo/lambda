@@ -370,6 +370,7 @@ struct FontProp {
     CssEnum font_weight;
     CssEnum font_variant;  // CSS font-variant (normal, small-caps)
     CssEnum text_deco; // CSS text decoration
+    int16_t font_weight_numeric;  // CSS numeric weight 100-900 (0 = not set, use font_weight keyword)
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
     // derived font properties
@@ -386,9 +387,16 @@ inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
     FontStyleDesc sd = {};
     sd.family  = fp->family;
     sd.size_px = fp->font_size;
-    sd.weight  = (fp->font_weight == CSS_VALUE_BOLD || fp->font_weight == CSS_VALUE_BOLDER)
-                 ? FONT_WEIGHT_BOLD : (fp->font_weight == CSS_VALUE_LIGHTER)
-                 ? FONT_WEIGHT_LIGHT : FONT_WEIGHT_NORMAL;
+
+    // Use numeric weight if set, otherwise map from CssEnum keyword
+    if (fp->font_weight_numeric > 0) {
+        sd.weight = (FontWeight)fp->font_weight_numeric;
+    } else {
+        sd.weight  = (fp->font_weight == CSS_VALUE_BOLD || fp->font_weight == CSS_VALUE_BOLDER)
+                     ? FONT_WEIGHT_BOLD : (fp->font_weight == CSS_VALUE_LIGHTER)
+                     ? FONT_WEIGHT_LIGHT : FONT_WEIGHT_NORMAL;
+    }
+
     sd.slant   = (fp->font_style == CSS_VALUE_ITALIC)  ? FONT_SLANT_ITALIC
                : (fp->font_style == CSS_VALUE_OBLIQUE) ? FONT_SLANT_OBLIQUE
                : FONT_SLANT_NORMAL;

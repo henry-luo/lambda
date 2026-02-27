@@ -414,8 +414,16 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_replaced_content = false;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.max_normal_line_height = 0;
+    // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
+    // These are the correct "parent" for top-level inline content.
+    // span_vertical_align will override with actual parent span font when recursing.
+    lycon->line.parent_font_ascender = lycon->block.init_ascender;
+    lycon->line.parent_font_descender = lycon->block.init_descender;
+    lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size : (lycon->block.init_ascender + lycon->block.init_descender);
+    lycon->line.parent_font_handle = lycon->font.font_handle;
     lycon->line.last_text_rect = NULL;
     lycon->line.trailing_space_width = 0;
+    lycon->line.is_last_line = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
@@ -467,6 +475,13 @@ void line_break(LayoutContext* lycon) {
         if (view) {
             FontBox pa_font = lycon->font;
             lycon->font = lycon->line.line_start_font;
+            // Reset parent font metrics to block-level for the vertical alignment pass.
+            // span_vertical_align will update these per-span as it recurses.
+            lycon->line.parent_font_ascender = lycon->block.init_ascender;
+            lycon->line.parent_font_descender = lycon->block.init_descender;
+            lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size
+                : (lycon->block.init_ascender + lycon->block.init_descender);
+            lycon->line.parent_font_handle = lycon->font.font_handle;
             bool end_of_line = false;
             NEXT_VIEW:
             View * vw = view;

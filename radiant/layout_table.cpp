@@ -4046,6 +4046,9 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
     DomElement* cell_elem = cell->as_element();
 
+    // CSS 2.1 §16.5: Resolve inherited text-transform for cell text measurement
+    CssEnum cell_text_transform = get_element_text_transform(cell_elem);
+
     // Check if the cell will have pseudo-element generated content (::before/::after)
     // Note: at measurement time, pseudo elements haven't been generated yet,
     // so we check the CSS styles directly via dom_element_has_before/after_content()
@@ -4154,7 +4157,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 // Use unified intrinsic sizing API - measures both widths in one call
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len);
+                    lycon, measure_text, measure_len, cell_text_transform);
 
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
@@ -4277,7 +4280,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
             size_t content_len = strlen(content);
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, content, content_len);
+                lycon, content, content_len, cell_text_transform);
 
             float text_max = (float)widths.max_content;
             float text_min = (float)widths.min_content;

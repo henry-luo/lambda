@@ -591,29 +591,51 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
     log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f, offset=%f",
         align, item_height, line_height, baseline_pos, item_baseline, valign_offset);
+    // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub reference the PARENT element's
+    // font metrics, not the block container's. parent_font_* is set by span_vertical_align
+    // before recursing into children; defaults to block init values for top-level content.
+    float pa_asc = lycon->line.parent_font_ascender;
+    float pa_desc = lycon->line.parent_font_descender;
+    float pa_fsize = lycon->line.parent_font_size;
     switch (align) {
     case CSS_VALUE_BASELINE:
         // For length/percentage vertical-align, offset shifts baseline (positive = raise = lower y)
         return baseline_pos - item_baseline - valign_offset;
     case CSS_VALUE_TOP:
         return 0;
-    case CSS_VALUE_MIDDLE:
-        return (line_height - item_height) / 2;
+    case CSS_VALUE_MIDDLE: {
+        // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with the baseline
+        // of the parent box plus half the x-height of the parent."
+        // Use actual x-height from font metrics when available.
+        float x_height_half;
+        if (lycon->line.parent_font_handle) {
+            float x_ratio = font_get_x_height_ratio(lycon->line.parent_font_handle);
+            x_height_half = pa_fsize * x_ratio / 2.0f;
+        } else {
+            x_height_half = pa_fsize * 0.25f; // fallback: ~0.5em x-height
+        }
+        // midpoint of box = baseline - x_height/2 → offset = baseline - x_height/2 - item_height/2
+        return baseline_pos - x_height_half - item_height / 2.0f;
+    }
     case CSS_VALUE_BOTTOM:
         log_debug("bottom-aligned-text: line %d", line_height);
         return line_height - item_height;
     case CSS_VALUE_TEXT_TOP:
-        // align with the top of the parent's font
-        return baseline_pos - lycon->block.init_ascender;
+        // CSS 2.1 §10.8.1: "Align the top of the box with the top of the parent's content area."
+        // The parent's content top is at (baseline_pos - parent_ascender).
+        return baseline_pos - pa_asc;
     case CSS_VALUE_TEXT_BOTTOM:
-        // align with the bottom of the parent's font
-        return baseline_pos + lycon->block.init_descender - item_height;
+        // CSS 2.1 §10.8.1: "Align the bottom of the box with the bottom of the parent's content area."
+        // The parent's content bottom is at (baseline_pos + parent_descender).
+        return baseline_pos + pa_desc - item_height;
     case CSS_VALUE_SUB:
-        // Subscript position (approximately 0.3em lower)
-        return baseline_pos - item_baseline + 0.3 * line_height;
+        // CSS 2.1 §10.8.1: "Lower the baseline of the box" by UA amount.
+        // Use ~0.3em of the parent's font size.
+        return baseline_pos - item_baseline + 0.3f * pa_fsize;
     case CSS_VALUE_SUPER:
-        // Superscript position (approximately 0.3em higher)
-        return baseline_pos - item_baseline - 0.3 * line_height;
+        // CSS 2.1 §10.8.1: "Raise the baseline of the box" by UA amount.
+        // Use ~0.3em of the parent's font size.
+        return baseline_pos - item_baseline - 0.3f * pa_fsize;
     default:
         return baseline_pos - item_baseline; // Default to baseline
     }
@@ -622,9 +644,23 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     FontBox pa_font = lycon->font;  CssEnum pa_line_align = lycon->line.vertical_align;
     float pa_valign_offset = lycon->line.vertical_align_offset;
+    // Save current parent font metrics to restore after processing children
+    float saved_pa_asc = lycon->line.parent_font_ascender;
+    float saved_pa_desc = lycon->line.parent_font_descender;
+    float saved_pa_fsize = lycon->line.parent_font_size;
+    struct FontHandle* saved_pa_handle = lycon->line.parent_font_handle;
     log_debug("span_vertical_align");
     View* child = span->first_child;
     if (child) {
+        // CSS 2.1 §10.8.1: Before updating to the span's own font, capture current font
+        // as the "parent font" for vertical-align keywords in children.
+        // lycon->font is the parent (caller) font at this point.
+        if (lycon->font.style) {
+            lycon->line.parent_font_ascender = lycon->font.style->ascender;
+            lycon->line.parent_font_descender = lycon->font.style->descender;
+            lycon->line.parent_font_size = lycon->font.style->font_size;
+            lycon->line.parent_font_handle = lycon->font.font_handle;
+        }
         if (span->font) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
         }
@@ -639,12 +675,18 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     }
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->line.vertical_align_offset = pa_valign_offset;
+    lycon->line.parent_font_ascender = saved_pa_asc;
+    lycon->line.parent_font_descender = saved_pa_desc;
+    lycon->line.parent_font_size = saved_pa_fsize;
+    lycon->line.parent_font_handle = saved_pa_handle;
 }
 
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
     log_debug("view_vertical_align: view=%d", view->view_type);
     float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
+    // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub use parent element's font.
+    // parent_font_* fields in lycon->line are set by span_vertical_align before recursing.
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
         TextRect* rect = text_view->rect;
@@ -913,8 +955,21 @@ void line_align(LayoutContext* lycon) {
         }
 
         if (text_align == CSS_VALUE_JUSTIFY) {
-                // For text nodes that wrap across multiple lines, we need to find the
-                // TextRect that corresponds to this line and justify it
+                // CSS 2.1 §16.2: "If 'text-align' is set to 'justify', the UA adjusts spacing
+                // in inline boxes to fit each line... except for the last line of the block."
+                // The is_last_line flag is set by the block layout caller before the final line_break().
+                if (lycon->line.is_last_line) {
+                    // Last line: fall back to start alignment (left for LTR, right for RTL)
+                    if (is_rtl) {
+                        float offset = lycon->block.content_width - line_width;
+                        if (offset > 0) {
+                            view_line_align(lycon, offset, view);
+                        }
+                    }
+                    return;
+                }
+
+                // Not the last line: distribute extra space across word gaps
                 if (view->view_type == RDT_VIEW_TEXT) {
                     ViewText* text = (ViewText*)view;
                     // Find the last TextRect (most recently created = current line)
@@ -926,34 +981,7 @@ void line_align(LayoutContext* lycon) {
                     }
 
                     if (last_rect) {
-                        // Check if this is the last line: only true if we're at the end of the text node
                         const char* text_data = (const char*)text->text_data();
-                        bool is_last_line = false;
-
-                        if (text_data) {
-                            size_t text_len = strlen(text_data);
-                            size_t rect_end = last_rect->start_index + last_rect->length;
-
-                            // Only consider it the last line if we're at the very end of the text
-                            // (rect_end == text_len means we've consumed all text)
-                            if (rect_end >= text_len) {
-                                is_last_line = true;
-                            }
-                        }
-
-                        // Don't justify the last line per CSS spec
-                        // CSS 2.1 §16.2: Last line of justified text aligns to 'start'
-                        // For RTL, start = right; for LTR, start = left (already positioned)
-                        if (is_last_line) {
-                            if (is_rtl) {
-                                float offset = lycon->block.content_width - line_width;
-                                if (offset > 0 && last_rect) {
-                                    last_rect->x += offset;
-                                }
-                            }
-                            return;
-                        }
-
                         // Count spaces in this specific rect
                         int num_spaces = 0;
                         if (text_data) {
@@ -973,7 +1001,7 @@ void line_align(LayoutContext* lycon) {
                     }
                 }
                 else {
-                    // Multi-view line (has start_view), use the original logic
+                    // Multi-view line: distribute space across all text views
                     int num_spaces = count_spaces_in_view(view);
                     float extra_width = lycon->block.content_width - line_width;
                     if (num_spaces > 0 && extra_width > 0) {
@@ -1356,6 +1384,26 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         line_init(lycon, bp_left, lycon->block.content_width + bp_left);
     }
 
+    // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
+    // Supports html:before and html:after in CSS conformance tests
+    if (elmt->is_element()) {
+        html->pseudo = alloc_pseudo_content_prop(lycon, html);
+        generate_pseudo_element_content(lycon, html, true);   // ::before
+        generate_pseudo_element_content(lycon, html, false);  // ::after
+        if (html->pseudo) {
+            if (html->pseudo->before) {
+                insert_pseudo_into_dom((DomElement*)elmt, html->pseudo->before, true);
+            }
+            if (html->pseudo->after) {
+                insert_pseudo_into_dom((DomElement*)elmt, html->pseudo->after, false);
+            }
+        }
+    }
+
+    // CSS 2.1 §9.2: Lay out ALL visible children of <html>, not just <body>.
+    // Elements like <head> can have display:block set via CSS, in which case
+    // they generate boxes and participate in layout. The default UA stylesheet
+    // sets head to display:none, so this only affects pages that override it.
     DomNode* child = nullptr;
     if (elmt->is_element()) {
         child = static_cast<DomElement*>(elmt)->first_child;
@@ -1363,11 +1411,16 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     while (child) {
         if (child->is_element()) {
             const char* tag_name = child->node_name();
-            log_debug("  Checking child element: %s", tag_name);
+            log_debug("  Checking html child element: %s", tag_name);
+            DisplayValue child_display = resolve_display_value(child);
+            if (child_display.outer != CSS_VALUE_NONE) {
+                log_debug("  Laying out html child <%s> (display outer=%d, inner=%d)",
+                    tag_name, child_display.outer, child_display.inner);
+                layout_block(lycon, child, child_display);
+            }
             if (strcmp(tag_name, "body") == 0) {
                 body_node = child;
                 log_debug("Found Lambda CSS body element");
-                break;
             }
         }
         child = child->next_sibling;
@@ -1377,22 +1430,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_info("[TIMING] layout: body find: %.1fms", duration<double, std::milli>(t_body_find - t_style).count());
 
     if (body_node) {
-        log_debug("Laying out body element: %p", (void*)body_node);
-        // Resolve body's actual display value from CSS (may be flex, grid, etc.)
-        DisplayValue body_display = resolve_display_value(body_node);
-        log_debug("Body element display resolved: outer=%d, inner=%d (FLEX=%d)",
-            body_display.outer, body_display.inner, CSS_VALUE_FLEX);
-        layout_block(lycon, body_node, body_display);
-
-        // After body layout, update html's advance_y from body's height
-        // This is critical for scroll height calculation in iframes
-        // Find the body view by iterating through html's children
+        // After layout, find the body view for scroll height calculation
         View* child = html->first_placed_child();
         ViewBlock* body_view = nullptr;
         while (child) {
             if (child->is_block()) {
                 ViewBlock* vb = (ViewBlock*)child;
-                // Check if this is the body element (tag() == HTM_TAG_BODY)
                 if (vb->tag() == HTM_TAG_BODY) {
                     body_view = vb;
                     break;
@@ -1402,9 +1445,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
 
         if (body_view) {
-            // advance_y was already correctly computed by layout_block() above,
-            // including margin collapsing (CSS 2.1 §8.3.1) and self-collapsing
-            // block handling. Do NOT override it with a naive margin sum.
             log_debug("Body layout done: body->height=%.1f, advance_y=%.1f",
                 body_view->height, lycon->block.advance_y);
         } else {
