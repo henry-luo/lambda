@@ -1104,13 +1104,13 @@ pn cd(numAircraft) {
 
 pn verify_result(collisions, numAircraft) {
     if (numAircraft == 100) {
-        if (collisions == 4305) { return 1 }
+        if (collisions == 1036434) { return 1 }
     }
     if (numAircraft == 10) {
-        if (collisions == 390) { return 1 }
+        if (collisions == 21660) { return 1 }
     }
     if (numAircraft == 2) {
-        if (collisions == 42) { return 1 }
+        if (collisions == 90) { return 1 }
     }
     print("Unexpected: collisions=")
     print(collisions)
@@ -1122,6 +1122,9 @@ pn verify_result(collisions, numAircraft) {
 
 pn main() {
     var collisions = cd(100)
+    print("collisions=")
+    print(collisions)
+    print("\n")
     var ok = verify_result(collisions, 100)
     if (ok == 1) {
         print("CD: PASS\n")

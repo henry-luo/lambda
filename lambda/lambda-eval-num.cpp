@@ -133,6 +133,9 @@ Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
 
+    // null propagation: null + x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+
     // vector operations: scalar+vector, vector+scalar, or vector+vector
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
@@ -275,6 +278,9 @@ Item fn_add(Item item_a, Item item_b) {
 Item fn_mul(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    // null propagation: null * x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -420,6 +426,9 @@ Item fn_sub(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
+    // null propagation: null - x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
@@ -551,6 +560,9 @@ Item fn_sub(Item item_a, Item item_b) {
 Item fn_div(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    // null propagation: null / x = null, x / null = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -751,6 +763,11 @@ Item fn_div(Item item_a, Item item_b) {
 
 Item fn_idiv(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+
+    // null propagation: null // x = null
+    TypeId ta = get_type_id(item_a), tb = get_type_id(item_b);
+    if (ta == LMD_TYPE_NULL || tb == LMD_TYPE_NULL) return ItemNull;
+
     // Check for division by zero
     bool is_zero = false;
     if (item_b._type_id == LMD_TYPE_INT) {
@@ -921,6 +938,9 @@ Item fn_pow(Item item_a, Item item_b) {
 Item fn_mod(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    // null propagation: null % x = null
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -2599,6 +2619,31 @@ extern "C" int64_t fn_round_i(int64_t x) {
 // ============================================================================
 // BITWISE OPERATIONS
 // ============================================================================
+
+// Safe unbox to int64_t for bitwise operation arguments.
+// Handles both tagged Items (type tag in high byte) and raw int64_t values
+// (from other bitwise ops or literals, with high byte == 0).
+extern "C" int64_t _barg(Item v) {
+    uint8_t tag = v._type_id;
+    switch (tag) {
+    case LMD_TYPE_INT:
+        return v.get_int56();
+    case LMD_TYPE_INT64:
+        return v.get_int64();
+    case LMD_TYPE_FLOAT:
+        return (int64_t)v.get_double();
+    case LMD_TYPE_BOOL:
+        return v.bool_val ? 1 : 0;
+    case LMD_TYPE_RAW_POINTER:
+        // raw int64_t (high byte == 0): from other bitwise ops or literals
+        return (int64_t)v.item;
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_ERROR:
+        return 0;
+    default:
+        return 0;
+    }
+}
 
 extern "C" int64_t fn_band(int64_t a, int64_t b) {
     return a & b;
