@@ -3036,7 +3036,7 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
     // type patterns use fn_is (matches runtime type checking)
     if (pattern_type == LMD_TYPE_TYPE) {
         strbuf_append_str(tp->code_buf, "fn_is(_pipe_item, ");
-        // handle bare identifier referencing an object type (AST_NODE_IDENT from type expr resolution)
+        // handle bare identifier referencing an object type or string/symbol pattern
         if (pattern->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)pattern;
             if (ident->entry && ident->entry->node &&
@@ -3047,6 +3047,13 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
                     TypeMap* type_map = (TypeMap*)type_type->type;
                     strbuf_append_format(tp->code_buf, "const_type(%d)", type_map->type_index);
                 }
+            } else if (ident->entry && ident->entry->node &&
+                       (ident->entry->node->node_type == AST_NODE_STRING_PATTERN ||
+                        ident->entry->node->node_type == AST_NODE_SYMBOL_PATTERN)) {
+                // pattern reference in match arm - emit const_pattern(index)
+                AstPatternDefNode* pattern_def = (AstPatternDefNode*)ident->entry->node;
+                TypePattern* pat_type = (TypePattern*)pattern_def->type;
+                strbuf_append_format(tp->code_buf, "const_pattern(%d)", pat_type->pattern_index);
             } else {
                 transpile_box_item(tp, pattern);
             }

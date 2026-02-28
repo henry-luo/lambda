@@ -344,8 +344,11 @@ typedef enum SysFunc {
     SYSFUNC_UPPER,
     SYSFUNC_URL_RESOLVE,
     SYSFUNC_SPLIT,
+    SYSFUNC_SPLIT3,         // split(str, sep, keep_delim) with 3 args
     SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
     SYSFUNC_REPLACE,
+    SYSFUNC_FIND,           // find(str, pattern) - find all matches
+    SYSFUNC_FIND3,          // find(str, pattern, options) - with options
     SYSFUNC_CHARS,          // chars(str) - decompose string into array of characters
     // vector functions
     SYSFUNC_PROD,
@@ -414,6 +417,9 @@ typedef enum SysFunc {
     SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
     SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
     SYSPROC_CLOCK,           // clock() - high-resolution monotonic time in seconds (float)
+    // file-based find/replace (procedural)
+    SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
+    SYSPROC_REPLACE_FILE4,   // pn replace(path, pattern, repl, options)
 } SysFunc;
 
 typedef struct TypeBinary : Type {
@@ -478,8 +484,9 @@ namespace re2 { class RE2; }
 typedef struct TypePattern : Type {
     int pattern_index;      // index in type_list for runtime access
     bool is_symbol;         // true for symbol pattern, false for string pattern
-    re2::RE2* re2;          // compiled RE2 regex (owned)
-    String* source;         // original pattern source for error messages
+    re2::RE2* re2;          // compiled RE2 regex (owned, anchored ^...$)
+    re2::RE2* re2_unanchored; // unanchored regex for find/replace/split (lazy, owned)
+    String* source;         // original pattern source (anchored) for error messages
 } TypePattern;
 
 struct Pack {

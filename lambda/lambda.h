@@ -885,9 +885,14 @@ typedef struct Context {
     Item fn_upper(Item str);
     Item fn_url_resolve(Item base, Item relative);
     Item fn_split(Item str, Item sep);
+    Item fn_split3(Item str, Item sep, Item keep_delim);
+    Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     Item fn_chars(Item str);            // chars(str) - decompose into array of characters
     Item fn_str_join(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
+    Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
+    Item fn_find2(Item source, Item pattern);
+    Item fn_find3(Item source, Item pattern, Item options);
 
     Function* to_fn(fn_ptr ptr);
     Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
