@@ -19,6 +19,7 @@
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/input/html_entities.h"
+#include "../lambda/input/input-utils.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/arena.h"
@@ -53,81 +54,111 @@ protected:
 };
 
 TEST_F(EntityResolutionTest, AsciiEscapes) {
-    // ASCII escapes should be decoded to their character values
-    EntityResult lt = html_entity_resolve("lt", 2);
-    EXPECT_EQ(lt.type, ENTITY_ASCII_ESCAPE);
-    EXPECT_STREQ(lt.decoded, "<");
+    // ASCII escapes should resolve to their character values
+    const char* lt = html_entity_lookup("lt", 2);
+    ASSERT_NE(lt, nullptr);
+    EXPECT_STREQ(lt, "<");
 
-    EntityResult gt = html_entity_resolve("gt", 2);
-    EXPECT_EQ(gt.type, ENTITY_ASCII_ESCAPE);
-    EXPECT_STREQ(gt.decoded, ">");
+    const char* gt = html_entity_lookup("gt", 2);
+    ASSERT_NE(gt, nullptr);
+    EXPECT_STREQ(gt, ">");
 
-    EntityResult amp = html_entity_resolve("amp", 3);
-    EXPECT_EQ(amp.type, ENTITY_ASCII_ESCAPE);
-    EXPECT_STREQ(amp.decoded, "&");
+    const char* amp = html_entity_lookup("amp", 3);
+    ASSERT_NE(amp, nullptr);
+    EXPECT_STREQ(amp, "&");
 
-    EntityResult quot = html_entity_resolve("quot", 4);
-    EXPECT_EQ(quot.type, ENTITY_ASCII_ESCAPE);
-    EXPECT_STREQ(quot.decoded, "\"");
+    const char* quot = html_entity_lookup("quot", 4);
+    ASSERT_NE(quot, nullptr);
+    EXPECT_STREQ(quot, "\"");
 
-    EntityResult apos = html_entity_resolve("apos", 4);
-    EXPECT_EQ(apos.type, ENTITY_ASCII_ESCAPE);
-    EXPECT_STREQ(apos.decoded, "'");
+    const char* apos = html_entity_lookup("apos", 4);
+    ASSERT_NE(apos, nullptr);
+    EXPECT_STREQ(apos, "'");
+
+    // Verify is_ascii_escape helper
+    EXPECT_TRUE(html_entity_is_ascii_escape("lt", 2));
+    EXPECT_TRUE(html_entity_is_ascii_escape("amp", 3));
+    EXPECT_FALSE(html_entity_is_ascii_escape("copy", 4));
 }
 
 TEST_F(EntityResolutionTest, NamedEntities) {
-    // Named entities should return ENTITY_NAMED with codepoint
-    EntityResult copy = html_entity_resolve("copy", 4);
-    EXPECT_EQ(copy.type, ENTITY_NAMED);
-    EXPECT_EQ(copy.named.codepoint, 0x00A9);  // ©
-    EXPECT_STREQ(copy.named.name, "copy");
+    // Named entities should return pre-encoded UTF-8
+    const char* copy_ent = html_entity_lookup("copy", 4);
+    ASSERT_NE(copy_ent, nullptr);
+    // © = U+00A9 = 0xC2 0xA9
+    EXPECT_EQ((unsigned char)copy_ent[0], 0xC2);
+    EXPECT_EQ((unsigned char)copy_ent[1], 0xA9);
+    EXPECT_EQ(utf8_first_codepoint(copy_ent), 0x00A9u);
 
-    EntityResult nbsp = html_entity_resolve("nbsp", 4);
-    EXPECT_EQ(nbsp.type, ENTITY_NAMED);
-    EXPECT_EQ(nbsp.named.codepoint, 0x00A0);  // non-breaking space
+    const char* nbsp_ent = html_entity_lookup("nbsp", 4);
+    ASSERT_NE(nbsp_ent, nullptr);
+    EXPECT_EQ(utf8_first_codepoint(nbsp_ent), 0x00A0u);
 
-    EntityResult mdash = html_entity_resolve("mdash", 5);
-    EXPECT_EQ(mdash.type, ENTITY_NAMED);
-    EXPECT_EQ(mdash.named.codepoint, 0x2014);  // —
+    const char* mdash_ent = html_entity_lookup("mdash", 5);
+    ASSERT_NE(mdash_ent, nullptr);
+    EXPECT_EQ(utf8_first_codepoint(mdash_ent), 0x2014u);
 
-    EntityResult euro = html_entity_resolve("euro", 4);
-    EXPECT_EQ(euro.type, ENTITY_NAMED);
-    EXPECT_EQ(euro.named.codepoint, 0x20AC);  // €
+    const char* euro_ent = html_entity_lookup("euro", 4);
+    ASSERT_NE(euro_ent, nullptr);
+    EXPECT_EQ(utf8_first_codepoint(euro_ent), 0x20ACu);
 }
 
 TEST_F(EntityResolutionTest, UnknownEntities) {
-    // Unknown entities should return ENTITY_NOT_FOUND
-    EntityResult unknown = html_entity_resolve("unknownentity", 13);
-    EXPECT_EQ(unknown.type, ENTITY_NOT_FOUND);
+    // Unknown entities should return nullptr
+    const char* unknown = html_entity_lookup("unknownentity", 13);
+    EXPECT_EQ(unknown, nullptr);
 
-    EntityResult invalid = html_entity_resolve("xyz123", 6);
-    EXPECT_EQ(invalid.type, ENTITY_NOT_FOUND);
+    const char* invalid = html_entity_lookup("xyz123", 6);
+    EXPECT_EQ(invalid, nullptr);
 }
 
-TEST_F(EntityResolutionTest, UnicodeToUtf8Conversion) {
+TEST_F(EntityResolutionTest, CodepointToUtf8Conversion) {
     char buf[8];
 
     // ASCII character
-    int len = unicode_to_utf8(0x41, buf);  // 'A'
+    int len = codepoint_to_utf8(0x41, buf);  // 'A'
     EXPECT_EQ(len, 1);
     EXPECT_EQ(buf[0], 'A');
 
     // 2-byte UTF-8 (copyright symbol)
-    len = unicode_to_utf8(0x00A9, buf);
+    len = codepoint_to_utf8(0x00A9, buf);
     EXPECT_EQ(len, 2);
     EXPECT_EQ((unsigned char)buf[0], 0xC2);
     EXPECT_EQ((unsigned char)buf[1], 0xA9);
 
     // 3-byte UTF-8 (euro sign)
-    len = unicode_to_utf8(0x20AC, buf);
+    len = codepoint_to_utf8(0x20AC, buf);
     EXPECT_EQ(len, 3);
     EXPECT_EQ((unsigned char)buf[0], 0xE2);
     EXPECT_EQ((unsigned char)buf[1], 0x82);
     EXPECT_EQ((unsigned char)buf[2], 0xAC);
 
     // 4-byte UTF-8 (emoji - grinning face)
-    len = unicode_to_utf8(0x1F600, buf);
+    len = codepoint_to_utf8(0x1F600, buf);
     EXPECT_EQ(len, 4);
+}
+
+TEST_F(EntityResolutionTest, Utf8FirstCodepoint) {
+    // Test utf8_first_codepoint helper
+    EXPECT_EQ(utf8_first_codepoint("A"), 0x41u);
+    EXPECT_EQ(utf8_first_codepoint("\xC2\xA9"), 0x00A9u);  // ©
+    EXPECT_EQ(utf8_first_codepoint("\xE2\x82\xAC"), 0x20ACu);  // €
+    EXPECT_EQ(utf8_first_codepoint(""), 0u);
+    EXPECT_EQ(utf8_first_codepoint(nullptr), 0u);
+}
+
+TEST_F(EntityResolutionTest, ReverseLookup) {
+    // Test entity name reverse lookup
+    // Note: WHATWG has both "COPY" and "copy" for U+00A9; reverse lookup
+    // returns whichever appears first in the sorted table (COPY).
+    const char* name = html_entity_name_for_codepoint(0x00A9);  // ©
+    ASSERT_NE(name, nullptr);
+    // Verify the returned name actually resolves back to the same codepoint
+    const char* utf8 = html_entity_lookup(name, strlen(name));
+    ASSERT_NE(utf8, nullptr);
+    EXPECT_EQ(utf8_first_codepoint(utf8), 0x00A9u);
+
+    EXPECT_EQ(html_entity_name_for_codepoint(0), nullptr);
 }
 
 // ==== HTML Entity Parsing Tests ====
