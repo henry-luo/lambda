@@ -78,12 +78,12 @@ static void format_command_with_args(LaTeXContext& ctx, const ElementReader& ele
 
 // Format \begin{env}...\end{env}
 static void format_environment(LaTeXContext& ctx, const ElementReader& elem, const char* env, int depth) {
-    ctx.write_latex_indent(depth);
+    ctx.write_indent(depth);
     ctx.write_begin_environment(env);
     format_element_content(ctx, elem);
     ctx.write_char('\n');
 
-    ctx.write_latex_indent(depth);
+    ctx.write_indent(depth);
     ctx.write_end_environment(env);
 }
 
@@ -121,7 +121,7 @@ static void format_latex_element(LaTeXContext& ctx, const ElementReader& elem, i
     } else if (strcmp(tag, "tableofcontents") == 0) {
         ctx.write_text("\\tableofcontents");
     } else if (strcmp(tag, "item") == 0) {
-        ctx.write_latex_indent(depth + 1);
+        ctx.write_indent(depth + 1);
         ctx.write_text("\\item ");
         format_element_content(ctx, elem);
     } else if (strncmp(tag, "math", 4) == 0) {

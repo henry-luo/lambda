@@ -5,31 +5,9 @@
 #include "../../lib/str.h"
 #include <ctype.h>
 
+#include "input-line-utils.h"
+
 using namespace lambda;
-
-// Helper function to skip whitespace at the beginning of a line
-static void skip_line_whitespace(const char **ics) {
-    while (**ics && (**ics == ' ' || **ics == '\t')) {
-        (*ics)++;
-    }
-}
-
-// Helper function to skip to the next line
-static void skip_to_newline(const char **ics) {
-    while (**ics && **ics != '\n' && **ics != '\r') {
-        (*ics)++;
-    }
-    if (**ics == '\r' && *(*ics + 1) == '\n') {
-        (*ics) += 2; // skip \r\n
-    } else if (**ics == '\n' || **ics == '\r') {
-        (*ics)++; // skip \n or \r
-    }
-}
-
-// Helper function to check if line starts with whitespace (indicating folded line)
-static bool is_folded_line(const char *ics) {
-    return *ics == ' ' || *ics == '\t';
-}
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **ics) {

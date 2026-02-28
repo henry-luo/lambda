@@ -5,18 +5,9 @@
 #include "source_tracker.hpp"
 #include "lib/log.h"
 
-using namespace lambda;
+#include "input-line-utils.h"
 
-static void skip_to_newline(const char **prop) {
-    while (**prop && **prop != '\n' && **prop != '\r') {
-        (*prop)++;
-    }
-    if (**prop == '\r' && *(*prop + 1) == '\n') {
-        (*prop) += 2; // skip \r\n
-    } else if (**prop == '\n' || **prop == '\r') {
-        (*prop)++; // skip \n or \r
-    }
-}
+using namespace lambda;
 
 static bool is_comment(const char *prop) {
     return *prop == '#' || *prop == '!';

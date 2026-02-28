@@ -475,8 +475,7 @@ bool is_emoji_shortcode(const char* name, size_t len) {
 }
 
 bool is_html_entity(const char* name, size_t len) {
-    EntityResult result = html_entity_resolve(name, len);
-    return result.type != ENTITY_NOT_FOUND;
+    return html_entity_lookup(name, len) != nullptr;
 }
 
 SymbolResolution resolve_symbol(const char* name, size_t len) {
@@ -501,27 +500,12 @@ SymbolResolution resolve_symbol(const char* name, size_t len) {
     }
 
     // Then check HTML entities
-    EntityResult entity = html_entity_resolve(name, len);
-    if (entity.type == ENTITY_ASCII_ESCAPE) {
+    const char* replacement = html_entity_lookup(name, len);
+    if (replacement) {
         result.type = SYMBOL_HTML_ENTITY;
-        result.utf8 = entity.decoded;
-        result.utf8_len = strlen(entity.decoded);
-        // Get codepoint from the decoded character
-        if (result.utf8_len == 1) {
-            result.codepoint = (uint8_t)entity.decoded[0];
-        }
-        return result;
-    } else if (entity.type == ENTITY_NAMED) {
-        result.type = SYMBOL_HTML_ENTITY;
-        // For named entities, we need to convert codepoint to UTF-8
-        // Store in static buffer (safe for single-threaded use)
-        static char utf8_buf[8];
-        int utf8_len = unicode_to_utf8(entity.named.codepoint, utf8_buf);
-        if (utf8_len > 0) {
-            result.utf8 = utf8_buf;
-            result.utf8_len = utf8_len;
-            result.codepoint = entity.named.codepoint;
-        }
+        result.utf8 = replacement;
+        result.utf8_len = strlen(replacement);
+        result.codepoint = utf8_first_codepoint(replacement);
         return result;
     }
 

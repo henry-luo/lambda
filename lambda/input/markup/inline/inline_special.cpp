@@ -509,6 +509,7 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 // ============================================================================
 
 #include "../../html_entities.h"
+#include "../../input-utils.h"
 
 /**
  * parse_entity_reference - Parse HTML entity and numeric character references
@@ -594,7 +595,7 @@ Item parse_entity_reference(MarkupParser* parser, const char** text) {
                 codepoint = 0xFFFD; // Unicode replacement character
             }
 
-            int len = unicode_to_utf8(codepoint, decoded);
+            int len = codepoint_to_utf8(codepoint, decoded);
             if (len == 0) {
                 return Item{.item = ITEM_UNDEFINED};
             }
@@ -612,21 +613,13 @@ Item parse_entity_reference(MarkupParser* parser, const char** text) {
 
         if (pos > name_start && *pos == ';') {
             size_t name_len = pos - name_start;
-            EntityResult result = html_entity_resolve(name_start, name_len);
+            const char* replacement = html_entity_lookup(name_start, name_len);
 
-            if (result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) {
-                // Direct decode for lt, gt, amp, quot, apos and multi-codepoint entities
-                strncpy(decoded, result.decoded, sizeof(decoded) - 1);
+            if (replacement) {
+                strncpy(decoded, replacement, sizeof(decoded) - 1);
+                decoded[sizeof(decoded) - 1] = '\0';
                 valid = true;
                 pos++; // Skip ;
-            } else if (result.type == ENTITY_UNICODE_SPACE || result.type == ENTITY_NAMED) {
-                // Decode Unicode codepoint
-                uint32_t cp = result.named.codepoint;
-                int len = unicode_to_utf8(cp, decoded);
-                if (len > 0) {
-                    valid = true;
-                    pos++; // Skip ;
-                }
             }
         }
     }

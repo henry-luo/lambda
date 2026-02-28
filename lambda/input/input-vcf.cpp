@@ -8,31 +8,9 @@ extern "C" {
 #include "../../lib/str.h"
 }
 
+#include "input-line-utils.h"
+
 using namespace lambda;
-
-// Helper function to skip whitespace at the beginning of a line
-static void skip_line_whitespace(const char **vcf) {
-    while (**vcf && (**vcf == ' ' || **vcf == '\t')) {
-        (*vcf)++;
-    }
-}
-
-// Helper function to skip to the next line
-static void skip_to_newline(const char **vcf) {
-    while (**vcf && **vcf != '\n' && **vcf != '\r') {
-        (*vcf)++;
-    }
-    if (**vcf == '\r' && *(*vcf + 1) == '\n') {
-        (*vcf) += 2; // skip \r\n
-    } else if (**vcf == '\n' || **vcf == '\r') {
-        (*vcf)++; // skip \n or \r
-    }
-}
-
-// Helper function to check if line starts with whitespace (indicating folded line)
-static bool is_folded_line(const char *vcf) {
-    return *vcf == ' ' || *vcf == '\t';
-}
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **vcf) {

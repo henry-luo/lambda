@@ -11,6 +11,7 @@
  */
 #include "block_common.hpp"
 #include "../../html_entities.h"
+#include "../../input-utils.h"
 #include <cstdlib>
 
 namespace lambda {
@@ -118,7 +119,7 @@ static size_t process_escapes_and_entities(char* str, size_t len) {
                     if (codepoint == 0) codepoint = 0xFFFD;
                     // Encode as UTF-8
                     char utf8_buf[5];
-                    size_t utf8_len = unicode_to_utf8(codepoint, utf8_buf);
+                    size_t utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
                     for (size_t i = 0; i < utf8_len; i++) {
                         str[write++] = utf8_buf[i];
                     }
@@ -139,23 +140,11 @@ static size_t process_escapes_and_entities(char* str, size_t len) {
                 if (read > name_start && read < len && str[read] == ';') {
                     size_t name_len = read - name_start;
 
-                    // Use html_entity_resolve API
-                    EntityResult result = html_entity_resolve(str + name_start, name_len);
-                    if (result.type != ENTITY_NOT_FOUND) {
+                    const char* replacement = html_entity_lookup(str + name_start, name_len);
+                    if (replacement) {
                         read++; // skip ';'
-                        if (result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) {
-                            // Copy the decoded string
-                            const char* decoded = result.decoded;
-                            while (*decoded) {
-                                str[write++] = *decoded++;
-                            }
-                        } else {
-                            // ENTITY_NAMED or ENTITY_UNICODE_SPACE - encode codepoint as UTF-8
-                            char utf8_buf[5];
-                            size_t utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
-                            for (size_t i = 0; i < utf8_len; i++) {
-                                str[write++] = utf8_buf[i];
-                            }
+                        while (*replacement) {
+                            str[write++] = *replacement++;
                         }
                     } else {
                         // Unknown entity, copy literally

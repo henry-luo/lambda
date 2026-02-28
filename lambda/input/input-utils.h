@@ -65,6 +65,30 @@ bool try_parse_double(const char* str, size_t len, double* out);
  */
 int input_strncasecmp(const char* s1, const char* s2, size_t n);
 
+// ── Whitespace & Line Utilities ────────────────────────────────────
+
+// NOTE: skip_whitespace() and skip_tab_pace() are declared in input.hpp
+// rather than here, because the name "skip_whitespace" conflicts with a
+// different-signature version in markup_common.hpp (returns int, tabs→4).
+
+/** Return true if @p c is space, tab, newline or carriage return. */
+bool input_is_whitespace_char(char c);
+
+/** Return true if @p line consists entirely of whitespace. */
+bool input_is_empty_line(const char* line);
+
+/** Count consecutive leading occurrences of @p ch in @p str. */
+int input_count_leading_chars(const char* str, char ch);
+
+/** Return a malloc'd trimmed copy of @p str (caller must free). */
+char* input_trim_whitespace(const char* str);
+
+/** Split @p text into malloc'd array of lines. Sets *line_count. Caller must free via input_free_lines(). */
+char** input_split_lines(const char* text, int* line_count);
+
+/** Free line array returned by input_split_lines(). */
+void input_free_lines(char** lines, int line_count);
+
 #ifdef __cplusplus
 }
 #endif
