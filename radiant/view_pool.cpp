@@ -2091,7 +2091,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"family\": \"%s\",\n", span->font->family);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"size\": %f,\n", span->font->font_size);
+        strbuf_append_format(buf, "\"size\": %g,\n", span->font->font_size);
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* style_str = "normal";
         auto style_val = css_enum_info(span->font->font_style);
