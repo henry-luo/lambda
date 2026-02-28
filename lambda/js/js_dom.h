@@ -122,6 +122,7 @@ Item js_dom_set_property(Item elem, Item prop_name, Item value);
  * @return The value that was set, or ITEM_NULL on failure
  */
 Item js_dom_set_style_property(Item elem, Item prop_name, Item value);
+Item js_dom_get_style_property(Item elem, Item prop_name);
 
 // =============================================================================
 // Element Method Dispatcher

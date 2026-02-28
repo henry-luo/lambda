@@ -94,8 +94,36 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
         const char* onload = extract_element_attribute(elem, "onload", nullptr);
         if (onload && onload[0]) {
             log_debug("script_runner: found body onload='%s'", onload);
-            strbuf_append_str(onload_buf, onload);
-            strbuf_append_str(onload_buf, "\n");
+
+            // Handle setTimeout('code', delay) in body onload — extract inner code
+            // Pattern: setTimeout('code()', delay) or setTimeout("code()", delay)
+            const char* st = strstr(onload, "setTimeout(");
+            if (st && (st == onload || *(st-1) == ' ' || *(st-1) == ';')) {
+                const char* p = st + 11; // skip "setTimeout("
+                char quote = *p;
+                if (quote == '\'' || quote == '"') {
+                    p++; // skip opening quote
+                    const char* code_start = p;
+                    // find closing quote
+                    while (*p && *p != quote) p++;
+                    if (*p == quote) {
+                        int code_len = (int)(p - code_start);
+                        log_debug("script_runner: extracted setTimeout code: '%.*s'", code_len, code_start);
+                        strbuf_append_str_n(onload_buf, code_start, code_len);
+                        strbuf_append_str(onload_buf, "\n");
+                    } else {
+                        strbuf_append_str(onload_buf, onload);
+                        strbuf_append_str(onload_buf, "\n");
+                    }
+                } else {
+                    // function form — pass through as-is, preamble handles it
+                    strbuf_append_str(onload_buf, onload);
+                    strbuf_append_str(onload_buf, "\n");
+                }
+            } else {
+                strbuf_append_str(onload_buf, onload);
+                strbuf_append_str(onload_buf, "\n");
+            }
         }
     }
 
@@ -105,7 +133,9 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
         const char* type_attr = extract_element_attribute(elem, "type", nullptr);
         if (type_attr && type_attr[0] &&
             strcasecmp(type_attr, "text/javascript") != 0 &&
-            strcasecmp(type_attr, "application/javascript") != 0) {
+            strcasecmp(type_attr, "application/javascript") != 0 &&
+            strcasecmp(type_attr, "text/ecmascript") != 0 &&
+            strcasecmp(type_attr, "application/ecmascript") != 0) {
             log_debug("script_runner: skipping <script type='%s'>", type_attr);
             return;
         }
@@ -148,6 +178,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     collect_scripts_recursive(html_root, script_buf, onload_buf);
 
     // append onload handler after all script definitions
+    // This handles both:
+    //   <body onload="doTest()">  → collected in onload_buf
+    //   window.onload = function() { ... }  → set on window object below
     if (onload_buf->length > 0) {
         strbuf_append_str(script_buf, onload_buf->str);
     }
@@ -158,6 +191,21 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         strbuf_free(onload_buf);
         return;
     }
+
+    // Wrap script code with window object support:
+    // 1. Prepend: var window = {};  (provides window.onload, window.setTimeout etc.)
+    // 2. Append: auto-call window.onload() if set by scripts
+    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 512);
+    // Preamble: provide browser globals
+    strbuf_append_str(wrapped_buf,
+        "var window = {};\n"
+        "function setTimeout(fn, delay) { if (typeof fn === 'function') fn(); }\n"
+        "function setInterval(fn, delay) { if (typeof fn === 'function') fn(); }\n"
+    );
+    strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
+    strbuf_append_str(wrapped_buf, "\nif (window.onload) { window.onload(); }\n");
+    strbuf_free(script_buf);
+    script_buf = wrapped_buf;
 
     log_info("execute_document_scripts: executing %zu bytes of JS", script_buf->length);
     log_debug("execute_document_scripts: combined source:\n%.500s%s",

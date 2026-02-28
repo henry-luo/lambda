@@ -1989,6 +1989,36 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     return text_node;
 }
 
+DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
+    if (!native_string) {
+        log_error("dom_text_create_detached: native_string required");
+        return nullptr;
+    }
+    if (!doc || !doc->arena) {
+        log_error("dom_text_create_detached: doc with arena required");
+        return nullptr;
+    }
+
+    DomText* text_node = (DomText*)arena_calloc(doc->arena, sizeof(DomText));
+    if (!text_node) {
+        log_error("dom_text_create_detached: arena_calloc failed");
+        return nullptr;
+    }
+
+    text_node->node_type = DOM_NODE_TEXT;
+    text_node->parent = nullptr;
+    text_node->next_sibling = nullptr;
+    text_node->prev_sibling = nullptr;
+
+    text_node->native_string = native_string;
+    text_node->text = native_string->chars;
+    text_node->length = native_string->len;
+    text_node->content_type = DOM_TEXT_STRING;
+
+    log_debug("dom_text_create_detached: created text node, text='%s'", native_string->chars);
+    return text_node;
+}
+
 DomText* dom_text_create_symbol(String* symbol_string, DomElement* parent_element) {
     if (!symbol_string || !parent_element) {
         log_error("dom_text_create_symbol: symbol_string and parent_element required");

@@ -60,15 +60,20 @@ extern "C" void* js_dom_get_document(void) {
 extern "C" Item js_dom_wrap_element(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
-    DomElement* elem = (DomElement*)dom_elem;
+    DomNode* node = (DomNode*)dom_elem;
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
     wrapper->type = (void*)&js_dom_type_marker;  // DOM marker
-    wrapper->data = dom_elem;                     // store DomElement* directly
+    wrapper->data = dom_elem;                     // store DomNode* directly
     wrapper->data_cap = 0;
 
-    log_debug("js_dom_wrap_element: wrapped DomElement tag='%s' as Map=%p",
-              elem->tag_name ? elem->tag_name : "(null)", (void*)wrapper);
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        log_debug("js_dom_wrap_element: wrapped DomElement tag='%s' as Map=%p",
+                  elem->tag_name ? elem->tag_name : "(null)", (void*)wrapper);
+    } else if (node->is_text()) {
+        log_debug("js_dom_wrap_element: wrapped DomText as Map=%p", (void*)wrapper);
+    }
 
     return (Item){.map = wrapper};
 }
@@ -335,25 +340,44 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return js_dom_wrap_element(dom_elem);
     }
 
+    // createElementNS(namespace, tagName) — treat same as createElement, ignoring namespace
+    if (strcmp(method, "createElementNS") == 0) {
+        if (argc < 2) return ItemNull;
+        // args[0] = namespace URI (ignored), args[1] = qualified tag name
+        const char* tag = fn_to_cstr(args[1]);
+        if (!tag) return ItemNull;
+
+        MarkBuilder builder(doc->input);
+        Item elem_item = builder.element(tag).final();
+
+        Element* elem = elem_item.element;
+        DomElement* dom_elem = dom_element_create(doc, tag, elem);
+        return js_dom_wrap_element(dom_elem);
+    }
+
     // createTextNode(text)
     if (strcmp(method, "createTextNode") == 0) {
         if (argc < 1) return ItemNull;
         const char* text = fn_to_cstr(args[0]);
         if (!text) return ItemNull;
 
-        // create a String-backed DomText node
+        // create a detached String-backed DomText node (no parent yet)
         String* str = heap_create_name(text);
-        DomText* text_node = dom_text_create(str, nullptr);
-        // wrap as DOM node (we use the same Map wrapper with a DomNode* cast)
-        // since DomText inherits DomNode, we can wrap it similarly
-        // but we need a slightly different marker — for simplicity, use the same wrapper
-        // and check node_type when unwrapping for operations
-        Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-        wrapper->type_id = LMD_TYPE_MAP;
-        wrapper->type = (void*)&js_dom_type_marker;
-        wrapper->data = (void*)text_node;
-        wrapper->data_cap = 0;
-        return (Item){.map = wrapper};
+        DomText* text_node = dom_text_create_detached(str, doc);
+        if (!text_node) {
+            log_error("js_document_method: createTextNode failed for '%s'", text);
+            return ItemNull;
+        }
+        return js_dom_wrap_element(text_node);
+    }
+
+    // normalize() — delegate to root element's normalize
+    if (strcmp(method, "normalize") == 0) {
+        if (doc->root) {
+            Item root_item = js_dom_wrap_element(doc->root);
+            js_dom_element_method(root_item, (Item){.item = s2it(heap_create_name("normalize"))}, nullptr, 0);
+        }
+        return ItemNull;
     }
 
     log_debug("js_document_method: unknown method '%s'", method);
@@ -450,14 +474,58 @@ extern "C" Item js_document_get_property(Item prop_name) {
 // ============================================================================
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
-    if (!elem) {
-        log_debug("js_dom_get_property: not a DOM element");
+    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    if (!node) {
+        log_debug("js_dom_get_property: not a DOM node");
         return ItemNull;
     }
 
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return ItemNull;
+
+    // Text node properties
+    if (node->is_text()) {
+        DomText* text_node = node->as_text();
+        if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 || strcmp(prop, "textContent") == 0) {
+            return text_node->text ? (Item){.item = s2it(heap_create_name(text_node->text))}
+                                   : (Item){.item = s2it(heap_create_name(""))};
+        }
+        if (strcmp(prop, "length") == 0) {
+            return (Item){.item = i2it((int64_t)text_node->length)};
+        }
+        if (strcmp(prop, "nodeType") == 0) {
+            return (Item){.item = i2it(3)}; // TEXT_NODE
+        }
+        if (strcmp(prop, "nodeName") == 0) {
+            return (Item){.item = s2it(heap_create_name("#text"))};
+        }
+        if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+            DomNode* parent = text_node->parent;
+            if (parent && parent->is_element()) {
+                return js_dom_wrap_element(parent->as_element());
+            }
+            return ItemNull;
+        }
+        if (strcmp(prop, "nextSibling") == 0) {
+            DomNode* sib = text_node->next_sibling;
+            if (!sib) return ItemNull;
+            return js_dom_wrap_element((void*)sib);
+        }
+        if (strcmp(prop, "previousSibling") == 0) {
+            DomNode* sib = text_node->prev_sibling;
+            if (!sib) return ItemNull;
+            return js_dom_wrap_element((void*)sib);
+        }
+        log_debug("js_dom_get_property: unknown text node property '%s'", prop);
+        return ItemNull;
+    }
+
+    // Element properties below — safe to cast
+    DomElement* elem = node->as_element();
+    if (!elem) {
+        log_debug("js_dom_get_property: node is not an element for property '%s'", prop);
+        return ItemNull;
+    }
 
     // tagName (uppercased per spec)
     if (strcmp(prop, "tagName") == 0) {
@@ -916,6 +984,109 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     log_debug("js_dom_set_style_property: set %s='%s' (CSS: %s) on <%s>",
               js_prop, val_str, css_prop, elem->tag_name ? elem->tag_name : "?");
     return value;
+}
+
+// ============================================================================
+// Style Property Read (elem.style.X)
+// ============================================================================
+
+extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) {
+        log_debug("js_dom_get_style_property: not a DOM element");
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    const char* js_prop = fn_to_cstr(prop_name);
+    if (!js_prop) return (Item){.item = s2it(heap_create_name(""))};
+
+    // convert camelCase JS property to CSS property
+    char css_prop[128];
+    js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+
+    // look up the CSS property ID
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    if (prop_id == CSS_PROPERTY_UNKNOWN) {
+        log_debug("js_dom_get_style_property: unknown CSS property '%s'", css_prop);
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // get the specified value for this property
+    CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
+    if (!decl || !decl->value) {
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // only return values that came from inline styles (element.style.X should
+    // only reflect inline styles, not stylesheet rules)
+    if (!decl->specificity.inline_style) {
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // convert the CSS value back to a string
+    CssValue* val = decl->value;
+    switch (val->type) {
+        case CSS_VALUE_TYPE_KEYWORD: {
+            const CssEnumInfo* info = css_enum_info(val->data.keyword);
+            if (info && info->name) {
+                return (Item){.item = s2it(heap_create_name(info->name))};
+            }
+            break;
+        }
+        case CSS_VALUE_TYPE_LENGTH: {
+            char buf[64];
+            const char* unit_str = "";
+            switch (val->data.length.unit) {
+                case CSS_UNIT_PX: unit_str = "px"; break;
+                case CSS_UNIT_EM: unit_str = "em"; break;
+                case CSS_UNIT_REM: unit_str = "rem"; break;
+                case CSS_UNIT_PERCENT: unit_str = "%"; break;
+                case CSS_UNIT_VW: unit_str = "vw"; break;
+                case CSS_UNIT_VH: unit_str = "vh"; break;
+                case CSS_UNIT_CM: unit_str = "cm"; break;
+                case CSS_UNIT_MM: unit_str = "mm"; break;
+                case CSS_UNIT_IN: unit_str = "in"; break;
+                case CSS_UNIT_PT: unit_str = "pt"; break;
+                case CSS_UNIT_PC: unit_str = "pc"; break;
+                default: unit_str = "px"; break;
+            }
+            double v = val->data.length.value;
+            if (v == (int)v) {
+                snprintf(buf, sizeof(buf), "%d%s", (int)v, unit_str);
+            } else {
+                snprintf(buf, sizeof(buf), "%g%s", v, unit_str);
+            }
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case CSS_VALUE_TYPE_PERCENTAGE: {
+            char buf[64];
+            double v = val->data.percentage.value;
+            if (v == (int)v) {
+                snprintf(buf, sizeof(buf), "%d%%", (int)v);
+            } else {
+                snprintf(buf, sizeof(buf), "%g%%", v);
+            }
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case CSS_VALUE_TYPE_NUMBER: {
+            char buf[64];
+            if (val->data.number.is_integer) {
+                snprintf(buf, sizeof(buf), "%d", (int)val->data.number.value);
+            } else {
+                snprintf(buf, sizeof(buf), "%g", val->data.number.value);
+            }
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case CSS_VALUE_TYPE_STRING:
+            if (val->data.string) {
+                return (Item){.item = s2it(heap_create_name(val->data.string))};
+            }
+            break;
+        default:
+            break;
+    }
+
+    return (Item){.item = s2it(heap_create_name(""))};
 }
 
 // ============================================================================
