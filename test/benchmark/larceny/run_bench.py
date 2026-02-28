@@ -36,7 +36,7 @@ BENCHMARKS = [
     ("triangl",   "backtrack",   "Triangle solitaire solutions"),
     ("puzzle",    "backtrack",   "N-Queens n=10 all solutions"),
     ("ray",       "numeric",     "Ray tracer 100x100 (10 iters)"),
-    ("sumfp_long", "numeric",    "Sum 1/i^2 for i=1..500000 (pi^2/6)"),
+    ("paraffins", "recursive",   "Paraffin isomer counting nb(1..23) x10"),
 ]
 
 # Lambda startup overhead (measured separately)
