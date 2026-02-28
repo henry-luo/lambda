@@ -69,6 +69,41 @@ static inline bool has_margin_chain(BoundaryProp* bound) {
     return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
 }
 
+// CSS 2.1 §10.6.4: When an ancestor block's y changes after its absolutely positioned
+// descendants have already had their static positions computed (e.g., due to margin
+// collapse), the descendants' positions must be updated by the same delta.
+// This walks the DOM subtree, adjusting abs/fixed children. Recursion stops at
+// abs/fixed elements since their descendants use a different containing block path.
+static void adjust_abs_descendants_y(ViewElement* parent, float delta) {
+    View* child = parent->first_child;
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            bool is_positioned = vb->position &&
+                vb->position->position != CSS_VALUE_STATIC;
+            if (is_positioned) {
+                bool is_abs_fixed = vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                    vb->position->position == CSS_VALUE_FIXED;
+                if (is_abs_fixed && !vb->position->has_top && !vb->position->has_bottom) {
+                    // Static-position abs/fixed element whose parent-to-CB walk
+                    // includes the ancestor that was adjusted → needs correction
+                    vb->y += delta;
+                    log_debug("[ABS ADJUST] Adjusted abs-pos %s y by %f to %f",
+                              vb->node_name(), delta, vb->y);
+                }
+                // Don't recurse past ANY positioned element (relative/absolute/fixed):
+                // it establishes a containing block for its abs-pos descendants,
+                // so their coordinates are relative to it, not the adjusted ancestor
+            } else {
+                // Non-positioned (static): abs-pos descendants beneath may still
+                // reference the adjusted ancestor in their parent-to-CB walk
+                adjust_abs_descendants_y((ViewElement*)vb, delta);
+            }
+        }
+        child = (View*)child->next_sibling;
+    }
+}
+
 // DEBUG: Global for tracking table height between calls
 // WORKAROUND: Table height gets corrupted between layout_block_content return and caller
 // This is a mysterious issue that needs further investigation
@@ -987,7 +1022,24 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // are collapsed-through (self-collapsing), they don't factor in the
             // auto height calculation — the height is zero.
             if (auto_height < 0) auto_height = 0;
-            float final_height = adjust_min_max_height(block, auto_height);
+
+            // CSS 2.1 §10.7: min-height/max-height refer to the content area for
+            // content-box elements. auto_height is in border-box space (includes
+            // padding+border from flow_height). Convert to content-box space for
+            // the min/max comparison, then add padding+border back.
+            float final_height;
+            bool is_content_box = !block->blk || block->blk->box_sizing != CSS_VALUE_BORDER_BOX;
+            if (is_content_box && block->bound) {
+                float pb = block->bound->padding.top + block->bound->padding.bottom;
+                if (block->bound->border) {
+                    pb += block->bound->border->width.top + block->bound->border->width.bottom;
+                }
+                float content_only = max(auto_height - pb, 0.0f);
+                content_only = adjust_min_max_height(block, content_only);
+                final_height = content_only + pb;
+            } else {
+                final_height = adjust_min_max_height(block, auto_height);
+            }
             log_debug("finalize block flow, set block height to flow height: %f (collapsible_mb=%f, auto=%f, after min/max: %f)",
                       flow_height, collapsible_mb, auto_height, final_height);
             block->height = final_height;
@@ -1024,9 +1076,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     }
 
     // BFC (Block Formatting Context) height expansion to contain floats
-    // CSS 2.2 Section 10.6.7: For BFC roots, floating descendants are included in height
-    // This applies to html/body elements which establish the initial BFC
-    if (lycon->block.establishing_element == block) {
+    // CSS 2.1 §10.6.7: For BFC roots with AUTO height, floating descendants
+    // are included in height computation. When height is explicitly specified
+    // (given_height >= 0), the explicit height is used and floats may overflow.
+    if (lycon->block.establishing_element == block && block_given_height < 0) {
         float max_float_bottom = 0;
         // Check all floats in this BFC
         for (FloatBox* fb = lycon->block.left_floats; fb; fb = fb->next) {
@@ -2745,7 +2798,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         } else {
             content_width = adjust_border_padding_width(block, content_width);
-            if (block->bound) content_width = adjust_min_max_width(block, content_width);
+            content_width = adjust_min_max_width(block, content_width);
         }
     }
     // Clamp to 0 - negative content_width can occur with very narrow containers
@@ -2772,7 +2825,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         } else {
             content_height = adjust_border_padding_height(block, content_height);
-            if (block->bound) content_height = adjust_min_max_height(block, content_height);
+            content_height = adjust_min_max_height(block, content_height);
         }
     }
     assert(content_height >= 0);
@@ -3293,6 +3346,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 block->bound->margin_chain_positive = 0;
                 block->bound->margin_chain_negative = 0;
                 block->y += delta;
+                // CSS 2.1 §10.6.4: The parent block's y changed; adjust any abs-pos
+                // descendants whose static position was computed using the old y.
+                if (delta != 0 && (!block->position || block->position->position == CSS_VALUE_STATIC)) {
+                    adjust_abs_descendants_y((ViewElement*)block, delta);
+                }
                 // CSS 2.1 §8.3.1: All self-collapsing children's margins were absorbed
                 // by the unified parent margin. Reset their positions to y=0 within
                 // the parent (they are all zero-height, so this is safe).
@@ -3304,8 +3362,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                             (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
                                               vb->position->position == CSS_VALUE_FIXED));
                         if (!oof) {
+                            float child_delta = -vb->y;  // resetting to 0
                             vb->y = 0;
                             if (vb->bound) vb->bound->margin.top = 0;
+                            // Also adjust abs-pos descendants inside this child
+                            if (child_delta != 0 &&
+                                (!vb->position || vb->position->position == CSS_VALUE_STATIC)) {
+                                adjust_abs_descendants_y((ViewElement*)vb, child_delta);
+                            }
                         }
                     }
                     View* next = (View*)fix_child->next_sibling;
@@ -3344,8 +3408,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     // BFC (Block Formatting Context) height expansion to contain floats
-    // CSS 2.2 Section 10.6.7: In certain cases (BFC roots), the heights of floating
-    // descendants are also taken into account when computing the height
+    // CSS 2.1 §10.6.7: In certain cases (BFC roots with AUTO height), the heights
+    // of floating descendants are also taken into account when computing the height.
+    // When height is explicitly specified, the explicit height is used and floats may overflow.
     // BFC is established by: overflow != visible, display: flow-root, float != none, etc.
     bool creates_bfc = block->scroller &&
                        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
@@ -3354,7 +3419,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     log_debug("BFC check for %s: creates_bfc=%d, scroller=%p, overflow_x=%d",
         block->node_name(), creates_bfc, block->scroller, block->scroller ? block->scroller->overflow_x : -1);
 
-    if (creates_bfc || lycon->block.is_bfc_root) {
+    if ((creates_bfc || lycon->block.is_bfc_root) && !has_explicit_height) {
         // Check unified BlockContext for float containment
         if (lycon->block.establishing_element == block) {
             float max_float_bottom = lycon->block.lowest_float_bottom;
@@ -4217,6 +4282,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         if (collapse != 0) {
                             block->y -= collapse;
                             block->bound->margin.top -= collapse;
+                            // CSS 2.1 §10.6.4: Adjust abs-pos descendants whose static
+                            // position was computed before this margin collapse adjustment.
+                            // Only needed when the block itself is NOT positioned, because
+                            // a positioned block IS the containing block for its abs-pos
+                            // descendants (their coordinates are relative to it, not affected
+                            // by changes to the block's own position).
+                            if (!block->position || block->position->position == CSS_VALUE_STATIC) {
+                                adjust_abs_descendants_y((ViewElement*)block, -collapse);
+                            }
                             log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
                         }
                     } else {
@@ -4328,6 +4402,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // negative component means the effective gap is smaller.
                         if (contribution < 0) {
                             block->y += contribution;
+                            // CSS 2.1 §10.6.4: Adjust abs-pos descendants whose static
+                            // position was computed before this y adjustment
+                            if (!block->position || block->position->position == CSS_VALUE_STATIC) {
+                                adjust_abs_descendants_y((ViewElement*)block, contribution);
+                            }
                         }
                         // expose the merged margin to next sibling via margin.bottom
                         if (block_has_clearance) {
