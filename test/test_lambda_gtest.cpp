@@ -23,6 +23,7 @@ static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
     "test/benchmark/awfy",
     "test/benchmark/r7rs",
+    "test/benchmark/beng",
     // Add more procedural test directories here as needed
 };
 static const size_t NUM_PROCEDURAL_TEST_DIRECTORIES = sizeof(PROCEDURAL_TEST_DIRECTORIES) / sizeof(PROCEDURAL_TEST_DIRECTORIES[0]);

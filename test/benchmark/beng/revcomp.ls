@@ -3,7 +3,7 @@
 // Uses file input instead of stdin (Lambda adaptation)
 // Expected: matches benchmarksgame revcomp-output.txt
 
-let INPUT_PATH = @"test/benchmark/beng/input/fasta_1000.txt"
+let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 let LINE_WIDTH = 60
 
 // complement mapping using two-pass swap to avoid overwriting
@@ -34,52 +34,51 @@ pn complement(seq) {
     return s
 }
 
-pn output_reverse(header, seq_chars) {
+pn output_reverse_complement(header, seq) {
     print(header ++ "\n")
-    // reverse the sequence
-    var rev = reverse(seq_chars)
-    // complement each character and output in LINE_WIDTH chunks
+    // complement then reverse (equivalent to reverse-complement)
+    var comp = complement(seq)
+    // reverse() on a string returns the reversed string
+    var rev = reverse(comp)
+    // output in LINE_WIDTH chunks
     var total = len(rev)
     var pos = 0
     while (pos < total) {
-        var end = pos + LINE_WIDTH
-        if (end > total) {
-            end = total
+        var end_pos = pos + LINE_WIDTH
+        if (end_pos > total) {
+            end_pos = total
         }
-        // build line from complemented chars
-        var chunk = str_join(slice(rev, pos, end), "")
-        print(complement(chunk) ++ "\n")
-        pos = end
+        print(slice(rev, pos, end_pos) ++ "\n")
+        pos = end_pos
     }
 }
 
 pn main() {
-    let text = input(INPUT_PATH, 'text)
+    let text^err = input(INPUT_PATH, 'text')
     let lines = split(text, "\n")
     var num_lines = len(lines)
 
     var header = ""
-    var seq_chars = []
+    var seq = ""
     var i = 0
     while (i < num_lines) {
         let line = lines[i]
         if (len(line) > 0 and slice(line, 0, 1) == ">") {
             // output previous sequence if any
-            if (len(seq_chars) > 0) {
-                output_reverse(header, seq_chars)
+            if (len(seq) > 0) {
+                output_reverse_complement(header, seq)
             }
             header = line
-            seq_chars = []
+            seq = ""
         } else {
             if (len(line) > 0) {
-                // append characters of this line
-                seq_chars = seq_chars ++ chars(line)
+                seq = seq ++ upper(line)
             }
         }
         i = i + 1
     }
     // output last sequence
-    if (len(seq_chars) > 0) {
-        output_reverse(header, seq_chars)
+    if (len(seq) > 0) {
+        output_reverse_complement(header, seq)
     }
 }
