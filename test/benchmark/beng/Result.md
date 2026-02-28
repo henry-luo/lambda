@@ -4,24 +4,25 @@
 
 - Runs per benchmark: 3
 - Node.js version: v22.13.0
-- Date: 2026-02-28 13:39:48
+- Date: 2026-02-28 13:53:38
 - Timing: wall-clock (startup + compile/JIT + execution)
 
 ## Results
 
 | Benchmark | Category | N | Lambda | Node.js | Ratio |
 |-----------|----------|---|--------|---------|-------|
-| binarytrees | gc | 10 | 70.3 ms | 48.7 ms | 1.44x |
-| fannkuch | combinatorial | 7 | 22.1 ms | 48.0 ms | 0.46x |
-| fasta | string | 1000 | 22.1 ms | 48.8 ms | 0.45x |
-| knucleotide | hashmap | file | 26.6 ms | 52.7 ms | 0.51x |
-| mandelbrot | numeric | 200 | 61.9 ms | 52.2 ms | 1.19x |
-| nbody | numeric | 1000 | 27.2 ms | 46.2 ms | 0.59x |
-| pidigits | bigint | 30 | 20.3 ms | 43.5 ms | 0.47x |
-| revcomp | string | file | 23.6 ms | 48.9 ms | 0.48x |
-| spectralnorm | numeric | 100 | 58.1 ms | 49.4 ms | 1.18x |
+| binarytrees | gc | 10 | 67.4 ms | 45.3 ms | 1.49x |
+| fannkuch | combinatorial | 7 | 18.4 ms | 43.0 ms | 0.43x |
+| fasta | string | 1000 | 48.8 ms | 45.3 ms | 1.08x |
+| knucleotide | hashmap | file | 23.9 ms | 45.9 ms | 0.52x |
+| mandelbrot | numeric | 200 | 54.2 ms | 46.3 ms | 1.17x |
+| nbody | numeric | 1000 | 26.9 ms | 62.2 ms | 0.43x |
+| pidigits | bigint | 30 | 16.5 ms | 45.3 ms | 0.36x |
+| regexredux | regex | file | 19.6 ms | 40.8 ms | 0.48x |
+| revcomp | string | file | 20.8 ms | 43.4 ms | 0.48x |
+| spectralnorm | numeric | 100 | 43.2 ms | 56.8 ms | 0.76x |
 
-**Geometric mean ratio: 0.67x** (Lambda wins: 6, Node.js wins: 3)
+**Geometric mean ratio: 0.64x** (Lambda wins: 7, Node.js wins: 3)
 
 ## Notes
 
