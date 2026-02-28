@@ -650,13 +650,10 @@ This keeps format knowledge DRY across both `input/` and `format/` trees.
 lambda/input/
   input.cpp                     # Dispatcher (cleaned: no misplaced utilities)
   input.hpp                     # Input type declarations
-  input-common.h                # Shared C API (renamed from input-utils.h)
-  input-common.hpp              # Shared C++ API (renamed from input-utils.hpp)
-  input-common.cpp              # Merged implementations (from input-utils.cpp + extracted utils)
-  input-line-utils.h            # NEW: line-oriented parsing helpers
-  input-line-utils.cpp          # NEW: implementations
+  input-utils.h                 # Shared C API (UTF-8, numeric, whitespace, line-oriented helpers)
+  input-utils.hpp               # Shared C++ API (parse_typed_value, etc.)
+  input-utils.cpp               # Implementations for both headers
   input-rfc-text.h              # NEW: RFC text-record helpers (EML/ICS/VCF)
-  input-rfc-text.cpp            # NEW: implementations
   input-parsers.h               # NEW: all parser entry point declarations
   input-context.hpp             # InputContext class (cleaned: no LaTeX decls)
   input-context.cpp             # InputContext implementations
@@ -696,37 +693,107 @@ lambda/defs/                    # NEW: shared definitions (optional, future)
 
 ## 9. Implementation Priority
 
-| Priority | Task | Effort | Impact |
-|----------|------|--------|--------|
-| **P0** | Remove 4 dead context classes from `format-utils.hpp` | Small | Cleanliness |
-| **P0** | Fix `JsonContext` shadowed `indent_level_` | Small | Correctness |
-| **P1** | Rename `input-common.cpp` → `input-latex-tables.cpp`, move LaTeX decls out of `input-context.hpp` | Small | Clarity |
-| **P1** | Merge `input-utils.cpp` into new `input-common.cpp` (or just rename for consistency) | Small | Naming |
-| **P1** | Move misplaced utilities from `input.cpp` to `input-common` | Small | Organization |
-| **P1** | Unify HTML entity systems — extract shared table, simplify API (§6) | Medium | Dedup ~2,300 lines, fix inconsistencies |
-| **P2** | Extract `input-line-utils.h` — shared `skip_to_newline`, `skip_line_whitespace`, etc. | Medium | Dedup ~15 copies |
-| **P2** | Adopt or delete unused `EscapeRule` tables in `format-utils.cpp` | Medium | Clean up ~60 lines dead code |
-| **P2** | Create `input-parsers.h` with all parser declarations | Medium | Consistency |
-| **P2** | Normalize `extern "C"` linkage | Small | Consistency |
-| **P3** | Extract `input-rfc-text.h` for EML/ICS/VCF shared parsing | Medium | Dedup ~200 lines |
-| **P3** | Consolidate formatter escape logic via table-driven `format_escaped_string()` | Large | Dedup ~12 escape impls |
-| **P3** | Create `html-defs.h` shared between parser and formatter | Medium | DRY tag knowledge |
-| **P3** | Unify indent helpers across formatter context classes | Small | Consistency |
-| **P4** | Consider `lambda/defs/` directory for all shared definitions | Large | Architecture |
+| Priority | Task                                                                                              | Effort | Impact                                  | Status                              |
+| -------- | ------------------------------------------------------------------------------------------------- | ------ | --------------------------------------- | ----------------------------------- |
+| **P0**   | Remove 4 dead context classes from `format-utils.hpp`                                             | Small  | Cleanliness                             | ✅ Done                              |
+| **P0**   | Fix `JsonContext` shadowed `indent_level_`                                                        | Small  | Correctness                             | ✅ Done                              |
+| **P1**   | Rename `input-common.cpp` → `input-latex-tables.cpp`, move LaTeX decls out of `input-context.hpp` | Small  | Clarity                                 | ✅ Done                              |
+| **P1**   | Relocate misplaced utilities from `input.cpp` to `input-utils.cpp`                                | Small  | Organization                            | ✅ Done                              |
+| **P1**   | Unify HTML entity systems — extract shared table, simplify API (§6)                               | Medium | Dedup ~2,300 lines, fix inconsistencies | ✅ Done                              |
+| **P2**   | Extract `input-line-utils.h` — shared `skip_to_newline`, `skip_line_whitespace`, etc.             | Medium | Dedup ~15 copies                        | ✅ Done                              |
+| **P2**   | Delete unused `EscapeRule` tables in `format-utils.cpp`                                           | Medium | Clean up ~65 lines dead code            | ✅ Done                              |
+| **P2**   | Create `input-parsers.h` with all parser declarations                                             | Medium | Consistency                             | ✅ Done                              |
+| **P2**   | Normalize `extern "C"` linkage                                                                    | Small  | Consistency                             | ✅ Done                              |
+| **P2**   | Unify indent helpers across formatter context classes                                             | Small  | Consistency                             | ✅ Done                              |
+| **P3**   | Extract `input-rfc-text.h` for ICS/VCF shared parsing                                             | Medium | Dedup ~60 lines                         | ✅ Done                              |
+| **P3**   | Create `html-defs.h` shared between parser and formatter                                          | Medium | DRY tag knowledge                       | ✅ Done                              |
+| **P3**   | Consolidate `markup-parser.h` and `markup-format.h`                                               | Small  | Consistency                             | ⊘ N/A — circular dep prevents merge |
+| **P3**   | Consolidate formatter escape logic via table-driven `format_escaped_string()`                     | Large  | Dedup ~12 escape impls                  | ✅ Done                              |
+| **P4**   | Consider `lambda/defs/` directory for all shared definitions                                      | Large  | Architecture                            | — Not started                       |
 
 ---
 
-## 10. Summary
+## 10. Implementation Log
 
-The input/format codebase has grown organically with significant duplication and inconsistency. The key problems are:
+All work verified against full test suites: **466/466 Lambda**, **2302/2303 Radiant** (1 pre-existing failure: `table-anonymous-block-006`).
 
-1. **5+ copies of the same line-parsing helpers** across INI, Properties, EML, ICS, VCF parsers
-2. **12+ independent escape implementations** across formatter context classes, EscapeRule tables, and inline formatter code — most unused
-3. **Misleading file names**: `input-common.cpp` contains only LaTeX tables, not common utilities
-4. **~200 lines of dead context classes** in `format-utils.hpp`
-5. **Two independent HTML entity systems** — a ~200-entry hand-maintained table and a 2,125-entry auto-generated table doing the same job with different APIs; the smaller table has internal inconsistencies (duplicate entries, unused type categorization)
-6. **No shared HTML tag/attribute definitions** between parser and formatter
-7. **Misplaced utility functions** in the dispatcher (`input.cpp`)
-8. **Inconsistent `extern "C"` linkage** for some parsers
+### §6 — Entity Unification (P1)
 
-The P0/P1 items are low-risk refactors that can be done immediately. P2 items require updating multiple parser/formatter files but are straightforward. P3/P4 items are architectural improvements for longer-term consideration.
+Unified two independent HTML entity systems into a single shared module. The 2,125-entry WHATWG table in `html5_tokenizer.cpp` was extracted to `html_entities_table.inc` (auto-generated). The old 4-table system in `html_entities.cpp` (~200 entries, linear scan, `EntityResult`/`EntityType` branching) was replaced with a single `html_entity_lookup()` using O(log n) binary search over the shared table. All 6 consumers (XML parser, markup parser, Radiant symbol resolver, HTML5 tokenizer) updated to the simplified API. Net: ~2,300 lines removed, simpler consumer code.
+
+### P0 — Dead Code Removal
+
+- **Removed 4 dead context classes** from `format-utils.hpp`: `WikiContext`, `RstContext`, `MarkdownContext`, `OrgContext` (~210 lines). All were replaced by `MarkupEmitter` but never deleted.
+- **Fixed `JsonContext` shadowed `indent_level_`**: removed the private `indent_level_` that shadowed the base class member, along with redundant `indent_level()`, `increase_indent()`, `decrease_indent()` re-declarations.
+
+### P1 — File Reorganization
+
+- **Renamed `input-common.cpp` → `input-latex-tables.cpp`** with new header `input-latex-tables.h`. The file only contained LaTeX-specific classification tables, not common utilities. LaTeX function declarations moved out of `input-context.hpp` into the new header.
+- **Relocated 8 utility functions** from `input.cpp` to `input-utils.cpp`: `skip_whitespace`, `skip_tab_pace`, `input_is_whitespace_char`, `input_count_leading_chars`, `input_detect_indent`, `input_count_indent_columns`, `input_free_lines`, `input_split_lines`. Corresponding declarations moved to `input-utils.h`.
+
+### P2 — Shared Infrastructure
+
+- **Created `input-parsers.h`**: consolidates ~20 parser forward declarations. Uses C++ linkage for most parsers; `extern "C"` only for `parse_latex_ts`, `input_markup_modular`, `input_markup_commonmark` (called from MIR JIT). Removed scattered declarations from `input.cpp`.
+- **Created `input-line-utils.h`** (later merged into `input-utils.h`): shared inline helpers `skip_to_newline()`, `skip_line_whitespace()`, `is_folded_line()`. Used by EML, VCF, ICS, INI, Properties parsers. Eliminated ~15 duplicate implementations.
+- **Deleted 6 unused `EscapeRule` tables** from `format-utils.cpp` (~65 lines): `JSON_ESCAPE_RULES`, `XML_TEXT_ESCAPE_RULES`, `XML_ATTR_ESCAPE_RULES`, `HTML_TEXT_ESCAPE_RULES`, `HTML_ATTR_ESCAPE_RULES`, `LATEX_ESCAPE_RULES`.
+- **Normalized `extern "C"` linkage**: standardized across `input-parsers.h`; only 3 functions that are called from C/MIR code retain `extern "C"`.
+- **Unified indent helpers**: added `write_indent(int level)` overload to `FormatterContextCpp` base class. Removed 5 duplicate format-specific indent methods (`write_xml_indent`, `write_css_indent`, `write_yaml_indent`, `write_latex_indent`, second `write_indent` in LaTeX).
+
+### P3 — Shared Definitions
+
+- **Created `html-defs.h` / `html-defs.cpp`**: shared HTML tag/attribute classification with sorted arrays + O(log n) binary search. Provides `html_is_void_element()`, `html_is_raw_text_element()`, `html_is_boolean_attribute()`, `html_is_block_element()`, `html_is_heading()`, `html_heading_level()`. Updated `format-html.cpp` to use shared API — removed ~50 lines of local arrays and linear-scan lookup functions.
+- **Created `input-rfc-text.h`**: shared RFC-style `parse_rfc_property_name()` and `parse_rfc_property_value()` (with line-unfolding). Updated `input-vcf.cpp` and `input-ics.cpp` to use shared helpers, eliminating ~60 lines of duplicated parsing code. EML left unchanged (different delimiter rules and trailing-whitespace trim).
+- **§7.4 markup header consolidation**: investigated and determined `markup-format.h` must remain separate to break circular dependency (`input.hpp` → `markup-format.h` ← `markup-parser.h` → `input.hpp`). The extern "C" entry points were already moved to `input-parsers.h` in P2. No further consolidation possible.
+
+### P3 — Escape Logic Consolidation
+
+- **Defined 8 predefined `EscapeRule` tables** in `format-utils.cpp` (declared in `format-utils.h`): `JSON_ESCAPE_RULES`, `HTML_TEXT_ESCAPE_RULES`, `HTML_ATTR_ESCAPE_RULES`, `XML_ATTR_ESCAPE_RULES`, `LATEX_ESCAPE_RULES`, `YAML_ESCAPE_RULES`, `JSX_TEXT_ESCAPE_RULES`, `JSX_ATTR_ESCAPE_RULES`.
+- **Added `format_escaped_string_ex()`** with `EscapeCtrlMode` enum — extends `format_escaped_string()` to also escape control characters < 0x20 as `\uXXXX` (JSON) or `&#xNN;` (XML). Uses the same flush-buffer approach for performance.
+- **Refactored 7 context class escape methods** in `format-utils.hpp` to delegate to table-driven `format_escaped_string[_ex]()` instead of inline per-character switch loops: `JsonContext::write_string_escaped`, `YamlContext::write_yaml_string`, `HtmlContext::write_html_escaped_text/attribute`, `LaTeXContext::write_latex_escaped_text`, `XmlContext::write_xml_escaped_text/attribute`.
+- **Refactored 4 standalone escape functions** in formatter `.cpp` files:
+  - `format-json.cpp`: `format_string()` and key escaping in `format_map_reader_contents()` (2 copies → `format_escaped_string_ex` + `ESCAPE_CTRL_JSON_UNICODE`)
+  - `format-jsx.cpp`: `format_jsx_text_content()` and `format_jsx_attribute_value()` (added `#include "format-utils.h"`, replaced inline switch loops)
+  - `format-yaml.cpp`: escape loop in `format_yaml_string()` (replaced 16-line switch with `format_escaped_string` call)
+- **Left as-is** (complex logic beyond simple char→string mapping): `format_html_string_safe()` (entity-preservation), `format_xml_string()` (entity-preservation + control chars), `format_graph_string()` (format-dependent branching + needs_quotes), `MarkupEmitter` (`TextEscapeConfig` system — different mechanism).
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `lambda/input/input-parsers.h` | Consolidated parser forward declarations |
+| `lambda/input/input-latex-tables.h` | LaTeX classification declarations (extracted from input-context.hpp) |
+| `lambda/input/input-rfc-text.h` | Shared RFC key:value parsing with line-unfolding |
+| `lambda/input/html_entities_table.inc` | Auto-generated 2,125-entry WHATWG entity table |
+| `lambda/format/html-defs.h` | Shared HTML tag/attribute classification API |
+| `lambda/format/html-defs.cpp` | Sorted arrays + binary search implementation |
+
+### Files Merged
+
+| Source | Merged Into |
+|--------|-------------|
+| `lambda/input/input-line-utils.h` | `lambda/input/input-utils.h` (line-oriented helpers: `skip_to_newline`, `skip_line_whitespace`, `is_folded_line`) |
+
+### Files Renamed
+
+| Before | After |
+|--------|-------|
+| `lambda/input/input-common.cpp` | `lambda/input/input-latex-tables.cpp` |
+
+---
+
+## 11. Summary
+
+The input/format codebase has been significantly cleaned up. Of the 15 original proposal items:
+
+- **13 completed** (all P0, P1, P2, and P3 items)
+- **1 investigated and closed** (§7.4 markup header consolidation — circular dependency prevents merge)
+- **1 remaining** (P4 `lambda/defs/` directory — deferred as a longer-term architectural change)
+
+Key improvements delivered:
+1. **~2,500 lines of dead/duplicate code removed** (entity unification, dead context classes, unused escape tables)
+2. **11 independent escape implementations consolidated** into 8 shared `EscapeRule` tables + `format_escaped_string[_ex]()` calls
+3. **6 new shared headers/files** created for code reuse across parsers and formatters
+4. **Consistent parser declarations** via `input-parsers.h`
+5. **O(log n) lookups** replace linear scans for HTML entities, tags, and attributes
+6. **Unified indent helpers** in formatter base class
+7. **Correct file naming** (`input-latex-tables.cpp` instead of misleading `input-common.cpp`)

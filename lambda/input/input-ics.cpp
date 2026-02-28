@@ -5,24 +5,15 @@
 #include "../../lib/str.h"
 #include <ctype.h>
 
-#include "input-line-utils.h"
+// line-oriented helpers from input-utils.h (included transitively via input-rfc-text.h)
+#include "input-rfc-text.h"
 
 using namespace lambda;
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **ics) {
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);  // Reset buffer for reuse
-
-    while (**ics && **ics != ':' && **ics != ';' && **ics != '\n' && **ics != '\r') {
-        stringbuf_append_char(sb, **ics);
-        (*ics)++;
-    }
-
-    if (sb->length > 0) {
-        String* result = builder.createString(sb->str->chars, sb->length);
-        return result;
+    if (parse_rfc_property_name(ctx.sb, ics) > 0) {
+        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
     }
     return NULL;
 }
@@ -86,46 +77,8 @@ static void parse_property_parameters(InputContext& ctx, const char **ics, Map* 
 
 // Helper function to parse property value (after the colon, handling folded lines)
 static String* parse_property_value(InputContext& ctx, const char **ics) {
-    if (**ics != ':') return NULL;
-
-    (*ics)++; // skip ':'
-
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);  // Reset buffer for reuse
-
-    // Parse the value, handling line folding
-    while (**ics) {
-        if (**ics == '\r' || **ics == '\n') {
-            // Check for line folding (next line starts with space or tab)
-            const char* next_line = *ics;
-
-            // Skip current line ending
-            if (*next_line == '\r' && *(next_line + 1) == '\n') {
-                next_line += 2;
-            } else {
-                next_line++;
-            }
-
-            // Check if next line is folded
-            if (is_folded_line(next_line)) {
-                // This is a folded line, replace line ending with space and continue
-                stringbuf_append_char(sb, ' ');
-                *ics = next_line;
-                skip_line_whitespace(ics); // skip the folding whitespace
-            } else {
-                // End of this property value
-                *ics = next_line;
-                break;
-            }
-        } else {
-            stringbuf_append_char(sb, **ics);
-            (*ics)++;
-        }
-    }
-
-    if (sb->length > 0) {
-        return builder.createString(sb->str->chars, sb->length);
+    if (parse_rfc_property_value(ctx.sb, ics) > 0) {
+        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
     }
     return NULL;
 }

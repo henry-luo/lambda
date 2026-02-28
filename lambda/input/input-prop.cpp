@@ -5,7 +5,7 @@
 #include "source_tracker.hpp"
 #include "lib/log.h"
 
-#include "input-line-utils.h"
+// line-oriented helpers (skip_to_newline, skip_line_whitespace, is_folded_line) from input-utils.h
 
 using namespace lambda;
 

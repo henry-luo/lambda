@@ -67,38 +67,11 @@ static void format_yaml_string(YamlContext& ctx, String* str) {
 
     if (needs_quotes) {
         stringbuf_append_char(ctx.output(), '"');
-    }
-
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-        if (needs_quotes) {
-            switch (c) {
-            case '"':
-                stringbuf_append_str(ctx.output(), "\\\"");
-                break;
-            case '\\':
-                stringbuf_append_str(ctx.output(), "\\\\");
-                break;
-            case '\n':
-                stringbuf_append_str(ctx.output(), "\\n");
-                break;
-            case '\r':
-                stringbuf_append_str(ctx.output(), "\\r");
-                break;
-            case '\t':
-                stringbuf_append_str(ctx.output(), "\\t");
-                break;
-            default:
-                stringbuf_append_char(ctx.output(), c);
-                break;
-            }
-        } else {
-            stringbuf_append_char(ctx.output(), c);
-        }
-    }
-
-    if (needs_quotes) {
+        format_escaped_string(ctx.output(), s, len,
+            YAML_ESCAPE_RULES, YAML_ESCAPE_RULES_COUNT);
         stringbuf_append_char(ctx.output(), '"');
+    } else {
+        stringbuf_append_str_n(ctx.output(), s, len);
     }
 }
 

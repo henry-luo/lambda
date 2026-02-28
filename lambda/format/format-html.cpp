@@ -1,6 +1,7 @@
 #include "format.h"
 #include "format-utils.h"
 #include "format-utils.hpp"
+#include "html-defs.h"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
@@ -11,59 +12,15 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int depth, bool raw_text_mode);
 static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, int depth, bool raw_text_mode);
 
-// HTML5 void elements (self-closing tags that should not have closing tags)
-static const char* void_elements[] = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input",
-    "link", "meta", "param", "source", "track", "wbr", "command",
-    "keygen", "menuitem", NULL
-};
-
-// HTML5 elements that contain raw text (like script, style)
-static const char* raw_text_elements[] = {
-    "script", "style", "textarea", "title", "xmp", "iframe", "noembed",
-    "noframes", "noscript", "plaintext", NULL
-};
-
-// HTML5 boolean attributes (attributes that can appear without a value)
-// See: https://html.spec.whatwg.org/multipage/indices.html#attributes-3
-static const char* boolean_attributes[] = {
-    "async", "autofocus", "autoplay", "checked", "controls", "default",
-    "defer", "disabled", "formnovalidate", "hidden", "ismap", "loop",
-    "multiple", "muted", "nomodule", "novalidate", "open", "playsinline",
-    "readonly", "required", "reversed", "selected", NULL
-};
-
-// Helper function to check if an element is a void element
-static bool is_void_element(const char* tag_name, size_t tag_len) {
-    for (int i = 0; void_elements[i]; i++) {
-        size_t void_len = strlen(void_elements[i]);
-        if (tag_len == void_len && str_ieq(tag_name, tag_len, void_elements[i], void_len)) {
-            return true;
-        }
-    }
-    return false;
+// Use shared html-defs.h for void/raw-text/boolean lookups
+static inline bool is_void_element(const char* tag_name, size_t tag_len) {
+    return html_is_void_element(tag_name, tag_len);
 }
-
-// Helper function to check if an attribute is a boolean attribute
-static bool is_boolean_attribute(const char* attr_name, size_t attr_len) {
-    for (int i = 0; boolean_attributes[i]; i++) {
-        size_t bool_len = strlen(boolean_attributes[i]);
-        if (attr_len == bool_len && str_ieq(attr_name, attr_len, boolean_attributes[i], bool_len)) {
-            return true;
-        }
-    }
-    return false;
+static inline bool is_boolean_attribute(const char* attr_name, size_t attr_len) {
+    return html_is_boolean_attribute(attr_name, attr_len);
 }
-
-// Helper function to check if an element is a raw text element
-static bool is_raw_text_element(const char* tag_name, size_t tag_len) {
-    for (int i = 0; raw_text_elements[i]; i++) {
-        size_t raw_len = strlen(raw_text_elements[i]);
-        if (tag_len == raw_len && str_ieq(tag_name, tag_len, raw_text_elements[i], raw_len)) {
-            return true;
-        }
-    }
-    return false;
+static inline bool is_raw_text_element(const char* tag_name, size_t tag_len) {
+    return html_is_raw_text_element(tag_name, tag_len);
 }
 
 // Helper function to check if a type is simple (can be output as HTML attribute)
