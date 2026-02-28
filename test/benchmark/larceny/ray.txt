@@ -1,0 +1,2 @@
+ray: hits=1392
+ray: PASS
