@@ -38,27 +38,9 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
 
         // Format the key (always quoted in JSON, with proper escaping)
         ctx.write_char('"');
-        for (const char* kp = key; *kp; kp++) {
-            char kc = *kp;
-            switch (kc) {
-            case '"':  ctx.write_text("\\\""); break;
-            case '\\': ctx.write_text("\\\\"); break;
-            case '\b': ctx.write_text("\\b"); break;
-            case '\f': ctx.write_text("\\f"); break;
-            case '\n': ctx.write_text("\\n"); break;
-            case '\r': ctx.write_text("\\r"); break;
-            case '\t': ctx.write_text("\\t"); break;
-            default:
-                if ((unsigned char)kc < 0x20) {
-                    char hex_buf[7];
-                    snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", (unsigned char)kc);
-                    stringbuf_append_str(ctx.output(), hex_buf);
-                } else {
-                    ctx.write_char(kc);
-                }
-                break;
-            }
-        }
+        format_escaped_string_ex(ctx.output(), key, strlen(key),
+            JSON_ESCAPE_RULES, JSON_ESCAPE_RULES_COUNT,
+            ESCAPE_CTRL_JSON_UNICODE);
         ctx.write_char('"');
         ctx.write_char(':');
 
@@ -80,46 +62,9 @@ static void format_string(JsonContext& ctx, String* str) {
     }
 
     ctx.write_char('"');
-
-    const char* s = str->chars;
-    size_t len = str->len;
-
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-        switch (c) {
-        case '"':
-            ctx.write_text("\\\"");
-            break;
-        case '\\':
-            ctx.write_text("\\\\");
-            break;
-        case '\b':
-            ctx.write_text("\\b");
-            break;
-        case '\f':
-            ctx.write_text("\\f");
-            break;
-        case '\n':
-            ctx.write_text("\\n");
-            break;
-        case '\r':
-            ctx.write_text("\\r");
-            break;
-        case '\t':
-            ctx.write_text("\\t");
-            break;
-        default:
-            if ((unsigned char)c < 0x20) {
-                // Control characters - encode as \uXXXX
-                char hex_buf[7];
-                snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", (unsigned char)c);
-                stringbuf_append_str(ctx.output(), hex_buf);
-            } else {
-                ctx.write_char(c);
-            }
-            break;
-        }
-    }
+    format_escaped_string_ex(ctx.output(), str->chars, str->len,
+        JSON_ESCAPE_RULES, JSON_ESCAPE_RULES_COUNT,
+        ESCAPE_CTRL_JSON_UNICODE);
     ctx.write_char('"');
 }
 

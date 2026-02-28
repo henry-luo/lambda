@@ -309,6 +309,7 @@
                 "lambda/validator/error_reporting.cpp",
                 "lambda/validator/suggestions.cpp",
                 "lambda/format/format.cpp",
+                "lambda/format/html-defs.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/path.c",

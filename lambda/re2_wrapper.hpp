@@ -52,6 +52,49 @@ bool pattern_partial_match(TypePattern* pattern, String* str);
 void pattern_destroy(TypePattern* pattern);
 
 /**
+ * Get or create the unanchored RE2 regex for partial matching operations.
+ * Lazily compiled on first call; cached in pattern->re2_unanchored.
+ * Used by find(), replace(), split() which need unanchored matching.
+ *
+ * @param pattern Compiled pattern (must have valid source)
+ * @return Unanchored RE2 regex, or nullptr on error
+ */
+re2::RE2* pattern_get_unanchored(TypePattern* pattern);
+
+/**
+ * Find all non-overlapping matches of pattern in string.
+ * Returns list of maps: [{value: "match", index: N}, ...]
+ *
+ * @param pattern Compiled pattern
+ * @param str String to search
+ * @return List of match maps (empty list if no matches)
+ */
+List* pattern_find_all(TypePattern* pattern, const char* str, size_t len);
+
+/**
+ * Replace all non-overlapping matches of pattern in string.
+ * Uses RE2::GlobalReplace with unanchored matching.
+ *
+ * @param pattern Compiled pattern
+ * @param str Source string
+ * @param replacement Replacement string
+ * @return New string with all matches replaced
+ */
+String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_len,
+                            const char* repl, size_t repl_len);
+
+/**
+ * Split string by pattern matches.
+ * If keep_delim is true, matched delimiters are included as separate elements.
+ *
+ * @param pattern Compiled pattern
+ * @param str String to split
+ * @param keep_delim Whether to include matched delimiters in result
+ * @return List of split parts
+ */
+List* pattern_split(TypePattern* pattern, const char* str, size_t len, bool keep_delim);
+
+/**
  * Convert a Lambda pattern AST to a RE2 regex string.
  * Used internally by compile_pattern_ast.
  *

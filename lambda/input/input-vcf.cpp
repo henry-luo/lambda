@@ -8,46 +8,15 @@ extern "C" {
 #include "../../lib/str.h"
 }
 
+// line-oriented helpers from input-utils.h (included transitively via input-rfc-text.h)
+#include "input-rfc-text.h"
+
 using namespace lambda;
-
-// Helper function to skip whitespace at the beginning of a line
-static void skip_line_whitespace(const char **vcf) {
-    while (**vcf && (**vcf == ' ' || **vcf == '\t')) {
-        (*vcf)++;
-    }
-}
-
-// Helper function to skip to the next line
-static void skip_to_newline(const char **vcf) {
-    while (**vcf && **vcf != '\n' && **vcf != '\r') {
-        (*vcf)++;
-    }
-    if (**vcf == '\r' && *(*vcf + 1) == '\n') {
-        (*vcf) += 2; // skip \r\n
-    } else if (**vcf == '\n' || **vcf == '\r') {
-        (*vcf)++; // skip \n or \r
-    }
-}
-
-// Helper function to check if line starts with whitespace (indicating folded line)
-static bool is_folded_line(const char *vcf) {
-    return *vcf == ' ' || *vcf == '\t';
-}
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **vcf) {
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    while (**vcf && **vcf != ':' && **vcf != ';' && **vcf != '\n' && **vcf != '\r') {
-        stringbuf_append_char(sb, **vcf);
-        (*vcf)++;
-    }
-
-    if (sb->length > 0) {
-        String* result = builder.createString(sb->str->chars, sb->length);
-        return result;
+    if (parse_rfc_property_name(ctx.sb, vcf) > 0) {
+        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
     }
     return NULL;
 }
@@ -112,46 +81,8 @@ static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* 
 
 // Helper function to parse property value (after the colon, handling folded lines)
 static String* parse_property_value(InputContext& ctx, const char **vcf) {
-    if (**vcf != ':') return NULL;
-
-    (*vcf)++; // skip ':'
-
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    // Parse the value, handling line folding
-    while (**vcf) {
-        if (**vcf == '\r' || **vcf == '\n') {
-            // Check for line folding (next line starts with space or tab)
-            const char* next_line = *vcf;
-
-            // Skip current line ending
-            if (*next_line == '\r' && *(next_line + 1) == '\n') {
-                next_line += 2;
-            } else {
-                next_line++;
-            }
-
-            // Check if next line is folded
-            if (is_folded_line(next_line)) {
-                // This is a folded line, replace line ending with space and continue
-                stringbuf_append_char(sb, ' ');
-                *vcf = next_line;
-                skip_line_whitespace(vcf); // skip the folding whitespace
-            } else {
-                // End of this property value
-                *vcf = next_line;
-                break;
-            }
-        } else {
-            stringbuf_append_char(sb, **vcf);
-            (*vcf)++;
-        }
-    }
-
-    if (sb->length > 0) {
-        return builder.createString(sb->str->chars, sb->length);
+    if (parse_rfc_property_value(ctx.sb, vcf) > 0) {
+        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
     }
     return NULL;
 }

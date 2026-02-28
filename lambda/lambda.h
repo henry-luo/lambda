@@ -41,8 +41,17 @@ extern double round(double x);
 extern bool g_dry_run;
 #endif
 
+// Stack overflow protection (callable from JIT-compiled code)
+extern void lambda_stack_overflow_error(const char* func_name);
+
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
+
+// TCO (Tail Call Optimization) iteration limit
+// Guards against infinite loops from tail-recursive functions that never terminate.
+// TCO converts tail calls into goto loops, bypassing signal-based stack overflow
+// detection, so we use an explicit counter.
+#define LAMBDA_TCO_MAX_ITERATIONS 1000000
 
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
@@ -876,9 +885,14 @@ typedef struct Context {
     Item fn_upper(Item str);
     Item fn_url_resolve(Item base, Item relative);
     Item fn_split(Item str, Item sep);
+    Item fn_split3(Item str, Item sep, Item keep_delim);
+    Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     Item fn_chars(Item str);            // chars(str) - decompose into array of characters
     Item fn_str_join(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
+    Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
+    Item fn_find2(Item source, Item pattern);
+    Item fn_find3(Item source, Item pattern, Item options);
 
     Function* to_fn(fn_ptr ptr);
     Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info

@@ -487,66 +487,137 @@ void format_escaped_string(StringBuf* sb, const char* str, size_t len,
     }
 }
 
-// ==============================================================================
-// Predefined Escape Rule Tables
-// ==============================================================================
+// extended version: also handles control characters below 0x20
+void format_escaped_string_ex(StringBuf* sb, const char* str, size_t len,
+                              const EscapeRule* rules, int num_rules,
+                              EscapeCtrlMode ctrl_mode) {
+    if (!str || len == 0) return;
+    if (ctrl_mode == ESCAPE_CTRL_NONE) {
+        format_escaped_string(sb, str, len, rules, num_rules);
+        return;
+    }
+
+    size_t flush_start = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        char ch = str[i];
+        const char* replacement = NULL;
+
+        for (int r = 0; r < num_rules; r++) {
+            if (ch == rules[r].from) {
+                replacement = rules[r].to;
+                break;
+            }
+        }
+
+        if (!replacement && (unsigned char)ch < 0x20 &&
+            ch != '\n' && ch != '\r' && ch != '\t') {
+            // flush accumulated literal segment
+            if (i > flush_start) {
+                stringbuf_append_str_n(sb, str + flush_start, i - flush_start);
+            }
+            char buf[10];
+            if (ctrl_mode == ESCAPE_CTRL_JSON_UNICODE) {
+                snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)ch);
+            } else {
+                snprintf(buf, sizeof(buf), "&#x%02x;", (unsigned char)ch);
+            }
+            stringbuf_append_str(sb, buf);
+            flush_start = i + 1;
+            continue;
+        }
+
+        if (replacement) {
+            if (i > flush_start) {
+                stringbuf_append_str_n(sb, str + flush_start, i - flush_start);
+            }
+            stringbuf_append_str(sb, replacement);
+            flush_start = i + 1;
+        }
+    }
+
+    if (flush_start < len) {
+        stringbuf_append_str_n(sb, str + flush_start, len - flush_start);
+    }
+}
+
+// ── Predefined escape rule tables ────────────────────────────────────
 
 const EscapeRule JSON_ESCAPE_RULES[] = {
-    { '"',  "\\\"" },
-    { '\\', "\\\\" },
-    { '\n', "\\n"  },
-    { '\r', "\\r"  },
-    { '\t', "\\t"  },
-    { '\b', "\\b"  },
-    { '\f', "\\f"  },
+    {'"',  "\\\""},
+    {'\\', "\\\\"},
+    {'\b', "\\b"},
+    {'\f', "\\f"},
+    {'\n', "\\n"},
+    {'\r', "\\r"},
+    {'\t', "\\t"},
 };
 const int JSON_ESCAPE_RULES_COUNT = sizeof(JSON_ESCAPE_RULES) / sizeof(JSON_ESCAPE_RULES[0]);
 
-const EscapeRule XML_TEXT_ESCAPE_RULES[] = {
-    { '<', "&lt;"   },
-    { '>', "&gt;"   },
-    { '&', "&amp;"  },
-};
-const int XML_TEXT_ESCAPE_RULES_COUNT = sizeof(XML_TEXT_ESCAPE_RULES) / sizeof(XML_TEXT_ESCAPE_RULES[0]);
-
-const EscapeRule XML_ATTR_ESCAPE_RULES[] = {
-    { '<',  "&lt;"    },
-    { '>',  "&gt;"    },
-    { '&',  "&amp;"   },
-    { '"',  "&quot;"  },
-    { '\'', "&apos;"  },
-};
-const int XML_ATTR_ESCAPE_RULES_COUNT = sizeof(XML_ATTR_ESCAPE_RULES) / sizeof(XML_ATTR_ESCAPE_RULES[0]);
-
-const EscapeRule LATEX_ESCAPE_RULES[] = {
-    { '#',  "\\#"  },
-    { '$',  "\\$"  },
-    { '&',  "\\&"  },
-    { '%',  "\\%"  },
-    { '_',  "\\_"  },
-    { '{',  "\\{"  },
-    { '}',  "\\}"  },
-    { '^',  "\\^{}" },
-    { '~',  "\\~{}" },
-    { '\\', "\\textbackslash{}" },
-};
-const int LATEX_ESCAPE_RULES_COUNT = sizeof(LATEX_ESCAPE_RULES) / sizeof(LATEX_ESCAPE_RULES[0]);
-
 const EscapeRule HTML_TEXT_ESCAPE_RULES[] = {
-    { '<', "&lt;"   },
-    { '>', "&gt;"   },
-    { '&', "&amp;"  },
+    {'&', "&amp;"},
+    {'<', "&lt;"},
+    {'>', "&gt;"},
 };
 const int HTML_TEXT_ESCAPE_RULES_COUNT = sizeof(HTML_TEXT_ESCAPE_RULES) / sizeof(HTML_TEXT_ESCAPE_RULES[0]);
 
 const EscapeRule HTML_ATTR_ESCAPE_RULES[] = {
-    { '<',  "&lt;"    },
-    { '>',  "&gt;"    },
-    { '&',  "&amp;"   },
-    { '"',  "&quot;"  },
-    { '\'', "&#39;"   },
+    {'&',  "&amp;"},
+    {'<',  "&lt;"},
+    {'>',  "&gt;"},
+    {'"',  "&quot;"},
+    {'\'', "&#39;"},
 };
 const int HTML_ATTR_ESCAPE_RULES_COUNT = sizeof(HTML_ATTR_ESCAPE_RULES) / sizeof(HTML_ATTR_ESCAPE_RULES[0]);
+
+const EscapeRule XML_ATTR_ESCAPE_RULES[] = {
+    {'&',  "&amp;"},
+    {'<',  "&lt;"},
+    {'>',  "&gt;"},
+    {'"',  "&quot;"},
+    {'\'', "&apos;"},
+};
+const int XML_ATTR_ESCAPE_RULES_COUNT = sizeof(XML_ATTR_ESCAPE_RULES) / sizeof(XML_ATTR_ESCAPE_RULES[0]);
+
+const EscapeRule LATEX_ESCAPE_RULES[] = {
+    {'\\', "\\textbackslash{}"},
+    {'{',  "\\{"},
+    {'}',  "\\}"},
+    {'$',  "\\$"},
+    {'&',  "\\&"},
+    {'%',  "\\%"},
+    {'#',  "\\#"},
+    {'_',  "\\_"},
+    {'^',  "\\^{}"},
+    {'~',  "\\~{}"},
+};
+const int LATEX_ESCAPE_RULES_COUNT = sizeof(LATEX_ESCAPE_RULES) / sizeof(LATEX_ESCAPE_RULES[0]);
+
+const EscapeRule YAML_ESCAPE_RULES[] = {
+    {'"',  "\\\""},
+    {'\\', "\\\\"},
+    {'\n', "\\n"},
+    {'\r', "\\r"},
+    {'\t', "\\t"},
+};
+const int YAML_ESCAPE_RULES_COUNT = sizeof(YAML_ESCAPE_RULES) / sizeof(YAML_ESCAPE_RULES[0]);
+
+const EscapeRule JSX_TEXT_ESCAPE_RULES[] = {
+    {'&', "&amp;"},
+    {'<', "&lt;"},
+    {'>', "&gt;"},
+    {'{', "&#123;"},
+    {'}', "&#125;"},
+};
+const int JSX_TEXT_ESCAPE_RULES_COUNT = sizeof(JSX_TEXT_ESCAPE_RULES) / sizeof(JSX_TEXT_ESCAPE_RULES[0]);
+
+const EscapeRule JSX_ATTR_ESCAPE_RULES[] = {
+    {'"',  "&quot;"},
+    {'&',  "&amp;"},
+    {'<',  "&lt;"},
+    {'>',  "&gt;"},
+};
+const int JSX_ATTR_ESCAPE_RULES_COUNT = sizeof(JSX_ATTR_ESCAPE_RULES) / sizeof(JSX_ATTR_ESCAPE_RULES[0]);
 
 // ==============================================================================
 // Unified Markup Output Rules — Link / Image Callbacks

@@ -107,9 +107,9 @@ TEST_F(NamespaceTest, SymbolStructLayout) {
 
 // verify that String does NOT have the ns field
 TEST_F(NamespaceTest, StringStructLayout) {
-    // String has: uint32_t len + flexible array chars[]
-    // On 64-bit: 4 bytes before chars[]
-    EXPECT_EQ(sizeof(String), 4u);
+    // String has: uint32_t len + uint8_t is_ascii + padding + flexible array chars[]
+    // On 64-bit: 4 + 1 + 3 padding = 8 bytes before chars[]
+    EXPECT_EQ(sizeof(String), 8u);
 }
 
 // ============================================================================
@@ -630,8 +630,8 @@ TEST_F(NamespaceTest, CharsOffset_SymbolVsString) {
     ptrdiff_t str_offset = (char*)str->chars - (char*)str;
     ptrdiff_t sym_offset = (char*)sym->chars - (char*)sym;
 
-    // String: chars at offset 4 (after uint32_t len)
-    EXPECT_EQ(str_offset, 4);
+    // String: chars at offset 5 (after uint32_t len + uint8_t is_ascii)
+    EXPECT_EQ(str_offset, 5);
 
     // Symbol: chars at offset 16 (after uint32_t len + padding + Target* ns)
     // On 64-bit with alignment: uint32_t(4) + padding(4) + Target*(8) = 16,
