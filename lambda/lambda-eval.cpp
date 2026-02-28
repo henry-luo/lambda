@@ -24,6 +24,9 @@
 
 extern __thread EvalContext* context;
 
+// create_match_map helper for find() (implemented in re2_wrapper.cpp)
+extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
+
 // forward declaration of static error string (defined later in this file)
 extern String STR_ERROR;
 
@@ -2872,6 +2875,21 @@ Item fn_split(Item str_item, Item sep_item) {
     // null separator means split on whitespace (Python convention)
     bool null_sep = (sep_type == LMD_TYPE_NULL);
 
+    // pattern-based split: split(str, pattern)
+    if (sep_type == LMD_TYPE_TYPE) {
+        Type* type = (Type*)(sep_item.item & 0x00FFFFFFFFFFFFFF);
+        if (type && type->kind == TYPE_KIND_PATTERN) {
+            if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+                log_debug("fn_split: first argument must be a string for pattern split");
+                return ItemError;
+            }
+            TypePattern* pattern = (TypePattern*)type;
+            const char* str_chars = str_item.get_chars();
+            uint32_t str_len = str_item.get_len();
+            return {.list = pattern_split(pattern, str_chars, str_len, false)};
+        }
+    }
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (!null_sep && sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_split: arguments must be strings or symbols");
@@ -2978,6 +2996,106 @@ Item fn_split(Item str_item, Item sep_item) {
     memcpy(part->chars, start, part_len);
     part->chars[part_len] = '\0';
 
+    list_push(result, {.item = s2it(part)});
+
+    if (context) { context->disable_string_merging = saved_merging; }
+    return {.list = result};
+}
+
+// split(str, sep, keep_delim) - 3-arg version with keep_delim boolean
+Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
+    GUARD_ERROR1(str_item);
+    TypeId str_type = get_type_id(str_item);
+    TypeId sep_type = get_type_id(sep_item);
+    TypeId keep_type = get_type_id(keep_item);
+
+    bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
+
+    // null string splits to empty list
+    if (str_type == LMD_TYPE_NULL) return {.list = list()};
+
+    // pattern-based split with keep_delim
+    if (sep_type == LMD_TYPE_TYPE) {
+        Type* type = (Type*)(sep_item.item & 0x00FFFFFFFFFFFFFF);
+        if (type && type->kind == TYPE_KIND_PATTERN) {
+            if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+                log_debug("fn_split3: first argument must be a string for pattern split");
+                return ItemError;
+            }
+            TypePattern* pattern = (TypePattern*)type;
+            const char* str_chars = str_item.get_chars();
+            uint32_t str_len = str_item.get_len();
+            return {.list = pattern_split(pattern, str_chars, str_len, keep_delim)};
+        }
+    }
+
+    // string-based split with keep_delim
+    if (!keep_delim) {
+        // no keep_delim, delegate to 2-arg version
+        return fn_split(str_item, sep_item);
+    }
+
+    // keep_delim string split
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_split3: arguments must be strings or symbols");
+        return ItemError;
+    }
+
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* sep_chars = sep_item.get_chars();
+    uint32_t sep_len = sep_item.get_len();
+
+    bool saved_merging = false;
+    if (context) {
+        saved_merging = context->disable_string_merging;
+        context->disable_string_merging = true;
+    }
+
+    List* result = list();
+    if (!str_chars || str_len == 0 || !sep_chars || sep_len == 0) {
+        if (context) { context->disable_string_merging = saved_merging; }
+        return {.list = result};
+    }
+
+    const char* start = str_chars;
+    const char* end = str_chars + str_len;
+    const char* p = start;
+
+    while (p <= end - sep_len) {
+        if (memcmp(p, sep_chars, sep_len) == 0) {
+            // push part before separator
+            size_t part_len = p - start;
+            String* part = (String*)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
+            part->len = part_len;
+            part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
+            memcpy(part->chars, start, part_len);
+            part->chars[part_len] = '\0';
+            list_push(result, {.item = s2it(part)});
+
+            // push the delimiter
+            String* delim = (String*)heap_alloc(sizeof(String) + sep_len + 1, LMD_TYPE_STRING);
+            delim->len = sep_len;
+            delim->is_ascii = str_is_ascii(sep_chars, sep_len) ? 1 : 0;
+            memcpy(delim->chars, sep_chars, sep_len);
+            delim->chars[sep_len] = '\0';
+            list_push(result, {.item = s2it(delim)});
+
+            p += sep_len;
+            start = p;
+        } else {
+            p++;
+        }
+    }
+
+    // add the last part
+    size_t part_len = end - start;
+    String* part = (String*)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
+    part->len = part_len;
+    part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
+    memcpy(part->chars, start, part_len);
+    part->chars[part_len] = '\0';
     list_push(result, {.item = s2it(part)});
 
     if (context) { context->disable_string_merging = saved_merging; }
@@ -3151,7 +3269,36 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     // null search pattern means nothing to find — return string unchanged
     if (old_type == LMD_TYPE_NULL) return str_item;
     // null replacement — treat as empty string (delete matches)
-    if (new_type == LMD_TYPE_NULL) new_type = LMD_TYPE_STRING;  // fall through, handled below by !new_chars check
+    // note: transpiler converts "" to ITEM_NULL, so we must handle this without calling get_chars on null
+    bool new_is_null = (new_type == LMD_TYPE_NULL);
+    if (new_is_null) new_type = LMD_TYPE_STRING;
+
+    // pattern-based replacement: replace(str, pattern, repl_str)
+    if (old_type == LMD_TYPE_TYPE) {
+        Type* type = (Type*)(old_item.item & 0x00FFFFFFFFFFFFFF);
+        if (type && type->kind == TYPE_KIND_PATTERN) {
+            if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+                log_debug("fn_replace: first argument must be a string for pattern replace");
+                return ItemError;
+            }
+            if (new_type != LMD_TYPE_STRING && new_type != LMD_TYPE_SYMBOL) {
+                log_debug("fn_replace: third argument must be a string for pattern replace");
+                return ItemError;
+            }
+            TypePattern* pattern = (TypePattern*)type;
+            const char* str_chars = str_item.get_chars();
+            uint32_t str_len = str_item.get_len();
+            const char* repl_chars = new_is_null ? "" : new_item.get_chars();
+            uint32_t repl_len = new_is_null ? 0 : new_item.get_len();
+
+            if (!str_chars || str_len == 0) return str_item;
+
+            String* result = pattern_replace_all(pattern, str_chars, str_len,
+                                                  repl_chars ? repl_chars : "", repl_chars ? repl_len : 0);
+            if (!result) return str_item;
+            return {.item = s2it(result)};
+        }
+    }
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (old_type != LMD_TYPE_STRING && old_type != LMD_TYPE_SYMBOL) ||
@@ -3164,8 +3311,8 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     uint32_t str_len = str_item.get_len();
     const char* old_chars = old_item.get_chars();
     uint32_t old_len = old_item.get_len();
-    const char* new_chars = new_item.get_chars();
-    uint32_t new_len_val = new_item.get_len();
+    const char* new_chars = new_is_null ? "" : new_item.get_chars();
+    uint32_t new_len_val = new_is_null ? 0 : new_item.get_len();
 
     if (!str_chars || str_len == 0) {
         return str_item;
@@ -3245,6 +3392,73 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     result->chars[new_len] = '\0';
 
     return {.item = s2it(result)};
+}
+
+// find(str, pattern_or_string) -> [{value, index}, ...]
+// Finds all non-overlapping matches in the source string.
+// Second argument can be a string literal or a compiled pattern.
+Item fn_find2(Item source_item, Item pattern_item) {
+    GUARD_ERROR2(source_item, pattern_item);
+    TypeId source_type = get_type_id(source_item);
+    TypeId pattern_type = get_type_id(pattern_item);
+
+    // null source -> empty list
+    if (source_type == LMD_TYPE_NULL) return {.list = list()};
+
+    if (source_type != LMD_TYPE_STRING && source_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_find: first argument must be a string or symbol");
+        return ItemError;
+    }
+
+    const char* str_chars = source_item.get_chars();
+    uint32_t str_len = source_item.get_len();
+
+    if (!str_chars || str_len == 0) return {.list = list()};
+
+    // pattern argument: check if it's a TypePattern
+    if (pattern_type == LMD_TYPE_TYPE) {
+        Type* type = (Type*)(pattern_item.item & 0x00FFFFFFFFFFFFFF);
+        if (type && type->kind == TYPE_KIND_PATTERN) {
+            TypePattern* pattern = (TypePattern*)type;
+            return {.list = pattern_find_all(pattern, str_chars, str_len)};
+        }
+    }
+
+    // plain string search
+    if (pattern_type != LMD_TYPE_STRING && pattern_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_find: second argument must be a string, symbol, or pattern");
+        return ItemError;
+    }
+
+    const char* needle = pattern_item.get_chars();
+    uint32_t needle_len = pattern_item.get_len();
+
+    List* result = list();
+    if (!needle || needle_len == 0) return {.list = result};
+
+    // find all non-overlapping occurrences of the literal substring
+    const char* p = str_chars;
+    const char* end = str_chars + str_len;
+    while (p <= end - needle_len) {
+        if (memcmp(p, needle, needle_len) == 0) {
+            int64_t index = (int64_t)(p - str_chars);
+            Map* m = create_match_map_ext(p, needle_len, index);
+            list_push(result, {.map = m});
+            p += needle_len;
+        } else {
+            p++;
+        }
+    }
+
+    return {.list = result};
+}
+
+// find(str, pattern, options) -> [{value, index}, ...]
+// 3-arg version with options map (for future: {limit, ignore_case})
+Item fn_find3(Item source_item, Item pattern_item, Item options_item) {
+    // for now, ignore options and delegate to 2-arg version
+    (void)options_item;
+    return fn_find2(source_item, pattern_item);
 }
 
 // normalize with 1 arg (defaults to NFC)

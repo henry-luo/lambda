@@ -742,11 +742,57 @@ fn validate_email(email: Email) => ...
 // Use in type annotations
 let method: HttpMethod = "GET"
 
-// Type checking with 'is'
+// Type checking with 'is' (full-match semantics)
 "hello" is Greeting              // true
 "goodbye" is Greeting            // false
 "v1.2.3" is Version              // true
 ```
+
+### Pattern Matching with `match`
+
+Named string patterns can be used as `match` arms. Each arm uses **full-match** semantics — the entire string must match the pattern:
+
+```lambda
+string digits = \d+
+string alpha = \a+
+
+fn classify(s) => match s {
+    case digits: "number"         // "123" → "number"
+    case alpha: "word"            // "hello" → "word"
+    default: "other"              // "hello world" → "other"
+}
+
+// Mix literal and pattern arms
+string num = \d+
+fn tag(s) => match s {
+    case "hello": "greeting"      // literal match checked first
+    case num: "number"
+    default: "unknown"
+}
+```
+
+### Pattern-Aware String Functions
+
+Named patterns can be passed to `find()`, `replace()`, and `split()` as the match argument. These functions use **partial/search** semantics (find matches *within* the string), unlike `is` and `match` which require full-string matches.
+
+```lambda
+string digits = \d+
+string ws = \s+
+
+// find(str, pattern) → [{value, index}, ...]
+find("a1b22c333", digits)
+// [{value: "1", index: 1}, {value: "22", index: 3}, {value: "333", index: 6}]
+
+// replace(str, pattern, replacement) → str
+replace("a1b2c3", digits, "N")        // "aNbNcN"
+replace("hello   world", ws, " ")     // "hello world"
+
+// split(str, pattern) → [str, ...]
+split("a1b2c3", digits)               // ["a", "b", "c", ""]
+split("a1b2c3", digits, true)         // ["a", "1", "b", "2", "c", "3", ""]  — keep delimiters
+```
+
+All three functions also accept plain strings as the match argument (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md) § String Functions).
 
 ---
 
