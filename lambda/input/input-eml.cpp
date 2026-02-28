@@ -8,31 +8,12 @@ extern "C" {
 #include "../../lib/str.h"
 }
 
+#include "input-line-utils.h"
+
 using namespace lambda;
 
-// Helper function to skip whitespace at the beginning of a line
-static void skip_line_whitespace(const char **eml) {
-    while (**eml && (**eml == ' ' || **eml == '\t')) {
-        (*eml)++;
-    }
-}
-
-// Helper function to skip to the next line
-static void skip_to_newline(const char **eml) {
-    while (**eml && **eml != '\n' && **eml != '\r') {
-        (*eml)++;
-    }
-    if (**eml == '\r' && *(*eml + 1) == '\n') {
-        (*eml) += 2; // skip \r\n
-    } else if (**eml == '\n' || **eml == '\r') {
-        (*eml)++; // skip \n or \r
-    }
-}
-
-// Helper function to check if line starts with whitespace (indicating continuation)
-static bool is_continuation_line(const char *eml) {
-    return *eml == ' ' || *eml == '\t';
-}
+// EML uses is_continuation_line (alias for is_folded_line)
+static inline bool is_continuation_line(const char* p) { return is_folded_line(p); }
 
 // Helper function to parse header name
 static String* parse_header_name(InputContext& ctx, const char **eml) {
