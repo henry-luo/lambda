@@ -8,13 +8,14 @@ This document provides comprehensive documentation for all built-in system funct
 2. [Mathematical Functions](#mathematical-functions)
 3. [Statistical Functions](#statistical-functions)
 4. [Date/Time Functions](#datetime-functions)
-5. [Collection Functions](#collection-functions)
-6. [Vector Functions](#vector-functions)
-7. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
-8. [Variadic Argument Functions](#variadic-argument-functions)
-9. [Input and Format Functions](#io-functions)
-10. [Procedural Functions](#procedural-functions)
-11. [Error Handling](#error-handling)
+5. [String Functions](#string-functions)
+6. [Collection Functions](#collection-functions)
+7. [Vector Functions](#vector-functions)
+8. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
+9. [Variadic Argument Functions](#variadic-argument-functions)
+10. [Input and Format Functions](#io-functions)
+11. [Procedural Functions](#procedural-functions)
+12. [Error Handling](#error-handling)
 
 ---
 
@@ -189,6 +190,104 @@ justnow()                  // Current time
 date(t'2025-01-01T14:30')  // t'2025-01-01'
 time(t'2025-01-01T14:30')  // t'14:30:00'
 ```
+
+---
+
+## String Functions
+
+Functions for string manipulation. `replace`, `split`, and `find` accept either a plain string or a **named string pattern** as the match argument.
+
+### String Pattern Recap
+
+String patterns are defined in the type system (see [Lambda_Type.md](Lambda_Type.md) § String Patterns) and can be used as arguments to string functions:
+
+```lambda
+string digits = \d+              // one or more digits
+string ws = \s+                  // one or more whitespace chars
+string word = \w+                // word characters
+```
+
+### replace(str, pattern_or_string, replacement)
+
+Replace all occurrences of a pattern or substring in a string. Returns a new string.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `replace(str, pattern, repl)` | Replace all pattern matches | `replace("a1b2", \d, "X")` | `"aXbX"` |
+| `replace(str, string, repl)` | Replace all substring matches | `replace("abc", "b", "X")` | `"aXc"` |
+
+```lambda
+string digit = \d
+string digits = \d+
+string ws = \s+
+
+replace("a1b2c3", digit, "X")         // "aXbXcX"
+replace("a1b22c333", digits, "N")     // "aNbNcN"
+replace("hello   world", ws, " ")     // "hello world"
+replace("no-digits", digit, "X")      // "no-digits" (no match → unchanged)
+replace("a1b2", digit, "")            // "ab" (delete matches)
+replace("abc", "b", "")               // "ac" (plain string delete)
+```
+
+### split(str, pattern_or_string, keep_delimiters?)
+
+Split a string by pattern or substring. Returns an array of substrings.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `split(str, pattern)` | Split by pattern | `split("a1b2", \d)` | `["a", "b", ""]` |
+| `split(str, string)` | Split by substring | `split("a,b,c", ",")` | `["a", "b", "c"]` |
+| `split(str, sep, true)` | Split, keep delimiters | `split("a1b2", \d, true)` | `["a","1","b","2",""]` |
+
+```lambda
+string digit = \d
+string digits = \d+
+string ws = \s+
+
+split("a1b2c3", digit)                // ["a", "b", "c", ""]
+split("hello   world", ws)            // ["hello", "world"]
+split("a1b22c333", digits)            // ["a", "b", "c", ""]
+split("no-match", digit)              // ["no-match"]
+split("a1b2c3", digit, true)          // ["a", "1", "b", "2", "c", "3", ""]  — keep delimiters
+split("a,b,c", ",", true)             // ["a", ",", "b", ",", "c"]           — works with strings too
+```
+
+### find(str, pattern_or_string)
+
+Find all occurrences of a pattern or substring. Returns a list of match maps `{value, index}`.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `find(str, pattern)` | Find all pattern matches | `find("a1b22", \d+)` | `[{value:"1",index:1}, ...]` |
+| `find(str, string)` | Find all substring matches | `find("abab", "ab")` | `[{value:"ab",index:0}, ...]` |
+
+Each match is a map with:
+- `value` — the matched substring
+- `index` — the start position (0-based) in the source string
+
+```lambda
+string digits = \d+
+string words = \w+
+
+find("a1b22c333", digits)
+// [{value: "1", index: 1}, {value: "22", index: 3}, {value: "333", index: 6}]
+
+find("hello world", words)
+// [{value: "hello", index: 0}, {value: "world", index: 6}]
+
+find("hello world hello", "lo")
+// [{value: "lo", index: 3}, {value: "lo", index: 14}]
+
+find("no-match", digits)
+// [] (empty list)
+
+// Extract just matching values via pipe
+find("a1b22", digits) | ~.value     // ["1", "22"]
+```
+
+### normalize(str)
+
+Normalize a string (Unicode normalization).
 
 ---
 
@@ -827,3 +926,10 @@ if (result is error) {
 | `error` | 1 | Create error |
 | `normalize` | 1 | Normalize string |
 | `varg` | 0-1 | Variadic args |
+
+### String Functions
+| Function | Args | Description |
+|----------|------|-------------|
+| `replace` | 3 | Replace pattern/substring in string |
+| `split` | 2-3 | Split string by pattern/substring |
+| `find` | 2 | Find all pattern/substring matches |

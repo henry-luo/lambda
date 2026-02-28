@@ -11,6 +11,21 @@
 #include "../lib/mempool.h"
 
 #include <re2/re2.h>
+#include <string>
+
+// runtime functions needed for pattern_find_all, pattern_split
+// Only available in main executable, not in shared library (lambda-input-full-cpp)
+#ifndef SIMPLE_SCHEMA_PARSER
+extern "C" {
+    List* list();
+    void list_push(List *list, Item item);
+    void* heap_calloc(size_t size, TypeId type_id);
+    void* heap_data_calloc(size_t size);
+    String* heap_strcpy(char* src, int len);
+}
+extern void* heap_alloc(int size, TypeId type_id);
+extern __thread EvalContext* context;
+#endif
 
 // Convert Lambda occurrence syntax [n], [n, m], [n+] to regex {n}, {n,m}, {n,}
 // Input: "[3]", "[2, 5]", "[3+]"
@@ -368,6 +383,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     pattern->kind = TYPE_KIND_PATTERN;
     pattern->is_symbol = is_symbol;
     pattern->re2 = re2;
+    pattern->re2_unanchored = nullptr;
     pattern->pattern_index = -1;  // Will be set when registered
 
     // Store source pattern for debugging
@@ -414,4 +430,214 @@ void pattern_destroy(TypePattern* pattern) {
         delete pattern->re2;
         pattern->re2 = nullptr;
     }
+    if (pattern && pattern->re2_unanchored) {
+        delete pattern->re2_unanchored;
+        pattern->re2_unanchored = nullptr;
+    }
 }
+
+// Get or create unanchored RE2 for partial matching operations.
+// The source string is stored as "^<regex>$"; we strip the anchors.
+re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
+    if (!pattern) return nullptr;
+    if (pattern->re2_unanchored) return pattern->re2_unanchored;
+
+    // source is "^<regex>$", strip leading ^ and trailing $
+    const char* src = pattern->source->chars;
+    size_t len = pattern->source->len;
+    if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
+        log_error("pattern_get_unanchored: unexpected source format: %s", src);
+        return nullptr;
+    }
+    std::string unanchored(src + 1, len - 2);
+
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    pattern->re2_unanchored = new re2::RE2(unanchored, opts);
+
+    if (!pattern->re2_unanchored->ok()) {
+        log_error("pattern_get_unanchored: failed to compile unanchored regex: %s",
+                  pattern->re2_unanchored->error().c_str());
+        delete pattern->re2_unanchored;
+        pattern->re2_unanchored = nullptr;
+        return nullptr;
+    }
+
+    log_debug("pattern_get_unanchored: compiled '%s'", unanchored.c_str());
+    return pattern->re2_unanchored;
+}
+
+// The following functions are only used in the main executable, not the shared library.
+// They depend on runtime symbols (heap_alloc, list, list_push, etc.) not available in lambda-input-full-cpp.
+#ifndef SIMPLE_SCHEMA_PARSER
+
+// helper: create a heap-allocated String from a char* + len
+static String* make_heap_string(const char* src, size_t len) {
+    String* s = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    s->len = (uint32_t)len;
+    s->is_ascii = 1;
+    for (size_t i = 0; i < len; i++) {
+        if ((unsigned char)src[i] >= 128) { s->is_ascii = 0; break; }
+    }
+    memcpy(s->chars, src, len);
+    s->chars[len] = '\0';
+    return s;
+}
+
+// helper: create a match map {value: string, index: int}
+// allocates TypeMap + ShapeEntry chain + data buffer on heap
+Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
+    Pool* pool = context->pool;
+    ArrayList* tl = (ArrayList*)context->type_list;
+
+    // create shape entries: value(string), index(int)
+    // entry 1: "value" -> string
+    ShapeEntry* e_value = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+    StrView* nv1 = (StrView*)((char*)e_value + sizeof(ShapeEntry));
+    nv1->str = "value";
+    nv1->length = 5;
+    e_value->name = nv1;
+    e_value->type = type_info[LMD_TYPE_STRING].type;
+    e_value->byte_offset = 0;
+    e_value->next = nullptr;
+
+    int64_t offset2 = type_info[LMD_TYPE_STRING].byte_size;
+
+    // entry 2: "index" -> int
+    ShapeEntry* e_index = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+    StrView* nv2 = (StrView*)((char*)e_index + sizeof(ShapeEntry));
+    nv2->str = "index";
+    nv2->length = 5;
+    e_index->name = nv2;
+    e_index->type = type_info[LMD_TYPE_INT].type;
+    e_index->byte_offset = offset2;
+    e_index->next = nullptr;
+
+    e_value->next = e_index;
+
+    int64_t byte_size = offset2 + type_info[LMD_TYPE_INT].byte_size;
+
+    // create TypeMap
+    TypeMap* mt = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    mt->shape = e_value;
+    mt->last = e_index;
+    mt->length = 2;
+    mt->byte_size = byte_size;
+    mt->type_index = tl->length;
+    arraylist_append(tl, mt);
+
+    // create Map container
+    Map* mp = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    mp->type_id = LMD_TYPE_MAP;
+    mp->type = mt;
+    mp->data = heap_data_calloc(byte_size);
+
+    // store value field (String* pointer)
+    String* val_str = make_heap_string(match_str, match_len);
+    *(String**)((char*)mp->data + e_value->byte_offset) = val_str;
+
+    // store index field (int64)
+    *(int64_t*)((char*)mp->data + e_index->byte_offset) = index;
+
+    return mp;
+}
+
+// Find all non-overlapping matches of pattern in string
+List* pattern_find_all(TypePattern* pattern, const char* str, size_t len) {
+    List* result = list();
+    if (!pattern || !str || len == 0) return result;
+
+    re2::RE2* re = pattern_get_unanchored(pattern);
+    if (!re) return result;
+
+    re2::StringPiece input(str, len);
+    re2::StringPiece match;
+    size_t pos = 0;
+
+    while (pos <= len) {
+        if (!re->Match(input, pos, len, re2::RE2::UNANCHORED, &match, 1)) {
+            break;
+        }
+
+        int64_t match_start = (int64_t)(match.data() - str);
+        size_t match_len_val = match.size();
+
+        Map* m = create_match_map(match.data(), match_len_val, match_start);
+        list_push(result, {.map = m});
+
+        // advance past match; if zero-length match, advance by 1 char
+        pos = match_start + match_len_val;
+        if (match_len_val == 0) pos++;
+    }
+
+    return result;
+}
+
+// Replace all non-overlapping matches of pattern in string
+String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_len,
+                            const char* repl, size_t repl_len) {
+    if (!pattern || !str) return nullptr;
+
+    re2::RE2* re = pattern_get_unanchored(pattern);
+    if (!re) return nullptr;
+
+    std::string input(str, str_len);
+    re2::StringPiece replacement(repl, repl_len);
+    RE2::GlobalReplace(&input, *re, replacement);
+
+    return make_heap_string(input.c_str(), input.size());
+}
+
+// Split string by pattern matches
+List* pattern_split(TypePattern* pattern, const char* str, size_t len, bool keep_delim) {
+    List* result = list();
+    if (!pattern || !str) return result;
+    if (len == 0) return result;
+
+    re2::RE2* re = pattern_get_unanchored(pattern);
+    if (!re) return result;
+
+    re2::StringPiece input(str, len);
+    re2::StringPiece match;
+    size_t pos = 0;
+
+    while (pos <= len) {
+        if (!re->Match(input, pos, len, re2::RE2::UNANCHORED, &match, 1)) {
+            break;
+        }
+
+        size_t match_start = match.data() - str;
+        size_t match_len_val = match.size();
+
+        // push the part before the match
+        size_t part_len = match_start - pos;
+        String* part = make_heap_string(str + pos, part_len);
+        list_push(result, {.item = s2it(part)});
+
+        // optionally push the delimiter
+        if (keep_delim && match_len_val > 0) {
+            String* delim = make_heap_string(match.data(), match_len_val);
+            list_push(result, {.item = s2it(delim)});
+        }
+
+        // advance past match; handle zero-length matches
+        pos = match_start + match_len_val;
+        if (match_len_val == 0) pos++;
+    }
+
+    // push remaining part after last match
+    if (pos <= len) {
+        size_t part_len = len - pos;
+        String* part = make_heap_string(str + pos, part_len);
+        list_push(result, {.item = s2it(part)});
+    }
+
+    return result;
+}
+
+// C-linkage wrapper for create_match_map, callable from lambda-eval.cpp
+extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index) {
+    return create_match_map(match_str, match_len, index);
+}
+
+#endif // SIMPLE_SCHEMA_PARSER
