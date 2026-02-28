@@ -5,7 +5,8 @@
 
 let N = 7
 
-pn fannkuch(n) {
+pn main() {
+    var n = N
     var perm = fill(n, 0)
     var perm1 = fill(n, 0)
     var count = fill(n, 0)
@@ -38,7 +39,7 @@ pn fannkuch(n) {
 
         // count flips
         var flips = 0
-        var k = perm[0]
+        var k = int(perm[0])
         while (k != 0) {
             var lo = 0
             var hi = k
@@ -50,7 +51,7 @@ pn fannkuch(n) {
                 hi = hi - 1
             }
             flips = flips + 1
-            k = perm[0]
+            k = int(perm[0])
         }
 
         if (flips > max_flips) {
@@ -63,33 +64,29 @@ pn fannkuch(n) {
         }
         perm_count = perm_count + 1
 
-        // generate next permutation
+        // generate next permutation inline
         var found = 0
-        while (found == 0 and running == 1) {
-            if (r == n) {
-                running = 0
-            } else {
-                var perm0 = perm1[0]
-                i = 0
-                while (i < r) {
-                    perm1[i] = perm1[i + 1]
-                    i = i + 1
-                }
-                perm1[r] = perm0
-                count[r] = count[r] - 1
-                if (count[r] > 0) {
-                    found = 1
-                } else {
-                    r = r + 1
-                }
+        r = 1
+        while (r < n and found == 0) {
+            var perm0 = perm1[0]
+            i = 0
+            while (i < r) {
+                perm1[i] = perm1[i + 1]
+                i = i + 1
             }
+            perm1[r] = perm0
+            count[r] = int(count[r]) - 1
+            if (int(count[r]) > 0) {
+                found = 1
+            } else {
+                r = r + 1
+            }
+        }
+        if (found == 0) {
+            running = 0
         }
     }
 
     print(string(checksum) ++ "\n")
     print("Pfannkuchen(" ++ string(n) ++ ") = " ++ string(max_flips) ++ "\n")
-}
-
-pn main() {
-    fannkuch(N)
 }
