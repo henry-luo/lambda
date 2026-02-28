@@ -334,6 +334,15 @@ match value {
         3.14 * ~.r ** 2
     default: "other"
 }
+
+// String pattern arms (full-match semantics)
+string digits = \d+
+string alpha = \a+
+match input {
+    case digits: "number"         // case named pattern
+    case alpha: "word"
+    default: "other"
+}
 ```
 
 **For Expressions:** (produce spreadable arrays)
@@ -407,6 +416,29 @@ f(b:2, a:1)     // named param call
 fn outer(n) { fn inner(x)=>x+n; inner } // closure
 ```
 
+## String Patterns
+
+Define named patterns for string validation and matching. Uses regex-like syntax integrated into the type system.
+
+**Definition:**
+```lambda
+string digits = \d+                    // one or more digits
+string email = \w+ "@" \w+ "." \a[2,6] // email-like
+string ws = \s+                        // whitespace
+symbol keyword = 'if' | 'else' | 'for' // symbol pattern
+```
+
+**Type check (`is`) — full-match semantics:**
+```lambda
+"hello@world.com" is email    // true
+"abc" is email                // false
+"123" is digits               // true
+```
+
+**Character classes:** `\d` digit, `\w` word, `\s` whitespace, `\a` alpha, `\.` any char, `...` any string
+
+**Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `[n]` exactly n, `[n,m]` range
+
 ## System Functions
 
 **Type:**
@@ -431,6 +463,32 @@ fn outer(n) { fn inner(x)=>x+n; inner } // closure
 ```lambda
 1 to 5                 // [1, 2, 3, 4, 5]
 range(0, 10, 2)        // [0, 2, 4, 6, 8]
+```
+
+**String:**
+
+`replace(str,old,new)` `split(str,sep)` `find(str,pattern)` `normalize(str)`
+
+All three accept both plain strings and named patterns as the second argument:
+```lambda
+string digit = \d
+string digits = \d+
+string ws = \s+
+
+// replace(str, pattern_or_string, replacement)
+replace("a1b2c3", digit, "X")        // "aXbXcX"
+replace("hello   world", ws, " ")    // "hello world"
+replace("abc", "b", "")              // "ac"
+
+// split(str, pattern_or_string)
+split("a1b2c3", digit)               // ["a", "b", "c", ""]
+split("hello   world", ws)           // ["hello", "world"]
+split("a,b,c", ",")                  // ["a", "b", "c"]
+split("a1b2c3", digit, true)         // ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
+
+// find(str, pattern_or_string) → [{value, index}, ...]
+find("a1b22c333", digits)            // [{value: "1", index: 1}, {value: "22", index: 3}, ...]
+find("hello world", "lo")            // [{value: "lo", index: 3}]
 ```
 
 **Collection:**
