@@ -51,6 +51,7 @@ extern "C" {
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
 #include "../radiant/pdf/pdf_to_view.hpp"
+#include "../radiant/script_runner.h"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -1665,6 +1666,16 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_debug("Built DomElement tree: root=%p, backed=%s",
               (void*)dom_root,
               (dom_root->native_element && dom_root->doc) ? "YES" : "NO");
+
+    // Step 2b: Execute inline <script> elements and body onload handlers
+    // Scripts run after DOM tree construction but before CSS cascade.
+    // This enables JS-based DOM mutations (className changes, appendChild, etc.)
+    // to take effect before styles are resolved and layout is computed.
+    dom_doc->root = dom_root;  // set root for JS DOM API access
+    execute_document_scripts(html_root, dom_doc, pool);
+
+    auto t_scripts = high_resolution_clock::now();
+    log_info("[TIMING] load: execute scripts: %.1fms", duration<double, std::milli>(t_scripts - t_dom).count());
 
     // Step 3: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
