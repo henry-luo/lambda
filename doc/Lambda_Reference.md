@@ -153,6 +153,20 @@ html[body]?<p>                   // child then recursive
 // If expressions
 if (x > 0) "positive" else "negative"
 if x > 0 { compute(x) } else "default"   // block form, expr else
+
+// String patterns (see Lambda_Type.md § String Patterns)
+string digits = \d+
+string email = \w+ "@" \w+ "." \a[2,6]
+"123" is digits                  // true (full-match)
+match input {
+    case digits: "number"
+    default: "other"
+}
+
+// Pattern-aware string functions
+find("a1b22", digits)            // [{value: "1", index: 1}, {value: "22", index: 3}]
+replace("a1b2", digits, "N")    // "aNbN"
+split("a1b2", digits)           // ["a", "b", ""]
 ```
 
 #### Functions (see [Lambda_Func.md](Lambda_Func.md))

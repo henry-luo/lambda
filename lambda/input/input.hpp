@@ -42,15 +42,14 @@ public:
 #ifdef __cplusplus
 extern "C" {
 #endif
-// Common input utility functions
-void skip_whitespace(const char **text);    // skip spaces, tabs, newlines
-void skip_tab_pace(const char **text);      // skip spaces and tabs only
-bool input_is_whitespace_char(char c);
-bool input_is_empty_line(const char* line);
-int input_count_leading_chars(const char* str, char ch);
-char* input_trim_whitespace(const char* str);
-char** input_split_lines(const char* text, int* line_count);
-void input_free_lines(char** lines, int line_count);
+// Shared input utility functions (most declarations in input-utils.h)
+#include "input-utils.h"
+
+// These two remain here (not in input-utils.h) because "skip_whitespace"
+// conflicts with a different-signature inline in markup_common.hpp.
+void skip_whitespace(const char** text);
+void skip_tab_pace(const char** text);
+
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);

@@ -61,29 +61,48 @@ typedef struct {
     const char* to;      // replacement string
 } EscapeRule;
 
+// control character handling mode for format_escaped_string_ex
+typedef enum {
+    ESCAPE_CTRL_NONE = 0,        // pass through control chars as-is
+    ESCAPE_CTRL_JSON_UNICODE,    // escape control chars < 0x20 as \uXXXX
+    ESCAPE_CTRL_XML_NUMERIC      // escape control chars < 0x20 as &#xNN;
+} EscapeCtrlMode;
+
 // generic character escaper using a rules table.
 // walks str and replaces characters per the rules. Unknown chars pass through.
 void format_escaped_string(StringBuf* sb, const char* str, size_t len,
                            const EscapeRule* rules, int num_rules);
 
-// predefined escape rule tables
-extern const EscapeRule JSON_ESCAPE_RULES[];
-extern const int JSON_ESCAPE_RULES_COUNT;
+// extended version that also escapes control characters (< 0x20, except \n \r \t)
+void format_escaped_string_ex(StringBuf* sb, const char* str, size_t len,
+                              const EscapeRule* rules, int num_rules,
+                              EscapeCtrlMode ctrl_mode);
 
-extern const EscapeRule XML_TEXT_ESCAPE_RULES[];
-extern const int XML_TEXT_ESCAPE_RULES_COUNT;
+// ── Predefined escape rule tables ────────────────────────────────────
 
-extern const EscapeRule XML_ATTR_ESCAPE_RULES[];
-extern const int XML_ATTR_ESCAPE_RULES_COUNT;
+extern const EscapeRule JSON_ESCAPE_RULES[];       // " \ \b \f \n \r \t
+extern const int        JSON_ESCAPE_RULES_COUNT;
 
-extern const EscapeRule LATEX_ESCAPE_RULES[];
-extern const int LATEX_ESCAPE_RULES_COUNT;
+extern const EscapeRule HTML_TEXT_ESCAPE_RULES[];   // < > &   (also used for XML text)
+extern const int        HTML_TEXT_ESCAPE_RULES_COUNT;
 
-extern const EscapeRule HTML_TEXT_ESCAPE_RULES[];
-extern const int HTML_TEXT_ESCAPE_RULES_COUNT;
+extern const EscapeRule HTML_ATTR_ESCAPE_RULES[];   // < > & " '(&#39;)
+extern const int        HTML_ATTR_ESCAPE_RULES_COUNT;
 
-extern const EscapeRule HTML_ATTR_ESCAPE_RULES[];
-extern const int HTML_ATTR_ESCAPE_RULES_COUNT;
+extern const EscapeRule XML_ATTR_ESCAPE_RULES[];    // < > & " '(&apos;)
+extern const int        XML_ATTR_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule LATEX_ESCAPE_RULES[];       // \ { } $ & % # _ ^ ~
+extern const int        LATEX_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule YAML_ESCAPE_RULES[];        // " \ \n \r \t
+extern const int        YAML_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule JSX_TEXT_ESCAPE_RULES[];     // < > & { }
+extern const int        JSX_TEXT_ESCAPE_RULES_COUNT;
+
+extern const EscapeRule JSX_ATTR_ESCAPE_RULES[];    // " & < >
+extern const int        JSX_ATTR_ESCAPE_RULES_COUNT;
 
 // ==============================================================================
 // HTML Entity Handling

@@ -13,6 +13,7 @@
  */
 #include "inline_common.hpp"
 #include "../../html_entities.h"
+#include "../../input-utils.h"
 #include <cstdlib>
 #include <cstring>
 
@@ -122,7 +123,7 @@ static char* unescape_string(const char* start, size_t len) {
 
                 if (valid) {
                     if (codepoint == 0) codepoint = 0xFFFD;
-                    int utf8_len = unicode_to_utf8(codepoint, out);
+                    int utf8_len = codepoint_to_utf8(codepoint, out);
                     if (utf8_len > 0) {
                         out += utf8_len;
                         pos = entity_pos + 1;
@@ -140,21 +141,14 @@ static char* unescape_string(const char* start, size_t len) {
 
                 if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
                     size_t name_len = entity_pos - entity_start;
-                    EntityResult result = html_entity_resolve(entity_start, name_len);
+                    const char* replacement = html_entity_lookup(entity_start, name_len);
 
-                    if (result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) {
-                        size_t decoded_len = strlen(result.decoded);
-                        memcpy(out, result.decoded, decoded_len);
-                        out += decoded_len;
+                    if (replacement) {
+                        size_t rep_len = strlen(replacement);
+                        memcpy(out, replacement, rep_len);
+                        out += rep_len;
                         pos = entity_pos + 1;
                         continue;
-                    } else if (result.type == ENTITY_UNICODE_SPACE || result.type == ENTITY_NAMED) {
-                        int utf8_len = unicode_to_utf8(result.named.codepoint, out);
-                        if (utf8_len > 0) {
-                            out += utf8_len;
-                            pos = entity_pos + 1;
-                            continue;
-                        }
                     }
                 }
             }
