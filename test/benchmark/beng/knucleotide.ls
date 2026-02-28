@@ -3,7 +3,7 @@
 // Uses file input instead of stdin (Lambda adaptation)
 // Expected: matches benchmarksgame knucleotide-output.txt
 
-let INPUT_PATH = @"test/benchmark/beng/input/fasta_1000.txt"
+let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
 // extract >THREE section from fasta input
 pn extract_three(text) {
@@ -72,6 +72,37 @@ pn format3(x) {
 }
 
 // print frequency table for k-mers of length k, sorted by frequency desc
+// bubble sort entries by count descending, then alphabetically ascending
+pn sort_entries(entries) {
+    var n = len(entries)
+    var swapped = 1
+    while (swapped == 1) {
+        swapped = 0
+        var i = 0
+        while (i < n - 1) {
+            var do_swap = 0
+            if (int(entries[i][1]) < int(entries[i + 1][1])) {
+                do_swap = 1
+            } else {
+                if (int(entries[i][1]) == int(entries[i + 1][1])) {
+                    if (entries[i][0] > entries[i + 1][0]) {
+                        do_swap = 1
+                    }
+                }
+            }
+            if (do_swap == 1) {
+                var tmp = entries[i]
+                entries[i] = entries[i + 1]
+                entries[i + 1] = tmp
+                swapped = 1
+            }
+            i = i + 1
+        }
+        n = n - 1
+    }
+    return entries
+}
+
 pn print_frequencies(seq, k) {
     let counts = count_kmers(seq, k)
     var total = len(seq) - k + 1
@@ -80,14 +111,7 @@ pn print_frequencies(seq, k) {
     var entries = [for (key, val at counts) [key, val]]
 
     // sort by count descending, then alphabetically
-    entries = sort(entries, fn(a, b) {
-        if (a[1] != b[1]) {
-            return b[1] - a[1]
-        }
-        if (a[0] < b[0]) { return -1 }
-        if (a[0] > b[0]) { return 1 }
-        return 0
-    })
+    entries = sort_entries(entries)
 
     var i = 0
     while (i < len(entries)) {
@@ -113,7 +137,7 @@ pn print_count(seq, kmer) {
 }
 
 pn main() {
-    let text = input(INPUT_PATH, 'text)
+    let text^err = input(INPUT_PATH, 'text')
     let seq = extract_three(text)
 
     // print frequency tables for 1-mers and 2-mers
