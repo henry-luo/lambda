@@ -18,18 +18,16 @@ All 19 benchmarks are written as `pn` (procedural) Lambda scripts using the `pn 
 |---|-----------|----------|-------------|-----------------|----------|
 | 1 | **deriv** | alloc | Symbolic differentiation of expression trees using tagged maps, 5000 iterations | 45 nodes | ✅ PASS |
 | 2 | **primes** | array | Sieve of Eratosthenes to 8000, repeated 10 times | pi(8000) = 1007 | ✅ PASS |
-| 3 | **pnpoly** | numeric | Point-in-polygon ray casting (Jordan curve theorem), 100K test points against a 20-vertex polygon | inside=29415 | ✅ PASS |
+| 3 | **pnpoly** | numeric | Point-in-polygon ray casting (Jordan curve theorem), 100K test points against a 20-vertex polygon | inside=29415 | ⏳ Release only |
 | 4 | **diviter** | iterative | Iterative integer division via repeated subtraction, 1000 iterations | result=500000 | ✅ PASS |
 | 5 | **divrec** | recursive | Recursive integer division via repeated subtraction, 1000 iterations | result=500000000 | ✅ PASS |
 | 6 | **array1** | array | Array fill (0..9999) & sum, 10000 elements × 100 iterations | sum=49995000 | ✅ PASS |
 | 7 | **gcbench** | gc | GC stress: binary tree allocation & traversal depth 4–14, stretch tree depth 15 | Multi-line tree stats | ✅ PASS |
-| 8 | **quicksort** | sort | Quicksort 5000 pseudo-random elements, 10 iterations | sorted=true | ⏳ Release only |
+| 8 | **quicksort** | sort | Quicksort 5000 pseudo-random elements, 10 iterations | sorted=true | ✅ PASS |
 | 9 | **triangl** | backtrack | Triangle solitaire — count all backtracking solutions (15-position board) | solutions=29760 | ⏳ Release only |
 | 10 | **puzzle** | backtrack | N-Queens n=10, count all solutions | solutions=724 | ✅ PASS |
 | 11 | **ray** | numeric | Ray tracer 100×100 with 4 spheres, 1 iteration | hits=1392 | ✅ PASS |
-| 12 | **sumfp_long** | numeric | Sum 1/i² for i=1..500000, 5 repetitions (pi²/6 ≈ 1.6449) | approximate sum | ⏳ Release only |
-
-**Note:** `paraffins` was originally planned but replaced with `sumfp_long` due to a SIGSEGV crash in the complex recursive enumeration algorithm.
+| 12 | **paraffins** | recursive | Paraffin isomer counting (OEIS A000602) nb(1..23) × 10 iters | nb(23)=5731580 | ✅ PASS |
 
 ## Kostya Suite (7 benchmarks)
 
@@ -200,15 +198,50 @@ pn next_rand(seed) { return (seed * 1664525 + 1013904223) % 1000000 }
 
 **Files affected:** `quicksort.ls`, `matmul.ls`, `json_gen.ls`
 
+#### 7. Modulo (`%`) on float values returns error in `pn` mode
+
+**Symptom:** `float_value % int_value` returns `<error>` instead of computing the remainder. Since `/` always returns float, any value derived from division that is subsequently used with `%` produces an error, which silently poisons all downstream arithmetic.
+
+**Impact:** Cannot use `(a - a % b) / b` as an integer division workaround when the result feeds back into expressions using `%`. The float contamination spreads through arrays and accumulators.
+
+**Workaround:** Use a pure-integer binary long division function that never touches `/`:
+
+```lambda
+pn int_div(a, b) {
+    if (a < b) { return 0 }
+    var rem = a
+    var q = 0
+    var power = b
+    var bit = 1
+    while (power + power <= rem) {
+        power = power + power
+        bit = bit + bit
+    }
+    while (bit >= 1) {
+        if (rem >= power) {
+            q = q + bit
+            rem = rem - power
+        }
+        power = shr(power, 1)
+        bit = shr(bit, 1)
+    }
+    return q
+}
+```
+
+**Files affected:** `paraffins.ls`
+
+### Resolved Issues
+
+#### A. `paraffins` SIGSEGV — fixed
+
+The original `paraffins` implementation (building explicit tree structures) caused a SIGSEGV crash deep in recursion. **Fixed** by rewriting with a counting-only approach: instead of allocating radical tree nodes, it counts radicals at each size using multiset combination formulas (ms2, ms3, ms4). Also required a pure-integer `int_div()` function (binary long division) since both `div` (broken in pn) and `/` (returns float, poisoning `%` operations) cannot be used. A critical algorithmic fix was adding a `max_rad = floor((n-1)/2)` constraint in the CCP (carbon-centered paraffin) enumeration to prevent overlap with BCP (bond-centered) counting and array out-of-bounds access.
+
 ### Outstanding Issues (not yet resolved)
-
-#### A. `paraffins` algorithm crashes with SIGSEGV
-
-The Larceny `paraffins` benchmark (enumerating paraffin isomers using radix-tree enumeration) causes a segmentation fault. The crash occurs deep in recursion and could not be worked around. This benchmark was replaced with `sumfp_long`.
 
 #### B. Debug build too slow for compute-heavy benchmarks
 
-The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `brainfuck` (10K iterations), `collatz` (1M numbers), `matmul` (200×200), `kostya/primes` (sieve to 1M), `quicksort` (5000 elements), `triangl` (backtracking 29K solutions), and `sumfp_long` (500K iterations) are only practical to run in release mode. They have been verified to compile and their logic verified with reduced inputs.
+The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `pnpoly` (100K points × 20-vertex polygon), `brainfuck` (10K iterations), `collatz` (1M numbers), `matmul` (200×200), `kostya/primes` (sieve to 1M), and `triangl` (backtracking 29K solutions) are only practical to run in release mode. They have been verified to compile and their logic verified with reduced inputs. Note: `quicksort` (5000 elements) previously timed out in debug but now passes.
 
 #### C. Semicolons on same line cause syntax error
 
