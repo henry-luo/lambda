@@ -13,6 +13,7 @@
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
 #include "../html_entities.h"
+#include "../input-utils.h"
 #include "../markup-format.h"
 #include "../../utf_string.h"
 #include "lib/log.h"
@@ -531,7 +532,7 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
 
                 if (valid && out_pos + 4 < dst_size) {
                     if (codepoint == 0) codepoint = 0xFFFD;
-                    int utf8_len = unicode_to_utf8(codepoint, dst + out_pos);
+                    int utf8_len = codepoint_to_utf8(codepoint, dst + out_pos);
                     if (utf8_len > 0) {
                         out_pos += utf8_len;
                         pos = entity_pos + 1;
@@ -549,21 +550,14 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
 
                 if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
                     size_t name_len = entity_pos - entity_start;
-                    EntityResult result = html_entity_resolve(entity_start, name_len);
+                    const char* replacement = html_entity_lookup(entity_start, name_len);
 
-                    if ((result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) && out_pos + strlen(result.decoded) < dst_size) {
-                        size_t decoded_len = strlen(result.decoded);
-                        memcpy(dst + out_pos, result.decoded, decoded_len);
-                        out_pos += decoded_len;
+                    if (replacement && out_pos + strlen(replacement) < dst_size) {
+                        size_t rep_len = strlen(replacement);
+                        memcpy(dst + out_pos, replacement, rep_len);
+                        out_pos += rep_len;
                         pos = entity_pos + 1;
                         continue;
-                    } else if ((result.type == ENTITY_UNICODE_SPACE || result.type == ENTITY_NAMED) && out_pos + 4 < dst_size) {
-                        int utf8_len = unicode_to_utf8(result.named.codepoint, dst + out_pos);
-                        if (utf8_len > 0) {
-                            out_pos += utf8_len;
-                            pos = entity_pos + 1;
-                            continue;
-                        }
                     }
                 }
             }

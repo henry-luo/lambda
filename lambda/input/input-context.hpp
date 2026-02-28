@@ -117,14 +117,7 @@ public:
 
 } // namespace lambda
 
-// Common utility functions
-bool is_greek_letter(const char* cmd_name);
-bool is_math_operator(const char* cmd_name);
-bool is_trig_function(const char* cmd_name);
-bool is_log_function(const char* cmd_name);
-bool is_latex_command(const char* cmd_name);
-bool is_latex_environment(const char* env_name);
-bool is_math_environment(const char* env_name);
-bool is_raw_text_environment(const char* env_name);
+// LaTeX command/environment classification — see input-latex-tables.h
+#include "input-latex-tables.h"
 
 #endif // LAMBDA_INPUT_CONTEXT_HPP

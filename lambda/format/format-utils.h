@@ -66,25 +66,6 @@ typedef struct {
 void format_escaped_string(StringBuf* sb, const char* str, size_t len,
                            const EscapeRule* rules, int num_rules);
 
-// predefined escape rule tables
-extern const EscapeRule JSON_ESCAPE_RULES[];
-extern const int JSON_ESCAPE_RULES_COUNT;
-
-extern const EscapeRule XML_TEXT_ESCAPE_RULES[];
-extern const int XML_TEXT_ESCAPE_RULES_COUNT;
-
-extern const EscapeRule XML_ATTR_ESCAPE_RULES[];
-extern const int XML_ATTR_ESCAPE_RULES_COUNT;
-
-extern const EscapeRule LATEX_ESCAPE_RULES[];
-extern const int LATEX_ESCAPE_RULES_COUNT;
-
-extern const EscapeRule HTML_TEXT_ESCAPE_RULES[];
-extern const int HTML_TEXT_ESCAPE_RULES_COUNT;
-
-extern const EscapeRule HTML_ATTR_ESCAPE_RULES[];
-extern const int HTML_ATTR_ESCAPE_RULES_COUNT;
-
 // ==============================================================================
 // HTML Entity Handling
 // ==============================================================================

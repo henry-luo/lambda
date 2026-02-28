@@ -181,3 +181,120 @@ Item parse_typed_value(InputContext& ctx, const char* str, size_t len) {
 }
 
 } // namespace lambda
+
+// ── Whitespace & Line Utilities (C linkage) ────────────────────────
+
+extern "C" void skip_whitespace(const char **text) {
+    while (**text && (**text == ' ' || **text == '\n' || **text == '\r' || **text == '\t')) {
+        (*text)++;
+    }
+}
+
+extern "C" void skip_tab_pace(const char **text) {
+    while (**text && (**text == ' ' || **text == '\t')) {
+        (*text)++;
+    }
+}
+
+bool input_is_whitespace_char(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+bool input_is_empty_line(const char* line) {
+    while (*line) {
+        if (!isspace(*line)) return false;
+        line++;
+    }
+    return true;
+}
+
+int input_count_leading_chars(const char* str, char ch) {
+    int count = 0;
+    while (str[count] == ch) count++;
+    return count;
+}
+
+char* input_trim_whitespace(const char* str) {
+    if (!str) return NULL;
+
+    // find start
+    while (isspace(*str)) str++;
+
+    if (*str == '\0') return strdup("");
+
+    // find end
+    const char* end = str + strlen(str) - 1;
+    while (end > str && isspace(*end)) end--;
+
+    // create trimmed copy
+    int len = end - str + 1;
+    char* result = (char*)malloc(len + 1);
+    strncpy(result, str, len);
+    result[len] = '\0';
+
+    return result;
+}
+
+char** input_split_lines(const char* text, int* line_count) {
+    *line_count = 0;
+
+    if (!text) {
+        return NULL;
+    }
+
+    // count lines
+    const char* ptr = text;
+    while (*ptr) {
+        if (*ptr == '\n') (*line_count)++;
+        ptr++;
+    }
+    if (ptr > text && *(ptr-1) != '\n') {
+        (*line_count)++; // last line without \n
+    }
+
+    if (*line_count == 0) {
+        return NULL;
+    }
+
+    // allocate array
+    char** lines = (char**)malloc(*line_count * sizeof(char*));
+
+    // split into lines
+    int line_index = 0;
+    const char* line_start = text;
+    ptr = text;
+
+    while (*ptr && line_index < *line_count) {
+        if (*ptr == '\n') {
+            int len = ptr - line_start;
+            lines[line_index] = (char*)malloc(len + 1);
+            strncpy(lines[line_index], line_start, len);
+            lines[line_index][len] = '\0';
+            line_index++;
+            line_start = ptr + 1;
+        }
+        ptr++;
+    }
+
+    // handle last line if it doesn't end with newline
+    if (line_index < *line_count && line_start < ptr) {
+        int len = ptr - line_start;
+        lines[line_index] = (char*)malloc(len + 1);
+        strncpy(lines[line_index], line_start, len);
+        lines[line_index][len] = '\0';
+        line_index++;
+    }
+
+    // adjust line count to actual lines created
+    *line_count = line_index;
+
+    return lines;
+}
+
+void input_free_lines(char** lines, int line_count) {
+    if (!lines) return;
+    for (int i = 0; i < line_count; i++) {
+        free(lines[i]);
+    }
+    free(lines);
+}

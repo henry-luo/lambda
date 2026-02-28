@@ -488,67 +488,6 @@ void format_escaped_string(StringBuf* sb, const char* str, size_t len,
 }
 
 // ==============================================================================
-// Predefined Escape Rule Tables
-// ==============================================================================
-
-const EscapeRule JSON_ESCAPE_RULES[] = {
-    { '"',  "\\\"" },
-    { '\\', "\\\\" },
-    { '\n', "\\n"  },
-    { '\r', "\\r"  },
-    { '\t', "\\t"  },
-    { '\b', "\\b"  },
-    { '\f', "\\f"  },
-};
-const int JSON_ESCAPE_RULES_COUNT = sizeof(JSON_ESCAPE_RULES) / sizeof(JSON_ESCAPE_RULES[0]);
-
-const EscapeRule XML_TEXT_ESCAPE_RULES[] = {
-    { '<', "&lt;"   },
-    { '>', "&gt;"   },
-    { '&', "&amp;"  },
-};
-const int XML_TEXT_ESCAPE_RULES_COUNT = sizeof(XML_TEXT_ESCAPE_RULES) / sizeof(XML_TEXT_ESCAPE_RULES[0]);
-
-const EscapeRule XML_ATTR_ESCAPE_RULES[] = {
-    { '<',  "&lt;"    },
-    { '>',  "&gt;"    },
-    { '&',  "&amp;"   },
-    { '"',  "&quot;"  },
-    { '\'', "&apos;"  },
-};
-const int XML_ATTR_ESCAPE_RULES_COUNT = sizeof(XML_ATTR_ESCAPE_RULES) / sizeof(XML_ATTR_ESCAPE_RULES[0]);
-
-const EscapeRule LATEX_ESCAPE_RULES[] = {
-    { '#',  "\\#"  },
-    { '$',  "\\$"  },
-    { '&',  "\\&"  },
-    { '%',  "\\%"  },
-    { '_',  "\\_"  },
-    { '{',  "\\{"  },
-    { '}',  "\\}"  },
-    { '^',  "\\^{}" },
-    { '~',  "\\~{}" },
-    { '\\', "\\textbackslash{}" },
-};
-const int LATEX_ESCAPE_RULES_COUNT = sizeof(LATEX_ESCAPE_RULES) / sizeof(LATEX_ESCAPE_RULES[0]);
-
-const EscapeRule HTML_TEXT_ESCAPE_RULES[] = {
-    { '<', "&lt;"   },
-    { '>', "&gt;"   },
-    { '&', "&amp;"  },
-};
-const int HTML_TEXT_ESCAPE_RULES_COUNT = sizeof(HTML_TEXT_ESCAPE_RULES) / sizeof(HTML_TEXT_ESCAPE_RULES[0]);
-
-const EscapeRule HTML_ATTR_ESCAPE_RULES[] = {
-    { '<',  "&lt;"    },
-    { '>',  "&gt;"    },
-    { '&',  "&amp;"   },
-    { '"',  "&quot;"  },
-    { '\'', "&#39;"   },
-};
-const int HTML_ATTR_ESCAPE_RULES_COUNT = sizeof(HTML_ATTR_ESCAPE_RULES) / sizeof(HTML_ATTR_ESCAPE_RULES[0]);
-
-// ==============================================================================
 // Unified Markup Output Rules — Link / Image Callbacks
 // ==============================================================================
 

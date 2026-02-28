@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 
 #include "input.hpp"
+#include "input-parsers.h"
 #include "../lambda-decimal.hpp"
 #include "../mark_builder.hpp"
 #include "../../lib/url.h"
@@ -18,40 +19,6 @@ extern "C" {
 }
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
-
-void parse_json(Input* input, const char* json_string);
-Item parse_json_to_item(Input* input, const char* json_string);
-void parse_csv(Input* input, const char* csv_string);
-void parse_ini(Input* input, const char* ini_string);
-void parse_properties(Input* input, const char* prop_string);
-void parse_toml(Input* input, const char* toml_string);
-void parse_yaml(Input *input, const char* yaml_str);
-void parse_xml(Input* input, const char* xml_string);
-Element* html5_parse(Input* input, const char* html);  // HTML5 compliant parser
-extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser (default)
-void parse_rtf(Input* input, const char* rtf_string);
-void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
-void parse_eml(Input* input, const char* eml_string);
-void parse_vcf(Input* input, const char* vcf_string);
-void parse_ics(Input* input, const char* ics_string);
-void parse_mark(Input* input, const char* mark_string);
-void parse_css(Input* input, const char* css_string);
-void parse_jsx(Input* input, const char* jsx_string);
-void parse_math(Input* input, const char* math_string, const char* flavor);
-
-// New modular markup parser (replaces old input_markup)
-extern "C" Item input_markup_modular(Input *input, const char* content);
-
-// CommonMark-specific parser (no GFM extensions)
-extern "C" Item input_markup_commonmark(Input *input, const char* content);
-
-// Old markup parser - kept for backward compatibility during transition
-Item input_markup(Input *input, const char* content);
-
-// Import MarkupFormat enum from markup-parser.h
-#include "markup-parser.h"
-#include "lib/log.h"
-Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
 __thread Context* input_context = NULL;
 
@@ -433,122 +400,6 @@ static const char* mime_to_parser_type(const char* mime_type) {
 
     // Default fallback
     return "text";
-}
-
-// Common utility functions for input parsers
-void skip_whitespace(const char **text) {
-    while (**text && (**text == ' ' || **text == '\n' || **text == '\r' || **text == '\t')) {
-        (*text)++;
-    }
-}
-
-void skip_tab_pace(const char **text) {
-    while (**text && (**text == ' ' || **text == '\t')) {
-        (*text)++;
-    }
-}
-
-bool input_is_whitespace_char(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
-bool input_is_empty_line(const char* line) {
-    while (*line) {
-        if (!isspace(*line)) return false;
-        line++;
-    }
-    return true;
-}
-
-int input_count_leading_chars(const char* str, char ch) {
-    int count = 0;
-    while (str[count] == ch) count++;
-    return count;
-}
-
-char* input_trim_whitespace(const char* str) {
-    if (!str) return NULL;
-
-    // Find start
-    while (isspace(*str)) str++;
-
-    if (*str == '\0') return strdup("");
-
-    // Find end
-    const char* end = str + strlen(str) - 1;
-    while (end > str && isspace(*end)) end--;
-
-    // Create trimmed copy
-    int len = end - str + 1;
-    char* result = (char*)malloc(len + 1);
-    strncpy(result, str, len);
-    result[len] = '\0';
-
-    return result;
-}
-
-char** input_split_lines(const char* text, int* line_count) {
-    *line_count = 0;
-
-    if (!text) {
-        return NULL;
-    }
-
-    // Count lines
-    const char* ptr = text;
-    while (*ptr) {
-        if (*ptr == '\n') (*line_count)++;
-        ptr++;
-    }
-    if (ptr > text && *(ptr-1) != '\n') {
-        (*line_count)++; // Last line without \n
-    }
-
-    if (*line_count == 0) {
-        return NULL;
-    }
-
-    // Allocate array
-    char** lines = (char**)malloc(*line_count * sizeof(char*));
-
-    // Split into lines
-    int line_index = 0;
-    const char* line_start = text;
-    ptr = text;
-
-    while (*ptr && line_index < *line_count) {
-        if (*ptr == '\n') {
-            int len = ptr - line_start;
-            lines[line_index] = (char*)malloc(len + 1);
-            strncpy(lines[line_index], line_start, len);
-            lines[line_index][len] = '\0';
-            line_index++;
-            line_start = ptr + 1;
-        }
-        ptr++;
-    }
-
-    // Handle last line if it doesn't end with newline
-    if (line_index < *line_count && line_start < ptr) {
-        int len = ptr - line_start;
-        lines[line_index] = (char*)malloc(len + 1);
-        strncpy(lines[line_index], line_start, len);
-        lines[line_index][len] = '\0';
-        line_index++;
-    }
-
-    // Adjust line count to actual lines created
-    *line_count = line_index;
-
-    return lines;
-}
-
-void input_free_lines(char** lines, int line_count) {
-    if (!lines) return;
-    for (int i = 0; i < line_count; i++) {
-        free(lines[i]);
-    }
-    free(lines);
 }
 
 extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {

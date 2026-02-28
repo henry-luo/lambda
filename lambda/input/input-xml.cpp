@@ -3,6 +3,7 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "html_entities.h"
+#include "input-utils.h"
 
 using namespace lambda;
 
@@ -57,7 +58,7 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
                     (*xml)++; // Skip ;
                     // Convert Unicode codepoint to UTF-8
                     char utf8_buf[8];
-                    int utf8_len = unicode_to_utf8(value, utf8_buf);
+                    int utf8_len = codepoint_to_utf8(value, utf8_buf);
                     if (utf8_len > 0) {
                         stringbuf_append_str(sb, utf8_buf);
                     } else {
@@ -78,26 +79,11 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
 
                 if (**xml == ';') {
                     size_t entity_len = *xml - entity_start;
-                    EntityResult result = html_entity_resolve(entity_start, entity_len);
+                    const char* replacement = html_entity_lookup(entity_start, entity_len);
                     (*xml)++; // Skip ;
 
-                    if (result.type == ENTITY_ASCII_ESCAPE) {
-                        // ASCII escapes: decode inline
-                        stringbuf_append_str(sb, result.decoded);
-                    } else if (result.type == ENTITY_UNICODE_SPACE) {
-                        // Unicode space entities: decode inline as UTF-8
-                        char utf8_buf[8];
-                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
-                        if (utf8_len > 0) {
-                            stringbuf_append_str(sb, utf8_buf);
-                        }
-                    } else if (result.type == ENTITY_NAMED) {
-                        // Named entities: decode to UTF-8 for attribute values
-                        char utf8_buf[8];
-                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
-                        if (utf8_len > 0) {
-                            stringbuf_append_str(sb, utf8_buf);
-                        }
+                    if (replacement) {
+                        stringbuf_append_str(sb, replacement);
                     } else {
                         // Unknown entity - preserve as-is for roundtrip compatibility
                         stringbuf_append_char(sb, '&');
@@ -656,26 +642,11 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
                                 if (text_start < text_end && *text_start == ';') {
                                     // Try to resolve entity using html_entities module
                                     size_t entity_len = text_start - entity_start;
-                                    EntityResult result = html_entity_resolve(entity_start, entity_len);
+                                    const char* replacement = html_entity_lookup(entity_start, entity_len);
                                     text_start++; // Skip ;
 
-                                    if (result.type == ENTITY_ASCII_ESCAPE) {
-                                        // ASCII escapes: decode inline
-                                        stringbuf_append_str(sb, result.decoded);
-                                    } else if (result.type == ENTITY_UNICODE_SPACE) {
-                                        // Unicode space entities: decode inline as UTF-8
-                                        char utf8_buf[8];
-                                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
-                                        if (utf8_len > 0) {
-                                            stringbuf_append_str(sb, utf8_buf);
-                                        }
-                                    } else if (result.type == ENTITY_NAMED) {
-                                        // Named entities: decode to UTF-8
-                                        char utf8_buf[8];
-                                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
-                                        if (utf8_len > 0) {
-                                            stringbuf_append_str(sb, utf8_buf);
-                                        }
+                                    if (replacement) {
+                                        stringbuf_append_str(sb, replacement);
                                     } else {
                                         // Unknown entity - preserve as-is for roundtrip compatibility
                                         stringbuf_append_char(sb, '&');
