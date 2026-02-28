@@ -56,9 +56,24 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         child = child->next();
     }
     if (!child) {
-        // All children are nil-views or out-of-flow — treat as empty
-        span->width = 0;
-        span->height = 0;
+        // All children are nil-views or out-of-flow — treat as empty but include border+padding
+        // CSS 2.1 §8.1: Empty inline elements still have border+padding in their bounding box
+        float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
+        float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
+        if (span->bound) {
+            if (span->bound->border) {
+                border_left = span->bound->border->width.left;
+                border_right = span->bound->border->width.right;
+                border_top = span->bound->border->width.top;
+                border_bottom = span->bound->border->width.bottom;
+            }
+            pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
+            pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
+            pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
+            pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+        }
+        span->width = (int)(border_left + pad_left + pad_right + border_right);
+        span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
         return;
     }
 
