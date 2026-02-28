@@ -407,6 +407,7 @@ func_obj_t func_list[] = {
     {"js_is_dom_node", (fn_ptr) js_is_dom_node},
     {"js_dom_set_property", (fn_ptr) js_dom_set_property},
     {"js_dom_set_style_property", (fn_ptr) js_dom_set_style_property},
+    {"js_dom_get_style_property", (fn_ptr) js_dom_get_style_property},
     // StringBuf functions for template literals
     {"stringbuf_new", (fn_ptr) stringbuf_new},
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},

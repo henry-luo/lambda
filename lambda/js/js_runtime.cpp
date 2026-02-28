@@ -607,6 +607,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
+        if (js_is_dom_node(object)) {
+            return js_dom_set_property(object, key, value);
+        }
         // Check if this is a JS object (indicated by NULL type)
         if (m->type == NULL && m->data != NULL) {
             // This is a JS object using hashmap
@@ -961,6 +965,14 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         }
         return (Item){.item = i2it(-1)};
     }
+    // item(index) - NodeList/HTMLCollection style index access
+    if (method->len == 4 && strncmp(method->chars, "item", 4) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        int idx = (int)js_get_number(args[0]);
+        Array* a = arr.array;
+        if (idx >= 0 && idx < a->length) return a->items[idx];
+        return ItemNull;
+    }
     // includes
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
         if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
@@ -976,7 +988,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         String* sep_str = it2s(sep);
         const char* sep_chars = sep_str ? sep_str->chars : ",";
         size_t sep_len = sep_str ? sep_str->len : 1;
-        
+
         Array* a = arr.array;
         StrBuf* buf = strbuf_new();
         for (int i = 0; i < a->length; i++) {
