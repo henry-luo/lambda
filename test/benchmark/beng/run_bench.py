@@ -39,6 +39,7 @@ BENCHMARKS = [
     ("mandelbrot",    200,   "n",      "numeric"),
     ("nbody",         1000,  "n",      "numeric"),
     ("pidigits",      30,    "n",      "bigint"),
+    ("regexredux",    None,  "file",   "regex"),
     ("revcomp",       None,  "file",   "string"),
     ("spectralnorm",  100,   "n",      "numeric"),
 ]
