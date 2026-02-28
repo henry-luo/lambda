@@ -8,7 +8,8 @@ extern "C" {
 #include "../../lib/str.h"
 }
 
-#include "input-line-utils.h"
+// line-oriented helpers (skip_to_newline, skip_line_whitespace, is_folded_line) from input-utils.h
+#include "input-utils.h"
 
 using namespace lambda;
 

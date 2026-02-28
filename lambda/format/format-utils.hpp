@@ -3,6 +3,7 @@
 
 #include "../../lib/stringbuf.h"
 #include "../lambda-data.hpp"
+#include "format-utils.h"
 
 // C++ FormatterContext base class for object-oriented formatter architecture
 // Note: Named FormatterContextCpp to avoid conflict with C struct FormatterContext in format-utils.h
@@ -153,26 +154,9 @@ public:
     inline void write_string_escaped(const char* str) {
         write_char('"');
         if (str) {
-            for (const char* p = str; *p; p++) {
-                switch (*p) {
-                case '"':  write_text("\\\""); break;
-                case '\\': write_text("\\\\"); break;
-                case '\n': write_text("\\n"); break;
-                case '\r': write_text("\\r"); break;
-                case '\t': write_text("\\t"); break;
-                case '\b': write_text("\\b"); break;
-                case '\f': write_text("\\f"); break;
-                default:
-                    if ((unsigned char)*p < 32) {
-                        char buf[8];
-                        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)*p);
-                        write_text(buf);
-                    } else {
-                        write_char(*p);
-                    }
-                    break;
-                }
-            }
+            format_escaped_string_ex(output_, str, strlen(str),
+                JSON_ESCAPE_RULES, JSON_ESCAPE_RULES_COUNT,
+                ESCAPE_CTRL_JSON_UNICODE);
         }
         write_char('"');
     }
@@ -284,21 +268,11 @@ public:
 
         if (force_quotes || needs_yaml_quotes(s, len)) {
             write_char('"');
-            for (size_t i = 0; i < len; i++) {
-                switch (s[i]) {
-                case '"':  write_text("\\\""); break;
-                case '\\': write_text("\\\\"); break;
-                case '\n': write_text("\\n"); break;
-                case '\r': write_text("\\r"); break;
-                case '\t': write_text("\\t"); break;
-                default:   write_char(s[i]); break;
-                }
-            }
+            format_escaped_string(output_, s, len,
+                YAML_ESCAPE_RULES, YAML_ESCAPE_RULES_COUNT);
             write_char('"');
         } else {
-            for (size_t i = 0; i < len; i++) {
-                write_char(s[i]);
-            }
+            if (output_) stringbuf_append_str_n(output_, s, len);
         }
     }
 };
@@ -343,28 +317,14 @@ public:
 
     inline void write_html_escaped_text(const char* text) {
         if (!text) return;
-        for (const char* p = text; *p; p++) {
-            switch (*p) {
-            case '<':  write_text("&lt;"); break;
-            case '>':  write_text("&gt;"); break;
-            case '&':  write_text("&amp;"); break;
-            default:   write_char(*p); break;
-            }
-        }
+        format_escaped_string(output_, text, strlen(text),
+            HTML_TEXT_ESCAPE_RULES, HTML_TEXT_ESCAPE_RULES_COUNT);
     }
 
     inline void write_html_escaped_attribute(const char* text) {
         if (!text) return;
-        for (const char* p = text; *p; p++) {
-            switch (*p) {
-            case '<':  write_text("&lt;"); break;
-            case '>':  write_text("&gt;"); break;
-            case '&':  write_text("&amp;"); break;
-            case '"':  write_text("&quot;"); break;
-            case '\'': write_text("&#39;"); break;
-            default:   write_char(*p); break;
-            }
-        }
+        format_escaped_string(output_, text, strlen(text),
+            HTML_ATTR_ESCAPE_RULES, HTML_ATTR_ESCAPE_RULES_COUNT);
     }
 
     inline void write_doctype() {
@@ -427,21 +387,8 @@ public:
 
     inline void write_latex_escaped_text(const char* text) {
         if (!text) return;
-        for (const char* p = text; *p; p++) {
-            switch (*p) {
-            case '\\': write_text("\\textbackslash{}"); break;
-            case '{':  write_text("\\{"); break;
-            case '}':  write_text("\\}"); break;
-            case '$':  write_text("\\$"); break;
-            case '&':  write_text("\\&"); break;
-            case '%':  write_text("\\%"); break;
-            case '#':  write_text("\\#"); break;
-            case '_':  write_text("\\_"); break;
-            case '^':  write_text("\\^{}"); break;
-            case '~':  write_text("\\~{}"); break;
-            default:   write_char(*p); break;
-            }
-        }
+        format_escaped_string(output_, text, strlen(text),
+            LATEX_ESCAPE_RULES, LATEX_ESCAPE_RULES_COUNT);
     }
 
     inline void write_optional_arg(const char* arg) {
@@ -513,28 +460,14 @@ public:
 
     inline void write_xml_escaped_text(const char* text) {
         if (!text) return;
-        for (const char* p = text; *p; p++) {
-            switch (*p) {
-            case '<':  write_text("&lt;"); break;
-            case '>':  write_text("&gt;"); break;
-            case '&':  write_text("&amp;"); break;
-            default:   write_char(*p); break;
-            }
-        }
+        format_escaped_string(output_, text, strlen(text),
+            HTML_TEXT_ESCAPE_RULES, HTML_TEXT_ESCAPE_RULES_COUNT);
     }
 
     inline void write_xml_escaped_attribute(const char* text) {
         if (!text) return;
-        for (const char* p = text; *p; p++) {
-            switch (*p) {
-            case '<':  write_text("&lt;"); break;
-            case '>':  write_text("&gt;"); break;
-            case '&':  write_text("&amp;"); break;
-            case '"':  write_text("&quot;"); break;
-            case '\'': write_text("&apos;"); break;
-            default:   write_char(*p); break;
-            }
-        }
+        format_escaped_string(output_, text, strlen(text),
+            XML_ATTR_ESCAPE_RULES, XML_ATTR_ESCAPE_RULES_COUNT);
     }
 
     inline void write_cdata_start() {

@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-utils.h"
 #include "../../lib/stringbuf.h"
 #include "../mark_reader.hpp"
 #include <ctype.h>
@@ -14,18 +15,8 @@ static void format_jsx_item(StringBuf* sb, const ItemReader& item);
 // Format JSX text content with proper escaping
 static void format_jsx_text_content(StringBuf* sb, String* text) {
     if (!text || text->len == 0 || text->len > 10000) return;
-
-    for (int i = 0; i < text->len; i++) {
-        char c = text->chars[i];
-        switch (c) {
-            case '<': stringbuf_append_str(sb, "&lt;");   break;
-            case '>': stringbuf_append_str(sb, "&gt;");   break;
-            case '&': stringbuf_append_str(sb, "&amp;");  break;
-            case '{': stringbuf_append_str(sb, "&#123;"); break;
-            case '}': stringbuf_append_str(sb, "&#125;"); break;
-            default:  stringbuf_append_char(sb, c);       break;
-        }
-    }
+    format_escaped_string(sb, text->chars, text->len,
+        JSX_TEXT_ESCAPE_RULES, JSX_TEXT_ESCAPE_RULES_COUNT);
 }
 
 // Format JSX attribute value with escaping
@@ -33,16 +24,8 @@ static void format_jsx_attribute_value(StringBuf* sb, String* value) {
     if (!value || value->len == 0) return;
 
     stringbuf_append_char(sb, '"');
-    for (int i = 0; i < value->len; i++) {
-        char c = value->chars[i];
-        switch (c) {
-            case '"': stringbuf_append_str(sb, "&quot;"); break;
-            case '&': stringbuf_append_str(sb, "&amp;");  break;
-            case '<': stringbuf_append_str(sb, "&lt;");   break;
-            case '>': stringbuf_append_str(sb, "&gt;");   break;
-            default:  stringbuf_append_char(sb, c);       break;
-        }
-    }
+    format_escaped_string(sb, value->chars, value->len,
+        JSX_ATTR_ESCAPE_RULES, JSX_ATTR_ESCAPE_RULES_COUNT);
     stringbuf_append_char(sb, '"');
 }
 
