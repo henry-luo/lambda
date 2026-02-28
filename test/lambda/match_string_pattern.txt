@@ -1,0 +1,31 @@
+'===== MATCH STRING PATTERN TESTS ====='
+'Test 1: Basic Pattern Match'
+1
+"number"
+2
+"word"
+3
+"other"
+'Test 2: Whitespace Pattern'
+4
+"yes"
+5
+"no"
+6
+"no"
+'Test 3: Word Patterns'
+7
+"yes"
+8
+"no"
+9
+"yes"
+'Test 4: Mixed Pattern and Literal Arms'
+10
+"greeting"
+11
+"number"
+12
+"name"
+13
+"unknown"

@@ -27,6 +27,11 @@ extern Item fn_symbol2(Item name, Item url);
 // Name function (implemented in lambda-eval.cpp)
 extern Symbol* fn_name(Item item);
 
+// find/split overloads (implemented in lambda-eval.cpp)
+extern Item fn_find2(Item source, Item pattern);
+extern Item fn_find3(Item source, Item pattern, Item options);
+extern Item fn_split3(Item str, Item sep, Item keep_delim);
+
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
@@ -239,10 +244,13 @@ func_obj_t func_list[] = {
     {"fn_lower", (fn_ptr) fn_lower},
     {"fn_upper", (fn_ptr) fn_upper},
     {"fn_url_resolve", (fn_ptr) fn_url_resolve},
-    {"fn_split", (fn_ptr) fn_split},
+    {"fn_split2", (fn_ptr) fn_split},
+    {"fn_split3", (fn_ptr) fn_split3},
     {"fn_chars", (fn_ptr) fn_chars},
     {"fn_str_join", (fn_ptr) fn_str_join},
-    {"fn_replace", (fn_ptr) fn_replace},
+    {"fn_replace3", (fn_ptr) fn_replace},
+    {"fn_find2", (fn_ptr) fn_find2},
+    {"fn_find3", (fn_ptr) fn_find3},
     {"fn_eq", (fn_ptr) fn_eq},
     {"fn_ne", (fn_ptr) fn_ne},
     {"fn_lt", (fn_ptr) fn_lt},
