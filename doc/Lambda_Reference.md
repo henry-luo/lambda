@@ -6,10 +6,9 @@
 2. [Language Overview](#language-overview)
 3. [Documentation Guide](#documentation-guide)
 4. [Modules and Imports](#modules-and-imports)
-5. [I/O Module](#io-module)
-6. [Error Handling](#error-handling)
-7. [Examples](#examples)
-8. [Language Philosophy](#language-philosophy-and-design-principles)
+5. [Error Handling](#error-handling)
+6. [Examples](#examples)
+7. [Language Philosophy](#language-philosophy-and-design-principles)
 
 ---
 
@@ -61,6 +60,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
+| **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — Mutable variables, assignment, while loops, I/O module, `pn` functions, and `main()` entry point |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, `let a^err` destructuring, compile-time enforcement |
 
 ### Reference Documentation
@@ -249,81 +249,6 @@ let volume = (4.0 / 3.0) * math.PI * math.cube(radius);
 
 ---
 
-## I/O Module
-
-Lambda provides a unified I/O system that handles both local files and remote URLs transparently.
-
-### Pure I/O Functions
-
-Available anywhere:
-
-| Function | Description |
-|----------|-------------|
-| `input(source, format?)` | Read and parse data from file or URL |
-| `exists(path)` | Check if file/directory exists |
-| `format(data, format)` | Convert data to string format |
-
-```lambda
-// Read data
-let data = input("config.json", 'json)
-let html = input(https.example.com.page, 'html)
-
-// Check existence
-if exists(.config.json) { ... }
-```
-
-### Procedural I/O Functions
-
-Available only in `pn` functions:
-
-| Function | Description |
-|----------|-------------|
-| `io.copy(src, dst)` | Copy file/directory (supports URL sources) |
-| `io.move(src, dst)` | Move/rename file or directory |
-| `io.delete(path)` | Delete file or directory |
-| `io.mkdir(path)` | Create directory (recursive) |
-| `io.touch(path)` | Create file or update timestamp |
-| `io.symlink(target, link)` | Create symbolic link |
-| `io.chmod(path, mode)` | Change file permissions |
-| `io.fetch(url, options?)` | Fetch content from URL |
-
-```lambda
-pn setup_project() {
-    io.mkdir("./output/reports")
-    io.copy("https://example.com/template.json", "./config.json")
-    {initialized: true} |> "./output/.ready"
-}
-```
-
-### Pipe Output Operators
-
-Write data to files in procedural functions:
-
-```lambda
-pn export_data(data) {
-    // Write (truncate)
-    data |> "/tmp/output.json"
-
-    // Append
-    {event: "saved"} |>> "/tmp/events.log"
-}
-```
-
-### Supported Formats
-
-| Format | Extensions | Symbol |
-|--------|------------|--------|
-| JSON | `.json` | `'json` |
-| YAML | `.yaml`, `.yml` | `'yaml` |
-| XML | `.xml` | `'xml` |
-| HTML | `.html` | `'html` |
-| Markdown | `.md` | `'markdown` |
-| CSV | `.csv` | `'csv` |
-| TOML | `.toml` | `'toml` |
-| Plain text | `.txt` | `'text` |
-
----
-
 ## Error Handling
 
 Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors using the `^` propagation operator or `let a^err` destructuring. Ignoring an error is a **compile-time error**.
@@ -491,18 +416,3 @@ Concise syntax for complex operations:
 4. **Pattern Matching**: Type-based pattern matching with `is`
 5. **Document Processing**: Built-in support for markup and data formats
 
----
-
-## Further Reading
-
-- **[Lambda_Syntax.md](Lambda_Syntax.md)** — Syntax fundamentals, names, symbols, and namespaces
-- **[Lambda_Data.md](Lambda_Data.md)** — Complete guide to literals and collections
-- **[Lambda_Type.md](Lambda_Type.md)** — Deep dive into the type system
-- **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** — All expressions and operators
-- **[Lambda_Func.md](Lambda_Func.md)** — Function features and patterns
-- **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** — Error types, propagation, and enforcement
-- **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** — All system functions
-- **[dev/Developer_Guide.md](dev/Developer_Guide.md)** — Building from source, testing, grammar and MIR workflows
-- **[dev/Lamdba_Runtime.md](dev/Lamdba_Runtime.md)** — Runtime internals
-
-For the latest updates and examples, refer to the test files in the `test/lambda/` directory.

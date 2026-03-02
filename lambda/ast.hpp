@@ -670,6 +670,10 @@ typedef struct Transpiler : Script {
     // unique counter for temporary variables (e.g., error propagation temps)
     int temp_var_counter;
 
+    // 'that' clause context: when true, bare identifiers not found in scope
+    // are rewritten to ~.name (member access on current item)
+    bool in_that_clause;
+
     // Object method transpilation context
     AstObjectTypeNode* method_owner;  // non-null when transpiling a method body
     struct TypeObject* pn_method_obj_type;  // non-null inside pn method body (for field write-back)

@@ -7,6 +7,7 @@ This document covers Lambda's function system, including pure functional (`fn`) 
 > - [Lambda Sys Func Reference](Lambda_Sys_Func.md) — Built-in system functions
 > - [Lambda Expressions](Lambda_Expr_Stam.md) — Expressions and statements
 > - [Lambda Type System](Lambda_Type.md) — Type annotations
+> - [Lambda Procedural](Lambda_Procedural.md) — Procedural statements (`var`, `while`, assignment)
 
 ---
 
@@ -467,147 +468,7 @@ reduce([1, 2, 3, 4], 0, (a, b) => a + b)   // 10
 
 ## Procedural Functions
 
-Procedural functions (`pn`) allow mutable state, side effects, and imperative control flow.
-
-### Declaration
-
-```lambda
-pn counter() {
-    var x = 0
-    while (x < 5) {
-        x = x + 1
-    }
-    x   // Returns 5
-}
-```
-
-### Key Differences from `fn`
-
-| Feature           | `fn` (Functional) | `pn` (Procedural)               |
-| ----------------- | ----------------- | ------------------------------- |
-| Mutable variables | No                | Yes (`var`)                     |
-| Assignment        | No                | Yes (`x = value`)               |
-| While loops       | No                | Yes                             |
-| Break/Continue    | No                | Yes                             |
-| Early return      | No                | Yes (`return`)                  |
-| File output       | No                | Yes (`output()`, `\|>`, `\|>>`) |
-| Side effects      | No                | Allowed                         |
-
-### Assignment
-
-Assignment is available in `pn` functions. Only `var` variables can be reassigned — `let` bindings and function parameters are immutable.
-
-#### Variable Assignment
-
-```lambda
-pn example() {
-    var x = 42
-    x = 3.14       // OK: type widening (int → float)
-    x = "hello"    // OK: type widening (float → string)
-
-    var y: int = 10
-    y = 20         // OK: same type
-    y = "oops"     // ERROR E201: type mismatch (int expected)
-}
-```
-
-Variables declared with `var` (without a type annotation) support **type widening** — the variable's runtime type changes automatically to accommodate the new value. Variables with explicit type annotations (`var x: int`) enforce the declared type.
-
-#### Array Element Assignment
-
-```lambda
-pn example() {
-    let arr = [1, 2, 3]    // typed as int array
-    arr[1] = 99            // OK: same type
-    arr[0] = 3.14          // OK: auto-converts array to generic
-    arr[-1] = "hello"      // OK: negative indexing supported
-}
-```
-
-When a value of a different type is assigned to a typed array (e.g., float into an int array), the array is automatically converted to a generic array that can hold any type.
-
-#### Map Field Assignment
-
-```lambda
-pn example() {
-    let obj = {name: "Alice", age: 30}
-    obj.age = 31           // OK: same type
-    obj.age = "thirty"     // OK: field type changes, shape rebuilt
-    obj.name = null        // OK: any type transition
-}
-```
-
-Map field assignment automatically rebuilds the map's shape metadata when the value type changes, ensuring structural consistency.
-
-#### Element Mutation
-
-```lambda
-pn example() {
-    let elem = <div class: "main"; "Hello">
-    elem.class = "updated"       // attribute assignment
-    elem[0] = "Goodbye"          // child assignment by index
-}
-```
-
-Elements support both attribute mutation (via dot notation) and child mutation (via index).
-
-### Implicit Return
-
-The last expression in a `pn` function is its return value:
-
-```lambda
-pn add_one(x: int) {
-    x + 1    // Returned
-}
-
-pn factorial(n: int) {
-    var result = 1
-    var i = 1
-    while (i <= n) {
-        result = result * i
-        i = i + 1
-    }
-    result   // Returned
-}
-```
-
-### Early Return
-
-```lambda
-pn find_first_even(nums: [int]) {
-    var i = 0
-    while (i < len(nums)) {
-        if (nums[i] % 2 == 0) {
-            return nums[i]   // Early exit
-        }
-        i = i + 1
-    }
-    null   // Not found
-}
-```
-
-### File Output in Procedural Functions
-
-```lambda
-pn save_report(data) {
-    // Using pipe output operators
-    data |> "/tmp/report.json"
-    
-    // Append to log
-    {event: "saved", time: now()} |>> "/tmp/events.log"
-    
-    // Using output function
-    output(data, "/tmp/backup.json", {atomic: true})
-}
-```
-
-### Running Procedural Scripts
-
-```bash
-./lambda.exe run script.ls    # Executes main() procedure
-```
-
-The `main()` procedure serves as the entry point.
+Procedural functions (`pn`) allow mutable state, side effects, and imperative control flow. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
 
 ---
 
@@ -629,4 +490,4 @@ Lambda provides extensive built-in functions. See [Lambda_Sys_Func.md](Lambda_Sy
 
 ---
 
-This document covers Lambda's function system. For built-in function details, see [Lambda_Sys_Func.md](Lambda_Sys_Func.md). For expressions, see [Lambda Expressions](Lambda_Expr_Stam.md).
+This document covers Lambda's function system. For built-in function details, see [Lambda_Sys_Func.md](Lambda_Sys_Func.md). For expressions, see [Lambda Expressions](Lambda_Expr_Stam.md). For procedural programming, see [Lambda Procedural](Lambda_Procedural.md).
