@@ -997,37 +997,15 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         log_debug("member expr field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
         ast_node->field = (AstNode*)id_node;
 
-        // Check if object is a member expression with namespace prefix as field
-        // e.g., in e.ns.attr, when building the outer expr, object is e.ns where ns is namespace
+        // In v2 namespaces, e.ns.attr is chained access: (e.ns).attr
+        // The sub-map desugaring stores ns attrs as ns: {attr: val}, so
+        // e.ns returns the sub-map and .attr accesses the key within it.
+        // No merging needed — just check for ns.value → qualified symbol.
         if (ast_node->object && ast_node->object->node_type == AST_NODE_PRIMARY) {
             AstPrimaryNode* pri = (AstPrimaryNode*)ast_node->object;
-            if (pri->expr && pri->expr->node_type == AST_NODE_MEMBER_EXPR) {
-                AstFieldNode* inner = (AstFieldNode*)pri->expr;
-                if (inner->field && inner->field->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* ns_ident = (AstIdentNode*)inner->field;
-                    NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
-                    if (ns_entry) {
-                        // Merge: replace object with inner->object, merge field name
-                        // Create qualified name: ns.attr
-                        size_t ns_len = ns_ident->name->len;
-                        size_t attr_len = id_node->name->len;
-                        size_t total_len = ns_len + 1 + attr_len;  // ns.attr
-                        char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
-                        memcpy(buf, ns_ident->name->chars, ns_len);
-                        buf[ns_len] = '.';
-                        memcpy(buf + ns_len + 1, id_node->name->chars, attr_len);
-                        buf[total_len] = '\0';
-                        StrView qualified = {buf, total_len};
-                        id_node->name = name_pool_create_strview(tp->name_pool, qualified);
-                        // Replace object with inner object (skip the namespace member access)
-                        ast_node->object = inner->object;
-                        log_debug("namespace member expr merged: '%.*s'", (int)id_node->name->len, id_node->name->chars);
-                    }
-                }
-            }
-            // Also check if object is just a namespace prefix identifier (for ns.value syntax)
+            // Check if object is just a namespace prefix identifier (for ns.value syntax)
             // e.g., ns.value where ns is a namespace prefix
-            else if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+            if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ns_ident = (AstIdentNode*)pri->expr;
                 NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
                 if (ns_entry) {
@@ -3517,6 +3495,113 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
     return (AstNode*)ast_node;
 }
 
+// ==================== Namespace Attribute Desugaring ====================
+// Desugar ns.attr: val → ns: {attr: val} at AST build time (v2 namespace design)
+
+// Find ns_identifier node from attr_name or direct name node
+// Returns the ns_identifier TSNode, or a null TSNode if not found
+static TSNode find_ns_identifier_in_name(TSNode name_node) {
+    TSSymbol sym = ts_node_symbol(name_node);
+    if (sym == sym_ns_identifier) return name_node;
+    if (sym == sym_attr_name) {
+        // attr_name wraps the actual name node
+        TSNode child = ts_node_named_child(name_node, 0);
+        if (!ts_node_is_null(child) && ts_node_symbol(child) == sym_ns_identifier) {
+            return child;
+        }
+    }
+    TSNode null_node = {};
+    return null_node;
+}
+
+// Build a synthetic map node wrapping a single key-value pair: {attr_name: val_expr}
+// Used for desugaring ns.attr: val → ns: {attr: val}
+static AstNode* build_ns_attr_map(Transpiler* tp, StrView attr_name, AstNode* val_expr, TSNode source_node) {
+    AstMapNode* map_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, source_node, sizeof(AstMapNode));
+    TypeMap* map_type = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    map_node->type = (Type*)map_type;
+
+    // create key_expr: attr_name: val_expr
+    AstNamedNode* key_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, source_node, sizeof(AstNamedNode));
+    key_node->name = name_pool_create_strview(tp->name_pool, attr_name);
+    key_node->as = val_expr;
+    key_node->type = val_expr->type;
+    map_node->item = (AstNode*)key_node;
+
+    // create shape entry
+    ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+    name_view->str = key_node->name->chars;
+    name_view->length = key_node->name->len;
+    entry->name = name_view;
+    entry->type = val_expr->type;
+    entry->byte_offset = 0;
+
+    map_type->shape = entry;
+    map_type->length = 1;
+    map_type->byte_size = type_info[val_expr->type->type_id].byte_size;
+
+    arraylist_append(tp->type_list, map_type);
+    map_type->type_index = tp->type_list->length - 1;
+
+    return (AstNode*)map_node;
+}
+
+// Merge two map AST nodes: append src map's items and shape entries to dst map
+// Used when multiple ns.attr attrs share the same ns prefix
+static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_item) {
+    if (!dst_item || !src_item) return;
+    if (dst_item->type->type_id != LMD_TYPE_MAP || src_item->type->type_id != LMD_TYPE_MAP) return;
+
+    AstMapNode* dst = (AstMapNode*)dst_item;
+    AstMapNode* src = (AstMapNode*)src_item;
+    TypeMap* dst_type = (TypeMap*)dst->type;
+    TypeMap* src_type = (TypeMap*)src->type;
+
+    // append src items to dst item linked list
+    AstNode* last_item = dst->item;
+    while (last_item && last_item->next) last_item = last_item->next;
+    if (last_item) last_item->next = src->item;
+    else dst->item = src->item;
+
+    // append src shape entries to dst shape linked list
+    ShapeEntry* last_entry = dst_type->shape;
+    while (last_entry && last_entry->next) last_entry = last_entry->next;
+    if (last_entry) {
+        // update byte_offset for merged entries
+        int byte_offset = last_entry->byte_offset + type_info[last_entry->type->type_id].byte_size;
+        ShapeEntry* src_entry = src_type->shape;
+        while (src_entry) {
+            src_entry->byte_offset = byte_offset;
+            byte_offset += type_info[src_entry->type->type_id].byte_size;
+            src_entry = src_entry->next;
+        }
+        last_entry->next = src_type->shape;
+    } else {
+        dst_type->shape = src_type->shape;
+    }
+
+    dst_type->length += src_type->length;
+    dst_type->byte_size += src_type->byte_size;
+}
+
+// Find an existing named item (key_expr) in a linked list by key name
+// Returns the AstNamedNode if found, NULL otherwise
+static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name) {
+    AstNode* item = first_item;
+    while (item) {
+        if (item->node_type == AST_NODE_KEY_EXPR) {
+            AstNamedNode* named = (AstNamedNode*)item;
+            if (named->name && named->name->len == name->len &&
+                memcmp(named->name->chars, name->chars, name->len) == 0) {
+                return named;
+            }
+        }
+        item = item->next;
+    }
+    return NULL;
+}
+
 StrView build_key_string(Transpiler* tp, TSNode key_node) {
     log_debug("build key string");
     TSSymbol symbol = ts_node_symbol(key_node);
@@ -3569,6 +3654,42 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
         return ast_node;
     }
 
+    // Check for ns_identifier to desugar: ns.attr: val → ns: {attr: val}
+    TSNode ns_id_node = find_ns_identifier_in_name(name);
+    if (!ts_node_is_null(ns_id_node)) {
+        // extract ns prefix and local attr name from ns_identifier fields
+        TSNode ns_node = ts_node_child_by_field_id(ns_id_node, field_ns);
+        TSNode local_node = ts_node_child_by_field_id(ns_id_node, field_name);
+        if (!ts_node_is_null(ns_node) && !ts_node_is_null(local_node)) {
+            StrView ns_prefix = ts_node_source(tp, ns_node);
+            StrView local_name = ts_node_source(tp, local_node);
+            log_debug("ns attr desugar: %.*s.%.*s → %.*s: {%.*s: val}",
+                (int)ns_prefix.length, ns_prefix.str,
+                (int)local_name.length, local_name.str,
+                (int)ns_prefix.length, ns_prefix.str,
+                (int)local_name.length, local_name.str);
+
+            // set key to ns prefix only
+            ast_node->name = name_pool_create_strview(tp->name_pool, ns_prefix);
+
+            // build value expression
+            TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+            AstNode* val_expr = ts_node_is_null(val_node) ? nullptr : build_expr(tp, val_node);
+            if (!val_expr) {
+                log_error("build_key_expr: missing value for ns.attr");
+                ast_node->type = &TYPE_ANY;
+                ast_node->as = nullptr;
+                return ast_node;
+            }
+
+            // wrap in map: {local_name: val_expr}
+            ast_node->as = build_ns_attr_map(tp, local_name, val_expr, pair_node);
+            ast_node->type = ast_node->as->type;
+            return ast_node;
+        }
+    }
+
+    // Normal (non-namespaced) key handling
     StrView name_view = build_key_string(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
@@ -4686,6 +4807,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         // named map item, or dynamic map expr
         AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
         if (!item) { log_error("build_map: null expr item");  break; }
+
         if (!prev_item) { ast_node->item = item; }
         else { prev_item->next = item; }
         prev_item = item;
@@ -4748,6 +4870,16 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             String* pooled_name = name_pool_create_strview(tp->name_pool, name);
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
+            // look up namespace prefix and set TypeElmt.ns
+            TSNode ns_node = ts_node_child_by_field_id(child, field_ns);
+            if (!ts_node_is_null(ns_node)) {
+                StrView ns_prefix = ts_node_source(tp, ns_node);
+                NamespaceEntry* ns_entry = lookup_namespace_strview(tp, ns_prefix);
+                if (ns_entry) {
+                    type->ns = ns_entry->target;
+                    log_debug("element ns resolved: %.*s → target %p", (int)ns_prefix.length, ns_prefix.str, ns_entry->target);
+                }
+            }
         }
         else if (symbol == SYM_SYMBOL) {  // element name as symbol 'name'
             int start_byte = ts_node_start_byte(child) + 1; // skip leading quote
@@ -4762,6 +4894,21 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
         }
         else {  // attrs
             AstNode* item = (symbol == SYM_ATTR) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+
+            // check for ns attr merging: if key already exists and both are maps, merge
+            if (item->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* new_key = (AstNamedNode*)item;
+                AstNamedNode* existing = find_existing_named_item(ast_node->item, new_key->name);
+                if (existing && existing->as && new_key->as &&
+                    existing->as->type->type_id == LMD_TYPE_MAP && new_key->as->type->type_id == LMD_TYPE_MAP) {
+                    merge_ns_attr_maps(tp, existing->as, new_key->as);
+                    existing->type = existing->as->type;
+                    log_debug("merged ns attr map for key '%.*s'", (int)new_key->name->len, new_key->name->chars);
+                    child = ts_node_next_named_sibling(child);
+                    continue;  // skip adding new entry
+                }
+            }
+
             if (!prev_item) { ast_node->item = item; }
             else { prev_item->next = item; }
             prev_item = item;
@@ -6589,7 +6736,27 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     }
     ts_tree_cursor_delete(&cursor);
     if (ast_node->module.length) {
-        if (ast_node->module.str[0] == '.') {
+        // Check if module is a bare URI (symbol literal like 'http://...')
+        // This is a namespace-only import: import ns: 'url'
+        if (ast_node->module.str[0] == '\'') {
+            // strip quotes from URI
+            StrView uri = { .str = ast_node->module.str + 1, .length = ast_node->module.length - 2 };
+            if (ast_node->alias) {
+                Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
+                String* uri_string = name_pool_create_strview(tp->name_pool, uri);
+                target->original = uri_string->chars;
+                add_namespace(tp, ast_node->alias, target);
+                log_debug("bare URI namespace import: %.*s -> %.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)uri.length, uri.str);
+            } else {
+                log_error("bare URI import requires an alias: import alias: 'url'");
+            }
+            // bare URI imports do not load a script — return NULL so they
+            // are not added to the AST child list (no code generation needed)
+            return NULL;
+        }
+        else if (ast_node->module.str[0] == '.') {
             // relative import: resolve relative to importing script's directory
             const char* base_dir = tp->directory ? tp->directory : "./";
             log_debug("import base dir: %s", base_dir);
@@ -6789,39 +6956,8 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         AstNode* ast = NULL;
         switch (symbol) {
         case SYM_IMPORT_MODULE:
-            // import module
+            // import module (also handles namespace imports: import ns: 'url')
             ast = build_module_import(tp, child);
-            break;
-        case sym_namespace_decl:
-            // namespace declaration: namespace ns1: 'url', ns2: 'url2', ...
-            log_debug("namespace declaration found");
-            {
-                // iterate through namespace_binding children
-                uint32_t binding_count = ts_node_named_child_count(child);
-                for (uint32_t i = 0; i < binding_count; i++) {
-                    TSNode binding = ts_node_named_child(child, i);
-                    if (ts_node_symbol(binding) == sym_namespace_binding) {
-                        TSNode prefix_node = ts_node_child_by_field_id(binding, FIELD_PREFIX);
-                        TSNode uri_node = ts_node_child_by_field_id(binding, FIELD_URI);
-                        if (!ts_node_is_null(prefix_node) && !ts_node_is_null(uri_node)) {
-                            StrView prefix_str = ts_node_source(tp, prefix_node);
-                            String* prefix = name_pool_create_strview(tp->name_pool, prefix_str);
-                            // build target from uri (string, symbol, or identifier)
-                            Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
-                            TSSymbol uri_sym = ts_node_symbol(uri_node);
-                            StrView uri_str = ts_node_source(tp, uri_node);
-                            if (uri_sym == SYM_STRING || uri_sym == SYM_SYMBOL) {
-                                // strip quotes
-                                uri_str.str++;
-                                uri_str.length -= 2;
-                            }
-                            String* uri_string = name_pool_create_strview(tp->name_pool, uri_str);
-                            target->original = uri_string->chars;  // store as original URL string
-                            add_namespace(tp, prefix, target);
-                        }
-                    }
-                }
-            }
             break;
         case SYM_CONTENT:
             ast = build_content(tp, child, true, true);

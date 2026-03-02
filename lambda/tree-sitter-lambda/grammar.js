@@ -1122,22 +1122,8 @@ module.exports = grammar({
           field('module', choice($.absolute_name, $.relative_name, $.symbol)))
     ),
 
-    _import_stam: $ => choice(
-      seq('import', $.import_module, repeat(seq(',', $.import_module))),
-      $.namespace_decl,
-    ),
-
-    // Namespace declaration: namespace ns1 : 'url', ns2 : "url", ns3: path, ...;
-    namespace_decl: $ => seq(
-      'namespace',
-      $.namespace_binding,
-      repeat(seq(',', $.namespace_binding)),
-    ),
-
-    namespace_binding: $ => seq(
-      field('prefix', $.identifier),
-      ':',
-      field('uri', choice($.string, $.symbol, $.identifier)),
+    _import_stam: $ => seq(
+      'import', $.import_module, repeat(seq(',', $.import_module)),
     ),
   },
 });
