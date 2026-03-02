@@ -150,9 +150,69 @@ Lambda supports NumPy-style element-wise operations on arrays:
 
 ### Equality
 
+The `==` operator performs **structural deep value equality** for all types — scalars and containers alike.
+
 ```lambda
-5 == 5             // Equal: true
-5 != 3             // Not equal: true
+// Scalar equality
+5 == 5             // true
+5 != 3             // true
+1 == 1.0           // true (numeric promotion: int, float, decimal)
+```
+
+#### Container Equality
+
+Containers (lists, arrays, maps, elements) are compared by **structure**, not by reference. Two containers are equal if they have the same shape and all corresponding elements are equal:
+
+```lambda
+// List and array equality
+[1, 2, 3] == [1, 2, 3]           // true
+[1, 2, 3] == [1, 2, 4]           // false (element mismatch)
+[1, 2, 3] == [1, 2]              // false (different length)
+[] == []                          // true
+
+// Numeric promotion composes into containers
+[1] == [1.0]                      // true (element-wise: 1 == 1.0)
+{a: 1} == {a: 1.0}                // true
+
+// Map equality is order-independent
+{a: 1, b: 2} == {b: 2, a: 1}     // true
+{a: 1, b: 2} == {a: 1}           // false (different key count)
+
+// Nested structural equality
+[[1, 2], [3, 4]] == [[1, 2], [3, 4]]   // true
+{a: {x: 1}} == {a: {x: 1}}             // true
+{a: [1, 2]} == {a: [1, 2]}             // true
+```
+
+#### Cross-Type Sequence Equality
+
+Ranges, lists, and arrays are all **sequences** — they compare equal across types if they contain the same elements:
+
+```lambda
+(1 to 3) == [1, 2, 3]            // true (range vs list)
+[1, 2, 3] == (1 to 3)            // true (symmetric)
+(1 to 3) == [1, 2, 4]            // false
+(1 to 3) == [1, 2]               // false (different length)
+```
+
+#### Function Equality
+
+Functions use **reference equality** — two function values are equal only if they are the same function object:
+
+```lambda
+fn add1(x) => x + 1
+let f = add1
+f == f                            // true (same reference)
+```
+
+#### NaN Equality
+
+Follows IEEE 754: `NaN != NaN`, including inside containers:
+
+```lambda
+let x = 0.0 / 0.0
+x == x                            // false
+[x] == [x]                        // false
 ```
 
 ### Relational
