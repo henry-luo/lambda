@@ -92,5 +92,5 @@ pn main() {
         i = i + 1
     }
 
-    print(format9(sqrt(vBv / vv)) ++ "\n")
+    print(format9(math.sqrt(vBv / vv)) ++ "\n")
 }

@@ -304,7 +304,7 @@ arr.len()
 | **Stats** | `sum(nums)` | `nums.sum()` |
 | **Stats** | `avg(nums)` | `nums.avg()` |
 | **Math** | `abs(x)` | `x.abs()` |
-| **Math** | `sqrt(x)` | `x.sqrt()` |
+| **Math** | `math.sqrt(x)` | `x \|> math.sqrt` |
 #### Method Chaining
 
 Method syntax enables fluent operations:

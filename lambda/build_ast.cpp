@@ -109,27 +109,27 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_FIND3, "find", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
     {SYSFUNC_CHARS, "chars", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},  // chars(str) -> array of 1-char strings
     // vector/array functions - method-eligible on arrays
-    {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CUMPROD, "cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // fill(n, val) - n is count, not self
-    {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.dot(b)
-    {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // statistical functions - method-eligible on collections
-    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // element-wise math functions - method-eligible on numbers/arrays
-    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DOT, "math_dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // math.dot(a, b)
+    {SYSFUNC_NORM, "math_norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // statistical functions - math module
+    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // element-wise math functions - math module
+    {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG, "math_log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG10, "math_log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_EXP, "math_exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SIN, "math_sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_COS, "math_cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TAN, "math_tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // vector manipulation functions - method-eligible on collections
     {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
@@ -141,7 +141,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.drop(n)
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.zip(b)
     {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // range(s,e,step) - constructor, not method
-    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.quantile(p)
+    {SYSFUNC_QUANTILE, "math_quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // math.quantile(arr, p)
     {SYSFUNC_REDUCE, "reduce", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // reduce(collection, fn)
     // parse string functions - overloaded with arg count
     {SYSFUNC_PARSE1, "parse", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true},   // parse(str) -> any^ (auto-detect)
@@ -1254,21 +1254,43 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             TSNode inner = ts_node_child(object_node, 0);
             if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
                 module_name = ts_node_source(tp, inner);
-                // Check for known built-in modules
-                if (strview_equal(&module_name, "io")) {
-                    is_builtin_module_call = true;
-                    log_debug("builtin module call detected: %.*s.%.*s()",
+                // Check for known built-in modules, but only if no user-defined
+                // qualified name (e.g., from aliased import) matches module.method
+                if (strview_equal(&module_name, "io") || strview_equal(&module_name, "math")) {
+                    // Check if module.method is already defined via aliased import
+                    char qbuf[256];
+                    snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                         (int)module_name.length, module_name.str,
                         (int)method_name.length, method_name.str);
+                    StrView qview = {qbuf, strlen(qbuf)};
+                    NameEntry* qualified = lookup_name(tp, qview);
+                    if (qualified == NULL) {
+                        is_builtin_module_call = true;
+                        log_debug("builtin module call detected: %.*s.%.*s()",
+                            (int)module_name.length, module_name.str,
+                            (int)method_name.length, method_name.str);
+                    } else {
+                        log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                    }
                 }
             }
         } else if (obj_symbol == sym_identifier) {
             module_name = ts_node_source(tp, object_node);
-            if (strview_equal(&module_name, "io")) {
-                is_builtin_module_call = true;
-                log_debug("builtin module call detected: %.*s.%.*s()",
+            if (strview_equal(&module_name, "io") || strview_equal(&module_name, "math")) {
+                char qbuf[256];
+                snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                     (int)module_name.length, module_name.str,
                     (int)method_name.length, method_name.str);
+                StrView qview = {qbuf, strlen(qbuf)};
+                NameEntry* qualified = lookup_name(tp, qview);
+                if (qualified == NULL) {
+                    is_builtin_module_call = true;
+                    log_debug("builtin module call detected: %.*s.%.*s()",
+                        (int)module_name.length, module_name.str,
+                        (int)method_name.length, method_name.str);
+                } else {
+                    log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                }
             }
         }
     }

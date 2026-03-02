@@ -31,41 +31,41 @@ len([])
 len(1 to 100)
 
 'prod'
-prod([2, 3, 4])
-prod([1.5, 2.0, 3.0])
-prod(1 to 5)
+math.prod([2, 3, 4])
+math.prod([1.5, 2.0, 3.0])
+math.prod(1 to 5)
 
 // ============================================================
 // STATISTICAL FUNCTIONS
 // ============================================================
 
 'mean'
-mean([1, 2, 3, 4, 5])
-mean([10.0, 20.0, 30.0])
-mean(1 to 9)
+math.mean([1, 2, 3, 4, 5])
+math.mean([10.0, 20.0, 30.0])
+math.mean(1 to 9)
 
 'median'
-median([1, 3, 5, 7, 9])
-median([1, 2, 3, 4])
-median([5.0, 1.0, 9.0, 3.0, 7.0])
+math.median([1, 3, 5, 7, 9])
+math.median([1, 2, 3, 4])
+math.median([5.0, 1.0, 9.0, 3.0, 7.0])
 
 'variance'
-variance([2, 4, 4, 4, 5, 5, 7, 9])
-variance([1, 2, 3])
-variance(1 to 5)
+math.variance([2, 4, 4, 4, 5, 5, 7, 9])
+math.variance([1, 2, 3])
+math.variance(1 to 5)
 
 'deviation'
-deviation([2, 4, 4, 4, 5, 5, 7, 9])
-deviation([1, 2, 3])
-deviation(1 to 5)
+math.deviation([2, 4, 4, 4, 5, 5, 7, 9])
+math.deviation([1, 2, 3])
+math.deviation(1 to 5)
 
 'quantile'
-quantile([1, 2, 3, 4, 5], 0.0)
-quantile([1, 2, 3, 4, 5], 0.25)
-quantile([1, 2, 3, 4, 5], 0.5)
-quantile([1, 2, 3, 4, 5], 0.75)
-quantile([1, 2, 3, 4, 5], 1.0)
-quantile(1 to 100, 0.5)
+math.quantile([1, 2, 3, 4, 5], 0.0)
+math.quantile([1, 2, 3, 4, 5], 0.25)
+math.quantile([1, 2, 3, 4, 5], 0.5)
+math.quantile([1, 2, 3, 4, 5], 0.75)
+math.quantile([1, 2, 3, 4, 5], 1.0)
+math.quantile(1 to 100, 0.5)
 
 // ============================================================
 // ELEMENT-WISE MATH FUNCTIONS
@@ -76,33 +76,33 @@ abs([-1, -2, 3, -4, 5])
 abs([-1.5, 2.5, -3.5])
 
 'sqrt'
-sqrt([1, 4, 9, 16, 25])
-sqrt([2.0, 8.0, 18.0])
-sqrt(4)
+math.sqrt([1, 4, 9, 16, 25])
+math.sqrt([2.0, 8.0, 18.0])
+math.sqrt(4)
 
 'log'
-log([1, 2.718281828, 7.389056099])
-log(1)
+math.log([1, 2.718281828, 7.389056099])
+math.log(1)
 
 'log10'
-log10([1, 10, 100, 1000])
-log10(100)
+math.log10([1, 10, 100, 1000])
+math.log10(100)
 
 'exp'
-exp([0, 1, 2])
-exp(0)
+math.exp([0, 1, 2])
+math.exp(0)
 
 'sin'
-sin([0, 1.5707963268, 3.1415926536])
-sin(0)
+math.sin([0, 1.5707963268, 3.1415926536])
+math.sin(0)
 
 'cos'
-cos([0, 1.5707963268, 3.1415926536])
-cos(0)
+math.cos([0, 1.5707963268, 3.1415926536])
+math.cos(0)
 
 'tan'
-tan([0, 0.7853981634])
-tan(0)
+math.tan([0, 0.7853981634])
+math.tan(0)
 
 'sign'
 sign([-5, 0, 3, -1, 7])
@@ -202,23 +202,23 @@ argmax([3.5, 1.2, 4.8])
 argmax(5 to 10)
 
 'cumsum'
-cumsum([1, 2, 3, 4, 5])
-cumsum([1.0, 2.0, 3.0])
-cumsum(1 to 5)
+math.cumsum([1, 2, 3, 4, 5])
+math.cumsum([1.0, 2.0, 3.0])
+math.cumsum(1 to 5)
 
 'cumprod'
-cumprod([1, 2, 3, 4])
-cumprod([2.0, 2.0, 2.0])
-cumprod(1 to 5)
+math.cumprod([1, 2, 3, 4])
+math.cumprod([2.0, 2.0, 2.0])
+math.cumprod(1 to 5)
 
 'dot'
-dot([1, 2, 3], [4, 5, 6])
-dot([1.0, 0.0], [0.0, 1.0])
+math.dot([1, 2, 3], [4, 5, 6])
+math.dot([1.0, 0.0], [0.0, 1.0])
 
 'norm'
-norm([3, 4])
-norm([1, 2, 2])
-norm([1.0, 1.0, 1.0, 1.0])
+math.norm([3, 4])
+math.norm([1, 2, 2])
+math.norm([1.0, 1.0, 1.0, 1.0])
 
 'zip'
 {r: zip([1, 2, 3], [4, 5, 6])}
@@ -266,13 +266,13 @@ sort([])
 
 'single element'
 sum([42])
-mean([42])
+math.mean([42])
 sort([42])
 {r: reverse([42])}
 
 'chained operations'
 sum([1, 2, 3, 4, 5] * 2)
 {r: sort(concat([5, 3, 1], [6, 4, 2]))}
-mean(take([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5))
+math.mean(take([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5))
 
 'ALL TESTS COMPLETE'

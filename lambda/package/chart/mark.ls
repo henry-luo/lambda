@@ -179,7 +179,7 @@ pub fn point_mark(data, ctx, mark_config) {
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let base_opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let base_size = if (mark_config and mark_config.size) mark_config.size else 30;
-    let base_r = sqrt(float(base_size) / util.PI);
+    let base_r = math.sqrt(float(base_size) / util.PI);
 
     let points = (for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
@@ -191,7 +191,7 @@ pub fn point_mark(data, ctx, mark_config) {
         else fill_color,
         let pt_r = if (size_scale and size_field)
             (let sv = float(d[size_field]),
-            sqrt(float(scale.scale_apply(size_scale, sv)) / util.PI))
+            math.sqrt(float(scale.scale_apply(size_scale, sv)) / util.PI))
         else base_r,
         let pt_opacity = if (opacity_scale and opacity_field)
             float(scale.scale_apply(opacity_scale, float(d[opacity_field])))

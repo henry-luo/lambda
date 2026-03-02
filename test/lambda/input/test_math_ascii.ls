@@ -9,7 +9,7 @@ let basic_test = input('x + y', {'type': 'math', 'flavor': 'ascii'})
 basic_test
 
 // Functions
-let function_test = input('sin(x) + cos(y)', {'type': 'math', 'flavor': 'ascii'})
+let function_test = input('math.sin(x) + math.cos(y)', {'type': 'math', 'flavor': 'ascii'})
 "Trigonometric functions:"
 function_test
 
@@ -29,7 +29,7 @@ let symbol_test = input('alpha + beta = gamma', {'type': 'math', 'flavor': 'asci
 symbol_test
 
 // Roots
-let root_test = input('sqrt(x) + sqrt(y)', {'type': 'math', 'flavor': 'ascii'})
+let root_test = input('math.sqrt(x) + math.sqrt(y)', {'type': 'math', 'flavor': 'ascii'})
 "Square roots:"
 root_test
 
@@ -44,7 +44,7 @@ let relation_test = input('x = y', {'type': 'math', 'flavor': 'ascii'})
 relation_test
 
 // Complex expression
-let complex_test = input('sin(alpha) + x^2 = sqrt(pi)', {'type': 'math', 'flavor': 'ascii'})
+let complex_test = input('math.sin(alpha) + x^2 = math.sqrt(pi)', {'type': 'math', 'flavor': 'ascii'})
 "Complex expression:"
 complex_test
 

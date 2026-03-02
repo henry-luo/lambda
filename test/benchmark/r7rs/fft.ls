@@ -51,9 +51,9 @@ pn four1(data, n) {
     var mmax = 2
     while (mmax < n) {
         var theta = PI2 / mmax
-        var sin_half = sin(0.5 * theta)
+        var sin_half = math.sin(0.5 * theta)
         var wpr = -2.0 * sin_half * sin_half
-        var wpi = sin(theta)
+        var wpi = math.sin(theta)
 
         var wr = 1.0
         var wi = 0.0

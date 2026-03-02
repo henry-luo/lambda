@@ -931,9 +931,9 @@ pn fi_compute(i1x: float, i1y: float, i1z: float,
         var discr: float = b * b - 4.0 * a * c
         if (discr < 0.0) { return null }
 
-        // sqrt returns push_d(sqrt(discr)) → Item
+        // sqrt returns push_d(math.sqrt(discr)) → Item
         // Pass through fi_collide typed param for native continuation
-        var sq = sqrt(discr)
+        var sq = math.sqrt(discr)
         return fi_collide(sq, b, a,
                           i1x, i1y, i1z, v1x, v1y, v1z,
                           i2x, i2y, i2z, v2x, v2y, v2z)
@@ -977,12 +977,12 @@ pn simulate_frame(numAircraft: int, tval) {
     while (i < numAircraft) {
         var cs1: int = i
         var px1 = tval
-        var py1 = cos(tval) * 2 + i * 3
+        var py1 = math.cos(tval) * 2 + i * 3
         var pz1: int = 10
         var a1 = [cs1, px1, py1, pz1]
         vec_add(frame, a1)
         var cs2: int = i + 1
-        var py2 = sin(tval) * 2 + i * 3
+        var py2 = math.sin(tval) * 2 + i * 3
         var a2 = [cs2, px1, py2, pz1]
         vec_add(frame, a2)
         i = i + 2

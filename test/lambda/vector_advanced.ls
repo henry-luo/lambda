@@ -66,20 +66,20 @@ min([3.7, 1.2, 5.8])
 max([3.7, 1.2, 5.8])
 
 // Product
-prod([1, 2, 3, 4])
-prod([2, 3, 5])
+math.prod([1, 2, 3, 4])
+math.prod([2, 3, 5])
 
 // Cumulative operations
-cumsum([1, 2, 3, 4])
-cumprod([1, 2, 3, 4])
+math.cumsum([1, 2, 3, 4])
+math.cumprod([1, 2, 3, 4])
 
 // Argmin/Argmax
 argmin([5, 2, 8, 1, 9])
 argmax([5, 2, 8, 1, 9])
 
 // Dot product and norm
-dot([1, 2, 3], [4, 5, 6])
-norm([3, 4])
+math.dot([1, 2, 3], [4, 5, 6])
+math.norm([3, 4])
 
 // Fill
 fill(5, 3)

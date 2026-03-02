@@ -448,10 +448,10 @@ Item vec_pow(Item a, Item b) {
 //==============================================================================
 
 // prod(vec) - product of all elements
-Item fn_prod(Item item) {
+Item fn_math_prod(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    log_debug("fn_prod: type=%d", type);
+    log_debug("fn_math_prod: type=%d", type);
 
     if (type == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr = item.array_int;
@@ -489,7 +489,7 @@ Item fn_prod(Item item) {
             Item elem = lst->items[i];
             double val = item_to_double(elem);
             if (std::isnan(val)) {
-                log_error("fn_prod: non-numeric element at index %ld", i);
+                log_error("fn_math_prod: non-numeric element at index %ld", i);
                 return ItemError;
             }
             prod *= val;
@@ -508,12 +508,12 @@ Item fn_prod(Item item) {
         return push_l(prod);
     }
 
-    log_error("fn_prod: unsupported type %s", get_type_name(type));
+    log_error("fn_math_prod: unsupported type %s", get_type_name(type));
     return ItemError;
 }
 
 // cumsum(vec) - cumulative sum
-Item fn_cumsum(Item item) {
+Item fn_math_cumsum(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
@@ -563,7 +563,7 @@ Item fn_cumsum(Item item) {
 }
 
 // cumprod(vec) - cumulative product
-Item fn_cumprod(Item item) {
+Item fn_math_cumprod(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
@@ -699,13 +699,13 @@ Item fn_fill(Item n_item, Item value) {
 }
 
 // dot(a, b) - dot product of two vectors
-Item fn_dot(Item a, Item b) {
+Item fn_math_dot(Item a, Item b) {
     GUARD_ERROR2(a, b);
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
 
     if (len_a != len_b || len_a < 0) {
-        log_error("fn_dot: vectors must have same length");
+        log_error("fn_math_dot: vectors must have same length");
         return ItemError;
     }
 
@@ -716,7 +716,7 @@ Item fn_dot(Item a, Item b) {
         double va = item_to_double(vector_get(a, i));
         double vb = item_to_double(vector_get(b, i));
         if (std::isnan(va) || std::isnan(vb)) {
-            log_error("fn_dot: non-numeric element at index %ld", i);
+            log_error("fn_math_dot: non-numeric element at index %ld", i);
             return ItemError;
         }
         sum += va * vb;
@@ -726,7 +726,7 @@ Item fn_dot(Item a, Item b) {
 }
 
 // norm(vec) - Euclidean norm (L2 norm)
-Item fn_norm(Item item) {
+Item fn_math_norm(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len == 0) return push_d(0.0);
@@ -735,7 +735,7 @@ Item fn_norm(Item item) {
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
-            log_error("fn_norm: non-numeric element at index %ld", i);
+            log_error("fn_math_norm: non-numeric element at index %ld", i);
             return ItemError;
         }
         sum_sq += val * val;
@@ -749,7 +749,7 @@ Item fn_norm(Item item) {
 //==============================================================================
 
 // mean(vec) - arithmetic mean (alias for avg)
-Item fn_mean(Item item) {
+Item fn_math_mean(Item item) {
     GUARD_ERROR1(item);
     // Delegate to existing fn_avg
     extern Item fn_avg(Item);
@@ -757,7 +757,7 @@ Item fn_mean(Item item) {
 }
 
 // median(vec) - median value
-Item fn_median(Item item) {
+Item fn_math_median(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len == 0) return ItemNull;
@@ -767,7 +767,7 @@ Item fn_median(Item item) {
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
-            log_error("fn_median: non-numeric element at index %ld", i);
+            log_error("fn_math_median: non-numeric element at index %ld", i);
             return ItemError;
         }
         sorted->items[i] = val;
@@ -792,7 +792,7 @@ Item fn_median(Item item) {
 }
 
 // variance(vec) - population variance
-Item fn_variance(Item item) {
+Item fn_math_variance(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len == 0) return ItemNull;
@@ -802,7 +802,7 @@ Item fn_variance(Item item) {
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
-            log_error("fn_variance: non-numeric element at index %ld", i);
+            log_error("fn_math_variance: non-numeric element at index %ld", i);
             return ItemError;
         }
         sum += val;
@@ -821,9 +821,9 @@ Item fn_variance(Item item) {
 }
 
 // deviation(vec) - population standard deviation
-Item fn_deviation(Item item) {
+Item fn_math_deviation(Item item) {
     GUARD_ERROR1(item);
-    Item var_result = fn_variance(item);
+    Item var_result = fn_math_variance(item);
     if (get_type_id(var_result) == LMD_TYPE_ERROR) return var_result;
     if (get_type_id(var_result) == LMD_TYPE_NULL) return var_result;
 
@@ -832,7 +832,7 @@ Item fn_deviation(Item item) {
 }
 
 // quantile(vec, p) - p-th quantile (0 <= p <= 1)
-Item fn_quantile(Item item, Item p_item) {
+Item fn_math_quantile(Item item, Item p_item) {
     GUARD_ERROR2(item, p_item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
@@ -840,7 +840,7 @@ Item fn_quantile(Item item, Item p_item) {
 
     double p = item_to_double(p_item);
     if (std::isnan(p) || p < 0.0 || p > 1.0) {
-        log_error("fn_quantile: p must be between 0 and 1");
+        log_error("fn_math_quantile: p must be between 0 and 1");
         return ItemError;
     }
 
@@ -849,7 +849,7 @@ Item fn_quantile(Item item, Item p_item) {
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
-            log_error("fn_quantile: non-numeric element at index %ld", i);
+            log_error("fn_math_quantile: non-numeric element at index %ld", i);
             return ItemError;
         }
         sorted->items[i] = val;
@@ -1072,7 +1072,7 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
 }
 
 // sqrt(vec) - element-wise square root
-Item fn_sqrt(Item item) {
+Item fn_math_sqrt(Item item) {
     GUARD_ERROR1(item);
     // Check if scalar
     TypeId type = get_type_id(item);
@@ -1080,73 +1080,73 @@ Item fn_sqrt(Item item) {
         double val = item_to_double(item);
         return push_d(sqrt(val));
     }
-    return vec_unary_math(item, sqrt, "fn_sqrt");
+    return vec_unary_math(item, sqrt, "fn_math_sqrt");
 }
 
 // log(vec) - element-wise natural logarithm
-Item fn_log(Item item) {
+Item fn_math_log(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(log(val));
     }
-    return vec_unary_math(item, log, "fn_log");
+    return vec_unary_math(item, log, "fn_math_log");
 }
 
 // log10(vec) - element-wise base-10 logarithm
-Item fn_log10(Item item) {
+Item fn_math_log10(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(log10(val));
     }
-    return vec_unary_math(item, log10, "fn_log10");
+    return vec_unary_math(item, log10, "fn_math_log10");
 }
 
 // exp(vec) - element-wise exponential
-Item fn_exp(Item item) {
+Item fn_math_exp(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(exp(val));
     }
-    return vec_unary_math(item, exp, "fn_exp");
+    return vec_unary_math(item, exp, "fn_math_exp");
 }
 
 // sin(vec) - element-wise sine
-Item fn_sin(Item item) {
+Item fn_math_sin(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(sin(val));
     }
-    return vec_unary_math(item, sin, "fn_sin");
+    return vec_unary_math(item, sin, "fn_math_sin");
 }
 
 // cos(vec) - element-wise cosine
-Item fn_cos(Item item) {
+Item fn_math_cos(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(cos(val));
     }
-    return vec_unary_math(item, cos, "fn_cos");
+    return vec_unary_math(item, cos, "fn_math_cos");
 }
 
 // tan(vec) - element-wise tangent
-Item fn_tan(Item item) {
+Item fn_math_tan(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(tan(val));
     }
-    return vec_unary_math(item, tan, "fn_tan");
+    return vec_unary_math(item, tan, "fn_math_tan");
 }
 
 // sign helper

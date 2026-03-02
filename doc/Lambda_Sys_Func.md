@@ -109,22 +109,22 @@ Functions for statistical analysis on collections.
 |----------|-------------|---------|--------|
 | `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
 | `avg(vec)` | Arithmetic mean | `avg([1, 2, 3])` | `2.0` |
-| `mean(vec)` | Alias for avg | `mean([1, 2, 3])` | `2.0` |
-| `median(vec)` | Median value | `median([1, 3, 2])` | `2` |
-| `variance(vec)` | Population variance | `variance([1, 2, 3])` | `0.666...` |
-| `deviation(vec)` | Standard deviation | `deviation([1, 2, 3])` | `0.816...` |
-| `quantile(vec, p)` | p-th quantile | `quantile([1,2,3,4], 0.5)` | `2.5` |
-| `prod(vec)` | Product of elements | `prod([2, 3, 4])` | `24` |
+| `math.mean(vec)` | Alias for avg | `math.mean([1, 2, 3])` | `2.0` |
+| `math.median(vec)` | Median value | `math.median([1, 3, 2])` | `2` |
+| `math.variance(vec)` | Population variance | `math.variance([1, 2, 3])` | `0.666...` |
+| `math.deviation(vec)` | Standard deviation | `math.deviation([1, 2, 3])` | `0.816...` |
+| `math.quantile(vec, p)` | p-th quantile | `math.quantile([1,2,3,4], 0.5)` | `2.5` |
+| `math.prod(vec)` | Product of elements | `math.prod([2, 3, 4])` | `24` |
 
 ```lambda
 sum([1, 2, 3, 4])           // 10
 avg([1, 2, 3, 4])           // 2.5
-mean([1, 2, 3, 4])          // 2.5
-median([1, 3, 2, 4, 5])     // 3
-variance([1, 2, 3])         // 0.666...
-deviation([1, 2, 3])        // 0.816...
-quantile([1, 2, 3, 4], 0.5) // 2.5
-prod([2, 3, 4])             // 24
+math.mean([1, 2, 3, 4])          // 2.5
+math.median([1, 3, 2, 4, 5])     // 3
+math.variance([1, 2, 3])         // 0.666...
+math.deviation([1, 2, 3])        // 0.816...
+math.quantile([1, 2, 3, 4], 0.5) // 2.5
+math.prod([2, 3, 4])             // 24
 ```
 
 ---
@@ -135,13 +135,13 @@ Functions that apply to each element of a collection and return a collection of 
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `sqrt(x)` | Square root | `sqrt([1, 4, 9])` | `[1, 2, 3]` |
-| `log(x)` | Natural logarithm | `log([1, 2.718...])` | `[0, 1]` |
-| `log10(x)` | Base-10 logarithm | `log10([1, 10, 100])` | `[0, 1, 2]` |
-| `exp(x)` | Exponential (e^x) | `exp([0, 1, 2])` | `[1, e, e²]` |
-| `sin(x)` | Sine | `sin([0, 1.57...])` | `[0, 1]` |
-| `cos(x)` | Cosine | `cos([0, 1.57...])` | `[1, 0]` |
-| `tan(x)` | Tangent | `tan([0, 0.785...])` | `[0, 1]` |
+| `math.sqrt(x)` | Square root | `math.sqrt([1, 4, 9])` | `[1, 2, 3]` |
+| `math.log(x)` | Natural logarithm | `math.log([1, 2.718...])` | `[0, 1]` |
+| `math.log10(x)` | Base-10 logarithm | `math.log10([1, 10, 100])` | `[0, 1, 2]` |
+| `math.exp(x)` | Exponential (e^x) | `math.exp([0, 1, 2])` | `[1, e, e²]` |
+| `math.sin(x)` | Sine | `math.sin([0, 1.57...])` | `[0, 1]` |
+| `math.cos(x)` | Cosine | `math.cos([0, 1.57...])` | `[1, 0]` |
+| `math.tan(x)` | Tangent | `math.tan([0, 0.785...])` | `[0, 1]` |
 | `abs(x)` | Absolute value | `abs([-1, 2, -3])` | `[1, 2, 3]` |
 | `round(x)` | Round | `round([1.4, 1.6])` | `[1, 2]` |
 | `floor(x)` | Floor | `floor([1.7, 2.3])` | `[1, 2]` |
@@ -149,12 +149,12 @@ Functions that apply to each element of a collection and return a collection of 
 | `sign(x)` | Sign (-1, 0, 1) | `sign([-5, 0, 3])` | `[-1, 0, 1]` |
 
 ```lambda
-sqrt([1, 4, 9])            // [1, 2, 3]
-log([1, 2.718281828])      // [0, 1]
-log10([1, 10, 100])        // [0, 1, 2]
-exp([0, 1])                // [1, 2.718...]
-sin([0, 3.14159/2])        // [0, 1]
-cos([0, 3.14159/2])        // [1, 0]
+math.sqrt([1, 4, 9])            // [1, 2, 3]
+math.log([1, 2.718281828])      // [0, 1]
+math.log10([1, 10, 100])        // [0, 1, 2]
+math.exp([0, 1])                // [1, 2.718...]
+math.sin([0, 3.14159/2])        // [0, 1]
+math.cos([0, 3.14159/2])        // [1, 0]
 abs([-1, 2, -3])           // [1, 2, 3]
 sign([-5, 0, 3])           // [-1, 0, 1]
 ```
@@ -366,7 +366,7 @@ Functions for vector/array computations. These support **element-wise operations
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
-| `prod(vec)` | Product of elements | `prod([2, 3, 4])` | `24` |
+| `math.prod(vec)` | Product of elements | `math.prod([2, 3, 4])` | `24` |
 | `min(vec)` | Minimum element | `min([3, 1, 2])` | `1` |
 | `max(vec)` | Maximum element | `max([3, 1, 2])` | `3` |
 
@@ -381,32 +381,32 @@ Functions for vector/array computations. These support **element-wise operations
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `cumsum(vec)` | Cumulative sum | `cumsum([1, 2, 3])` | `[1, 3, 6]` |
-| `cumprod(vec)` | Cumulative product | `cumprod([1, 2, 3])` | `[1, 2, 6]` |
+| `math.cumsum(vec)` | Cumulative sum | `math.cumsum([1, 2, 3])` | `[1, 3, 6]` |
+| `math.cumprod(vec)` | Cumulative product | `math.cumprod([1, 2, 3])` | `[1, 2, 6]` |
 
 ### Linear Algebra
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `dot(a, b)` | Dot product | `dot([1,2,3], [4,5,6])` | `32` |
-| `norm(vec)` | Euclidean norm | `norm([3, 4])` | `5` |
+| `math.dot(a, b)` | Dot product | `math.dot([1,2,3], [4,5,6])` | `32` |
+| `math.norm(vec)` | Euclidean norm | `math.norm([3, 4])` | `5` |
 
 ```lambda
 // Aggregation
 sum([1, 2, 3, 4])          // 10
-prod([2, 3, 4])            // 24
+math.prod([2, 3, 4])            // 24
 
 // Index operations
 argmin([5, 2, 8, 1])       // 3 (index of 1)
 argmax([5, 2, 8, 1])       // 2 (index of 8)
 
 // Cumulative
-cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
-cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
+math.cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
+math.cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
 
 // Linear algebra
-dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
-norm([3, 4])               // 5 (sqrt(9 + 16))
+math.dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
+math.norm([3, 4])               // 5 (sqrt(9 + 16))
 ```
 
 ---
