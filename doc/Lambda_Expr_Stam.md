@@ -990,7 +990,7 @@ let name = "Alice", age = 30;
 
 // With type annotation
 let x: int = 42;
-let items: [string] = ["a", "b", "c"];
+let items: string[] = ["a", "b", "c"];
 ```
 
 #### If Statements
