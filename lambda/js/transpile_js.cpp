@@ -158,13 +158,26 @@ void transpile_js_literal(JsTranspiler* tp, JsLiteralNode* literal_node) {
         case JS_LITERAL_NUMBER:
             strbuf_append_format(tp->code_buf, "%.17g", literal_node->value.number_value);
             break;
-        case JS_LITERAL_STRING:
+        case JS_LITERAL_STRING: {
             strbuf_append_char(tp->code_buf, '"');
-            // TODO: Proper string escaping
-            strbuf_append_str_n(tp->code_buf, literal_node->value.string_value->chars,
-                               literal_node->value.string_value->len);
+            // escape special characters for C string literal
+            const char* s = literal_node->value.string_value->chars;
+            int64_t len = literal_node->value.string_value->len;
+            for (int64_t i = 0; i < len; i++) {
+                char c = s[i];
+                switch (c) {
+                    case '"':  strbuf_append_str(tp->code_buf, "\\\""); break;
+                    case '\\': strbuf_append_str(tp->code_buf, "\\\\"); break;
+                    case '\n': strbuf_append_str(tp->code_buf, "\\n"); break;
+                    case '\r': strbuf_append_str(tp->code_buf, "\\r"); break;
+                    case '\t': strbuf_append_str(tp->code_buf, "\\t"); break;
+                    case '\0': strbuf_append_str(tp->code_buf, "\\0"); break;
+                    default:   strbuf_append_char(tp->code_buf, c); break;
+                }
+            }
             strbuf_append_char(tp->code_buf, '"');
             break;
+        }
         case JS_LITERAL_BOOLEAN:
             strbuf_append_str(tp->code_buf, literal_node->value.boolean_value ? "true" : "false");
             break;
@@ -375,14 +388,36 @@ void transpile_js_unary_expression(JsTranspiler* tp, JsUnaryNode* unary_node) {
             strbuf_append_char(tp->code_buf, ')');
             break;
         case JS_OP_INCREMENT:
-            strbuf_append_str(tp->code_buf, "js_increment(");
-            transpile_js_box_item(tp, unary_node->operand);
-            strbuf_append_format(tp->code_buf, ", %s)", unary_node->prefix ? "true" : "false");
+            // ++var → (var = js_add(var, i2it(1)))
+            // var++ → same side effect, returns old value in expression context
+            if (unary_node->operand && unary_node->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)unary_node->operand;
+                strbuf_append_str(tp->code_buf, "(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, " = js_add(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", i2it(1)))");
+            } else {
+                // For member expressions, just evaluate (no side effect on non-variables)
+                strbuf_append_str(tp->code_buf, "js_add(");
+                transpile_js_box_item(tp, unary_node->operand);
+                strbuf_append_str(tp->code_buf, ", i2it(1))");
+            }
             break;
         case JS_OP_DECREMENT:
-            strbuf_append_str(tp->code_buf, "js_decrement(");
-            transpile_js_box_item(tp, unary_node->operand);
-            strbuf_append_format(tp->code_buf, ", %s)", unary_node->prefix ? "true" : "false");
+            // --var → (var = js_subtract(var, i2it(1)))
+            if (unary_node->operand && unary_node->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)unary_node->operand;
+                strbuf_append_str(tp->code_buf, "(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, " = js_subtract(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", i2it(1)))");
+            } else {
+                strbuf_append_str(tp->code_buf, "js_subtract(");
+                transpile_js_box_item(tp, unary_node->operand);
+                strbuf_append_str(tp->code_buf, ", i2it(1))");
+            }
             break;
         case JS_OP_VOID:
             // Evaluate operand for side effects, then return undefined
@@ -491,16 +526,17 @@ void transpile_js_assignment_expression(JsTranspiler* tp, JsAssignmentNode* assi
         }
 
         // General member assignment: obj.prop = val or obj[key] = val
-        strbuf_append_str(tp->code_buf, "js_property_set(");
+        // For compound assignment (+=, -=, etc.), we need to read-modify-write:
+        //   obj.prop += val → js_property_set(obj, "prop", js_add(js_property_access(obj, "prop"), val))
+        // Use a statement expression to evaluate the object once
+        strbuf_append_str(tp->code_buf, "({\n  Item _aobj = ");
         transpile_js_box_item(tp, member->object);
-        strbuf_append_str(tp->code_buf, ", ");
+        strbuf_append_str(tp->code_buf, ";\n  Item _akey = ");
 
         if (member->computed) {
-            // obj[key] = val
             transpile_js_box_item(tp, member->property);
         } else if (member->property &&
                    member->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            // obj.prop = val
             JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
             strbuf_append_str(tp->code_buf, "s2it(heap_create_name(\"");
             strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
@@ -509,9 +545,29 @@ void transpile_js_assignment_expression(JsTranspiler* tp, JsAssignmentNode* assi
             transpile_js_box_item(tp, member->property);
         }
 
-        strbuf_append_str(tp->code_buf, ", ");
-        transpile_js_box_item(tp, assign_node->right);
-        strbuf_append_str(tp->code_buf, ")");
+        strbuf_append_str(tp->code_buf, ";\n  js_property_set(_aobj, _akey, ");
+
+        // For compound operators, wrap the new value with the operation
+        if (assign_node->op == JS_OP_ASSIGN) {
+            transpile_js_box_item(tp, assign_node->right);
+        } else {
+            // compound: op(current_value, rhs)
+            const char* op_fn = nullptr;
+            switch (assign_node->op) {
+                case JS_OP_ADD_ASSIGN: op_fn = "js_add"; break;
+                case JS_OP_SUB_ASSIGN: op_fn = "js_subtract"; break;
+                case JS_OP_MUL_ASSIGN: op_fn = "js_multiply"; break;
+                case JS_OP_DIV_ASSIGN: op_fn = "js_divide"; break;
+                case JS_OP_MOD_ASSIGN: op_fn = "js_modulo"; break;
+                default: op_fn = "js_add"; break; // fallback
+            }
+            strbuf_append_str(tp->code_buf, op_fn);
+            strbuf_append_str(tp->code_buf, "(js_property_access(_aobj, _akey), ");
+            transpile_js_box_item(tp, assign_node->right);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+
+        strbuf_append_str(tp->code_buf, ");\n})");
     } else {
         // Unsupported assignment target
         log_error("Unsupported assignment target type: %d", assign_node->left->node_type);
@@ -563,6 +619,19 @@ static bool is_document_member(JsMemberNode* member) {
     if (!member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
     JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
     return obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0;
+}
+
+// Check if a call expression is window.getComputedStyle(...)
+static bool is_window_getComputedStyle_call(JsCallNode* call_node) {
+    if (!call_node->callee) return false;
+    if (call_node->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    JsMemberNode* member = (JsMemberNode*)call_node->callee;
+    if (!member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    if (!member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+    return obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "window", 6) == 0 &&
+           prop->name && prop->name->len == 16 && strncmp(prop->name->chars, "getComputedStyle", 16) == 0;
 }
 
 // Check if a call expression is a method call on a non-special object (obj.method())
@@ -662,6 +731,26 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
         }
         strbuf_append_int(tp->code_buf, arg_count);
         strbuf_append_str(tp->code_buf, ");\n})");
+        return;
+    }
+
+    // Special handling for window.getComputedStyle(elem, pseudo) calls
+    if (is_window_getComputedStyle_call(call_node)) {
+        int arg_count = count_js_args(call_node->arguments);
+        strbuf_append_str(tp->code_buf, "js_get_computed_style(");
+        if (arg_count >= 1) {
+            JsAstNode* arg = call_node->arguments;
+            transpile_js_box_item(tp, arg);
+            strbuf_append_str(tp->code_buf, ", ");
+            if (arg_count >= 2 && arg->next) {
+                transpile_js_box_item(tp, arg->next);
+            } else {
+                strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            }
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_NULL, ITEM_NULL");
+        }
+        strbuf_append_str(tp->code_buf, ")");
         return;
     }
 
@@ -794,7 +883,7 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
     } else {
         strbuf_append_str(tp->code_buf, "js_call_function(");
         transpile_js_box_item(tp, call_node->callee);
-        strbuf_append_str(tp->code_buf, ", ITEM_NULL, NULL, 0)");
+        strbuf_append_str(tp->code_buf, ", ITEM_NULL, ((void*)0), 0)");
     }
 }
 
@@ -821,6 +910,28 @@ void transpile_js_member_expression(JsTranspiler* tp, JsMemberNode* member_node)
             strbuf_append_str_n(tp->code_buf, prop->name->chars, prop->name->len);
             strbuf_append_str(tp->code_buf, "\")))");
             return;
+        }
+    }
+
+    // Special case: obj.style.X → js_dom_get_style_property(obj, "X")
+    if (!member_node->computed && member_node->object &&
+        member_node->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION &&
+        member_node->property &&
+        member_node->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsMemberNode* outer = (JsMemberNode*)member_node->object;
+        if (!outer->computed && outer->property &&
+            outer->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* mid_prop = (JsIdentifierNode*)outer->property;
+            if (mid_prop->name && mid_prop->name->len == 5 &&
+                strncmp(mid_prop->name->chars, "style", 5) == 0) {
+                JsIdentifierNode* style_prop = (JsIdentifierNode*)member_node->property;
+                strbuf_append_str(tp->code_buf, "js_dom_get_style_property(");
+                transpile_js_box_item(tp, outer->object);
+                strbuf_append_str(tp->code_buf, ", s2it(heap_create_name(\"");
+                strbuf_append_str_n(tp->code_buf, style_prop->name->chars, style_prop->name->len);
+                strbuf_append_str(tp->code_buf, "\")))");
+                return;
+            }
         }
     }
 
@@ -1547,7 +1658,10 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, "extern Item js_dom_get_property(Item elem, Item prop_name);\n");
     strbuf_append_str(tp->code_buf, "extern Item js_dom_set_property(Item elem, Item prop_name, Item value);\n");
     strbuf_append_str(tp->code_buf, "extern Item js_dom_set_style_property(Item elem, Item prop_name, Item value);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_dom_get_style_property(Item elem, Item prop_name);\n");
     strbuf_append_str(tp->code_buf, "extern _Bool js_is_dom_node(Item item);\n");
+    // Computed style
+    strbuf_append_str(tp->code_buf, "extern Item js_get_computed_style(Item elem, Item pseudo);\n");
     // Lambda runtime functions used by codegen
     strbuf_append_str(tp->code_buf, "extern int64_t fn_len(Item item);\n");
     strbuf_append_str(tp->code_buf, "extern TypeId item_type_id(Item item);\n");
@@ -1582,18 +1696,8 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     // Generate main function signature
     strbuf_append_str(tp->code_buf, "Item js_main(Context *ctx) {\n");
 
-    // Find the last expression statement (which will be the return value)
-    stmt = program->body;
-    JsAstNode* last_expr_stmt = NULL;
-    bool has_content = false;
-
-    while (stmt) {
-        if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-            last_expr_stmt = stmt;
-        }
-        has_content = true;
-        stmt = stmt->next;
-    }
+    // Emit a result variable before all statements
+    strbuf_append_str(tp->code_buf, "\n  Item result = ITEM_NULL;");
 
     // Second pass: transpile all statements except function declarations
     // (function declarations were already emitted outside js_main)
@@ -1625,38 +1729,21 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
             continue;
         }
 
-        if (stmt == last_expr_stmt) {
-            // Skip - will be used as return value
-        } else if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-            // Transpile expression statement as a statement (for side effects like console.log)
+        if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+            // Transpile expression statement in-place for side effects
+            // and capture as result (last expression becomes return value)
             JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)stmt;
             if (expr_stmt->expression) {
-                strbuf_append_str(tp->code_buf, "\n  ");
-                transpile_js_expression(tp, expr_stmt->expression);
+                strbuf_append_str(tp->code_buf, "\n  result = ");
+                transpile_js_box_item(tp, expr_stmt->expression);
                 strbuf_append_str(tp->code_buf, ";");
             }
         } else {
-            // Generate other statements (like variable declarations)
+            // Generate other statements (like variable declarations, if, for, etc.)
             transpile_js_statement(tp, stmt);
         }
 
         stmt = stmt->next;
-    }
-
-    // Generate the final result assignment
-    strbuf_append_str(tp->code_buf, "\n  Item result = ");
-
-    if (last_expr_stmt) {
-        // printf("DEBUG: Generating final result from last expression statement\n");
-        // printf("DEBUG: Current code buffer before final expression: %.*s\n", (int)tp->code_buf->length, tp->code_buf->str);
-        fflush(stdout);
-        transpile_js_statement(tp, last_expr_stmt);
-        // printf("DEBUG: Final expression completed\n");
-        fflush(stdout);
-    } else if (!has_content) {
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
-    } else {
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
 
     strbuf_append_str(tp->code_buf, ";\n\n");
