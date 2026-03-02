@@ -1,17 +1,17 @@
 // latex/latex.ls — Main entry point for the LaTeX-to-HTML package
 // Usage:
-//   import latex: .lambda.package.latex.latex
+//   import latex: lambda.package.latex.latex
 //   let html_string = latex.render_to_html(ast)
 //   let html_string = latex.render_to_html(ast, {standalone: true})
 //   let html_string = latex.render_file_to_html("paper.tex")
 //   let elements = latex.render(ast)
 
-import normalize: .lambda.package.latex.normalize
-import analyzer: .lambda.package.latex.analyze
-import macros: .lambda.package.latex.macros
-import dispatcher: .lambda.package.latex.render
-import css: .lambda.package.latex.css
-import html_ser: .lambda.package.latex.to_html
+import normalize: lambda.package.latex.normalize
+import analyzer: lambda.package.latex.analyze
+import macros: lambda.package.latex.macros
+import dispatcher: lambda.package.latex.render
+import css: lambda.package.latex.css
+import html_ser: lambda.package.latex.to_html
 
 // ============================================================
 // Public API — HTML string output

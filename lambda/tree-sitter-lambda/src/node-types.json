@@ -3929,6 +3929,10 @@
           {
             "type": "assign_expr",
             "named": true
+          },
+          {
+            "type": "object_type",
+            "named": true
           }
         ]
       }
@@ -4858,19 +4862,19 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
-  },
-  {
-    "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
     "named": true
+  },
+  {
+    "type": "decimal",
+    "named": false
   },
   {
     "type": "default",
@@ -5078,11 +5082,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

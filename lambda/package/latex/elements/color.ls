@@ -2,7 +2,7 @@
 // \textcolor{color}{text}, \color{color}, \colorbox{color}{text},
 // \fcolorbox{border}{bg}{text}, \definecolor{name}{model}{spec}, \pagecolor{color}
 
-import util: .lambda.package.latex.util
+import util: lambda.package.latex.util
 
 // ============================================================
 // Named color map (LaTeX xcolor standard named colors)

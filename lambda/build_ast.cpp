@@ -31,6 +31,9 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
 // Forward declaration for function building (used by object type methods)
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global);
 
+// Forward declaration for object type building (used by pub type)
+AstNode* build_object_type(Transpiler* tp, TSNode type_node);
+
 // System function definitions with method call support
 // Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
 // is_method_eligible: true if can be called as obj.method() style
@@ -1633,9 +1636,14 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             log_debug("got imported identifier %.*s from module %.*s",
                 (int)entry->name->len, entry->name->chars,
                 (int)entry->import->module.length, entry->import->module.str);
-            ast_node->type = alloc_type(tp->pool, entry->node->type->type_id, sizeof(Type));
-            // defensive code
-            ast_node->type->is_const = 0;
+            if (entry->node->type->type_id == LMD_TYPE_TYPE) {
+                // for imported type definitions (pub type T = ...), preserve the full TypeType wrapper
+                ast_node->type = entry->node->type;
+            } else {
+                ast_node->type = alloc_type(tp->pool, entry->node->type->type_id, sizeof(Type));
+                // defensive code
+                ast_node->type->is_const = 0;
+            }
         }
         else {
             log_debug("Debug: entry->node->type is %p for identifier %.*s",
@@ -3426,6 +3434,19 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
     // determine if this is a type definition based on the parent symbol
     bool is_type_definition = (symbol == SYM_TYPE_DEFINE);
 
+    // for pub_stam: detect 'pub type ...' variants by scanning for the anonymous 'type' keyword
+    if (symbol == SYM_PUB_STAM) {
+        TSNode child = ts_node_child(let_node, 0);
+        int child_count = ts_node_child_count(let_node);
+        for (int i = 0; i < child_count; i++) {
+            child = ts_node_child(let_node, i);
+            if (ts_node_symbol(child) == anon_sym_type) {
+                is_type_definition = true;
+                break;
+            }
+        }
+    }
+
     // 'let' can have multiple name-value declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
@@ -3436,18 +3457,27 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
         if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             TSSymbol child_symbol = ts_node_symbol(child);
-            // defensive check: validate symbol type
-            // type_assign is aliased as assign_expr in the grammar, so we only see SYM_ASSIGN_EXPR
-            if (child_symbol != SYM_ASSIGN_EXPR) {
-                log_error("Error: build_let_and_type_stam expected SYM_ASSIGN_EXPR but got symbol %d", child_symbol);
+
+            AstNode* declare = NULL;
+            if (child_symbol == SYM_OBJECT_TYPE) {
+                // pub type Counter { ... } — object type definition wrapped in pub
+                declare = build_object_type(tp, child);
+                if (declare) {
+                    ((AstObjectTypeNode*)declare)->is_public = true;
+                }
+            } else if (child_symbol == SYM_ASSIGN_EXPR) {
+                // pub x = expr  OR  pub type T = type_expr (aliased as assign_expr)
+                declare = build_assign_expr(tp, child, is_type_definition);
+            } else {
+                log_error("Error: build_let_and_type_stam expected SYM_ASSIGN_EXPR or SYM_OBJECT_TYPE but got symbol %d", child_symbol);
                 // skip invalid node and continue - defensive recovery
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
-            AstNode* declare = build_assign_expr(tp, child, is_type_definition);
+
             // additional defensive check
             if (!declare) {
-                log_error("Error: build_let_and_type_stam failed to build assign expression");
+                log_error("Error: build_let_and_type_stam failed to build declaration");
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
@@ -3768,6 +3798,8 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     log_debug("build_object_type");
     AstObjectTypeNode* ast_node = (AstObjectTypeNode*)alloc_ast_node(tp,
         AST_NODE_OBJECT_TYPE, type_node, sizeof(AstObjectTypeNode));
+    ast_node->is_public = false;
+    ast_node->local_type_index = -1;
 
     // allocate TypeObject (extends TypeMap) for this object type definition
     TypeObject* obj_type = (TypeObject*)pool_calloc(tp->pool, sizeof(TypeObject));
@@ -6454,13 +6486,60 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
             AstLetNode* pub_node = (AstLetNode*)node;
             AstNode* declare = pub_node->declare;
             while (declare) {
-                AstNamedNode* dec_node = (AstNamedNode*)declare;
-                if (has_alias) {
-                    push_qualified_name(tp, (AstNamedNode*)dec_node, import_node, import_node->alias);
+                if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                    // exported object type — register in importing script's type_list
+                    AstObjectTypeNode* obj_node = (AstObjectTypeNode*)declare;
+                    Type* node_type = obj_node->type;
+                    if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* tt = (TypeType*)node_type;
+                        TypeObject* obj_type = (TypeObject*)tt->type;
+                        // re-register in importing script's type_list with new local index
+                        arraylist_append(tp->type_list, (void*)tt);
+                        obj_type->type_index = tp->type_list->length - 1;
+                        log_debug("registered imported object type '%.*s' at local index %d",
+                            (int)obj_node->name->len, obj_node->name->chars, obj_type->type_index);
+                    }
+                    if (has_alias) {
+                        push_qualified_name(tp, (AstNamedNode*)obj_node, import_node, import_node->alias);
+                    } else {
+                        push_name(tp, (AstNamedNode*)obj_node, import_node);
+                    }
+                    log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
                 } else {
-                    push_name(tp, (AstNamedNode*)dec_node, import_node);
+                    AstNamedNode* dec_node = (AstNamedNode*)declare;
+                    if (has_alias) {
+                        push_qualified_name(tp, (AstNamedNode*)dec_node, import_node, import_node->alias);
+                    } else {
+                        push_name(tp, (AstNamedNode*)dec_node, import_node);
+                    }
+                    log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
+                    // also export the error variable for ^err destructuring
+                    if (dec_node->error_name) {
+                        AstNamedNode* err_var = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
+                        err_var->node_type = AST_NODE_ASSIGN;
+                        err_var->name = dec_node->error_name;
+                        err_var->type = &TYPE_ANY;
+                        err_var->as = nullptr;
+                        if (has_alias) {
+                            push_qualified_name(tp, err_var, import_node, import_node->alias);
+                        } else {
+                            push_name(tp, err_var, import_node);
+                        }
+                        log_debug("got pub error var: %.*s", (int)dec_node->error_name->len, dec_node->error_name->chars);
+                    }
+                    // re-register type aliases in importing script's type_list
+                    if (dec_node->type && dec_node->type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* tt = (TypeType*)dec_node->type;
+                        Type* inner = tt->type;
+                        if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT
+                            || inner->type_id == LMD_TYPE_LIST || inner->type_id == LMD_TYPE_ARRAY)) {
+                            arraylist_append(tp->type_list, (void*)tt);
+                            ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
+                            log_debug("registered imported type alias '%.*s' at local index %d",
+                                (int)dec_node->name->len, dec_node->name->chars, ((TypeMap*)inner)->type_index);
+                        }
+                    }
                 }
-                log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
                 declare = declare->next;
             }
         }
@@ -6492,34 +6571,65 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     ts_tree_cursor_delete(&cursor);
     if (ast_node->module.length) {
         if (ast_node->module.str[0] == '.') {
-            // convert relative import to path
-            log_debug("runtime: %p", tp->runtime);
-            log_debug("runtime dir: %s", tp->runtime->current_dir);
+            // relative import: resolve relative to importing script's directory
+            const char* base_dir = tp->directory ? tp->directory : "./";
+            log_debug("import base dir: %s", base_dir);
             StrBuf* buf = strbuf_new();
-            strbuf_append_format(buf, "%s%.*s", tp->runtime->current_dir,
+            strbuf_append_format(buf, "%s%.*s", base_dir,
                 (int)ast_node->module.length - 1, ast_node->module.str + 1);
             char* ch = buf->str + buf->length - (ast_node->module.length - 1);
             while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
             strbuf_append_str(buf, ".ls");
+            ast_node->is_relative = true;
 
             #ifdef SIMPLE_SCHEMA_PARSER
-            // Skip module loading in simple schema parser mode
             ast_node->script = nullptr;
             #else
-            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);  // is_import = true
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
             #endif
 
-            strbuf_free(buf);
-            // import names/definitions from the modules
             if (ast_node->script) {
                 declare_module_import(tp, ast_node);
             }
             else {
-                log_error("Error: failed to load module %.*s", (int)ast_node->module.length, ast_node->module.str);
+                log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str,
+                    tp->reference ? tp->reference : "<unknown>");
+                fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    "  Resolved path: %s\n  Importing script: %s\n",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str,
+                    tp->reference ? tp->reference : "<unknown>");
             }
+            strbuf_free(buf);
         }
         else {
-            log_debug("module type not supported yet: %.*s", (int)ast_node->module.length, ast_node->module.str);
+            // absolute import: resolve from CWD (project root)
+            log_debug("absolute import: %.*s", (int)ast_node->module.length, ast_node->module.str);
+            StrBuf* buf = strbuf_new();
+            strbuf_append_format(buf, "./%.*s",
+                (int)ast_node->module.length, ast_node->module.str);
+            char* ch = buf->str + 2;  // skip "./"
+            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_str(buf, ".ls");
+            ast_node->is_relative = false;
+
+            #ifdef SIMPLE_SCHEMA_PARSER
+            ast_node->script = nullptr;
+            #else
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
+            #endif
+
+            if (ast_node->script) {
+                declare_module_import(tp, ast_node);
+            }
+            else {
+                log_error("Error: failed to load module '%.*s' (resolved: %s)",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str);
+                fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    "  Resolved path: %s\n",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str);
+            }
+            strbuf_free(buf);
         }
     }
     return (AstNode*)ast_node;

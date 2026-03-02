@@ -1,6 +1,6 @@
 // Test: line chart from Vega-Lite JSON
-import vega: .lambda.package.chart.vega
-import chart: .lambda.package.chart.chart
+import vega: lambda.package.chart.vega
+import chart: lambda.package.chart.chart
 
 let vl = {
     width: 400,

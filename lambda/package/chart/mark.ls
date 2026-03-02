@@ -2,10 +2,10 @@
 // Each mark type transforms data + scales into SVG elements.
 // All mark functions take (data, ctx, mark_config) where ctx is a render context map.
 
-import util: .lambda.package.chart.util
-import svg: .lambda.package.chart.svg
-import color: .lambda.package.chart.color
-import scale: .lambda.package.chart.scale
+import util: lambda.package.chart.util
+import svg: lambda.package.chart.svg
+import color: lambda.package.chart.color
+import scale: lambda.package.chart.scale
 
 // ============================================================
 // Bar mark

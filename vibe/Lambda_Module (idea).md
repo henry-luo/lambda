@@ -21,33 +21,57 @@ This document proposes enhancements to Lambda's module system to improve code or
 
 ## Current State
 
-Lambda currently supports basic module functionality:
+Lambda supports the following module functionality:
 
 ```lambda
-// Relative import (dot-separated path)
+// Relative import (resolved relative to importing script's directory)
 import .path.to.module
+
+// Absolute import (resolved relative to CWD/project root)
+import path.to.module
 
 // Symbol import (for built-in modules)
 import 'chart'
 
-// Aliased import
+// Aliased import (grammar exists, not yet fully functional)
 import alias: .module
 
-// Public exports
+// Public exports — values, functions, procedures
 pub PI = 3.14159
 pub fn add(a: int, b: int) => a + b
+pub pn log(msg) { print(msg) }
+
+// Public type exports — type aliases and object types
+pub type UserId = int
+pub type Counter {
+    value: int = 0;
+    fn double() => value * 2
+}
+
+// Error destructuring at module scope
+pub data^err = input("config.json", 'json')
 ```
 
-### Current Limitations
+### Already Implemented
+
+| Feature | Status |
+|---------|--------|
+| Script-relative imports (`.module`) | ✅ Imports resolve relative to importing file |
+| Absolute imports (`module`) | ✅ Resolve relative to CWD/project root |
+| Path normalization | ✅ `realpath()` canonical dedup prevents redundant compilation |
+| Public type exports (`pub type`) | ✅ Type aliases + object types with methods |
+| Error destructuring at module scope | ✅ `pub a^err = expr` works across modules |
+| Better error messages | ✅ Shows resolved path + importing script on failure |
+
+### Remaining Limitations
 
 | Limitation | Impact |
 |------------|--------|
 | All-or-nothing imports | Namespace pollution, unclear dependencies |
 | No qualified access | Name collisions across modules |
-| No type exports | Types must be redefined in each file |
 | No re-exports | Cannot create facade modules |
-| Limited path resolution | Only relative paths supported |
 | No circular import detection | Potential infinite loops |
+| No standard library paths | Only relative/CWD paths supported |
 
 ---
 
@@ -55,9 +79,9 @@ pub fn add(a: int, b: int) => a + b
 
 1. **Selective Imports**: Import only what you need
 2. **Namespace Control**: Qualified vs unqualified access
-3. **Type Exports**: First-class type sharing across modules
+3. ~~**Type Exports**: First-class type sharing across modules~~ ✅ Done
 4. **Re-exports**: Create module facades and aggregations
-5. **Clear Resolution**: Predictable module path resolution
+5. ~~**Clear Resolution**: Predictable module path resolution~~ ✅ Done (script-relative + path normalization)
 6. **Backward Compatibility**: Existing code continues to work
 
 ---
@@ -194,42 +218,20 @@ if (optional_func != null) {
 
 ## Export Mechanisms
 
-### 1. Public Declarations (Current - Unchanged)
+### 1. Public Declarations (Implemented)
 
 ```lambda
 pub PI = 3.14159
 pub fn add(a: int, b: int) => a + b
-```
-
-### 2. Type Exports
-
-Export type definitions for use in other modules:
-
-```lambda
-// types.ls
 pub type UserId = int
-pub type UserName = string
-
-pub type User = {
-    id: UserId,
-    name: UserName,
-    email: string,
-    active: bool
-}
-
-pub type UserList = [User]
+pub type Counter { value: int = 0; fn double() => value * 2 }
 ```
 
-```lambda
-// main.ls
-import .types: User, UserId
+> **Note:** Type exports (`pub type T = ...` and `pub type T { ... }`) are fully implemented.
+> Both type aliases and object types with methods work across modules, including
+> `is` type checking, object construction, and method calls.
 
-fn create_user(id: UserId, name: string) -> User {
-    {id: id, name: name, email: "", active: true}
-}
-```
-
-### 3. Re-exports
+### 2. Re-exports
 
 Re-export items from other modules:
 
@@ -287,38 +289,40 @@ export PI, E, factorial, fibonacci
 
 ### Export Visibility Summary
 
-| Declaration | Visibility |
-|-------------|------------|
-| `pub x = ...` | Public (exported) |
-| `pub fn f()` | Public function |
-| `pub type T` | Public type |
-| `pub import` | Re-export |
-| `let x = ...` | Private (module-local) |
-| `fn f()` | Private function |
-| `type T` | Private type |
+| Declaration | Visibility | Status |
+|-------------|------------|--------|
+| `pub x = ...` | Public (exported) | ✅ Implemented |
+| `pub fn f()` | Public function | ✅ Implemented |
+| `pub pn p()` | Public procedure | ✅ Implemented |
+| `pub type T` | Public type | ✅ Implemented |
+| `pub import` | Re-export | ⬜ Not yet |
+| `let x = ...` | Private (module-local) | ✅ Implemented |
+| `fn f()` | Private function | ✅ Implemented |
+| `type T` | Private type | ✅ Implemented |
 
 ---
 
 ## Module Resolution
 
-### Resolution Order
+### Current Resolution (Implemented)
 
-When resolving `import .path.to.module`:
+Two-tier resolution is implemented:
 
-1. **Relative to current file**: `./path/to/module.ls`
-2. **Relative to project root**: `<project>/path/to/module.ls`
-3. **Standard library**: `<std>/path/to/module.ls`
-4. **Installed packages**: `<packages>/path/to/module.ls`
+| Syntax | Resolution | Status |
+|--------|------------|--------|
+| `.module` | Relative to importing script's directory | ✅ Implemented |
+| `.path.to.module` | Relative: `<script_dir>/path/to/module.ls` | ✅ Implemented |
+| `module` (no dot) | Relative to CWD/project root | ✅ Implemented |
 
-### Path Syntax
+Path normalization via `realpath()` prevents redundant compilation when the same file is imported via different relative paths.
 
-| Syntax | Resolution |
-|--------|------------|
-| `.module` | Relative: `./module.ls` |
-| `.path.to.module` | Relative: `./path/to/module.ls` |
-| `..parent.module` | Parent: `../parent/module.ls` |
-| `std.math` | Standard library: `<std>/math.ls` |
-| `@pkg.module` | Package: `<packages>/pkg/module.ls` |
+### Future Resolution Extensions
+
+| Syntax | Resolution | Status |
+|--------|------------|--------|
+| `..parent.module` | Parent: `../parent/module.ls` | ⬜ Not yet |
+| `std.math` | Standard library: `<std>/math.ls` | ⬜ Not yet |
+| `@pkg.module` | Package: `<packages>/pkg/module.ls` | ⬜ Not yet |
 
 ### Project Configuration
 
@@ -463,41 +467,16 @@ import .b  // b imports a -> circular!
 //   ^ creates cycle
 ```
 
-Implementation approach:
+> **Note:** Path normalization (`realpath()`) is implemented, which prevents false-negative cycle detection from different relative paths to the same file. Explicit circular import detection (tracking import stack) is not yet implemented.
 
-```cpp
-// In load_script() or build_module_import()
-thread_local std::vector<const char*> import_stack;
+### Module Not Found (Implemented)
 
-Script* load_script(Runtime *runtime, const char* script_path, ...) {
-    // Check for circular import
-    for (const char* path : import_stack) {
-        if (strcmp(path, script_path) == 0) {
-            log_error("Circular import detected");
-            print_import_chain(import_stack, script_path);
-            return nullptr;
-        }
-    }
-    
-    import_stack.push_back(script_path);
-    // ... load and compile ...
-    import_stack.pop_back();
-}
+Import failures now show the resolved path and importing script:
+
 ```
-
-### Module Not Found
-
-Clear error messages for missing modules:
-
-```lambda
-import .nonexistent.module
-
-// Error:
-// Module not found: ./nonexistent/module.ls
-// Searched paths:
-//   ./nonexistent/module.ls
-//   <project>/nonexistent/module.ls
-//   <std>/nonexistent/module.ls
+Error: Failed to import module '.missing_mod'
+  Resolved path: /project/src/missing_mod.ls
+  Importing script: /project/src/main.ls
 ```
 
 ### Import Errors
@@ -541,16 +520,10 @@ import .broken_module
 
 **Estimated Effort**: 3-4 days
 
-### Phase 3: Type Exports (High Priority)
+### ~~Phase 3: Type Exports~~ ✅ Implemented
 
-**Goal**: Export and import type definitions
-
-**Changes Required**:
-1. Extend `declare_module_import()` to handle type definitions
-2. Type pool sharing across modules
-3. Cross-module type checking
-
-**Estimated Effort**: 2-3 days
+Public type exports (`pub type T = ...` and `pub type T { ... }`) are fully working.
+See `Lambda_Module2.md` §8.4 for implementation details.
 
 ### Phase 4: Re-exports (Medium Priority)
 
@@ -575,17 +548,20 @@ import .broken_module
 
 **Estimated Effort**: 1-2 weeks
 
-### Phase 6: Path Resolution (Medium Priority)
+### Phase 6: Path Resolution (Partially Done)
 
-**Goal**: Support multiple path resolution strategies
+**Implemented:**
+- ✅ Script-relative resolution (`.module` resolves from importing file's directory)
+- ✅ CWD-relative resolution (`module` without dot resolves from project root)
+- ✅ Path normalization via `realpath()` for deduplication
 
-**Changes Required**:
-1. Implement path resolver with search paths
-2. Add `lambda.json` configuration support
-3. Support `@alias` syntax
-4. Index file resolution
+**Remaining:**
+1. Add `lambda.json` configuration support
+2. Support `@alias` syntax
+3. Index file resolution
+4. Standard library path resolution
 
-**Estimated Effort**: 3-4 days
+**Estimated Effort**: 2-3 days
 
 ### Phase 7: Conditional Imports (Low Priority)
 
@@ -740,15 +716,17 @@ fn main() {
 
 This proposal enhances Lambda's module system with:
 
-| Feature | Benefit |
-|---------|---------|
-| Selective imports | Clear dependencies, smaller namespaces |
-| Namespace imports | Avoid collisions, explicit origins |
-| Type exports | Share types across modules |
-| Re-exports | Create clean module facades |
-| Standard library | Organized, discoverable built-ins |
-| Path resolution | Flexible project organization |
-| Conditional imports | Optional dependencies |
+| Feature | Benefit | Status |
+|---------|---------|--------|
+| Selective imports | Clear dependencies, smaller namespaces | ⬜ Not yet |
+| Namespace imports | Avoid collisions, explicit origins | ⬜ Not yet |
+| Type exports | Share types across modules | ✅ Done |
+| Re-exports | Create clean module facades | ⬜ Not yet |
+| Standard library | Organized, discoverable built-ins | ⬜ Not yet |
+| Path resolution | Flexible project organization | ✅ Partially done |
+| Conditional imports | Optional dependencies | ⬜ Not yet |
+| Error destructuring | `pub a^err = expr` at module scope | ✅ Done |
+| Better error messages | Resolved path + source shown on failure | ✅ Done |
 
 The design maintains backward compatibility while providing modern module features expected by developers from languages like TypeScript, Rust, and Python.
 

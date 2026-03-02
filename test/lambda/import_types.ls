@@ -1,5 +1,5 @@
 // test type_list isolation: main script and module both define map types
-import .test.lambda.mod_types
+import .mod_types
 
 // module's map types
 let p = make_point(3, 4)

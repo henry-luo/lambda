@@ -533,6 +533,8 @@ typedef struct AstObjectTypeNode : AstNamedNode {
     AstNode* base_type;         // base type identifier for inheritance (NULL if none)
     AstNode* methods;           // linked list of fn/pn AST nodes
     AstNode* constraints;       // linked list of that-constraint AST nodes
+    bool is_public;             // true when declared with 'pub type T { ... }'
+    int local_type_index;       // type_index in importing script's type_list (-1 = use TypeObject's own)
 } AstObjectTypeNode;
 
 // Object literal node: {TypeName key: value, ...}
@@ -596,6 +598,7 @@ typedef struct MIR_context *MIR_context_t;
 // Script extends Input to inherit unified memory management
 struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
+    const char* directory;      // directory containing this script (for relative imports)
     int index;                  // index of the script in the runtime scripts list
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)

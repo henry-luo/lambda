@@ -1,5 +1,5 @@
 // test importing multiple modules in one script
-import .test.lambda.mod_vars, .test.lambda.mod_compute
+import .mod_vars, .mod_compute
 
 // from mod_vars
 (name, version)

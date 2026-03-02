@@ -1,7 +1,7 @@
 // test_math_context.ls — Test math rendering context
 // Coverage: context.ls — display_context, text_context, derive, numer_context, denom_context, sup_context, sub_context, is_display, is_script, context_scale, font_size_css
 
-import ctx: .lambda.package.math.context
+import ctx: lambda.package.math.context
 
 "===== MATH CONTEXT TESTS ====="
 

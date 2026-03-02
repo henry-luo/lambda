@@ -1,16 +1,16 @@
 // chart/chart.ls — Main entry point for the Lambda Chart Library
 // Provides chart.render(spec) -> SVG element tree
 
-import parse: .lambda.package.chart.parse
-import transform: .lambda.package.chart.transform
-import scale: .lambda.package.chart.scale
-import mark: .lambda.package.chart.mark
-import axis: .lambda.package.chart.axis
-import leg: .lambda.package.chart.legend
-import layout: .lambda.package.chart.layout
-import svg: .lambda.package.chart.svg
-import color: .lambda.package.chart.color
-import util: .lambda.package.chart.util
+import parse: lambda.package.chart.parse
+import transform: lambda.package.chart.transform
+import scale: lambda.package.chart.scale
+import mark: lambda.package.chart.mark
+import axis: lambda.package.chart.axis
+import leg: lambda.package.chart.legend
+import layout: lambda.package.chart.layout
+import svg: lambda.package.chart.svg
+import color: lambda.package.chart.color
+import util: lambda.package.chart.util
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
