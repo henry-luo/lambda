@@ -2401,7 +2401,29 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // CSS 2.1 §9.5: Float avoidance is based on the border edge, so include margin-top
             // (margin is not yet added to block->y at this point — it's added later)
             float block_margin_top = block->bound ? block->bound->margin.top : 0;
-            float y_in_bfc = block->y + block_margin_top;
+
+            // CSS 2.1 §8.3.1: If this block's margin-top will collapse with its parent
+            // (first in-flow child, parent has no top border/padding, parent is not BFC root),
+            // then don't add margin_top to y_in_bfc. The parent will shift later to account
+            // for the collapsed margin, and the float was registered at pre-collapse coords.
+            // Adding margin_top here would make y_in_bfc overshoot the float, hiding the overlap.
+            bool margin_will_collapse_with_parent = false;
+            if (block_margin_top > 0 && block->y == 0) {
+                ViewBlock* pa = block->parent_view()->is_block() ? (ViewBlock*)block->parent_view() : nullptr;
+                if (pa && pa->parent_view()) {
+                    bool pa_creates_bfc = block_context_establishes_bfc(pa);
+                    float pa_border_top = pa->bound && pa->bound->border ? pa->bound->border->width.top : 0;
+                    float pa_padding_top = pa->bound ? pa->bound->padding.top : 0;
+                    if (!pa_creates_bfc && pa_border_top == 0 && pa_padding_top == 0) {
+                        margin_will_collapse_with_parent = true;
+                        log_debug("BFC float avoidance: margin_top=%.1f will collapse with parent, "
+                                  "using y_in_bfc without margin", block_margin_top);
+                    }
+                }
+            }
+
+            float effective_margin = margin_will_collapse_with_parent ? 0 : block_margin_top;
+            float y_in_bfc = block->y + effective_margin;
             float x_in_bfc = block->x;
 
             // Walk up from parent to BFC establishing element, accumulating offsets
@@ -2955,7 +2977,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // Compute hypothetical position (with margin collapsing) and compare
             // with the float bottom. If hypothetical >= clear_y: no clearance needed,
             // allow margin collapse later. If hypothetical < clear_y: clearance needed.
-            BlockContext* bfc = block_context_find_bfc(&lycon->block);
+            // Use PARENT's BlockContext to find the BFC — if this element establishes
+            // its own BFC (e.g. overflow:hidden), its own context has zero floats.
+            // This mirrors layout_clear_element() which also uses lycon->block.parent.
+            BlockContext* bfc = lycon->block.parent
+                ? block_context_find_bfc(lycon->block.parent)
+                : block_context_find_bfc(&lycon->block);
             float clear_y = 0;
             if (bfc) {
                 float clear_y_bfc = block_context_clear_y(bfc, block->position->clear);

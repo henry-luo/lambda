@@ -200,9 +200,14 @@ bool selector_matcher_matches(SelectorMatcher* matcher,
             bool combinator_matches = false;
 
             switch (combinator) {
-                case CSS_COMBINATOR_DESCENDANT:
-                    combinator_matches = selector_matcher_has_ancestor(matcher, left, current_element);
+                case CSS_COMBINATOR_DESCENDANT: {
+                    DomElement* matched_ancestor = nullptr;
+                    combinator_matches = selector_matcher_has_ancestor(matcher, left, current_element, &matched_ancestor);
+                    if (combinator_matches && matched_ancestor) {
+                        current_element = matched_ancestor;
+                    }
                     break;
+                }
 
                 case CSS_COMBINATOR_CHILD:
                     combinator_matches = selector_matcher_has_parent(matcher, left, current_element);
@@ -225,9 +230,14 @@ bool selector_matcher_matches(SelectorMatcher* matcher,
                     }
                     break;
 
-                case CSS_COMBINATOR_SUBSEQUENT_SIBLING:
-                    combinator_matches = selector_matcher_has_preceding_sibling(matcher, left, current_element);
+                case CSS_COMBINATOR_SUBSEQUENT_SIBLING: {
+                    DomElement* matched_sibling = nullptr;
+                    combinator_matches = selector_matcher_has_preceding_sibling(matcher, left, current_element, &matched_sibling);
+                    if (combinator_matches && matched_sibling) {
+                        current_element = matched_sibling;
+                    }
                     break;
+                }
 
                 default:
                     combinator_matches = false;
@@ -900,13 +910,13 @@ bool selector_matcher_matches_combinator(SelectorMatcher* matcher,
     // Check combinator relationship
     switch (combinator) {
         case CSS_COMBINATOR_DESCENDANT:
-            return selector_matcher_has_ancestor(matcher, left_selector, element);
+            return selector_matcher_has_ancestor(matcher, left_selector, element, nullptr);
         case CSS_COMBINATOR_CHILD:
             return selector_matcher_has_parent(matcher, left_selector, element);
         case CSS_COMBINATOR_NEXT_SIBLING:
             return selector_matcher_has_prev_sibling(matcher, left_selector, element);
         case CSS_COMBINATOR_SUBSEQUENT_SIBLING:
-            return selector_matcher_has_preceding_sibling(matcher, left_selector, element);
+            return selector_matcher_has_preceding_sibling(matcher, left_selector, element, nullptr);
         default:
             return false;
     }
@@ -914,7 +924,8 @@ bool selector_matcher_matches_combinator(SelectorMatcher* matcher,
 
 bool selector_matcher_has_ancestor(SelectorMatcher* matcher,
                                    CssCompoundSelector* selector,
-                                   DomElement* element) {
+                                   DomElement* element,
+                                   DomElement** matched_ancestor) {
     if (!matcher || !selector || !element) {
         return false;
     }
@@ -922,6 +933,7 @@ bool selector_matcher_has_ancestor(SelectorMatcher* matcher,
     DomElement* ancestor = static_cast<DomElement*>(element->parent);
     while (ancestor) {
         if (selector_matcher_matches_compound(matcher, selector, ancestor)) {
+            if (matched_ancestor) *matched_ancestor = ancestor;
             return true;
         }
         ancestor = static_cast<DomElement*>(ancestor->parent);
@@ -959,7 +971,8 @@ bool selector_matcher_has_prev_sibling(SelectorMatcher* matcher,
 
 bool selector_matcher_has_preceding_sibling(SelectorMatcher* matcher,
                                             CssCompoundSelector* selector,
-                                            DomElement* element) {
+                                            DomElement* element,
+                                            DomElement** matched_sibling) {
     if (!matcher || !selector || !element) {
         return false;
     }
@@ -969,6 +982,7 @@ bool selector_matcher_has_preceding_sibling(SelectorMatcher* matcher,
         if (sibling_node->is_element()) {
             DomElement* sibling = static_cast<DomElement*>(sibling_node);
             if (selector_matcher_matches_compound(matcher, selector, sibling)) {
+                if (matched_sibling) *matched_sibling = sibling;
                 return true;
             }
         }
