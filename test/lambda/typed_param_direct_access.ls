@@ -6,7 +6,7 @@
 
 // Test 1: basic float field reads on map params
 type Point = {x: float, y: float}
-fn distance(a: Point, b: Point) => sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y))
+fn distance(a: Point, b: Point) => math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y))
 let p1: Point = {x: 3.0, y: 0.0}
 let p2: Point = {x: 0.0, y: 4.0}
 distance(p1, p2)
@@ -43,12 +43,12 @@ fn offset_area(s: Size, factor: int) => s.w * s.h * factor
 offset_area(sz, 3)
 
 // Test 7: map param used multiple times in expression
-fn diagonal(s: Size) => sqrt(float(s.w * s.w + s.h * s.h))
+fn diagonal(s: Size) => math.sqrt(float(s.w * s.w + s.h * s.h))
 diagonal(sz)
 
 // Test 8: function returning a typed map, called with typed param
 type Vec2 = {x: float, y: float}
-fn length(v: Vec2) => sqrt(v.x * v.x + v.y * v.y)
+fn length(v: Vec2) => math.sqrt(v.x * v.x + v.y * v.y)
 let v: Vec2 = {x: 3.0, y: 4.0}
 length(v)
 

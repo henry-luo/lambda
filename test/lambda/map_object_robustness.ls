@@ -196,7 +196,7 @@ manhattan({x: 0, y: 0}, {x: 3, y: 4})
 // ============================================================
 
 // 8a: fn method with float field arithmetic
-type Vec2 { x: float, y: float; fn length() => sqrt(x * x + y * y) }
+type Vec2 { x: float, y: float; fn length() => math.sqrt(x * x + y * y) }
 let vec = {Vec2 x: 3.0, y: 4.0}
 '=8a='
 vec.length()

@@ -166,13 +166,15 @@ struct NativeMathFunc {
 
 static const NativeMathFunc native_math_funcs[] = {
     // Single-argument functions (use C math library directly)
-    {"sin", "sin", true, 1},
-    {"cos", "cos", true, 1},
-    {"tan", "tan", true, 1},
-    {"sqrt", "sqrt", true, 1},
-    {"log", "log", true, 1},
-    {"log10", "log10", true, 1},
-    {"exp", "exp", true, 1},
+    // math module functions
+    {"math_sin", "sin", true, 1},
+    {"math_cos", "cos", true, 1},
+    {"math_tan", "tan", true, 1},
+    {"math_sqrt", "sqrt", true, 1},
+    {"math_log", "log", true, 1},
+    {"math_log10", "log10", true, 1},
+    {"math_exp", "exp", true, 1},
+    // global math functions
     {"abs", "fabs", true, 1},       // Note: fabs for float, but we may prefer fn_abs_i for int
     {"floor", "floor", true, 1},
     {"ceil", "ceil", true, 1},

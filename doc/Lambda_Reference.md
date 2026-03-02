@@ -120,7 +120,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
 // Object types (nominally-typed maps with methods)
 type Point {
     x: float, y: float;
-    fn distance(other: Point) => sqrt((x - other.x)**2 + (y - other.y)**2)
+    fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
 }
 type Circle : Point { radius: float; }   // Inheritance
 let p = {Point x: 3.0, y: 4.0}           // Object literal
@@ -243,7 +243,7 @@ pub type Angle = float
 // Public object type with methods
 pub type Vec2 {
     x: float = 0.0, y: float = 0.0;
-    fn len() => sqrt(x**2 + y**2)
+    fn len() => math.sqrt(x**2 + y**2)
     fn scale(f) => {Vec2 x: x*f, y: y*f}
 }
 

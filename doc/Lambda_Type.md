@@ -387,8 +387,8 @@ Object types are **nominally-typed maps** with optional methods, inheritance, de
 // Object type with fields and methods
 type Point {
     x: float, y: float;
-    fn distance(other: Point) => sqrt((x - other.x)**2 + (y - other.y)**2)
-    fn magnitude() => sqrt(x**2 + y**2)
+    fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
+    fn magnitude() => math.sqrt(x**2 + y**2)
 }
 
 // Inheritance

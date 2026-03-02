@@ -25,7 +25,7 @@ doc_content = <document>
     </paragraph>
     
     <math inline:false>
-        '\\frac{d}{dx}\\left(\\sin(x)\\right) = \\cos(x)'
+        '\\frac{d}{dx}\\left(\\math.sin(x)\\right) = \\math.cos(x)'
     </math>
     
     <paragraph>

@@ -100,7 +100,7 @@ type User {
 **Self reference `~`:**
 ```lambda
 type Vec { x: float, y: float;
-  fn len() => sqrt(x**2 + y**2)
+  fn len() => math.sqrt(x**2 + y**2)
   fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
 }
 ```
@@ -460,11 +460,11 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 
 **Math:**
 
-`abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `sqrt(x)` `log(x)` `log10(x)` `exp(x)` `sin(x)` `cos(x)` `tan(x)`
+`abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `math.sqrt(x)` `math.log(x)` `math.log10(x)` `math.exp(x)` `math.sin(x)` `math.cos(x)` `math.tan(x)`
 
 **Stats:**
 
-`sum(v)` `avg(v)` `mean(v)` `median(v)` `variance(v)` `deviation(v)` `quantile(v,p)` `prod(v)`
+`sum(v)` `avg(v)` `math.mean(v)` `math.median(v)` `math.variance(v)` `math.deviation(v)` `math.quantile(v,p)` `math.prod(v)`
 
 **Date/Time:**
 
@@ -510,7 +510,7 @@ find("hello world", "lo")            // [{value: "lo", index: 3}]
 
 **Vector:**
 
-`dot(a,b)` `norm(v)` `cumsum(v)` `cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
+`math.dot(a,b)` `math.norm(v)` `math.cumsum(v)` `math.cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
 
 **I/O:**
 
@@ -560,7 +560,7 @@ pub data^err = input("f", 'json) // Export with error var
 ```lambda
 // In math_utils.ls:
 pub PI = 3.14159
-pub type Vec2 { x: float, y: float; fn len() => sqrt(x**2 + y**2) }
+pub type Vec2 { x: float, y: float; fn len() => math.sqrt(x**2 + y**2) }
 
 // In main.ls:
 import .math_utils

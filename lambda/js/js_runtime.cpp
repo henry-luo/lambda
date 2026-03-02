@@ -1300,7 +1300,7 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     // Math.sqrt
     if (method->len == 4 && strncmp(method->chars, "sqrt", 4) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_sqrt(js_to_number(args[0]));
+        return fn_math_sqrt(js_to_number(args[0]));
     }
     // Math.pow
     if (method->len == 3 && strncmp(method->chars, "pow", 3) == 0) {
@@ -1320,32 +1320,32 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     // Math.log
     if (method->len == 3 && strncmp(method->chars, "log", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_log(js_to_number(args[0]));
+        return fn_math_log(js_to_number(args[0]));
     }
     // Math.log10
     if (method->len == 5 && strncmp(method->chars, "log10", 5) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_log10(js_to_number(args[0]));
+        return fn_math_log10(js_to_number(args[0]));
     }
     // Math.exp
     if (method->len == 3 && strncmp(method->chars, "exp", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_exp(js_to_number(args[0]));
+        return fn_math_exp(js_to_number(args[0]));
     }
     // Math.sin
     if (method->len == 3 && strncmp(method->chars, "sin", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_sin(js_to_number(args[0]));
+        return fn_math_sin(js_to_number(args[0]));
     }
     // Math.cos
     if (method->len == 3 && strncmp(method->chars, "cos", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_cos(js_to_number(args[0]));
+        return fn_math_cos(js_to_number(args[0]));
     }
     // Math.tan
     if (method->len == 3 && strncmp(method->chars, "tan", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_tan(js_to_number(args[0]));
+        return fn_math_tan(js_to_number(args[0]));
     }
     // Math.sign
     if (method->len == 4 && strncmp(method->chars, "sign", 4) == 0) {

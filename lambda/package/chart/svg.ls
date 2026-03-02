@@ -116,10 +116,10 @@ pub fn area_path(top_points, bottom_points) string {
 
 // build an arc path segment for pie/donut charts
 pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle) string {
-    let cos_s = cos(start_angle);
-    let sin_s = sin(start_angle);
-    let cos_e = cos(end_angle);
-    let sin_e = sin(end_angle);
+    let cos_s = math.cos(start_angle);
+    let sin_s = math.sin(start_angle);
+    let cos_e = math.cos(end_angle);
+    let sin_e = math.sin(end_angle);
     let large = if (end_angle - start_angle > util.PI) 1 else 0;
 
     let ox1 = cx + outer_r * cos_s;
