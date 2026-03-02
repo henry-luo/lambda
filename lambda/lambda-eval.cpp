@@ -819,8 +819,238 @@ Bool fn_is(Item a, Item b) {
     }
 }
 
-// 3-states comparison
-Bool fn_eq(Item a_item, Item b_item) {
+// maximum recursion depth for structural equality comparison
+#define EQ_MAX_DEPTH 256
+
+// forward declaration for recursive structural equality
+static Bool fn_eq_depth(Item a_item, Item b_item, int depth);
+
+// forward declaration: get field value from a map's packed data by shape entry
+static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field);
+
+// helper: structural equality for list/array items (element-wise comparison)
+static Bool list_eq(List* a, List* b, int depth) {
+    if (a == b) return BOOL_TRUE;  // pointer identity fast-path
+    if (a->length != b->length) return BOOL_FALSE;
+    for (int64_t i = 0; i < a->length; i++) {
+        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1);
+        if (r == BOOL_ERROR) return BOOL_ERROR;
+        if (r == BOOL_FALSE) return BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
+// helper: structural equality for typed int arrays
+static Bool array_int_eq(ArrayInt* a, ArrayInt* b) {
+    if (a == b) return BOOL_TRUE;
+    if (a->length != b->length) return BOOL_FALSE;
+    return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
+}
+
+// helper: structural equality for typed int64 arrays
+static Bool array_int64_eq(ArrayInt64* a, ArrayInt64* b) {
+    if (a == b) return BOOL_TRUE;
+    if (a->length != b->length) return BOOL_FALSE;
+    return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
+}
+
+// helper: structural equality for typed float arrays
+static Bool array_float_eq(ArrayFloat* a, ArrayFloat* b) {
+    if (a == b) return BOOL_TRUE;
+    if (a->length != b->length) return BOOL_FALSE;
+    // element-wise comparison to respect NaN != NaN
+    for (int64_t i = 0; i < a->length; i++) {
+        if (a->items[i] != b->items[i]) return BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
+// helper: structural equality for maps (order-independent key-value comparison)
+static Bool map_eq(Map* a, Map* b, int depth) {
+    if (a == b) return BOOL_TRUE;  // pointer identity fast-path
+    TypeMap* type_a = (TypeMap*)a->type;
+    TypeMap* type_b = (TypeMap*)b->type;
+    if (!type_a || !type_b) return BOOL_FALSE;
+    if (type_a->length != type_b->length) return BOOL_FALSE;
+
+    // same-shape fast path: keys are identical in same order, compare values by slot
+    if (type_a == type_b) {
+        ShapeEntry* field = type_a->shape;
+        while (field) {
+            Item val_a = _map_field_value(type_a, a->data, field);
+            Item val_b = _map_field_value(type_b, b->data, field);
+            Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+            if (r == BOOL_ERROR) return BOOL_ERROR;
+            if (r == BOOL_FALSE) return BOOL_FALSE;
+            field = field->next;
+        }
+        return BOOL_TRUE;
+    }
+
+    // different shapes: for each key in A, look up in B by name+namespace
+    ShapeEntry* field_a = type_a->shape;
+    while (field_a) {
+        // find matching field in B by name and namespace
+        ShapeEntry* field_b = type_b->shape;
+        bool found = false;
+        while (field_b) {
+            if (strview_equal(field_a->name, field_b->name->str) &&
+                target_equal(field_a->ns, field_b->ns)) {
+                found = true;
+                break;
+            }
+            field_b = field_b->next;
+        }
+        if (!found) return BOOL_FALSE;
+
+        Item val_a = _map_field_value(type_a, a->data, field_a);
+        Item val_b = _map_field_value(type_b, b->data, field_b);
+        Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+        if (r == BOOL_ERROR) return BOOL_ERROR;
+        if (r == BOOL_FALSE) return BOOL_FALSE;
+        field_a = field_a->next;
+    }
+    // key-count check already done above — no extra keys in B
+    return BOOL_TRUE;
+}
+
+// helper: structural equality for elements (tag + attrs + children)
+static Bool element_eq(Element* a, Element* b, int depth) {
+    if (a == b) return BOOL_TRUE;  // pointer identity fast-path
+
+    // compare tag names
+    TypeElmt* type_a = (TypeElmt*)a->type;
+    TypeElmt* type_b = (TypeElmt*)b->type;
+    if (type_a->name.length != type_b->name.length) return BOOL_FALSE;
+    if (type_a->name.length > 0 &&
+        strncmp(type_a->name.str, type_b->name.str, type_a->name.length) != 0) return BOOL_FALSE;
+    // compare namespaces
+    if (!target_equal(type_a->ns, type_b->ns)) return BOOL_FALSE;
+
+    // compare attributes (map part) — use map_eq on the element's map fields
+    Bool attr_r = map_eq((Map*)a, (Map*)b, depth);
+    if (attr_r != BOOL_TRUE) return attr_r;
+
+    // compare children (list part)
+    if (a->length != b->length) return BOOL_FALSE;
+    for (int64_t i = 0; i < a->length; i++) {
+        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1);
+        if (r == BOOL_ERROR) return BOOL_ERROR;
+        if (r == BOOL_FALSE) return BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
+// helper: structural equality for VMaps (virtual maps)
+static Bool vmap_eq(VMap* a, VMap* b, int depth) {
+    if (a == b) return BOOL_TRUE;
+    int64_t count_a = a->vtable->count(a->data);
+    int64_t count_b = b->vtable->count(b->data);
+    if (count_a != count_b) return BOOL_FALSE;
+
+    // iterate A's keys and look up each in B
+    for (int64_t i = 0; i < count_a; i++) {
+        Item key = a->vtable->key_at(a->data, i);
+        Item val_a = a->vtable->value_at(a->data, i);
+        Item val_b = b->vtable->get(b->data, key);
+        // if key not found in B, val_b will be null but val_a shouldn't be
+        Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+        if (r == BOOL_ERROR) return BOOL_ERROR;
+        if (r == BOOL_FALSE) return BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
+// helper: cross-type array equality (e.g. array[int] vs array[float])
+// promotes each element via fn_eq_depth to leverage numeric promotion
+static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
+    // get lengths for both array types
+    int64_t len_a = 0, len_b = 0;
+    TypeId a_tid = get_type_id(a_item);
+    TypeId b_tid = get_type_id(b_item);
+
+    if (a_tid == LMD_TYPE_ARRAY)       len_a = a_item.array->length;
+    else if (a_tid == LMD_TYPE_ARRAY_INT)   len_a = a_item.array_int->length;
+    else if (a_tid == LMD_TYPE_ARRAY_INT64) len_a = a_item.array_int64->length;
+    else if (a_tid == LMD_TYPE_ARRAY_FLOAT) len_a = a_item.array_float->length;
+
+    if (b_tid == LMD_TYPE_ARRAY)       len_b = b_item.array->length;
+    else if (b_tid == LMD_TYPE_ARRAY_INT)   len_b = b_item.array_int->length;
+    else if (b_tid == LMD_TYPE_ARRAY_INT64) len_b = b_item.array_int64->length;
+    else if (b_tid == LMD_TYPE_ARRAY_FLOAT) len_b = b_item.array_float->length;
+
+    if (len_a != len_b) return BOOL_FALSE;
+
+    for (int64_t i = 0; i < len_a; i++) {
+        Item elem_a, elem_b;
+        // extract element from a
+        if (a_tid == LMD_TYPE_ARRAY)       elem_a = a_item.array->items[i];
+        else if (a_tid == LMD_TYPE_ARRAY_INT)   elem_a = {.item = i2it(a_item.array_int->items[i])};
+        else if (a_tid == LMD_TYPE_ARRAY_INT64) elem_a = push_l(a_item.array_int64->items[i]);
+        else                                    elem_a = push_d(a_item.array_float->items[i]);
+        // extract element from b
+        if (b_tid == LMD_TYPE_ARRAY)       elem_b = b_item.array->items[i];
+        else if (b_tid == LMD_TYPE_ARRAY_INT)   elem_b = {.item = i2it(b_item.array_int->items[i])};
+        else if (b_tid == LMD_TYPE_ARRAY_INT64) elem_b = push_l(b_item.array_int64->items[i]);
+        else                                    elem_b = push_d(b_item.array_float->items[i]);
+
+        Bool r = fn_eq_depth(elem_a, elem_b, depth + 1);
+        if (r == BOOL_ERROR) return BOOL_ERROR;
+        if (r == BOOL_FALSE) return BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
+// helper: get element at index from any sequence type (list, array, range)
+static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
+    switch (tid) {
+    case LMD_TYPE_LIST:        return item.list->items[i];
+    case LMD_TYPE_ARRAY:       return item.array->items[i];
+    case LMD_TYPE_ARRAY_INT:   return {.item = i2it(item.array_int->items[i])};
+    case LMD_TYPE_ARRAY_INT64: return push_l(item.array_int64->items[i]);
+    case LMD_TYPE_ARRAY_FLOAT: return push_d(item.array_float->items[i]);
+    case LMD_TYPE_RANGE:       return {.item = i2it(item.range->start + i)};
+    default:                   return ItemNull;
+    }
+}
+
+// helper: get length from any sequence type
+static inline int64_t seq_get_length(Item item, TypeId tid) {
+    switch (tid) {
+    case LMD_TYPE_LIST:        return item.list->length;
+    case LMD_TYPE_ARRAY:       return item.array->length;
+    case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
+    case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
+    case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
+    case LMD_TYPE_RANGE:       return item.range->length;
+    default:                   return -1;
+    }
+}
+
+// helper: cross-type sequence equality (range vs list, list vs array, etc.)
+// element-wise comparison with numeric promotion
+static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid, int depth) {
+    int64_t len_a = seq_get_length(a_item, a_tid);
+    int64_t len_b = seq_get_length(b_item, b_tid);
+    if (len_a != len_b) return BOOL_FALSE;
+
+    for (int64_t i = 0; i < len_a; i++) {
+        Item elem_a = seq_get_element(a_item, a_tid, i);
+        Item elem_b = seq_get_element(b_item, b_tid, i);
+        Bool r = fn_eq_depth(elem_a, elem_b, depth + 1);
+        if (r == BOOL_ERROR) return BOOL_ERROR;
+        if (r == BOOL_FALSE) return BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
+// 3-states comparison with depth tracking for structural equality
+static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
+    if (depth > EQ_MAX_DEPTH) {
+        log_error("eq depth limit exceeded: structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
+        return BOOL_ERROR;
+    }
+
     if (a_item._type_id != b_item._type_id) {
         // special case: type(null) == null, type(error) == error
         // when one side is a type value and the other is null/error,
@@ -847,6 +1077,21 @@ Bool fn_eq(Item a_item, Item b_item) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
+
+        // cross-type sequence comparison: range, list, and array types
+        // all represent ordered sequences and can be compared element-wise
+        TypeId a_tid = (a_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(a_item) : (TypeId)a_item._type_id;
+        TypeId b_tid = (b_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(b_item) : (TypeId)b_item._type_id;
+        bool a_is_seq = (a_tid == LMD_TYPE_LIST || a_tid == LMD_TYPE_ARRAY ||
+                         a_tid == LMD_TYPE_ARRAY_INT || a_tid == LMD_TYPE_ARRAY_INT64 ||
+                         a_tid == LMD_TYPE_ARRAY_FLOAT || a_tid == LMD_TYPE_RANGE);
+        bool b_is_seq = (b_tid == LMD_TYPE_LIST || b_tid == LMD_TYPE_ARRAY ||
+                         b_tid == LMD_TYPE_ARRAY_INT || b_tid == LMD_TYPE_ARRAY_INT64 ||
+                         b_tid == LMD_TYPE_ARRAY_FLOAT || b_tid == LMD_TYPE_RANGE);
+        if (a_is_seq && b_is_seq) {
+            return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
+        }
+
         // Type mismatch error for equality comparisons (e.g., true == 1)
         return BOOL_ERROR;
     }
@@ -895,16 +1140,90 @@ Bool fn_eq(Item a_item, Item b_item) {
         // both are container/pointer types - resolve actual type_id
         TypeId a_tid = get_type_id(a_item);
         TypeId b_tid = get_type_id(b_item);
+
+        // pointer identity fast-path for all container types
+        if (a_item.item == b_item.item) return BOOL_TRUE;
+
+        // type values
         if (a_tid == LMD_TYPE_TYPE && b_tid == LMD_TYPE_TYPE) {
             // compare type values by their inner type
             TypeType* a_tt = (TypeType*)a_item.type;
             TypeType* b_tt = (TypeType*)b_item.type;
             return (a_tt->type->type_id == b_tt->type->type_id) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // other container types: fall through to error (structural equality not yet supported)
+
+        // structural equality for container types requires same resolved type
+        if (a_tid != b_tid) {
+            // cross-type sequence comparison (array[int] vs array[float], list vs range, etc.)
+            bool a_is_seq = (a_tid == LMD_TYPE_LIST || a_tid == LMD_TYPE_ARRAY ||
+                             a_tid == LMD_TYPE_ARRAY_INT || a_tid == LMD_TYPE_ARRAY_INT64 ||
+                             a_tid == LMD_TYPE_ARRAY_FLOAT || a_tid == LMD_TYPE_RANGE);
+            bool b_is_seq = (b_tid == LMD_TYPE_LIST || b_tid == LMD_TYPE_ARRAY ||
+                             b_tid == LMD_TYPE_ARRAY_INT || b_tid == LMD_TYPE_ARRAY_INT64 ||
+                             b_tid == LMD_TYPE_ARRAY_FLOAT || b_tid == LMD_TYPE_RANGE);
+            if (a_is_seq && b_is_seq) {
+                return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
+            }
+            return BOOL_ERROR;
+        }
+
+        // list structural equality
+        if (a_tid == LMD_TYPE_LIST) {
+            return list_eq(a_item.list, b_item.list, depth);
+        }
+        // generic array (array of Items) structural equality
+        if (a_tid == LMD_TYPE_ARRAY) {
+            return list_eq((List*)a_item.array, (List*)b_item.array, depth);
+        }
+        // typed array equality
+        if (a_tid == LMD_TYPE_ARRAY_INT) {
+            return array_int_eq(a_item.array_int, b_item.array_int);
+        }
+        if (a_tid == LMD_TYPE_ARRAY_INT64) {
+            return array_int64_eq(a_item.array_int64, b_item.array_int64);
+        }
+        if (a_tid == LMD_TYPE_ARRAY_FLOAT) {
+            return array_float_eq(a_item.array_float, b_item.array_float);
+        }
+        // map structural equality (order-independent)
+        if (a_tid == LMD_TYPE_MAP) {
+            return map_eq(a_item.map, b_item.map, depth);
+        }
+        // element structural equality (tag + attrs + children)
+        if (a_tid == LMD_TYPE_ELEMENT) {
+            return element_eq(a_item.element, b_item.element, depth);
+        }
+        // vmap structural equality
+        if (a_tid == LMD_TYPE_VMAP) {
+            return vmap_eq(a_item.vmap, b_item.vmap, depth);
+        }
+        // range equality (start, end, length)
+        if (a_tid == LMD_TYPE_RANGE) {
+            Range* ra = a_item.range;
+            Range* rb = b_item.range;
+            return (ra->start == rb->start && ra->end == rb->end && ra->length == rb->length)
+                ? BOOL_TRUE : BOOL_FALSE;
+        }
+        // object structural equality (same as map, fields must match)
+        if (a_tid == LMD_TYPE_OBJECT) {
+            Object* oa = a_item.object;
+            Object* ob = b_item.object;
+            return map_eq((Map*)oa, (Map*)ob, depth);
+        }
+        // function reference equality
+        if (a_tid == LMD_TYPE_FUNC) {
+            return (a_item.function == b_item.function) ? BOOL_TRUE : BOOL_FALSE;
+        }
+        log_error("eq unsupported container type: %s", get_type_name(a_tid));
+        return BOOL_ERROR;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
     return BOOL_ERROR;
+}
+
+// 3-states comparison (public entry point)
+Bool fn_eq(Item a_item, Item b_item) {
+    return fn_eq_depth(a_item, b_item, 0);
 }
 
 Bool fn_ne(Item a_item, Item b_item) {

@@ -226,6 +226,14 @@ let a = [1, 2, 3]
 ==  !=  <  <=  >  >=
 ```
 
+`==` performs **structural deep equality** on all types:
+```lambda
+[1, 2] == [1, 2]             // true  (list/array)
+{a: 1, b: 2} == {b: 2, a: 1} // true  (map, order-independent)
+[1] == [1.0]                  // true  (numeric promotion)
+(1 to 3) == [1, 2, 3]         // true  (cross-type sequence)
+```
+
 **Logical:** logical and, or, not
 ```lambda
 and  or  not
