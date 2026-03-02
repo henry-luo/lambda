@@ -3,15 +3,16 @@
 // type checking, comparison, string operations, and use as element tags.
 
 // =============================================
-// Section 1: Namespace declarations
+// Section 1: Namespace declarations (v2: import-based)
 // =============================================
-namespace svg: 'http://www.w3.org/2000/svg', xlink: 'http://www.w3.org/1999/xlink'
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
 
 "1. namespaced element tags"
 <svg.rect>
 <svg.circle>
 
-"2. namespaced attributes"
+"2. namespaced attributes (desugared to sub-maps)"
 <svg.rect svg.width: 100, svg.height: 50>
 <image xlink.href: "#id">
 
@@ -130,7 +131,7 @@ let s3 = 'different'
 // =============================================
 // Section 10: Namespace member access (e.ns.attr)
 // =============================================
-"23. e.ns.attr member expression"
+"23. e.ns.attr member expression (via sub-map)"
 let elem = <svg.rect svg.width: 100, svg.height: 50>
 elem.svg.width
 elem.svg.height

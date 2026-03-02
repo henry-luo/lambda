@@ -384,6 +384,10 @@ typedef enum SysFunc {
     SYSFUNC_ZIP,
     SYSFUNC_RANGE3,
     SYSFUNC_QUANTILE,
+    SYSFUNC_REDUCE,         // reduce(collection, fn) - fold/accumulate
+    // parse string functions
+    SYSFUNC_PARSE1,         // parse(str) - parse string, auto-detect format
+    SYSFUNC_PARSE2,         // parse(str, format) - parse string with format
     // variadic parameter access
     SYSFUNC_VARG0,          // varg() - get all variadic args as list
     SYSFUNC_VARG1,          // varg(n) - get nth variadic arg

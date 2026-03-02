@@ -857,6 +857,7 @@ typedef struct Context {
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_quantile(Item a, Item p);
+    Item fn_reduce(Item collection, Item func);
 
     Range* fn_to(Item a, Item b);
 
@@ -909,6 +910,8 @@ typedef struct Context {
 
     Item fn_input1(Item url);
     Item fn_input2(Item url, Item options);
+    Item fn_parse1(Item str);
+    Item fn_parse2(Item str, Item options);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
