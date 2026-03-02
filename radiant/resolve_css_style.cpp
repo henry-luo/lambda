@@ -2530,11 +2530,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     next_idx++;
 
                                     // Next should be line-height
+                                    // CSS 2.1 §15.7: line-height accepts: normal | <number> | <length> | <percentage> | inherit
                                     if (next_idx < count) {
                                         const CssValue* lh = value->data.list.values[next_idx];
                                         if (lh && (lh->type == CSS_VALUE_TYPE_LENGTH ||
                                                    lh->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                                                   lh->type == CSS_VALUE_TYPE_NUMBER)) {
+                                                   lh->type == CSS_VALUE_TYPE_NUMBER ||
+                                                   (lh->type == CSS_VALUE_TYPE_KEYWORD &&
+                                                    (lh->data.keyword == CSS_VALUE_NORMAL ||
+                                                     lh->data.keyword == CSS_VALUE_INHERIT)))) {
                                             line_height_value = lh;
                                             log_debug("[CSS] Font shorthand: found line-height at [%zu]", next_idx);
                                             next_idx++;
@@ -2683,6 +2687,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set font-size. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-size: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
             float font_size = 0.0f;  bool valid = false;
@@ -2757,6 +2775,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_WEIGHT: {
             log_debug("[CSS] Processing font-weight property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set/reset font-weight. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-weight: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
                 log_debug("[CSS]   Created new FontProp with defaults");
@@ -2769,6 +2801,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_FAMILY: {
             log_debug("[CSS] Processing font-family property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set font-family. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-family: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
@@ -2879,6 +2925,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             log_debug("[CSS] Processing line-height property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set line-height. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping line-height: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->blk) { span->blk = alloc_block_prop(lycon); }
             span->blk->line_height = value;  // will be resolved later
             break;
@@ -6100,6 +6160,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_STYLE: {
             log_debug("[CSS] Processing font-style property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set/reset font-style. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-style: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6201,6 +6275,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_VARIANT: {
             log_debug("[CSS] Processing font-variant property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set/reset font-variant. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-variant: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
@@ -8011,8 +8099,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             log_debug("[CSS] list-style: expanded to list-style-type=%s", info ? info->name : "unknown");
                         }
                         else if (!is_position && keyword == CSS_VALUE_NONE) {
-                            block->blk->list_style_type = CSS_VALUE_NONE;
-                            log_debug("[CSS] list-style: set list-style-type=none");
+                            // CSS 2.1 §12.5: 'none' in the shorthand is ambiguous.
+                            // If list-style-type was already explicitly set by a prior
+                            // value in this shorthand, 'none' applies to list-style-image.
+                            // Otherwise it applies to list-style-type (and image gets none too).
+                            if (block->blk->list_style_type != 0 && block->blk->list_style_type != CSS_VALUE_NONE) {
+                                // Type already set — apply none to image only
+                                block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
+                                str_copy(block->blk->list_style_image, 5, "none", 4);
+                                log_debug("[CSS] list-style: 'none' applied to list-style-image (type already set)");
+                            } else {
+                                block->blk->list_style_type = CSS_VALUE_NONE;
+                                log_debug("[CSS] list-style: set list-style-type=none");
+                            }
                         }
                     }
                     else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
@@ -8036,6 +8135,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
                 }
+            }
+
+            // CSS 2.1 §12.5.1: If list-style shorthand didn't explicitly set
+            // list-style-type, it defaults to 'disc' (the initial value).
+            // Without this, marker generation is skipped because list_style_type==0.
+            if (block->blk->list_style_type == 0) {
+                block->blk->list_style_type = CSS_VALUE_DISC;
+                log_debug("[CSS] list-style shorthand: using default list-style-type=disc");
             }
             break;
         }
