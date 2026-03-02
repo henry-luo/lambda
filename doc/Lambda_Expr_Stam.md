@@ -174,6 +174,15 @@ null == 42         // false (not an error)
 if (x == null) "missing" else x
 ```
 
+### Type Comparisons
+
+```lambda
+// Type checking
+42 is int          // true
+"hello" is string  // true
+42 is not string   // true
+```
+
 ---
 
 ## Logical Expressions
@@ -361,30 +370,39 @@ When `~` is not used, the pipe passes the entire collection/data on left side to
 [1, 2, 3, 4, 5] | take(3)    // [1, 2, 3]
 ```
 
-### Where / That Clause (Filtering)
+### That Clause (Filtering)
 
 ```lambda
 // Basic filtering
-[1, 2, 3, 4, 5] where ~ > 3
+[1, 2, 3, 4, 5] that (~ > 3)
 // Result: [4, 5]
 
 // Filter objects
-users where ~.age >= 18
+users that (age >= 18)
 // Keep only adult users
 
+// == and != work without parens
+[1, 2, 3, 4, 5] that ~ == 3
+// Result: [3]
+
 // Combined with pipe
-data | ~.name where len(~) > 3 | ~.upper()
+data | ~.name that (len(~) > 3) | ~.upper()
 ```
+
+> **Note:** The relational operators `<`, `>`, `<=`, `>=` conflict with element-tag
+> syntax in the parser. When a `that` (or `|`) condition uses any of these
+> operators, wrap the condition in parentheses: `items that (~ > 0)`.  
+> The operators `==`, `!=`, `and`, `or`, `+`, `-`, `*`, `/` work without parens.
 
 #### Implicit Field Access in `that` Clause
 
-The `that` keyword works like `where` for filtering, but supports **implicit field access** — bare identifiers that are not in scope automatically resolve to `~.name`:
+Inside a `that` clause, bare identifiers that are not in scope automatically resolve to `~.name` — **implicit field access**:
 
 ```lambda
-// Traditional: explicit ~.field
-users where (~.age >= 18 and ~.name != "admin")
+// Explicit: ~.field
+users that (~.age >= 18 and ~.name != "admin")
 
-// With 'that': implicit field names
+// Implicit: bare field names
 users that (age >= 18 and name != "admin")
 
 // Both forms produce identical results
@@ -650,49 +668,150 @@ v == null              // true
 
 ### Extended For-Expression Clauses
 
+For expressions support SQL/XQuery-inspired clauses for filtering, sorting, pagination, and intermediate bindings. The full syntax is:
+
+```
+for (<bindings> [, let <name> = <expr>, ...] [where <cond>] [order by <spec>] [limit <n>] [offset <n>]) <body>
+```
+
+Clauses are processed in logical order: **bindings → let → where → order by → offset → limit → body**.
+
+#### `where` — Filter
+
+The `where` clause filters items by a boolean condition. Only items where the condition is truthy proceed to the body. Use `and` / `or` to combine conditions.
+
 ```lambda
-// Where clause — filter
 for (x in [1, 2, 3, 4, 5] where x > 2) x
 // (3, 4, 5)
 
-// Let clause — intermediate bindings
+for (user in users where user.active and user.age >= 18)
+  user.name
+
+// where eliminates nulls cleanly — compare with if in body:
+for (x in data where x > 0) x * 2     // [2, 4, 6]
+for (x in data) if (x > 0) x * 2      // [null, 2, null, 4, ...] — nulls remain
+```
+
+#### `let` — Intermediate Bindings
+
+The `let` clause introduces named values computed per iteration. The name is available in subsequent clauses (`where`, `order by`) and in the body. Multiple `let` clauses are comma-separated after the bindings, and each can reference earlier `let` names.
+
+```lambda
+// Compute once, reuse in where and body
 for (x in [1, 2, 3], let squared = x * x) squared + 1
 // (2, 5, 10)
 
-// Order by clause — sort
-for (x in [3, 1, 4] order by x) x
-// (1, 3, 4)
+// let feeds into where
+for (x in [1, 2, 3, 4, 5], let doubled = x * 2 where doubled > 4) doubled
+// (6, 8, 10)
 
-for (x in [3, 1, 4] order by x desc) x
-// (4, 3, 1)
+// Chained lets — each sees the previous
+for (x in [2, 3, 4], let sq = x * x, let cube = sq * x where cube > 10) [x, sq, cube]
+// [[3, 9, 27], [4, 16, 64]]
 
-// Limit and offset — pagination
+// let avoids redundant computation
+for (order in orders,
+     let subtotal = sum(order.items | ~.price * ~.qty),
+     let tax = subtotal * 0.08,
+     let total = subtotal + tax
+     where total > 100)
+  {id: order.id, total: total}
+```
+
+#### `order by` — Sort
+
+The `order by` clause sorts the result set. The default direction is ascending. Append `desc` for descending, or `asc` for explicit ascending. Multiple sort keys are comma-separated for tie-breaking.
+
+```lambda
+// Ascending (default)
+for (x in [3, 1, 4, 1, 5] order by x) x
+// (1, 1, 3, 4, 5)
+
+// Descending
+for (x in [3, 1, 4, 1, 5] order by x desc) x
+// (5, 4, 3, 1, 1)
+
+// Sort by field
+let people = [{name: "Alice", age: 30}, {name: "Bob", age: 25}, {name: "Carol", age: 35}]
+for (p in people order by p.age) p.name
+// ("Bob", "Alice", "Carol")
+
+// Sort by computed expression
+for (s in ["banana", "fig", "apple"] order by len(s)) s
+// ("fig", "apple", "banana")
+
+// Multiple sort keys (secondary for tie-breaking)
+for (p in employees order by p.department asc, p.salary desc)
+  {name: p.name, dept: p.department}
+```
+
+#### `limit` and `offset` — Pagination
+
+`limit N` returns at most N results. `offset M` skips the first M results. Both are applied **after** filtering and sorting.
+
+```lambda
+// First 3 items
 for (x in [1, 2, 3, 4, 5] limit 3) x
 // (1, 2, 3)
 
+// Skip first 2
 for (x in [1, 2, 3, 4, 5] offset 2) x
 // (3, 4, 5)
 
-// Combined clauses
+// Combined: skip 2, then take 3
+for (x in [1, 2, 3, 4, 5, 6, 7] limit 3 offset 2) x
+// (3, 4, 5)
+
+// Pagination pattern: page 3, 20 items per page
+for (item in items order by item.id limit 20 offset 40) item
+
+// Offset past end returns empty
+for (x in [1, 2, 3] offset 10) x
+// (empty)
+
+// Limit larger than collection returns all
+for (x in [1, 2, 3] limit 10) x
+// (1, 2, 3)
+```
+
+#### `group by` — Grouping
+
+> **Status:** The `group by` clause is parsed but **not yet implemented** in the runtime. It is reserved for future use.
+
+The planned syntax groups items by a key expression and binds each group to a name via `as`:
+
+```
+group by <key-expr> [, <key-expr>, ...] as <group-name>
+```
+
+Each group will be a map with `.key` (the grouping key) and `.items` (array of items in that group):
+
+```lambda
+// Planned syntax (not yet available):
+for (sale in sales group by sale.product as g)
+  {product: g.key, total: sum(g.items | ~.amount)}
+```
+
+#### Combined Clauses
+
+All clauses can be used together. The recommended order matches the logical processing order:
+
+```lambda
 for (x in items,
      let score = x.value * x.weight
      where x.active
      order by score desc
      limit 10)
   {name: x.name, score: score}
-```
 
-### Type Expressions
-
-```lambda
-// Type queries
-type(42)           // 'int
-type("hello")      // 'string
-
-// Type checking
-42 is int          // true
-"hello" is string  // true
-42 is not string   // true
+// Filter, compute, sort, paginate in one expression
+for (x in 1 to 20,
+     let sq = x * x
+     where x > 3 and x < 15
+     order by sq desc
+     limit 3 offset 2)
+  sq
+// (144, 121, 100)
 ```
 
 ---
@@ -1033,7 +1152,7 @@ From highest to lowest:
 | 9          | `or`                       | Logical OR      |
 | 10         | `to`                       | Range           |
 | 11         | `is`, `in`                 | Type operations |
-| 12         | `\|`, `where`, `that`      | Pipe, Filter    |
+| 12         | `\|`, `that`               | Pipe, Filter    |
 
 ### Arithmetic Operators
 
@@ -1087,8 +1206,7 @@ From highest to lowest:
 | Operator | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `\|` | Pipe (transform) | `[1, 2, 3] \| ~ * 2` | `[2, 4, 6]` |
-| `where` | Filter | `[1, 2, 3, 4] where ~ > 2` | `[3, 4]` |
-| `that` | Filter (implicit `~.name`) | `items that (age > 18)` | Filtered items |
+| `that` | Filter | `[1, 2, 3, 4] that (~ > 2)` | `[3, 4]` |
 
 ### Pipe Output Operators
 
