@@ -22,9 +22,9 @@ type OptionalEmail = string?
 type OptionalAge = int?
 
 // arrays
-type Names = [string]
-type Numbers = [int]
-type OptionalList = [string]?  // array itself is optional
+type Names = string[]
+type Numbers = int[]
+type OptionalList = string[]?  // array itself is optional
 
 // maps
 type Person = {
@@ -40,17 +40,17 @@ Control array cardinality with occurrence operators:
 
 ```lambda
 type Document = {
-    // exactly one array (required)
-    tags: [string],
-
     // zero or more elements (can be empty)
+    tags: string[],
+
+    // zero or more elements (can be empty) — bracket form
     comments: [string*],
 
     // one or more elements (must have at least one)
     authors: [string+],
 
-    // optional array (can be missing, but if present must have elements)
-    attachments: [string]?
+    // optional array (can be missing entirely)
+    attachments: string[]?
 }
 ```
 
@@ -361,7 +361,7 @@ type Team = {
 
 // use ? for optional arrays (can be missing entirely)
 type Document = {
-    attachments: [string]?  // array can be missing
+    attachments: string[]?  // array can be missing
 }
 ```
 

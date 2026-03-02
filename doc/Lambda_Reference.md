@@ -103,9 +103,9 @@ The Lambda language documentation is organized into focused sub-documents for ea
 ```lambda
 // Type annotations
 let x: int = 42
-let items: [string] = ["a", "b"]
+let items: string[] = ["a", "b"]
 
-// Typed array annotations (native performance)
+// Typed array annotations
 var arr: int[] = [1, 2, 3]     // Native int array
 var data: float[] = [0.1, 0.2] // Native float array
 
