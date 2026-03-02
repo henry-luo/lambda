@@ -113,9 +113,6 @@ extern "C" {
 #define SYM_OBJECT_LITERAL sym_object_literal
 #define SYM_THAT_CONSTRAINT sym_that_constraint
 
-// Namespace declaration symbols
-#define SYM_NAMESPACE_DECL sym_namespace_decl
-
 // String/Symbol Pattern symbols
 #define SYM_STRING_PATTERN sym_string_pattern
 #define SYM_SYMBOL_PATTERN sym_symbol_pattern

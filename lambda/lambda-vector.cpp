@@ -1341,7 +1341,11 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     arr->is_spreadable = false;
 }
 
-// sort(vec, direction) - sort with direction ('asc' or 'desc')
+// sort(vec, option) - sort with direction, key function, or options map
+// 2nd arg dispatch:
+//   symbol/string → direction ('asc or 'desc)
+//   function      → key extractor fn (ascending)
+//   map           → {dir: 'asc|'desc, by: key_fn}
 // string/symbol passthrough: strings are singular, not iterable
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
@@ -1354,9 +1358,11 @@ Item fn_sort2(Item item, Item dir_item) {
         return { .list = result };
     }
 
-    // Parse direction - default to ascending
+    // Parse the 2nd argument: direction, key function, or options map
     bool descending = false;
+    Function* key_fn = NULL;
     TypeId dir_type = get_type_id(dir_item);
+
     if (dir_type == LMD_TYPE_STRING) {
         String* str = dir_item.get_string();
         if (str && (strcmp(str->chars, "desc") == 0 || strcmp(str->chars, "descending") == 0)) {
@@ -1367,8 +1373,89 @@ Item fn_sort2(Item item, Item dir_item) {
         if (sym && (strcmp(sym->chars, "desc") == 0 || strcmp(sym->chars, "descending") == 0)) {
             descending = true;
         }
+    } else if (dir_type == LMD_TYPE_FUNC) {
+        // 2nd arg is a key extractor function
+        key_fn = dir_item.function;
+    } else if (dir_type == LMD_TYPE_MAP || dir_type == LMD_TYPE_OBJECT) {
+        // 2nd arg is an options map: {dir: 'asc|'desc, by: key_fn}
+        Map* options_map = dir_item.map;
+        bool is_found;
+
+        // extract 'dir' field
+        Item dir_val = map_get(options_map, (Item){.item = s2it(heap_create_name("dir", 3))});
+        TypeId dir_val_type = get_type_id(dir_val);
+        if (dir_val_type == LMD_TYPE_STRING) {
+            String* str = dir_val.get_string();
+            if (str && (strcmp(str->chars, "desc") == 0 || strcmp(str->chars, "descending") == 0)) {
+                descending = true;
+            }
+        } else if (dir_val_type == LMD_TYPE_SYMBOL) {
+            Symbol* sym = dir_val.get_symbol();
+            if (sym && (strcmp(sym->chars, "desc") == 0 || strcmp(sym->chars, "descending") == 0)) {
+                descending = true;
+            }
+        }
+
+        // extract 'by' field (key function)
+        Item by_val = map_get(options_map, (Item){.item = s2it(heap_create_name("by", 2))});
+        if (get_type_id(by_val) == LMD_TYPE_FUNC) {
+            key_fn = by_val.function;
+        }
     }
 
+    // If we have a key function, sort by extracted keys (works for any collection type)
+    if (key_fn) {
+        // build an Array of Items to sort
+        Array* result = array();
+        result->capacity = len;
+        result->length = len;
+        result->items = (Item*)heap_data_calloc(len * sizeof(Item));
+        for (int64_t i = 0; i < len; i++) {
+            result->items[i] = vector_get(item, i);
+        }
+
+        // extract keys using the key function
+        Item* key_vals = (Item*)malloc(len * sizeof(Item));
+        int64_t* indices = (int64_t*)malloc(len * sizeof(int64_t));
+        for (int64_t i = 0; i < len; i++) {
+            indices[i] = i;
+            Item key_result = fn_call1(key_fn, result->items[i]);
+            if (get_type_id(key_result) == LMD_TYPE_ERROR) {
+                free(key_vals);
+                free(indices);
+                return key_result;  // propagate error
+            }
+            key_vals[i] = key_result;
+        }
+
+        // sort indices by key values using generic comparison (fn_lt/fn_gt)
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                Bool cmp = descending ? fn_lt(key_vals[indices[j]], key_vals[indices[j + 1]])
+                                      : fn_gt(key_vals[indices[j]], key_vals[indices[j + 1]]);
+                if (cmp == BOOL_TRUE) {
+                    int64_t tmp = indices[j];
+                    indices[j] = indices[j + 1];
+                    indices[j + 1] = tmp;
+                }
+            }
+        }
+
+        // rearrange items by sorted indices
+        Item* temp = (Item*)malloc(len * sizeof(Item));
+        for (int64_t i = 0; i < len; i++) {
+            temp[i] = result->items[indices[i]];
+        }
+        memcpy(result->items, temp, len * sizeof(Item));
+        free(temp);
+        free(indices);
+        free(key_vals);
+
+        result->is_spreadable = false;
+        return { .array = result };
+    }
+
+    // No key function - sort by value with direction (original behavior)
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         ArrayInt64* result = array_int64_new(len);
@@ -1421,6 +1508,33 @@ Item fn_sort2(Item item, Item dir_item) {
         }
         return { .array_float = result };
     }
+}
+
+// reduce(collection, fn) - fold/accumulate a collection using a binary function
+// fn receives (accumulator, current_element) and returns new accumulator
+// Initial accumulator is the first element; fn is called starting from the second element
+// Returns ItemNull for empty collections
+Item fn_reduce(Item collection, Item func_item) {
+    GUARD_ERROR2(collection, func_item);
+
+    TypeId func_type = get_type_id(func_item);
+    if (func_type != LMD_TYPE_FUNC) {
+        log_error("reduce: 2nd argument must be a function, got type: %s", get_type_name(func_type));
+        return ItemError;
+    }
+    Function* fn = func_item.function;
+
+    int64_t len = vector_length(collection);
+    if (len <= 0) return ItemNull;  // empty collection
+    if (len == 1) return vector_get(collection, 0);  // single element
+
+    Item acc = vector_get(collection, 0);
+    for (int64_t i = 1; i < len; i++) {
+        Item elem = vector_get(collection, i);
+        acc = fn_call2(fn, acc, elem);
+        if (get_type_id(acc) == LMD_TYPE_ERROR) return acc;  // propagate error
+    }
+    return acc;
 }
 
 // unique(vec) - remove duplicates

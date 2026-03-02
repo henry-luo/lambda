@@ -31,6 +31,9 @@ extern Symbol* fn_name(Item item);
 extern Item fn_find2(Item source, Item pattern);
 extern Item fn_find3(Item source, Item pattern, Item options);
 extern Item fn_split3(Item str, Item sep, Item keep_delim);
+extern Item fn_reduce(Item collection, Item func);
+extern Item fn_parse1(Item str);
+extern Item fn_parse2(Item str, Item options);
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
@@ -227,6 +230,7 @@ func_obj_t func_list[] = {
     {"fn_zip", (fn_ptr) fn_zip},
     {"fn_range3", (fn_ptr) fn_range3},
     {"fn_quantile", (fn_ptr) fn_quantile},
+    {"fn_reduce", (fn_ptr) fn_reduce},
     {"fn_strcat", (fn_ptr) fn_strcat},
     {"fn_normalize", (fn_ptr) fn_normalize},
     {"fn_normalize1", (fn_ptr) fn_normalize1},
@@ -301,6 +305,8 @@ func_obj_t func_list[] = {
     {"fn_symbol2", (fn_ptr) fn_symbol2},
     {"fn_type", (fn_ptr) fn_type},    {"fn_name", (fn_ptr) fn_name},    {"fn_input1", (fn_ptr) fn_input1},
     {"fn_input2", (fn_ptr) fn_input2},
+    {"fn_parse1", (fn_ptr) fn_parse1},
+    {"fn_parse2", (fn_ptr) fn_parse2},
     {"fn_format1", (fn_ptr) fn_format1},
     {"fn_format2", (fn_ptr) fn_format2},
     {"fn_error", (fn_ptr) fn_error},
