@@ -1604,6 +1604,23 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     log_debug("looking up name: %.*s", (int)var_name.length, var_name.str);
     NameEntry* entry = lookup_name(tp, var_name);
     if (!entry) {
+        // In 'that' clause, rewrite bare identifier to ~.name (member access on current item)
+        // Name resolution order: 1) scope names, 2) ~.name fields, 3) system properties
+        if (tp->in_that_clause) {
+            log_debug("that clause: rewriting bare '%.*s' to ~.%.*s",
+                (int)var_name.length, var_name.str, (int)var_name.length, var_name.str);
+            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node(tp,
+                AST_NODE_MEMBER_EXPR, id_node, sizeof(AstFieldNode));
+            // create ~ (current item) as the object
+            AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, id_node, sizeof(AstNode));
+            current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+            field_node->object = current_item;
+            // use the identifier as the field name (without scope lookup)
+            ast_node->type = &TYPE_ANY;
+            field_node->field = (AstNode*)ast_node;
+            field_node->type = &TYPE_ANY;
+            return (AstNode*)field_node;
+        }
         // ident is used for member access, thus we return TYPE_ANY
         ast_node->type = &TYPE_ANY;
     }
@@ -2532,7 +2549,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_PIPE; }
     else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
-    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is alias for 'where'
+    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
     else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE_FILE; }
     else if (strview_equal(&op, "|>>")) { ast_node->op = OPERATOR_PIPE_APPEND; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
@@ -2556,12 +2573,19 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     }
 
+    // For 'that' operator: enable implicit ~.name resolution for bare identifiers
+    bool is_that = strview_equal(&op, "that");
+    bool old_in_that = tp->in_that_clause;
+    if (is_that) tp->in_that_clause = true;
+
     ast_node->right = build_expr(tp, right_node);
 
     // Reset pipe_inject_args after building right side
     if (pipe_inject) {
         tp->pipe_inject_args = 0;
     }
+    // Reset that clause flag
+    tp->in_that_clause = old_in_that;
 
     // Defensive validation: ensure right operand was built successfully
     if (!ast_node->right) {
@@ -3792,10 +3816,13 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
             }
         }
         else if (symbol == SYM_THAT_CONSTRAINT) {
-            // object-level constraint: that (expr)
+            // object-level constraint: that (expr) - enable implicit ~.name resolution
             TSNode constraint_expr = ts_node_child_by_field_id(child, FIELD_CONSTRAINT);
             if (!ts_node_is_null(constraint_expr)) {
+                bool old_in_that = tp->in_that_clause;
+                tp->in_that_clause = true;
                 AstNode* constraint = build_expr(tp, constraint_expr);
+                tp->in_that_clause = old_in_that;
                 if (constraint) {
                     if (!prev_constraint) { ast_node->constraints = constraint; }
                     else { prev_constraint->next = constraint; }
@@ -4158,10 +4185,13 @@ AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
         ast_node->base = build_expr(tp, base_node);
     }
 
-    // Build constraint expression
+    // Build constraint expression (inside 'that' clause: enable implicit ~.name resolution)
     TSNode constraint_node = ts_node_child_by_field_id(type_node, FIELD_CONSTRAINT);
     if (!ts_node_is_null(constraint_node)) {
+        bool old_in_that = tp->in_that_clause;
+        tp->in_that_clause = true;
         ast_node->constraint = build_expr(tp, constraint_node);
+        tp->in_that_clause = old_in_that;
     }
 
     // Create TypeConstrained directly (not wrapped in TypeType)
@@ -5946,9 +5976,13 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             byte_offset += sizeof(void*);
                         }
                     } else if (child_sym == SYM_THAT_CONSTRAINT) {
+                        // object-level constraint: enable implicit ~.name resolution
                         TSNode constraint_expr = ts_node_child_by_field_id(obj_child, FIELD_CONSTRAINT);
                         if (!ts_node_is_null(constraint_expr)) {
+                            bool old_in_that = tp->in_that_clause;
+                            tp->in_that_clause = true;
                             AstNode* constraint = build_expr(tp, constraint_expr);
+                            tp->in_that_clause = old_in_that;
                             if (constraint) {
                                 if (!prev_constraint) { obj_node->constraints = constraint; }
                                 else { prev_constraint->next = constraint; }

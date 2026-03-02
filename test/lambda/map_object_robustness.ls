@@ -383,3 +383,13 @@ let src: Pt = {x: 50, y: 60}
 let alias = src
 '=18='
 alias.x + alias.y
+
+// ============================================================
+// Section 19: Object-level constraint with implicit ~.name
+// ============================================================
+
+// 19a: object constraint using implicit name (hi, lo instead of ~.hi, ~.lo)
+type Range2 { lo: int, hi: int; that (hi > lo) }
+'=19a='
+{Range2 lo: 1, hi: 10} is Range2
+{Range2 lo: 10, hi: 1} is Range2
