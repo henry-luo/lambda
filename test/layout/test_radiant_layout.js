@@ -290,15 +290,15 @@ class RadiantLayoutTester {
     }
 
     /**
-     * Load the skip list for a category (e.g., test/layout/data/css2.1/skip_list.txt).
+     * Load the skip list from test/layout/skip_list.txt.
      * Each line is a test name (without extension) to skip.
-     * Caches the result per category.
+     * Caches the result (single shared list for all categories).
      */
     async loadSkipList(category) {
         if (!this._skipListCache) this._skipListCache = {};
-        if (this._skipListCache[category] !== undefined) return this._skipListCache[category];
+        if (this._skipListCache['_global'] !== undefined) return this._skipListCache['_global'];
 
-        const skipListPath = path.join(this.testDataDir, category, 'skip_list.txt');
+        const skipListPath = path.join(__dirname, 'skip_list.txt');
         try {
             const content = await fs.readFile(skipListPath, 'utf8');
             const names = new Set(
@@ -306,18 +306,18 @@ class RadiantLayoutTester {
                     .map(line => line.trim())
                     .filter(line => line && !line.startsWith('#'))
             );
-            this._skipListCache[category] = names;
+            this._skipListCache['_global'] = names;
             return names;
         } catch (e) {
             // No skip list file — nothing to skip
-            this._skipListCache[category] = new Set();
-            return this._skipListCache[category];
+            this._skipListCache['_global'] = new Set();
+            return this._skipListCache['_global'];
         }
     }
 
     /**
      * Pre-filter test tasks: remove files without browser references, exceeding MAX_TEST_FILE_SIZE,
-     * or listed in the category's skip_list.txt.
+     * or listed in skip_list.txt.
      * Returns { tasks, skipped } where skipped is the count of removed tasks.
      */
     async filterTestTasks(testTasks) {
