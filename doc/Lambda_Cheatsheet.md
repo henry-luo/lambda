@@ -170,15 +170,17 @@ map.key           // Map field access
 map["key"]        // Map field by string
 ```
 
-**Namespaces Support:**
+**Namespaces (via `import` with bare URI):**
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
-namespace xlink: 'http://www.w3.org/1999/xlink'
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
 
 <svg.rect svg.width: 100>   // Namespaced tag & attr
-elem.svg.width              // Namespaced member access
+// desugars to: <svg.rect svg: {width: 100}>
+elem.svg.width              // Chained sub-map access
+elem.svg                    // {width: 100} sub-map
 svg.rect                    // Qualified symbol
-symbol("href", 'xlink_url') // Create namespaced symbol
+symbol("href", 'xlink_url') // Dynamic namespaced symbol
 ```
 
 ## Variables & Declarations
