@@ -29,7 +29,10 @@ static inline bool is_out_of_flow_child(View* child) {
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     View* child = span->first_child;
     if (!child) {
-        // Empty inline element - size includes border and padding per CSS 2.1 §8.1
+        // Truly empty inline element (no children at all) — CSS 2.1 §9.4.2:
+        // Line boxes with no text, no preserved whitespace, and no inline elements
+        // with non-zero margins/padding/borders are zero-height. A truly empty
+        // inline element (e.g., <span></span>) contributes only border+padding.
         float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
         float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
         if (span->bound) {
@@ -555,6 +558,30 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     compute_span_bounding_box(span, span_is_multi_line);
+
+    // CSS 2.1 §10.8.1: Mark collapsed-content inline spans for line-break fixup.
+    // When an inline element has children but all content collapsed (whitespace-only),
+    // the span gets 0×0 from compute_span_bounding_box. However, per CSS 2.1, the
+    // inline box still contributes its line-height to the line box. We store the
+    // span's resolved line-height in content_height as a marker; line_break() will
+    // set the height if the line turns out to have visible content.
+    if (span->height == 0 && span->width == 0 && span->first_child) {
+        // Check if all children are collapsed (RDT_VIEW_NONE)
+        bool all_collapsed = true;
+        DomNode* chk = static_cast<DomElement*>(elmt)->first_child;
+        while (chk) {
+            if (chk->view_type != RDT_VIEW_NONE) {
+                all_collapsed = false;
+                break;
+            }
+            chk = chk->next_sibling;
+        }
+        if (all_collapsed) {
+            span->content_height = lycon->block.line_height;
+            log_debug("marking collapsed inline span %s for line-height fixup (lh=%.1f)",
+                     elmt->node_name(), lycon->block.line_height);
+        }
+    }
 
     // Restore the trailing space on the child so advance_x remains correct
     // for any subsequent layout processing

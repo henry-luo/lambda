@@ -16,6 +16,52 @@
 #include <cstring>
 
 // ============================================================================
+// Helper: Read border width from CSS specified style
+// ============================================================================
+// Parses the CSS border shorthand to extract border width, matching the logic
+// in resolve_css_style.cpp. Handles: explicit length, keyword (thin/medium/thick),
+// and the CSS default of medium (3px) when style is visible but width unspecified.
+static float get_border_width_from_css(LayoutContext* lycon, DomElement* element) {
+    if (!element || !element->specified_style) return 0;
+    CssDeclaration* border_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BORDER);
+    if (!border_decl || !border_decl->value) return 0;
+
+    float bw = -1.0f;
+    bool has_visible_style = false;
+    CssValue* val = border_decl->value;
+
+    auto parse_keyword = [&](CssEnum kw) {
+        if (kw == CSS_VALUE_THIN) bw = 1.0f;
+        else if (kw == CSS_VALUE_MEDIUM) bw = 3.0f;
+        else if (kw == CSS_VALUE_THICK) bw = 5.0f;
+        else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
+                 kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DOUBLE ||
+                 kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
+                 kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET)
+            has_visible_style = true;
+    };
+
+    if (val->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < val->data.list.count; i++) {
+            CssValue* v = val->data.list.values[i];
+            if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER)
+                bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, v);
+            else if (v->type == CSS_VALUE_TYPE_KEYWORD)
+                parse_keyword(v->data.keyword);
+        }
+    } else if (val->type == CSS_VALUE_TYPE_LENGTH || val->type == CSS_VALUE_TYPE_NUMBER) {
+        bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, val);
+    } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+        parse_keyword(val->data.keyword);
+    }
+
+    // CSS spec: visible style with no explicit width defaults to medium (3px)
+    if (has_visible_style && bw < 0) bw = 3.0f;
+    return bw > 0 ? bw : 0;
+}
+
+// ============================================================================
 // Text Measurement (Core Implementation)
 // ============================================================================
 
@@ -646,20 +692,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                     }
-                    // Read border from CSS
-                    CssDeclaration* border_decl = style_tree_get_declaration(
-                        element->specified_style, CSS_PROPERTY_BORDER);
-                    if (border_decl && border_decl->value) {
-                        // border shorthand: width style color
-                        if (border_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                            border_decl->value->data.list.count >= 1) {
-                            CssValue* width_val = border_decl->value->data.list.values[0];
-                            if (width_val && width_val->type == CSS_VALUE_TYPE_LENGTH) {
-                                float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, width_val);
-                                border_left = border_right = bw;
-                            }
-                        }
-                    }
+                    // Read border from CSS using helper
+                    float css_bw = get_border_width_from_css(lycon, element);
+                    if (css_bw > 0) { border_left = css_bw; border_right = css_bw; }
                     explicit_width += (int)(pad_left + pad_right + border_left + border_right);
                     log_debug("  -> explicit width: %d (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
                               explicit_width, pad_left, pad_right, border_left, border_right);
@@ -935,6 +970,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bdr_left = tbl_view->bound->border->width.left;
                     bdr_right = tbl_view->bound->border->width.right;
                 }
+            }
+            // Fallback: read border from specified CSS if bound not yet resolved
+            if (bdr_left == 0 && bdr_right == 0) {
+                float css_bw = get_border_width_from_css(lycon, element);
+                if (css_bw > 0) { bdr_left = css_bw; bdr_right = css_bw; }
             }
 
             // Only use table-specific result if we actually found table rows/cells.

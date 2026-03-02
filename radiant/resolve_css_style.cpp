@@ -914,9 +914,17 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
 
     if (!decl && lycon->view) {
         // Try to get font-size from the view's font property
-        ViewSpan* span = (ViewSpan*)lycon->view;
-        if (span->font && span->font->font_size > 0) {
-            lycon->font.current_font_size = span->font->font_size;
+        // IMPORTANT: Must check node type before accessing font field.
+        // DomElement::font and DomText::font are at different struct offsets,
+        // so casting a DomText* to ViewSpan* (DomElement*) reads garbage memory.
+        FontProp* fp = nullptr;
+        if (lycon->view->is_element()) {
+            fp = ((DomElement*)lycon->view)->font;
+        } else if (lycon->view->is_text()) {
+            fp = ((DomText*)lycon->view)->font;
+        }
+        if (fp && fp->font_size > 0) {
+            lycon->font.current_font_size = fp->font_size;
             log_debug("resolved font size from view: %.2f px", lycon->font.current_font_size);
             return;
         }

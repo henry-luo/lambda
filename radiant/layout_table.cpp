@@ -269,7 +269,9 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewBlock* element) {
             dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
         if (height_decl && height_decl->value) {
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-            if (resolved > 0) return resolved;
+            if (resolved > 0) {
+                return resolved;
+            }
         }
     }
 
@@ -873,10 +875,12 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     log_debug("[PROCESS_TABLE_CELL] Returned from layout_table_cell_content");
 
     float explicit_cell_height = get_explicit_css_height(lycon, cell);
+
     float content_height = measure_cell_content_height(lycon, tcell);
 
     // Calculate final cell height
     float cell_height_val = calculate_cell_height(lycon, tcell, table, content_height, explicit_cell_height);
+
     cell->height = cell_height_val;
 
     // Apply vertical alignment
@@ -3611,8 +3615,13 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         if (cell) {
             cell->display = display;
             lycon->view = (View*)cell;
+            // save parent font context before cell resolution, so that em-based
+            // font sizes in sibling cells resolve against the row/table font,
+            // not the previously resolved cell's font (CSS 2.1 §4.3.2)
+            FontBox saved_font = lycon->font;
             dom_node_resolve_style(node, lycon);
             parse_cell_attributes(lycon, node, cell);
+            lycon->font = saved_font;
         }
     }
     else if (tag == HTM_TAG_COLGROUP || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
@@ -3917,6 +3926,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
     FontBox saved_font = lycon->font;
+    View* saved_view = lycon->view;
 
     // CRITICAL: Set up the cell's font before laying out content
     // This ensures text uses the cell's font-size (e.g., 14px) instead of parent's (e.g., 16px)
@@ -4113,6 +4123,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->line = saved_line;
     lycon->elmt = saved_elmt;
     lycon->font = saved_font;
+    lycon->view = saved_view;
 }
 
 // Forward declaration from layout_text.cpp
