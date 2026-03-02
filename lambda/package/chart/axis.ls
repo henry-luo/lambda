@@ -1,9 +1,9 @@
 // chart/axis.ls — Axis generation for the chart library
 // Generates SVG elements for x and y axes with ticks, labels, and titles.
 
-import util: lambda.package.chart.util
-import svg: lambda.package.chart.svg
-import scale: lambda.package.chart.scale
+import util: .util
+import svg: .svg
+import scale: .scale
 
 // ============================================================
 // Default axis configuration

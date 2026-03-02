@@ -1,9 +1,9 @@
 // chart/layout.ls — Layout and positioning for the chart library
 // Computes margins, plot area dimensions, and positions all chart components.
 
-import axis: lambda.package.chart.axis
-import leg: lambda.package.chart.legend
-import parse: lambda.package.chart.parse
+import axis: .axis
+import leg: .legend
+import parse: .parse
 
 // ============================================================
 // Compute layout from parsed spec

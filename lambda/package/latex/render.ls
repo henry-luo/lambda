@@ -2,15 +2,15 @@
 // Uses pre-computed DocInfo from analyze.ls (read-only, no state threading).
 // render_node(node, info) returns element|string|null directly.
 
-import util: lambda.package.latex.util
-import sym: lambda.package.latex.symbols
-import math_bridge: lambda.package.latex.math_bridge
-import spacing: lambda.package.latex.elements.spacing
-import macros: lambda.package.latex.macros
-import boxes: lambda.package.latex.elements.boxes
-import font_decl: lambda.package.latex.elements.font_decl
-import color: lambda.package.latex.elements.color
-import picture: lambda.package.latex.elements.picture
+import util: .util
+import sym: .symbols
+import math_bridge: .math_bridge
+import spacing: .elements.spacing
+import macros: .macros
+import boxes: .elements.boxes
+import font_decl: .elements.font_decl
+import color: .elements.color
+import picture: .elements.picture
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
