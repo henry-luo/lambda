@@ -422,6 +422,13 @@ type User {
     that (~.name != "admin")               // Object-level constraint
 }
 
+// In 'that' clauses, bare identifiers resolve to ~.name implicitly:
+type User2 {
+    name: string that (len(~) > 0),        // ~ needed for scalar field value
+    age: int that (~ > 0);
+    that (name != "admin")                  // 'name' resolves to ~.name
+}
+
 // Object literals
 let p = {Point x: 3.0, y: 4.0}
 let c = {Counter}                          // All defaults

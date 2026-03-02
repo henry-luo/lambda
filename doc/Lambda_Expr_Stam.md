@@ -361,7 +361,7 @@ When `~` is not used, the pipe passes the entire collection/data on left side to
 [1, 2, 3, 4, 5] | take(3)    // [1, 2, 3]
 ```
 
-### Where Clause (Filtering)
+### Where / That Clause (Filtering)
 
 ```lambda
 // Basic filtering
@@ -374,6 +374,31 @@ users where ~.age >= 18
 
 // Combined with pipe
 data | ~.name where len(~) > 3 | ~.upper()
+```
+
+#### Implicit Field Access in `that` Clause
+
+The `that` keyword works like `where` for filtering, but supports **implicit field access** — bare identifiers that are not in scope automatically resolve to `~.name`:
+
+```lambda
+// Traditional: explicit ~.field
+users where (~.age >= 18 and ~.name != "admin")
+
+// With 'that': implicit field names
+users that (age >= 18 and name != "admin")
+
+// Both forms produce identical results
+```
+
+Name resolution order inside a `that` clause:
+1. Names in scope (`let`, `var`, `fn`, `pn`, `type` definitions)
+2. Stored field on the current item `~` (map/object/element)
+3. System properties of the current item `~`
+
+```lambda
+let min_age = 18
+// 'min_age' resolves to the let binding; 'age' resolves to ~.age
+users that (age >= min_age)
 ```
 
 ### Pipe Behavior Summary
@@ -1008,7 +1033,7 @@ From highest to lowest:
 | 9          | `or`                       | Logical OR      |
 | 10         | `to`                       | Range           |
 | 11         | `is`, `in`                 | Type operations |
-| 12         | `\|`, `where`              | Pipe, Filter    |
+| 12         | `\|`, `where`, `that`      | Pipe, Filter    |
 
 ### Arithmetic Operators
 
@@ -1063,6 +1088,7 @@ From highest to lowest:
 |----------|-------------|---------|--------|
 | `\|` | Pipe (transform) | `[1, 2, 3] \| ~ * 2` | `[2, 4, 6]` |
 | `where` | Filter | `[1, 2, 3, 4] where ~ > 2` | `[3, 4]` |
+| `that` | Filter (implicit `~.name`) | `items that (age > 18)` | Filtered items |
 
 ### Pipe Output Operators
 
