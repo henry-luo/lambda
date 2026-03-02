@@ -142,6 +142,10 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.zip(b)
     {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // range(s,e,step) - constructor, not method
     {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.quantile(p)
+    {SYSFUNC_REDUCE, "reduce", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // reduce(collection, fn)
+    // parse string functions - overloaded with arg count
+    {SYSFUNC_PARSE1, "parse", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true},   // parse(str) -> any^ (auto-detect)
+    {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true},   // parse(str, format) -> any^
     // variadic parameter access - not method-eligible
     {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
     {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
