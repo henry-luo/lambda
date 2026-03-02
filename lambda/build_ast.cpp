@@ -2407,11 +2407,56 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     return (AstNode*)ast_node;
 }
 
+// Build type negation expression: !T → any ! T (exclude type)
+// Creates a TypeBinary(OPERATOR_EXCLUDE, any, T) so that `x is !string` works
+AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
+    log_debug("build type negation expr (!T)");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    // Build the operand (the type to negate)
+    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
+    ast_node->right = build_expr(tp, operand_node);
+    if (!ast_node->right) {
+        log_error("Error: build_type_negation_expr failed to build operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Create synthetic "any" node for the left side
+    AstPrimaryNode* any_node = (AstPrimaryNode*)alloc_ast_node(tp,
+        AST_NODE_PRIMARY, node, sizeof(AstPrimaryNode));
+    any_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ((TypeType*)any_node->type)->type = &TYPE_ANY;
+    ast_node->left = (AstNode*)any_node;
+
+    ast_node->op = OPERATOR_EXCLUDE;
+    ast_node->op_str = {.str = "!", .length = 1};
+
+    type->left = ast_node->left->type;
+    type->right = ast_node->right->type;
+    type->op = OPERATOR_EXCLUDE;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+
+    log_debug("type negation expr created: any ! T, index: %d", type->type_index);
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build unary expr");
-    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
+
+    // Check for ! operator early — it means type negation, not logical NOT
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
     StrView op = ts_node_source(tp, op_node);
+    if (strview_equal(&op, "!")) {
+        return build_type_negation_expr(tp, bi_node);
+    }
+
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
     ast_node->op_str = op;
     if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }

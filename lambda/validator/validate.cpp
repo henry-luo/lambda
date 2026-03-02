@@ -93,6 +93,15 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         return result;
     }
 
+    // Handle 'any' type — matches everything except error
+    if (base_type->type_id == LMD_TYPE_ANY) {
+        result->valid = (item.type_id() != LMD_TYPE_ERROR);
+        if (!result->valid) {
+            add_type_mismatch_error(result, validator, "any", item.type_id());
+        }
+        return result;
+    }
+
     // Handle TypeUnary (occurrence operators: ?, +, *, [n], [n+], [n,m])
     if (base_type->kind == TYPE_KIND_UNARY) {
         return validate_occurrence_type(validator, item, (TypeUnary*)base_type);

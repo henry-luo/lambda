@@ -581,7 +581,7 @@ else result * 2
 
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` `?` `.?` - Primary, query
-2. `-` `+` `not` - Unary operators
+2. `-` `+` `not` `!` - Unary (`not`: logical NOT, `!`: type negation)
 3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
