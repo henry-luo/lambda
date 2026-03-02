@@ -135,11 +135,12 @@ class RadiantLayoutTester {
                 stderr += data.toString();
             });
 
-            // Longer timeout for batch processing
+            // Longer timeout for batch processing — scale with file count
+            const batchTimeout = Math.max(120000, htmlFiles.length * 15000);  // min 120s, or 15s per file
             const timeout = setTimeout(() => {
                 proc.kill();
-                reject(new Error(`Batch layout timeout (${htmlFiles.length} files, 120s limit)`));
-            }, 120000);
+                reject(new Error(`Batch layout timeout (${htmlFiles.length} files, ${Math.round(batchTimeout / 1000)}s limit)`));
+            }, batchTimeout);
 
             proc.on('close', (code) => {
                 clearTimeout(timeout);
@@ -289,15 +290,15 @@ class RadiantLayoutTester {
     }
 
     /**
-     * Load the skip list for a category (e.g., test/layout/data/css2.1/skip_list.txt).
+     * Load the skip list from test/layout/skip_list.txt.
      * Each line is a test name (without extension) to skip.
-     * Caches the result per category.
+     * Caches the result (single shared list for all categories).
      */
     async loadSkipList(category) {
         if (!this._skipListCache) this._skipListCache = {};
-        if (this._skipListCache[category] !== undefined) return this._skipListCache[category];
+        if (this._skipListCache['_global'] !== undefined) return this._skipListCache['_global'];
 
-        const skipListPath = path.join(this.testDataDir, category, 'skip_list.txt');
+        const skipListPath = path.join(__dirname, 'skip_list.txt');
         try {
             const content = await fs.readFile(skipListPath, 'utf8');
             const names = new Set(
@@ -305,18 +306,18 @@ class RadiantLayoutTester {
                     .map(line => line.trim())
                     .filter(line => line && !line.startsWith('#'))
             );
-            this._skipListCache[category] = names;
+            this._skipListCache['_global'] = names;
             return names;
         } catch (e) {
             // No skip list file — nothing to skip
-            this._skipListCache[category] = new Set();
-            return this._skipListCache[category];
+            this._skipListCache['_global'] = new Set();
+            return this._skipListCache['_global'];
         }
     }
 
     /**
      * Pre-filter test tasks: remove files without browser references, exceeding MAX_TEST_FILE_SIZE,
-     * or listed in the category's skip_list.txt.
+     * or listed in skip_list.txt.
      * Returns { tasks, skipped } where skipped is the count of removed tasks.
      */
     async filterTestTasks(testTasks) {
@@ -1779,7 +1780,22 @@ class RadiantLayoutTester {
             }
 
             // Run batch layout
-            const outputMap = await this.runBatchLayout(htmlFiles);
+            let outputMap;
+            try {
+                outputMap = await this.runBatchLayout(htmlFiles);
+            } catch (err) {
+                // Batch timeout or error — skip this batch, continue with next
+                console.log(`   ⚠️  Batch error: ${err.message} — skipping ${batch.length} tests`);
+                for (const task of batch) {
+                    results.push({
+                        testName: path.basename(task.htmlFile).replace(/\.(html|htm)$/i, ''),
+                        passed: false,
+                        htmlFile: task.htmlFile,
+                        failureDetails: [`Batch error: ${err.message}`]
+                    });
+                }
+                continue;
+            }
 
             // Compare each result against reference (in parallel)
             const comparePromises = batch.map(async (task) => {
@@ -1872,7 +1888,8 @@ class RadiantLayoutTester {
                 .map(entry => entry.name);
 
             // Also scan subdirectories for HTML files (e.g., css2.1 has html4/, xhtml1/)
-            const subDirs = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.'));
+            // Skip 'support' directory — it contains frame/reference helper files, not standalone tests
+            const subDirs = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'support');
             for (const subDir of subDirs) {
                 const subDirPath = path.join(categoryDir, subDir.name);
                 try {
