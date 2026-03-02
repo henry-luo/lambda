@@ -832,7 +832,8 @@ module.exports = grammar({
 
     // var statement for mutable variables (procedural only)
     var_stam: $ => seq(
-      'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+      'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr))),
+      optional(';')
     ),
 
     // assignment statement for mutable variables (procedural only)
