@@ -8657,53 +8657,15 @@
       ]
     },
     "_import_stam": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "import"
-            },
-            {
-              "type": "SYMBOL",
-              "name": "import_module"
-            },
-            {
-              "type": "REPEAT",
-              "content": {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": ","
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "import_module"
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "type": "SYMBOL",
-          "name": "namespace_decl"
-        }
-      ]
-    },
-    "namespace_decl": {
       "type": "SEQ",
       "members": [
         {
           "type": "STRING",
-          "value": "namespace"
+          "value": "import"
         },
         {
           "type": "SYMBOL",
-          "name": "namespace_binding"
+          "name": "import_module"
         },
         {
           "type": "REPEAT",
@@ -8716,45 +8678,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "namespace_binding"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    "namespace_binding": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "prefix",
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": ":"
-        },
-        {
-          "type": "FIELD",
-          "name": "uri",
-          "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "string"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "symbol"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "identifier"
+                "name": "import_module"
               }
             ]
           }
