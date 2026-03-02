@@ -535,27 +535,37 @@ format(data, 'yaml')                // Format as YAML
 
 **Import Syntax:**
 ```lambda
-import module_name;               // Basic import
-import .relative_module;          // Relative import
-import alias: module_name;        // Import with alias
-import mod1, mod2, alias: mod3;   // Multiple imports
+import .relative_module          // Relative to script's directory
+import .path.to.module           // Nested relative import
+import module_name               // Relative to CWD/project root
+import alias: .module            // Import with alias
 ```
 
 **Export Declarations:**
 ```lambda
-pub PI = 3.14159;             // Export variable
-pub fn square(x) => x * x;    // Export function
+pub PI = 3.14159                 // Export variable
+pub fn square(x) => x * x       // Export function
+pub pn log(msg) { print(msg) }  // Export procedure
+pub type Score = int             // Export type alias
+pub type Counter {               // Export object type
+    value: int = 0;
+    fn double() => value * 2
+}
+pub data^err = input("f", 'json) // Export with error var
 ```
 
-**Module Usage Example:**
+**Module Usage:**
 ```lambda
 // In math_utils.ls:
-pub PI = 3.14159;
-pub fn square(x) => x * x;
+pub PI = 3.14159
+pub type Vec2 { x: float, y: float; fn len() => sqrt(x**2 + y**2) }
 
 // In main.ls:
-import math: .math_utils;
-let area = math.PI * math.square(radius);
+import .math_utils
+let area = PI * r ** 2
+let v = {Vec2 x: 3.0, y: 4.0}
+v.len()        // 5.0
+v is Vec2      // true
 ```
 ## Error Handling
 

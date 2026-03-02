@@ -1,7 +1,7 @@
 // test_math_spacing.ls — Test math inter-atom spacing table
 // Coverage: spacing_table.ls — atom_type_index, get_spacing, spacing_class
 
-import sp: .lambda.package.math.spacing_table
+import sp: lambda.package.math.spacing_table
 
 "===== MATH SPACING TESTS ====="
 

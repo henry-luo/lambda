@@ -2,8 +2,8 @@
 // Tests Phase 2D: font declarations, alignment declarations
 // Tests Phase 2E: appendix numbering, secnumdepth
 
-import font_decl: .lambda.package.latex.elements.font_decl
-import dc_article: .lambda.package.latex.docclass.article
+import font_decl: lambda.package.latex.elements.font_decl
+import dc_article: lambda.package.latex.docclass.article
 
 "===== FONT DECLARATION TESTS ====="
 

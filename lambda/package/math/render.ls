@@ -2,20 +2,20 @@
 // This is the heart of the math rendering pipeline.
 // It dispatches on AST element tag names and delegates to atom-specific renderers.
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
-import met: .lambda.package.math.metrics
-import sym: .lambda.package.math.symbols
-import sp_table: .lambda.package.math.spacing_table
-import fraction: .lambda.package.math.atoms.fraction
-import scripts: .lambda.package.math.atoms.scripts
-import spacing: .lambda.package.math.atoms.spacing
-import style: .lambda.package.math.atoms.style
-import color: .lambda.package.math.atoms.color
-import arr_mod: .lambda.package.math.atoms.array
-import enclose: .lambda.package.math.atoms.enclose
-import delims: .lambda.package.math.atoms.delimiters
+import box: .box
+import ctx: .context
+import css: .css
+import met: .metrics
+import sym: .symbols
+import sp_table: .spacing_table
+import fraction: .atoms.fraction
+import scripts: .atoms.scripts
+import spacing: .atoms.spacing
+import style: .atoms.style
+import color: .atoms.color
+import arr_mod: .atoms.array
+import enclose: .atoms.enclose
+import delims: .atoms.delimiters
 
 // ============================================================
 // Main render dispatch

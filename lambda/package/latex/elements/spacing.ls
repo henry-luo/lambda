@@ -1,7 +1,7 @@
 // latex/elements/spacing.ls — Spacing, line breaks, page breaks, rules
 // Handles \hspace, \vspace, \hskip, \vskip, \\, \newline, \hrule, \hfill, etc.
 
-import util: .lambda.package.latex.util
+import util: lambda.package.latex.util
 
 // ============================================================
 // Line breaks

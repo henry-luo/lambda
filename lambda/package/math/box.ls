@@ -2,9 +2,9 @@
 // A box is a map: {element, height, depth, width, type, classes, italic, skew}
 // Boxes wrap Lambda elements (<span>) and carry metric metadata.
 
-import css: .lambda.package.math.css
-import util: .lambda.package.math.util
-import met: .lambda.package.math.metrics
+import css: .css
+import util: .util
+import met: .metrics
 
 // ============================================================
 // Box constructors

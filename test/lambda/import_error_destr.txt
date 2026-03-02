@@ -1,0 +1,6 @@
+"1. safe_val:"
+50
+"2. fail_val:3. safe_err is error:"
+false
+"4. fail_err is error:"
+true

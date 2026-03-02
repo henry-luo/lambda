@@ -1,10 +1,10 @@
 // math/atoms/fraction.ls — Fraction rendering (\frac, \dfrac, \tfrac, \binom)
 // Implements TeXBook Rules 15b-15e from Appendix G
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
-import met: .lambda.package.math.metrics
+import box: lambda.package.math.box
+import ctx: lambda.package.math.context
+import css: lambda.package.math.css
+import met: lambda.package.math.metrics
 
 // ============================================================
 // Fraction rendering

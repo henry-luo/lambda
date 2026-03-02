@@ -205,47 +205,88 @@ pn main() {
 ### Import Statements
 
 ```lambda
-// Import modules
-import module_name;
-import .relative_module;        // Relative import
-import \\windows\\style\\path;  // Windows-style path
+// Relative import — resolved relative to the importing script's directory
+import .relative_module
+import .path.to.module
+
+// Absolute import — resolved relative to CWD/project root
+import module_name
 
 // Import with alias
-import alias: module_name;
-import my_utils: .utilities;
-
-// Multiple imports
-import module1, module2, alias: module3;
+import alias: .module
+import my_utils: .utilities
 ```
+
+**Import resolution:**
+- `.module` (dot prefix) — resolved relative to the importing script's directory. Nested imports work correctly: if `A.ls` imports `B.ls` and `B.ls` imports `C.ls`, `C.ls` resolves relative to `B.ls`'s directory.
+- `module` (no dot) — resolved relative to the current working directory / project root.
+- Paths are normalized via `realpath()` to prevent redundant compilation when the same file is imported through different relative paths.
 
 ### Module Structure
 
-Each Lambda Script file is a module that can export public declarations. Currently only variable and function definitions can be exported:
+Each Lambda Script file is a module that can export public declarations — variables, functions, procedures, type aliases, and object types:
 
 ```lambda
 // math_utils.ls
-pub PI = 3.14159;
-pub E = 2.71828;
 
-pub fn square(x: float) => x * x;
-pub fn cube(x: float) => x * x * x;
+// Public values
+pub PI = 3.14159
+pub E = 2.71828
 
-// Private variable (not exported)
-let v = 123;
+// Public functions
+pub fn square(x: float) => x * x
+pub fn cube(x: float) => x * x * x
 
-// Private function (not exported)
-fn helper(x: float) => x + 1;
+// Public type alias
+pub type Angle = float
+
+// Public object type with methods
+pub type Vec2 {
+    x: float = 0.0, y: float = 0.0;
+    fn len() => sqrt(x**2 + y**2)
+    fn scale(f) => {Vec2 x: x*f, y: y*f}
+}
+
+// Public with error destructuring
+pub config^err = input("config.json", 'json)
+
+// Private (not exported)
+let v = 123
+fn helper(x: float) => x + 1
+type Internal = {a: int, b: int}
 ```
 
 ### Using Imported Modules
 
 ```lambda
 // main.ls
-import math: .math_utils;
+import .math_utils
 
-let area = math.PI * math.square(radius);
-let volume = (4.0 / 3.0) * math.PI * math.cube(radius);
+// Imported values and functions are available directly
+let area = PI * square(radius)
+
+// Imported types can be used for annotations, construction, and type checks
+let angle: Angle = 1.57
+let v = {Vec2 x: 3.0, y: 4.0}
+v.len()          // 5.0
+v is Vec2        // true
+
+// Error variables are also imported
+if (err != null) print("config failed")
 ```
+
+### Export Visibility
+
+| Declaration | Visibility |
+|-------------|------------|
+| `pub x = ...` | Public (exported) |
+| `pub fn f()` / `pub pn p()` | Public function/procedure |
+| `pub type T = ...` | Public type alias |
+| `pub type T { ... }` | Public object type |
+| `pub x^err = ...` | Public value + error variable |
+| `let x = ...` | Private (module-local) |
+| `fn f()` / `pn p()` | Private function/procedure |
+| `type T = ...` / `type T { ... }` | Private type |
 
 ---
 

@@ -1,7 +1,7 @@
 // math/atoms/spacing.ls — Spacing commands (\quad, \qquad, \, \: \; \! \hspace \kern)
 
-import box: .lambda.package.math.box
-import css: .lambda.package.math.css
+import box: lambda.package.math.box
+import css: lambda.package.math.css
 
 // ============================================================
 // Spacing command rendering

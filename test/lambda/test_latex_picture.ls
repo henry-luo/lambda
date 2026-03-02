@@ -1,7 +1,7 @@
 // test_latex_picture.ls — Test picture environment rendering
 // Tests Phase 2G: \begin{picture}(w,h)...\end{picture} → SVG
 
-import picture: .lambda.package.latex.elements.picture
+import picture: lambda.package.latex.elements.picture
 
 "===== PICTURE ENVIRONMENT TESTS ====="
 
