@@ -1084,8 +1084,18 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                         resolved->name = q_entry->name;
                         resolved->entry = q_entry;
                         if (q_entry->import && q_entry->node->type->type_id != LMD_TYPE_FUNC) {
-                            resolved->type = alloc_type(tp->pool, q_entry->node->type->type_id, sizeof(Type));
-                            resolved->type->is_const = 0;
+                            // For container types (array, list, map, element, etc.), use the
+                            // original type directly to preserve nested type info (e.g.
+                            // TypeArray::nested). Allocating a bare Type loses this info,
+                            // causing wrong accessor functions (e.g. array_get vs array_int_get).
+                            Type* orig = q_entry->node->type;
+                            TypeId tid = orig->type_id;
+                            if (tid >= LMD_TYPE_CONTAINER) {
+                                resolved->type = orig;
+                            } else {
+                                resolved->type = alloc_type(tp->pool, tid, sizeof(Type));
+                                resolved->type->is_const = 0;
+                            }
                         } else {
                             resolved->type = q_entry->node->type ? q_entry->node->type : &TYPE_ANY;
                         }
@@ -1640,9 +1650,18 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 // for imported type definitions (pub type T = ...), preserve the full TypeType wrapper
                 ast_node->type = entry->node->type;
             } else {
-                ast_node->type = alloc_type(tp->pool, entry->node->type->type_id, sizeof(Type));
-                // defensive code
-                ast_node->type->is_const = 0;
+                // For container types (array, list, map, element, etc.), use the
+                // original type directly to preserve nested type info (e.g.
+                // TypeArray::nested). Allocating a bare Type loses this info,
+                // causing wrong accessor functions (e.g. array_get vs array_int_get).
+                Type* orig = entry->node->type;
+                TypeId tid = orig->type_id;
+                if (tid >= LMD_TYPE_CONTAINER) {
+                    ast_node->type = orig;
+                } else {
+                    ast_node->type = alloc_type(tp->pool, tid, sizeof(Type));
+                    ast_node->type->is_const = 0;
+                }
             }
         }
         else {
