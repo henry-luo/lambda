@@ -555,6 +555,10 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (js_is_dom_node(object)) {
             return js_dom_get_property(object, key);
         }
+        // Check if this is a computed style wrapper
+        if (js_is_computed_style_item(object)) {
+            return js_computed_style_get_property(object, key);
+        }
         // Check if this is a JS object (indicated by NULL type)
         if (m->type == NULL && m->data != NULL) {
             // This is a JS object using hashmap
@@ -899,6 +903,16 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
         return fn_index(str, args[0]);
+    }
+    if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
+        if (argc < 1) return ItemNull;
+        String* s = it2s(str);
+        if (!s || s->len == 0) return ItemNull;
+        int idx = (int)js_get_number(args[0]);
+        if (idx < 0 || idx >= (int)s->len) return ItemNull;
+        // return the char code (byte value for ASCII/Latin1, first byte for UTF-8)
+        unsigned char ch = (unsigned char)s->chars[idx];
+        return (Item){.item = i2it((int64_t)ch)};
     }
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
         Item result = str;
