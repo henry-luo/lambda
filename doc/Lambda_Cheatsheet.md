@@ -39,8 +39,11 @@ int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
-int[]            // Typed int array
-float[]          // Typed float array
+int[]            // Array of ints (same as int*)
+int[5]           // Array of exactly 5 ints
+[int*]           // Bracket form: array of 0+ ints
+[int+]           // Bracket form: array of 1+ ints
+float[]          // Array of floats
 fn (a: int, b: string) bool   // Function type
 fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
@@ -198,8 +201,8 @@ x = 10       // ERROR E211: cannot reassign let binding
 ```lambda
 var x = 0;         // Mutable variable
 var y: int = 42;   // With type annotation
-var a: int[] = [1, 2, 3];  // Typed int array
-var b: float[] = [0.1, 0.2]; // Typed float array
+var a: int[] = [1, 2, 3];  // Array of ints
+var b: float[] = [0.1, 0.2]; // Array of floats
 x = x + 1          // OK: reassignment
 x = "hello"        // OK: type widening (int → string)
 y = "oops"      // ERROR E201: annotated type enforced
@@ -221,6 +224,14 @@ let a = [1, 2, 3]
 **Comparison:** equal, not equal, less than, less equal, greater than, greater equal
 ```lambda
 ==  !=  <  <=  >  >=
+```
+
+`==` performs **structural deep equality** on all types:
+```lambda
+[1, 2] == [1, 2]             // true  (list/array)
+{a: 1, b: 2} == {b: 2, a: 1} // true  (map, order-independent)
+[1] == [1.0]                  // true  (numeric promotion)
+(1 to 3) == [1, 2, 3]         // true  (cross-type sequence)
 ```
 
 **Logical:** logical and, or, not
@@ -403,7 +414,7 @@ fn multiply(x: int, y: int) => x * y
 let square = (x) => x * x;
 // Procedural function
 pn f(n) { var x=0; while(x<n) {x=x+1}; x }
-// Typed array parameters (native access)
+// Array parameters
 pn advance(pos: float[], vel: float[], n: int) { ... }
 ```
 
@@ -581,7 +592,7 @@ else result * 2
 
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` `?` `.?` - Primary, query
-2. `-` `+` `not` - Unary operators
+2. `-` `+` `not` `!` - Unary (`not`: logical NOT, `!`: type negation)
 3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
