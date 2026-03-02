@@ -621,6 +621,19 @@ static bool is_document_member(JsMemberNode* member) {
     return obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0;
 }
 
+// Check if a call expression is window.getComputedStyle(...)
+static bool is_window_getComputedStyle_call(JsCallNode* call_node) {
+    if (!call_node->callee) return false;
+    if (call_node->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    JsMemberNode* member = (JsMemberNode*)call_node->callee;
+    if (!member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    if (!member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+    return obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "window", 6) == 0 &&
+           prop->name && prop->name->len == 16 && strncmp(prop->name->chars, "getComputedStyle", 16) == 0;
+}
+
 // Check if a call expression is a method call on a non-special object (obj.method())
 static bool is_method_call(JsCallNode* call_node) {
     if (!call_node->callee) return false;
@@ -718,6 +731,26 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
         }
         strbuf_append_int(tp->code_buf, arg_count);
         strbuf_append_str(tp->code_buf, ");\n})");
+        return;
+    }
+
+    // Special handling for window.getComputedStyle(elem, pseudo) calls
+    if (is_window_getComputedStyle_call(call_node)) {
+        int arg_count = count_js_args(call_node->arguments);
+        strbuf_append_str(tp->code_buf, "js_get_computed_style(");
+        if (arg_count >= 1) {
+            JsAstNode* arg = call_node->arguments;
+            transpile_js_box_item(tp, arg);
+            strbuf_append_str(tp->code_buf, ", ");
+            if (arg_count >= 2 && arg->next) {
+                transpile_js_box_item(tp, arg->next);
+            } else {
+                strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            }
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_NULL, ITEM_NULL");
+        }
+        strbuf_append_str(tp->code_buf, ")");
         return;
     }
 
@@ -1627,6 +1660,8 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, "extern Item js_dom_set_style_property(Item elem, Item prop_name, Item value);\n");
     strbuf_append_str(tp->code_buf, "extern Item js_dom_get_style_property(Item elem, Item prop_name);\n");
     strbuf_append_str(tp->code_buf, "extern _Bool js_is_dom_node(Item item);\n");
+    // Computed style
+    strbuf_append_str(tp->code_buf, "extern Item js_get_computed_style(Item elem, Item pseudo);\n");
     // Lambda runtime functions used by codegen
     strbuf_append_str(tp->code_buf, "extern int64_t fn_len(Item item);\n");
     strbuf_append_str(tp->code_buf, "extern TypeId item_type_id(Item item);\n");

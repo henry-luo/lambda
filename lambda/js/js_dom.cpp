@@ -21,10 +21,15 @@
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/css_parser.hpp"
+#include "../input/css/css_style_node.hpp"
 #include "../input/css/selector_matcher.hpp"
 
 #include <cstring>
 #include <cctype>
+
+// Forward declarations
+static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
+static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 
 // ============================================================================
 // Unique type marker for DOM-wrapped Maps
@@ -33,6 +38,10 @@
 // Sentinel used in Map::type to distinguish DOM wrappers from regular Maps.
 // Address uniqueness is all that matters; the content is unused.
 static TypeMap js_dom_type_marker = {};
+
+// Sentinel used in Map::type to distinguish computed style wrappers.
+// Map::data stores the DomElement*, Map::data_cap stores pseudo-element type (0=none, 1=before, 2=after).
+static TypeMap js_computed_style_marker = {};
 
 // ============================================================================
 // Thread-local DOM document context
@@ -94,6 +103,307 @@ extern "C" bool js_is_dom_node(Item item) {
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_dom_type_marker;
+}
+
+// ============================================================================
+// Computed Style Wrapping
+// ============================================================================
+
+static bool js_is_computed_style(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid != LMD_TYPE_MAP) return false;
+    Map* m = item.map;
+    return m->type == (void*)&js_computed_style_marker;
+}
+
+extern "C" bool js_is_computed_style_item(Item item) {
+    return js_is_computed_style(item);
+}
+// Helper: serialize a CssValue to a string Item
+static Item css_value_to_string_item(CssValue* val) {
+    if (!val) return (Item){.item = s2it(heap_create_name(""))};
+
+    switch (val->type) {
+        case CSS_VALUE_TYPE_KEYWORD: {
+            const CssEnumInfo* info = css_enum_info(val->data.keyword);
+            if (info && info->name) {
+                return (Item){.item = s2it(heap_create_name(info->name))};
+            }
+            break;
+        }
+        case CSS_VALUE_TYPE_LENGTH: {
+            char buf[64];
+            const char* unit_str = "px";
+            switch (val->data.length.unit) {
+                case CSS_UNIT_PX: unit_str = "px"; break;
+                case CSS_UNIT_EM: unit_str = "em"; break;
+                case CSS_UNIT_REM: unit_str = "rem"; break;
+                case CSS_UNIT_PERCENT: unit_str = "%"; break;
+                case CSS_UNIT_VW: unit_str = "vw"; break;
+                case CSS_UNIT_VH: unit_str = "vh"; break;
+                case CSS_UNIT_CM: unit_str = "cm"; break;
+                case CSS_UNIT_MM: unit_str = "mm"; break;
+                case CSS_UNIT_IN: unit_str = "in"; break;
+                case CSS_UNIT_PT: unit_str = "pt"; break;
+                case CSS_UNIT_PC: unit_str = "pc"; break;
+                default: unit_str = "px"; break;
+            }
+            double v = val->data.length.value;
+            if (v == (int)v) {
+                snprintf(buf, sizeof(buf), "%d%s", (int)v, unit_str);
+            } else {
+                snprintf(buf, sizeof(buf), "%g%s", v, unit_str);
+            }
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case CSS_VALUE_TYPE_PERCENTAGE: {
+            char buf[64];
+            double v = val->data.percentage.value;
+            if (v == (int)v) {
+                snprintf(buf, sizeof(buf), "%d%%", (int)v);
+            } else {
+                snprintf(buf, sizeof(buf), "%g%%", v);
+            }
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case CSS_VALUE_TYPE_NUMBER: {
+            char buf[64];
+            if (val->data.number.is_integer) {
+                snprintf(buf, sizeof(buf), "%d", (int)val->data.number.value);
+            } else {
+                snprintf(buf, sizeof(buf), "%g", val->data.number.value);
+            }
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case CSS_VALUE_TYPE_STRING:
+            if (val->data.string) {
+                // for getComputedStyle, string values are returned with quotes
+                char buf[256];
+                snprintf(buf, sizeof(buf), "\"%s\"", val->data.string);
+                return (Item){.item = s2it(heap_create_name(buf))};
+            }
+            break;
+        case CSS_VALUE_TYPE_COLOR: {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "rgb(%d, %d, %d)",
+                     val->data.color.data.rgba.r,
+                     val->data.color.data.rgba.g,
+                     val->data.color.data.rgba.b);
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        default:
+            break;
+    }
+    return (Item){.item = s2it(heap_create_name(""))};
+}
+
+extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    if (!node || !node->is_element()) {
+        log_debug("js_get_computed_style: not a DOM element");
+        return ItemNull;
+    }
+
+    // determine pseudo-element type: 0=none, 1=before, 2=after
+    int pseudo_type = 0;
+    if (get_type_id(pseudo_item) == LMD_TYPE_STRING || get_type_id(pseudo_item) == LMD_TYPE_SYMBOL) {
+        const char* pseudo_str = fn_to_cstr(pseudo_item);
+        if (pseudo_str) {
+            // handle both "before" and "::before" or ":before"
+            while (*pseudo_str == ':') pseudo_str++;
+            if (strcmp(pseudo_str, "before") == 0) pseudo_type = 1;
+            else if (strcmp(pseudo_str, "after") == 0) pseudo_type = 2;
+        }
+    }
+
+    // create a computed style wrapper
+    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->type = (void*)&js_computed_style_marker;
+    wrapper->data = node->as_element();     // store DomElement*
+    wrapper->data_cap = pseudo_type;        // store pseudo type
+
+    log_debug("js_get_computed_style: created wrapper for <%s> pseudo=%d",
+              node->as_element()->tag_name ? node->as_element()->tag_name : "?", pseudo_type);
+
+    return (Item){.map = wrapper};
+}
+
+extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) {
+    if (!js_is_computed_style(style_item)) {
+        log_debug("js_computed_style_get_property: not a computed style object");
+        return ItemNull;
+    }
+
+    Map* wrapper = style_item.map;
+    DomElement* elem = (DomElement*)wrapper->data;
+    int pseudo_type = (int)wrapper->data_cap;
+
+    if (!elem) return (Item){.item = s2it(heap_create_name(""))};
+
+    const char* js_prop = fn_to_cstr(prop_name);
+    if (!js_prop) return (Item){.item = s2it(heap_create_name(""))};
+
+    // handle getPropertyValue method separately
+    if (strcmp(js_prop, "getPropertyValue") == 0) {
+        // return a function-like marker — handled by method dispatch
+        return ItemNull;
+    }
+
+    // convert camelCase JS property to CSS hyphenated property
+    char css_prop[128];
+    js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+
+    // look up the CSS property ID
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    if (prop_id == CSS_PROPERTY_UNKNOWN) {
+        log_debug("js_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
+                  css_prop, js_prop);
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // get the specified (cascaded) value for this property
+    CssDeclaration* decl = nullptr;
+    if (pseudo_type == 1) {
+        decl = dom_element_get_pseudo_element_value(elem, prop_id, 1); // ::before
+    } else if (pseudo_type == 2) {
+        decl = dom_element_get_pseudo_element_value(elem, prop_id, 2); // ::after
+    } else {
+        decl = dom_element_get_specified_value(elem, prop_id);
+    }
+
+    if (!decl || !decl->value) {
+        // return CSS initial/default value for the property
+        // CSS spec: 'content' initial value is 'normal'
+        //   - on regular elements: computed value is 'normal'
+        //   - on ::before/::after pseudo-elements: 'normal' computes to 'none'
+        if (prop_id == CSS_PROPERTY_CONTENT) {
+            if (pseudo_type == 1 || pseudo_type == 2) {
+                return (Item){.item = s2it(heap_create_name("none"))};
+            }
+            return (Item){.item = s2it(heap_create_name("normal"))};
+        }
+
+        // if cascade hasn't happened yet, try on-demand matching
+        if (!decl) {
+            decl = js_match_element_property(elem, prop_id, pseudo_type);
+        }
+
+        if (!decl || !decl->value) {
+            // return empty string for unset properties
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
+    }
+
+    // CSS spec: for ::before/::after, content 'normal' computes to 'none'
+    if (prop_id == CSS_PROPERTY_CONTENT && (pseudo_type == 1 || pseudo_type == 2)) {
+        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            decl->value->data.keyword == CSS_VALUE_NORMAL) {
+            return (Item){.item = s2it(heap_create_name("none"))};
+        }
+    }
+
+    return css_value_to_string_item(decl->value);
+}
+
+// ============================================================================
+// On-demand CSS selector matching for getComputedStyle
+// ============================================================================
+
+/**
+ * Match an element against all parsed stylesheets to find a specific property.
+ * Used when CSS cascade hasn't happened yet (JS runs before cascade).
+ *
+ * This performs a mini-cascade for a single element + property:
+ * iterates all stylesheet rules, matches selectors, and returns the
+ * declaration with highest specificity for the requested property.
+ */
+static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type) {
+    if (!elem || !elem->doc) return nullptr;
+
+    DomDocument* doc = elem->doc;
+    if (!doc->stylesheets || doc->stylesheet_count <= 0) {
+        log_debug("js_match_element_property: no stylesheets available");
+        return nullptr;
+    }
+
+    Pool* pool = doc->pool;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) return nullptr;
+
+    CssDeclaration* best_decl = nullptr;
+    CssSpecificity best_spec = {0, 0, 0, 0, false};
+
+    // map pseudo_type (0=none, 1=before, 2=after) to PseudoElementType
+    PseudoElementType target_pseudo = PSEUDO_ELEMENT_NONE;
+    if (pseudo_type == 1) target_pseudo = PSEUDO_ELEMENT_BEFORE;
+    else if (pseudo_type == 2) target_pseudo = PSEUDO_ELEMENT_AFTER;
+
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet) continue;
+
+        for (size_t r = 0; r < sheet->rule_count; r++) {
+            CssRule* rule = sheet->rules[r];
+            if (!rule || rule->type != CSS_RULE_STYLE) continue;
+            if (rule->data.style_rule.declaration_count == 0) continue;
+
+            // try matching selector(s) against element
+            bool matched = false;
+            CssSpecificity match_spec = {0, 0, 0, 0, false};
+            PseudoElementType matched_pseudo = PSEUDO_ELEMENT_NONE;
+
+            // handle selector group (comma-separated)
+            CssSelectorGroup* group = rule->data.style_rule.selector_group;
+            CssSelector* single_sel = rule->data.style_rule.selector;
+
+            if (group && group->selector_count > 0) {
+                for (size_t si = 0; si < group->selector_count; si++) {
+                    CssSelector* sel = group->selectors[si];
+                    if (!sel) continue;
+
+                    MatchResult result;
+                    if (selector_matcher_matches(matcher, sel, elem, &result)) {
+                        matched = true;
+                        match_spec = result.specificity;
+                        matched_pseudo = result.pseudo_element;
+                        break;
+                    }
+                }
+            } else if (single_sel) {
+                MatchResult result;
+                if (selector_matcher_matches(matcher, single_sel, elem, &result)) {
+                    matched = true;
+                    match_spec = result.specificity;
+                    matched_pseudo = result.pseudo_element;
+                }
+            }
+
+            if (!matched) continue;
+
+            // check pseudo-element type matches what we're looking for
+            if (matched_pseudo != target_pseudo) continue;
+
+            // find the requested property in this rule's declarations
+            for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
+                CssDeclaration* decl = rule->data.style_rule.declarations[d];
+                if (!decl || decl->property_id != prop_id) continue;
+
+                // compare specificity — take highest
+                if (!best_decl || css_specificity_compare(match_spec, best_spec) >= 0) {
+                    best_decl = decl;
+                    best_spec = match_spec;
+                }
+            }
+        }
+    }
+
+    if (best_decl) {
+        log_debug("js_match_element_property: found property %d for <%s> pseudo=%d via on-demand matching",
+                  prop_id, elem->tag_name ? elem->tag_name : "?", pseudo_type);
+    }
+
+    return best_decl;
 }
 
 // ============================================================================
@@ -194,6 +504,61 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
         while (child) {
             collect_text_content(child, sb);
             child = child->next_sibling;
+        }
+    }
+}
+
+// ============================================================================
+// Helper: recursive innerHTML serialization
+// ============================================================================
+
+static void collect_inner_html(DomNode* node, StrBuf* sb) {
+    if (!node) return;
+
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text->text && text->length > 0) {
+            strbuf_append_str_n(sb, text->text, (int)text->length);
+        }
+        return;
+    }
+
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        // opening tag
+        strbuf_append_char(sb, '<');
+        strbuf_append_str(sb, elem->tag_name ? elem->tag_name : "unknown");
+        // serialize key attributes (id, class)
+        if (elem->id) {
+            strbuf_append_str(sb, " id=\"");
+            strbuf_append_str(sb, elem->id);
+            strbuf_append_char(sb, '"');
+        }
+        if (elem->class_count > 0) {
+            strbuf_append_str(sb, " class=\"");
+            for (int i = 0; i < elem->class_count; i++) {
+                if (i > 0) strbuf_append_char(sb, ' ');
+                strbuf_append_str(sb, elem->class_names[i]);
+            }
+            strbuf_append_char(sb, '"');
+        }
+        strbuf_append_char(sb, '>');
+
+        // children
+        DomNode* child = elem->first_child;
+        while (child) {
+            collect_inner_html(child, sb);
+            child = child->next_sibling;
+        }
+
+        // closing tag (skip void elements)
+        const char* tag = elem->tag_name;
+        if (tag && strcmp(tag, "br") != 0 && strcmp(tag, "hr") != 0 &&
+            strcmp(tag, "img") != 0 && strcmp(tag, "input") != 0 &&
+            strcmp(tag, "meta") != 0 && strcmp(tag, "link") != 0) {
+            strbuf_append_str(sb, "</");
+            strbuf_append_str(sb, tag);
+            strbuf_append_char(sb, '>');
         }
     }
 }
@@ -380,6 +745,45 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return ItemNull;
     }
 
+    // document.write(text) / document.writeln(text)
+    // Appends the text content to the document body as a text node.
+    // Note: real document.write parses HTML and inserts at the current parse point,
+    // but for CSS2.1 tests this simplified approach works since tests only write
+    // simple text ("PASS", "FAIL", CSS property values, etc.)
+    if (strcmp(method, "write") == 0 || strcmp(method, "writeln") == 0) {
+        if (argc < 1) return ItemNull;
+        const char* text = fn_to_cstr(args[0]);
+        if (!text) return ItemNull;
+
+        // find <body> element
+        DomElement* body = nullptr;
+        DomNode* child = doc->root->first_child;
+        while (child) {
+            if (child->is_element()) {
+                DomElement* e = child->as_element();
+                if (e->tag_name && strcmp(e->tag_name, "body") == 0) {
+                    body = e;
+                    break;
+                }
+            }
+            child = child->next_sibling;
+        }
+        if (!body) {
+            log_debug("js_document_method: write - no body element found");
+            return ItemNull;
+        }
+
+        // create a text node and append to body
+        String* str = heap_create_name(text);
+        DomText* text_node = dom_text_create_detached(str, doc);
+        if (text_node) {
+            ((DomNode*)body)->append_child((DomNode*)text_node);
+            log_debug("js_document_method: write '%s' appended to body", text);
+        }
+
+        return ItemNull;
+    }
+
     log_debug("js_document_method: unknown method '%s'", method);
     return ItemNull;
 }
@@ -555,6 +959,19 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     if (strcmp(prop, "textContent") == 0) {
         StrBuf* sb = strbuf_new_cap(128);
         collect_text_content((DomNode*)elem, sb);
+        String* result = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
+
+    // innerHTML (recursive HTML serialization of children)
+    if (strcmp(prop, "innerHTML") == 0) {
+        StrBuf* sb = strbuf_new_cap(256);
+        DomNode* child = elem->first_child;
+        while (child) {
+            collect_inner_html(child, sb);
+            child = child->next_sibling;
+        }
         String* result = heap_create_name(sb->str ? sb->str : "");
         strbuf_free(sb);
         return (Item){.item = s2it(result)};

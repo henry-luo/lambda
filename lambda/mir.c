@@ -408,6 +408,8 @@ func_obj_t func_list[] = {
     {"js_dom_set_property", (fn_ptr) js_dom_set_property},
     {"js_dom_set_style_property", (fn_ptr) js_dom_set_style_property},
     {"js_dom_get_style_property", (fn_ptr) js_dom_get_style_property},
+    // Computed style
+    {"js_get_computed_style", (fn_ptr) js_get_computed_style},
     // StringBuf functions for template literals
     {"stringbuf_new", (fn_ptr) stringbuf_new},
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},
