@@ -1,4 +1,4 @@
-import .test.lambda.func
+import .func
 
 pub PI = 3.1415926
 

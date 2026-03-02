@@ -3,7 +3,7 @@
 // down through the rendering tree. It is immutable — child contexts
 // are new maps with overridden fields.
 
-import met: .lambda.package.math.metrics
+import met: .metrics
 
 // ============================================================
 // Math styles and their relationships

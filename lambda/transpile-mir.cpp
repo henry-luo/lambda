@@ -1102,6 +1102,7 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index);
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node);
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node);
 
@@ -1272,6 +1273,16 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 
             strbuf_free(var_name);
             return val_reg;
+        }
+        // Imported pub object types — resolve via const_type(type_index)
+        if (entry_node && entry_node->node_type == AST_NODE_OBJECT_TYPE) {
+            AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry_node;
+            if (obj_node->type && obj_node->type->type_id == LMD_TYPE_TYPE) {
+                TypeObject* ot = (TypeObject*)((TypeType*)obj_node->type)->type;
+                log_debug("mir: resolving imported object type '%.*s' via const_type(%d)",
+                    (int)obj_node->name->len, obj_node->name->chars, ot->type_index);
+                return transpile_const_type(mt, ot->type_index);
+            }
         }
     }
 
@@ -6468,6 +6479,18 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
                                         log_debug("mir: registered import var BSS: %s -> %p", var_name->str, bss_item->addr);
                                     }
                                     strbuf_free(var_name);
+                                }
+                                // also register error variable BSS for ^err destructuring
+                                if (named->error_name) {
+                                    StrBuf* err_name = strbuf_new_cap(64);
+                                    strbuf_append_char(err_name, '_');
+                                    strbuf_append_str_n(err_name, named->error_name->chars, named->error_name->len);
+                                    MIR_item_t err_bss = find_import(imp->script->jit_context, err_name->str);
+                                    if (err_bss && err_bss->addr) {
+                                        register_dynamic_import(strdup(err_name->str), err_bss->addr);
+                                        log_debug("mir: registered import error var BSS: %s -> %p", err_name->str, err_bss->addr);
+                                    }
+                                    strbuf_free(err_name);
                                 }
                                 declare = declare->next;
                             }

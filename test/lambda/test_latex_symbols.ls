@@ -1,8 +1,8 @@
 // test_latex_symbols.ls — Test extended symbol and spacing command rendering
 // Tests Phase 2A (symbols) and Phase 2C (spacing) of LaTeX package
 
-import sym: .lambda.package.latex.symbols
-import spacing: .lambda.package.latex.elements.spacing
+import sym: lambda.package.latex.symbols
+import spacing: lambda.package.latex.elements.spacing
 
 "===== EXTENDED SYMBOL RESOLUTION TESTS ====="
 

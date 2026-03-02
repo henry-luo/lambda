@@ -14,6 +14,7 @@ bool has_typed_params(AstFuncNode* fn_node);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global);
+void transpile_object_type_method_registration(Transpiler* tp, AstObjectTypeNode* obj_node);
 void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
 void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
 void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *node);
@@ -2187,6 +2188,9 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global = f
             transpile_assign_expr(tp, (AstNamedNode*)declare, is_global);
         } else if (declare->node_type == AST_NODE_DECOMPOSE) {
             transpile_decompose_expr(tp, (AstDecomposeNode*)declare, is_global);
+        } else if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+            // object type definitions inside pub_stam — register methods at runtime
+            transpile_object_type_method_registration(tp, (AstObjectTypeNode*)declare);
         } else {
             log_error("Error: transpile_let_stam found unexpected node type %d in declare chain", declare->node_type);
         }
@@ -7059,11 +7063,22 @@ void write_mod_struct_fields(Transpiler* tp, AstNode *ast_root) {
         else if (node->node_type == AST_NODE_PUB_STAM) {
             AstNode *declare = ((AstLetNode*)node)->declare;
             while (declare) {
+                if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                    // object types are not exported as struct fields (for now)
+                    declare = declare->next;
+                    continue;
+                }
                 AstNamedNode *asn_node = (AstNamedNode*)declare;
                 write_type(tp->code_buf, asn_node->type);
                 strbuf_append_char(tp->code_buf, ' ');
                 write_var_name(tp->code_buf, asn_node, NULL);
                 strbuf_append_str(tp->code_buf, ";\n");
+                // also add error variable field for ^err destructuring
+                if (asn_node->error_name) {
+                    strbuf_append_str(tp->code_buf, "Item _");
+                    strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                    strbuf_append_str(tp->code_buf, ";\n");
+                }
                 declare = declare->next;
             }
         }
@@ -7405,6 +7420,11 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
     // declare global vars
     AstNode *decl = let_node->declare;
     while (decl) {
+        if (decl->node_type == AST_NODE_OBJECT_TYPE) {
+            // object type definitions are handled separately — not variable declarations
+            decl = decl->next;
+            continue;
+        }
         if (decl->node_type == AST_NODE_DECOMPOSE) {
             // Handle decomposition - declare all variables as Item
             AstDecomposeNode* dec_node = (AstDecomposeNode*)decl;
@@ -7433,9 +7453,15 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
 }
 
 void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
-    // declare global vars
+    // assign global vars (and register object type methods)
     AstNode *decl = let_node->declare;
     while (decl) {
+        if (decl->node_type == AST_NODE_OBJECT_TYPE) {
+            // object type method registration — handled here instead of as variable assignment
+            transpile_object_type_method_registration(tp, (AstObjectTypeNode*)decl);
+            decl = decl->next;
+            continue;
+        }
         if (decl->node_type == AST_NODE_DECOMPOSE) {
             // Handle decomposition at global level using a nested scope
             AstDecomposeNode* dec_node = (AstDecomposeNode*)decl;
@@ -7534,11 +7560,16 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         strbuf_append_str(tp->code_buf, "static Element* _mod_elmt(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Element* r=elmt(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static Type* _mod_const_type(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Type* r=const_type(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static TypePattern* _mod_const_pattern(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; TypePattern* r=const_pattern(ti); rt->type_list=sv; return r; }\n");
+        // Wrappers for object type method/constraint registration (must use module's type_list)
+        strbuf_append_str(tp->code_buf, "static void _mod_object_type_set_method(int64_t ti,const char* n,fn_ptr fp,int64_t a,int64_t p) { void* sv=rt->type_list; rt->type_list=_mod_type_list; object_type_set_method(ti,n,fp,a,p); rt->type_list=sv; }\n");
+        strbuf_append_str(tp->code_buf, "static void _mod_object_type_set_constraint(int64_t ti,fn_ptr fp) { void* sv=rt->type_list; rt->type_list=_mod_type_list; object_type_set_constraint(ti,fp); rt->type_list=sv; }\n");
         // Redirect calls to use module-local wrappers
         strbuf_append_str(tp->code_buf, "#define map(idx) _mod_map(idx)\n");
         strbuf_append_str(tp->code_buf, "#define elmt(idx) _mod_elmt(idx)\n");
         strbuf_append_str(tp->code_buf, "#define const_type(idx) _mod_const_type(idx)\n");
         strbuf_append_str(tp->code_buf, "#define const_pattern(idx) _mod_const_pattern(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define object_type_set_method(ti,n,fp,a,p) _mod_object_type_set_method(ti,n,fp,a,p)\n");
+        strbuf_append_str(tp->code_buf, "#define object_type_set_constraint(ti,fp) _mod_object_type_set_constraint(ti,fp)\n");
     }
 
     // Pre-define all closure environment structs before any function definitions
@@ -7596,6 +7627,23 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             }
             tp->method_owner = nullptr;
             child = child->next;
+        } else if (child->node_type == AST_NODE_PUB_STAM) {
+            // forward-declare methods inside pub object types
+            AstNode* decl = ((AstLetNode*)child)->declare;
+            while (decl) {
+                if (decl->node_type == AST_NODE_OBJECT_TYPE) {
+                    AstObjectTypeNode* obj_node = (AstObjectTypeNode*)decl;
+                    tp->method_owner = obj_node;
+                    AstNode* method = obj_node->methods;
+                    while (method) {
+                        forward_declare_func(tp, (AstFuncNode*)method);
+                        method = method->next;
+                    }
+                    tp->method_owner = nullptr;
+                }
+                decl = decl->next;
+            }
+            child = child->next;
         } else {
             child = child->next;
         }
@@ -7642,12 +7690,25 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             else if (child->node_type == AST_NODE_PUB_STAM) {
                 AstNode *declare = ((AstLetNode*)child)->declare;
                 while (declare) {
+                    if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                        // object types are not global variables — skip in _init_mod_vars
+                        declare = declare->next;
+                        continue;
+                    }
                     AstNamedNode *asn_node = (AstNamedNode*)declare;
                     strbuf_append_str(tp->code_buf, " _m->");
                     write_var_name(tp->code_buf, asn_node, NULL);
                     strbuf_append_str(tp->code_buf, " = ");
                     write_var_name(tp->code_buf, asn_node, NULL);
                     strbuf_append_str(tp->code_buf, ";\n");
+                    // also copy error variable for ^err destructuring
+                    if (asn_node->error_name) {
+                        strbuf_append_str(tp->code_buf, " _m->_");
+                        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                        strbuf_append_str(tp->code_buf, " = _");
+                        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                        strbuf_append_str(tp->code_buf, ";\n");
+                    }
                     declare = declare->next;
                 }
             }

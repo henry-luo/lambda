@@ -1,8 +1,8 @@
 // latex/normalize.ls — Phase 1: AST cleanup and normalization
 // Cleans up the raw tree-sitter AST for easier processing.
 
-import util: .lambda.package.latex.util
-import sym: .lambda.package.latex.symbols
+import util: .util
+import sym: .symbols
 
 // ============================================================
 // Main normalization entry point

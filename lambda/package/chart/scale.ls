@@ -3,8 +3,8 @@
 // Scale objects are pure data maps. Use scale_apply / scale_ticks / scale_invert
 // dispatch functions to operate on them.
 
-import util: .lambda.package.chart.util
-import color: .lambda.package.chart.color
+import util: .util
+import color: .color
 
 // ============================================================
 // Scale constructors (return pure data maps)
