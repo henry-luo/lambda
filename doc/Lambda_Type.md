@@ -51,7 +51,7 @@ Types in Lambda are first-class values that can be manipulated like any other va
 ```lambda
 // Assign types to variables
 let T = int
-let StringList = [string]
+let StringList = string[]
 let UserType = {name: string, age: int}
 
 // Pass types as arguments
@@ -62,7 +62,7 @@ validate("hello", int)      // false
 
 // Return types from functions
 fn element_type(arr_type: type) => arr_type.element
-element_type([int])         // int
+element_type(int[])         // int
 
 // Type in collections
 let types = [int, string, bool]
@@ -118,7 +118,7 @@ flowchart TD
 | `int` | `number` | `42 is number` → `true` |
 | `float` | `number` | `3.14 is number` → `true` |
 | `range` | `collection` | `(1 to 10) is range` → `true` |
-| `[int]` | `[any]` | `[1,2,3] is [any]` → `true` |
+| `int[]` | `any[]` | `[1,2,3] is any[]` → `true` |
 | `null` | `T?` | `null is int?` → `true` |
 | Every type | `any` | `"hello" is any` → `true` |
 
@@ -229,22 +229,43 @@ let squares = for (i in 1 to 5) i ^ 2   // [1, 4, 9, 16, 25]
 
 ### Array Types
 
+Lambda has two forms for array types:
+
+**Form 1: Bracket notation** — a type with an occurrence modifier inside `[ ]`:
+
 ```lambda
-// Homogeneous arrays
-[int]              // Array of integers
-[string]           // Array of strings
-[bool]             // Array of booleans
+[int*]             // Array of zero or more ints
+[int+]             // Array of one or more ints (non-empty)
+[string*]          // Array of zero or more strings
+[bool+]            // Non-empty array of booleans
+```
 
-// Nested arrays
-[[int]]            // Array of integer arrays
-[[[string]]]       // 3D array of strings
+> **Note:** `[int]` (without `*` or `+`) means a list of exactly 1 int, not an array of ints.
 
-// Array with any element
-[any]              // Array of any type
+**Form 2: Occurrence suffix** — a type followed by `[]` or `[n]`:
 
-// Examples
-let nums: [int] = [1, 2, 3]
-let matrix: [[int]] = [[1, 2], [3, 4]]
+```lambda
+int[]              // Array of zero or more ints (same as [int*])
+string[]           // Array of zero or more strings
+float[]            // Array of zero or more floats
+int[5]             // Array of exactly 5 ints
+int[3+]            // Array of 3 or more ints
+int[2, 10]         // Array of 2 to 10 ints
+```
+
+Nested arrays:
+
+```lambda
+int[][]            // Array of int arrays
+string[][]         // 2D array of strings
+```
+
+Examples:
+
+```lambda
+let nums: int[] = [1, 2, 3]
+let matrix: int[][] = [[1, 2], [3, 4]]
+let names: [string+] = ["Alice", "Bob"]
 ```
 
 ### List Types (Tuples)
@@ -291,7 +312,7 @@ type Paragraph = <p; string>
 type Link = <a href: string; string>
 type Article = <article title: string, author: string;
     string,           // Text content
-    [Section]         // Array of sections
+    Section*          // Zero or more sections
 >
 ```
 
@@ -349,7 +370,7 @@ type UserName = string
 type Point = (float, float)
 
 // Collection aliases
-type IntList = [int]
+type IntList = int[]
 type StringMap = {string: string}
 
 // Usage
@@ -436,7 +457,7 @@ type Section = <section heading: string;
 
 type Article = <article title: string, author: string;
     string,           // Intro text
-    [Section]         // Array of sections
+    Section*          // Zero or more sections
 >
 
 // Usage
@@ -459,7 +480,7 @@ Type occurrences specify cardinality and optionality:
 // Optional (nullable) types
 int?               // int | null
 string?            // string | null
-[int]?             // Array or null
+int[]?             // Array or null
 
 // In function parameters
 fn greet(name: string, title?: string) => ...
@@ -475,22 +496,25 @@ type User = {
 
 ```lambda
 // Zero or more (array)
-int*               // Same as [int] - array of zero or more
+int*               // Same as int[] — array of zero or more
 string*            // Array of zero or more strings
 
 // One or more (non-empty array)
 int+               // Array of at least one int
 string+            // Non-empty string array
 
-// Typed array (native performance)
-int[]              // Typed int array
-float[]            // Typed float array
+// Occurrence suffix forms
+int[]              // Array of zero or more ints (same as int*)
+float[]            // Array of zero or more floats
+int[5]             // Array of exactly 5 ints
+int[3+]            // Array of 3 or more ints
+int[2, 10]         // Array of 2 to 10 ints
 
 // Examples
 type Args = string*        // Zero or more arguments
 type Names = string+       // At least one name required
 
-// Typed array in variables and parameters
+// In variables and parameters
 var positions: float[] = [0.0, 1.0, 2.0]
 pn update(arr: int[], n: int) { arr[0] = n }
 
@@ -504,9 +528,12 @@ fn concat(parts: string+) => ...   // Requires at least one
 |--------|---------|------------|
 | `T` | Exactly one | Required |
 | `T?` | Zero or one | `T \| null` |
-| `T*` | Zero or more | `[T]` |
-| `T+` | One or more | Non-empty `[T]` |
-| `T[]` | Typed array | Native `T` array (int, float) |
+| `T*` | Zero or more | `T[]` |
+| `T+` | One or more | Non-empty `T[]` |
+| `T[]` | Zero or more | Same as `T*` |
+| `T[n]` | Exactly n | Fixed-size array |
+| `T[n+]` | n or more | Min-size array |
+| `T[n, m]` | n to m | Bounded-size array |
 
 ---
 
@@ -520,7 +547,7 @@ Type patterns enable matching and destructuring based on type structure.
 // Type check with 'is'
 42 is int                  // true
 "hello" is string          // true
-[1, 2] is [int]            // true
+[1, 2] is int[]            // true
 
 // Negated type check with '!'
 !(42 is string)            // true
@@ -544,9 +571,9 @@ if (value is string) {
 ```lambda
 // Array element type matching
 let arr = [1, 2, 3]
-arr is [int]               // true
-arr is [string]            // false
-arr is [number]            // true (int is subtype of number)
+arr is int[]               // true
+arr is string[]            // false
+arr is number[]            // true (int is subtype of number)
 
 // Map structure matching
 let obj = {name: "Alice", age: 30}
@@ -572,7 +599,7 @@ string?                // Same as: string | null
 fn process(value: int | string) => ...
 
 // Union in collections
-let mixed: [int | string] = [1, "two", 3, "four"]
+let mixed: (int | string)[] = [1, "two", 3, "four"]
 ```
 
 Pattern matching with union types:
@@ -993,7 +1020,7 @@ Lambda performs type checking at compile time:
 ```lambda
 // Type errors caught at compile time
 let x: int = "hello"           // Error: string not assignable to int
-let y: [int] = [1, "two", 3]   // Error: mixed types in [int]
+let y: int[] = [1, "two", 3]   // Error: mixed types in int[]
 
 fn add(a: int, b: int) int => a + b
 add(1, "2")                    // Error: string not assignable to int
@@ -1037,7 +1064,7 @@ Lambda infers types automatically when not explicitly annotated:
 // Types inferred from initializer
 let x = 42                     // x: int
 let name = "Alice"             // name: string
-let items = [1, 2, 3]          // items: [int]
+let items = [1, 2, 3]          // items: int[]
 let user = {name: "Bob"}       // user: {name: string}
 ```
 
@@ -1049,7 +1076,7 @@ fn double(x: int) => x * 2     // Returns int
 fn greet(name: string) => "Hello, " ++ name  // Returns string
 
 // Complex inference
-fn process(items: [int]) => {
+fn process(items: int[]) => {
     let filtered = items where ~ > 0
     let doubled = filtered | ~ * 2
     sum(doubled)
@@ -1060,9 +1087,9 @@ fn process(items: [int]) => {
 
 ```lambda
 // Element type inferred from contents
-let nums = [1, 2, 3]           // [int]
-let mixed = [1, 2.5, 3]        // [number] (int promoted to number)
-let empty = []                 // [any] (unknown element type)
+let nums = [1, 2, 3]           // int[]
+let mixed = [1, 2.5, 3]        // number[] (int promoted to number)
+let empty = []                 // any[] (unknown element type)
 
 // Map type inferred from structure
 let config = {
@@ -1076,7 +1103,7 @@ let config = {
 
 ```lambda
 // Sometimes explicit annotation needed
-let empty: [int] = []          // Disambiguate empty array type
+let empty: int[] = []          // Disambiguate empty array type
 
 // Recursive types need annotation
 type Node = {value: int, next: Node?}
