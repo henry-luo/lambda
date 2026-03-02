@@ -566,6 +566,34 @@ void line_break(LayoutContext* lycon) {
         used_line_height = css_line_height;
     }
 
+    // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
+    // Inline elements whose content all collapsed (e.g., <em> </em>) get 0×0 from
+    // compute_span_bounding_box. However, when the line has visible content, the
+    // inline box should still show height = its line-height (the "strut" concept).
+    // Walk siblings from start_view and fix any marked collapsed inline spans.
+    // CSS 2.1 §9.4.2: Line boxes with no text/content/etc. are zero-height, so
+    // only fix when used_line_height > 0 (line has actual visible content).
+    if (used_line_height > 0 && lycon->line.start_view) {
+        View* v = lycon->line.start_view;
+        // Find the parent to limit sibling walk
+        DomNode* line_parent = ((DomNode*)v)->parent;
+        while (v) {
+            if (v->view_type == RDT_VIEW_INLINE && v->height == 0) {
+                DomElement* elem = static_cast<DomElement*>((DomNode*)v);
+                if (elem->content_height > 0) {
+                    // Marked as collapsed inline — apply its stored line-height
+                    v->height = (int)elem->content_height;
+                    elem->content_height = 0;  // clear the marker
+                    log_debug("fixup collapsed inline span %s height=%d", elem->node_name(), v->height);
+                }
+            }
+            // Walk siblings at the same parent level
+            DomNode* next = ((DomNode*)v)->next_sibling;
+            if (!next || ((DomNode*)v)->parent != line_parent) break;
+            v = (View*)next;
+        }
+    }
+
     lycon->block.advance_y += used_line_height;
 
     // CSS 2.1 10.8.1: Track last line's ascender for inline-block baseline alignment
