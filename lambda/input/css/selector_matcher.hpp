@@ -344,11 +344,13 @@ bool selector_matcher_matches_combinator(SelectorMatcher* matcher,
  * @param matcher Selector matcher
  * @param selector Ancestor selector
  * @param element Descendant element
+ * @param matched_ancestor Optional output: the ancestor that matched (for advancing position)
  * @return true if element has an ancestor matching selector
  */
 bool selector_matcher_has_ancestor(SelectorMatcher* matcher,
                                    CssCompoundSelector* selector,
-                                   DomElement* element);
+                                   DomElement* element,
+                                   DomElement** matched_ancestor = nullptr);
 
 /**
  * Check child relationship (parent selector matches immediate parent)
@@ -377,11 +379,13 @@ bool selector_matcher_has_prev_sibling(SelectorMatcher* matcher,
  * @param matcher Selector matcher
  * @param selector Preceding sibling selector
  * @param element Subsequent sibling element
+ * @param matched_sibling Optional output: the sibling that matched (for advancing position)
  * @return true if element has a preceding sibling matching selector
  */
 bool selector_matcher_has_preceding_sibling(SelectorMatcher* matcher,
                                             CssCompoundSelector* selector,
-                                            DomElement* element);
+                                            DomElement* element,
+                                            DomElement** matched_sibling = nullptr);
 
 // ============================================================================
 // CSS4 Advanced Selectors
