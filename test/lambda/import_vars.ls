@@ -1,5 +1,5 @@
 // test pub vars of various types from imported module
-import .test.lambda.mod_vars
+import .mod_vars
 
 (name, version, ratio)
 items

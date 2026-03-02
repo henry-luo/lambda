@@ -653,8 +653,14 @@ module.exports = grammar({
       'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
-    pub_stam: $ => seq(
-      'pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    pub_stam: $ => choice(
+      // pub variable: pub x = expr, pub y = expr
+      seq('pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))),
+      // pub type alias: pub type T = type_expr
+      seq('pub', 'type', field('declare', alias($.type_assign, $.assign_expr)),
+        repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))),
+      // pub object type: pub type T { ... }
+      seq('pub', field('declare', $.object_type)),
     ),
 
     // Expression-form if: if (cond) expr else expr | else { stam }

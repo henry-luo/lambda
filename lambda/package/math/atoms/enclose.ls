@@ -1,10 +1,10 @@
 // math/atoms/enclose.ls — Enclosure rendering (\boxed, \fbox, \phantom, \rule)
 // Handles box commands, phantom commands, and rule commands.
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
-import met: .lambda.package.math.metrics
+import box: lambda.package.math.box
+import ctx: lambda.package.math.context
+import css: lambda.package.math.css
+import met: lambda.package.math.metrics
 
 // ============================================================
 // Box commands (\boxed, \fbox, \bbox)

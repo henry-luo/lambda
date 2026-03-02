@@ -6,9 +6,9 @@
 // Strategy: render non-separator children as flat list of cell boxes,
 // use CSS grid with grid-template-columns to achieve proper layout.
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
+import box: lambda.package.math.box
+import ctx: lambda.package.math.context
+import css: lambda.package.math.css
 
 // ============================================================
 // Public entry points

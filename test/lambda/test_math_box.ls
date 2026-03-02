@@ -1,7 +1,7 @@
 // test_math_box.ls — Test math box model
 // Coverage: box.ls — text_box, skip_box, null_delim, make_box, hbox, with_class, with_color, with_scale
 
-import box: .lambda.package.math.box
+import box: lambda.package.math.box
 
 "===== MATH BOX TESTS ====="
 

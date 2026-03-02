@@ -3,10 +3,10 @@
 // collects headings (TOC), labels, footnotes.
 // Returns immutable DocInfo used by render pass.
 
-import util: .lambda.package.latex.util
-import dc_article: .lambda.package.latex.docclass.article
-import dc_book: .lambda.package.latex.docclass.book
-import dc_report: .lambda.package.latex.docclass.report
+import util: lambda.package.latex.util
+import dc_article: lambda.package.latex.docclass.article
+import dc_book: lambda.package.latex.docclass.book
+import dc_report: lambda.package.latex.docclass.report
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {

@@ -1,7 +1,7 @@
 // latex/math_bridge.ls - Bridge to the math package
 // Delegates math AST rendering to lambda/package/math/math.ls
 
-import math: .lambda.package.math.math
+import math: lambda.package.math.math
 
 // ============================================================
 // Inline math

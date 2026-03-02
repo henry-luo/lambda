@@ -694,28 +694,56 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
+
+    // Normalize path to canonical absolute path for reliable deduplication
+    // (skip for source-provided scripts like REPL which have synthetic paths)
+    const char* lookup_path = script_path;
+    char* canonical_path = NULL;
+    if (!source) {
+        canonical_path = realpath(script_path, NULL);
+        if (canonical_path) {
+            lookup_path = canonical_path;
+        }
+    }
+
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
-        if (strcmp(script->reference, script_path) == 0) {
+        if (strcmp(script->reference, lookup_path) == 0) {
             // circular import detection: script is in list but still being loaded
             if (script->is_loading) {
-                log_error("Circular import detected: %s", script_path);
-                fprintf(stderr, "Error: Circular import detected: %s\n", script_path);
+                log_error("Circular import detected: %s", lookup_path);
+                fprintf(stderr, "Error: Circular import detected: %s\n", lookup_path);
+                if (canonical_path) free(canonical_path);
                 return NULL;
             }
-            log_info("Script %s is already loaded.", script_path);
+            log_info("Script %s is already loaded.", lookup_path);
+            if (canonical_path) free(canonical_path);
             return script;
         }
     }
     // script not found, create a new one
-    const char* script_source =  source ? source : read_text_file(script_path);
+    const char* script_source = source ? source : read_text_file(lookup_path);
     if (!script_source) {
-        log_error("Error: Failed to read source code from %s", script_path);
+        log_error("Error: Failed to read source code from %s", lookup_path);
+        if (canonical_path) free(canonical_path);
         return NULL;
     }
     Script *new_script = (Script*)calloc(1, sizeof(Script));
-    new_script->reference = strdup(script_path);
+    new_script->reference = strdup(lookup_path);
+    // extract directory from script path for script-relative imports
+    const char* last_slash = strrchr(lookup_path, '/');
+    if (last_slash) {
+        int dir_len = (int)(last_slash - lookup_path + 1);
+        char* dir = (char*)malloc(dir_len + 1);
+        memcpy(dir, lookup_path, dir_len);
+        dir[dir_len] = '\0';
+        new_script->directory = dir;
+    } else {
+        new_script->directory = strdup("./");
+    }
+    log_debug("script directory: %s", new_script->directory);
+    if (canonical_path) free(canonical_path);
     new_script->source = script_source;
     log_debug("script source length: %d", (int)strlen(new_script->source));
     arraylist_append(runtime->scripts, new_script);
