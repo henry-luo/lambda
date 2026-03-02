@@ -99,6 +99,8 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 ```lambda
 -x                 // Negation
 +x                 // Positive (identity)
+not x              // Logical NOT
+!T                 // Type negation (any except T)
 *x                 // Spread (expand collection)
 ```
 
@@ -179,9 +181,14 @@ if (x == null) "missing" else x
 
 ```lambda
 // Type checking
-42 is int          // true
-"hello" is string  // true
-42 is not string   // true
+42 is int              // true
+"hello" is string      // true
+!(42 is string)        // true (negated type check)
+
+// Type equality
+type(42) == int        // true
+type([1,2]) == array   // true
+type(42) != string     // true
 ```
 
 ---
@@ -1051,7 +1058,7 @@ From highest to lowest:
 | Precedence | Operators                  | Description     |
 | ---------- | -------------------------- | --------------- |
 | 1          | `()`, `[]`, `[T]`, `.`, `?`, `.?` | Primary, query  |
-| 2          | `-`, `+`, `not`, `*`       | Unary           |
+| 2          | `-`, `+`, `not`, `!`, `*`  | Unary (`!`: type negation) |
 | 3          | `**`                       | Exponentiation  |
 | 4          | `*`, `/`, `div`, `%`       | Multiplicative  |
 | 5          | `+`, `-`                   | Additive        |

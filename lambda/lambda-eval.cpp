@@ -822,10 +822,24 @@ Bool fn_is(Item a, Item b) {
 // 3-states comparison
 Bool fn_eq(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
-        // special case: null comparison with any type returns false (not error)
-        // this allows idiomatic null checking like: if (x == null) ...
-        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
-            return BOOL_FALSE;
+        // special case: type(null) == null, type(error) == error
+        // when one side is a type value and the other is null/error,
+        // compare the type's inner type_id against the value's type_id
+        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL ||
+            a_item._type_id == LMD_TYPE_ERROR || b_item._type_id == LMD_TYPE_ERROR) {
+            // check if either side is a type value (container pointer with type_id == LMD_TYPE_TYPE)
+            Item type_item, value_item;
+            if (get_type_id(a_item) == LMD_TYPE_TYPE) {
+                type_item = a_item; value_item = b_item;
+            } else if (get_type_id(b_item) == LMD_TYPE_TYPE) {
+                type_item = b_item; value_item = a_item;
+            } else {
+                // neither side is a type value — use existing null/error semantics
+                return BOOL_FALSE;
+            }
+            // compare type's inner type_id against the value's type_id
+            TypeType* tt = (TypeType*)type_item.type;
+            return (tt->type->type_id == get_type_id(value_item)) ? BOOL_TRUE : BOOL_FALSE;
         }
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
@@ -876,6 +890,18 @@ Bool fn_eq(Item a_item, Item b_item) {
         if (strncmp(sym_a->chars, sym_b->chars, sym_a->len) != 0) return BOOL_FALSE;
         // compare namespaces - both NULL or same URL
         return target_equal(sym_a->ns, sym_b->ns) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_RAW_POINTER) {
+        // both are container/pointer types - resolve actual type_id
+        TypeId a_tid = get_type_id(a_item);
+        TypeId b_tid = get_type_id(b_item);
+        if (a_tid == LMD_TYPE_TYPE && b_tid == LMD_TYPE_TYPE) {
+            // compare type values by their inner type
+            TypeType* a_tt = (TypeType*)a_item.type;
+            TypeType* b_tt = (TypeType*)b_item.type;
+            return (a_tt->type->type_id == b_tt->type->type_id) ? BOOL_TRUE : BOOL_FALSE;
+        }
+        // other container types: fall through to error (structural equality not yet supported)
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
     return BOOL_ERROR;
@@ -1521,6 +1547,15 @@ Type* fn_type(Item item) {
     else {
         // fallback to null for any other case
         item_type->type_id = LMD_TYPE_NULL;
+    }
+    // normalize specialized types to their base type for consistent comparison
+    // e.g., array[int], array[int64], array[float] all map to 'array'
+    //        vmap maps to 'map'
+    TypeId tid = item_type->type_id;
+    if (tid == LMD_TYPE_ARRAY_INT || tid == LMD_TYPE_ARRAY_INT64 || tid == LMD_TYPE_ARRAY_FLOAT) {
+        item_type->type_id = LMD_TYPE_ARRAY;
+    } else if (tid == LMD_TYPE_VMAP) {
+        item_type->type_id = LMD_TYPE_MAP;
     }
     return (Type*)type;
 }
