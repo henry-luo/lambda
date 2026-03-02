@@ -946,7 +946,7 @@ static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, flo
  * @param table_height Height of the table content area (excluding caption)
  */
 static void layout_column_elements(ViewTable* table, float* col_widths, float* col_x_positions,
-                                   int columns, float table_height) {
+                                   int columns, float table_height, float content_y_offset) {
     if (!table || columns <= 0) return;
 
     log_debug("[COLUMN-LAYOUT] Setting column/colgroup dimensions for %d columns, table_height=%.1f",
@@ -984,8 +984,11 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             if (last_col >= columns) last_col = columns - 1;
 
             // Calculate colgroup dimensions
+            // CSS 2.1 §17.2.1: Column groups span the table content area.
+            // col_x_positions[] are absolute from the table border-box origin
+            // (they include border + padding + border-spacing offsets).
             if (first_col < columns) {
-                float x = col_x_positions[first_col] - col_x_positions[0];  // Relative to table content
+                float x = col_x_positions[first_col];
                 float width = 0;
                 for (int c = first_col; c <= last_col && c < columns; c++) {
                     width += col_widths[c];
@@ -997,12 +1000,14 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
                 }
 
                 child->x = x;
-                child->y = 0;
+                child->y = content_y_offset;
                 child->width = width;
-                child->height = table_height;
+                // CSS 2.1 §17.5.1: Column groups with zero width have zero height
+                // (no visible column = no visible box in getBoundingClientRect)
+                child->height = (width > 0) ? table_height : 0;
 
                 log_debug("[COLUMN-LAYOUT] Colgroup: cols %d-%d, x=%.1f, y=0, width=%.1f, height=%.1f",
-                          first_col, last_col, x, width, table_height);
+                          first_col, last_col, x, width, child->height);
             }
 
             // Now set dimensions for child column elements
@@ -1011,8 +1016,8 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             int col_idx = first_col;
             for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
                 if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
-                    // Column x relative to table
-                    float col_x_in_table = col_x_positions[col_idx] - col_x_positions[0];
+                    // Column x absolute from table border-box
+                    float col_x_in_table = col_x_positions[col_idx];
                     // Column x relative to parent colgroup
                     float col_x = col_x_in_table - colgroup_x;
                     float col_width = col_widths[col_idx];
@@ -1020,10 +1025,11 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
                     col->x = col_x;
                     col->y = 0;
                     col->width = col_width;
-                    col->height = table_height;
+                    // CSS 2.1 §17.5.1: Columns with zero width have zero height
+                    col->height = (col_width > 0) ? table_height : 0;
 
                     log_debug("[COLUMN-LAYOUT] Column %d: x=%.1f (in table: %.1f), y=0, width=%.1f, height=%.1f",
-                              col_idx, col_x, col_x_in_table, col_width, table_height);
+                              col_idx, col_x, col_x_in_table, col_width, col->height);
                     col_idx++;
                 }
             }
@@ -1033,16 +1039,17 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
         else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
             // Standalone column (not in a colgroup)
             if (current_col < columns) {
-                float col_x = col_x_positions[current_col] - col_x_positions[0];
+                float col_x = col_x_positions[current_col];
                 float col_width = col_widths[current_col];
 
                 child->x = col_x;
-                child->y = 0;
+                child->y = content_y_offset;
                 child->width = col_width;
-                child->height = table_height;
+                // CSS 2.1 §17.5.1: Columns with zero width have zero height
+                child->height = (col_width > 0) ? table_height : 0;
 
                 log_debug("[COLUMN-LAYOUT] Standalone column %d: x=%.1f, y=0, width=%.1f, height=%.1f",
-                          current_col, col_x, col_width, table_height);
+                          current_col, col_x, col_width, child->height);
                 current_col++;
             }
         }
@@ -4591,10 +4598,10 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     max_width += border_horizontal + padding_horizontal;
     min_width += border_horizontal + padding_horizontal;
 
-    // CSS 2.1: Ensure minimum widths aren't zero for cells with text content
-    // (empty cells already handled at function entry)
-    if (max_width < 1.0f) max_width = 1.0f;
-    if (min_width < 1.0f) min_width = 1.0f;
+    // CSS 2.1: Ensure max_width is at least 1px for cells that have actual content
+    // (prevents zero-width cells that would make text invisible)
+    // Note: min_width is NOT clamped - cells with no visible content can be 0-width
+    if (max_width < 1.0f && max_width > 0.0f) max_width = 1.0f;
 
     log_debug("Cell widths: max=%.2f, min=%.2f (content + padding=%.1f + border=%.1f, collapse=%d)",
         max_width, min_width, padding_horizontal, border_horizontal, border_collapse);
@@ -4920,6 +4927,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Get explicit CSS width using helper function
             // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't add to column width
+            // Set up the cell's font context for em-based width resolution
+            FontBox saved_font_cell = lycon->font;
+            if (tcell->font) {
+                setup_font(lycon->ui_context, &lycon->font, tcell->font);
+            }
             float cell_width = get_cell_css_width(lycon, tcell, table_content_width, table->tb->border_collapse);
 
             // Calculate both minimum and preferred widths for CSS 2.1 table layout
@@ -5076,6 +5088,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
                 }
             }
+            // Restore parent font context after cell width measurement
+            lycon->font = saved_font_cell;
         }
     }
 
@@ -5964,6 +5978,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("Added top border-spacing: +%dpx", table->tb->border_spacing_v);
     }
 
+    // Save the y-offset where the content area starts (for column positioning)
+    // CSS 2.1 §17.2.1: column elements span from the content area top
+    int content_area_top_y = current_y;
+
     // Position caption at top if caption-side is top (default)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
         caption->x = 0;
@@ -6824,7 +6842,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_padding_vert += table->bound->padding.bottom;
     }
     if (table->bound && table->bound->border) {
-        table_border_vert = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
+        if (table->tb->border_collapse) {
+            // CSS 2.1 §17.6.2: In border-collapse mode, the table's border box includes
+            // only HALF of the collapsed border on each edge (shared with the outer cells).
+            float collapsed_top = meta->collapsed_border_top;
+            float collapsed_bottom = meta->collapsed_border_bottom;
+            if (collapsed_top <= 0) collapsed_top = table->bound->border->width.top;
+            if (collapsed_bottom <= 0) collapsed_bottom = table->bound->border->width.bottom;
+            table_border_vert = (int)(collapsed_top / 2.0f + 0.5f) + (int)(collapsed_bottom / 2.0f + 0.5f);
+        } else {
+            table_border_vert = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
+        }
     }
     if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
         table_spacing_vert = (int)(2 * table->tb->border_spacing_v);  // Top and bottom edge spacing
@@ -7091,6 +7119,57 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             current_y += extra_height;
             final_table_height = current_y;
             log_debug("Updated final_table_height to %d after height distribution", final_table_height);
+
+            // Third pass: recalculate row group y-positions and heights after height distribution.
+            // The view update loop above computed group heights using stale group y positions,
+            // so we must reposition groups sequentially and recalculate both row-relative
+            // positions and group heights from the authoritative meta->row_y_positions.
+            {
+                float group_y_accum = -1;
+                for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                    if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                        if (group_y_accum >= 0) {
+                            float old_y = child->y;
+                            child->y = group_y_accum;
+                            if (old_y != child->y) {
+                                log_debug("Repositioned row group from y=%.1f to y=%.1f", old_y, child->y);
+                            }
+                        } else {
+                            // First group keeps its original y
+                            group_y_accum = child->y;
+                        }
+
+                        // Recalculate row positions within group relative to the (possibly updated) group y,
+                        // and recompute group height from the corrected row extents.
+                        float group_max_y = 0;
+                        for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+                            if (row->view_type == RDT_VIEW_TABLE_ROW) {
+                                ViewTableRow* trow = (ViewTableRow*)row;
+                                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                                    int row_idx = tcell->td->row_index;
+                                    if (row_idx >= 0 && row_idx < meta->row_count) {
+                                        row->y = meta->row_y_positions[row_idx] - child->y;
+                                        float row_bottom = row->y + row->height;
+                                        if (row_bottom > group_max_y) {
+                                            group_max_y = row_bottom;
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (group_max_y > 0) {
+                            child->height = group_max_y;
+                        }
+
+                        group_y_accum = child->y + child->height;
+                        // Add border-spacing between groups
+                        if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                            group_y_accum += table->tb->border_spacing_v;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -7403,7 +7482,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // CSS 2.1 §17.5.1: Set dimensions for column and column group elements
     // Column elements span the full table content height (excluding caption)
     // Their width is determined by the computed column widths
-    layout_column_elements(table, col_widths, col_x_positions, columns, (float)table->content_height);
+    layout_column_elements(table, col_widths, col_x_positions, columns,
+                           (float)table->content_height, (float)content_area_top_y);
 
     // Cleanup ArrayLists
     arraylist_free(thead_groups);
