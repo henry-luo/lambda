@@ -596,8 +596,8 @@ lambda/js/
 lambda/
 ├── mir.c                      # Registered js_dom_set_property, js_dom_set_style_property,
 │                              #   js_get_computed_style, js_document_write
-test/layout/data/css2.1/
-├── skip_list.txt              # Emptied — no tests skipped (was 304 → 269 → 178 → 0)
+test/layout/
+├── skip_list.txt              # Shared skip list — 4 non-test entries (chapter TOCs + ref file)
 ```
 
 ### Build System
@@ -610,7 +610,7 @@ test/layout/data/css2.1/
 
 ### 7.1 Skip List Eliminated
 
-The skip list (`test/layout/data/css2.1/skip_list.txt`) has been emptied. All CSS2.1 tests, including the 304 formerly-skipped JS-dependent tests, now run in the unified test suite:
+The skip list (`test/layout/skip_list.txt`) contains only 4 non-test entries (chapter TOC pages and a reference file). All CSS2.1 tests, including the 304 formerly-skipped JS-dependent tests, now run in the unified test suite:
 
 ```bash
 make layout suite=css2.1    # Full run (all tests, no skips)
