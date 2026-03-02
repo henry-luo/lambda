@@ -2063,6 +2063,74 @@ extern "C" Item fn_input1(Item url) {
     return fn_input2(url, ItemNull);
 }
 
+// parse(str, format) - parse a string into Lambda data structures
+// Unlike input() which reads from files/URLs, parse() works on in-memory strings.
+// 2nd arg can be a format symbol ('json, 'yaml, etc.) or an options map like input().
+extern "C" Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
+
+Item fn_parse2(Item str_item, Item type) {
+    GUARD_ERROR2(str_item, type);
+
+    // first arg must be a string
+    TypeId str_type = get_type_id(str_item);
+    if (str_type != LMD_TYPE_STRING) {
+        log_error("parse: 1st argument must be a string, got type: %s", get_type_name(str_type));
+        return ItemError;
+    }
+    String* str = str_item.get_string();
+    if (!str || !str->chars) return ItemNull;
+
+    // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
+    String* type_str = NULL;
+    String* flavor_str = NULL;
+
+    TypeId type_id = get_type_id(type);
+    if (type_id == LMD_TYPE_NULL) {
+        type_str = NULL;  // auto-detect
+    }
+    else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        type_str = fn_string(type);
+    }
+    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
+        Map* options_map = type.map;
+        bool is_found;
+
+        // extract 'type' from map
+        Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
+        if (is_found && input_type.item && input_type._type_id != LMD_TYPE_NULL) {
+            TypeId type_value_type = get_type_id(input_type);
+            if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+                type_str = fn_string(input_type);
+            }
+        }
+
+        // extract 'flavor' from map
+        Item input_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
+        if (is_found && input_flavor.item && input_flavor._type_id != LMD_TYPE_NULL) {
+            TypeId flavor_value_type = get_type_id(input_flavor);
+            if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+                flavor_str = fn_string(input_flavor);
+            }
+        }
+    }
+    else {
+        log_error("parse: 2nd argument must be a format symbol or options map, got type: %s", get_type_name(type_id));
+        return ItemError;
+    }
+
+    // create a dummy URL for the parser infrastructure (no actual file)
+    Url* dummy_url = url_parse("parse://inline");
+
+    log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
+
+    Input* input = input_from_source(str->chars, dummy_url, type_str, flavor_str);
+    return (input && input->root.item) ? input->root : ItemNull;
+}
+
+Item fn_parse1(Item str_item) {
+    return fn_parse2(str_item, ItemNull);
+}
+
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
 
 String* fn_format2(Item item, Item type) {

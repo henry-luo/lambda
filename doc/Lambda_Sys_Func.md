@@ -312,6 +312,8 @@ Functions for working with arrays, lists, and other collections.
 | `reverse(vec)` | Reverse order | `reverse([1, 2, 3])` | `[3, 2, 1]` |
 | `sort(vec)` | Sort ascending | `sort([3, 1, 2])` | `[1, 2, 3]` |
 | `sort(vec, 'desc)` | Sort descending | `sort([1, 2, 3], 'desc)` | `[3, 2, 1]` |
+| `sort(vec, fn)` | Sort by key function | `sort(users, ~.age)` | Sorted by age |
+| `sort(vec, options)` | Sort with options map | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
 | `unique(vec)` | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])` | `[1, 2, 3]` |
 | `concat(v1, v2)` | Concatenate vectors | `concat([1, 2], [3, 4])` | `[1, 2, 3, 4]` |
 | `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` |
@@ -334,6 +336,15 @@ any([false, false, true])  // true
 reverse([1, 2, 3])         // [3, 2, 1]
 sort([3, 1, 2])            // [1, 2, 3]
 sort([1, 2, 3], 'desc)     // [3, 2, 1]
+
+// Sort by key function — 2nd arg is fn
+let users = [{name: "Bob", age: 30}, {name: "Alice", age: 25}]
+sort(users, ~.age)         // sorted by age ascending
+sort(users, ~.name)        // sorted by name ascending
+
+// Sort with options map — direction + key
+sort(users, {dir: 'desc, by: ~.age})   // sorted by age descending
+
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
 concat([1, 2], [3, 4])     // [1, 2, 3, 4]
 take([1, 2, 3, 4], 2)      // [1, 2]
@@ -413,6 +424,23 @@ Functions that reduce collections to single values.
 | `all(vec)` | All truthy? | `all([true, true])` | `true` |
 | `any(vec)` | Any truthy? | `any([false, true])` | `true` |
 | `len(vec)` | Count elements | `len([1, 2, 3])` | `3` |
+| `reduce(vec, fn)` | Reduce with binary function | `reduce([1,2,3], (a,b) => a+b)` | `6` |
+
+### reduce(vec, fn)
+
+Reduce a collection to a single value by applying a binary function cumulatively. Uses the first element as the initial accumulator.
+
+```lambda
+reduce([1, 2, 3, 4], (a, b) => a + b)     // 10 (sum)
+reduce([1, 2, 3, 4, 5], (a, b) => a * b)   // 120 (product)
+reduce([42], (a, b) => a + b)               // 42 (single element)
+
+// Sort and reduce
+let nums = [5, 3, 8, 1]
+reduce(sort(nums), (acc, x) => acc * 10 + x)   // 1358
+```
+
+> **Note**: Collection must have at least one element. If only one element, it is returned directly without calling the function.
 
 ---
 
@@ -509,6 +537,35 @@ let csv_data = input(@./data.csv, {type: 'csv, delimiter: ','})
 // Auto-detection (based on file extension)
 let auto_data = input(@./document.md)  // Automatically detects Markdown
 ```
+
+#### parse(str) / parse(str, format)
+
+Parse a string into Lambda data structures. Like `input()` but operates on string content instead of file paths/URLs.
+
+| Function | Description | Example |
+|----------|-------------|--------|
+| `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
+| `parse(str, format)` | Parse string with specified format | `parse(str, 'json)` |
+
+**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`
+
+```lambda
+// Parse JSON string
+let data^err = parse("{\"name\": \"Alice\", \"age\": 30}", 'json)
+data.name     // "Alice"
+
+// Auto-detect JSON from content
+let data2^err = parse("{\"x\": 1}")
+data2.x       // 1
+
+// Parse with options map
+let expr^err = parse("x^2 + y", {type: 'math, flavor: 'latex})
+
+// Parse CSV from string
+let csv^err = parse("name,age\nAlice,30\nBob,25", 'csv)
+```
+
+> **Note**: `parse()` can raise errors. Use `let result^err = parse(...)` for error-safe handling.
 
 #### exists(target)
 
@@ -856,6 +913,7 @@ if (result is error) {
 | `prod` | 1 | Product |
 | `min` | 1-2 | Minimum |
 | `max` | 1-2 | Maximum |
+| `reduce` | 2 | Reduce with binary fn |
 
 ### Vector Functions
 | Function | Args | Description |
@@ -877,7 +935,7 @@ if (result is error) {
 | `all` | 1 | All truthy |
 | `any` | 1 | Any truthy |
 | `reverse` | 1 | Reverse order |
-| `sort` | 1-2 | Sort |
+| `sort` | 1-2 | Sort (dir, key fn, or options map) |
 | `unique` | 1 | Unique elements |
 | `concat` | 2 | Concatenate |
 | `take` | 2 | Take first n |
@@ -888,6 +946,7 @@ if (result is error) {
 | Function | Args | Description |
 |----------|------|-------------|
 | `input` | 1-2 | Parse file/URL |
+| `parse` | 1-2 | Parse string content |
 | `exists` | 1 | Check if target exists |
 | `format` | 1-2 | Format data as string |
 
