@@ -159,7 +159,7 @@ The following are reserved and cannot be used as identifiers:
 let   pub   fn    pn    if    else   for   while
 in    to    by    where order  group  limit offset
 and   or    not   is    as    true   false null
-type  import namespace raise  var   break  continue  return
+type  import raise  var   break  continue  return
 ```
 
 ### Reserved Type Names
@@ -191,9 +191,8 @@ Strings are UTF-8 text values enclosed in double quotes:
 ### Symbols
 
 Symbols are interned identifiers enclosed in single quotes. They are used for:
-- Attribute keys in maps and elements
+- Attribute keys in maps, objects and elements
 - Tag names in elements
-- Format specifiers
 - Enumeration-like values
 
 ```lambda
@@ -241,26 +240,25 @@ starts_with('hello', 'hel')  // true
 
 Namespaces solve name collisions when mixing markup vocabularies (e.g., SVG inside HTML, MathML inside XHTML). Lambda uses `.` (dot) as the namespace separator, consistent with member access syntax.
 
-### Namespace Declaration
+### Namespace Import
 
-Namespace declarations are global statements that bind a short prefix to a namespace URL:
+Namespaces are declared using the standard `import` statement with a bare URI (a symbol literal):
 
 ```lambda
-// Single namespace declaration
-namespace svg: 'http://www.w3.org/2000/svg'
-
-// Multiple namespace declarations
-namespace svg: 'http://www.w3.org/2000/svg', xlink: 'http://www.w3.org/1999/xlink'
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
 ```
 
-**Syntax:** `namespace` prefix `:` url (`,` prefix `:` url)*
+**Syntax:** `import` prefix `:` `'`url`'`
+
+Bare URI imports register a namespace prefix without loading any code. They use the same `import alias: module` syntax as module imports, but with a symbol literal (single-quoted URL) instead of a module path.
 
 ### Namespace Prefixes as Reserved Names
 
 Once declared, namespace prefixes are **reserved** — no variable, function, type, or field name may use the same name:
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
+import svg: 'http://www.w3.org/2000/svg'
 
 let svg = 123       // ERROR: 'svg' conflicts with namespace prefix
 fn svg() => ...     // ERROR: 'svg' conflicts with namespace prefix
@@ -271,7 +269,7 @@ fn svg() => ...     // ERROR: 'svg' conflicts with namespace prefix
 Use `ns.name` form for namespaced element tags:
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
+import svg: 'http://www.w3.org/2000/svg'
 
 // Namespaced element tags
 <svg.rect>
@@ -283,34 +281,42 @@ namespace svg: 'http://www.w3.org/2000/svg'
 <span>
 ```
 
-### Namespaced Attributes
+### Namespaced Attributes (Sub-Map Desugaring)
 
-Attribute names can also be namespaced:
+Attribute names can use `ns.attr` syntax. At compile time, dotted attribute keys are **desugared into sub-maps** — the namespace prefix becomes a map-valued attribute containing the local keys:
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
-namespace xlink: 'http://www.w3.org/1999/xlink'
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
 
-// Namespaced attributes
+// Dotted syntax (what you write)
 <svg.rect svg.width: 100, svg.height: 50>
 <svg.a xlink.href: "https://example.com"; "Click">
 
+// Desugared form (what actually gets stored)
+// <svg.rect svg: {width: 100, height: 50}>
+// <svg.a xlink: {href: "https://example.com"}; "Click">
+
 // Mixed namespaced and regular attributes
 <svg.rect id: "myRect", svg.width: 100>
+// desugars to: <svg.rect id: "myRect", svg: {width: 100}>
 ```
+
+Multiple attributes sharing the same namespace prefix are merged into a single sub-map.
 
 ### Namespaced Member Access
 
-When accessing namespaced attributes on elements, use the `e.ns.attr` form:
+Since namespaced attributes are stored as sub-maps, accessing them uses standard chained member access — `e.ns` returns the sub-map, `.attr` accesses the key within it:
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
+import svg: 'http://www.w3.org/2000/svg'
 
 let elem = <svg.rect svg.width: 100, svg.height: 50>
 
-// Access namespaced attributes
-elem.svg.width      // 100
-elem.svg.height     // 50
+// Access namespaced attributes (chained through sub-map)
+elem.svg           // {width: 100, height: 50}
+elem.svg.width     // 100
+elem.svg.height    // 50
 ```
 
 ### Namespaced Symbols
@@ -318,7 +324,7 @@ elem.svg.height     // 50
 The `ns.name` form in expression context creates a qualified symbol:
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
+import svg: 'http://www.w3.org/2000/svg'
 
 // Qualified symbols
 svg.rect           // 'svg.rect' (with namespace target attached)
@@ -353,7 +359,7 @@ Namespaces are **file-local** — they cannot be imported or exported. Each file
 
 ```lambda
 // file_a.ls
-namespace svg: 'http://www.w3.org/2000/svg'
+import svg: 'http://www.w3.org/2000/svg'
 pub elem = <svg.rect svg.width: 100>
 
 // file_b.ls
@@ -361,7 +367,7 @@ import a: .file_a
 // 'svg' prefix is NOT available here
 // but a.elem still has correct namespace data
 
-namespace s: 'http://www.w3.org/2000/svg'  // can use different prefix
+import s: 'http://www.w3.org/2000/svg'  // can use different prefix
 <s.circle>  // works fine
 ```
 
@@ -370,8 +376,8 @@ namespace s: 'http://www.w3.org/2000/svg'  // can use different prefix
 Namespaced symbols are compared by both local name AND namespace URL (semantic comparison):
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
-namespace s: 'http://www.w3.org/2000/svg'  // same URL, different prefix
+import svg: 'http://www.w3.org/2000/svg'
+import s: 'http://www.w3.org/2000/svg'  // same URL, different prefix
 
 svg.rect == s.rect    // true (same namespace URL)
 svg.rect == 'svg.rect'  // false (one has namespace, one doesn't)
@@ -380,8 +386,8 @@ svg.rect == 'svg.rect'  // false (one has namespace, one doesn't)
 ### Example: SVG Document
 
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
-namespace xlink: 'http://www.w3.org/1999/xlink'
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
 
 let drawing = <svg.svg svg.width: 200, svg.height: 200;
     <svg.rect svg.x: 10, svg.y: 10, svg.width: 80, svg.height: 80, fill: "blue">
