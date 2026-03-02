@@ -1,9 +1,9 @@
 // chart/legend.ls — Legend generation for the chart library
 // Renders color, size, and shape legends as SVG elements.
 
-import svg: lambda.package.chart.svg
-import util: lambda.package.chart.util
-import scale: lambda.package.chart.scale
+import svg: .svg
+import util: .util
+import scale: .scale
 
 // ============================================================
 // Default legend configuration

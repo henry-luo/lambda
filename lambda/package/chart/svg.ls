@@ -1,7 +1,7 @@
 // chart/svg.ls — SVG element construction helpers
 // Provides convenience functions for building SVG elements.
 
-import util: lambda.package.chart.util
+import util: .util
 
 // ============================================================
 // SVG root element

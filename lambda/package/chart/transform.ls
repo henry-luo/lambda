@@ -1,7 +1,7 @@
 // chart/transform.ls — Data transform operations for the chart library
 // Applied in order before encoding: filter, aggregate, calculate, bin, sort, fold, flatten
 
-import util: lambda.package.chart.util
+import util: .util
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data

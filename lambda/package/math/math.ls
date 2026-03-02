@@ -1,11 +1,11 @@
 // math/math.ls — Main entry point for the Lambda Math Package
 // Provides math.render(ast) → HTML element tree
 
-import render: lambda.package.math.render
-import ctx: lambda.package.math.context
-import css: lambda.package.math.css
-import box: lambda.package.math.box
-import opt: lambda.package.math.optimize
+import render: .render
+import ctx: .context
+import css: .css
+import box: .box
+import opt: .optimize
 
 // ============================================================
 // Public API

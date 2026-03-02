@@ -6,7 +6,7 @@
 //   <name; "arg">
 // Expansion happens at render time via render.ls to avoid tree-rebuilding.
 
-import util: lambda.package.latex.util
+import util: .util
 
 // ============================================================
 // Public API
