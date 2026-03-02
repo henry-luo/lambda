@@ -202,7 +202,7 @@ While loops can be combined with `break` and `continue` for more complex control
 `break` exits the innermost loop immediately. `continue` skips to the next iteration.
 
 ```lambda
-pn find_first_negative(nums: [int]) {
+pn find_first_negative(nums: int[]) {
     var i = 0
     var result = null
     while (i < len(nums)) {
@@ -239,7 +239,7 @@ pn process_items(items) {
 `return` exits the function immediately with a value:
 
 ```lambda
-pn find_first_even(nums: [int]) {
+pn find_first_even(nums: int[]) {
     var i = 0
     while (i < len(nums)) {
         if (nums[i] % 2 == 0) {
