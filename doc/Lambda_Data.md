@@ -136,6 +136,26 @@ can span multiple lines"
 | `\\` | Backslash |
 | `\"` | Double quote |
 
+#### String Indexing and Slicing
+
+Strings are indexable by character position (0-based). Both single-character access and range slicing are supported:
+
+```lambda
+let s = "hello";
+s[0]              // "h"  — first character
+s[4]              // "o"  — last character
+s[-1]             // "o"  — negative index counts from end
+
+// Range subscript: str[a to b] (inclusive both ends)
+s[0 to 4]         // "hello"  — full string
+s[1 to 3]         // "ell"   — substring
+s[0 to 0]         // "h"     — single character via range
+
+// UTF-8 aware: indices are character positions, not byte offsets
+let c = "café";
+c[2 to 3]         // "fé"   — works correctly with multi-byte characters
+```
+
 ### Symbol Literals
 
 Symbols are interned identifiers, often used as keys or tags:
@@ -152,6 +172,17 @@ Symbols are interned identifiers, often used as keys or tags:
 - Symbols are interned (only one copy exists in memory)
 - Comparison is O(1) pointer equality
 - Used for type tags, format identifiers, map keys
+
+#### Symbol Indexing and Slicing
+
+Like strings, symbols support character indexing and range slicing. The result is always a symbol:
+
+```lambda
+let sym = 'hello;
+sym[0]             // 'h   — single character (symbol)
+sym[1 to 3]        // 'ell  — substring (symbol)
+sym[0 to 4]        // 'hello — full symbol
+```
 
 ### Binary Literals
 
