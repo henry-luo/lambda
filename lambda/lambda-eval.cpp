@@ -632,8 +632,9 @@ Bool fn_is(Item a, Item b) {
     TypeId b_type_id = get_type_id(b);
 
     if (b_type_id != LMD_TYPE_TYPE) {
-        log_error("2nd argument must be a type or pattern, got type: %s", get_type_name(b_type_id));
-        return BOOL_ERROR;
+        // RHS is a value, not a type — treat as equality comparison
+        log_debug("fn_is: RHS is value (type %s), using equality", get_type_name(b_type_id));
+        return fn_eq(a, b);
     }
 
     Type* b_type = b.type;  // all type variants now share type_id = LMD_TYPE_TYPE
@@ -817,6 +818,17 @@ Bool fn_is(Item a, Item b) {
     default:
         return a_type_id == type_b->type->type_id;
     }
+}
+
+// IEEE NaN check: expr is nan
+Bool fn_is_nan(Item a) {
+    log_debug("fn_is_nan");
+    TypeId tid = get_type_id(a);
+    if (tid == LMD_TYPE_FLOAT) {
+        double val = a.get_double();
+        return __builtin_isnan(val) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    return BOOL_FALSE;  // non-float values are never NaN
 }
 
 // maximum recursion depth for structural equality comparison

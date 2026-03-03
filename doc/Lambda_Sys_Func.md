@@ -146,30 +146,95 @@ math.norm([3, 4])               // 5 (sqrt(9 + 16))
 
 Functions that apply to each element of a collection and return a collection of the same size. Also work on scalar values.
 
+### Constants
+
+| Constant | Description | Value |
+|----------|-------------|-------|
+| `math.pi` | Pi (π) | `3.1415926536` |
+| `math.e` | Euler's number (e) | `2.7182818285` |
+
+### Trigonometric
+
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `math.sqrt(x)` | Square root | `math.sqrt([1, 4, 9])` | `[1, 2, 3]` |
-| `math.log(x)` | Natural logarithm | `math.log([1, 2.718...])` | `[0, 1]` |
-| `math.log10(x)` | Base-10 logarithm | `math.log10([1, 10, 100])` | `[0, 1, 2]` |
-| `math.exp(x)` | Exponential (e^x) | `math.exp([0, 1, 2])` | `[1, e, e²]` |
 | `math.sin(x)` | Sine | `math.sin([0, 1.57...])` | `[0, 1]` |
 | `math.cos(x)` | Cosine | `math.cos([0, 1.57...])` | `[1, 0]` |
 | `math.tan(x)` | Tangent | `math.tan([0, 0.785...])` | `[0, 1]` |
+
+### Inverse Trigonometric
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.asin(x)` | Inverse sine (arcsin) | `math.asin(1)` | `1.5707963268` |
+| `math.acos(x)` | Inverse cosine (arccos) | `math.acos(1)` | `0` |
+| `math.atan(x)` | Inverse tangent (arctan) | `math.atan(1)` | `0.7853981634` |
+| `math.atan2(y, x)` | Two-argument arctan | `math.atan2(1, 1)` | `0.7853981634` |
+
+### Hyperbolic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.sinh(x)` | Hyperbolic sine | `math.sinh(1)` | `1.1752011936` |
+| `math.cosh(x)` | Hyperbolic cosine | `math.cosh(0)` | `1` |
+| `math.tanh(x)` | Hyperbolic tangent | `math.tanh(1)` | `0.761594156` |
+
+### Inverse Hyperbolic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.asinh(x)` | Inverse hyperbolic sine | `math.asinh(1)` | `0.881373587` |
+| `math.acosh(x)` | Inverse hyperbolic cosine | `math.acosh(2)` | `1.3169578969` |
+| `math.atanh(x)` | Inverse hyperbolic tangent | `math.atanh(0.5)` | `0.5493061443` |
+
+### Exponential / Logarithmic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.exp(x)` | Exponential (e^x) | `math.exp([0, 1, 2])` | `[1, e, e²]` |
+| `math.exp2(x)` | Base-2 exponential (2^x) | `math.exp2(3)` | `8` |
+| `math.expm1(x)` | exp(x) - 1 (precise for small x) | `math.expm1(0)` | `0` |
+| `math.log(x)` | Natural logarithm | `math.log([1, 2.718...])` | `[0, 1]` |
+| `math.log2(x)` | Base-2 logarithm | `math.log2(8)` | `3` |
+| `math.log10(x)` | Base-10 logarithm | `math.log10([1, 10, 100])` | `[0, 1, 2]` |
+| `math.log1p(x)` | log(1 + x) (precise for small x) | `math.log1p(0)` | `0` |
+
+### Power / Root
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.pow(b, e)` | Power (b^e) | `math.pow(2, 10)` | `1024` |
+| `math.sqrt(x)` | Square root | `math.sqrt([1, 4, 9])` | `[1, 2, 3]` |
+| `math.cbrt(x)` | Cube root | `math.cbrt(27)` | `3` |
+| `math.hypot(x, y)` | Hypotenuse √(x²+y²) | `math.hypot(3, 4)` | `5` |
+
+### Rounding / Sign
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
 | `abs(x)` | Absolute value | `abs([-1, 2, -3])` | `[1, 2, 3]` |
 | `round(x)` | Round | `round([1.4, 1.6])` | `[1, 2]` |
 | `floor(x)` | Floor | `floor([1.7, 2.3])` | `[1, 2]` |
 | `ceil(x)` | Ceiling | `ceil([1.2, 2.8])` | `[2, 3]` |
+| `math.trunc(x)` | Truncate toward zero | `math.trunc([-3.7, 3.7])` | `[-3, 3]` |
 | `sign(x)` | Sign (-1, 0, 1) | `sign([-5, 0, 3])` | `[-1, 0, 1]` |
 
 ```lambda
-math.sqrt([1, 4, 9])            // [1, 2, 3]
-math.log([1, 2.718281828])      // [0, 1]
-math.log10([1, 10, 100])        // [0, 1, 2]
-math.exp([0, 1])                // [1, 2.718...]
+math.pi                         // 3.1415926536
+math.e                          // 2.7182818285
 math.sin([0, 3.14159/2])        // [0, 1]
 math.cos([0, 3.14159/2])        // [1, 0]
-abs([-1, 2, -3])           // [1, 2, 3]
-sign([-5, 0, 3])           // [-1, 0, 1]
+math.asin(1)                    // 1.5707963268 (π/2)
+math.atan2(1, 1)                // 0.7853981634 (π/4)
+math.sinh(1)                    // 1.1752011936
+math.exp2(3)                    // 8
+math.log2(8)                    // 3
+math.pow(2, 10)                 // 1024
+math.cbrt(27)                   // 3
+math.hypot(3, 4)                // 5
+math.log1p(0)                   // 0
+math.trunc(3.7)                 // 3
+abs([-1, 2, -3])                // [1, 2, 3]
+sign([-5, 0, 3])                // [-1, 0, 1]
 ```
 
 ---
@@ -866,13 +931,33 @@ if (result is error) {
 | `floor` | 1 | Round down |
 | `ceil` | 1 | Round up |
 | `sign` | 1 | Sign (-1, 0, 1) |
-| `sqrt` | 1 | Square root |
-| `log` | 1 | Natural log |
-| `log10` | 1 | Base-10 log |
-| `exp` | 1 | Exponential |
-| `sin` | 1 | Sine |
-| `cos` | 1 | Cosine |
-| `tan` | 1 | Tangent |
+| `math.sqrt` | 1 | Square root |
+| `math.cbrt` | 1 | Cube root |
+| `math.hypot` | 2 | Hypotenuse √(x²+y²) |
+| `math.trunc` | 1 | Truncate toward zero |
+| `math.pow` | 2 | Power (b^e) |
+| `math.log` | 1 | Natural log |
+| `math.log2` | 1 | Base-2 log |
+| `math.log10` | 1 | Base-10 log |
+| `math.log1p` | 1 | log(1 + x) |
+| `math.exp` | 1 | Exponential (e^x) |
+| `math.exp2` | 1 | Base-2 exponential |
+| `math.expm1` | 1 | exp(x) - 1 |
+| `math.sin` | 1 | Sine |
+| `math.cos` | 1 | Cosine |
+| `math.tan` | 1 | Tangent |
+| `math.asin` | 1 | Inverse sine |
+| `math.acos` | 1 | Inverse cosine |
+| `math.atan` | 1 | Inverse tangent |
+| `math.atan2` | 2 | Two-arg arctan |
+| `math.sinh` | 1 | Hyperbolic sine |
+| `math.cosh` | 1 | Hyperbolic cosine |
+| `math.tanh` | 1 | Hyperbolic tangent |
+| `math.asinh` | 1 | Inverse hyp. sine |
+| `math.acosh` | 1 | Inverse hyp. cosine |
+| `math.atanh` | 1 | Inverse hyp. tangent |
+| `math.pi` | - | Pi (π) constant |
+| `math.e` | - | Euler's number constant |
 
 ### Statistical Functions
 | Function | Args | Description |
