@@ -19,7 +19,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
     // Write directly to flat reference directory (combined structure)
     // If platform is specified, add platform suffix to filename (e.g., test_name.linux.json)
     const outputDir = path.join(__dirname, 'reference');
-    const outputFile = platform 
+    const outputFile = platform
         ? path.join(outputDir, `${baseName}.${platform}.json`)
         : path.join(outputDir, `${baseName}.json`);
 
@@ -64,7 +64,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
             ],
             timeout: 30000
         };
-        
+
         // On ARM Linux, use system Chromium instead of Puppeteer's bundled Chrome
         const os = require('os');
         const { execSync } = require('child_process');
@@ -79,7 +79,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
                 // Fall back to bundled Chrome
             }
         }
-        
+
         browser = await puppeteer.launch(launchOptions);
 
         const page = await browser.newPage();
@@ -257,11 +257,22 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
                             // Return array of separate text nodes (one per line) to match Radiant's behavior
                             const lineTextNodes = [];
                             lines.forEach((line, lineIndex) => {
-                                if (line.chars.length > 0 && lineIndex < rectArray.length) {
+                                if (line.chars.length > 0) {
                                     const startIndex = line.chars[0].index;
                                     const endIndex = line.chars[line.chars.length - 1].index + 1;
                                     const segmentText = text.substring(startIndex, endIndex);
-                                    const rect = rectArray[lineIndex];
+
+                                    // Match line to rectArray entry by Y-coordinate proximity
+                                    // (not by index, since getClientRects() may include extra
+                                    // zero-width rects for newline characters in pre/pre-wrap)
+                                    const lineTolerance = 3;
+                                    let rect = rectArray.find(r =>
+                                        Math.abs(r.y - line.y) <= lineTolerance && r.width > 0
+                                    );
+                                    if (!rect && lineIndex < rectArray.length) {
+                                        rect = rectArray[lineIndex]; // fallback to index
+                                    }
+                                    if (!rect) return;
 
                                     lineTextNodes.push({
                                         nodeType: 'text',

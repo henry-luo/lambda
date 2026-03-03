@@ -963,12 +963,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 78.63,
-                      "y": 56.19,
-                      "width": 0,
+                      "x": 22.19,
+                      "y": 74.19,
+                      "width": 32,
                       "height": 18,
-                      "right": 78.63,
-                      "bottom": 74.19,
+                      "right": 54.19,
+                      "bottom": 92.19,
                       "text": "\tshould be on\n",
                       "startIndex": 0,
                       "endIndex": 14
@@ -992,11 +992,11 @@
                   "rects": [
                     {
                       "x": 22.19,
-                      "y": 74.19,
-                      "width": 32,
+                      "y": 92.19,
+                      "width": 16,
                       "height": 18,
-                      "right": 54.19,
-                      "bottom": 92.19,
+                      "right": 38.19,
+                      "bottom": 110.19,
                       "text": "    \tfour\n",
                       "startIndex": 0,
                       "endIndex": 10
@@ -1019,12 +1019,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 54.19,
-                      "y": 74.19,
-                      "width": 81.78,
+                      "x": 22.19,
+                      "y": 110.19,
+                      "width": 66.22,
                       "height": 18,
-                      "right": 135.97,
-                      "bottom": 92.19,
+                      "right": 88.41,
+                      "bottom": 128.19,
                       "text": "        lines.",
                       "startIndex": 0,
                       "endIndex": 14
