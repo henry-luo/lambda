@@ -351,6 +351,8 @@ typedef enum SysFunc {
     SYSFUNC_FIND,           // find(str, pattern) - find all matches
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
     SYSFUNC_CHARS,          // chars(str) - decompose string into array of characters
+    SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
+    SYSFUNC_CHR,            // chr(int) - character from Unicode code point
     // vector functions
     SYSFUNC_PROD,
     SYSFUNC_CUMSUM,

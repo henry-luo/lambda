@@ -483,7 +483,7 @@ range(0, 10, 2)        // [0, 2, 4, 6, 8]
 
 **String:**
 
-`replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)`
+`replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)` `ord(str)` `chr(int)`
 
 All three accept both plain strings and named patterns as the second argument:
 ```lambda

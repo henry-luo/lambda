@@ -3611,6 +3611,59 @@ Item fn_chars(Item str_item) {
     return {.array = result};
 }
 
+// ord(str) - return Unicode code point of first character
+int64_t fn_ord(Item str_item) {
+    TypeId type = get_type_id(str_item);
+
+    if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_ord: argument must be a string or symbol, got type %d", type);
+        return 0;
+    }
+
+    const char* chars = str_item.get_chars();
+    uint32_t byte_len = str_item.get_len();
+
+    if (!chars || byte_len == 0) {
+        return 0;
+    }
+
+    uint32_t codepoint = 0;
+    int decoded = str_utf8_decode(chars, byte_len, &codepoint);
+    if (decoded <= 0) {
+        return 0; // invalid UTF-8
+    }
+    return (int64_t)codepoint;
+}
+
+// chr(int) - return 1-char string from Unicode code point
+Item fn_chr(Item cp_item) {
+    GUARD_ERROR1(cp_item);
+    TypeId type = get_type_id(cp_item);
+
+    // return empty string for null/invalid input
+    if (type == LMD_TYPE_NULL) {
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
+    }
+
+    int64_t codepoint = it2l(cp_item);
+    if (codepoint < 0 || codepoint > 0x10FFFF) {
+        log_debug("fn_chr: code point %lld out of range (0..0x10FFFF)", (long long)codepoint);
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
+    }
+
+    char buf[4];
+    size_t len = str_utf8_encode((uint32_t)codepoint, buf, sizeof(buf));
+    if (len == 0) {
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};  // invalid code point (e.g., surrogate)
+    }
+
+    String* result = heap_strcpy(buf, (int)len);
+    return {.item = s2it(result)};
+}
+
 // join(strs, sep) - join list of strings with separator
 Item fn_join2(Item list_item, Item sep_item) {
     GUARD_ERROR2(list_item, sep_item);
