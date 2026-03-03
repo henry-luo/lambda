@@ -91,11 +91,14 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     let result = benchmark()
+    var __t1 = clock()
     print("triangl: solutions=" ++ string(result) ++ "\n")
     if (result == 29760) {
         print("triangl: PASS\n")
     } else {
         print("triangl: DONE\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

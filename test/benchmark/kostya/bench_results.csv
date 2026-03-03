@@ -1,9 +1,9 @@
-# Kostya Benchmark Results 2026-03-03 21:55:15, runs=3
-benchmark,category,lambda_ms
-brainfuck,interp,391.622
-matmul,numeric,368.729
-primes,array,29.832
-base64,string,1101.352
-levenshtein,dp,35.297
-json_gen,string,89.461
-collatz,numeric,2665.732
+# Kostya Benchmark Results 2026-03-03 23:32:01, runs=3
+benchmark,category,wall_ms,exec_ms,jit_ms
+brainfuck,interp,334.801,325.657,9.144
+matmul,numeric,343.017,333.635,9.382
+primes,array,26.629,21.393,5.236
+base64,string,996.324,902.633,93.691
+levenshtein,dp,31.630,23.586,8.044
+json_gen,string,81.620,66.145,15.475
+collatz,numeric,2460.079,2454.680,5.399
