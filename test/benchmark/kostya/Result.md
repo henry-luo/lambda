@@ -2,7 +2,8 @@
 
 **Date**: 2026-03-03
 **Platform**: macOS, Apple Silicon (M-series)
-**Build**: Release (LTO, stripped, optimized)
+**Lambda Build**: Release (LTO, stripped, optimized)
+**Node.js**: v22.13.0
 **Runs per benchmark**: 3 (median reported)
 
 ## Overview
@@ -23,18 +24,29 @@ This suite implements common cross-language benchmarks adapted from [github.com/
 
 ## Results
 
-| Benchmark | Category | Median Time | Status |
-|-----------|----------|-------------|--------|
-| brainfuck | interp | 391.6 ms | PASS |
-| matmul | numeric | 368.7 ms | PASS |
-| primes | array | 29.8 ms | PASS |
-| base64 | string | 1.101 s | PASS |
-| levenshtein | dp | 35.3 ms | PASS |
-| json_gen | string | 89.5 ms | PASS |
-| collatz | numeric | 2.666 s | PASS |
+| Benchmark | Category | Lambda | Node.js | Ratio |
+|-----------|----------|--------|---------|-------|
+| brainfuck | interp | 391.6 ms | 45.7 ms | 8.6× |
+| matmul | numeric | 368.7 ms | 16.5 ms | 22.3× |
+| primes | array | 29.8 ms | 5.2 ms | 5.7× |
+| base64 | string | 1.101 s | 19.1 ms | 57.6× |
+| levenshtein | dp | 35.3 ms | 5.7 ms | 6.2× |
+| json_gen | string | 89.5 ms | 21.2 ms | 4.2× |
+| collatz | numeric | 2.666 s | 1.337 s | 2.0× |
 
-**Total time**: 4.682 s
-**Geometric mean**: 235.3 ms
+| | Lambda | Node.js | Ratio |
+|---|--------|---------|-------|
+| **Total time** | 4.682 s | 1.451 s | 3.2× |
+| **Geometric mean** | 235.3 ms | 27.6 ms | 8.5× |
+
+## Analysis
+
+Node.js (V8 JIT) is **8.5× faster** on geometric mean across this suite. The gap varies significantly by workload:
+
+- **Closest** (2–6×): collatz (pure integer loops), json_gen (string concat), primes (sieve), levenshtein (DP arrays)
+- **Widest** (20–60×): matmul (dense FP arithmetic), base64 (byte-level string building)
+
+The base64 gap (57.6×) reflects Lambda's string concatenation overhead — each encoded character appends to a growing string. The matmul gap (22.3×) reflects V8's superior floating-point loop optimization with typed arrays.
 
 ## Origin
 
