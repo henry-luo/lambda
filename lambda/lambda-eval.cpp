@@ -2688,8 +2688,9 @@ int64_t fn_len(Item item) {
 // substring system function - extracts a substring from start to end (exclusive)
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
     GUARD_ERROR3(str_item, start_item, end_item);
-    if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        log_debug("fn_substring: first argument must be a string");
+    TypeId str_tid = get_type_id(str_item);
+    if (str_tid != LMD_TYPE_STRING && str_tid != LMD_TYPE_SYMBOL) {
+        log_debug("fn_substring: first argument must be a string or symbol");
         return ItemError;
     }
 
@@ -2703,22 +2704,35 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    if (!str || str->len == 0) {
-        return str_item; // return empty string
+    // use type-aware accessors: String and Symbol have different struct layouts
+    // String: {len, is_ascii, chars[]}, Symbol: {len, ns*, chars[]}
+    const char* chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    if (!chars || str_len == 0) {
+        return str_item; // return empty string/symbol
+    }
+
+    // helper: return result as string or symbol depending on input type
+    bool is_symbol = (str_tid == LMD_TYPE_SYMBOL);
+
+    // is_ascii only exists on String, not Symbol; symbols use UTF-8 path
+    bool is_ascii = false;
+    if (!is_symbol) {
+        is_ascii = str_item.get_string()->is_ascii;
     }
 
     int64_t start = it2l(start_item);
     int64_t end = it2l(end_item);
 
     // ASCII fast path: char index == byte index
-    if (str->is_ascii) {
-        int64_t char_len = (int64_t)str->len;
+    if (is_ascii) {
+        int64_t char_len = (int64_t)str_len;
         if (start < 0) start = char_len + start;
         if (end < 0) end = char_len + end;
         if (start < 0) start = 0;
         if (end > char_len) end = char_len;
         if (start >= end) {
+            if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
             String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
             empty->len = 0;
             empty->is_ascii = 1;
@@ -2726,16 +2740,17 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
             return {.item = s2it(empty)};
         }
         long result_len = (long)(end - start);
+        if (is_symbol) return {.item = y2it(heap_create_symbol(chars + start, result_len))};
         String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
         result->len = result_len;
         result->is_ascii = 1;
-        memcpy(result->chars, str->chars + start, result_len);
+        memcpy(result->chars, chars + start, result_len);
         result->chars[result_len] = '\0';
         return {.item = s2it(result)};
     }
 
     // handle negative indices (count from end)
-    int64_t char_len = (int64_t)str_utf8_count(str->chars, str->len);
+    int64_t char_len = (int64_t)str_utf8_count(chars, str_len);
     if (start < 0) start = char_len + start;
     if (end < 0) end = char_len + end;
 
@@ -2743,7 +2758,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     if (start < 0) start = 0;
     if (end > char_len) end = char_len;
     if (start >= end) {
-        // return empty string
+        if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
         empty->is_ascii = 1;
@@ -2752,11 +2767,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     }
 
     // convert char indices to byte indices
-    long byte_start = (long)str_utf8_char_to_byte(str->chars, str->len, (size_t)start);
-    long byte_end = (long)str_utf8_char_to_byte(str->chars, str->len, (size_t)end);
+    long byte_start = (long)str_utf8_char_to_byte(chars, str_len, (size_t)start);
+    long byte_end = (long)str_utf8_char_to_byte(chars, str_len, (size_t)end);
 
-    if (byte_start >= str->len || byte_end < 0) {
-        // return empty string
+    if (byte_start >= str_len || byte_end < 0) {
+        if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
         empty->is_ascii = 1;
@@ -2765,10 +2780,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     }
 
     long result_len = byte_end - byte_start;
+    if (is_symbol) return {.item = y2it(heap_create_symbol(chars + byte_start, result_len))};
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
     result->is_ascii = 0;  // UTF-8 path — not necessarily ASCII
-    memcpy(result->chars, str->chars + byte_start, result_len);
+    memcpy(result->chars, chars + byte_start, result_len);
     result->chars[result_len] = '\0';
 
     return {.item = s2it(result)};
