@@ -93,7 +93,7 @@ pub fn line_path(points) string {
         let start = M(first[0], first[1]);
         let segments = (for (i in 1 to (len(points) - 1))
             L(points[i][0], points[i][1]));
-        start ++ " " ++ (segments | str_join(" "))
+        start ++ " " ++ (segments | join(" "))
     }
 }
 
@@ -107,9 +107,9 @@ pub fn area_path(top_points, bottom_points) string {
         let d1 = M(first[0], first[1]);
         let top_segs = (for (i in 1 to (len(top_points) - 1))
             L(top_points[i][0], top_points[i][1]));
-        let d2 = d1 ++ " " ++ (top_segs | str_join(" "));
+        let d2 = d1 ++ " " ++ (top_segs | join(" "));
         let bottom_segs = (for (bp in bottom_rev) L(bp[0], bp[1]));
-        let d3 = d2 ++ " " ++ (bottom_segs | str_join(" "));
+        let d3 = d2 ++ " " ++ (bottom_segs | join(" "));
         d3 ++ " " ++ Z_cmd()
     }
 }

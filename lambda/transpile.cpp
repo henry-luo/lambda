@@ -1992,7 +1992,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         // Fast path (no boxing) is only safe for scalar types where the C representation
         // is guaranteed consistent (e.g., both sides produce int32_t, double, bool, etc.).
         // For STRING/SYMBOL/BINARY/containers, different functions may return String* vs Item
-        // at the C level (e.g., fn_string() returns String* but fn_str_join() returns Item),
+        // at the C level (e.g., fn_string() returns String* but fn_join2() returns Item),
         // causing "incompatible types in cond-expression" errors in C2MIR.
         TypeId tid = then_type->type_id;
         if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {

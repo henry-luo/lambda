@@ -252,6 +252,21 @@ split("a1b2c3", digit, true)          // ["a", "1", "b", "2", "c", "3", ""]  —
 split("a,b,c", ",", true)             // ["a", ",", "b", ",", "c"]           — works with strings too
 ```
 
+### join(strs, separator)
+
+Join a list of strings with a separator. Returns a string.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `join(strs, sep)` | Join with separator | `join(["a", "b", "c"], ", ")` | `"a, b, c"` |
+| `join(strs, "")` | Concatenate | `join(["hello", "world"], "")` | `"helloworld"` |
+
+```lambda
+join(["a", "b", "c"], ", ")           // "a, b, c"
+join(["hello"], ", ")                 // "hello"
+join(["x", "y"], "-")                // "x-y"
+```
+
 ### find(str, pattern_or_string)
 
 Find all occurrences of a pattern or substring. Returns a list of match maps `{value, index}`.
@@ -991,4 +1006,5 @@ if (result is error) {
 |----------|------|-------------|
 | `replace` | 3 | Replace pattern/substring in string |
 | `split` | 2-3 | Split string by pattern/substring |
+| `join` | 2 | Join list of strings with separator |
 | `find` | 2 | Find all pattern/substring matches |

@@ -3573,8 +3573,8 @@ Item fn_chars(Item str_item) {
     return {.array = result};
 }
 
-// str_join(strs, sep) - join list of strings with separator
-Item fn_str_join(Item list_item, Item sep_item) {
+// join(strs, sep) - join list of strings with separator
+Item fn_join2(Item list_item, Item sep_item) {
     GUARD_ERROR2(list_item, sep_item);
     TypeId list_type = get_type_id(list_item);
     TypeId sep_type = get_type_id(sep_item);
@@ -3583,7 +3583,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
     if (list_type == LMD_TYPE_NULL) return ItemNull;
 
     if (list_type != LMD_TYPE_LIST && list_type != LMD_TYPE_ARRAY) {
-        log_debug("fn_str_join: first argument must be a list or array");
+        log_debug("fn_join2: first argument must be a list or array");
         return ItemError;
     }
 
@@ -3595,7 +3595,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
         sep_chars = sep_item.get_chars();
         sep_len = sep_chars ? sep_item.get_len() : 0;
     } else if (sep_type != LMD_TYPE_NULL) {
-        log_debug("fn_str_join: separator must be a string, symbol, or null");
+        log_debug("fn_join2: separator must be a string, symbol, or null");
         return ItemError;
     }
 

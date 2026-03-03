@@ -1552,7 +1552,7 @@ fn build_img_style(opts) {
     let tx0 = []
     let tx1 = if (opts.scale != null) { tx0 ++ ["scale(" ++ opts.scale ++ ")"] } else tx0
     let tx2 = if (opts.angle != null) { tx1 ++ ["rotate(" ++ opts.angle ++ "deg)"] } else tx1
-    let parts4 = if (len(tx2) > 0) { parts3 ++ ["transform:" ++ str_join(tx2, " ")] } else parts3
+    let parts4 = if (len(tx2) > 0) { parts3 ++ ["transform:" ++ join(tx2, " ")] } else parts3
     // trim + clip → clip-path:inset(top right bottom left)
     // LaTeX trim order: left bottom right top
     let trim_vals = if (opts.trim != null) split(trim(opts.trim), null) else []
@@ -1561,7 +1561,7 @@ fn build_img_style(opts) {
         parts4 ++ ["clip-path:inset(" ++ trim_vals[3] ++ " " ++ trim_vals[2] ++ " " ++ trim_vals[1] ++ " " ++ trim_vals[0] ++ ")"]
     } else parts4
 
-    str_join(parts5, ";")
+    join(parts5, ";")
 }
 
 fn render_marginpar(el, info) {
