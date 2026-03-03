@@ -171,6 +171,28 @@ The original `paraffins` implementation (building explicit tree structures) caus
 
 The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `pnpoly`, `brainfuck`, `collatz`, `matmul`, `kostya/primes`, and `triangl` are only practical to run in release mode (`make release`). All 19 benchmarks pass in release mode.
 
+## Node.js Comparison
+
+All 19 benchmarks were also implemented in JavaScript and timed with Node.js v22.13.0 (V8 JIT) on the same machine. Node.js startup overhead (~34 ms) and Lambda startup overhead (~10 ms) are subtracted. Three runs per benchmark, median reported.
+
+### Summary
+
+| Suite | Lambda Geo Mean | Node.js Geo Mean | Ratio |
+|-------|----------------|-----------------|-------|
+| Kostya (7) | 235.3 ms | 27.6 ms | 8.5× |
+| Larceny (12) | 71.5 ms | 10.4 ms | 6.9× |
+
+Lambda is roughly **7–9× slower** than Node.js (V8 JIT) across these suites. The gap varies from 1.8× (divrec — simple recursion) to 109× (gcbench — GC stress with millions of small allocations).
+
+### Key Observations
+
+- **Closest performance** (2–4×): Simple loop/recursion benchmarks (divrec, primes, collatz, ray, quicksort) where Lambda's C2MIR JIT generates efficient native code.
+- **Medium gap** (5–13×): Array-heavy and string/DP benchmarks (array1, levenshtein, base64 encoding, diviter) where V8's typed-array and string optimizations provide an advantage.
+- **Largest gap** (26–109×): GC stress (gcbench) and backtracking with array copies (triangl) — Lambda's garbage collector and object allocation are the primary bottleneck in these workloads.
+
+JS benchmark files: `test/benchmark/kostya/*.js`, `test/benchmark/larceny/*.js`
+Timing runner: `temp/run_node_bench.py`
+
 ## Benchmark Design Patterns
 
 Several patterns were established for writing benchmarks in Lambda `pn` mode:

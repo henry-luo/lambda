@@ -2,7 +2,8 @@
 
 **Date**: 2026-03-03
 **Platform**: macOS, Apple Silicon (M-series)
-**Build**: Release (LTO, stripped, optimized)
+**Lambda Build**: Release (LTO, stripped, optimized)
+**Node.js**: v22.13.0
 **Runs per benchmark**: 3 (median reported)
 
 ## Overview
@@ -28,23 +29,35 @@ This suite implements classic benchmarks from the Larceny/Gambit Scheme benchmar
 
 ## Results
 
-| Benchmark | Category | Median Time | Status |
-|-----------|----------|-------------|--------|
-| deriv | alloc | 64.4 ms | PASS |
-| primes | array | 7.0 ms | PASS |
-| pnpoly | numeric | 66.9 ms | PASS |
-| diviter | iterative | 5.731 s | PASS |
-| divrec | recursive | 16.2 ms | PASS |
-| array1 | array | 17.7 ms | PASS |
-| gcbench | gc | 2.675 s | PASS |
-| quicksort | sort | 13.3 ms | PASS |
-| triangl | backtrack | 1.798 s | PASS |
-| puzzle | backtrack | 21.5 ms | PASS |
-| ray | numeric | 17.2 ms | PASS |
-| paraffins | recursive | 15.2 ms | PASS |
+| Benchmark | Category | Lambda | Node.js | Ratio |
+|-----------|----------|--------|---------|-------|
+| deriv | alloc | 64.4 ms | 6.4 ms | 10.1× |
+| primes | array | 7.0 ms | 3.3 ms | 2.1× |
+| pnpoly | numeric | 66.9 ms | 7.2 ms | 9.3× |
+| diviter | iterative | 5.731 s | 445.7 ms | 12.9× |
+| divrec | recursive | 16.2 ms | 9.0 ms | 1.8× |
+| array1 | array | 17.7 ms | 3.5 ms | 5.1× |
+| gcbench | gc | 2.675 s | 24.5 ms | 109.2× |
+| quicksort | sort | 13.3 ms | 4.2 ms | 3.2× |
+| triangl | backtrack | 1.798 s | 68.5 ms | 26.2× |
+| puzzle | backtrack | 21.5 ms | 5.3 ms | 4.1× |
+| ray | numeric | 17.2 ms | 5.6 ms | 3.1× |
+| paraffins | recursive | 15.2 ms | 3.6 ms | 4.2× |
 
-**Total time**: 10.443 s
-**Geometric mean**: 71.5 ms
+| | Lambda | Node.js | Ratio |
+|---|--------|---------|-------|
+| **Total time** | 10.443 s | 586.6 ms | 17.8× |
+| **Geometric mean** | 71.5 ms | 10.4 ms | 6.9× |
+
+## Analysis
+
+Node.js (V8 JIT) is **6.9× faster** on geometric mean across this suite. The gap varies dramatically by workload type:
+
+- **Closest** (2–4×): divrec (simple recursion), primes (small sieve), ray (FP math), quicksort (array sort), paraffins (combinatorics)
+- **Medium** (5–13×): array1, puzzle, deriv, pnpoly, diviter
+- **Widest** (26–109×): triangl (backtracking with array copies), gcbench (GC stress with deep tree allocation)
+
+The gcbench gap (109×) is the largest outlier — this benchmark is a GC stress test that allocates millions of small binary tree nodes. V8's generational GC with fast nursery allocation dominates here. The triangl gap (26×) reflects Lambda's overhead in array mutation and backtracking state management.
 
 ## Origin
 
