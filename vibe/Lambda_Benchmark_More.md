@@ -192,15 +192,15 @@ pn next_rand(seed) { return (seed * 1664525 + 1013904223) % 1000000 }
 
 The original `paraffins` implementation (building explicit tree structures) caused a SIGSEGV crash deep in recursion. **Fixed** by rewriting with a counting-only approach: instead of allocating radical tree nodes, it counts radicals at each size using multiset combination formulas (ms2, ms3, ms4). Also required a pure-integer `int_div()` function (binary long division) since both `div` (broken in pn) and `/` (returns float, poisoning `%` operations) cannot be used. A critical algorithmic fix was adding a `max_rad = floor((n-1)/2)` constraint in the CCP (carbon-centered paraffin) enumeration to prevent overlap with BCP (bond-centered) counting and array out-of-bounds access.
 
-### Outstanding Issues (not yet resolved)
+### Outstanding Issues
 
 #### B. Debug build too slow for compute-heavy benchmarks
 
 The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `pnpoly` (100K points × 20-vertex polygon), `brainfuck` (10K iterations), `collatz` (1M numbers), `matmul` (200×200), `kostya/primes` (sieve to 1M), and `triangl` (backtracking 29K solutions) are only practical to run in release mode. They have been verified to compile and their logic verified with reduced inputs. Note: `quicksort` (5000 elements) previously timed out in debug but now passes.
 
-#### C. Semicolons on same line cause syntax error
+#### C. Semicolons on same line cause syntax error — NO LONGER REPRODUCIBLE
 
-Multiple statements separated by `;` on a single line (e.g., `stack[sp] = i; sp = sp + 1`) produce syntax error E100. Lambda requires each statement on its own line or in its own block `{ }`.
+Multiple statements separated by `;` on a single line (e.g., `stack[sp] = i; sp = sp + 1`) were reported to produce syntax error E100. Testing confirms semicolons now work correctly in both `pn` and `fn` modes for all statement types: `var` declarations, assignments, index assignments, `print`, `if`, and `while`.
 
 #### D. `div` keyword entirely non-functional in `pn` mode — FIXED
 
@@ -211,19 +211,12 @@ The `div` operator for integer division now works correctly in procedural (`pn`)
 Several patterns were established for writing benchmarks in Lambda `pn` mode:
 
 ### Dynamic array creation
-Lambda does not have a built-in `make_array(n, val)`, so each benchmark includes a helper:
+Lambda has a built-in `fill(n, val)` function that creates an array of `n` elements initialized to `val` (as long as `val` is not `null`):
 ```lambda
-pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    // ... handle remainder
-    return arr
-}
+var arr = fill(1000, 0)     // [0, 0, 0, ..., 0] — 1000 zeros
+var flags = fill(8001, 1)   // [1, 1, 1, ..., 1] — 8001 ones
 ```
+Note: `fill(n, str)` on a string value repeats the string (`fill(3, "ab")` → `"ababab"`), so use `fill(n, 0)` for numeric arrays.
 
 ### Character code conversion — `ord()` and `chr()` now supported
 Lambda now has built-in `ord(str)` and `chr(int)` functions for Unicode code point conversion. Previously, manual lookup tables were needed:

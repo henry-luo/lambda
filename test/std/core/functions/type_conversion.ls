@@ -1,0 +1,21 @@
+// Test: Type Conversion Functions
+// Layer: 3 | Category: function | Covers: int, float, string, type
+
+int(3.14)
+int(3.99)
+int("42")
+float(42)
+float("3.14")
+string(42)
+string(3.14)
+string(true)
+string(false)
+string(null)
+string([1, 2, 3])
+type(42)
+type(3.14)
+type("hello")
+type(true)
+type(null)
+type([1, 2])
+type({a: 1})
