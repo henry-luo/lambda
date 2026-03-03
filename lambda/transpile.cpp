@@ -850,6 +850,19 @@ bool is_dynamic_fn_call(AstNode* node) {
     return entry_type != AST_NODE_FUNC && entry_type != AST_NODE_FUNC_EXPR && entry_type != AST_NODE_PROC;
 }
 
+// Check if a node is specifically an IDIV binary expression.
+// fn_idiv returns boxed Item (for div-by-zero error handling),
+// but AST type inference says INT — so assignment to native int needs unboxing.
+static bool is_idiv_expr(AstNode* node) {
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        if (pri->expr) node = pri->expr;
+    }
+    if (node->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* bin = (AstBinaryNode*)node;
+    return bin->op == OPERATOR_IDIV;
+}
+
 // Check if a binary expression uses Item-returning runtime functions (fn_add, fn_sub, fn_mul)
 // rather than native C operators. When operands are not both concrete numeric types,
 // the transpiler uses runtime functions which return Item — boxing is not needed.
@@ -1748,7 +1761,6 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_MOD) {
         // Always use boxed fn_mod() for proper division-by-zero error handling
-        // Cannot use unboxed fn_mod_i since it cannot return error for b == 0
         strbuf_append_str(tp->code_buf, "fn_mod(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -1774,7 +1786,6 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_IDIV) {
         // Always use boxed fn_idiv() for proper division-by-zero error handling
-        // Cannot use unboxed fn_idiv_i since it cannot return error for b == 0
         strbuf_append_str(tp->code_buf, "fn_idiv(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -2147,12 +2158,21 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         TypeId var_tid = var_type->type_id;
         TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
         const char* unbox_fn = NULL;
+        // Case 1: RHS type is ANY/NULL but variable is scalar → standard coercion
         if (var_tid != rhs_tid && (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL)) {
             if (var_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
             else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
             else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
             else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
             else if (var_tid == LMD_TYPE_STRING || var_tid == LMD_TYPE_BINARY) unbox_fn = "it2s(";
+        }
+        // Case 2: RHS is idiv — fn_idiv returns boxed Item
+        // but AST type says INT, so we need to unbox for native scalar variable
+        if (!unbox_fn && is_idiv_expr(asn_node->as)) {
+            if (var_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
+            else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
+            else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
+            else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
         }
         if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
         transpile_expr(tp, asn_node->as);
@@ -3387,7 +3407,16 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         if (assign_node->target_node && assign_node->target_node->type && assign_node->value->type) {
             TypeId target_tid = assign_node->target_node->type->type_id;
             TypeId val_tid = assign_node->value->type->type_id;
+            // Case 1: value type is ANY/NULL but target is scalar → standard coercion
             if (target_tid != val_tid && (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL)) {
+                if (target_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
+                else if (target_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
+                else if (target_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
+                else if (target_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
+            }
+            // Case 2: value is idiv — fn_idiv returns boxed Item
+            // but AST type says INT, so we need to unbox for native scalar target
+            if (!unbox_fn && is_idiv_expr(assign_node->value)) {
                 if (target_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
                 else if (target_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
                 else if (target_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";

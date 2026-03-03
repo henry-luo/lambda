@@ -72,73 +72,53 @@ During implementation, several Lambda `pn`-mode (procedural JIT) issues were dis
 
 **Files affected by fix:** `lambda/transpile.cpp`, `lambda/lambda-eval.cpp`
 
-#### 2. `div` operator fails in `pn` mode
+#### 2. `div` operator fails in `pn` mode — FIXED
 
-**Symptom:** The `div` keyword (integer division) returns an `error` value instead of an integer when used inside `pn` functions. The runtime reports the result type as `error`.
+**Symptom:** The `div` keyword (integer division) returned an `error` value instead of an integer when used inside `pn` functions. The bug was **pn-only** — `div` worked correctly in `fn` mode.
 
-**Impact:** Any computation using `div` silently produces error values that poison subsequent arithmetic.
+**Why pn-only:** The transpiler generates different C code for `fn` vs `pn` variable bindings:
 
-**Workaround:** Use `shr(x, n)` (bit shift right) for division by powers of 2. For general integer division, use `int(a / b)` — however, see Issue #3 below.
+- **`fn` mode** — All `let` bindings use the generic `Item` type (a tagged 64-bit value). Since `fn_idiv()` returns `Item`, there is no type mismatch:
+  ```c
+  // fn: let q = a div b → everything is Item, no mismatch
+  Item result = fn_idiv(i2it(97), i2it(4));   // Item → Item ✓
+  ```
+
+- **`pn` mode** — The transpiler infers concrete C types for `var` bindings based on AST type analysis. Since `int div int` infers to `int`, the variable is declared as native `int64_t`. But `fn_idiv()` still returns a **boxed `Item`** (to handle div-by-zero → `ItemError`), creating a type mismatch:
+  ```c
+  // pn: var q = a div b → variable typed as int64_t, but fn_idiv returns Item
+  int64_t _q = fn_idiv(i2it(_a), i2it(_b));   // Item crammed into int64_t ✗
+  pn_print(i2it(_q));                          // re-boxes garbage → <error>
+  ```
+
+**Root Cause:** `fn_idiv()` returns a boxed `Item`, but the pn transpiler declared result variables as native `int64_t` (because AST type inference says `int div int = int`). The boxed Item was stored raw, then re-boxed with `i2it()` at use, creating a garbage value.
+
+**Fix:** Added targeted unboxing (`it2i()`) in `transpile_assign_expr` and `transpile_assign_stam` when the RHS is an IDIV binary expression. The generated code now correctly unwraps:
+```c
+// After fix: unbox Item → native int at assignment
+int64_t _q = it2i(fn_idiv(i2it(_a), i2it(_b)));   // Item → int64_t ✓
+pn_print(i2it(_q));                                 // boxes native int → correct Item ✓
+```
+
+**Files affected by fix:** `lambda/transpile.cpp`, `lambda/build_ast.cpp`
+
+#### 3. `int()` of a float returns `int64` type — not usable as array/string index — NO LONGER REPRODUCIBLE
+
+**Original Symptom:** `int(float_value)` returned a value with internal type `int64` (TypeId 64) that could not be used for indexing into strings or arrays.
+
+**Current Status:** This issue is no longer reproducible. The runtime's `fn_index()` handles `LMD_TYPE_INT64` correctly (extracts via `get_int64()` and passes to `item_at()`), and the transpiler now keeps `fn_int()` results as `Item` type rather than misboxing them. The original failure was likely a manifestation of the same pn boxing bug family as Issue #2 (`div`).
 
 ```
-// BROKEN in pn mode
-var x = 97 div 4            // returns <error>
-
-// WORKS (power-of-2 divisors)
-var x = shr(97, 2)          // 97 >> 2 = 24
-
-// WORKS (general case, but see Issue #3)
-var x = int(97 / 4)         // returns 24 as int
-```
-
-**Files affected:** `base64.ls`, `collatz.ls`
-
-#### 3. `int()` of a float returns `int64` type — not usable as array/string index
-
-**Symptom:** `int(float_value)` returns a value with internal type `int64` (TypeId 64) rather than the normal `int` type. The runtime's `item_at` function does not support this type for indexing into strings or arrays, producing `"unsupported item_at type: 64"` errors.
-
-**Impact:** Cannot use `int(x / y)` result directly to index into strings or arrays. Must find alternative approaches (e.g., bit shifts, or pre-computing integer values).
-
-**Workaround:** For powers-of-2 division, `shr()` returns a proper `int`. For other cases, avoid the pattern entirely or restructure the algorithm.
-
-```
-// BROKEN — int() returns int64, unusable for indexing
+// Now works correctly in pn mode:
 var idx = int(b0 / 4)
-var ch = table[idx]          // ERROR: item_at type 64
-
-// WORKS — shr returns proper int
-var idx = shr(b0, 2)
-var ch = table[idx]          // OK
+var ch = table[idx]          // OK — fn_index handles INT64
 ```
 
-**Files affected:** `base64.ls`
+#### 4. String literal in called `pn` function produces `item_at` error — NO LONGER REPRODUCIBLE
 
-#### 4. String literal in called `pn` function produces `item_at` error
+**Original Symptom:** When a `pn` function contains a `let` binding to a string literal and that function is called from another `pn` function, indexing the string failed with `"unsupported item_at type: 64"`.
 
-**Symptom:** When a `pn` function contains a `let` binding to a string literal and that function is called from another `pn` function, indexing the string fails with `"unsupported item_at type: 64"` even when the index is a proper `int`.
-
-**Impact:** Cannot define lookup tables as local string constants inside helper functions.
-
-**Workaround:** Define the string in `main()` and pass it as a parameter to the helper function.
-
-```
-// BROKEN — string literal inside called pn function
-pn b64_char(idx) {
-    let table = "ABCD..."
-    return table[idx]        // ERROR on repeated calls
-}
-
-// WORKS — pass string from caller
-pn b64_char(table, idx) {
-    return table[idx]        // OK
-}
-pn main() {
-    let table = "ABCD..."
-    print(b64_char(table, 24))
-}
-```
-
-**Files affected:** `base64.ls`
+**Current Status:** This issue is no longer reproducible. String literals in called `pn` functions now work correctly, including repeated calls (tested with 64 consecutive calls). The original failure was likely related to the same pn transpiler boxing issues fixed in Issue #2 (`div`).
 
 #### 5. `pn` functions must have explicit `return` on all code paths
 
@@ -191,38 +171,20 @@ pn next_rand(seed) { return (seed * 1664525 + 1013904223) % 1000000 }
 
 **Files affected:** `quicksort.ls`, `matmul.ls`, `json_gen.ls`
 
-#### 7. Modulo (`%`) on float values returns error in `pn` mode
+#### 7. Modulo (`%`) on float values returns error — FIXED
 
-**Symptom:** `float_value % int_value` returns `<error>` instead of computing the remainder. Since `/` always returns float, any value derived from division that is subsequently used with `%` produces an error, which silently poisons all downstream arithmetic.
+**Symptom:** `float_value % int_value` returned `<error>` instead of computing the remainder. Since `/` always returns float, any value derived from division that is subsequently used with `%` produced an error, which silently poisoned all downstream arithmetic.
 
-**Impact:** Cannot use `(a - a % b) / b` as an integer division workaround when the result feeds back into expressions using `%`. The float contamination spreads through arrays and accumulators.
+**Root cause:** `fn_mod()` in `lambda-eval-num.cpp` explicitly rejected float operands with `"modulo not supported for float types"` → `ItemError`. This was a **runtime limitation** (not a transpiler bug like Issue #2), affecting both `fn` and `pn` modes equally.
 
-**Workaround:** Use a pure-integer binary long division function that never touches `/`:
+**Fix:** Replaced the error branch in `fn_mod()` with proper `fmod()` computation from `<cmath>`. When either operand is `LMD_TYPE_FLOAT`, both operands are promoted to `double` (handling `INT`, `INT64`, and `FLOAT` sources) and `fmod(a, b)` is called. Division by zero returns `ItemError`.
 
-```lambda
-pn int_div(a, b) {
-    if (a < b) { return 0 }
-    var rem = a
-    var q = 0
-    var power = b
-    var bit = 1
-    while (power + power <= rem) {
-        power = power + power
-        bit = bit + bit
-    }
-    while (bit >= 1) {
-        if (rem >= power) {
-            q = q + bit
-            rem = rem - power
-        }
-        power = shr(power, 1)
-        bit = shr(bit, 1)
-    }
-    return q
-}
-```
-
-**Files affected:** `paraffins.ls`
+**Verification:**
+- `10.5 % 3` → `1.5` (fn and pn modes)
+- `17.0 % 5` → `2`, `10 % 3.5` → `3`, `7.5 % 2.5` → `0`
+- `10.5 % 0` → `<error>` (zero check works)
+- 570/572 baseline tests pass (2 pre-existing failures unrelated)
+- Existing `numeric_expr` and `cross_type_arithmetic` tests updated to expect float mod results instead of errors
 
 ### Resolved Issues
 
@@ -240,9 +202,9 @@ The debug build of `lambda.exe` is orders of magnitude slower than release for c
 
 Multiple statements separated by `;` on a single line (e.g., `stack[sp] = i; sp = sp + 1`) produce syntax error E100. Lambda requires each statement on its own line or in its own block `{ }`.
 
-#### D. `div` keyword entirely non-functional in `pn` mode
+#### D. `div` keyword entirely non-functional in `pn` mode — FIXED
 
-The `div` operator for integer division does not work at all in procedural (`pn`) mode. This is a significant gap since integer division is common in algorithms. Currently must use `shr()` for power-of-2 cases or `int(a / b)` for general cases (with the caveat that the result may not be usable as an index — see Issue #3).
+The `div` operator for integer division now works correctly in procedural (`pn`) mode. The fix adds unboxing at assignment when the RHS is an `idiv` expression. See Issue #2 above for details.
 
 ## Benchmark Design Patterns
 
@@ -263,14 +225,21 @@ pn make_array(n, val) {
 }
 ```
 
-### Character code conversion (no `ord()`/`chr()`)
-Lambda `pn` mode lacks `ord()` and `chr()` builtins, so manual lookup tables map characters to codes and back:
+### Character code conversion — `ord()` and `chr()` now supported
+Lambda now has built-in `ord(str)` and `chr(int)` functions for Unicode code point conversion. Previously, manual lookup tables were needed:
 ```lambda
+// Old workaround (no longer needed):
 pn chr(code) {
     if (code == 72) { return "H" }
     if (code == 101) { return "e" }
     // ...
 }
+
+// Now use built-in functions:
+ord("A")    // 65
+chr(65)     // "A"
+ord("é")    // 233
+chr(128512) // "😀"
 ```
 
 ### Safe LCG random numbers

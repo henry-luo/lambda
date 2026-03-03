@@ -2856,7 +2856,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_IDIV) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
-            type_id = LMD_TYPE_INT;  // Integer division always produces int results
+            type_id = LMD_TYPE_INT;  // Integer division always produces int result
         }
         else {
             type_id = LMD_TYPE_ANY;
