@@ -14,13 +14,22 @@ find test/std -name "*.ls" | sort | while read -r f; do
     base="${f%.ls}"
     expected="${base}.expected"
     
-    out=$(./lambda.exe "$f" 2>/dev/null)
+    # Check if file uses procedural mode (needs "lambda.exe run")
+    if head -5 "$f" | grep -q "// Mode: procedural"; then
+        out=$(./lambda.exe run "$f" 2>/dev/null)
+    else
+        out=$(./lambda.exe "$f" 2>/dev/null)
+    fi
     rc=$?
     
     if [ $rc -ne 0 ]; then
         echo "FAIL (exit $rc): $f"
         # Show error
-        ./lambda.exe "$f" 2>&1 | head -5
+        if head -5 "$f" | grep -q "// Mode: procedural"; then
+            ./lambda.exe run "$f" 2>&1 | head -5
+        else
+            ./lambda.exe "$f" 2>&1 | head -5
+        fi
         echo "---"
     else
         echo "$out" > "$expected"
