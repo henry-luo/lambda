@@ -4927,7 +4927,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
 
         // Subtract table padding
-        if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+        // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
+        if (!table->tb->border_collapse && table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
             table_content_width -= table->bound->padding.left + table->bound->padding.right;
         }
 
@@ -5384,7 +5385,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Subtract table padding
-            if (table->bound) {
+            // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
+            if (!table->tb->border_collapse && table->bound) {
                 if (table->bound->padding.top >= 0) content_height -= table->bound->padding.top;
                 if (table->bound->padding.bottom >= 0) content_height -= table->bound->padding.bottom;
             }
@@ -5718,8 +5720,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Add table padding to width
+    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     int table_padding_horizontal = 0;
-    if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+    if (!table->tb->border_collapse && table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
         table_padding_horizontal = table->bound->padding.left + table->bound->padding.right;
         table_width += table_padding_horizontal;
         log_debug("Added table padding horizontal: %dpx (left=%d, right=%d)",
@@ -5823,8 +5826,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     float* col_x_positions = (float*)mem_calloc(columns + 1, sizeof(float), MEM_CAT_LAYOUT);
 
     // Start with table padding and left border-spacing for separate border model
+    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     int table_padding_left = 0;
-    if (table->bound && table->bound->padding.left >= 0) {
+    if (!table->tb->border_collapse && table->bound && table->bound->padding.left >= 0) {
         table_padding_left = table->bound->padding.left;
         log_debug("Added table padding left: +%dpx", table_padding_left);
     }
@@ -5995,8 +5999,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Add table padding (space inside table border)
+    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     int table_padding_top = 0;
-    if (table->bound && table->bound->padding.top >= 0) {
+    if (!table->tb->border_collapse && table->bound && table->bound->padding.top >= 0) {
         table_padding_top = table->bound->padding.top;
         current_y += table_padding_top;
         log_debug("Added table padding top: +%dpx", table_padding_top);
@@ -7204,8 +7209,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Add table padding bottom
+    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     int table_padding_bottom = 0;
-    if (table->bound && table->bound->padding.bottom >= 0) {
+    if (!table->tb->border_collapse && table->bound && table->bound->padding.bottom >= 0) {
         table_padding_bottom = table->bound->padding.bottom;
         final_table_height += table_padding_bottom;
         log_debug("Added table padding bottom: +%dpx", table_padding_bottom);

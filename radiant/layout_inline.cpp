@@ -3,6 +3,7 @@
 #include "layout_table.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/font/font.h"
 #include "../lib/strbuf.h"
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
@@ -487,6 +488,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // Normal inline-only content
+    bool had_children = (child != nullptr);
     float start_advance_y = lycon->block.advance_y;
     if (child) {
         log_debug("layout inline children: advance_y %f, line_height %f", lycon->block.advance_y, lycon->block.line_height);
@@ -498,6 +500,53 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Advance past the right border+padding so the next sibling starts after this inline's border
     lycon->line.advance_x += inline_right_edge;
+
+    // CSS 2.1 §10.8.1: For non-replaced inline elements, the inline box height
+    // equals its 'line-height', computed via the half-leading model. Even empty
+    // inline elements contribute their strut to the line box height calculation.
+    // When children produce text output, output_text() applies the half-leading;
+    // for empty inlines (no children at all), we must apply it here explicitly.
+    if (!had_children && lycon->font.font_handle) {
+        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+        float ascender = 0, descender = 0;
+        if (typo.valid && typo.use_typo_metrics) {
+            ascender = typo.ascender;
+            descender = typo.descender;
+        } else {
+            const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+            if (m) {
+                ascender = m->hhea_ascender;
+                descender = -(m->hhea_descender);
+            }
+        }
+        if (ascender > 0 || descender > 0) {
+            if (!lycon->block.line_height_is_normal) {
+                float content_height = ascender + descender;
+                float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+                ascender += half_leading;
+                descender += half_leading;
+            }
+            float va_offset = lycon->line.vertical_align_offset;
+            if (va_offset != 0) {
+                ascender += va_offset;
+                descender -= va_offset;
+            }
+            lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+            lycon->line.max_descender = max(lycon->line.max_descender, descender);
+            if (lycon->block.line_height_is_normal) {
+                float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+                lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
+            }
+            log_debug("empty inline strut: ascender=%.1f, descender=%.1f, line_height=%.1f",
+                     ascender, descender, lycon->block.line_height);
+        }
+        // CSS 2.1 §9.4.2: An inline element with non-zero margins, borders, or
+        // padding makes the line box non-empty (not subject to zero-height rule).
+        // Mark the line as having content so line_break() is called at finalization.
+        if (inline_left_edge > 0 || inline_right_edge > 0) {
+            lycon->line.is_line_start = false;
+        }
+    }
 
     // Detect multi-line: if advance_y changed during child layout, the span wrapped to a new line
     bool span_is_multi_line = (lycon->block.advance_y > start_advance_y + 1.0f);

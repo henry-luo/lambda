@@ -447,9 +447,16 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         }
 
         // resolve length/number/percentage
+        float font_size_for_lh = lycon->font.current_font_size;
+        // CSS 2.1 §10.8.1: Number line-height values are multiplied by the element's
+        // own font-size. When current_font_size is unresolved (-1), use the computed
+        // font-size from the font style (inherited from parent if not explicitly set).
+        if (font_size_for_lh < 0 && lycon->font.style) {
+            font_size_for_lh = lycon->font.style->font_size;
+        }
         float resolved_height =
         resolved_value->type == CSS_VALUE_TYPE_NUMBER ?
-            resolved_value->data.number.value * lycon->font.current_font_size :
+            resolved_value->data.number.value * font_size_for_lh :
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, resolved_value);
 
         // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
