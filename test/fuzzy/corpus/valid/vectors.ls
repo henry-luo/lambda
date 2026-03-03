@@ -13,8 +13,8 @@ let multiplied = v1 * v2;
 // System functions
 let total = sum(v1);
 let average = avg(v1);
-let d = dot(v1, v2);
-let n = norm(v1);
-let cs = cumsum(v1);
+let d = math.dot(v1, v2);
+let n = math.norm(v1);
+let cs = math.cumsum(v1);
 
 [total, average, d, n]

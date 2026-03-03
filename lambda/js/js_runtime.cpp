@@ -555,6 +555,10 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (js_is_dom_node(object)) {
             return js_dom_get_property(object, key);
         }
+        // Check if this is a computed style wrapper
+        if (js_is_computed_style_item(object)) {
+            return js_computed_style_get_property(object, key);
+        }
         // Check if this is a JS object (indicated by NULL type)
         if (m->type == NULL && m->data != NULL) {
             // This is a JS object using hashmap
@@ -607,6 +611,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
+        if (js_is_dom_node(object)) {
+            return js_dom_set_property(object, key, value);
+        }
         // Check if this is a JS object (indicated by NULL type)
         if (m->type == NULL && m->data != NULL) {
             // This is a JS object using hashmap
@@ -896,6 +904,16 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
         return fn_index(str, args[0]);
     }
+    if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
+        if (argc < 1) return ItemNull;
+        String* s = it2s(str);
+        if (!s || s->len == 0) return ItemNull;
+        int idx = (int)js_get_number(args[0]);
+        if (idx < 0 || idx >= (int)s->len) return ItemNull;
+        // return the char code (byte value for ASCII/Latin1, first byte for UTF-8)
+        unsigned char ch = (unsigned char)s->chars[idx];
+        return (Item){.item = i2it((int64_t)ch)};
+    }
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
         Item result = str;
         for (int i = 0; i < argc; i++) {
@@ -961,6 +979,14 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         }
         return (Item){.item = i2it(-1)};
     }
+    // item(index) - NodeList/HTMLCollection style index access
+    if (method->len == 4 && strncmp(method->chars, "item", 4) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        int idx = (int)js_get_number(args[0]);
+        Array* a = arr.array;
+        if (idx >= 0 && idx < a->length) return a->items[idx];
+        return ItemNull;
+    }
     // includes
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
         if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
@@ -976,7 +1002,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         String* sep_str = it2s(sep);
         const char* sep_chars = sep_str ? sep_str->chars : ",";
         size_t sep_len = sep_str ? sep_str->len : 1;
-        
+
         Array* a = arr.array;
         StrBuf* buf = strbuf_new();
         for (int i = 0; i < a->length; i++) {
@@ -1274,7 +1300,7 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     // Math.sqrt
     if (method->len == 4 && strncmp(method->chars, "sqrt", 4) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_sqrt(js_to_number(args[0]));
+        return fn_math_sqrt(js_to_number(args[0]));
     }
     // Math.pow
     if (method->len == 3 && strncmp(method->chars, "pow", 3) == 0) {
@@ -1294,32 +1320,32 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     // Math.log
     if (method->len == 3 && strncmp(method->chars, "log", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_log(js_to_number(args[0]));
+        return fn_math_log(js_to_number(args[0]));
     }
     // Math.log10
     if (method->len == 5 && strncmp(method->chars, "log10", 5) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_log10(js_to_number(args[0]));
+        return fn_math_log10(js_to_number(args[0]));
     }
     // Math.exp
     if (method->len == 3 && strncmp(method->chars, "exp", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_exp(js_to_number(args[0]));
+        return fn_math_exp(js_to_number(args[0]));
     }
     // Math.sin
     if (method->len == 3 && strncmp(method->chars, "sin", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_sin(js_to_number(args[0]));
+        return fn_math_sin(js_to_number(args[0]));
     }
     // Math.cos
     if (method->len == 3 && strncmp(method->chars, "cos", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_cos(js_to_number(args[0]));
+        return fn_math_cos(js_to_number(args[0]));
     }
     // Math.tan
     if (method->len == 3 && strncmp(method->chars, "tan", 3) == 0) {
         if (argc < 1) return ItemNull;
-        return fn_tan(js_to_number(args[0]));
+        return fn_math_tan(js_to_number(args[0]));
     }
     // Math.sign
     if (method->len == 4 && strncmp(method->chars, "sign", 4) == 0) {

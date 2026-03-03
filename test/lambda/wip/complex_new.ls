@@ -172,7 +172,7 @@ pub fn perform_statistical_analysis(dataset) {
             min: min(values),
             max: max(values),
             range: max(values) - min(values),
-            std_dev: sqrt(avg((for (val in values) (val - mean_val) * (val - mean_val))))
+            std_dev: math.sqrt(avg((for (val in values) (val - mean_val) * (val - mean_val))))
         }
     }
     

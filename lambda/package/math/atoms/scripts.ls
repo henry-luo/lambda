@@ -1,11 +1,11 @@
 // math/atoms/scripts.ls — Superscript/subscript rendering
 // Implements TeXBook Rules 18a-f from Appendix G
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
-import met: .lambda.package.math.metrics
-import util: .lambda.package.math.util
+import box: lambda.package.math.box
+import ctx: lambda.package.math.context
+import css: lambda.package.math.css
+import met: lambda.package.math.metrics
+import util: lambda.package.math.util
 
 // ============================================================
 // Script rendering (superscript, subscript, or both)

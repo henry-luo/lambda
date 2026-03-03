@@ -6,10 +6,9 @@
 2. [Language Overview](#language-overview)
 3. [Documentation Guide](#documentation-guide)
 4. [Modules and Imports](#modules-and-imports)
-5. [I/O Module](#io-module)
-6. [Error Handling](#error-handling)
-7. [Examples](#examples)
-8. [Language Philosophy](#language-philosophy-and-design-principles)
+5. [Error Handling](#error-handling)
+6. [Examples](#examples)
+7. [Language Philosophy](#language-philosophy-and-design-principles)
 
 ---
 
@@ -61,6 +60,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
+| **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — Mutable variables, assignment, while loops, I/O module, `pn` functions, and `main()` entry point |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, `let a^err` destructuring, compile-time enforcement |
 
 ### Reference Documentation
@@ -103,9 +103,9 @@ The Lambda language documentation is organized into focused sub-documents for ea
 ```lambda
 // Type annotations
 let x: int = 42
-let items: [string] = ["a", "b"]
+let items: string[] = ["a", "b"]
 
-// Typed array annotations (native performance)
+// Typed array annotations
 var arr: int[] = [1, 2, 3]     // Native int array
 var data: float[] = [0.1, 0.2] // Native float array
 
@@ -120,7 +120,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
 // Object types (nominally-typed maps with methods)
 type Point {
     x: float, y: float;
-    fn distance(other: Point) => sqrt((x - other.x)**2 + (y - other.y)**2)
+    fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
 }
 type Circle : Point { radius: float; }   // Inheritance
 let p = {Point x: 3.0, y: 4.0}           // Object literal
@@ -205,122 +205,88 @@ pn main() {
 ### Import Statements
 
 ```lambda
-// Import modules
-import module_name;
-import .relative_module;        // Relative import
-import \\windows\\style\\path;  // Windows-style path
+// Relative import — resolved relative to the importing script's directory
+import .relative_module
+import .path.to.module
+
+// Absolute import — resolved relative to CWD/project root
+import module_name
 
 // Import with alias
-import alias: module_name;
-import my_utils: .utilities;
-
-// Multiple imports
-import module1, module2, alias: module3;
+import alias: .module
+import my_utils: .utilities
 ```
+
+**Import resolution:**
+- `.module` (dot prefix) — resolved relative to the importing script's directory. Nested imports work correctly: if `A.ls` imports `B.ls` and `B.ls` imports `C.ls`, `C.ls` resolves relative to `B.ls`'s directory.
+- `module` (no dot) — resolved relative to the current working directory / project root.
+- Paths are normalized via `realpath()` to prevent redundant compilation when the same file is imported through different relative paths.
 
 ### Module Structure
 
-Each Lambda Script file is a module that can export public declarations. Currently only variable and function definitions can be exported:
+Each Lambda Script file is a module that can export public declarations — variables, functions, procedures, type aliases, and object types:
 
 ```lambda
 // math_utils.ls
-pub PI = 3.14159;
-pub E = 2.71828;
 
-pub fn square(x: float) => x * x;
-pub fn cube(x: float) => x * x * x;
+// Public values
+pub PI = 3.14159
+pub E = 2.71828
 
-// Private variable (not exported)
-let v = 123;
+// Public functions
+pub fn square(x: float) => x * x
+pub fn cube(x: float) => x * x * x
 
-// Private function (not exported)
-fn helper(x: float) => x + 1;
+// Public type alias
+pub type Angle = float
+
+// Public object type with methods
+pub type Vec2 {
+    x: float = 0.0, y: float = 0.0;
+    fn len() => math.sqrt(x**2 + y**2)
+    fn scale(f) => {Vec2 x: x*f, y: y*f}
+}
+
+// Public with error destructuring
+pub config^err = input("config.json", 'json)
+
+// Private (not exported)
+let v = 123
+fn helper(x: float) => x + 1
+type Internal = {a: int, b: int}
 ```
 
 ### Using Imported Modules
 
 ```lambda
 // main.ls
-import math: .math_utils;
+import .math_utils
 
-let area = math.PI * math.square(radius);
-let volume = (4.0 / 3.0) * math.PI * math.cube(radius);
+// Imported values and functions are available directly
+let area = PI * square(radius)
+
+// Imported types can be used for annotations, construction, and type checks
+let angle: Angle = 1.57
+let v = {Vec2 x: 3.0, y: 4.0}
+v.len()          // 5.0
+v is Vec2        // true
+
+// Error variables are also imported
+if (err != null) print("config failed")
 ```
 
----
+### Export Visibility
 
-## I/O Module
-
-Lambda provides a unified I/O system that handles both local files and remote URLs transparently.
-
-### Pure I/O Functions
-
-Available anywhere:
-
-| Function | Description |
-|----------|-------------|
-| `input(source, format?)` | Read and parse data from file or URL |
-| `exists(path)` | Check if file/directory exists |
-| `format(data, format)` | Convert data to string format |
-
-```lambda
-// Read data
-let data = input("config.json", 'json)
-let html = input(https.example.com.page, 'html)
-
-// Check existence
-if exists(.config.json) { ... }
-```
-
-### Procedural I/O Functions
-
-Available only in `pn` functions:
-
-| Function | Description |
-|----------|-------------|
-| `io.copy(src, dst)` | Copy file/directory (supports URL sources) |
-| `io.move(src, dst)` | Move/rename file or directory |
-| `io.delete(path)` | Delete file or directory |
-| `io.mkdir(path)` | Create directory (recursive) |
-| `io.touch(path)` | Create file or update timestamp |
-| `io.symlink(target, link)` | Create symbolic link |
-| `io.chmod(path, mode)` | Change file permissions |
-| `io.fetch(url, options?)` | Fetch content from URL |
-
-```lambda
-pn setup_project() {
-    io.mkdir("./output/reports")
-    io.copy("https://example.com/template.json", "./config.json")
-    {initialized: true} |> "./output/.ready"
-}
-```
-
-### Pipe Output Operators
-
-Write data to files in procedural functions:
-
-```lambda
-pn export_data(data) {
-    // Write (truncate)
-    data |> "/tmp/output.json"
-
-    // Append
-    {event: "saved"} |>> "/tmp/events.log"
-}
-```
-
-### Supported Formats
-
-| Format | Extensions | Symbol |
-|--------|------------|--------|
-| JSON | `.json` | `'json` |
-| YAML | `.yaml`, `.yml` | `'yaml` |
-| XML | `.xml` | `'xml` |
-| HTML | `.html` | `'html` |
-| Markdown | `.md` | `'markdown` |
-| CSV | `.csv` | `'csv` |
-| TOML | `.toml` | `'toml` |
-| Plain text | `.txt` | `'text` |
+| Declaration | Visibility |
+|-------------|------------|
+| `pub x = ...` | Public (exported) |
+| `pub fn f()` / `pub pn p()` | Public function/procedure |
+| `pub type T = ...` | Public type alias |
+| `pub type T { ... }` | Public object type |
+| `pub x^err = ...` | Public value + error variable |
+| `let x = ...` | Private (module-local) |
+| `fn f()` / `pn p()` | Private function/procedure |
+| `type T = ...` / `type T { ... }` | Private type |
 
 ---
 
@@ -491,18 +457,3 @@ Concise syntax for complex operations:
 4. **Pattern Matching**: Type-based pattern matching with `is`
 5. **Document Processing**: Built-in support for markup and data formats
 
----
-
-## Further Reading
-
-- **[Lambda_Syntax.md](Lambda_Syntax.md)** — Syntax fundamentals, names, symbols, and namespaces
-- **[Lambda_Data.md](Lambda_Data.md)** — Complete guide to literals and collections
-- **[Lambda_Type.md](Lambda_Type.md)** — Deep dive into the type system
-- **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** — All expressions and operators
-- **[Lambda_Func.md](Lambda_Func.md)** — Function features and patterns
-- **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** — Error types, propagation, and enforcement
-- **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** — All system functions
-- **[dev/Developer_Guide.md](dev/Developer_Guide.md)** — Building from source, testing, grammar and MIR workflows
-- **[dev/Lamdba_Runtime.md](dev/Lamdba_Runtime.md)** — Runtime internals
-
-For the latest updates and examples, refer to the test files in the `test/lambda/` directory.

@@ -656,7 +656,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
                     decl->specificity.ids = 0;
                     decl->specificity.classes = 0;
                     decl->specificity.elements = 0;
-                    decl->specificity.important = false;
+                    decl->specificity.important = decl->important; // preserve !important for cascade
 
                     // Apply to element
                     bool applied = dom_element_apply_declaration(element, decl);
@@ -774,6 +774,7 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
             if (decl) {
                 // Update declaration's specificity to match the selector
                 decl->specificity = specificity;
+                decl->specificity.important = decl->important; // preserve !important for cascade
                 decl->origin = rule->origin;
 
                 if (dom_element_apply_declaration(element, decl)) {
@@ -859,6 +860,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
             if (decl) {
                 // Update declaration's specificity to match the selector
                 decl->specificity = specificity;
+                decl->specificity.important = decl->important; // preserve !important for cascade
                 decl->origin = rule->origin;
 
                 // Apply to pseudo-element style tree
@@ -1986,6 +1988,36 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     text_node->parent = parent_element;
 
     log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
+    return text_node;
+}
+
+DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
+    if (!native_string) {
+        log_error("dom_text_create_detached: native_string required");
+        return nullptr;
+    }
+    if (!doc || !doc->arena) {
+        log_error("dom_text_create_detached: doc with arena required");
+        return nullptr;
+    }
+
+    DomText* text_node = (DomText*)arena_calloc(doc->arena, sizeof(DomText));
+    if (!text_node) {
+        log_error("dom_text_create_detached: arena_calloc failed");
+        return nullptr;
+    }
+
+    text_node->node_type = DOM_NODE_TEXT;
+    text_node->parent = nullptr;
+    text_node->next_sibling = nullptr;
+    text_node->prev_sibling = nullptr;
+
+    text_node->native_string = native_string;
+    text_node->text = native_string->chars;
+    text_node->length = native_string->len;
+    text_node->content_type = DOM_TEXT_STRING;
+
+    log_debug("dom_text_create_detached: created text node, text='%s'", native_string->chars);
     return text_node;
 }
 

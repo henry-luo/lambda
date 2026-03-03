@@ -110,7 +110,7 @@ fn normalize_whitespace(str) =>
         let trimmed = trim(str),
         let parts = split(trimmed, " "),
         let non_empty = [for (p in parts where len(trim(p)) > 0) trim(p)],
-        str_join(non_empty, " ")
+        join(non_empty, " ")
     )
 
 // Word count approximation
@@ -148,7 +148,7 @@ fn text_similarity(text_a, text_b) =>
         else (
             // Tokens in B not in A
             let uniq_b = [for (t in b_set where not (t in a_set)) t],
-            let dist_b = len(str_join(uniq_b, " ")) * 1.0 / (len(str_join(b_set, " ")) * 1.0),
+            let dist_b = len(join(uniq_b, " ")) * 1.0 / (len(join(b_set, " ")) * 1.0),
             1.0 - dist_b
         )
     )

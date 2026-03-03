@@ -1,7 +1,7 @@
 // test_math_symbols.ls — Test math package symbol lookup and classification
 // Coverage: symbols.ls — lookup_symbol, classify_symbol, get_operator_name, get_accent, get_delim_size
 
-import sym: .lambda.package.math.symbols
+import sym: lambda.package.math.symbols
 
 "===== MATH SYMBOL TESTS ====="
 

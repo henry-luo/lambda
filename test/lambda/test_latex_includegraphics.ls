@@ -1,7 +1,7 @@
 // test_latex_includegraphics.ls — Test \includegraphics option parsing
 // Tests Phase 2I: width, height, scale, angle, keepaspectratio, trim+clip
 
-import util: .lambda.package.latex.util
+import util: lambda.package.latex.util
 
 "===== INCLUDEGRAPHICS OPTION TESTS ====="
 

@@ -1,0 +1,19 @@
+# Non-test files: chapter index/TOC pages (not actual layout tests)
+chapter-1
+chapter-2
+chapter-3
+chapter-6
+chapter-7
+chapter-11
+chapter-13
+chapter-A
+chapter-B
+chapter-C
+chapter-D
+chapter-E
+chapter-F
+chapter-G
+chapter-I
+toc
+# Non-test files: reference visual comparison targets
+abspos-replaced-width-margin-000-ref

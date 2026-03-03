@@ -30,6 +30,7 @@ typedef union {
 struct DomElement;
 struct DomText;
 struct DomComment;
+struct DomDocument;
 typedef struct String String;  // Lambda String type
 typedef struct Element Element;  // Lambda Element type
 
@@ -228,6 +229,15 @@ struct DomText : public DomNode {
  * @return New DomText or NULL on failure
  */
 DomText* dom_text_create(String* native_string, DomElement* parent_element);
+
+/**
+ * Create a detached DomText node backed by Lambda String (no parent)
+ * Used by JS createTextNode — the node will be parented later via appendChild/insertBefore.
+ * @param native_string Pointer to Lambda String (will be referenced, not copied)
+ * @param doc DomDocument (provides arena for allocation)
+ * @return New DomText or NULL on failure
+ */
+DomText* dom_text_create_detached(String* native_string, DomDocument* doc);
 
 /**
  * Create a new DomText node for a symbol (entity or emoji)

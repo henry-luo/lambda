@@ -16,14 +16,13 @@ This document covers Lambda's type system, including first-class types, type hie
 3. [Type Hierarchy](#type-hierarchy)
 4. [Basic Types](#basic-types)
 5. [Collection Types](#collection-types)
-6. [Union Types](#union-types)
-7. [Function Types](#function-types)
-8. [Type Declarations](#type-declarations)
-9. [Type Occurrences](#type-occurrences)
-10. [Type Patterns](#type-patterns)
-11. [String Patterns](#string-patterns)
-12. [Type Checking](#type-checking)
-13. [Type Inference](#type-inference)
+6. [Function Types](#function-types)
+7. [Type Declarations](#type-declarations)
+8. [Type Occurrences](#type-occurrences)
+9. [Type Patterns](#type-patterns)
+10. [String Patterns](#string-patterns)
+11. [Type Checking](#type-checking)
+12. [Type Inference](#type-inference)
 
 ---
 
@@ -52,7 +51,7 @@ Types in Lambda are first-class values that can be manipulated like any other va
 ```lambda
 // Assign types to variables
 let T = int
-let StringList = [string]
+let StringList = string[]
 let UserType = {name: string, age: int}
 
 // Pass types as arguments
@@ -63,7 +62,7 @@ validate("hello", int)      // false
 
 // Return types from functions
 fn element_type(arr_type: type) => arr_type.element
-element_type([int])         // int
+element_type(int[])         // int
 
 // Type in collections
 let types = [int, string, bool]
@@ -73,14 +72,15 @@ let types = [int, string, bool]
 
 ```lambda
 // Get type of a value
-type(42)           // int
-type("hello")      // string
-type([1, 2, 3])    // [int]
-type({a: 1})       // {a: int}
+type(42)           // type int
+type("hello")      // type string
+type([1, 2, 3])    // type array
+type({a: 1})       // type map
 
 // Type comparison
 type(42) == int           // true
-type([1,2]) == [int]      // true
+type(123) != string       // true
+type([1,2]) == array      // true
 ```
 
 ---
@@ -118,7 +118,7 @@ flowchart TD
 | `int` | `number` | `42 is number` → `true` |
 | `float` | `number` | `3.14 is number` → `true` |
 | `range` | `collection` | `(1 to 10) is range` → `true` |
-| `[int]` | `[any]` | `[1,2,3] is [any]` → `true` |
+| `int[]` | `any[]` | `[1,2,3] is any[]` → `true` |
 | `null` | `T?` | `null is int?` → `true` |
 | Every type | `any` | `"hello" is any` → `true` |
 
@@ -229,22 +229,43 @@ let squares = for (i in 1 to 5) i ^ 2   // [1, 4, 9, 16, 25]
 
 ### Array Types
 
+Lambda has two forms for array types:
+
+**Form 1: Bracket notation** — a type with an occurrence modifier inside `[ ]`:
+
 ```lambda
-// Homogeneous arrays
-[int]              // Array of integers
-[string]           // Array of strings
-[bool]             // Array of booleans
+[int*]             // Array of zero or more ints
+[int+]             // Array of one or more ints (non-empty)
+[string*]          // Array of zero or more strings
+[bool+]            // Non-empty array of booleans
+```
 
-// Nested arrays
-[[int]]            // Array of integer arrays
-[[[string]]]       // 3D array of strings
+> **Note:** `[int]` (without `*` or `+`) means a list of exactly 1 int, not an array of ints.
 
-// Array with any element
-[any]              // Array of any type
+**Form 2: Occurrence suffix** — a type followed by `[]` or `[n]`:
 
-// Examples
-let nums: [int] = [1, 2, 3]
-let matrix: [[int]] = [[1, 2], [3, 4]]
+```lambda
+int[]              // Array of zero or more ints (same as [int*])
+string[]           // Array of zero or more strings
+float[]            // Array of zero or more floats
+int[5]             // Array of exactly 5 ints
+int[3+]            // Array of 3 or more ints
+int[2, 10]         // Array of 2 to 10 ints
+```
+
+Nested arrays:
+
+```lambda
+int[][]            // Array of int arrays
+string[][]         // 2D array of strings
+```
+
+Examples:
+
+```lambda
+let nums: int[] = [1, 2, 3]
+let matrix: int[][] = [[1, 2], [3, 4]]
+let names: [string+] = ["Alice", "Bob"]
 ```
 
 ### List Types (Tuples)
@@ -291,40 +312,8 @@ type Paragraph = <p; string>
 type Link = <a href: string; string>
 type Article = <article title: string, author: string;
     string,           // Text content
-    [Section]         // Array of sections
+    Section*          // Zero or more sections
 >
-```
-
----
-
-## Union Types
-
-Union types allow a value to be one of several types:
-
-```lambda
-// Basic union
-int | string           // Either int or string
-int | float | string   // One of three types
-
-// Nullable types (shorthand and explicit)
-int?                   // Same as: int | null
-string?                // Same as: string | null
-
-// Union in function parameters
-fn process(value: int | string) => ...
-
-// Union in collections
-let mixed: [int | string] = [1, "two", 3, "four"]
-```
-
-### Pattern Matching with Unions
-
-```lambda
-fn describe(value: int | string | bool) => {
-    if (value is int) "integer: " ++ string(value)
-    else if (value is string) "string: " ++ value
-    else "boolean: " ++ string(value)
-}
 ```
 
 ---
@@ -381,7 +370,7 @@ type UserName = string
 type Point = (float, float)
 
 // Collection aliases
-type IntList = [int]
+type IntList = int[]
 type StringMap = {string: string}
 
 // Usage
@@ -398,8 +387,8 @@ Object types are **nominally-typed maps** with optional methods, inheritance, de
 // Object type with fields and methods
 type Point {
     x: float, y: float;
-    fn distance(other: Point) => sqrt((x - other.x)**2 + (y - other.y)**2)
-    fn magnitude() => sqrt(x**2 + y**2)
+    fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
+    fn magnitude() => math.sqrt(x**2 + y**2)
 }
 
 // Inheritance
@@ -422,6 +411,13 @@ type User {
     that (~.name != "admin")               // Object-level constraint
 }
 
+// In 'that' clauses, bare identifiers resolve to ~.name implicitly:
+type User2 {
+    name: string that (len(~) > 0),        // ~ needed for scalar field value
+    age: int that (~ > 0);
+    that (name != "admin")                  // 'name' resolves to ~.name
+}
+
 // Object literals
 let p = {Point x: 3.0, y: 4.0}
 let c = {Counter}                          // All defaults
@@ -437,7 +433,7 @@ p is map       // true (objects are map-compatible)
 let p2 = {Point p, x: 10.0}   // copy p, override x
 ```
 
-#### Map Type Aliases
+### Map Types
 
 Map type aliases remain available for structural typing:
 
@@ -461,7 +457,7 @@ type Section = <section heading: string;
 
 type Article = <article title: string, author: string;
     string,           // Intro text
-    [Section]         // Array of sections
+    Section*          // Zero or more sections
 >
 
 // Usage
@@ -484,7 +480,7 @@ Type occurrences specify cardinality and optionality:
 // Optional (nullable) types
 int?               // int | null
 string?            // string | null
-[int]?             // Array or null
+int[]?             // Array or null
 
 // In function parameters
 fn greet(name: string, title?: string) => ...
@@ -496,26 +492,29 @@ type User = {
 }
 ```
 
-### Array Occurrence Modifiers
+### Type Occurrence Modifiers
 
 ```lambda
 // Zero or more (array)
-int*               // Same as [int] - array of zero or more
+int*               // Same as int[] — array of zero or more
 string*            // Array of zero or more strings
 
 // One or more (non-empty array)
 int+               // Array of at least one int
 string+            // Non-empty string array
 
-// Typed array (native performance)
-int[]              // Typed int array
-float[]            // Typed float array
+// Occurrence suffix forms
+int[]              // Array of zero or more ints (same as int*)
+float[]            // Array of zero or more floats
+int[5]             // Array of exactly 5 ints
+int[3+]            // Array of 3 or more ints
+int[2, 10]         // Array of 2 to 10 ints
 
 // Examples
 type Args = string*        // Zero or more arguments
 type Names = string+       // At least one name required
 
-// Typed array in variables and parameters
+// In variables and parameters
 var positions: float[] = [0.0, 1.0, 2.0]
 pn update(arr: int[], n: int) { arr[0] = n }
 
@@ -529,9 +528,12 @@ fn concat(parts: string+) => ...   // Requires at least one
 |--------|---------|------------|
 | `T` | Exactly one | Required |
 | `T?` | Zero or one | `T \| null` |
-| `T*` | Zero or more | `[T]` |
-| `T+` | One or more | Non-empty `[T]` |
-| `T[]` | Typed array | Native `T` array (int, float) |
+| `T*` | Zero or more | `T[]` |
+| `T+` | One or more | Non-empty `T[]` |
+| `T[]` | Zero or more | Same as `T*` |
+| `T[n]` | Exactly n | Fixed-size array |
+| `T[n+]` | n or more | Min-size array |
+| `T[n, m]` | n to m | Bounded-size array |
 
 ---
 
@@ -545,11 +547,18 @@ Type patterns enable matching and destructuring based on type structure.
 // Type check with 'is'
 42 is int                  // true
 "hello" is string          // true
-[1, 2] is [int]            // true
+[1, 2] is int[]            // true
 
-// Negated type check
-42 is not string           // true
-null is not int            // true
+// Negated type check with '!'
+!(42 is string)            // true
+!(null is int)             // true
+!("hello" is int)          // true
+
+// Type equality
+type(42) == int            // true
+type("hi") == string       // true
+type([1,2]) == array       // true
+type(42) != string         // true
 
 // Type in conditionals
 if (value is string) {
@@ -562,9 +571,9 @@ if (value is string) {
 ```lambda
 // Array element type matching
 let arr = [1, 2, 3]
-arr is [int]               // true
-arr is [string]            // false
-arr is [number]            // true (int is subtype of number)
+arr is int[]               // true
+arr is string[]            // false
+arr is number[]            // true (int is subtype of number)
 
 // Map structure matching
 let obj = {name: "Alice", age: 30}
@@ -575,7 +584,33 @@ obj is {email: string}     // false (missing required field)
 
 ### Union Type Patterns
 
+The union operator `|` combines types so a value can be one of several types:
+
 ```lambda
+// Basic union
+int | string           // Either int or string
+int | float | string   // One of three types
+
+// Nullable types (shorthand for union with null)
+int?                   // Same as: int | null
+string?                // Same as: string | null
+
+// Union in function parameters
+fn process(value: int | string) => ...
+
+// Union in collections
+let mixed: (int | string)[] = [1, "two", 3, "four"]
+```
+
+Pattern matching with union types:
+
+```lambda
+fn describe(value: int | string | bool) => {
+    if (value is int) "integer: " ++ string(value)
+    else if (value is string) "string: " ++ value
+    else "boolean: " ++ string(value)
+}
+
 fn process(value: int | string | null) => {
     if (value is null) "nothing"
     else if (value is int) "number: " ++ string(value)
@@ -583,21 +618,201 @@ fn process(value: int | string | null) => {
 }
 ```
 
-### Type Guards
+### Exclusion Type Patterns
 
-Type patterns act as type guards, narrowing the type in subsequent code:
+The exclusion operator `!` subtracts one type from another — `T1 ! T2` matches values that match `T1` but **not** `T2`:
 
 ```lambda
-fn handle(data: any) => {
-    if (data is [int]) {
-        // data is [int] here
-        sum(data)
-    } else if (data is {values: [int]}) {
-        // data is {values: [int]} here
-        sum(data.values)
-    } else {
-        error("Unsupported type")
-    }
+// any except null (non-nullable any)
+any ! null
+
+// number but not float (only int)
+number ! float
+
+// scalar but not bool
+scalar ! bool
+```
+
+Exclusion is useful for narrowing broad types:
+
+```lambda
+// Accept any non-null value
+fn required(value: any ! null) => value
+
+// Accept any number except float
+fn integers_only(n: number ! float) => n * 2
+
+// Collection of non-null values
+type NonNullList = [any ! null]
+```
+
+Exclusion can also be used in `is` checks and `match` expressions:
+
+```lambda
+// Type check
+42 is (any ! null)         // true
+null is (any ! null)       // false
+42 is (number ! float)     // true (int matches)
+3.14 is (number ! float)   // false (float excluded)
+
+// In match expressions
+fn classify(x) => match x {
+    case number ! float: "integer"
+    case float: "float"
+    case string: "text"
+    default: "other"
+}
+```
+
+### Negation Types
+
+The prefix `!` operator negates a type — `!T` matches any value that does **not** match `T`:
+
+```lambda
+// Not null — any non-null value
+!null
+
+// Not string — anything except string
+!string
+
+// Not bool — anything except bool
+!bool
+```
+
+Negation differs from exclusion in that it has no base type — `!T` is equivalent to `any ! T`:
+
+| Syntax | Meaning | Equivalent |
+|--------|---------|------------|
+| `!T` | Anything that is not `T` | `any ! T` |
+| `T1 ! T2` | Values matching `T1` but not `T2` | (no shorthand) |
+
+Negation is useful in type annotations and pattern matching:
+
+```lambda
+// Parameter that rejects null
+fn required(value: !null) => value
+
+// Type negation works in expressions with 'is'
+42 is !null          // true (int is not null)
+null is !null        // false
+"hi" is !int         // true (string is not int)
+42 is !int           // false
+```
+
+> **Note:** `!T` creates a negation type value. Use `x is !T` to check that `x` does **not** match type `T`. For logical negation, use `not` (e.g., `not true`).
+
+In string patterns, `!` negates character classes:
+
+```lambda
+// Any character except a digit
+string NotDigit = !\d
+
+// Any character except whitespace
+string NotSpace = !\s
+```
+
+### Constrained Types (`that`)
+
+The `that` clause attaches a **runtime constraint** to a type. A value matches `T that (predicate)` only if it matches `T` **and** the predicate evaluates to true, with `~` referring to the value being checked.
+
+```lambda
+// Syntax: type that (predicate using ~)
+int that (~ > 0)                    // Positive integer
+int that (5 < ~ < 10)              // Integer between 5 and 10 (exclusive)
+string that (len(~) > 0)           // Non-empty string
+```
+
+#### Type Aliases with Constraints
+
+Name constrained types for reuse:
+
+```lambda
+type Positive = int that (~ > 0)
+type Percentage = int that (0 <= ~ and ~ <= 100)
+type NonEmpty = string that (len(~) > 0)
+type Between5And10 = int that (5 < ~ < 10)
+
+// Type checking
+1 is Positive          // true
+-1 is Positive         // false
+50 is Percentage       // true
+110 is Percentage      // false
+"hi" is NonEmpty       // true
+"" is NonEmpty         // false
+7 is Between5And10     // true
+5 is Between5And10     // false (not > 5)
+```
+
+#### Constrained Types in `match`
+
+Constrained types work as `match` arms for precise value-based dispatch:
+
+```lambda
+fn classify(x) => match x {
+    case int that (~ > 0): "positive"
+    case int that (~ < 0): "negative"
+    case 0: "zero"
+    default: "other"
+}
+
+fn grade(score) => match score {
+    case int that (90 <= ~ <= 100): "A"
+    case int that (80 <= ~ < 90): "B"
+    case int that (70 <= ~ < 80): "C"
+    case int that (60 <= ~ < 70): "D"
+    case int that (0 <= ~ < 60): "F"
+    default: "invalid"
+}
+```
+
+#### Field-Level Constraints in Object Types
+
+Object type fields can each carry their own `that` constraint:
+
+```lambda
+type User {
+    name: string that (len(~) > 0),
+    age: int that (0 <= ~ and ~ <= 150),
+    email: string;
+}
+
+{User name: "Alice", age: 30, email: "a@x.com"} is User   // true
+{User name: "", age: 30, email: "a@x.com"} is User         // false (empty name)
+{User name: "Bob", age: -5, email: "b@x.com"} is User      // false (negative age)
+```
+
+#### Object-Level Constraints
+
+A `that` clause after the semicolon constrains the **entire object**, with `~` referring to the object itself:
+
+```lambda
+type DateRange {
+    start: int,
+    end: int;
+    that (~.end > ~.start)
+}
+
+{DateRange start: 1, end: 10} is DateRange    // true
+{DateRange start: 10, end: 1} is DateRange    // false
+```
+
+Field-level and object-level constraints can be combined:
+
+```lambda
+type Config {
+    min: int that (~ >= 0),
+    max: int that (~ >= 0);
+    that (~.max > ~.min)
+}
+```
+
+In object-level `that` clauses, bare identifiers that are not in scope resolve to `~.name` implicitly:
+
+```lambda
+type User2 {
+    name: string that (len(~) > 0),     // ~ = field value (scalar)
+    age: int that (~ > 0);
+    that (name != "admin")               // name resolves to ~.name
 }
 ```
 
@@ -805,7 +1020,7 @@ Lambda performs type checking at compile time:
 ```lambda
 // Type errors caught at compile time
 let x: int = "hello"           // Error: string not assignable to int
-let y: [int] = [1, "two", 3]   // Error: mixed types in [int]
+let y: int[] = [1, "two", 3]   // Error: mixed types in int[]
 
 fn add(a: int, b: int) int => a + b
 add(1, "2")                    // Error: string not assignable to int
@@ -849,7 +1064,7 @@ Lambda infers types automatically when not explicitly annotated:
 // Types inferred from initializer
 let x = 42                     // x: int
 let name = "Alice"             // name: string
-let items = [1, 2, 3]          // items: [int]
+let items = [1, 2, 3]          // items: int[]
 let user = {name: "Bob"}       // user: {name: string}
 ```
 
@@ -861,7 +1076,7 @@ fn double(x: int) => x * 2     // Returns int
 fn greet(name: string) => "Hello, " ++ name  // Returns string
 
 // Complex inference
-fn process(items: [int]) => {
+fn process(items: int[]) => {
     let filtered = items where ~ > 0
     let doubled = filtered | ~ * 2
     sum(doubled)
@@ -872,9 +1087,9 @@ fn process(items: [int]) => {
 
 ```lambda
 // Element type inferred from contents
-let nums = [1, 2, 3]           // [int]
-let mixed = [1, 2.5, 3]        // [number] (int promoted to number)
-let empty = []                 // [any] (unknown element type)
+let nums = [1, 2, 3]           // int[]
+let mixed = [1, 2.5, 3]        // number[] (int promoted to number)
+let empty = []                 // any[] (unknown element type)
 
 // Map type inferred from structure
 let config = {
@@ -888,7 +1103,7 @@ let config = {
 
 ```lambda
 // Sometimes explicit annotation needed
-let empty: [int] = []          // Disambiguate empty array type
+let empty: int[] = []          // Disambiguate empty array type
 
 // Recursive types need annotation
 type Node = {value: int, next: Node?}

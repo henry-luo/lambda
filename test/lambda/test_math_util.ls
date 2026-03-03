@@ -1,7 +1,7 @@
 // test_math_util.ls — Test math package utility functions
 // Coverage: util.ls — fmt_num, fmt_em, fmt_pct, clamp, str_repeat, str_join, starts_with, attr_or, text_of
 
-import util: .lambda.package.math.util
+import util: lambda.package.math.util
 
 "===== MATH UTIL TESTS ====="
 

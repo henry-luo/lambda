@@ -1,9 +1,9 @@
 // math/atoms/color.ls — Color command rendering (\textcolor, \color, \colorbox)
 // Handles foreground and background color wrapping.
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
+import box: lambda.package.math.box
+import ctx: lambda.package.math.context
+import css: lambda.package.math.css
 
 // ============================================================
 // Color command rendering

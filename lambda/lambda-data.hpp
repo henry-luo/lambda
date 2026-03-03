@@ -262,6 +262,7 @@ typedef enum Operator {
     OPERATOR_INTERSECT,
     OPERATOR_EXCLUDE,
     OPERATOR_IS,
+    OPERATOR_IS_NAN,  // expr is nan — IEEE NaN check
     OPERATOR_IN,
 
     // pipe operators
@@ -345,7 +346,7 @@ typedef enum SysFunc {
     SYSFUNC_URL_RESOLVE,
     SYSFUNC_SPLIT,
     SYSFUNC_SPLIT3,         // split(str, sep, keep_delim) with 3 args
-    SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
+    SYSFUNC_JOIN,           // join(strs, sep) for strings
     SYSFUNC_REPLACE,
     SYSFUNC_FIND,           // find(str, pattern) - find all matches
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
@@ -372,6 +373,29 @@ typedef enum SysFunc {
     SYSFUNC_SIN,
     SYSFUNC_COS,
     SYSFUNC_TAN,
+    // inverse trigonometric
+    SYSFUNC_ASIN,
+    SYSFUNC_ACOS,
+    SYSFUNC_ATAN,
+    SYSFUNC_ATAN2,
+    // hyperbolic
+    SYSFUNC_SINH,
+    SYSFUNC_COSH,
+    SYSFUNC_TANH,
+    // inverse hyperbolic
+    SYSFUNC_ASINH,
+    SYSFUNC_ACOSH,
+    SYSFUNC_ATANH,
+    // exponential/logarithmic variants
+    SYSFUNC_EXP2,
+    SYSFUNC_EXPM1,
+    SYSFUNC_LOG2,
+    // power/root
+    SYSFUNC_POW_MATH,
+    SYSFUNC_CBRT,
+    SYSFUNC_TRUNC,
+    SYSFUNC_HYPOT,
+    SYSFUNC_LOG1P,
     SYSFUNC_SIGN,
     // vector manipulation functions
     SYSFUNC_REVERSE,
@@ -384,6 +408,10 @@ typedef enum SysFunc {
     SYSFUNC_ZIP,
     SYSFUNC_RANGE3,
     SYSFUNC_QUANTILE,
+    SYSFUNC_REDUCE,         // reduce(collection, fn) - fold/accumulate
+    // parse string functions
+    SYSFUNC_PARSE1,         // parse(str) - parse string, auto-detect format
+    SYSFUNC_PARSE2,         // parse(str, format) - parse string with format
     // variadic parameter access
     SYSFUNC_VARG0,          // varg() - get all variadic args as list
     SYSFUNC_VARG1,          // varg(n) - get nth variadic arg

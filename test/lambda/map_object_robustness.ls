@@ -196,7 +196,7 @@ manhattan({x: 0, y: 0}, {x: 3, y: 4})
 // ============================================================
 
 // 8a: fn method with float field arithmetic
-type Vec2 { x: float, y: float; fn length() => sqrt(x * x + y * y) }
+type Vec2 { x: float, y: float; fn length() => math.sqrt(x * x + y * y) }
 let vec = {Vec2 x: 3.0, y: 4.0}
 '=8a='
 vec.length()
@@ -383,3 +383,13 @@ let src: Pt = {x: 50, y: 60}
 let alias = src
 '=18='
 alias.x + alias.y
+
+// ============================================================
+// Section 19: Object-level constraint with implicit ~.name
+// ============================================================
+
+// 19a: object constraint using implicit name (hi, lo instead of ~.hi, ~.lo)
+type Range2 { lo: int, hi: int; that (hi > lo) }
+'=19a='
+{Range2 lo: 1, hi: 10} is Range2
+{Range2 lo: 10, hi: 1} is Range2

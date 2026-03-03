@@ -1,7 +1,7 @@
 // test_math_metrics.ls — Test math font metrics module
 // Coverage: metrics.ls — constants, style_index, style_scale, get_metric, at, sigma parameters
 
-import met: .lambda.package.math.metrics
+import met: lambda.package.math.metrics
 
 "===== MATH METRICS TESTS ====="
 

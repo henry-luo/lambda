@@ -180,7 +180,7 @@ python3 test/benchmark/r7rs/run_bench.py 3
 
 ## Enhancement: Tail Call Optimization for Procedures
 
-**Date**: 2025-02-19
+**Date**: 2026-02-19
 
 ### Background
 

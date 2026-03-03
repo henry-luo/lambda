@@ -1,5 +1,5 @@
 // test computed pub vars (expressions, arrays, string concatenation)
-import .test.lambda.mod_compute
+import .mod_compute
 
 doubled
 label

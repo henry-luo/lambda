@@ -1,0 +1,16 @@
+"1. Basic nan check"
+[true, true, true]
+"2. Non-nan values"
+[false, false, false, false, false, false, false]
+"3. NaN from math operations"
+[true, true, true]
+"4. nan equality vs is nan"
+[false, true, true]
+"5. Replace NaN"
+[1, 2, 0, 4, 0]
+"6. Value equality"
+[true, false, true, false]
+"7. Float/string/array"
+[true, true, false, true, false]
+"8. Type checks"
+[true, true, true, true]

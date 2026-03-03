@@ -75,7 +75,7 @@ let sum_filtered = for (x in [1,2,3,4,5] where x > 2) x
 sum(sum_filtered)
 
 // Test 23: For with function call in body
-[for (x in [1, 4, 9, 16] where x > 2) sqrt(x)]
+[for (x in [1, 4, 9, 16] where x > 2) math.sqrt(x)]
 
 // Test 24: For filtering only even numbers and doubling
 [for (x in [1, 2, 3, 4, 5] where x % 2 == 0) x * 10]

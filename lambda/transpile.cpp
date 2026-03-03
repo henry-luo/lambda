@@ -14,6 +14,7 @@ bool has_typed_params(AstFuncNode* fn_node);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global);
+void transpile_object_type_method_registration(Transpiler* tp, AstObjectTypeNode* obj_node);
 void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
 void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
 void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *node);
@@ -165,13 +166,38 @@ struct NativeMathFunc {
 
 static const NativeMathFunc native_math_funcs[] = {
     // Single-argument functions (use C math library directly)
-    {"sin", "sin", true, 1},
-    {"cos", "cos", true, 1},
-    {"tan", "tan", true, 1},
-    {"sqrt", "sqrt", true, 1},
-    {"log", "log", true, 1},
-    {"log10", "log10", true, 1},
-    {"exp", "exp", true, 1},
+    // math module functions
+    {"math_sin", "sin", true, 1},
+    {"math_cos", "cos", true, 1},
+    {"math_tan", "tan", true, 1},
+    {"math_sqrt", "sqrt", true, 1},
+    {"math_log", "log", true, 1},
+    {"math_log10", "log10", true, 1},
+    {"math_exp", "exp", true, 1},
+    // inverse trigonometric
+    {"math_asin", "asin", true, 1},
+    {"math_acos", "acos", true, 1},
+    {"math_atan", "atan", true, 1},
+    {"math_atan2", "atan2", true, 2},
+    // hyperbolic
+    {"math_sinh", "sinh", true, 1},
+    {"math_cosh", "cosh", true, 1},
+    {"math_tanh", "tanh", true, 1},
+    // inverse hyperbolic
+    {"math_asinh", "asinh", true, 1},
+    {"math_acosh", "acosh", true, 1},
+    {"math_atanh", "atanh", true, 1},
+    // exponential/logarithmic variants
+    {"math_exp2", "exp2", true, 1},
+    {"math_expm1", "expm1", true, 1},
+    {"math_log2", "log2", true, 1},
+    // power/root
+    {"math_pow", "fn_pow_u", true, 2},
+    {"math_cbrt", "cbrt", true, 1},
+    {"math_trunc", "trunc", true, 1},
+    {"math_hypot", "hypot", true, 2},
+    {"math_log1p", "log1p", true, 1},
+    // global math functions
     {"abs", "fabs", true, 1},       // Note: fabs for float, but we may prefer fn_abs_i for int
     {"floor", "floor", true, 1},
     {"ceil", "ceil", true, 1},
@@ -462,11 +488,12 @@ void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* impor
     } else {
         strbuf_append_char(strbuf, 'f');
     }
-    // add suffix before offset for clarity: _square_b15 vs _square15
+    // add suffix before offset for clarity: _square_b_15 vs _square_15
     if (suffix) {
         strbuf_append_str(strbuf, suffix);
     }
-    // char offset ensures the fn name is unique across the script
+    // _ + char offset ensures the fn name is unique across the script
+    strbuf_append_char(strbuf, '_');
     strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
 }
 
@@ -760,8 +787,8 @@ bool emit_captured_var_item(Transpiler* tp, AstNode* item) {
             AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
             CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
             if (cap) {
-                // emit _env->varname directly (this is already an Item)
-                strbuf_append_str(tp->code_buf, "_env->");
+                // emit cenv->varname directly (this is already an Item)
+                strbuf_append_str(tp->code_buf, "cenv->");
                 strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                 return true;
             }
@@ -918,7 +945,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     CaptureInfo* cap = find_capture(tp->current_closure, ident->name);
                     if (cap) {
                         // captured widened var — read from env (already Item)
-                        strbuf_append_str(tp->code_buf, "_env->");
+                        strbuf_append_str(tp->code_buf, "cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         return;
                     }
@@ -989,7 +1016,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         // Check if this is a captured variable reference (already Item in closure env)
         if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
             break;
         }
         strbuf_append_str(tp->code_buf, "b2it(");
@@ -1004,7 +1031,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         // Check if this is a captured variable reference (already Item in closure env)
         if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
             break;
         }
 
@@ -1021,7 +1048,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         // Check if this is a captured variable reference (already Item in closure env)
         if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
             break;
         }
         if (item->type->is_literal) {
@@ -1047,7 +1074,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         // Check if this is a captured variable reference (already Item in closure env)
         if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
             break;
         }
         if (item->type->is_literal) {
@@ -1097,7 +1124,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         // Check if this is a captured variable reference (already Item in closure env)
         if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
             break;
         }
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
@@ -1241,28 +1268,28 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     // env stores Items, so we may need to unbox depending on usage
                     TypeId type_id = pri_node->type->type_id;
                     if (type_id == LMD_TYPE_INT) {
-                        strbuf_append_str(tp->code_buf, "it2i(_env->");
+                        strbuf_append_str(tp->code_buf, "it2i(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_INT64) {
-                        strbuf_append_str(tp->code_buf, "it2l(_env->");
+                        strbuf_append_str(tp->code_buf, "it2l(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2d(_env->");
+                        strbuf_append_str(tp->code_buf, "it2d(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_BOOL) {
-                        strbuf_append_str(tp->code_buf, "it2b(_env->");
+                        strbuf_append_str(tp->code_buf, "it2b(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
-                        strbuf_append_str(tp->code_buf, "it2s(_env->");
+                        strbuf_append_str(tp->code_buf, "it2s(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
                         // for Item or container types, return directly
-                        strbuf_append_str(tp->code_buf, "_env->");
+                        strbuf_append_str(tp->code_buf, "cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                     }
                     return;
@@ -1321,7 +1348,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         // Generate same code as transpile_fn_expr for closures
                         strbuf_append_str(tp->code_buf, "({ ");
                         write_env_name(tp->code_buf, fn_node);
-                        strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
+                        strbuf_append_str(tp->code_buf, "* closure_env = heap_calloc(sizeof(");
                         write_env_name(tp->code_buf, fn_node);
                         strbuf_append_str(tp->code_buf, "), 0);\n");
 
@@ -1330,7 +1357,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         CaptureInfo* cap = fn_node->captures;
                         while (cap) {
                             cap_count++;
-                            strbuf_append_str(tp->code_buf, "  _closure_env->");
+                            strbuf_append_str(tp->code_buf, "  closure_env->");
                             strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                             strbuf_append_str(tp->code_buf, " = ");
 
@@ -1347,7 +1374,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
                         strbuf_append_str(tp->code_buf, "  Function* _fn = to_closure_named(");
                         write_fn_name(tp->code_buf, fn_node, (AstImportNode*)ident_node->entry->import);
-                        strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
+                        strbuf_append_format(tp->code_buf, ",%d,closure_env,", arity);
                         // pass function name as string literal for stack traces
                         // prefer named function, fall back to assignment variable name, then <anonymous>
                         if (fn_node->name && fn_node->name->chars) {
@@ -1508,9 +1535,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     // nan keyword: emit C constant expression for NaN
                     strbuf_append_str(tp->code_buf, "(0.0/0.0)");
                 } else {
-                    // regular numeric float literal: emit source text directly
+                    // emit the actual double value (handles both source literals and synthesized constants like math.pi)
                     strbuf_append_str(tp->code_buf, "((double)(");
-                    write_node_source(tp, pri_node->node);
+                    strbuf_append_format(tp->code_buf, "%.17g", val);
                     strbuf_append_str(tp->code_buf, "))");
                 }
             }
@@ -1754,6 +1781,12 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
+    else if (bi_node->op == OPERATOR_IS_NAN) {
+        // IEEE NaN check: expr is nan
+        strbuf_append_str(tp->code_buf, "fn_is_nan(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ')');
+    }
     else if (bi_node->op == OPERATOR_IS) {
         // Check if right operand is a constrained type for inline constraint evaluation
         AstNode* right = bi_node->right;
@@ -1802,23 +1835,23 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             TypeConstrained* constrained = (TypeConstrained*)constrained_node->type;
 
             strbuf_append_str(tp->code_buf, "({\n");
-            strbuf_append_str(tp->code_buf, "  Item _ct_value = ");
+            strbuf_append_str(tp->code_buf, "  Item ct_value = ");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, ";\n");
-            strbuf_append_str(tp->code_buf, "  Item _pipe_item = _ct_value;\n");  // for ~ in constraint
+            strbuf_append_str(tp->code_buf, "  Item pipe_item = ct_value;\n");  // for ~ in constraint
 
             // Check base type using base_type() function
-            strbuf_append_str(tp->code_buf, "  Bool _ct_result = (item_type_id(_ct_value) == ");
+            strbuf_append_str(tp->code_buf, "  Bool ct_result = (item_type_id(ct_value) == ");
             strbuf_append_int(tp->code_buf, constrained->base->type_id);
             strbuf_append_str(tp->code_buf, ");\n");
 
             // If base type matches, evaluate constraint
-            strbuf_append_str(tp->code_buf, "  if (_ct_result) {\n");
-            strbuf_append_str(tp->code_buf, "    _ct_result = is_truthy(");
+            strbuf_append_str(tp->code_buf, "  if (ct_result) {\n");
+            strbuf_append_str(tp->code_buf, "    ct_result = is_truthy(");
             transpile_box_item(tp, constrained_node->constraint);
             strbuf_append_str(tp->code_buf, ") ? BOOL_TRUE : BOOL_FALSE;\n");
             strbuf_append_str(tp->code_buf, "  }\n");
-            strbuf_append_str(tp->code_buf, "  _ct_result;\n");
+            strbuf_append_str(tp->code_buf, "  ct_result;\n");
             strbuf_append_str(tp->code_buf, "})");
         } else {
             // Standard fn_is call
@@ -1989,7 +2022,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         // Fast path (no boxing) is only safe for scalar types where the C representation
         // is guaranteed consistent (e.g., both sides produce int32_t, double, bool, etc.).
         // For STRING/SYMBOL/BINARY/containers, different functions may return String* vs Item
-        // at the C level (e.g., fn_string() returns String* but fn_str_join() returns Item),
+        // at the C level (e.g., fn_string() returns String* but fn_join2() returns Item),
         // causing "incompatible types in cond-expression" errors in C2MIR.
         TypeId tid = then_type->type_id;
         if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {
@@ -2044,7 +2077,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     if (asn_node->error_name) {
         int tmp_id = tp->temp_var_counter++;
         // emit temp variable for the full result (may be value or error)
-        strbuf_append_format(tp->code_buf, "\n Item _et%d=", tmp_id);
+        strbuf_append_format(tp->code_buf, "\n Item et%d=", tmp_id);
         transpile_expr(tp, asn_node->as);
         strbuf_append_char(tp->code_buf, ';');
 
@@ -2052,14 +2085,14 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         strbuf_append_str(tp->code_buf, "\n ");
         if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
         write_var_name(tp->code_buf, asn_node, NULL);
-        strbuf_append_format(tp->code_buf, "=(item_type_id(_et%d)==LMD_TYPE_ERROR)?ITEM_NULL:_et%d;", tmp_id, tmp_id);
+        strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?ITEM_NULL:et%d;", tmp_id, tmp_id);
 
         // emit error variable: error if error, null otherwise
         strbuf_append_str(tp->code_buf, "\n ");
         if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
         strbuf_append_str(tp->code_buf, "_");
         strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
-        strbuf_append_format(tp->code_buf, "=(item_type_id(_et%d)==LMD_TYPE_ERROR)?_et%d:ITEM_NULL;", tmp_id, tmp_id);
+        strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?et%d:ITEM_NULL;", tmp_id, tmp_id);
 
         tp->current_assign_name = prev_assign_name;
         return;
@@ -2151,8 +2184,8 @@ void transpile_decompose_expr(Transpiler* tp, AstDecomposeNode *dec_node, bool i
         }
     }
 
-    // Use a nested scope to avoid _dec_src redeclaration conflicts
-    strbuf_append_str(tp->code_buf, "\n {Item _dec_src=");
+    // Use a nested scope to avoid dec_src redeclaration conflicts
+    strbuf_append_str(tp->code_buf, "\n {Item dec_src=");
     transpile_box_item(tp, dec_node->as);
     strbuf_append_str(tp->code_buf, ";");
 
@@ -2165,12 +2198,12 @@ void transpile_decompose_expr(Transpiler* tp, AstDecomposeNode *dec_node, bool i
 
         if (dec_node->is_named) {
             // Named decomposition: get attribute by name
-            strbuf_append_str(tp->code_buf, "item_attr(_dec_src,\"");
+            strbuf_append_str(tp->code_buf, "item_attr(dec_src,\"");
             strbuf_append_str_n(tp->code_buf, name->chars, name->len);
             strbuf_append_str(tp->code_buf, "\");");
         } else {
             // Positional decomposition: get by index
-            strbuf_append_format(tp->code_buf, "item_at(_dec_src,%d);", i);
+            strbuf_append_format(tp->code_buf, "item_at(dec_src,%d);", i);
         }
     }
     strbuf_append_str(tp->code_buf, "}");  // close the nested scope
@@ -2187,6 +2220,9 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global = f
             transpile_assign_expr(tp, (AstNamedNode*)declare, is_global);
         } else if (declare->node_type == AST_NODE_DECOMPOSE) {
             transpile_decompose_expr(tp, (AstDecomposeNode*)declare, is_global);
+        } else if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+            // object type definitions inside pub_stam — register methods at runtime
+            transpile_object_type_method_registration(tp, (AstObjectTypeNode*)declare);
         } else {
             log_error("Error: transpile_let_stam found unexpected node type %d in declare chain", declare->node_type);
         }
@@ -2237,15 +2273,15 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         // for v at expr -> v is key name (single variable form)
         strbuf_append_str(tp->code_buf, " Item it=");
         transpile_box_item(tp, loop_node->as);
-        strbuf_append_str(tp->code_buf, ";\n ArrayList* _attr_keys=item_keys(it);\n");
-        strbuf_append_str(tp->code_buf, " for (int _ki=0; _attr_keys && _ki<_attr_keys->length; _ki++) {\n");
+        strbuf_append_str(tp->code_buf, ";\n ArrayList* attr_keys=item_keys(it);\n");
+        strbuf_append_str(tp->code_buf, " for (int ki=0; attr_keys && ki<attr_keys->length; ki++) {\n");
 
         if (has_index) {
             // Two-variable form: for k, v at expr
             // k (index_name) = key name, v (name) = value
             strbuf_append_str(tp->code_buf, "  String* _");
             strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-            strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
+            strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
 
             strbuf_append_str(tp->code_buf, "  Item _");
             strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
@@ -2256,7 +2292,7 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
             // Single-variable form: for v at expr -> v is key name
             strbuf_append_str(tp->code_buf, "  String* _");
             strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-            strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
+            strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
         }
     } else {
         // 'in' iteration: standard indexed iteration
@@ -2296,15 +2332,15 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
 
         // start the loop
         strbuf_append_str(tp->code_buf,
-            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " :
-            is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
-            ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
+            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+            is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
+            ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 
         // generate index variable if present (for i, v in expr)
         if (has_index) {
             strbuf_append_str(tp->code_buf, "  long _");
             strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-            strbuf_append_str(tp->code_buf, "=_idx;\n");
+            strbuf_append_str(tp->code_buf, "=idx;\n");
         }
 
         // construct loop variable
@@ -2312,18 +2348,18 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
         if (expr_type->type_id == LMD_TYPE_RANGE) {
-            strbuf_append_str(tp->code_buf, "=_idx;\n");
+            strbuf_append_str(tp->code_buf, "=idx;\n");
         }
         else if (is_any_array) {
             if (item_type->type_id == LMD_TYPE_STRING) {
-                strbuf_append_str(tp->code_buf, "=fn_string(arr->items[_idx]);\n");
+                strbuf_append_str(tp->code_buf, "=fn_string(arr->items[idx]);\n");
             }
             else {
-                strbuf_append_str(tp->code_buf, "=arr->items[_idx];\n");
+                strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
             }
         }
         else {
-            strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
+            strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
         }
     }
 
@@ -2447,15 +2483,15 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 // 'at' iteration: iterate over attributes/fields
                 strbuf_append_str(tp->code_buf, " Item it=");
                 transpile_box_item(tp, loop_node->as);
-                strbuf_append_str(tp->code_buf, ";\n ArrayList* _attr_keys=item_keys(it);\n");
-                strbuf_append_str(tp->code_buf, " for (int _ki=0; _attr_keys && _ki<_attr_keys->length; _ki++) {\n");
+                strbuf_append_str(tp->code_buf, ";\n ArrayList* attr_keys=item_keys(it);\n");
+                strbuf_append_str(tp->code_buf, " for (int ki=0; attr_keys && ki<attr_keys->length; ki++) {\n");
 
                 if (loop_node->index_name) {
                     // Two-variable form: for k, v at expr
                     // k (index_name) = key name (String*), v (name) = value (Item)
                     strbuf_append_str(tp->code_buf, "  String* _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
+                    strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
 
                     strbuf_append_str(tp->code_buf, "  Item _");
                     strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
@@ -2466,7 +2502,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     // Single-variable form: for v at expr -> v is key name
                     strbuf_append_str(tp->code_buf, "  String* _");
                     strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                    strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
+                    strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
                 }
             } else {
                 // 'in' iteration: standard indexed iteration
@@ -2510,15 +2546,15 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
 
                 // Start the loop
                 strbuf_append_str(tp->code_buf,
-                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " :
-                    is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
-                    ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
+                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+                    is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
+                    ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 
                 // Index variable if present
                 if (loop_node->index_name) {
                     strbuf_append_str(tp->code_buf, "  long _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=_idx;\n");
+                    strbuf_append_str(tp->code_buf, "=idx;\n");
                 }
 
                 // Construct loop variable type
@@ -2540,11 +2576,11 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str(tp->code_buf, " _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
                 if (expr_type->type_id == LMD_TYPE_RANGE) {
-                    strbuf_append_str(tp->code_buf, "=_idx;\n");
+                    strbuf_append_str(tp->code_buf, "=idx;\n");
                 } else if (is_any_array) {
-                    strbuf_append_str(tp->code_buf, "=arr->items[_idx];\n");
+                    strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
                 } else {
-                    strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
+                    strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
                 }
             }
 
@@ -2554,20 +2590,20 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 AstLoopNode* nl = (AstLoopNode*)next_loop;
                 Type* nl_expr_type = nl->as->type ? nl->as->type : &TYPE_ANY;
 
-                strbuf_append_str(tp->code_buf, " Item _nl_src=");
+                strbuf_append_str(tp->code_buf, " Item nl_src=");
                 transpile_box_item(tp, nl->as);
-                strbuf_append_str(tp->code_buf, ";\n int _nl_len=fn_len(_nl_src);\n");
-                strbuf_append_str(tp->code_buf, " for (int _nidx=0; _nidx<_nl_len; _nidx++) {\n");
+                strbuf_append_str(tp->code_buf, ";\n int nl_len=fn_len(nl_src);\n");
+                strbuf_append_str(tp->code_buf, " for (int nidx=0; nidx<nl_len; nidx++) {\n");
 
                 if (nl->index_name) {
                     strbuf_append_str(tp->code_buf, "  long _");
                     strbuf_append_str_n(tp->code_buf, nl->index_name->chars, nl->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=_nidx;\n");
+                    strbuf_append_str(tp->code_buf, "=nidx;\n");
                 }
 
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, nl->name->chars, nl->name->len);
-                strbuf_append_str(tp->code_buf, "=item_at(_nl_src,_nidx);\n");
+                strbuf_append_str(tp->code_buf, "=item_at(nl_src,nidx);\n");
 
                 next_loop = next_loop->next;
             }
@@ -2645,7 +2681,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
 
         // Apply OFFSET if present
         if (has_offset) {
-            strbuf_append_str(tp->code_buf, " Item _offset = fn_drop((Item)arr_out, ");
+            strbuf_append_str(tp->code_buf, " Item offset_v = fn_drop((Item)arr_out, ");
             transpile_box_item(tp, for_node->offset);
             strbuf_append_str(tp->code_buf, ");\n");
         }
@@ -2653,9 +2689,9 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         // Apply LIMIT if present
         if (has_limit) {
             if (has_offset) {
-                strbuf_append_str(tp->code_buf, " Item _limited = fn_take(_offset, ");
+                strbuf_append_str(tp->code_buf, " Item limited_v = fn_take(offset_v, ");
             } else {
-                strbuf_append_str(tp->code_buf, " Item _limited = fn_take((Item)arr_out, ");
+                strbuf_append_str(tp->code_buf, " Item limited_v = fn_take((Item)arr_out, ");
             }
             transpile_box_item(tp, for_node->limit);
             strbuf_append_str(tp->code_buf, ");\n");
@@ -2663,9 +2699,9 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
 
         // return the result
         if (has_limit) {
-            strbuf_append_str(tp->code_buf, " _limited;})");
+            strbuf_append_str(tp->code_buf, " limited_v;})");
         } else {
-            strbuf_append_str(tp->code_buf, " _offset;})");
+            strbuf_append_str(tp->code_buf, " offset_v;})");
         }
     } else {
         // No offset/limit - use array_end to finalize the Array
@@ -2771,61 +2807,61 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     // Generate inline loop using statement expression
     // Use array instead of list to avoid string merging behavior
     strbuf_append_str(tp->code_buf, "({\n");
-    strbuf_append_str(tp->code_buf, "  Item _pipe_collection = ");
+    strbuf_append_str(tp->code_buf, "  Item pipe_collection = ");
     transpile_box_item(tp, pipe_node->left);
     strbuf_append_str(tp->code_buf, ";\n");
-    strbuf_append_str(tp->code_buf, "  TypeId _pipe_type = item_type_id(_pipe_collection);\n");
-    strbuf_append_str(tp->code_buf, "  Array* _pipe_result = array();\n");
+    strbuf_append_str(tp->code_buf, "  TypeId pipe_type = item_type_id(pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "  Array* pipe_result = array();\n");
 
     // Check if collection type - if not, apply to single item
-    strbuf_append_str(tp->code_buf, "  if (_pipe_type == LMD_TYPE_ARRAY || _pipe_type == LMD_TYPE_LIST || ");
-    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_RANGE || _pipe_type == LMD_TYPE_MAP || ");
-    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_INT || _pipe_type == LMD_TYPE_ARRAY_INT64 || ");
-    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_FLOAT || _pipe_type == LMD_TYPE_ELEMENT || _pipe_type == LMD_TYPE_OBJECT) {\n");
+    strbuf_append_str(tp->code_buf, "  if (pipe_type == LMD_TYPE_ARRAY || pipe_type == LMD_TYPE_LIST || ");
+    strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_RANGE || pipe_type == LMD_TYPE_MAP || ");
+    strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_INT || pipe_type == LMD_TYPE_ARRAY_INT64 || ");
+    strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_FLOAT || pipe_type == LMD_TYPE_ELEMENT || pipe_type == LMD_TYPE_OBJECT) {\n");
 
     // Map case - iterate over key-value pairs
-    strbuf_append_str(tp->code_buf, "    if (_pipe_type == LMD_TYPE_MAP || _pipe_type == LMD_TYPE_OBJECT) {\n");
-    strbuf_append_str(tp->code_buf, "      ArrayList* _pipe_keys = item_keys(_pipe_collection);\n");
-    strbuf_append_str(tp->code_buf, "      if (_pipe_keys) {\n");
-    strbuf_append_str(tp->code_buf, "        for (int64_t _pipe_i = 0; _pipe_i < _pipe_keys->length; _pipe_i++) {\n");
-    strbuf_append_str(tp->code_buf, "          String* _key_str = (String*)_pipe_keys->data[_pipe_i];\n");
-    strbuf_append_str(tp->code_buf, "          Item _pipe_index = s2it(_key_str);\n");
-    strbuf_append_str(tp->code_buf, "          Item _pipe_item = item_attr(_pipe_collection, _key_str->chars);\n");
+    strbuf_append_str(tp->code_buf, "    if (pipe_type == LMD_TYPE_MAP || pipe_type == LMD_TYPE_OBJECT) {\n");
+    strbuf_append_str(tp->code_buf, "      ArrayList* pipe_keys = item_keys(pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "      if (pipe_keys) {\n");
+    strbuf_append_str(tp->code_buf, "        for (int64_t pipe_i = 0; pipe_i < pipe_keys->length; pipe_i++) {\n");
+    strbuf_append_str(tp->code_buf, "          String* key_str = (String*)pipe_keys->data[pipe_i];\n");
+    strbuf_append_str(tp->code_buf, "          Item pipe_index = s2it(key_str);\n");
+    strbuf_append_str(tp->code_buf, "          Item pipe_item = item_attr(pipe_collection, key_str->chars);\n");
 
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter - only keep if condition is truthy
         strbuf_append_str(tp->code_buf, "          if (is_truthy(");
         transpile_box_item(tp, pipe_node->right);
         strbuf_append_str(tp->code_buf, ")) {\n");
-        strbuf_append_str(tp->code_buf, "            array_push(_pipe_result, _pipe_item);\n");
+        strbuf_append_str(tp->code_buf, "            array_push(pipe_result, pipe_item);\n");
         strbuf_append_str(tp->code_buf, "          }\n");
     } else {
         // map - transform and collect
-        strbuf_append_str(tp->code_buf, "          array_push(_pipe_result, ");
+        strbuf_append_str(tp->code_buf, "          array_push(pipe_result, ");
         transpile_box_item(tp, pipe_node->right);
         strbuf_append_str(tp->code_buf, ");\n");
     }
     strbuf_append_str(tp->code_buf, "        }\n");
-    strbuf_append_str(tp->code_buf, "        // Note: _pipe_keys memory managed by heap GC\n");
+    strbuf_append_str(tp->code_buf, "        // Note: pipe_keys memory managed by heap GC\n");
     strbuf_append_str(tp->code_buf, "      }\n");
     strbuf_append_str(tp->code_buf, "    } else {\n");
 
     // Array/List/Range case - iterate with numeric index
-    strbuf_append_str(tp->code_buf, "      int64_t _pipe_len = fn_len(_pipe_collection);\n");
-    strbuf_append_str(tp->code_buf, "      for (int64_t _pipe_i = 0; _pipe_i < _pipe_len; _pipe_i++) {\n");
-    strbuf_append_str(tp->code_buf, "        Item _pipe_index = i2it(_pipe_i);\n");
-    strbuf_append_str(tp->code_buf, "        Item _pipe_item = item_at(_pipe_collection, (int)_pipe_i);\n");
+    strbuf_append_str(tp->code_buf, "      int64_t pipe_len = fn_len(pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "      for (int64_t pipe_i = 0; pipe_i < pipe_len; pipe_i++) {\n");
+    strbuf_append_str(tp->code_buf, "        Item pipe_index = i2it(pipe_i);\n");
+    strbuf_append_str(tp->code_buf, "        Item pipe_item = item_at(pipe_collection, (int)pipe_i);\n");
 
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter
         strbuf_append_str(tp->code_buf, "        if (is_truthy(");
         transpile_box_item(tp, pipe_node->right);
         strbuf_append_str(tp->code_buf, ")) {\n");
-        strbuf_append_str(tp->code_buf, "          array_push(_pipe_result, _pipe_item);\n");
+        strbuf_append_str(tp->code_buf, "          array_push(pipe_result, pipe_item);\n");
         strbuf_append_str(tp->code_buf, "        }\n");
     } else {
         // map
-        strbuf_append_str(tp->code_buf, "        array_push(_pipe_result, ");
+        strbuf_append_str(tp->code_buf, "        array_push(pipe_result, ");
         transpile_box_item(tp, pipe_node->right);
         strbuf_append_str(tp->code_buf, ");\n");
     }
@@ -2834,24 +2870,24 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "  } else {\n");
 
     // Scalar case - apply transform once
-    strbuf_append_str(tp->code_buf, "    Item _pipe_item = _pipe_collection;\n");
-    strbuf_append_str(tp->code_buf, "    Item _pipe_index = ITEM_NULL;\n");
+    strbuf_append_str(tp->code_buf, "    Item pipe_item = pipe_collection;\n");
+    strbuf_append_str(tp->code_buf, "    Item pipe_index = ITEM_NULL;\n");
 
     if (pipe_node->op == OPERATOR_WHERE) {
         strbuf_append_str(tp->code_buf, "    if (is_truthy(");
         transpile_box_item(tp, pipe_node->right);
         strbuf_append_str(tp->code_buf, ")) {\n");
-        strbuf_append_str(tp->code_buf, "      array_push(_pipe_result, _pipe_item);\n");
+        strbuf_append_str(tp->code_buf, "      array_push(pipe_result, pipe_item);\n");
         strbuf_append_str(tp->code_buf, "    }\n");
     } else {
-        strbuf_append_str(tp->code_buf, "    array_push(_pipe_result, ");
+        strbuf_append_str(tp->code_buf, "    array_push(pipe_result, ");
         transpile_box_item(tp, pipe_node->right);
         strbuf_append_str(tp->code_buf, ");\n");
     }
     strbuf_append_str(tp->code_buf, "  }\n");
 
     // Return result - array_end finalizes and returns as Item
-    strbuf_append_str(tp->code_buf, "  array_end(_pipe_result);\n");
+    strbuf_append_str(tp->code_buf, "  array_end(pipe_result);\n");
     strbuf_append_str(tp->code_buf, "})");
 }
 
@@ -3014,19 +3050,19 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
         TypeConstrained* constrained = (TypeConstrained*)constrained_node->type;
 
         strbuf_append_str(tp->code_buf, "({\n");
-        // Note: _pipe_item already set by the match expression to the scrutinee value
+        // Note: pipe_item already set by the match expression to the scrutinee value
         // Check base type first
-        strbuf_append_str(tp->code_buf, "    Bool _ct_result = (item_type_id(_pipe_item) == ");
+        strbuf_append_str(tp->code_buf, "    Bool ct_result = (item_type_id(pipe_item) == ");
         strbuf_append_int(tp->code_buf, constrained->base->type_id);
         strbuf_append_str(tp->code_buf, ");\n");
 
         // If base type matches, evaluate constraint
-        strbuf_append_str(tp->code_buf, "    if (_ct_result) {\n");
-        strbuf_append_str(tp->code_buf, "      _ct_result = is_truthy(");
+        strbuf_append_str(tp->code_buf, "    if (ct_result) {\n");
+        strbuf_append_str(tp->code_buf, "      ct_result = is_truthy(");
         transpile_box_item(tp, constrained_node->constraint);
         strbuf_append_str(tp->code_buf, ") ? BOOL_TRUE : BOOL_FALSE;\n");
         strbuf_append_str(tp->code_buf, "    }\n");
-        strbuf_append_str(tp->code_buf, "    _ct_result;\n");
+        strbuf_append_str(tp->code_buf, "    ct_result;\n");
         strbuf_append_str(tp->code_buf, "  })");
         return;
     }
@@ -3035,7 +3071,7 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
 
     // type patterns use fn_is (matches runtime type checking)
     if (pattern_type == LMD_TYPE_TYPE) {
-        strbuf_append_str(tp->code_buf, "fn_is(_pipe_item, ");
+        strbuf_append_str(tp->code_buf, "fn_is(pipe_item, ");
         // handle bare identifier referencing an object type or string/symbol pattern
         if (pattern->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)pattern;
@@ -3064,13 +3100,13 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
     }
     // range patterns use fn_in (membership/containment check)
     else if (pattern_type == LMD_TYPE_RANGE) {
-        strbuf_append_str(tp->code_buf, "fn_in(_pipe_item, ");
+        strbuf_append_str(tp->code_buf, "fn_in(pipe_item, ");
         transpile_box_item(tp, pattern);
         strbuf_append_char(tp->code_buf, ')');
     }
     // value patterns use fn_eq (equality check)
     else {
-        strbuf_append_str(tp->code_buf, "fn_eq(_pipe_item, ");
+        strbuf_append_str(tp->code_buf, "fn_eq(pipe_item, ");
         transpile_box_item(tp, pattern);
         strbuf_append_str(tp->code_buf, ") == BOOL_TRUE");
     }
@@ -3088,10 +3124,10 @@ void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
 
     // statement expression: evaluate scrutinee, chain if-else, produce result
     strbuf_append_str(tp->code_buf, "({\n");
-    strbuf_append_str(tp->code_buf, "  Item _pipe_item = ");
+    strbuf_append_str(tp->code_buf, "  Item pipe_item = ");
     transpile_box_item(tp, match_node->scrutinee);
     strbuf_append_str(tp->code_buf, ";\n");
-    strbuf_append_str(tp->code_buf, "  Item _match_result = ITEM_NULL;\n");
+    strbuf_append_str(tp->code_buf, "  Item match_result = ITEM_NULL;\n");
 
     bool first = true;
     AstMatchArm* arm = match_node->first_arm;
@@ -3110,7 +3146,7 @@ void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
             if (arm->body && arm->body->node_type == AST_NODE_CONTENT) {
                 transpile_proc_statements(tp, (AstListNode*)arm->body);
             } else {
-                strbuf_append_str(tp->code_buf, "    _match_result = ");
+                strbuf_append_str(tp->code_buf, "    match_result = ");
                 transpile_box_item(tp, arm->body);
                 strbuf_append_str(tp->code_buf, ";\n");
             }
@@ -3121,7 +3157,7 @@ void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
                 if (arm->body && arm->body->node_type == AST_NODE_CONTENT) {
                     transpile_proc_statements(tp, (AstListNode*)arm->body);
                 } else {
-                    strbuf_append_str(tp->code_buf, "  _match_result = ");
+                    strbuf_append_str(tp->code_buf, "  match_result = ");
                     transpile_box_item(tp, arm->body);
                     strbuf_append_str(tp->code_buf, ";\n");
                 }
@@ -3130,7 +3166,7 @@ void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
                 if (arm->body && arm->body->node_type == AST_NODE_CONTENT) {
                     transpile_proc_statements(tp, (AstListNode*)arm->body);
                 } else {
-                    strbuf_append_str(tp->code_buf, "    _match_result = ");
+                    strbuf_append_str(tp->code_buf, "    match_result = ");
                     transpile_box_item(tp, arm->body);
                     strbuf_append_str(tp->code_buf, ";\n");
                 }
@@ -3140,7 +3176,7 @@ void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
         arm = (AstMatchArm*)arm->next;
     }
 
-    strbuf_append_str(tp->code_buf, "\n  _match_result;\n})");
+    strbuf_append_str(tp->code_buf, "\n  match_result;\n})");
     log_debug("end transpile match expr");
 }
 
@@ -3153,7 +3189,7 @@ void transpile_match_stam(Transpiler* tp, AstMatchNode *match_node) {
     }
 
     strbuf_append_str(tp->code_buf, "\n{");
-    strbuf_append_str(tp->code_buf, "\n  Item _pipe_item = ");
+    strbuf_append_str(tp->code_buf, "\n  Item pipe_item = ");
     transpile_box_item(tp, match_node->scrutinee);
     strbuf_append_str(tp->code_buf, ";");
 
@@ -3294,9 +3330,9 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     if (tp->current_closure) {
         CaptureInfo* cap = find_capture(tp->current_closure, assign_node->target);
         if (cap) {
-            // captured variable: emit _env->varname = boxed_value
+            // captured variable: emit cenv->varname = boxed_value
             // env stores Item, so value must be boxed
-            strbuf_append_str(tp->code_buf, "\n _env->");
+            strbuf_append_str(tp->code_buf, "\n cenv->");
             strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
             strbuf_append_str(tp->code_buf, " = ");
             transpile_box_item(tp, assign_node->value);
@@ -3375,15 +3411,15 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
                 strncmp(se->name->str, assign_node->target->chars, se->name->length) == 0) {
                 // Phase 6: direct struct write for fixed-shape object types
                 if (has_fixed_shape((TypeMap*)obj_type)) {
-                    // emit: _self_data->field = _field;
-                    strbuf_append_str(tp->code_buf, "\n _self_data->");
+                    // emit: self_data->field = _field;
+                    strbuf_append_str(tp->code_buf, "\n self_data->");
                     strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
                     strbuf_append_str(tp->code_buf, " = _");
                     strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
                     strbuf_append_str(tp->code_buf, ";");
                 } else {
-                    // fallback: fn_map_set(_self_item, field_key, boxed_value)
-                    strbuf_append_str(tp->code_buf, "\n fn_map_set(_self_item, s2it(heap_create_name(\"");
+                    // fallback: fn_map_set(self_item, field_key, boxed_value)
+                    strbuf_append_str(tp->code_buf, "\n fn_map_set(self_item, s2it(heap_create_name(\"");
                     strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
                     strbuf_append_str(tp->code_buf, "\")), ");
                     // box the local variable for fn_map_set
@@ -4222,7 +4258,7 @@ void transpile_object_expr(Transpiler* tp, AstObjectLiteralNode *obj_node) {
 
         // If we have a source object, emit it into a temp variable
         if (source_obj) {
-            strbuf_append_str(tp->code_buf, "\n Item _src = ");
+            strbuf_append_str(tp->code_buf, "\n Item spread_src = ");
             transpile_box_item(tp, source_obj);
             strbuf_append_str(tp->code_buf, ";");
         }
@@ -4260,7 +4296,7 @@ void transpile_object_expr(Transpiler* tp, AstObjectLiteralNode *obj_node) {
                 }
             } else if (source_obj) {
                 // field not provided — copy from source object
-                strbuf_append_str(tp->code_buf, "fn_member(_src, s2it(heap_create_name(\"");
+                strbuf_append_str(tp->code_buf, "fn_member(spread_src, s2it(heap_create_name(\"");
                 strbuf_append_str_n(tp->code_buf, se->name->str, (int)se->name->length);
                 strbuf_append_str(tp->code_buf, "\")))");
             } else {
@@ -4554,7 +4590,7 @@ AstNamedNode* get_param_at_index(AstFuncNode* fn_node, int index) {
 /**
  * Transpile a tail-recursive call as a goto statement.
  * Transforms: factorial(n-1, acc*n) into:
- *   { int _t0 = _n - 1; int _t1 = _acc * _n; _n = _t0; _acc = _t1; goto _tco_start; }
+ *   { int _t0 = _n - 1; int _t1 = _acc * _n; _n = _t0; _acc = _t1; goto tco_start; }
  *
  * Note: We use temporary variables to handle cases like f(b, a) where args are swapped.
  */
@@ -4565,7 +4601,7 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
     bool prev_in_tail = tp->in_tail_position;
     tp->in_tail_position = false;
 
-    // Generate: ({ temp assignments; param = temp; ...; goto _tco_start; ITEM_NULL; })
+    // Generate: ({ temp assignments; param = temp; ...; goto tco_start; ITEM_NULL; })
     // The ITEM_NULL at end is never reached but satisfies the expression type
     strbuf_append_str(tp->code_buf, "({ ");
 
@@ -4584,7 +4620,7 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         // Generate: TypeX _tN = <arg>;
         Type* param_type = param->type;
         write_type(tp->code_buf, param_type);
-        strbuf_append_format(tp->code_buf, " _tco_tmp%d = ", arg_idx);
+        strbuf_append_format(tp->code_buf, " tco_tmp%d = ", arg_idx);
         // For Item (untyped) parameters, use box_item to ensure proper boxing
         // (e.g., literal 1 must become i2it(1) for Item parameters)
         if (!param_type || param_type->type_id == LMD_TYPE_ANY) {
@@ -4650,7 +4686,7 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         if (!param) break;
         strbuf_append_str(tp->code_buf, "_");
         strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
-        strbuf_append_format(tp->code_buf, " = _tco_tmp%d; ", i);
+        strbuf_append_format(tp->code_buf, " = tco_tmp%d; ", i);
         param = (AstNamedNode*)param->next;
     }
 
@@ -4658,7 +4694,7 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
     tp->in_tail_position = prev_in_tail;
 
     // Jump back to function start
-    strbuf_append_str(tp->code_buf, "goto _tco_start; ");
+    strbuf_append_str(tp->code_buf, "goto tco_start; ");
 
     // The expression type - never reached but keeps C happy
     Type* ret_type = ((TypeFunc*)tco_func->type)->returned;
@@ -4695,7 +4731,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     int prop_id = -1;
     if (call_node->propagate) {
         prop_id = tp->temp_var_counter;  // will be incremented at the end
-        strbuf_append_format(tp->code_buf, "({Item _ep%d=", prop_id);
+        strbuf_append_format(tp->code_buf, "({Item ep%d=", prop_id);
     }
 
     // TCO: Check if this is a tail-recursive call that should be transformed to goto
@@ -5136,7 +5172,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             }
 
             // Build argument list
-            strbuf_append_str(tp->code_buf, ",({Item _fa[]={");
+            strbuf_append_str(tp->code_buf, ",({Item fa[]={");
             arg = call_node->argument;
             bool first = true;
             while (arg) {
@@ -5146,7 +5182,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 first = false;
             }
             strbuf_append_format(tp->code_buf,
-                "}; List _fl={.type_id=%d,.items=_fa,.length=%d,.capacity=%d}; &_fl;}))",
+                "}; List fl={.type_id=%d,.items=fa,.length=%d,.capacity=%d}; &fl;}))",
                 LMD_TYPE_LIST, arg_count, arg_count);
         }
         return;  // Done with function variable call
@@ -5268,8 +5304,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             if (varg_count == 0) {
                 strbuf_append_str(tp->code_buf, "null");  // no variadic args
             } else {
-                // build inline list: ({Item _va[]={...}; List _vl={...}; &_vl;})
-                strbuf_append_str(tp->code_buf, "({Item _va[]={");
+                // build inline list: ({Item va[]={...}; List vl={...}; &vl;})
+                strbuf_append_str(tp->code_buf, "({Item va[]={");
                 bool first_varg = true;
                 while (arg) {
                     if (!first_varg) strbuf_append_char(tp->code_buf, ',');
@@ -5278,7 +5314,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     first_varg = false;
                 }
                 strbuf_append_format(tp->code_buf,
-                    "}; List _vl={.type_id=%d,.items=_va,.length=%d,.capacity=%d}; &_vl;})",
+                    "}; List vl={.type_id=%d,.items=va,.length=%d,.capacity=%d}; &vl;})",
                     LMD_TYPE_LIST, varg_count, varg_count);
             }
             has_output_arg = true;
@@ -5305,7 +5341,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         // use unique counter for temp variable to avoid name collisions
         int prop_id = tp->temp_var_counter++;
         // close the statement expression: check error, return if error, else yield value
-        strbuf_append_format(tp->code_buf, "; if(item_type_id(_ep%d)==LMD_TYPE_ERROR) return _ep%d; _ep%d;})", prop_id, prop_id, prop_id);
+        strbuf_append_format(tp->code_buf, "; if(item_type_id(ep%d)==LMD_TYPE_ERROR) return ep%d; ep%d;})", prop_id, prop_id, prop_id);
     }
 
     tp->in_tail_position = prev_in_tail;
@@ -5365,9 +5401,10 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 
     // Check if field type is numeric (addressing the TODO comment)
     if (field_type != LMD_TYPE_INT && field_type != LMD_TYPE_INT64 && field_type != LMD_TYPE_FLOAT) {
-        // Non-numeric index, must use generic fn_index
+        // Non-numeric index (e.g. range, string key), must use generic fn_index
+        // Both object and field must be boxed Items for fn_index to work correctly
         strbuf_append_str(tp->code_buf, "fn_index(");
-        transpile_expr(tp, field_node->object);
+        transpile_box_item(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
@@ -6076,13 +6113,13 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_method_fwd = (tp->method_owner != nullptr && !is_closure);
     bool has_params = false;
     if (is_method_fwd) {
-        strbuf_append_str(tp->code_buf, "void* _self");
+        strbuf_append_str(tp->code_buf, "void* self_ptr");
         has_params = true;
     }
 
     // for closures, add hidden env parameter as first param
     if (is_closure) {
-        strbuf_append_str(tp->code_buf, "void* _env_ptr");
+        strbuf_append_str(tp->code_buf, "void* env_ptr");
         has_params = true;
     }
 
@@ -6104,14 +6141,14 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
 
     if (fn_type && fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        strbuf_append_str(tp->code_buf, "List* _vargs");
+        strbuf_append_str(tp->code_buf, "List* vargs");
     }
 
     strbuf_append_str(tp->code_buf, ");\n");
 }
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
-    // Methods: clear captures since field references are handled via _self, not closure env
+    // Methods: clear captures since field references are handled via self_ptr, not closure env
     // This ensures is_closure=false and is_method=true for proper method transpilation
     if (tp->method_owner != nullptr) {
         fn_node->captures = nullptr;
@@ -6161,13 +6198,13 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     bool is_method = (tp->method_owner != nullptr && !is_closure);
     bool has_params = false;
     if (is_method) {
-        strbuf_append_str(tp->code_buf, "void* _self");
+        strbuf_append_str(tp->code_buf, "void* self_ptr");
         has_params = true;
     }
 
     // for closures, add hidden env parameter as first param
     if (is_closure) {
-        strbuf_append_str(tp->code_buf, "void* _env_ptr");
+        strbuf_append_str(tp->code_buf, "void* env_ptr");
         has_params = true;
     }
 
@@ -6187,11 +6224,11 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         has_params = true;
     }
 
-    // add hidden _vargs parameter for variadic functions
+    // add hidden vargs parameter for variadic functions
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     if (fn_type && fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        strbuf_append_str(tp->code_buf, "List* _vargs");
+        strbuf_append_str(tp->code_buf, "List* vargs");
     }
 
     if (as_pointer) {
@@ -6204,9 +6241,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     if (is_closure) {
         strbuf_append_str(tp->code_buf, " ");
         write_env_name(tp->code_buf, fn_node);
-        strbuf_append_str(tp->code_buf, "* _env = (");
+        strbuf_append_str(tp->code_buf, "* cenv = (");
         write_env_name(tp->code_buf, fn_node);
-        strbuf_append_str(tp->code_buf, "*)_env_ptr;\n");
+        strbuf_append_str(tp->code_buf, "*)env_ptr;\n");
     }
 
     // for methods, load fields from self object into local variables
@@ -6214,19 +6251,19 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         AstObjectTypeNode* owner = tp->method_owner;
         TypeType* tt = (TypeType*)owner->type;
         TypeObject* obj_type = (TypeObject*)tt->type;
-        strbuf_append_str(tp->code_buf, " Item _self_item = (uint64_t)(uintptr_t)_self;\n");
-        // make ~ refer to self inside method bodies (pipe expressions will shadow _pipe_item)
-        strbuf_append_str(tp->code_buf, " Item _pipe_item = _self_item;\n");
+        strbuf_append_str(tp->code_buf, " Item self_item = (uint64_t)(uintptr_t)self_ptr;\n");
+        // make ~ refer to self inside method bodies (pipe expressions will shadow pipe_item)
+        strbuf_append_str(tp->code_buf, " Item pipe_item = self_item;\n");
 
         // Phase 5: direct struct field reads for fixed-shape object types
         if (has_fixed_shape((TypeMap*)obj_type)) {
             const char* sname = ((TypeMap*)obj_type)->struct_name;
-            // emit: _type_Name* _self_data = (_type_Name*)((Object*)_self)->data;
+            // emit: _type_Name* self_data = (_type_Name*)((Object*)self_ptr)->data;
             strbuf_append_str(tp->code_buf, " _type_");
             strbuf_append_str(tp->code_buf, sname);
-            strbuf_append_str(tp->code_buf, "* _self_data = (_type_");
+            strbuf_append_str(tp->code_buf, "* self_data = (_type_");
             strbuf_append_str(tp->code_buf, sname);
-            strbuf_append_str(tp->code_buf, "*)((Object*)_self)->data;\n");
+            strbuf_append_str(tp->code_buf, "*)((Object*)self_ptr)->data;\n");
             ShapeEntry* se = obj_type->shape;
             while (se) {
                 if (se->name) {
@@ -6234,7 +6271,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                     int flen = (int)se->name->length;
                     Type* field_type = se->type;
                     TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
-                    // emit: TYPE _fieldname = _self_data->fieldname;
+                    // emit: TYPE _fieldname = self_data->fieldname;
                     strbuf_append_str(tp->code_buf, " ");
                     if (field_type) {
                         write_type(tp->code_buf, field_type);
@@ -6248,7 +6285,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                         // void* → Item requires explicit cast
                         strbuf_append_str(tp->code_buf, "(Item)(uintptr_t)");
                     }
-                    strbuf_append_str(tp->code_buf, "_self_data->");
+                    strbuf_append_str(tp->code_buf, "self_data->");
                     strbuf_append_str_n(tp->code_buf, fname, flen);
                     strbuf_append_str(tp->code_buf, ";\n");
                 }
@@ -6262,7 +6299,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                     const char* fname = se->name->str;
                     int flen = (int)se->name->length;
                     Type* field_type = se->type;
-                    // emit: TYPE _fieldname = UNBOX(fn_member(_self_item, s2it(heap_create_name("field"))));
+                    // emit: TYPE _fieldname = UNBOX(fn_member(self_item, s2it(heap_create_name("field"))));
                     strbuf_append_str(tp->code_buf, " ");
                     if (field_type) {
                         write_type(tp->code_buf, field_type);
@@ -6285,7 +6322,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                     } else {
                         // no unboxing for Item or complex types
                     }
-                    strbuf_append_str(tp->code_buf, "fn_member(_self_item, s2it(heap_create_name(\"");
+                    strbuf_append_str(tp->code_buf, "fn_member(self_item, s2it(heap_create_name(\"");
                     strbuf_append_str_n(tp->code_buf, fname, flen);
                     strbuf_append_str(tp->code_buf, "\")))");
                     if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
@@ -6311,9 +6348,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // stack overflow detection since TCO converts tail calls into flat goto loops).
     // The check is placed after the label so every iteration hits it.
     if (use_tco) {
-        strbuf_append_str(tp->code_buf, " int _tco_count = 0;\n");
-        strbuf_append_str(tp->code_buf, " _tco_start:;\n");
-        strbuf_append_str(tp->code_buf, " if (++_tco_count > LAMBDA_TCO_MAX_ITERATIONS) { lambda_stack_overflow_error(\"");
+        strbuf_append_str(tp->code_buf, " int tco_count = 0;\n");
+        strbuf_append_str(tp->code_buf, " tco_start:;\n");
+        strbuf_append_str(tp->code_buf, " if (++tco_count > LAMBDA_TCO_MAX_ITERATIONS) { lambda_stack_overflow_error(\"");
         strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
         strbuf_append_str(tp->code_buf, "\"); ");
         // Return error value matching the function's return type
@@ -6332,7 +6369,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // set vargs before function body for variadic functions
     if (fn_type && fn_type->is_variadic) {
-        strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
+        strbuf_append_str(tp->code_buf, " set_vargs(vargs);\n");
     }
 
     // set current_closure context for body transpilation
@@ -6342,7 +6379,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         tp->current_closure = fn_node;
     }
 
-    // clear method_owner during method body transpilation (so nested fns don't get _self)
+    // clear method_owner during method body transpilation (so nested fns don't get self_ptr)
     AstObjectTypeNode* prev_method_owner = tp->method_owner;
     if (is_method) {
         tp->method_owner = nullptr;
@@ -6518,14 +6555,14 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     if (fn_type && fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        strbuf_append_str(tp->code_buf, "List* _vargs");
+        strbuf_append_str(tp->code_buf, "List* vargs");
     }
 
     strbuf_append_str(tp->code_buf, "){\n");
 
     // Variadic setup
     if (fn_type && fn_type->is_variadic) {
-        strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
+        strbuf_append_str(tp->code_buf, " set_vargs(vargs);\n");
     }
 
     // Function body - return without boxing
@@ -6582,7 +6619,7 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     }
     if (fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        strbuf_append_str(tp->code_buf, "List* _vargs");
+        strbuf_append_str(tp->code_buf, "List* vargs");
     }
     strbuf_append_str(tp->code_buf, "){\n return ");
 
@@ -6653,7 +6690,7 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     }
     if (fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        strbuf_append_str(tp->code_buf, "_vargs");
+        strbuf_append_str(tp->code_buf, "vargs");
     }
     strbuf_append_char(tp->code_buf, ')');
 
@@ -6667,7 +6704,7 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
 
     if (from_outer_env) {
         // already boxed in outer env, just copy
-        strbuf_append_str(tp->code_buf, "_env->");
+        strbuf_append_str(tp->code_buf, "cenv->");
         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
         return;
     }
@@ -6734,7 +6771,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         //              _fn->closure_field_count = N; _fn; })
         strbuf_append_str(tp->code_buf, "({ ");
         write_env_name(tp->code_buf, fn_node);
-        strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
+        strbuf_append_str(tp->code_buf, "* closure_env = heap_calloc(sizeof(");
         write_env_name(tp->code_buf, fn_node);
         strbuf_append_str(tp->code_buf, "), 0);\n");
 
@@ -6743,7 +6780,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         CaptureInfo* cap = fn_node->captures;
         while (cap) {
             cap_count++;
-            strbuf_append_str(tp->code_buf, "  _closure_env->");
+            strbuf_append_str(tp->code_buf, "  closure_env->");
             strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
             strbuf_append_str(tp->code_buf, " = ");
 
@@ -6761,7 +6798,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
 
         strbuf_append_str(tp->code_buf, "  Function* _fn = to_closure_named(");
         write_fn_name(tp->code_buf, fn_node, NULL);
-        strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
+        strbuf_append_format(tp->code_buf, ",%d,closure_env,", arity);
         // pass function name as string literal for stack traces
         // prefer named function, fall back to assignment variable name, then <anonymous>
         if (fn_node->name && fn_node->name->chars) {
@@ -6847,11 +6884,11 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_CURRENT_ITEM:
         // ~ references the current pipe context item
-        strbuf_append_str(tp->code_buf, "_pipe_item");
+        strbuf_append_str(tp->code_buf, "pipe_item");
         break;
     case AST_NODE_CURRENT_INDEX:
         // ~# references the current pipe context key/index
-        strbuf_append_str(tp->code_buf, "_pipe_index");
+        strbuf_append_str(tp->code_buf, "pipe_index");
         break;
     case AST_NODE_IF_EXPR:
         transpile_if(tp, (AstIfNode*)expr_node);
@@ -7059,11 +7096,22 @@ void write_mod_struct_fields(Transpiler* tp, AstNode *ast_root) {
         else if (node->node_type == AST_NODE_PUB_STAM) {
             AstNode *declare = ((AstLetNode*)node)->declare;
             while (declare) {
+                if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                    // object types are not exported as struct fields (for now)
+                    declare = declare->next;
+                    continue;
+                }
                 AstNamedNode *asn_node = (AstNamedNode*)declare;
                 write_type(tp->code_buf, asn_node->type);
                 strbuf_append_char(tp->code_buf, ' ');
                 write_var_name(tp->code_buf, asn_node, NULL);
                 strbuf_append_str(tp->code_buf, ";\n");
+                // also add error variable field for ^err destructuring
+                if (asn_node->error_name) {
+                    strbuf_append_str(tp->code_buf, "Item _");
+                    strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                    strbuf_append_str(tp->code_buf, ";\n");
+                }
                 declare = declare->next;
             }
         }
@@ -7169,10 +7217,10 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         bool has_obj_constraints = (obj_node->constraints != NULL);
 
         if (has_field_constraints || has_obj_constraints) {
-            // emit: uint8_t _constraint_N(Item _self_item) { ... }
-            strbuf_append_format(tp->code_buf, "\nuint8_t _constraint_%d(Item _self_item) {\n",
+            // emit: uint8_t _constraint_N(Item self_item) { ... }
+            strbuf_append_format(tp->code_buf, "\nuint8_t _constraint_%d(Item self_item) {\n",
                 obj_type->type_index);
-            strbuf_append_str(tp->code_buf, "  Item _pipe_item = _self_item;\n");
+            strbuf_append_str(tp->code_buf, "  Item pipe_item = self_item;\n");
 
             // field-level constraint checks — iterate AST field nodes
             field_item = obj_node->item;
@@ -7185,15 +7233,15 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
                         TypeConstrained* tc = (TypeConstrained*)as_type;
                         if (tc->constraint) {
                             strbuf_append_str(tp->code_buf, "  {\n");
-                            strbuf_append_str(tp->code_buf, "    Item _fval = fn_member(_self_item, s2it(heap_create_name(\"");
+                            strbuf_append_str(tp->code_buf, "    Item fval = fn_member(self_item, s2it(heap_create_name(\"");
                             strbuf_append_str_n(tp->code_buf, fn->name->chars, fn->name->len);
                             strbuf_append_str(tp->code_buf, "\")));\n");
-                            strbuf_append_str(tp->code_buf, "    Item _saved_pipe = _pipe_item;\n");
-                            strbuf_append_str(tp->code_buf, "    _pipe_item = _fval;\n");
+                            strbuf_append_str(tp->code_buf, "    Item saved_pipe = pipe_item;\n");
+                            strbuf_append_str(tp->code_buf, "    pipe_item = fval;\n");
                             strbuf_append_str(tp->code_buf, "    if (!is_truthy(");
                             transpile_box_item(tp, tc->constraint);
                             strbuf_append_str(tp->code_buf, ")) { return 0; }\n");
-                            strbuf_append_str(tp->code_buf, "    _pipe_item = _saved_pipe;\n");
+                            strbuf_append_str(tp->code_buf, "    pipe_item = saved_pipe;\n");
                             strbuf_append_str(tp->code_buf, "  }\n");
                         }
                     }
@@ -7204,7 +7252,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             // object-level constraint checks
             AstNode* constraint = obj_node->constraints;
             while (constraint) {
-                strbuf_append_str(tp->code_buf, "  _pipe_item = _self_item;\n");
+                strbuf_append_str(tp->code_buf, "  pipe_item = self_item;\n");
                 strbuf_append_str(tp->code_buf, "  if (!is_truthy(");
                 transpile_box_item(tp, constraint);
                 strbuf_append_str(tp->code_buf, ")) { return 0; }\n");
@@ -7405,6 +7453,11 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
     // declare global vars
     AstNode *decl = let_node->declare;
     while (decl) {
+        if (decl->node_type == AST_NODE_OBJECT_TYPE) {
+            // object type definitions are handled separately — not variable declarations
+            decl = decl->next;
+            continue;
+        }
         if (decl->node_type == AST_NODE_DECOMPOSE) {
             // Handle decomposition - declare all variables as Item
             AstDecomposeNode* dec_node = (AstDecomposeNode*)decl;
@@ -7433,13 +7486,19 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
 }
 
 void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
-    // declare global vars
+    // assign global vars (and register object type methods)
     AstNode *decl = let_node->declare;
     while (decl) {
+        if (decl->node_type == AST_NODE_OBJECT_TYPE) {
+            // object type method registration — handled here instead of as variable assignment
+            transpile_object_type_method_registration(tp, (AstObjectTypeNode*)decl);
+            decl = decl->next;
+            continue;
+        }
         if (decl->node_type == AST_NODE_DECOMPOSE) {
             // Handle decomposition at global level using a nested scope
             AstDecomposeNode* dec_node = (AstDecomposeNode*)decl;
-            strbuf_append_str(tp->code_buf, "\n {Item _dec_src=");
+            strbuf_append_str(tp->code_buf, "\n {Item dec_src=");
             transpile_box_item(tp, dec_node->as);
             strbuf_append_str(tp->code_buf, ";");
 
@@ -7451,11 +7510,11 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
                 strbuf_append_char(tp->code_buf, '=');
 
                 if (dec_node->is_named) {
-                    strbuf_append_str(tp->code_buf, "item_attr(_dec_src,\"");
+                    strbuf_append_str(tp->code_buf, "item_attr(dec_src,\"");
                     strbuf_append_str_n(tp->code_buf, name->chars, name->len);
                     strbuf_append_str(tp->code_buf, "\");");
                 } else {
-                    strbuf_append_format(tp->code_buf, "item_at(_dec_src,%d);", i);
+                    strbuf_append_format(tp->code_buf, "item_at(dec_src,%d);", i);
                 }
             }
             strbuf_append_str(tp->code_buf, "}");  // close nested scope
@@ -7534,11 +7593,16 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         strbuf_append_str(tp->code_buf, "static Element* _mod_elmt(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Element* r=elmt(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static Type* _mod_const_type(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Type* r=const_type(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static TypePattern* _mod_const_pattern(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; TypePattern* r=const_pattern(ti); rt->type_list=sv; return r; }\n");
+        // Wrappers for object type method/constraint registration (must use module's type_list)
+        strbuf_append_str(tp->code_buf, "static void _mod_object_type_set_method(int64_t ti,const char* n,fn_ptr fp,int64_t a,int64_t p) { void* sv=rt->type_list; rt->type_list=_mod_type_list; object_type_set_method(ti,n,fp,a,p); rt->type_list=sv; }\n");
+        strbuf_append_str(tp->code_buf, "static void _mod_object_type_set_constraint(int64_t ti,fn_ptr fp) { void* sv=rt->type_list; rt->type_list=_mod_type_list; object_type_set_constraint(ti,fp); rt->type_list=sv; }\n");
         // Redirect calls to use module-local wrappers
         strbuf_append_str(tp->code_buf, "#define map(idx) _mod_map(idx)\n");
         strbuf_append_str(tp->code_buf, "#define elmt(idx) _mod_elmt(idx)\n");
         strbuf_append_str(tp->code_buf, "#define const_type(idx) _mod_const_type(idx)\n");
         strbuf_append_str(tp->code_buf, "#define const_pattern(idx) _mod_const_pattern(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define object_type_set_method(ti,n,fp,a,p) _mod_object_type_set_method(ti,n,fp,a,p)\n");
+        strbuf_append_str(tp->code_buf, "#define object_type_set_constraint(ti,fp) _mod_object_type_set_constraint(ti,fp)\n");
     }
 
     // Pre-define all closure environment structs before any function definitions
@@ -7596,6 +7660,23 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             }
             tp->method_owner = nullptr;
             child = child->next;
+        } else if (child->node_type == AST_NODE_PUB_STAM) {
+            // forward-declare methods inside pub object types
+            AstNode* decl = ((AstLetNode*)child)->declare;
+            while (decl) {
+                if (decl->node_type == AST_NODE_OBJECT_TYPE) {
+                    AstObjectTypeNode* obj_node = (AstObjectTypeNode*)decl;
+                    tp->method_owner = obj_node;
+                    AstNode* method = obj_node->methods;
+                    while (method) {
+                        forward_declare_func(tp, (AstFuncNode*)method);
+                        method = method->next;
+                    }
+                    tp->method_owner = nullptr;
+                }
+                decl = decl->next;
+            }
+            child = child->next;
         } else {
             child = child->next;
         }
@@ -7631,8 +7712,8 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         strbuf_append_str(tp->code_buf, "};\n");
 
         // generate _init_mod_vars: copies each pub var into the Mod struct
-        strbuf_append_str(tp->code_buf, "void _init_mod_vars(void* _mp) {\n");
-        strbuf_append_format(tp->code_buf, " struct Mod%d* _m = (struct Mod%d*)_mp;\n", tp->index, tp->index);
+        strbuf_append_str(tp->code_buf, "void _init_mod_vars(void* mod_p) {\n");
+        strbuf_append_format(tp->code_buf, " struct Mod%d* mod_v = (struct Mod%d*)mod_p;\n", tp->index, tp->index);
         child = script->child;
         while (child) {
             if (child->node_type == AST_NODE_CONTENT) {
@@ -7642,12 +7723,25 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             else if (child->node_type == AST_NODE_PUB_STAM) {
                 AstNode *declare = ((AstLetNode*)child)->declare;
                 while (declare) {
+                    if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                        // object types are not global variables — skip in _init_mod_vars
+                        declare = declare->next;
+                        continue;
+                    }
                     AstNamedNode *asn_node = (AstNamedNode*)declare;
-                    strbuf_append_str(tp->code_buf, " _m->");
+                    strbuf_append_str(tp->code_buf, " mod_v->");
                     write_var_name(tp->code_buf, asn_node, NULL);
                     strbuf_append_str(tp->code_buf, " = ");
                     write_var_name(tp->code_buf, asn_node, NULL);
                     strbuf_append_str(tp->code_buf, ";\n");
+                    // also copy error variable for ^err destructuring
+                    if (asn_node->error_name) {
+                        strbuf_append_str(tp->code_buf, " mod_v->_");
+                        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                        strbuf_append_str(tp->code_buf, " = _");
+                        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+                        strbuf_append_str(tp->code_buf, ";\n");
+                    }
                     declare = declare->next;
                 }
             }

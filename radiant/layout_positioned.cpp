@@ -1308,21 +1308,55 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float final_y_bfc = current_y_bfc;
     int max_iterations = 100;  // Prevent infinite loops
 
-    // CSS 2.1 §9.5.1: Float's margin box must not exceed the containing block's content edge
-    // Calculate the containing block's right edge in BFC coordinates
+    // CSS 2.1 §9.5.1: Calculate containing block edges in BFC coordinates
+    float containing_block_left_bfc = parent_x_in_bfc + content_offset_x;
     float containing_block_right_bfc = parent_x_in_bfc + content_offset_x + parent_content_width;
-    log_debug("[FLOAT_LAYOUT] Containing block right edge in BFC coords: %.1f", containing_block_right_bfc);
+    float containing_block_width = parent_content_width;
+    log_debug("[FLOAT_LAYOUT] Containing block in BFC coords: left=%.1f, right=%.1f, width=%.1f",
+              containing_block_left_bfc, containing_block_right_bfc, containing_block_width);
+
+    // CSS 2.1 §9.5.1 Rule 7 (paraphrased): A left float may not stick out at the right edge
+    // of its containing block UNLESS it is already as far to the left as possible.
+    // This means: if the float's margin box is wider than its containing block's content width,
+    // the float can overflow (it's inherently too wide to fit). In that case, don't push it
+    // down trying to find space — place it at its leftmost/rightmost position and let it overflow.
+    bool float_wider_than_cb = (float_total_width > containing_block_width + 0.5f);
+    if (float_wider_than_cb) {
+        log_debug("[FLOAT_LAYOUT] Float (%.1f) is wider than containing block (%.1f), may overflow",
+                  float_total_width, containing_block_width);
+    }
 
     while (max_iterations-- > 0) {
-        // Query available space at this Y position
+        // Query available space at this Y position (constrained by BFC edges and other floats)
         FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
 
-        // Constrain space.right by the containing block's right edge
-        float effective_right = min(space.right, containing_block_right_bfc);
-        float available_width = effective_right - space.left;
+        // CSS 2.1 §9.5.1: Compute effective available width
+        // Normally, the float must fit within the containing block boundaries.
+        // But if the float is wider than its containing block, it may overflow per Rule 7.
+        float effective_left, effective_right;
+        if (block->position->float_prop == CSS_VALUE_LEFT) {
+            effective_left = max(space.left, containing_block_left_bfc);
+            if (float_wider_than_cb) {
+                // Float is wider than CB — use BFC space (allow overflow to right)
+                effective_right = space.right;
+            } else {
+                // Normal case — constrain by containing block right edge
+                effective_right = min(space.right, containing_block_right_bfc);
+            }
+        } else {
+            effective_right = min(space.right, containing_block_right_bfc);
+            if (float_wider_than_cb) {
+                // Float is wider than CB — use BFC space (allow overflow to left)
+                effective_left = space.left;
+            } else {
+                // Normal case — constrain by containing block left edge
+                effective_left = max(space.left, containing_block_left_bfc);
+            }
+        }
+        float available_width = effective_right - effective_left;
 
-        log_debug("[FLOAT_LAYOUT] Checking Y=%.1f: space=(%.1f, %.1f), effective_right=%.1f, available=%.1f, needed=%.1f",
-                  final_y_bfc, space.left, space.right, effective_right, available_width, float_total_width);
+        log_debug("[FLOAT_LAYOUT] Checking Y=%.1f: space=(%.1f, %.1f), effective=(%.1f, %.1f), available=%.1f, needed=%.1f",
+                  final_y_bfc, space.left, space.right, effective_left, effective_right, available_width, float_total_width);
 
         // Check if float fits at this Y position
         if (available_width >= float_total_width) {
@@ -1352,6 +1386,33 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("[FLOAT_LAYOUT] Float:right positioned at x=%.1f", new_x);
             }
             break;  // Found a valid position
+        }
+
+        // CSS 2.1 §9.5.1 Rule 7: "A left-floating box that has another left-floating box
+        // to its left may not have its right outer edge to the right of its containing
+        // block's right edge. (Loosely: a left float may not stick out at the right edge,
+        // unless it is already as far to the left as possible.)"
+        // If the float is wider than its containing block AND it's at its leftmost/rightmost
+        // possible position (no same-direction float blocking it), place it here and overflow.
+        if (float_wider_than_cb) {
+            if (block->position->float_prop == CSS_VALUE_LEFT) {
+                bool at_leftmost = !space.has_left_float || (space.left <= containing_block_left_bfc + 0.5f);
+                if (at_leftmost) {
+                    log_debug("[FLOAT_LAYOUT] Left float wider than CB, at leftmost, overflow at Y=%.1f", final_y_bfc);
+                    float new_x = content_offset_x + margin_left;
+                    block->x = new_x;
+                    break;
+                }
+            } else {
+                bool at_rightmost = !space.has_right_float || (space.right >= containing_block_right_bfc - 0.5f);
+                if (at_rightmost) {
+                    log_debug("[FLOAT_LAYOUT] Right float wider than CB, at rightmost, overflow at Y=%.1f", final_y_bfc);
+                    float content_right = content_offset_x + parent_content_width;
+                    float new_x = content_right - block->width - margin_right;
+                    block->x = new_x;
+                    break;
+                }
+            }
         }
 
         // Float doesn't fit - need to shift down (CSS 2.2 §9.5.1 Rule 7)

@@ -660,6 +660,17 @@ DisplayValue resolve_display_value(void* child) {
                                 display.outer = CSS_VALUE_NONE;
                                 display.inner = CSS_VALUE_NONE;
                                 return display;
+                            } else if (keyword == CSS_VALUE_INHERIT) {
+                                // CSS 2.1 §9.2.4: display: inherit — use parent's computed display
+                                DomElement* parent_elem = dom_element_get_parent(dom_elem);
+                                if (parent_elem) {
+                                    DisplayValue parent_display = resolve_display_value((void*)parent_elem);
+                                    log_debug("[CSS] display: inherit — resolved parent display outer=%d, inner=%d",
+                                              parent_display.outer, parent_display.inner);
+                                    return needs_blockify ? blockify_display(parent_display) : parent_display;
+                                }
+                                log_debug("[CSS] display: inherit — no parent, using tag default");
+                                // no parent (root element) — fall through to tag-based default
                             } else if (keyword == CSS_VALUE_RUN_IN) {
                                 // run-in is unsupported (matches Chrome, which dropped it in v32).
                                 // Don't return — fall through to tag-based default display below.
@@ -903,9 +914,17 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
 
     if (!decl && lycon->view) {
         // Try to get font-size from the view's font property
-        ViewSpan* span = (ViewSpan*)lycon->view;
-        if (span->font && span->font->font_size > 0) {
-            lycon->font.current_font_size = span->font->font_size;
+        // IMPORTANT: Must check node type before accessing font field.
+        // DomElement::font and DomText::font are at different struct offsets,
+        // so casting a DomText* to ViewSpan* (DomElement*) reads garbage memory.
+        FontProp* fp = nullptr;
+        if (lycon->view->is_element()) {
+            fp = ((DomElement*)lycon->view)->font;
+        } else if (lycon->view->is_text()) {
+            fp = ((DomText*)lycon->view)->font;
+        }
+        if (fp && fp->font_size > 0) {
+            lycon->font.current_font_size = fp->font_size;
             log_debug("resolved font size from view: %.2f px", lycon->font.current_font_size);
             return;
         }
@@ -934,12 +953,24 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
             log_debug("resolved font size from declaration: %.2f px", lycon->font.current_font_size);
             return;
         } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-            // Keyword font size
-            float size = map_lambda_font_size_keyword(value->data.keyword);
+            CssEnum kw = value->data.keyword;
+            // CSS 2.1 §15.7: 'larger' and 'smaller' are relative to parent font size
+            // Scale factor between adjacent absolute-size keywords is ~1.2
+            if (kw == CSS_VALUE_LARGER || kw == CSS_VALUE_SMALLER) {
+                float parent_size = (lycon->font.style && lycon->font.style->font_size > 0)
+                                    ? lycon->font.style->font_size : 16.0f;
+                float scale = (kw == CSS_VALUE_LARGER) ? 1.2f : (1.0f / 1.2f);
+                lycon->font.current_font_size = parent_size * scale;
+                log_debug("resolved font size '%s' from parent %.2f → %.2f px",
+                         css_enum_info(kw)->name, parent_size, lycon->font.current_font_size);
+                return;
+            }
+            // Absolute keyword font size
+            float size = map_lambda_font_size_keyword(kw);
             if (size > 0) {
                 lycon->font.current_font_size = size;
                 log_debug("resolved font size from keyword '%s': %.2f px",
-                         css_enum_info(value->data.keyword)->name, size);
+                         css_enum_info(kw)->name, size);
                 return;
             }
         }
@@ -1128,11 +1159,18 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             }
         } else {
             // width-related and other properties: percentage relative to parent width
-            if (lycon->block.parent) {
+            if (lycon->block.parent && lycon->block.parent->content_width > 0) {
                 log_debug("percentage calculation: %.2f%% of parent width %.1f = %.2f",
                        percentage, lycon->block.parent->content_width,
                        percentage * lycon->block.parent->content_width / 100.0);
                 result = percentage * lycon->block.parent->content_width / 100.0;
+            } else if (!lycon->block.parent && lycon && lycon->width > 0) {
+                // No parent context (root html element) - use viewport width
+                // CSS 2.1 §10.3: percentage widths on the root resolve against the
+                // initial containing block (viewport), same as percentage heights
+                log_debug("percentage width value %.2f%% of viewport width %.1f = %.2f (no parent)",
+                       percentage, lycon->width, percentage * lycon->width / 100.0);
+                result = percentage * lycon->width / 100.0;
             } else {
                 log_debug("percentage value %.2f%% without parent context", percentage);
                 result = 0.0f;
@@ -2451,6 +2489,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing font shorthand property");
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
+            // CSS 2.1 §15.8: font shorthand resets omitted properties to initial values.
+            // Pre-reset font-variant before scanning; if small-caps is found, the loop sets it.
+            span->font->font_variant = CSS_VALUE_NORMAL;
+
             // Font shorthand format: [font-style] [font-variant] [font-weight] [font-stretch] font-size[/line-height] font-family
             // The last value (or values) is always font-family
             // font-size is required and comes before font-family
@@ -2495,11 +2537,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     next_idx++;
 
                                     // Next should be line-height
+                                    // CSS 2.1 §15.7: line-height accepts: normal | <number> | <length> | <percentage> | inherit
                                     if (next_idx < count) {
                                         const CssValue* lh = value->data.list.values[next_idx];
                                         if (lh && (lh->type == CSS_VALUE_TYPE_LENGTH ||
                                                    lh->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                                                   lh->type == CSS_VALUE_TYPE_NUMBER)) {
+                                                   lh->type == CSS_VALUE_TYPE_NUMBER ||
+                                                   (lh->type == CSS_VALUE_TYPE_KEYWORD &&
+                                                    (lh->data.keyword == CSS_VALUE_NORMAL ||
+                                                     lh->data.keyword == CSS_VALUE_INHERIT)))) {
                                             line_height_value = lh;
                                             log_debug("[CSS] Font shorthand: found line-height at [%zu]", next_idx);
                                             next_idx++;
@@ -2614,24 +2660,54 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] Font shorthand: NO font-family found!");
                 }
 
-                // Apply font-weight if specified
+                // CSS 2.1 §15.8: Properties omitted from the font shorthand
+                // are reset to their initial values.
+                // Reset font-weight to initial (normal/400) then apply if specified
                 if (weight_value) {
                     span->font->font_weight = map_font_weight(weight_value);
                     span->font->font_weight_numeric = map_font_weight_numeric(weight_value);
                     log_debug("[CSS] Font shorthand: set font-weight (numeric=%d)", span->font->font_weight_numeric);
+                } else {
+                    // reset to initial: font-weight: normal (400)
+                    span->font->font_weight = CSS_VALUE_NORMAL;
+                    span->font->font_weight_numeric = 400;
+                    log_debug("[CSS] Font shorthand: reset font-weight to normal (400)");
                 }
 
-                // Apply font-style if specified
+                // Reset font-style to initial (normal) then apply if specified
                 if (style_value) {
                     span->font->font_style = style_value->data.keyword;
                     log_debug("[CSS] Font shorthand: set font-style");
+                } else {
+                    // reset to initial: font-style: normal
+                    span->font->font_style = CSS_VALUE_NORMAL;
+                    log_debug("[CSS] Font shorthand: reset font-style to normal");
                 }
+
+                // Reset font-variant if not set via shorthand — already done with
+                // pre-reset to CSS_VALUE_NORMAL above (before scanning loop).
+                // If small-caps was found in the shorthand, the loop already set
+                // font_variant = CSS_VALUE_SMALL_CAPS.
             }
             break;
         }
 
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set font-size. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-size: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
             float font_size = 0.0f;  bool valid = false;
@@ -2667,11 +2743,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Named font sizes: small, medium, large, etc.
-                font_size = map_lambda_font_size_keyword(value->data.keyword);
-                const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                log_debug("[CSS] Font size keyword: %s -> %.2f px", info ? info->name : "unknown", font_size);
-                if (font_size > 0) {
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_LARGER || kw == CSS_VALUE_SMALLER) {
+                    // CSS 2.1 §15.7: relative to parent font size
+                    float scale = (kw == CSS_VALUE_LARGER) ? 1.2f : (1.0f / 1.2f);
+                    font_size = parent_font_size * scale;
+                    log_debug("[CSS] Font size '%s' from parent %.2f -> %.2f px",
+                              css_enum_info(kw)->name, parent_font_size, font_size);
                     valid = true;
+                } else {
+                    font_size = map_lambda_font_size_keyword(kw);
+                    const CssEnumInfo* info = css_enum_info(kw);
+                    log_debug("[CSS] Font size keyword: %s -> %.2f px", info ? info->name : "unknown", font_size);
+                    if (font_size > 0) {
+                        valid = true;
+                    }
                 }
             } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Per CSS spec, unitless zero is valid and treated as 0px
@@ -2696,6 +2782,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_WEIGHT: {
             log_debug("[CSS] Processing font-weight property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set/reset font-weight. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-weight: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
                 log_debug("[CSS]   Created new FontProp with defaults");
@@ -2708,6 +2808,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_FAMILY: {
             log_debug("[CSS] Processing font-family property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set font-family. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-family: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
@@ -2818,6 +2932,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             log_debug("[CSS] Processing line-height property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set line-height. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping line-height: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->blk) { span->blk = alloc_block_prop(lycon); }
             span->blk->line_height = value;  // will be resolved later
             break;
@@ -3043,7 +3171,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // This distinguishes from explicit 'width: 0'
             // Same for 'max-content', 'min-content', 'fit-content' - these are intrinsic sizing keywords
             float width;
-            if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                // CSS 2.1 §6.2.1: inherit computed value from parent
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->blk && parent_block->blk->given_width >= 0) {
+                    width = parent_block->blk->given_width;
+                    log_debug("[CSS] width: inherit %.2f from parent", width);
+                } else {
+                    width = -1;  // parent has auto width
+                    log_debug("[CSS] width: inherit but parent has auto width");
+                }
+            } else if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
                 (value->data.keyword == CSS_VALUE_AUTO ||
                  value->data.keyword == CSS_VALUE_MAX_CONTENT ||
                  value->data.keyword == CSS_VALUE_MIN_CONTENT ||
@@ -3078,7 +3217,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // This distinguishes from explicit 'height: 0'
             // Same for 'max-content', 'min-content', 'fit-content' - these are intrinsic sizing keywords
             float height;
-            if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                // CSS 2.1 §6.2.1: inherit computed value from parent
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->blk && parent_block->blk->given_height >= 0) {
+                    height = parent_block->blk->given_height;
+                    log_debug("[CSS] height: inherit %.2f from parent", height);
+                } else {
+                    height = -1;  // parent has auto height
+                    log_debug("[CSS] height: inherit but parent has auto height");
+                }
+            } else if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
                 (value->data.keyword == CSS_VALUE_AUTO ||
                  value->data.keyword == CSS_VALUE_MAX_CONTENT ||
                  value->data.keyword == CSS_VALUE_MIN_CONTENT ||
@@ -5600,9 +5750,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
-                block->position->position = val;
-                const CssEnumInfo* info = css_enum_info(val);
-                log_debug("[CSS] Position: %s -> %d", info ? info->name : "unknown", val);
+                if (val == CSS_VALUE_INHERIT) {
+                    // CSS 2.1 §6.2.1: inherit from parent's computed value
+                    DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                    ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                    if (parent_block && parent_block->position) {
+                        block->position->position = parent_block->position->position;
+                        log_debug("[CSS] position: inherit %d from parent", block->position->position);
+                    } else {
+                        block->position->position = CSS_VALUE_STATIC;
+                        log_debug("[CSS] position: inherit but no parent position, using static");
+                    }
+                } else {
+                    block->position->position = val;
+                    const CssEnumInfo* info = css_enum_info(val);
+                    log_debug("[CSS] Position: %s -> %d", info ? info->name : "unknown", val);
+                }
             }
             break;
         }
@@ -5613,7 +5776,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->position) {
                 block->position = alloc_position_prop(lycon);
             }
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                // CSS 2.1 §8.3: inherit from parent's computed value
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->position && parent_block->position->has_top) {
+                    block->position->top = parent_block->position->top;
+                    block->position->top_percent = parent_block->position->top_percent;
+                    block->position->has_top = true;
+                    log_debug("[CSS] top: inherit %.2f from parent", block->position->top);
+                } else {
+                    block->position->has_top = false;
+                    log_debug("[CSS] top: inherit but parent has no top value");
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // 'auto' or other keyword
                 block->position->has_top = false;
             } else {
                 block->position->top = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
@@ -5631,7 +5807,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->position) {
                 block->position = alloc_position_prop(lycon);
             }
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->position && parent_block->position->has_left) {
+                    block->position->left = parent_block->position->left;
+                    block->position->left_percent = parent_block->position->left_percent;
+                    block->position->has_left = true;
+                    log_debug("[CSS] left: inherit %.2f from parent", block->position->left);
+                } else {
+                    block->position->has_left = false;
+                    log_debug("[CSS] left: inherit but parent has no left value");
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // 'auto' or other keyword
                 block->position->has_left = false;
             } else {
                 block->position->left = resolve_length_value(lycon, CSS_PROPERTY_LEFT, value);
@@ -5649,7 +5837,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->position) {
                 block->position = alloc_position_prop(lycon);
             }
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->position && parent_block->position->has_right) {
+                    block->position->right = parent_block->position->right;
+                    block->position->right_percent = parent_block->position->right_percent;
+                    block->position->has_right = true;
+                    log_debug("[CSS] right: inherit %.2f from parent", block->position->right);
+                } else {
+                    block->position->has_right = false;
+                    log_debug("[CSS] right: inherit but parent has no right value");
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // 'auto' or other keyword
                 block->position->has_right = false;
             } else {
                 block->position->right = resolve_length_value(lycon, CSS_PROPERTY_RIGHT, value);
@@ -5667,7 +5867,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->position) {
                 block->position = alloc_position_prop(lycon);
             }
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                ViewBlock* parent_block = parent ? (ViewBlock*)parent : nullptr;
+                if (parent_block && parent_block->position && parent_block->position->has_bottom) {
+                    block->position->bottom = parent_block->position->bottom;
+                    block->position->bottom_percent = parent_block->position->bottom_percent;
+                    block->position->has_bottom = true;
+                    log_debug("[CSS] bottom: inherit %.2f from parent", block->position->bottom);
+                } else {
+                    block->position->has_bottom = false;
+                    log_debug("[CSS] bottom: inherit but parent has no bottom value");
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // 'auto' or other keyword
                 block->position->has_bottom = false;
             } else {
                 block->position->bottom = resolve_length_value(lycon, CSS_PROPERTY_BOTTOM, value);
@@ -5707,7 +5919,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum float_value = value->data.keyword;
-                if (float_value > 0) {
+                // CSS 2.1 §1.3.2: Handle 'inherit' — use parent's computed float value
+                if (float_value == CSS_VALUE_INHERIT) {
+                    DomElement* parent_elem = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                    if (parent_elem && parent_elem->position) {
+                        float_value = parent_elem->position->float_prop;
+                        log_debug("[CSS] float: inherit — resolved to parent float 0x%04X", float_value);
+                    } else {
+                        float_value = CSS_VALUE_NONE;  // initial value
+                        log_debug("[CSS] float: inherit — no parent or no parent position, using none");
+                    }
+                }
+                if (float_value > 0 && float_value != CSS_VALUE_INHERIT) {
                     block->position->float_prop = float_value;
                     const CssEnumInfo* info = css_enum_info(float_value);
                     log_debug("[CSS] Float: %s -> 0x%04X", info ? info->name : "unknown", float_value);
@@ -5725,7 +5948,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum clear_value = value->data.keyword;
-                if (clear_value > 0) {
+                // CSS 2.1 §1.3.2: Handle 'inherit' — use parent's computed clear value
+                if (clear_value == CSS_VALUE_INHERIT) {
+                    DomElement* parent_elem = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                    if (parent_elem && parent_elem->position) {
+                        clear_value = parent_elem->position->clear;
+                        log_debug("[CSS] clear: inherit — resolved to parent clear 0x%04X", clear_value);
+                    } else {
+                        clear_value = CSS_VALUE_NONE;  // initial value
+                        log_debug("[CSS] clear: inherit — no parent or no parent position, using none");
+                    }
+                }
+                if (clear_value > 0 && clear_value != CSS_VALUE_INHERIT) {
                     block->position->clear = clear_value;
                     const CssEnumInfo* info = css_enum_info(clear_value);
                     log_debug("[CSS] Clear: %s -> 0x%04X", info ? info->name : "unknown", clear_value);
@@ -5955,6 +6189,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_STYLE: {
             log_debug("[CSS] Processing font-style property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set/reset font-style. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-style: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6056,6 +6304,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_VARIANT: {
             log_debug("[CSS] Processing font-variant property");
+            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
+            // it already set/reset font-variant. Skip the longhand to respect cascade.
+            {
+                DomElement* elem = (DomElement*)lycon->view;
+                if (elem && elem->specified_style) {
+                    CssDeclaration* font_sh = style_tree_get_declaration(
+                        elem->specified_style, CSS_PROPERTY_FONT);
+                    if (font_sh && font_sh->source_order > decl->source_order) {
+                        log_debug("[CSS] Skipping font-variant: font shorthand (order=%u) overrides (order=%u)",
+                            font_sh->source_order, decl->source_order);
+                        break;
+                    }
+                }
+            }
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
@@ -7763,6 +8025,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->blk = alloc_block_prop(lycon);
             }
 
+            // Handle 'inherit' keyword: copy all three list-style sub-properties from parent
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                DomElement* parent = dom_elem->parent ? dom_elem->parent->as_element() : nullptr;
+                while (parent) {
+                    if (parent->blk) {
+                        if (parent->blk->list_style_type) {
+                            block->blk->list_style_type = parent->blk->list_style_type;
+                        }
+                        if (parent->blk->list_style_position) {
+                            block->blk->list_style_position = parent->blk->list_style_position;
+                        }
+                        if (parent->blk->list_style_image) {
+                            block->blk->list_style_image = parent->blk->list_style_image;
+                        }
+                        log_debug("[CSS] list-style: inherit from parent type=0x%04X pos=0x%04X",
+                            block->blk->list_style_type, block->blk->list_style_position);
+                        break;
+                    }
+                    parent = parent->parent ? parent->parent->as_element() : nullptr;
+                }
+                break;
+            }
+
             // Handle single keyword value (most common case)
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum keyword = value->data.keyword;
@@ -7866,8 +8152,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             log_debug("[CSS] list-style: expanded to list-style-type=%s", info ? info->name : "unknown");
                         }
                         else if (!is_position && keyword == CSS_VALUE_NONE) {
-                            block->blk->list_style_type = CSS_VALUE_NONE;
-                            log_debug("[CSS] list-style: set list-style-type=none");
+                            // CSS 2.1 §12.5: 'none' in the shorthand is ambiguous.
+                            // If list-style-type was already explicitly set by a prior
+                            // value in this shorthand, 'none' applies to list-style-image.
+                            // Otherwise it applies to list-style-type (and image gets none too).
+                            if (block->blk->list_style_type != 0 && block->blk->list_style_type != CSS_VALUE_NONE) {
+                                // Type already set — apply none to image only
+                                block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
+                                str_copy(block->blk->list_style_image, 5, "none", 4);
+                                log_debug("[CSS] list-style: 'none' applied to list-style-image (type already set)");
+                            } else {
+                                block->blk->list_style_type = CSS_VALUE_NONE;
+                                log_debug("[CSS] list-style: set list-style-type=none");
+                            }
                         }
                     }
                     else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
@@ -7891,6 +8188,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
                 }
+            }
+
+            // CSS 2.1 §12.5.1: If list-style shorthand didn't explicitly set
+            // list-style-type, it defaults to 'disc' (the initial value).
+            // Without this, marker generation is skipped because list_style_type==0.
+            if (block->blk->list_style_type == 0) {
+                block->blk->list_style_type = CSS_VALUE_DISC;
+                log_debug("[CSS] list-style shorthand: using default list-style-type=disc");
             }
             break;
         }

@@ -1,7 +1,7 @@
 // chart/svg.ls — SVG element construction helpers
 // Provides convenience functions for building SVG elements.
 
-import util: .lambda.package.chart.util
+import util: .util
 
 // ============================================================
 // SVG root element
@@ -93,7 +93,7 @@ pub fn line_path(points) string {
         let start = M(first[0], first[1]);
         let segments = (for (i in 1 to (len(points) - 1))
             L(points[i][0], points[i][1]));
-        start ++ " " ++ (segments | str_join(" "))
+        start ++ " " ++ (segments | join(" "))
     }
 }
 
@@ -107,19 +107,19 @@ pub fn area_path(top_points, bottom_points) string {
         let d1 = M(first[0], first[1]);
         let top_segs = (for (i in 1 to (len(top_points) - 1))
             L(top_points[i][0], top_points[i][1]));
-        let d2 = d1 ++ " " ++ (top_segs | str_join(" "));
+        let d2 = d1 ++ " " ++ (top_segs | join(" "));
         let bottom_segs = (for (bp in bottom_rev) L(bp[0], bp[1]));
-        let d3 = d2 ++ " " ++ (bottom_segs | str_join(" "));
+        let d3 = d2 ++ " " ++ (bottom_segs | join(" "));
         d3 ++ " " ++ Z_cmd()
     }
 }
 
 // build an arc path segment for pie/donut charts
 pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle) string {
-    let cos_s = cos(start_angle);
-    let sin_s = sin(start_angle);
-    let cos_e = cos(end_angle);
-    let sin_e = sin(end_angle);
+    let cos_s = math.cos(start_angle);
+    let sin_s = math.sin(start_angle);
+    let cos_e = math.cos(end_angle);
+    let sin_e = math.sin(end_angle);
     let large = if (end_angle - start_angle > util.PI) 1 else 0;
 
     let ox1 = cx + outer_r * cos_s;
