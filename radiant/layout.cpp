@@ -1324,50 +1324,136 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     DomNode* body_node = nullptr;
     log_debug("Searching for body element in Lambda CSS document");
 
-    // CSS 2.1 §10.3.3: Apply root element margins to position and sizing.
-    // The HTML root element should be offset by its margins and its width
-    // reduced to viewport_width - margin_left - margin_right.
-    if (html->bound && html->bound->margin.left != 0) {
-        html->x = html->bound->margin.left;
+    // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.
+    // Detect if the root <html> element has explicit CSS width/height
+    // or non-static positioning, and apply accordingly.
+    bool root_is_abspos = html->position &&
+        (html->position->position == CSS_VALUE_ABSOLUTE || html->position->position == CSS_VALUE_FIXED);
+    bool root_is_relative = html->position && html->position->position == CSS_VALUE_RELATIVE;
+
+    // Compute border+padding dimensions for the root element
+    float root_bp_left = 0, root_bp_right = 0, root_bp_top = 0, root_bp_bottom = 0;
+    if (html->bound) {
+        if (html->bound->border) {
+            root_bp_left += html->bound->border->width.left;
+            root_bp_right += html->bound->border->width.right;
+            root_bp_top += html->bound->border->width.top;
+            root_bp_bottom += html->bound->border->width.bottom;
+        }
+        root_bp_left += html->bound->padding.left;
+        root_bp_right += html->bound->padding.right;
+        root_bp_top += html->bound->padding.top;
+        root_bp_bottom += html->bound->padding.bottom;
     }
-    if (html->bound && html->bound->margin.top != 0) {
-        html->y = html->bound->margin.top;
-        // CSS 2.1 §8.3.1: Root element margins do not collapse.
-        // html.y positions the border box from the viewport edge.
-        // advance_y stays at 0 — children are positioned relative to html's content box.
+
+    // Check for explicit CSS width on the root element
+    bool root_has_explicit_width = false;
+    float root_css_width = -1;  // content-box width from CSS
+    if (html->blk) {
+        if (html->blk->given_width > 0) {
+            root_css_width = html->blk->given_width;
+            root_has_explicit_width = true;
+        } else if (!isnan(html->blk->given_width_percent)) {
+            // Percentage width should have been resolved against viewport in style resolution
+            // but may have resolved to 0 if parent context was lost; re-resolve here
+            root_css_width = physical_width * html->blk->given_width_percent / 100.0f;
+            root_has_explicit_width = (root_css_width > 0);
+        }
     }
-    {
-        float margin_h = 0;
-        if (html->bound) margin_h = html->bound->margin.left + html->bound->margin.right;
-        if (margin_h > 0) {
-            float new_width = physical_width - margin_h;
-            html->width = new_width;
-            html->content_width = new_width;
-            lycon->block.content_width = new_width;
-            lycon->block.max_width = new_width;
-            lycon->block.given_width = new_width;
-            lycon->block.float_right_edge = new_width;
-            line_init(lycon, 0, new_width);
-            log_debug("[CSS] Root element margins: left=%.1f right=%.1f, width adjusted to %.1f",
-                      html->bound->margin.left, html->bound->margin.right, new_width);
+
+    // Check for explicit CSS height on the root element
+    bool root_has_explicit_height = false;
+    float root_css_height = -1;  // content-box height from CSS
+    if (html->blk) {
+        if (html->blk->given_height > 0) {
+            root_css_height = html->blk->given_height;
+            root_has_explicit_height = true;
+        } else if (!isnan(html->blk->given_height_percent)) {
+            root_css_height = physical_height * html->blk->given_height_percent / 100.0f;
+            root_has_explicit_height = (root_css_height > 0);
+        }
+    }
+
+    if (root_has_explicit_width) {
+        // CSS 2.1 §10.3: Root element with explicit width.
+        // Set html->width to the border-box width so the existing border/padding
+        // subtraction code correctly computes content_width = root_css_width.
+        float border_box_width = root_css_width + root_bp_left + root_bp_right;
+        html->width = border_box_width;
+        html->content_width = border_box_width;
+        lycon->block.content_width = border_box_width;
+        lycon->block.max_width = border_box_width;
+        lycon->block.given_width = root_css_width;
+        lycon->block.float_right_edge = border_box_width;
+        line_init(lycon, 0, border_box_width);
+        log_debug("[CSS] Root explicit width: css_width=%.1f, border_box=%.1f", root_css_width, border_box_width);
+    }
+
+    if (root_has_explicit_height) {
+        // CSS 2.1 §10.6: Root element with explicit height.
+        // Set the border-box height so finalize_block_flow doesn't override.
+        float border_box_height = root_css_height + root_bp_top + root_bp_bottom;
+        html->height = border_box_height;
+        lycon->block.given_height = root_css_height;
+        log_debug("[CSS] Root explicit height: css_height=%.1f, border_box=%.1f", root_css_height, border_box_height);
+    }
+
+    if (root_is_abspos) {
+        // CSS 2.1 §10.3.7: Absolutely/fixed positioned root element.
+        // Position from left/top offsets (containing block = initial containing block/viewport).
+        // Margins do not reduce viewport width for abspos elements.
+        if (html->position->has_left) {
+            html->x = html->position->left;
+        }
+        if (html->position->has_top) {
+            html->y = html->position->top;
+        }
+        // For abspos, margins shift position (if left/top not set, margins auto-resolve)
+        if (!html->position->has_left && html->bound && html->bound->margin.left != 0) {
+            html->x += html->bound->margin.left;
+        }
+        if (!html->position->has_top && html->bound && html->bound->margin.top != 0) {
+            html->y += html->bound->margin.top;
+        }
+
+        // If no explicit width was set, use viewport width for abspos
+        if (!root_has_explicit_width) {
+            // Same as default: use viewport - margins (but margins don't reduce abspos width)
+            // Keep the default viewport width
+        }
+        log_debug("[CSS] Root abspos: x=%.1f, y=%.1f", html->x, html->y);
+    } else {
+        // Static or relative positioning: apply margins normally
+        if (html->bound && html->bound->margin.left != 0) {
+            html->x = html->bound->margin.left;
+        }
+        if (html->bound && html->bound->margin.top != 0) {
+            html->y = html->bound->margin.top;
+        }
+
+        if (!root_has_explicit_width) {
+            // No explicit width: reduce by margins (existing behavior)
+            float margin_h = 0;
+            if (html->bound) margin_h = html->bound->margin.left + html->bound->margin.right;
+            if (margin_h > 0) {
+                float new_width = physical_width - margin_h;
+                html->width = new_width;
+                html->content_width = new_width;
+                lycon->block.content_width = new_width;
+                lycon->block.max_width = new_width;
+                lycon->block.given_width = new_width;
+                lycon->block.float_right_edge = new_width;
+                line_init(lycon, 0, new_width);
+                log_debug("[CSS] Root element margins: left=%.1f right=%.1f, width adjusted to %.1f",
+                          html->bound->margin.left, html->bound->margin.right, new_width);
+            }
         }
     }
 
     // CSS 2.1 §10.3.3: Apply root element border and padding to reduce content area
     // Children are placed inside the border+padding box, not at the margin edge
     {
-        float bp_left = 0, bp_right = 0, bp_top = 0;
-        if (html->bound) {
-            if (html->bound->border) {
-                bp_left += html->bound->border->width.left;
-                bp_right += html->bound->border->width.right;
-                bp_top += html->bound->border->width.top;
-            }
-            bp_left += html->bound->padding.left;
-            bp_right += html->bound->padding.right;
-            bp_top += html->bound->padding.top;
-        }
-        float bp_h = bp_left + bp_right;
+        float bp_h = root_bp_left + root_bp_right;
         if (bp_h > 0) {
             float new_cw = lycon->block.content_width - bp_h;
             if (new_cw < 0) new_cw = 0;
@@ -1377,11 +1463,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.float_right_edge = new_cw;
             log_debug("[CSS] Root border+padding: reducing content_width by %.1f to %.1f", bp_h, new_cw);
         }
-        if (bp_top > 0) {
-            lycon->block.advance_y += bp_top;
-            log_debug("[CSS] Root border+padding: advance_y offset by %.1f to %.1f", bp_top, lycon->block.advance_y);
+        if (root_bp_top > 0) {
+            lycon->block.advance_y += root_bp_top;
+            log_debug("[CSS] Root border+padding: advance_y offset by %.1f to %.1f", root_bp_top, lycon->block.advance_y);
         }
-        line_init(lycon, bp_left, lycon->block.content_width + bp_left);
+        line_init(lycon, root_bp_left, lycon->block.content_width + root_bp_left);
     }
 
     // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
@@ -1458,6 +1544,18 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_info("[TIMING] layout: layout_block: %.1fms", duration<double, std::milli>(t_layout_block - t_body_find).count());
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
+
+    // CSS 2.1 §9.4.3: Apply position:relative offsets to root element after layout
+    if (root_is_relative && html->position) {
+        if (html->position->has_left) {
+            html->x += html->position->left;
+            log_debug("[CSS] Root relative offset: x += %.1f = %.1f", html->position->left, html->x);
+        }
+        if (html->position->has_top) {
+            html->y += html->position->top;
+            log_debug("[CSS] Root relative offset: y += %.1f = %.1f", html->position->top, html->y);
+        }
+    }
 
     auto t_finalize = high_resolution_clock::now();
     log_info("[TIMING] layout: finalize_block_flow: %.1fms", duration<double, std::milli>(t_finalize - t_layout_block).count());
