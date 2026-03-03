@@ -1,0 +1,82 @@
+"===== ORD/CHR TEST ====="
+{
+  t: "ord A",
+  r: 65
+}
+{
+  t: "ord a",
+  r: 97
+}
+{
+  t: "ord 0",
+  r: 48
+}
+{
+  t: "ord space",
+  r: 32
+}
+{
+  t: "ord hello",
+  r: 104
+}
+{
+  t: "ord é",
+  r: 233
+}
+{
+  t: "ord emoji",
+  r: 128512
+}
+{
+  t: "ord 中",
+  r: 20013
+}
+{
+  t: "ord sym A",
+  r: 65
+}
+{
+  t: "ord empty",
+  r: 0
+}
+{
+  t: "chr 65",
+  r: "A"
+}
+{
+  t: "chr 97",
+  r: "a"
+}
+{
+  t: "chr 48",
+  r: "0"
+}
+{
+  t: "chr 233",
+  r: "é"
+}
+{
+  t: "chr emoji",
+  r: "😀"
+}
+{
+  t: "chr 中",
+  r: "中"
+}
+{
+  t: "chr -1",
+  r: null
+}
+{
+  t: "chr too big",
+  r: null
+}
+{
+  t: "rt chr-ord",
+  r: "Z"
+}
+{
+  t: "rt ord-chr",
+  r: 65
+}
+"ALL TESTS COMPLETE"

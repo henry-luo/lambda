@@ -154,6 +154,12 @@ s[0 to 0]         // "h"     — single character via range
 // UTF-8 aware: indices are character positions, not byte offsets
 let c = "café";
 c[2 to 3]         // "fé"   — works correctly with multi-byte characters
+
+// Character ↔ code point conversion
+ord("A")           // 65    — Unicode code point of first character
+chr(65)            // "A"   — string from Unicode code point
+ord("é")           // 233
+chr(128512)        // "😀"
 ```
 
 ### Symbol Literals
