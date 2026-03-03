@@ -2300,6 +2300,16 @@ Item fn_index(Item item, Item index_item) {
         if (index_type == LMD_TYPE_TYPE) {
             return fn_child_query(item, index_item);
         }
+        // range index: s[i to j] → slice(item, start, end+1)
+        if (index_type == LMD_TYPE_RANGE) {
+            Range* rng = index_item.range;
+            if (rng) {
+                Item start_it = {.item = i2it(rng->start)};
+                Item end_it = {.item = i2it(rng->end + 1)}; // range end is inclusive, slice end is exclusive
+                return fn_slice(item, start_it, end_it);
+            }
+            return ItemNull;
+        }
         // for VMap, support arbitrary key types (int, float, etc.)
         TypeId item_type = get_type_id(item);
         if (item_type == LMD_TYPE_VMAP) {
@@ -2678,8 +2688,9 @@ int64_t fn_len(Item item) {
 // substring system function - extracts a substring from start to end (exclusive)
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
     GUARD_ERROR3(str_item, start_item, end_item);
-    if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        log_debug("fn_substring: first argument must be a string");
+    TypeId str_tid = get_type_id(str_item);
+    if (str_tid != LMD_TYPE_STRING && str_tid != LMD_TYPE_SYMBOL) {
+        log_debug("fn_substring: first argument must be a string or symbol");
         return ItemError;
     }
 
@@ -2693,22 +2704,35 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    if (!str || str->len == 0) {
-        return str_item; // return empty string
+    // use type-aware accessors: String and Symbol have different struct layouts
+    // String: {len, is_ascii, chars[]}, Symbol: {len, ns*, chars[]}
+    const char* chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    if (!chars || str_len == 0) {
+        return str_item; // return empty string/symbol
+    }
+
+    // helper: return result as string or symbol depending on input type
+    bool is_symbol = (str_tid == LMD_TYPE_SYMBOL);
+
+    // is_ascii only exists on String, not Symbol; symbols use UTF-8 path
+    bool is_ascii = false;
+    if (!is_symbol) {
+        is_ascii = str_item.get_string()->is_ascii;
     }
 
     int64_t start = it2l(start_item);
     int64_t end = it2l(end_item);
 
     // ASCII fast path: char index == byte index
-    if (str->is_ascii) {
-        int64_t char_len = (int64_t)str->len;
+    if (is_ascii) {
+        int64_t char_len = (int64_t)str_len;
         if (start < 0) start = char_len + start;
         if (end < 0) end = char_len + end;
         if (start < 0) start = 0;
         if (end > char_len) end = char_len;
         if (start >= end) {
+            if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
             String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
             empty->len = 0;
             empty->is_ascii = 1;
@@ -2716,16 +2740,17 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
             return {.item = s2it(empty)};
         }
         long result_len = (long)(end - start);
+        if (is_symbol) return {.item = y2it(heap_create_symbol(chars + start, result_len))};
         String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
         result->len = result_len;
         result->is_ascii = 1;
-        memcpy(result->chars, str->chars + start, result_len);
+        memcpy(result->chars, chars + start, result_len);
         result->chars[result_len] = '\0';
         return {.item = s2it(result)};
     }
 
     // handle negative indices (count from end)
-    int64_t char_len = (int64_t)str_utf8_count(str->chars, str->len);
+    int64_t char_len = (int64_t)str_utf8_count(chars, str_len);
     if (start < 0) start = char_len + start;
     if (end < 0) end = char_len + end;
 
@@ -2733,7 +2758,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     if (start < 0) start = 0;
     if (end > char_len) end = char_len;
     if (start >= end) {
-        // return empty string
+        if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
         empty->is_ascii = 1;
@@ -2742,11 +2767,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     }
 
     // convert char indices to byte indices
-    long byte_start = (long)str_utf8_char_to_byte(str->chars, str->len, (size_t)start);
-    long byte_end = (long)str_utf8_char_to_byte(str->chars, str->len, (size_t)end);
+    long byte_start = (long)str_utf8_char_to_byte(chars, str_len, (size_t)start);
+    long byte_end = (long)str_utf8_char_to_byte(chars, str_len, (size_t)end);
 
-    if (byte_start >= str->len || byte_end < 0) {
-        // return empty string
+    if (byte_start >= str_len || byte_end < 0) {
+        if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
         empty->is_ascii = 1;
@@ -2755,10 +2780,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     }
 
     long result_len = byte_end - byte_start;
+    if (is_symbol) return {.item = y2it(heap_create_symbol(chars + byte_start, result_len))};
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
     result->is_ascii = 0;  // UTF-8 path — not necessarily ASCII
-    memcpy(result->chars, str->chars + byte_start, result_len);
+    memcpy(result->chars, chars + byte_start, result_len);
     result->chars[result_len] = '\0';
 
     return {.item = s2it(result)};
@@ -3583,6 +3609,59 @@ Item fn_chars(Item str_item) {
 
     if (context) { context->disable_string_merging = saved_merging; }
     return {.array = result};
+}
+
+// ord(str) - return Unicode code point of first character
+int64_t fn_ord(Item str_item) {
+    TypeId type = get_type_id(str_item);
+
+    if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_ord: argument must be a string or symbol, got type %d", type);
+        return 0;
+    }
+
+    const char* chars = str_item.get_chars();
+    uint32_t byte_len = str_item.get_len();
+
+    if (!chars || byte_len == 0) {
+        return 0;
+    }
+
+    uint32_t codepoint = 0;
+    int decoded = str_utf8_decode(chars, byte_len, &codepoint);
+    if (decoded <= 0) {
+        return 0; // invalid UTF-8
+    }
+    return (int64_t)codepoint;
+}
+
+// chr(int) - return 1-char string from Unicode code point
+Item fn_chr(Item cp_item) {
+    GUARD_ERROR1(cp_item);
+    TypeId type = get_type_id(cp_item);
+
+    // return empty string for null/invalid input
+    if (type == LMD_TYPE_NULL) {
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
+    }
+
+    int64_t codepoint = it2l(cp_item);
+    if (codepoint < 0 || codepoint > 0x10FFFF) {
+        log_debug("fn_chr: code point %lld out of range (0..0x10FFFF)", (long long)codepoint);
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
+    }
+
+    char buf[4];
+    size_t len = str_utf8_encode((uint32_t)codepoint, buf, sizeof(buf));
+    if (len == 0) {
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};  // invalid code point (e.g., surrogate)
+    }
+
+    String* result = heap_strcpy(buf, (int)len);
+    return {.item = s2it(result)};
 }
 
 // join(strs, sep) - join list of strings with separator

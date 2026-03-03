@@ -39,7 +39,6 @@ release/
 conf
 
 # Executables and other project-specific generated files
-core/
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
 output.pgm

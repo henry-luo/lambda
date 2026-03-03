@@ -666,8 +666,11 @@ Item fn_fill(Item n_item, Item value) {
         return ItemError;
     }
     if (n == 0) {
-        List* result = list();
-        return { .list = result };
+        Array *result = (Array *)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        result->type_id = LMD_TYPE_ARRAY;
+        result->length = 0;  result->extra = 0;
+        result->items = (Item*)(result + 1);
+        return { .array = result };
     }
 
     TypeId val_type = get_type_id(value);
@@ -689,12 +692,15 @@ Item fn_fill(Item n_item, Item value) {
         return { .array_float = result };
     }
     else {
-        // generic list for non-numeric values
-        List* result = list();
+        // spreadable array for non-numeric values (avoids list merge behavior for strings)
+        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*n, LMD_TYPE_ARRAY);
+        result->type_id = LMD_TYPE_ARRAY;
+        result->length = n;  result->extra = 0;
+        result->items = (Item*)(result + 1);
         for (int64_t i = 0; i < n; i++) {
-            list_push(result, value);
+            result->items[i] = value;
         }
-        return { .list = result };
+        return { .array = result };
     }
 }
 

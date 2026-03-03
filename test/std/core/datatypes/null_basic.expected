@@ -1,0 +1,11 @@
+type.null
+true
+false
+false
+false
+[null, null, null]
+{
+  a: null
+}
+42
+0

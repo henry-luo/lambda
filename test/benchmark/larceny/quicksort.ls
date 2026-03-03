@@ -4,26 +4,6 @@
 // Sorts elements using Lomuto partition, verifies sorted order
 // Expected: PASS (all elements in non-decreasing order)
 
-pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain = n - sz
-        var extra = [val]
-        var esz = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
-}
-
 // Simple pseudo-random number generator that stays in safe int range
 pn lcg_next(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
@@ -73,7 +53,7 @@ pn is_sorted(arr, n) {
 
 pn benchmark() {
     let size = 5000
-    var arr = make_array(size, 0)
+    var arr = fill(size, 0)
 
     // Fill with deterministic descending + modular values
     var seed = 42

@@ -936,6 +936,8 @@ typedef struct Context {
     Item fn_split3(Item str, Item sep, Item keep_delim);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     Item fn_chars(Item str);            // chars(str) - decompose into array of characters
+    int64_t fn_ord(Item str);           // ord(str) - Unicode code point of first character
+    Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace

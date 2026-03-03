@@ -382,6 +382,36 @@ find("a1b22", digits) | ~.value     // ["1", "22"]
 
 Normalize a string (Unicode normalization).
 
+### ord(str)
+
+Return the Unicode code point (integer) of the first character. Works on both strings and symbols.
+
+```lambda
+ord("A")             // 65
+ord("é")             // 233
+ord("😀")            // 128512
+ord('A')             // 65 (symbol input)
+ord("hello")         // 104 (first character 'h')
+ord("")              // 0 (empty string)
+```
+
+### chr(int)
+
+Return a 1-character string from a Unicode code point.
+
+```lambda
+chr(65)              // "A"
+chr(233)             // "é"
+chr(128512)          // "😀"
+chr(-1)              // null (out of range)
+```
+
+**Round-trip:**
+```lambda
+chr(ord("Z"))        // "Z"
+ord(chr(65))         // 65
+```
+
 ---
 
 ## Collection Functions
@@ -1048,3 +1078,5 @@ if (result is error) {
 | `split` | 2-3 | Split string by pattern/substring |
 | `join` | 2 | Join list of strings with separator |
 | `find` | 2 | Find all pattern/substring matches |
+| `ord` | 1 | Unicode code point of first character |
+| `chr` | 1 | Character from Unicode code point |
