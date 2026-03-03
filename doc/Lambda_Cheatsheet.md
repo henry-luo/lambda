@@ -168,6 +168,9 @@ arr.0             // Alt. syntax for const index
 arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
+"hello"[1 to 3]   // "ell" — string slicing
+'hello'[1 to 3]   // 'ell  — symbol slicing
+"café"[2 to 3]    // "fé"  — UTF-8 aware
 ```
 
 **Namespaces (via `import` with bare URI):**
