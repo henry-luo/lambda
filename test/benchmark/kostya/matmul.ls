@@ -6,26 +6,6 @@
 
 let N = 200
 
-pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain = n - sz
-        var extra = [val]
-        var esz = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
-}
-
 pn next_rand(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
@@ -50,9 +30,9 @@ pn matmul(a, b, c, n) {
 
 pn main() {
     let size = N * N
-    var a = make_array(size, 0.0)
-    var b = make_array(size, 0.0)
-    var c = make_array(size, 0.0)
+    var a = fill(size, 0.0)
+    var b = fill(size, 0.0)
+    var c = fill(size, 0.0)
 
     // Initialize with pseudo-random values in [-1.0, 1.0)
     var seed = 42

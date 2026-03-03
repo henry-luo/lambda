@@ -14,20 +14,20 @@ All 19 benchmarks are written as `pn` (procedural) Lambda scripts using the `pn 
 **Location:** `test/benchmark/larceny/`
 **Runner:** `python3 test/benchmark/larceny/run_bench.py [num_runs]`
 
-| # | Benchmark | Category | Description | Expected Result | Verified |
-|---|-----------|----------|-------------|-----------------|----------|
-| 1 | **deriv** | alloc | Symbolic differentiation of expression trees using tagged maps, 5000 iterations | 45 nodes | ✅ PASS |
-| 2 | **primes** | array | Sieve of Eratosthenes to 8000, repeated 10 times | pi(8000) = 1007 | ✅ PASS |
-| 3 | **pnpoly** | numeric | Point-in-polygon ray casting (Jordan curve theorem), 100K test points against a 20-vertex polygon | inside=29415 | ⏳ Release only |
-| 4 | **diviter** | iterative | Iterative integer division via repeated subtraction, 1000 iterations | result=500000 | ✅ PASS |
-| 5 | **divrec** | recursive | Recursive integer division via repeated subtraction, 1000 iterations | result=500000000 | ✅ PASS |
-| 6 | **array1** | array | Array fill (0..9999) & sum, 10000 elements × 100 iterations | sum=49995000 | ✅ PASS |
-| 7 | **gcbench** | gc | GC stress: binary tree allocation & traversal depth 4–14, stretch tree depth 15 | Multi-line tree stats | ✅ PASS |
-| 8 | **quicksort** | sort | Quicksort 5000 pseudo-random elements, 10 iterations | sorted=true | ✅ PASS |
-| 9 | **triangl** | backtrack | Triangle solitaire — count all backtracking solutions (15-position board) | solutions=29760 | ⏳ Release only |
-| 10 | **puzzle** | backtrack | N-Queens n=10, count all solutions | solutions=724 | ✅ PASS |
-| 11 | **ray** | numeric | Ray tracer 100×100 with 4 spheres, 1 iteration | hits=1392 | ✅ PASS |
-| 12 | **paraffins** | recursive | Paraffin isomer counting (OEIS A000602) nb(1..23) × 10 iters | nb(23)=5731580 | ✅ PASS |
+| #   | Benchmark     | Category  | Description                                                                                       | Expected Result       | Verified |
+| --- | ------------- | --------- | ------------------------------------------------------------------------------------------------- | --------------------- | -------- |
+| 1   | **deriv**     | alloc     | Symbolic differentiation of expression trees using tagged maps, 5000 iterations                   | 45 nodes              | ✅ PASS   |
+| 2   | **primes**    | array     | Sieve of Eratosthenes to 8000, repeated 10 times                                                  | pi(8000) = 1007       | ✅ PASS   |
+| 3   | **pnpoly**    | numeric   | Point-in-polygon ray casting (Jordan curve theorem), 100K test points against a 20-vertex polygon | inside=29415          | ✅ PASS   |
+| 4   | **diviter**   | iterative | Iterative integer division via repeated subtraction, 1000 iterations                              | result=500000         | ✅ PASS   |
+| 5   | **divrec**    | recursive | Recursive integer division via repeated subtraction, 1000 iterations                              | result=500000000      | ✅ PASS   |
+| 6   | **array1**    | array     | Array fill (0..9999) & sum, 10000 elements × 100 iterations                                       | sum=49995000          | ✅ PASS   |
+| 7   | **gcbench**   | gc        | GC stress: binary tree allocation & traversal depth 4–14, stretch tree depth 15                   | Multi-line tree stats | ✅ PASS   |
+| 8   | **quicksort** | sort      | Quicksort 5000 pseudo-random elements, 10 iterations                                              | sorted=true           | ✅ PASS   |
+| 9   | **triangl**   | backtrack | Triangle solitaire — count all backtracking solutions (15-position board)                         | solutions=29760       | ✅ PASS   |
+| 10  | **puzzle**    | backtrack | N-Queens n=10, count all solutions                                                                | solutions=724         | ✅ PASS   |
+| 11  | **ray**       | numeric   | Ray tracer 100×100 with 4 spheres, 1 iteration                                                    | hits=1392             | ✅ PASS   |
+| 12  | **paraffins** | recursive | Paraffin isomer counting (OEIS A000602) nb(1..23) × 10 iters                                      | nb(23)=5731580        | ✅ PASS   |
 
 ## Kostya Suite (7 benchmarks)
 
@@ -36,13 +36,13 @@ All 19 benchmarks are written as `pn` (procedural) Lambda scripts using the `pn 
 
 | # | Benchmark | Category | Description | Expected Result | Verified |
 |---|-----------|----------|-------------|-----------------|----------|
-| 1 | **brainfuck** | interpreter | Brainfuck interpreter for Hello World program, 10000 iterations | "Hello World!\n" | ✅ PASS (1 iter) |
-| 2 | **matmul** | numeric | 200×200 matrix multiply with LCG-initialized matrices | sum printed | ⏳ Release only |
-| 3 | **primes** | array | Sieve of Eratosthenes to 1,000,000 | pi(10⁶) = 78498 | ⏳ Release only |
+| 1 | **brainfuck** | interpreter | Brainfuck interpreter for Hello World program, 10000 iterations | "Hello World!\n" | ✅ PASS |
+| 2 | **matmul** | numeric | 200×200 matrix multiply with LCG-initialized matrices | sum printed | ✅ PASS |
+| 3 | **primes** | array | Sieve of Eratosthenes to 1,000,000 | pi(10⁶) = 78498 | ✅ PASS |
 | 4 | **base64** | encoding | Base64 encode 10KB of data (all 'a'), 100 iterations | encoded_len=13336 | ✅ PASS |
 | 5 | **levenshtein** | string/DP | Levenshtein edit distance (2-row DP), multiple string pairs | d(kitten,sitting)=3 | ✅ PASS |
 | 6 | **json_gen** | string | JSON string generation, 1000 objects × 10 iterations | length=61626 | ✅ PASS |
-| 7 | **collatz** | numeric | Longest Collatz (3n+1) sequence under 1,000,000 | start=837799 | ⏳ Release only |
+| 7 | **collatz** | numeric | Longest Collatz (3n+1) sequence under 1,000,000 | start=837799 | ✅ PASS |
 
 ## File Structure
 
@@ -57,9 +57,9 @@ test/benchmark/<suite>/
 
 ## Lambda Language Issues Discovered & Fixed
 
-During implementation, several Lambda `pn`-mode (procedural JIT) issues were discovered and worked around at the benchmark level. These represent real limitations in the current C2MIR transpiler and runtime.
+During implementation, several Lambda `pn`-mode (procedural JIT) issues were discovered. All have been fixed in the engine and workarounds removed from benchmark code.
 
-### Fixed (worked around in benchmark code)
+### All Issues — FIXED
 
 #### ~~1. String range indexing returns `null` in `pn` mode~~ — FIXED in engine
 
@@ -120,38 +120,11 @@ var ch = table[idx]          // OK — fn_index handles INT64
 
 **Current Status:** This issue is no longer reproducible. String literals in called `pn` functions now work correctly, including repeated calls (tested with 64 consecutive calls). The original failure was likely related to the same pn transpiler boxing issues fixed in Issue #2 (`div`).
 
-#### 5. `pn` functions must have explicit `return` on all code paths
+#### 5. `pn` functions must have explicit `return` on all code paths — FIXED
 
-**Symptom:** A recursive `pn` function that does not have an explicit `return` statement on every code path causes the C2MIR transpiler to emit `"unfinished compound statement"` and fail compilation.
+**Status:** ✅ **Resolved.** The transpiler now correctly handles `pn` functions where the body is a single control flow statement (if/while/for/match) without wrapping content. When the body is a single `AST_NODE_IF_EXPR`, the transpiler routes to `transpile_if_stam` and appends `return ITEM_NULL;` as a fallthrough, instead of generating an invalid nested return in ternary expression.
 
-**Impact:** Affects any recursive helper `pn` function where the programmer relies on implicit return of the last expression.
-
-**Workaround:** Always add explicit `return <value>` at the end of every branch in recursive `pn` functions.
-
-```
-// BROKEN — missing return after recursive call
-pn qsort(arr, lo, hi) {
-    if (lo < hi) {
-        var p = partition(arr, lo, hi)
-        qsort(arr, lo, p - 1)
-        qsort(arr, p + 1, hi)
-    }
-    // no return → transpiler error
-}
-
-// WORKS
-pn qsort(arr, lo, hi) {
-    if (lo < hi) {
-        var p = partition(arr, lo, hi)
-        qsort(arr, lo, p - 1)
-        qsort(arr, p + 1, hi)
-        return 0
-    }
-    return 0
-}
-```
-
-**Files affected:** `quicksort.ls`
+**Files affected by fix:** `lambda/transpile.cpp`
 
 #### 6. Large integer overflow in LCG random number generators
 
@@ -190,45 +163,29 @@ pn next_rand(seed) { return (seed * 1664525 + 1013904223) % 1000000 }
 
 #### A. `paraffins` SIGSEGV — fixed
 
-The original `paraffins` implementation (building explicit tree structures) caused a SIGSEGV crash deep in recursion. **Fixed** by rewriting with a counting-only approach: instead of allocating radical tree nodes, it counts radicals at each size using multiset combination formulas (ms2, ms3, ms4). Also required a pure-integer `int_div()` function (binary long division) since both `div` (broken in pn) and `/` (returns float, poisoning `%` operations) cannot be used. A critical algorithmic fix was adding a `max_rad = floor((n-1)/2)` constraint in the CCP (carbon-centered paraffin) enumeration to prevent overlap with BCP (bond-centered) counting and array out-of-bounds access.
+The original `paraffins` implementation (building explicit tree structures) caused a SIGSEGV crash deep in recursion. **Fixed** by rewriting with a counting-only approach: instead of allocating radical tree nodes, it counts radicals at each size using multiset combination formulas (ms2, ms3, ms4). A critical algorithmic fix was adding a `max_rad = floor((n-1)/2)` constraint in the CCP (carbon-centered paraffin) enumeration to prevent overlap with BCP (bond-centered) counting and array out-of-bounds access. Now uses the `div` operator directly for integer division.
 
-### Outstanding Issues
+### Remaining Limitations
 
 #### B. Debug build too slow for compute-heavy benchmarks
 
-The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `pnpoly` (100K points × 20-vertex polygon), `brainfuck` (10K iterations), `collatz` (1M numbers), `matmul` (200×200), `kostya/primes` (sieve to 1M), and `triangl` (backtracking 29K solutions) are only practical to run in release mode. They have been verified to compile and their logic verified with reduced inputs. Note: `quicksort` (5000 elements) previously timed out in debug but now passes.
-
-#### C. Semicolons on same line cause syntax error — NO LONGER REPRODUCIBLE
-
-Multiple statements separated by `;` on a single line (e.g., `stack[sp] = i; sp = sp + 1`) were reported to produce syntax error E100. Testing confirms semicolons now work correctly in both `pn` and `fn` modes for all statement types: `var` declarations, assignments, index assignments, `print`, `if`, and `while`.
-
-#### D. `div` keyword entirely non-functional in `pn` mode — FIXED
-
-The `div` operator for integer division now works correctly in procedural (`pn`) mode. The fix adds unboxing at assignment when the RHS is an `idiv` expression. See Issue #2 above for details.
+The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `pnpoly`, `brainfuck`, `collatz`, `matmul`, `kostya/primes`, and `triangl` are only practical to run in release mode (`make release`). All 19 benchmarks pass in release mode.
 
 ## Benchmark Design Patterns
 
 Several patterns were established for writing benchmarks in Lambda `pn` mode:
 
 ### Dynamic array creation
-Lambda has a built-in `fill(n, val)` function that creates an array of `n` elements initialized to `val` (as long as `val` is not `null`):
+Lambda has a built-in `fill(n, val)` function that creates an array of `n` elements initialized to `val`:
 ```lambda
-var arr = fill(1000, 0)     // [0, 0, 0, ..., 0] — 1000 zeros
-var flags = fill(8001, 1)   // [1, 1, 1, ..., 1] — 8001 ones
+var arr = fill(1000, 0)         // [0, 0, 0, ..., 0] — 1000 zeros
+var flags = fill(8001, true)    // [true, true, ..., true] — 8001 bools
+var strs = fill(3, "hello")    // ["hello", "hello", "hello"] — 3 strings
 ```
-Note: `fill(n, str)` on a string value repeats the string (`fill(3, "ab")` → `"ababab"`), so use `fill(n, 0)` for numeric arrays.
 
-### Character code conversion — `ord()` and `chr()` now supported
-Lambda now has built-in `ord(str)` and `chr(int)` functions for Unicode code point conversion. Previously, manual lookup tables were needed:
+### Character code conversion — `ord()` and `chr()`
+Lambda has built-in `ord(str)` and `chr(int)` functions for Unicode code point conversion:
 ```lambda
-// Old workaround (no longer needed):
-pn chr(code) {
-    if (code == 72) { return "H" }
-    if (code == 101) { return "e" }
-    // ...
-}
-
-// Now use built-in functions:
 ord("A")    // 65
 chr(65)     // "A"
 ord("é")    // 233
