@@ -149,6 +149,7 @@ pn nb(n) {
 }
 
 pn main() {
+    var __t0 = clock()
     var result = 0
     var iter = 0
     while (iter < 10) {
@@ -159,6 +160,7 @@ pn main() {
         }
         iter = iter + 1
     }
+    var __t1 = clock()
 
     // result = nb(23)
     print("paraffins: nb(23) = " ++ string(result) ++ "\n")
@@ -167,4 +169,5 @@ pn main() {
     } else {
         print("paraffins: FAIL (expected 5731580)\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

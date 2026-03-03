@@ -53,6 +53,7 @@ function runBf(prog, jumps) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const prog = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.";
     const jumps = buildJumpTable(prog);
 
@@ -60,7 +61,9 @@ function main() {
     for (let iter = 0; iter < 10000; iter++) {
         output = runBf(prog, jumps);
     }
+    const __t1 = process.hrtime.bigint();
     process.stdout.write(output + "\n");
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

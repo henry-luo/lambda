@@ -57,16 +57,19 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     var result = 0
     var iter = 0
     while (iter < 10) {
         result = benchmark()
         iter = iter + 1
     }
+    var __t1 = clock()
     print("json_gen: length=" ++ string(result) ++ "\n")
     if (result > 0) {
         print("json_gen: PASS\n")
     } else {
         print("json_gen: FAIL\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

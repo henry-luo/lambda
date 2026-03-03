@@ -3,6 +3,7 @@
 'use strict';
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const mfrom = [0,0,1,1,2,2,3,3,3,3,4,4,5,5,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,12,12,13,13,14,14];
     const mover = [1,2,3,4,4,5,1,4,6,7,7,8,2,4,8,9,3,7,4,8,4,7,5,8,6,11,7,12,7,8,11,13,8,12,9,13];
     const mto   = [3,5,6,8,7,9,0,5,10,12,11,13,0,3,12,14,1,8,2,9,1,6,2,7,3,12,4,13,3,5,10,14,4,11,5,12];
@@ -58,6 +59,7 @@ function main() {
             }
         }
     }
+    const __t1 = process.hrtime.bigint();
 
     process.stdout.write("triangl: solutions=" + solutions + "\n");
     if (solutions === 29760) {
@@ -65,6 +67,7 @@ function main() {
     } else {
         process.stdout.write("triangl: DONE\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

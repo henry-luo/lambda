@@ -102,5 +102,8 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     benchmark()
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

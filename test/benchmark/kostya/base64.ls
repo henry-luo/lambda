@@ -53,6 +53,7 @@ pn b64_decode_len(encoded) {
 }
 
 pn main() {
+    var __t0 = clock()
     // Create input: 10000 bytes all = 97 ('a')
     let table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     let num_bytes = 10000
@@ -67,6 +68,7 @@ pn main() {
         decoded_len = b64_decode_len(encoded)
         iter = iter + 1
     }
+    var __t1 = clock()
 
     let enc_len = len(encoded)
     print("base64: encoded_len=" ++ string(enc_len) ++ " decoded_len=" ++ string(decoded_len) ++ "\n")
@@ -75,4 +77,5 @@ pn main() {
     } else {
         print("base64: FAIL\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

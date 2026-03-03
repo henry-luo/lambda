@@ -24,16 +24,19 @@ function solve(row, cols, diag1, diag2, n) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const cols = new Array(BOARD_SIZE).fill(false);
     const diag1 = new Array(BOARD_SIZE * 2).fill(false);
     const diag2 = new Array(BOARD_SIZE * 2).fill(false);
 
     const result = solve(0, cols, diag1, diag2, BOARD_SIZE);
+    const __t1 = process.hrtime.bigint();
     if (result === 724) {
         process.stdout.write("puzzle: PASS\n");
     } else {
         process.stdout.write("puzzle: FAIL result=" + result + "\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

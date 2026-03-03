@@ -29,6 +29,7 @@ function makeString(ch, n) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const d1 = levenshtein("kitten", "sitting");
     const d2 = levenshtein("saturday", "sunday");
 
@@ -39,6 +40,7 @@ function main() {
     const s3 = makeString("ab", 200);
     const s4 = makeString("ba", 200);
     const d4 = levenshtein(s3, s4);
+    const __t1 = process.hrtime.bigint();
 
     process.stdout.write("levenshtein: d(kitten,sitting)=" + d1 + "\n");
     process.stdout.write("levenshtein: d(saturday,sunday)=" + d2 + "\n");
@@ -50,6 +52,7 @@ function main() {
     } else {
         process.stdout.write("levenshtein: FAIL\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();
