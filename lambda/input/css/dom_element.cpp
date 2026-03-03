@@ -656,7 +656,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
                     decl->specificity.ids = 0;
                     decl->specificity.classes = 0;
                     decl->specificity.elements = 0;
-                    decl->specificity.important = false;
+                    decl->specificity.important = decl->important; // preserve !important for cascade
 
                     // Apply to element
                     bool applied = dom_element_apply_declaration(element, decl);
@@ -774,6 +774,7 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
             if (decl) {
                 // Update declaration's specificity to match the selector
                 decl->specificity = specificity;
+                decl->specificity.important = decl->important; // preserve !important for cascade
                 decl->origin = rule->origin;
 
                 if (dom_element_apply_declaration(element, decl)) {
@@ -859,6 +860,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
             if (decl) {
                 // Update declaration's specificity to match the selector
                 decl->specificity = specificity;
+                decl->specificity.important = decl->important; // preserve !important for cascade
                 decl->origin = rule->origin;
 
                 // Apply to pseudo-element style tree
