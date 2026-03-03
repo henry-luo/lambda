@@ -799,6 +799,7 @@ typedef struct Context {
     Bool fn_ge(Item a, Item b);
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
+    Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
 
     // query operations: search data for items matching a type
