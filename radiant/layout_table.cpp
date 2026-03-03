@@ -7623,6 +7623,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         DomNode* run_end = child;
 
         // Collect consecutive table-internal siblings (and any text/whitespace between them)
+        // CSS 2.1 §17.2.1: Text nodes between table-internal elements are included in the
+        // anonymous wrapper. Trailing whitespace-only text nodes are also included (they get
+        // absorbed per §17.2.1 rule about whitespace adjacent to table elements).
+        // Non-whitespace text nodes NOT followed by table-internal elements remain outside.
         while (run_end->next_sibling) {
             DomNode* next = run_end->next_sibling;
             if (next->is_element()) {
@@ -7633,8 +7637,35 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     break;
                 }
             } else if (next->is_text()) {
-                // Include text nodes between table-internal elements
-                run_end = next;
+                // Look ahead past this text node to see if more table-internal follows
+                DomNode* after_text = next->next_sibling;
+                while (after_text && after_text->is_text()) {
+                    after_text = after_text->next_sibling;
+                }
+                if (after_text && after_text->is_element()) {
+                    DisplayValue after_display = resolve_display_value((void*)after_text);
+                    if (is_table_internal_display(after_display.inner)) {
+                        // Text is between two table-internal elements — include it
+                        run_end = next;
+                        continue;
+                    }
+                }
+                // Text is NOT followed by table-internal. Include only if whitespace-only
+                // (CSS 2.1 §17.2.1: whitespace adjacent to table elements is absorbed)
+                const unsigned char* text = next->text_data();
+                bool is_whitespace_only = true;
+                if (text) {
+                    for (const unsigned char* p = text; *p; p++) {
+                        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') {
+                            is_whitespace_only = false;
+                            break;
+                        }
+                    }
+                }
+                if (is_whitespace_only) {
+                    run_end = next;  // absorb trailing whitespace
+                }
+                break;  // stop regardless (whitespace included or not)
             } else {
                 break;
             }
@@ -7671,14 +7702,17 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
 
         if (needs_table) {
             // Create anonymous table
-            // CSS Display Level 3: 'display: table' is shorthand for 'display: block table'
-            // outer = BLOCK (how it participates in flow), inner = TABLE (how children are laid out)
+            // CSS 2.1 §17.2.1: If parent is inline, create inline-table (participates in inline flow)
+            // Otherwise create block-level table
+            DisplayValue parent_display = resolve_display_value((void*)parent);
+            bool parent_is_inline = (parent_display.outer == CSS_VALUE_INLINE);
+
             table_wrapper = (DomElement*)pool_calloc(pool, sizeof(DomElement));
             if (table_wrapper) {
                 table_wrapper->node_type = DOM_NODE_ELEMENT;
                 table_wrapper->tag_name = "::anon-table";
                 table_wrapper->doc = parent->doc;
-                table_wrapper->display.outer = CSS_VALUE_BLOCK;  // Tables are block-level
+                table_wrapper->display.outer = parent_is_inline ? CSS_VALUE_INLINE : CSS_VALUE_BLOCK;
                 table_wrapper->display.inner = CSS_VALUE_TABLE;  // Inner is table layout
                 table_wrapper->styles_resolved = true;
 
