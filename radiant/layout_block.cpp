@@ -2972,6 +2972,30 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("Element has clear property, applying clear layout BEFORE children (float=%d, bound=%p)",
                       is_float, (void*)block->bound);
             layout_clear_element(lycon, block);
+            // CSS 2.1 §9.5.2: Recalculate x offset after clear moves element below floats
+            if (bfc_float_offset_x > 0) {
+                BlockContext* clear_bfc = lycon->block.parent
+                    ? block_context_find_bfc(lycon->block.parent)
+                    : block_context_find_bfc(&lycon->block);
+                if (clear_bfc) {
+                    float new_y_in_bfc = block->y;
+                    ViewElement* pv = block->parent_view();
+                    while (pv && clear_bfc->establishing_element && pv != clear_bfc->establishing_element) {
+                        new_y_in_bfc += pv->y;
+                        ViewElement* ppv = pv->parent_view();
+                        if (!ppv) break;
+                        pv = ppv;
+                    }
+                    float query_height = block->height > 0 ? block->height : 16.0f;
+                    FloatAvailableSpace space = block_context_space_at_y(clear_bfc, new_y_in_bfc, query_height);
+                    if (!space.has_left_float && !space.has_right_float) {
+                        // No floats at the new y position — remove the offset
+                        block->x -= bfc_float_offset_x;
+                        log_debug("[CLEARANCE] Removed float x offset after clear: block->x=%.1f", block->x);
+                        bfc_float_offset_x = 0;
+                    }
+                }
+            }
         } else {
             // CSS 2.1 §9.5.2: In-flow non-float block with margins.
             // Compute hypothetical position (with margin collapsing) and compare
@@ -3081,6 +3105,42 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 // Signal margin collapsing section to skip collapse for this block
                 pa_block->saved_clear_y = clear_y;
                 log_debug("[CLEARANCE] Applied: y=%.1f, saved_clear_y=%.1f", block->y, clear_y);
+
+                // CSS 2.1 §9.5.2: After clearance moves the element below the floats,
+                // the BFC float-avoidance x offset computed at the original y position
+                // may no longer apply. Recalculate the x offset at the new y position.
+                if (bfc_float_offset_x > 0) {
+                    BlockContext* clear_bfc = lycon->block.parent
+                        ? block_context_find_bfc(lycon->block.parent)
+                        : block_context_find_bfc(&lycon->block);
+                    if (clear_bfc) {
+                        // Compute BFC y coordinate at the new position
+                        float new_y_in_bfc = block->y;
+                        ViewElement* pv = block->parent_view();
+                        while (pv && clear_bfc->establishing_element && pv != clear_bfc->establishing_element) {
+                            new_y_in_bfc += pv->y;
+                            ViewElement* ppv = pv->parent_view();
+                            if (!ppv) break;
+                            pv = ppv;
+                        }
+                        float query_height = block->height > 0 ? block->height : 16.0f;
+                        FloatAvailableSpace space = block_context_space_at_y(clear_bfc, new_y_in_bfc, query_height);
+                        float new_offset_x = 0;
+                        if (space.has_left_float) {
+                            float x_in_bfc = block->x - bfc_float_offset_x;  // original x in BFC coords
+                            float local_left = space.left - x_in_bfc + (block->bound ? block->bound->margin.left : 0);
+                            new_offset_x = max(0.0f, local_left);
+                        }
+                        // Remove old offset and apply new one
+                        float offset_delta = new_offset_x - bfc_float_offset_x;
+                        if (offset_delta != 0) {
+                            block->x += offset_delta;
+                            bfc_float_offset_x = new_offset_x;
+                            log_debug("[CLEARANCE] Recalculated x offset after clear: old_offset=%.1f, new_offset=%.1f, block->x=%.1f",
+                                      bfc_float_offset_x - offset_delta, new_offset_x, block->x);
+                        }
+                    }
+                }
             }
         }
     }
