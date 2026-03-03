@@ -5919,7 +5919,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum float_value = value->data.keyword;
-                if (float_value > 0) {
+                // CSS 2.1 §1.3.2: Handle 'inherit' — use parent's computed float value
+                if (float_value == CSS_VALUE_INHERIT) {
+                    DomElement* parent_elem = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                    if (parent_elem && parent_elem->position) {
+                        float_value = parent_elem->position->float_prop;
+                        log_debug("[CSS] float: inherit — resolved to parent float 0x%04X", float_value);
+                    } else {
+                        float_value = CSS_VALUE_NONE;  // initial value
+                        log_debug("[CSS] float: inherit — no parent or no parent position, using none");
+                    }
+                }
+                if (float_value > 0 && float_value != CSS_VALUE_INHERIT) {
                     block->position->float_prop = float_value;
                     const CssEnumInfo* info = css_enum_info(float_value);
                     log_debug("[CSS] Float: %s -> 0x%04X", info ? info->name : "unknown", float_value);
@@ -5937,7 +5948,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum clear_value = value->data.keyword;
-                if (clear_value > 0) {
+                // CSS 2.1 §1.3.2: Handle 'inherit' — use parent's computed clear value
+                if (clear_value == CSS_VALUE_INHERIT) {
+                    DomElement* parent_elem = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                    if (parent_elem && parent_elem->position) {
+                        clear_value = parent_elem->position->clear;
+                        log_debug("[CSS] clear: inherit — resolved to parent clear 0x%04X", clear_value);
+                    } else {
+                        clear_value = CSS_VALUE_NONE;  // initial value
+                        log_debug("[CSS] clear: inherit — no parent or no parent position, using none");
+                    }
+                }
+                if (clear_value > 0 && clear_value != CSS_VALUE_INHERIT) {
                     block->position->clear = clear_value;
                     const CssEnumInfo* info = css_enum_info(clear_value);
                     log_debug("[CSS] Clear: %s -> 0x%04X", info ? info->name : "unknown", clear_value);
