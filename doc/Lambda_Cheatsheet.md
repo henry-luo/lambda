@@ -613,7 +613,7 @@ else result * 2
 8. `and` - Logical AND
 9. `or` - Logical OR
 10. `to` - Range
-11. `is` `in` - Type operations
+11. `is` `in` - Type operations (`is nan` for NaN detection)
 12. `|` `where` - Pipe and Filter
 
 ## Quick Examples

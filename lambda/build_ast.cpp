@@ -2716,6 +2716,25 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
+    // Special case: 'expr is nan' — IEEE NaN check
+    // nan is a float value, not a type, so 'is' type-check doesn't work.
+    // Detect NaN literal on RHS and rewrite to OPERATOR_IS_NAN (unary-like check).
+    if (ast_node->op == OPERATOR_IS) {
+        AstNode* rhs = ast_node->right;
+        if (rhs->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)rhs;
+            if (pri->type && pri->type->type_id == LMD_TYPE_FLOAT) {
+                TypeFloat* ft = (TypeFloat*)pri->type;
+                if (__builtin_isnan(ft->double_val)) {
+                    log_debug("build_binary_expr: detected 'expr is nan', rewriting to OPERATOR_IS_NAN");
+                    ast_node->op = OPERATOR_IS_NAN;
+                    ast_node->type = &TYPE_BOOL;
+                    return (AstNode*)ast_node;
+                }
+            }
+        }
+    }
+
     // Chained comparison transformation: a < b < c => (a < b) and (b < c)
     // Detect when left operand is a comparison and current op is also a comparison
     if (is_relational_op(ast_node->op) && ast_node->left->node_type == AST_NODE_BINARY) {

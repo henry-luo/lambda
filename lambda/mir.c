@@ -341,6 +341,7 @@ func_obj_t func_list[] = {
     {"fn_call2", (fn_ptr) fn_call2},
     {"fn_call3", (fn_ptr) fn_call3},
     {"fn_is", (fn_ptr) fn_is},
+    {"fn_is_nan", (fn_ptr) fn_is_nan},
     {"fn_in", (fn_ptr) fn_in},
     {"fn_query", (fn_ptr) fn_query},
     {"fn_to", (fn_ptr) fn_to},

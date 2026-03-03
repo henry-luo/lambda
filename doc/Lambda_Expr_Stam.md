@@ -245,6 +245,18 @@ if (x == null) "missing" else x
 "hello" is string      // true
 !(42 is string)        // true (negated type check)
 
+// NaN detection (IEEE 754: nan == nan is false, use 'is nan' instead)
+nan is nan             // true
+(0/0) is nan           // true
+1.0 is nan             // false
+
+// Value comparison (when RHS is a value, not a type)
+42 is 42               // true (equivalent to 42 == 42)
+"hello" is "hello"     // true
+[1,2,3] is [1,2,3]    // true (structural equality)
+true is true           // true
+inf is inf             // true
+
 // Type equality
 type(42) == int        // true
 type([1,2]) == array   // true
@@ -1174,6 +1186,8 @@ From highest to lowest:
 | Operator | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `is` | Type check | `42 is int` | `true` |
+| `is` | Value comparison | `42 is 42` | `true` |
+| `is nan` | NaN check | `nan is nan` | `true` |
 | `in` | Membership | `2 in [1, 2, 3]` | `true` |
 | `to` | Range | `1 to 5` | `[1, 2, 3, 4, 5]` |
 

@@ -1780,6 +1780,12 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
+    else if (bi_node->op == OPERATOR_IS_NAN) {
+        // IEEE NaN check: expr is nan
+        strbuf_append_str(tp->code_buf, "fn_is_nan(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ')');
+    }
     else if (bi_node->op == OPERATOR_IS) {
         // Check if right operand is a constrained type for inline constraint evaluation
         AstNode* right = bi_node->right;
