@@ -1,14 +1,14 @@
-# Larceny/Gambit Benchmark Results 2026-03-03 21:54:47, runs=3
+# Larceny/Gambit Benchmark Results 2026-03-03 22:56:06, runs=3
 benchmark,category,lambda_ms
-deriv,alloc,64.403
-primes,array,6.962
-pnpoly,numeric,66.881
-diviter,iterative,5731.227
-divrec,recursive,16.173
-array1,array,17.699
-gcbench,gc,2674.543
-quicksort,sort,13.269
-triangl,backtrack,1797.638
-puzzle,backtrack,21.481
-ray,numeric,17.238
-paraffins,recursive,15.250
+deriv,alloc,67.198
+primes,array,7.387
+pnpoly,numeric,66.917
+diviter,iterative,5762.080
+divrec,recursive,15.902
+array1,array,17.895
+gcbench,gc,2830.706
+quicksort,sort,13.594
+triangl,backtrack,1792.323
+puzzle,backtrack,20.404
+ray,numeric,16.174
+paraffins,recursive,14.659

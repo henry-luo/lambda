@@ -31,23 +31,23 @@ This suite implements classic benchmarks from the Larceny/Gambit Scheme benchmar
 
 | Benchmark | Category | Lambda | Node.js | Ratio |
 |-----------|----------|--------|---------|-------|
-| deriv | alloc | 64.4 ms | 6.4 ms | 10.1× |
-| primes | array | 7.0 ms | 3.3 ms | 2.1× |
+| deriv | alloc | 67.2 ms | 6.4 ms | 10.5× |
+| primes | array | 7.4 ms | 3.3 ms | 2.2× |
 | pnpoly | numeric | 66.9 ms | 7.2 ms | 9.3× |
-| diviter | iterative | 5.731 s | 445.7 ms | 12.9× |
-| divrec | recursive | 16.2 ms | 9.0 ms | 1.8× |
-| array1 | array | 17.7 ms | 3.5 ms | 5.1× |
-| gcbench | gc | 2.675 s | 24.5 ms | 109.2× |
-| quicksort | sort | 13.3 ms | 4.2 ms | 3.2× |
-| triangl | backtrack | 1.798 s | 68.5 ms | 26.2× |
-| puzzle | backtrack | 21.5 ms | 5.3 ms | 4.1× |
-| ray | numeric | 17.2 ms | 5.6 ms | 3.1× |
-| paraffins | recursive | 15.2 ms | 3.6 ms | 4.2× |
+| diviter | iterative | 5.762 s | 445.7 ms | 12.9× |
+| divrec | recursive | 15.9 ms | 9.0 ms | 1.8× |
+| array1 | array | 17.9 ms | 3.5 ms | 5.1× |
+| gcbench | gc | 2.831 s | 24.5 ms | 115.6× |
+| quicksort | sort | 13.6 ms | 4.2 ms | 3.2× |
+| triangl | backtrack | 1.792 s | 68.5 ms | 26.2× |
+| puzzle | backtrack | 20.4 ms | 5.3 ms | 3.8× |
+| ray | numeric | 16.2 ms | 5.6 ms | 2.9× |
+| paraffins | recursive | 14.7 ms | 3.6 ms | 4.1× |
 
 | | Lambda | Node.js | Ratio |
 |---|--------|---------|-------|
-| **Total time** | 10.443 s | 586.6 ms | 17.8× |
-| **Geometric mean** | 71.5 ms | 10.4 ms | 6.9× |
+| **Total time** | 10.625 s | 586.6 ms | 18.1× |
+| **Geometric mean** | 71.6 ms | 10.4 ms | 6.9× |
 
 ## Analysis
 
@@ -57,7 +57,7 @@ Node.js (V8 JIT) is **6.9× faster** on geometric mean across this suite. The ga
 - **Medium** (5–13×): array1, puzzle, deriv, pnpoly, diviter
 - **Widest** (26–109×): triangl (backtracking with array copies), gcbench (GC stress with deep tree allocation)
 
-The gcbench gap (109×) is the largest outlier — this benchmark is a GC stress test that allocates millions of small binary tree nodes. V8's generational GC with fast nursery allocation dominates here. The triangl gap (26×) reflects Lambda's overhead in array mutation and backtracking state management.
+The gcbench gap (116×) is the largest outlier — this benchmark is a GC stress test that allocates millions of small binary tree nodes. V8's generational GC with fast nursery allocation dominates here. The triangl gap (26×) reflects Lambda's overhead in array mutation and backtracking state management.
 
 ## Origin
 
