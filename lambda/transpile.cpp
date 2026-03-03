@@ -19,6 +19,8 @@ void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
 void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
 void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *node);
 void transpile_index_assign_stam(Transpiler* tp, AstCompoundAssignNode *node);
+void transpile_return(Transpiler* tp, AstReturnNode *return_node);
+void transpile_raise(Transpiler* tp, AstRaiseNode *raise_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
@@ -2986,6 +2988,12 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
             // nested if in then branch
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_RETURN_STAM) {
+            transpile_return(tp, (AstReturnNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_RAISE_STAM) {
+            transpile_raise(tp, (AstRaiseNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_WHILE_STAM) {
+            transpile_while(tp, (AstWhileNode*)if_node->then);
         } else if (if_node->then->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
             transpile_member_assign_stam(tp, (AstCompoundAssignNode*)if_node->then);
         } else if (if_node->then->node_type == AST_NODE_ASSIGN_STAM) {
@@ -3010,6 +3018,12 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
             // else if chain
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_RETURN_STAM) {
+            transpile_return(tp, (AstReturnNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_RAISE_STAM) {
+            transpile_raise(tp, (AstRaiseNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_WHILE_STAM) {
+            transpile_while(tp, (AstWhileNode*)if_node->otherwise);
         } else if (if_node->otherwise->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
             transpile_member_assign_stam(tp, (AstCompoundAssignNode*)if_node->otherwise);
         } else if (if_node->otherwise->node_type == AST_NODE_ASSIGN_STAM) {
@@ -6451,6 +6465,19 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // return statement already generates return, don't add another
         transpile_return(tp, (AstReturnNode*)fn_node->body);
         strbuf_append_str(tp->code_buf, "\n}\n");
+    } else if (is_proc && fn_node->body->node_type == AST_NODE_IF_EXPR) {
+        // single if-expression as proc body — must use statement form
+        // (expression form would embed return statements inside ternary)
+        strbuf_append_str(tp->code_buf, "\n ");
+        transpile_if_stam(tp, (AstIfNode*)fn_node->body);
+        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+    } else if (is_proc && (fn_node->body->node_type == AST_NODE_WHILE_STAM ||
+                           fn_node->body->node_type == AST_NODE_FOR_STAM ||
+                           fn_node->body->node_type == AST_NODE_MATCH_EXPR)) {
+        // single loop/match as proc body — transpile as statement + default return
+        strbuf_append_str(tp->code_buf, "\n ");
+        transpile_expr(tp, fn_node->body);
+        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");
         // Check if we need to box the return value
