@@ -179,10 +179,10 @@ All 19 benchmarks were also implemented in JavaScript and timed with Node.js v22
 
 | Suite | Lambda Geo Mean | Node.js Geo Mean | Ratio |
 |-------|----------------|-----------------|-------|
-| Kostya (7) | 235.3 ms | 27.6 ms | 8.5× |
-| Larceny (12) | 71.5 ms | 10.4 ms | 6.9× |
+| Kostya (7) | 229.2 ms | 27.6 ms | 8.3× |
+| Larceny (12) | 71.6 ms | 10.4 ms | 6.9× |
 
-Lambda is roughly **7–9× slower** than Node.js (V8 JIT) across these suites. The gap varies from 1.8× (divrec — simple recursion) to 109× (gcbench — GC stress with millions of small allocations).
+Lambda is roughly **7–8× slower** than Node.js (V8 JIT) across these suites. The gap varies from 1.8× (divrec — simple recursion) to 109× (gcbench — GC stress with millions of small allocations).
 
 ### Key Observations
 

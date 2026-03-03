@@ -26,27 +26,27 @@ This suite implements common cross-language benchmarks adapted from [github.com/
 
 | Benchmark | Category | Lambda | Node.js | Ratio |
 |-----------|----------|--------|---------|-------|
-| brainfuck | interp | 391.6 ms | 45.7 ms | 8.6× |
-| matmul | numeric | 368.7 ms | 16.5 ms | 22.3× |
-| primes | array | 29.8 ms | 5.2 ms | 5.7× |
-| base64 | string | 1.101 s | 19.1 ms | 57.6× |
-| levenshtein | dp | 35.3 ms | 5.7 ms | 6.2× |
-| json_gen | string | 89.5 ms | 21.2 ms | 4.2× |
-| collatz | numeric | 2.666 s | 1.337 s | 2.0× |
+| brainfuck | interp | 356.7 ms | 45.7 ms | 7.8× |
+| matmul | numeric | 360.9 ms | 16.5 ms | 21.9× |
+| primes | array | 28.1 ms | 5.2 ms | 5.4× |
+| base64 | string | 1.171 s | 19.1 ms | 61.3× |
+| levenshtein | dp | 34.4 ms | 5.7 ms | 6.0× |
+| json_gen | string | 88.6 ms | 21.2 ms | 4.2× |
+| collatz | numeric | 2.576 s | 1.337 s | 1.9× |
 
 | | Lambda | Node.js | Ratio |
 |---|--------|---------|-------|
-| **Total time** | 4.682 s | 1.451 s | 3.2× |
-| **Geometric mean** | 235.3 ms | 27.6 ms | 8.5× |
+| **Total time** | 4.616 s | 1.451 s | 3.2× |
+| **Geometric mean** | 229.2 ms | 27.6 ms | 8.3× |
 
 ## Analysis
 
-Node.js (V8 JIT) is **8.5× faster** on geometric mean across this suite. The gap varies significantly by workload:
+Node.js (V8 JIT) is **8.3× faster** on geometric mean across this suite. The gap varies significantly by workload:
 
 - **Closest** (2–6×): collatz (pure integer loops), json_gen (string concat), primes (sieve), levenshtein (DP arrays)
 - **Widest** (20–60×): matmul (dense FP arithmetic), base64 (byte-level string building)
 
-The base64 gap (57.6×) reflects Lambda's string concatenation overhead — each encoded character appends to a growing string. The matmul gap (22.3×) reflects V8's superior floating-point loop optimization with typed arrays.
+The base64 gap (61.3×) reflects Lambda's string concatenation overhead — each encoded character appends to a growing string. The matmul gap (21.9×) reflects V8's superior floating-point loop optimization with typed arrays.
 
 ## Origin
 
