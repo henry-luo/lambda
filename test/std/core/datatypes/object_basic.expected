@@ -1,0 +1,13 @@
+{Point 
+  x: 3,
+  y: 4
+}
+3
+4
+5
+10
+8
+[true, true]
+[false, false]
+[true, true]
+[13, 7, 30]
