@@ -158,12 +158,16 @@ typedef struct Linebox {
     struct FontHandle* parent_font_handle; // parent element's font handle (for x-height)
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
+    float hanging_space_width;      // CSS Text 3 §4.1.3: accumulated trailing preserved space width
+                                    // for pre-wrap mode; used to compute hanging space at wrap points
+    float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
     bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
 
     inline void reset_space() {
-        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;  last_space_is_hyphen = false;
+        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
+        last_space_is_hyphen = false;  last_space_hanging_width = 0;
     }
 } Linebox;
 
