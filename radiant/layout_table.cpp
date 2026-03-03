@@ -572,24 +572,54 @@ static float find_first_baseline_recursive(LayoutContext* lycon, View* parent, f
         }
 
         // Recurse into block-level children to find text inside them
-        if (child->view_type == RDT_VIEW_BLOCK ||
-            child->view_type == RDT_VIEW_INLINE ||
-            child->view_type == RDT_VIEW_INLINE_BLOCK ||
-            child->view_type == RDT_VIEW_LIST_ITEM) {
+        // CSS 2.1 §17.5.4: Skip captions (blocks inside tables) when searching for baseline
+        bool is_table_structure = (child->view_type == RDT_VIEW_TABLE ||
+                                   child->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+                                   child->view_type == RDT_VIEW_TABLE_ROW ||
+                                   child->view_type == RDT_VIEW_TABLE_CELL);
+        bool is_block_like = (child->view_type == RDT_VIEW_BLOCK ||
+                              child->view_type == RDT_VIEW_INLINE ||
+                              child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                              child->view_type == RDT_VIEW_LIST_ITEM);
+
+        if (is_table_structure) {
+            // always recurse into table structure for baseline search
             float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
             if (result >= 0) return result;
+        } else if (is_block_like) {
+            // recurse into blocks, but skip blocks inside tables (those are captions)
+            bool parent_is_table = (parent->view_type == RDT_VIEW_TABLE);
+            if (!parent_is_table) {
+                float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
+                if (result >= 0) return result;
+            }
         }
     }
     return -1.0f;
 }
 
 // Find the baseline of a table cell (distance from cell's border-box top to first text baseline)
-// Returns -1 if no in-flow line box baseline is found (e.g., cell contains only tables/images).
-// CSS 2.1 §17.5.4: If no baseline found, the caller decides the fallback behavior.
+// CSS 2.1 §17.5.4: If no line box and no in-flow table row, the baseline is the
+// bottom of the content edge of the cell box.
 static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
     float baseline = find_first_baseline_recursive(lycon, (View*)tcell, 0);
-    log_debug("find_cell_baseline: cell col=%d row=%d -> baseline=%.1f",
-              tcell->td->col_index, tcell->td->row_index, baseline);
+    if (baseline < 0) {
+        // CSS 2.1 §17.5.4: No in-flow line box or table row found.
+        // Use the bottom of the content edge as the baseline.
+        float content_edge_bottom = tcell->height;
+        if (tcell->bound) {
+            if (tcell->bound->border) {
+                content_edge_bottom -= tcell->bound->border->width.bottom;
+            }
+            content_edge_bottom -= tcell->bound->padding.bottom;
+        }
+        baseline = content_edge_bottom;
+        log_debug("find_cell_baseline: cell col=%d row=%d -> content-edge baseline=%.1f (no text found)",
+                  tcell->td->col_index, tcell->td->row_index, baseline);
+    } else {
+        log_debug("find_cell_baseline: cell col=%d row=%d -> baseline=%.1f",
+                  tcell->td->col_index, tcell->td->row_index, baseline);
+    }
     return baseline;
 }
 

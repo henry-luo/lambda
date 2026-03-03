@@ -1159,11 +1159,18 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             }
         } else {
             // width-related and other properties: percentage relative to parent width
-            if (lycon->block.parent) {
+            if (lycon->block.parent && lycon->block.parent->content_width > 0) {
                 log_debug("percentage calculation: %.2f%% of parent width %.1f = %.2f",
                        percentage, lycon->block.parent->content_width,
                        percentage * lycon->block.parent->content_width / 100.0);
                 result = percentage * lycon->block.parent->content_width / 100.0;
+            } else if (!lycon->block.parent && lycon && lycon->width > 0) {
+                // No parent context (root html element) - use viewport width
+                // CSS 2.1 §10.3: percentage widths on the root resolve against the
+                // initial containing block (viewport), same as percentage heights
+                log_debug("percentage width value %.2f%% of viewport width %.1f = %.2f (no parent)",
+                       percentage, lycon->width, percentage * lycon->width / 100.0);
+                result = percentage * lycon->width / 100.0;
             } else {
                 log_debug("percentage value %.2f%% without parent context", percentage);
                 result = 0.0f;
@@ -7994,6 +8001,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
+            }
+
+            // Handle 'inherit' keyword: copy all three list-style sub-properties from parent
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                DomElement* parent = dom_elem->parent ? dom_elem->parent->as_element() : nullptr;
+                while (parent) {
+                    if (parent->blk) {
+                        if (parent->blk->list_style_type) {
+                            block->blk->list_style_type = parent->blk->list_style_type;
+                        }
+                        if (parent->blk->list_style_position) {
+                            block->blk->list_style_position = parent->blk->list_style_position;
+                        }
+                        if (parent->blk->list_style_image) {
+                            block->blk->list_style_image = parent->blk->list_style_image;
+                        }
+                        log_debug("[CSS] list-style: inherit from parent type=0x%04X pos=0x%04X",
+                            block->blk->list_style_type, block->blk->list_style_position);
+                        break;
+                    }
+                    parent = parent->parent ? parent->parent->as_element() : nullptr;
+                }
+                break;
             }
 
             // Handle single keyword value (most common case)
