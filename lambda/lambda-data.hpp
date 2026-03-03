@@ -372,6 +372,29 @@ typedef enum SysFunc {
     SYSFUNC_SIN,
     SYSFUNC_COS,
     SYSFUNC_TAN,
+    // inverse trigonometric
+    SYSFUNC_ASIN,
+    SYSFUNC_ACOS,
+    SYSFUNC_ATAN,
+    SYSFUNC_ATAN2,
+    // hyperbolic
+    SYSFUNC_SINH,
+    SYSFUNC_COSH,
+    SYSFUNC_TANH,
+    // inverse hyperbolic
+    SYSFUNC_ASINH,
+    SYSFUNC_ACOSH,
+    SYSFUNC_ATANH,
+    // exponential/logarithmic variants
+    SYSFUNC_EXP2,
+    SYSFUNC_EXPM1,
+    SYSFUNC_LOG2,
+    // power/root
+    SYSFUNC_POW_MATH,
+    SYSFUNC_CBRT,
+    SYSFUNC_TRUNC,
+    SYSFUNC_HYPOT,
+    SYSFUNC_LOG1P,
     SYSFUNC_SIGN,
     // vector manipulation functions
     SYSFUNC_REVERSE,

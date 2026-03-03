@@ -130,6 +130,29 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_SIN, "math_sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_COS, "math_cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_TAN, "math_tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // inverse trigonometric - math module
+    {SYSFUNC_ASIN, "math_asin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ACOS, "math_acos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ATAN, "math_atan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ATAN2, "math_atan2", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // hyperbolic - math module
+    {SYSFUNC_SINH, "math_sinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_COSH, "math_cosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TANH, "math_tanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // inverse hyperbolic - math module
+    {SYSFUNC_ASINH, "math_asinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ACOSH, "math_acosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ATANH, "math_atanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // exponential/logarithmic variants - math module
+    {SYSFUNC_EXP2, "math_exp2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_EXPM1, "math_expm1", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG2, "math_log2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // power/root - math module
+    {SYSFUNC_POW_MATH, "math_pow", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CBRT, "math_cbrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TRUNC, "math_trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_HYPOT, "math_hypot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG1P, "math_log1p", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // vector manipulation functions - method-eligible on collections
     {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
@@ -1043,6 +1066,29 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     AstPrimaryNode* sym_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
                     sym_node->type = (Type*)sym_type;
                     return (AstNode*)sym_node;
+                }
+
+                // Check for math module constants: math.pi, math.e
+                if (ns_ident->name->len == 4 && memcmp(ns_ident->name->chars, "math", 4) == 0) {
+                    double const_val = 0.0;
+                    bool is_math_const = false;
+                    if (id_node->name->len == 2 && memcmp(id_node->name->chars, "pi", 2) == 0) {
+                        const_val = 3.14159265358979323846;
+                        is_math_const = true;
+                    } else if (id_node->name->len == 1 && id_node->name->chars[0] == 'e') {
+                        const_val = 2.71828182845904523536;
+                        is_math_const = true;
+                    }
+                    if (is_math_const) {
+                        TypeFloat* ft = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+                        ft->double_val = const_val;
+                        arraylist_append(tp->const_list, &ft->double_val);
+                        ft->const_index = tp->const_list->length - 1;
+                        ft->is_const = 1;  ft->is_literal = 1;
+                        AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pn->type = (Type*)ft;
+                        return (AstNode*)pn;
+                    }
                 }
 
                 // Check if object is an aliased import prefix (e.g., helper.val)
