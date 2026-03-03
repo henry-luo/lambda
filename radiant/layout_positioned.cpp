@@ -1294,7 +1294,23 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
 
     // Get the initial Y position (from normal flow placement)
     // block->y is relative to parent's border box, includes margin.top already
-    float initial_y_local = block->y - margin_top;  // Get content box top in parent coords
+    // CSS 2.1 §9.5.2: For floats with 'clear', the border edge is positioned at or below
+    // the bottom outer edge of cleared floats. The margin-top may overlap with the cleared
+    // float's margin-bottom. When querying available space, use the border edge (not margin
+    // edge) so the overlap doesn't cause horizontal displacement.
+    bool has_clear = block->position &&
+        (block->position->clear == CSS_VALUE_LEFT ||
+         block->position->clear == CSS_VALUE_RIGHT ||
+         block->position->clear == CSS_VALUE_BOTH);
+    float initial_y_local;
+    if (has_clear) {
+        // Use border edge: block->y is the cleared position (border edge)
+        initial_y_local = block->y;
+        // Adjust float_total_height to exclude margin_top since we start at border edge
+        float_total_height = block->height + margin_bottom;
+    } else {
+        initial_y_local = block->y - margin_top;  // margin-top edge in parent coords
+    }
     float current_y_bfc = initial_y_local + parent_y_in_bfc;
 
     log_debug("[FLOAT_LAYOUT] Float dimensions: width=%.1f, height=%.1f, total_width=%.1f, total_height=%.1f",
