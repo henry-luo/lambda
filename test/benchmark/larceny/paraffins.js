@@ -68,18 +68,21 @@ function nb(n) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     let result = 0;
     for (let iter = 0; iter < 10; iter++) {
         for (let n = 1; n <= 23; n++) {
             result = nb(n);
         }
     }
+    const __t1 = process.hrtime.bigint();
     process.stdout.write("paraffins: nb(23) = " + result + "\n");
     if (result === 5731580) {
         process.stdout.write("paraffins: PASS\n");
     } else {
         process.stdout.write("paraffins: FAIL (expected 5731580)\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

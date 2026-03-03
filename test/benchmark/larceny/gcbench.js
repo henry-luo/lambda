@@ -13,6 +13,7 @@ function checkTree(node) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const minDepth = 4;
     const maxDepth = 14;
     const stretchDepth = maxDepth + 1;
@@ -30,8 +31,10 @@ function main() {
         }
         process.stdout.write(iterations + " trees of depth " + depth + " check: " + totalCheck + "\n");
     }
+    const __t1 = process.hrtime.bigint();
 
     process.stdout.write("long lived tree of depth " + maxDepth + " check: " + checkTree(longLived) + "\n");
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

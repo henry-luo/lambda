@@ -17,16 +17,19 @@ function divrecMod(x, y) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     let result = 0;
     for (let iter = 0; iter < 1000; iter++) {
         result += divrecDiv(1000, 2);
         result -= divrecMod(1000, 2);
     }
+    const __t1 = process.hrtime.bigint();
     if (result === 500000) {
         process.stdout.write("divrec: PASS\n");
     } else {
         process.stdout.write("divrec: FAIL result=" + result + "\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

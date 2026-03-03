@@ -22,15 +22,18 @@ function sieve(limit) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     let result = 0;
     for (let iter = 0; iter < 10; iter++) {
         result = sieve(8000);
     }
+    const __t1 = process.hrtime.bigint();
     if (result === 1007) {
         process.stdout.write("primes: PASS\n");
     } else {
         process.stdout.write("primes: FAIL result=" + result + "\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

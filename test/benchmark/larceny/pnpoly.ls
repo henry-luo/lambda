@@ -64,7 +64,10 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     let result = benchmark()
+    var __t1 = clock()
     // result depends on polygon area / grid sampling
     print("pnpoly: DONE\n")
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

@@ -21,6 +21,7 @@ function matmul(a, b, c, n) {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const size = N * N;
     const a = new Float64Array(size);
     const b = new Float64Array(size);
@@ -40,10 +41,12 @@ function main() {
     for (let i = 0; i < size; i++) {
         total += c[i];
     }
+    const __t1 = process.hrtime.bigint();
 
     const intTotal = Math.trunc(Math.floor(total));
     process.stdout.write("matmul: sum=" + intTotal + "\n");
     process.stdout.write("matmul: DONE\n");
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();

@@ -45,12 +45,15 @@ function benchmark() {
 }
 
 function main() {
+    const __t0 = process.hrtime.bigint();
     const result = benchmark();
+    const __t1 = process.hrtime.bigint();
     if (result === 45) {
         process.stdout.write("deriv: PASS\n");
     } else {
         process.stdout.write("deriv: FAIL result=" + result + "\n");
     }
+    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 }
 
 main();
