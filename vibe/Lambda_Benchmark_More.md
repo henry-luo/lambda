@@ -61,23 +61,16 @@ During implementation, several Lambda `pn`-mode (procedural JIT) issues were dis
 
 ### Fixed (worked around in benchmark code)
 
-#### 1. String range indexing returns `null` in `pn` mode
+#### ~~1. String range indexing returns `null` in `pn` mode~~ — FIXED in engine
 
-**Symptom:** `s[i to i]` (range-based string slicing to extract a single character) returns `null` instead of a single-character string when used inside `pn` functions.
+**Status:** ✅ **Resolved.** Two bugs were fixed in the engine:
 
-**Impact:** Any string character comparison using range syntax evaluates as `null == null → true`, producing silently wrong results.
+1. **C transpiler boxing bug** (`transpile.cpp`, `transpile_index_expr`): When the index expression is non-numeric (e.g., a Range from `i to i`), the object was passed to `fn_index()` as a raw pointer via `transpile_expr()` instead of a boxed Item via `transpile_box_item()`. This caused `get_type_id()` to misread the string's `len` field as its TypeId.
+2. **Missing Range handler in `fn_index`** (`lambda-eval.cpp`): `fn_index()` had no code path for Range-typed index values. Added handling that extracts `start`/`end` from the Range and delegates to `fn_slice()` (with inclusive→exclusive end conversion).
 
-**Workaround:** Use integer indexing `s[i]` instead of range indexing `s[i to i]`. Integer indexing works correctly and returns a comparable character value.
+`s[i to i]` now works correctly in `pn` mode. Note: `s[i]` (integer indexing) is still more efficient for single-character access since it avoids Range allocation and substring overhead.
 
-```
-// BROKEN in pn mode
-var ch = s[i to i]          // returns null
-
-// WORKS
-var ch = s[i]               // returns character at position i
-```
-
-**Files affected:** `levenshtein.ls`, `brainfuck.ls`, `base64.ls`
+**Files affected by fix:** `lambda/transpile.cpp`, `lambda/lambda-eval.cpp`
 
 #### 2. `div` operator fails in `pn` mode
 

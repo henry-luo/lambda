@@ -81,4 +81,51 @@
 {
   r: "café"
 }
+'range subscript'
+{
+  r: "hello"
+}
+{
+  r: "ell"
+}
+{
+  r: "h"
+}
+{
+  r: "o"
+}
+{
+  r: "café"
+}
+{
+  r: "fé"
+}
+{
+  r: "world"
+}
+{
+  r: "hello"
+}
+{
+  r: "world"
+}
+'symbol range subscript'
+{
+  r: 'hello'
+}
+{
+  r: 'ell'
+}
+{
+  r: 'h'
+}
+{
+  r: 'o'
+}
+{
+  r: 'hello'
+}
+{
+  r: 'world'
+}
 'ALL TESTS COMPLETE'
