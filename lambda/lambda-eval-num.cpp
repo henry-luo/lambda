@@ -732,8 +732,21 @@ Item fn_mod(Item item_a, Item item_b) {
         return push_l(a_val % b_val);
     }
     else if (item_a._type_id == LMD_TYPE_FLOAT || item_b._type_id == LMD_TYPE_FLOAT) {
-        log_debug("modulo not supported for float types");
-        return ItemError;
+        // float modulo: promote both operands to double, use fmod()
+        double a_val = 0.0, b_val = 0.0;
+        if (item_a._type_id == LMD_TYPE_INT)        a_val = (double)item_a.get_int56();
+        else if (item_a._type_id == LMD_TYPE_INT64)  a_val = (double)item_a.get_int64();
+        else if (item_a._type_id == LMD_TYPE_FLOAT)  a_val = item_a.get_double();
+
+        if (item_b._type_id == LMD_TYPE_INT)        b_val = (double)item_b.get_int56();
+        else if (item_b._type_id == LMD_TYPE_INT64)  b_val = (double)item_b.get_int64();
+        else if (item_b._type_id == LMD_TYPE_FLOAT)  b_val = item_b.get_double();
+
+        if (b_val == 0.0) {
+            log_error("float modulo by zero error");
+            return ItemError;
+        }
+        return push_d(fmod(a_val, b_val));
     }
     else {
         log_error("unknown mod type: %d, %d\n", item_a._type_id, item_b._type_id);
