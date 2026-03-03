@@ -953,12 +953,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 118.67,
-                      "y": 767,
-                      "width": 0,
+                      "x": 8,
+                      "y": 783,
+                      "width": 110.67,
                       "height": 18,
                       "right": 118.67,
-                      "bottom": 785,
+                      "bottom": 801,
                       "text": "    Page 1 Line B\n",
                       "startIndex": 0,
                       "endIndex": 18
@@ -982,11 +982,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 783,
-                      "width": 110.67,
+                      "y": 799,
+                      "width": 111.55,
                       "height": 18,
-                      "right": 118.67,
-                      "bottom": 801,
+                      "right": 119.55,
+                      "bottom": 817,
                       "text": "    Page 2 Line C\n",
                       "startIndex": 0,
                       "endIndex": 18
@@ -1009,12 +1009,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 118.67,
-                      "y": 783,
-                      "width": 0,
+                      "x": 8,
+                      "y": 815,
+                      "width": 111.55,
                       "height": 18,
-                      "right": 118.67,
-                      "bottom": 801,
+                      "right": 119.55,
+                      "bottom": 833,
                       "text": "    Page 2 Line D\n",
                       "startIndex": 0,
                       "endIndex": 18
@@ -1038,11 +1038,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 799,
-                      "width": 111.55,
+                      "y": 831,
+                      "width": 12,
                       "height": 18,
-                      "right": 119.55,
-                      "bottom": 817,
+                      "right": 20,
+                      "bottom": 849,
                       "text": "   ",
                       "startIndex": 0,
                       "endIndex": 3

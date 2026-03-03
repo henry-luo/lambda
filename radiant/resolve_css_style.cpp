@@ -672,9 +672,7 @@ DisplayValue resolve_display_value(void* child) {
                                 log_debug("[CSS] display: inherit — no parent, using tag default");
                                 // no parent (root element) — fall through to tag-based default
                             } else if (keyword == CSS_VALUE_RUN_IN) {
-                                // run-in is unsupported (matches Chrome, which dropped it in v32).
-                                // Don't return — fall through to tag-based default display below.
-                                log_debug("[CSS] run-in unsupported, using tag default display");
+                                // run-in is unsupported (Chrome dropped it); fall through to tag default
                             } else if (keyword == CSS_VALUE_TABLE) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE;
@@ -736,7 +734,7 @@ DisplayValue resolve_display_value(void* child) {
                                 } else if (outer_kw == CSS_VALUE_INLINE) {
                                     display.outer = CSS_VALUE_INLINE;
                                 } else if (outer_kw == CSS_VALUE_RUN_IN) {
-                                    // run-in unsupported — don't set, will fall through to tag default
+                                    // run-in unsupported — don't set
                                 } else {
                                     display.outer = CSS_VALUE_BLOCK; // default to block
                                 }

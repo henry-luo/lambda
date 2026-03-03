@@ -809,12 +809,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 95.64,
-                      "y": 50,
-                      "width": 0,
+                      "x": 8,
+                      "y": 68,
+                      "width": 58.11,
                       "height": 18,
-                      "right": 95.64,
-                      "bottom": 68,
+                      "right": 66.11,
+                      "bottom": 86,
                       "text": "PASSED",
                       "startIndex": 0,
                       "endIndex": 6
