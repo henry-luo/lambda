@@ -5401,9 +5401,10 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 
     // Check if field type is numeric (addressing the TODO comment)
     if (field_type != LMD_TYPE_INT && field_type != LMD_TYPE_INT64 && field_type != LMD_TYPE_FLOAT) {
-        // Non-numeric index, must use generic fn_index
+        // Non-numeric index (e.g. range, string key), must use generic fn_index
+        // Both object and field must be boxed Items for fn_index to work correctly
         strbuf_append_str(tp->code_buf, "fn_index(");
-        transpile_expr(tp, field_node->object);
+        transpile_box_item(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');

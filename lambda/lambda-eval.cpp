@@ -2300,6 +2300,16 @@ Item fn_index(Item item, Item index_item) {
         if (index_type == LMD_TYPE_TYPE) {
             return fn_child_query(item, index_item);
         }
+        // range index: s[i to j] → slice(item, start, end+1)
+        if (index_type == LMD_TYPE_RANGE) {
+            Range* rng = index_item.range;
+            if (rng) {
+                Item start_it = {.item = i2it(rng->start)};
+                Item end_it = {.item = i2it(rng->end + 1)}; // range end is inclusive, slice end is exclusive
+                return fn_slice(item, start_it, end_it);
+            }
+            return ItemNull;
+        }
         // for VMap, support arbitrary key types (int, float, etc.)
         TypeId item_type = get_type_id(item);
         if (item_type == LMD_TYPE_VMAP) {
