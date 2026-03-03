@@ -1,5 +1,6 @@
 // AWFY Benchmark: List (Typed version)
 // Expected result: 10
+// Typed: map? on nullable linked-list node params, int return types
 
 pn make_list(length: int) {
     if (length == 0) {
@@ -9,14 +10,14 @@ pn make_list(length: int) {
     return e
 }
 
-pn list_length(node) {
+pn list_length(node: map?) int {
     if (node == null) {
         return 0
     }
     return 1 + list_length(node.next)
 }
 
-pn is_shorter_than(x, y) {
+pn is_shorter_than(x: map?, y: map?) int {
     var x_tail = x
     var y_tail = y
     while (y_tail != null) {
@@ -29,7 +30,7 @@ pn is_shorter_than(x, y) {
     return 0
 }
 
-pn tail(x, y, z) {
+pn tail(x: map?, y: map?, z: map?) {
     if (is_shorter_than(y, x) == 1) {
         return tail(
             tail(x.next, y, z),
@@ -40,7 +41,7 @@ pn tail(x, y, z) {
     return z
 }
 
-pn benchmark() {
+pn benchmark() int {
     let result = tail(
         make_list(15),
         make_list(10),
