@@ -1068,6 +1068,21 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
                     if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
 
+                    // CSS 2.1 §12.5.1: The marker box is the first inline box in the
+                    // principal box when list-style-position is 'inside'. It participates
+                    // in the line box, so we must mark the line as non-empty. Without this,
+                    // a subsequent block-level child won't trigger line_break() and the
+                    // marker's line height is lost (advance_y never advances).
+                    if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
+                    lycon->line.is_line_start = false;
+
+                    // Track normal line-height so line_break() uses platform metrics
+                    // (which include lineGap/platform hacks) instead of raw hhea sum
+                    if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
+                        float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+                        lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
+                    }
+
                     log_debug("[MARKER] Laid out marker with fixed width=%.1f, height=%.1f at (%.1f, %.1f)",
                              marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
                 }

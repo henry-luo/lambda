@@ -1537,9 +1537,23 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Merge inline content measurements
     if (has_inline_content) {
+        // CSS 2.1 §16.1: text-indent applies to the first formatted line.
+        // Positive: increases both min-content and max-content first-line width.
+        // Negative: reduces first-line width but cannot make it negative;
+        //           subsequent lines are unaffected, so min-content uses max of
+        //           (first-line-with-indent, widest-subsequent-line).
         if (text_indent > 0) {
             inline_max_sum += text_indent;
             inline_min_sum += text_indent;
+        } else if (text_indent < 0) {
+            // Negative text-indent: first line is narrower, but min/max content
+            // cannot go below zero from the indent alone.
+            inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
+            // For min-content with negative indent: the first word + indent might
+            // still be wider than subsequent words, or it might not.
+            // Use max of (first-line contribution, existing min without indent).
+            float first_line_min = fmaxf(inline_min_sum + text_indent, 0.0f);
+            inline_min_sum = fmaxf(first_line_min, sizes.min_content);
         }
         sizes.min_content = max(sizes.min_content, inline_min_sum);
         sizes.max_content = max(sizes.max_content, inline_max_sum);

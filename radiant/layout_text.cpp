@@ -1184,11 +1184,21 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             } else {
                 // Preserve spaces - just advance one character
                 str++;
+                // CSS 2.1 §16.6.1: Preserved spaces ARE content — mark line as started.
+                // Without this, a line containing only preserved spaces (white-space: pre)
+                // would be treated as empty and not commit a line box.
+                lycon->line.is_line_start = false;
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
             lycon->line.has_space = true;
-            lycon->line.trailing_space_width = wd;  // CSS 2.1 §16.6.1: track for end-of-line trimming
+            // CSS 2.1 §16.6.1: Only track trailing space for end-of-line trimming
+            // when spaces are collapsible (normal/nowrap/pre-line). Per spec,
+            // trailing spaces are removed only for those values. For pre and
+            // pre-wrap, spaces are fully preserved at end of line.
+            if (collapse_spaces) {
+                lycon->line.trailing_space_width = wd;
+            }
         }
         else if (*str == '-') {
             // Hyphens are break opportunities (CSS allows breaking after hyphens)

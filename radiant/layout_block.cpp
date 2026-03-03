@@ -2967,10 +2967,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                              block->position->clear == CSS_VALUE_RIGHT ||
                              block->position->clear == CSS_VALUE_BOTH)) {
         bool is_float = block->position && element_has_float(block);
-        if (is_float || !block->bound) {
-            // Floats and blocks without bound: apply clear directly
-            log_debug("Element has clear property, applying clear layout BEFORE children (float=%d, bound=%p)",
-                      is_float, (void*)block->bound);
+        if (is_float) {
+            // Floats: apply clear directly (floats don't participate in margin collapse)
+            log_debug("Float has clear property, applying clear layout BEFORE children");
             layout_clear_element(lycon, block);
             // CSS 2.1 §9.5.2: Recalculate x offset after clear moves element below floats
             if (bfc_float_offset_x > 0) {
@@ -3025,8 +3024,71 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
 
             // Compute hypothetical position (what if margins collapsed normally)
+            float own_margin_top = block->bound ? block->bound->margin.top : 0;
             float uncollapsed_y = block->y;
             float hypothetical_y = uncollapsed_y;
+
+            // CSS 2.1 §9.5.2 + §8.3.1: The hypothetical position must account for
+            // all margin collapses that would occur if clear were 'none', including
+            // parent-child collapse with the first in-flow child. When the block has
+            // no border-top and no padding-top, its margin is adjoining with the first
+            // in-flow child's margin-top. This extended margin affects the hypothetical
+            // position and may push the border edge past the float, eliminating the
+            // need for clearance entirely.
+            float child_margin_contribution = 0;
+            {
+                float block_border_top = block->bound && block->bound->border ?
+                    block->bound->border->width.top : 0;
+                float block_padding_top = block->bound ? block->bound->padding.top : 0;
+                if (block_border_top == 0 && block_padding_top == 0) {
+                    // Parent-child collapse is possible — peek at first in-flow child's margin.
+                    // Use DOM tree (first_child/next_sibling) because View tree children
+                    // haven't been placed yet (view_type is 0 at this point).
+                    DomNode* dom_child = block->first_child;
+                    while (dom_child) {
+                        if (dom_child->is_element()) {
+                            DomElement* child_elem = dom_child->as_element();
+                            ViewBlock* child_vb = (ViewBlock*)child_elem;
+                            // Skip floats — they don't participate in normal flow margins
+                            bool child_is_float = child_vb->position &&
+                                (child_vb->position->float_prop == CSS_VALUE_LEFT ||
+                                 child_vb->position->float_prop == CSS_VALUE_RIGHT);
+                            if (!child_is_float) {
+                                // Found first in-flow element child
+                                float child_mt = child_vb->bound ? child_vb->bound->margin.top : 0;
+                                // If child bound isn't resolved yet, try the specified style tree
+                                if (!child_vb->bound && child_elem->specified_style) {
+                                    CssDeclaration* mt_decl = style_tree_get_declaration(
+                                        child_elem->specified_style, CSS_PROPERTY_MARGIN_TOP);
+                                    if (mt_decl && mt_decl->value) {
+                                        child_mt = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, mt_decl->value);
+                                    }
+                                }
+                                if (child_mt > own_margin_top) {
+                                    child_margin_contribution = child_mt - own_margin_top;
+                                    log_debug("[CLEARANCE] Peek at first child margin: child_mt=%.1f, own_mt=%.1f, contribution=%.1f",
+                                              child_mt, own_margin_top, child_margin_contribution);
+                                }
+                                break;
+                            }
+                        } else if (dom_child->is_text()) {
+                            // Text node — check if whitespace-only (skip) or real content (stops search)
+                            const unsigned char* text = ((DomText*)dom_child)->text_data();
+                            if (text) {
+                                bool all_ws = true;
+                                for (const unsigned char* p = text; *p; p++) {
+                                    unsigned char c = *p;
+                                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+                                        all_ws = false; break;
+                                    }
+                                }
+                                if (!all_ws) break;  // real text content stops parent-child collapse
+                            }
+                        }
+                        dom_child = dom_child->next_sibling;
+                    }
+                }
+            }
 
             // Check if this is the first in-flow child (parent-child collapse case)
             View* first_in_flow = block->parent_view()->first_placed_child();
@@ -3050,8 +3112,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     parent->bound->border->width.top : 0;
                 if (parent && parent->parent && !parent_creates_bfc &&
                     parent_padding_top == 0 && parent_border_top == 0 &&
-                    block->bound->margin.top != 0) {
-                    float advance_y_before = block->y - block->bound->margin.top;
+                    own_margin_top != 0) {
+                    float advance_y_before = block->y - own_margin_top;
                     hypothetical_y = advance_y_before;
                 }
             } else {
@@ -3072,7 +3134,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     && ((ViewBlock*)prev_view)->bound) {
                     ViewBlock* prev_block = (ViewBlock*)prev_view;
                     float prev_mb = prev_block->bound->margin.bottom;
-                    float cur_mt = block->bound->margin.top;
+                    float cur_mt = own_margin_top;
                     if (prev_mb != 0 || cur_mt != 0) {
                         float collapsed = collapse_margins(prev_mb, cur_mt);
                         float collapse_amount = (prev_mb + cur_mt) - collapsed;
@@ -3081,8 +3143,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
             }
 
-            log_debug("[CLEARANCE §9.5.2] hypothetical=%.1f, clear_y=%.1f, uncollapsed=%.1f",
-                      hypothetical_y, clear_y, uncollapsed_y);
+            // CSS 2.1 §9.5.2 + §8.3.1: Include the child margin contribution in
+            // the hypothetical position. The child's margin-top extends the effective
+            // margin through parent-child collapse, pushing the border edge further down.
+            hypothetical_y += child_margin_contribution;
+
+            log_debug("[CLEARANCE §9.5.2] hypothetical=%.1f, clear_y=%.1f, uncollapsed=%.1f, child_margin_contrib=%.1f",
+                      hypothetical_y, clear_y, uncollapsed_y, child_margin_contribution);
 
             if (hypothetical_y >= clear_y) {
                 // No clearance needed — margin collapse proceeds normally
@@ -3169,7 +3236,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("min-content width: using min_content=%.1f", fit_content);
         }
 
-        if (fit_content >= 0 && fit_content < block->width) {
+        // CSS 2.1 §10.3.5: Float/shrink-to-fit width replaces the initial placeholder.
+        // The fit_content formula (min(max-content, max(min-content, available))) is
+        // always correct, whether it expands (narrow container) or shrinks (wide container).
+        if (fit_content >= 0 && fabsf(fit_content - block->width) > 0.01f) {
             log_debug("Shrink-to-fit (%s): fit_content=%.1f, old_width=%.1f, available=%.1f",
                 is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" : "float"),
                 fit_content, block->width, available);
@@ -3778,8 +3848,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // Generate list marker if list-style-type is not 'none'
             // Only create ::marker pseudo-element for 'inside' positioned markers
             // Outside markers are rendered directly in the margin area (not in DOM tree)
-            if (block->blk && block->blk->list_style_type && block->blk->list_style_type != CSS_VALUE_NONE) {
-                CssEnum marker_style = block->blk->list_style_type;
+            // CSS 2.1 §12.5: Initial value of list-style-type is 'disc'.
+            // Default to disc when no list-style-type is explicitly set.
+            CssEnum effective_list_style = block->blk ? block->blk->list_style_type : (CssEnum)0;
+            if (effective_list_style == 0) {
+                effective_list_style = CSS_VALUE_DISC;
+            }
+            if (effective_list_style != CSS_VALUE_NONE) {
+                CssEnum marker_style = effective_list_style;
                 const CssEnumInfo* info = css_enum_info(marker_style);
                 log_debug("    [List] Generating marker with style: %s (0x%04X)", info ? info->name : "unknown", marker_style);
 
@@ -4123,7 +4199,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 memset(block->bound, 0, sizeof(BoundaryProp));
                             }
                             block->bound->margin.top = y_shift;
-                            block->y = pa_block.advance_y;
+                            // Don't reset block->y here. If parent-child collapse occurs,
+                            // the collapse code sets block->y = 0 itself. If the grandparent
+                            // has border/padding preventing collapse, the y position must
+                            // remain at its current value (advance_y + child_margin).
                             log_debug("propagated first-child margin through pass-through block: margin.top=%f (unaccounted=%f)", y_shift, unaccounted);
                         }
                     }
@@ -4175,6 +4254,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // ARE valid first in-flow children — their margins participate in parent-child collapse.
                     // Only skip blocks that have no margins either (truly invisible/empty).
                     if (vb->height == 0) {
+                        // CSS 2.1 §8.3.1 + §9.5.2: Never skip blocks with a clear property.
+                        // Clearance introduces spacing that breaks margin adjacency between
+                        // the parent's top margin and subsequent children. Even if the block
+                        // has no margins/border/padding, its clearance prevents later siblings'
+                        // margins from collapsing through to the parent.
+                        bool has_clear_prop = vb->position &&
+                            (vb->position->clear == CSS_VALUE_LEFT ||
+                             vb->position->clear == CSS_VALUE_RIGHT ||
+                             vb->position->clear == CSS_VALUE_BOTH);
+                        if (has_clear_prop) {
+                            log_debug("not skipping zero-height block with clear property for margin collapsing");
+                            break;
+                        }
                         float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
                         float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
                         float padding_top = vb->bound ? vb->bound->padding.top : 0;
