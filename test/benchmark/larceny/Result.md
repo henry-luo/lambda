@@ -1,7 +1,8 @@
 # Larceny/Gambit Benchmark Results — Lambda Script
 
-**Date**: (pending first run)
-**Platform**: macOS, Apple Silicon
+**Date**: 2026-03-03
+**Platform**: macOS, Apple Silicon (M-series)
+**Build**: Release (LTO, stripped, optimized)
 **Runs per benchmark**: 3 (median reported)
 
 ## Overview
@@ -23,11 +24,27 @@ This suite implements classic benchmarks from the Larceny/Gambit Scheme benchmar
 | triangl | backtrack | 15 positions | Triangle solitaire board puzzle, count solutions |
 | puzzle | backtrack | 10×10 board | N-Queens all solutions for n=10 |
 | ray | numeric | 100×100, 10× | Ray tracer: rays against 4 spheres |
-| paraffins | recursive | n=17 | Paraffin (alkane) isomer counting |
+| paraffins | recursive | n=23, 10× | Paraffin (alkane) isomer counting |
 
 ## Results
 
-(Run `python3 test/benchmark/larceny/run_bench.py` to populate)
+| Benchmark | Category | Median Time | Status |
+|-----------|----------|-------------|--------|
+| deriv | alloc | 64.4 ms | PASS |
+| primes | array | 7.0 ms | PASS |
+| pnpoly | numeric | 66.9 ms | PASS |
+| diviter | iterative | 5.731 s | PASS |
+| divrec | recursive | 16.2 ms | PASS |
+| array1 | array | 17.7 ms | PASS |
+| gcbench | gc | 2.675 s | PASS |
+| quicksort | sort | 13.3 ms | PASS |
+| triangl | backtrack | 1.798 s | PASS |
+| puzzle | backtrack | 21.5 ms | PASS |
+| ray | numeric | 17.2 ms | PASS |
+| paraffins | recursive | 15.2 ms | PASS |
+
+**Total time**: 10.443 s
+**Geometric mean**: 71.5 ms
 
 ## Origin
 

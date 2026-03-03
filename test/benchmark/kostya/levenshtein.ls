@@ -4,26 +4,6 @@
 // Computes edit distance between two strings, repeated for timing
 // Expected: levenshtein("kitten", "sitting") = 3
 
-pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain = n - sz
-        var extra = [val]
-        var esz = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
-}
-
 pn min2(a, b) {
     if (a < b) { return a }
     return b
@@ -38,8 +18,8 @@ pn levenshtein(s1, s2) {
     let m = len(s2)
 
     // Use 2 rows instead of full matrix for space efficiency
-    var prev = make_array(m + 1, 0)
-    var curr = make_array(m + 1, 0)
+    var prev = fill(m + 1, 0)
+    var curr = fill(m + 1, 0)
 
     var j = 0
     while (j <= m) {
