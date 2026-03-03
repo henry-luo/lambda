@@ -763,6 +763,10 @@ typedef struct BoundaryProp {
     BoxShadow* box_shadow;       // Linked list of box shadows
     float collapsed_through_mb;  // CSS 2.1 §8.3.1: margin transferred from descendants via
                                  // parent-child bottom margin collapse (the inflated portion)
+    bool has_clearance;              // CSS 2.1 §9.5.2: true if clearance was applied to this block.
+                                     // Prevents first child's parent-child margin collapse from
+                                     // double-adjusting position (clearance already accounts for
+                                     // the child's margin contribution).
     bool clearance_in_margin_chain;  // CSS 2.1 §8.3.1: true if this element's bottom margin
                                      // includes contribution from a self-collapsing element
                                      // with clearance. Such margins must NOT collapse with
