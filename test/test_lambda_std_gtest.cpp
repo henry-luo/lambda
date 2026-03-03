@@ -92,13 +92,36 @@ static std::string make_test_name(const std::string& script_path) {
     return relative;
 }
 
+// Check if a script file contains '// Mode: procedural' annotation
+static bool is_procedural_mode(const char* script_path) {
+    FILE* f = fopen(script_path, "r");
+    if (!f) return false;
+    char line[256];
+    // check first 5 lines for mode annotation
+    for (int i = 0; i < 5 && fgets(line, sizeof(line), f); i++) {
+        if (strstr(line, "// Mode: procedural")) {
+            fclose(f);
+            return true;
+        }
+    }
+    fclose(f);
+    return false;
+}
+
 // Execute a lambda script, capture stdout only (stderr discarded)
 static char* execute_script(const char* script_path) {
     char command[512];
+    bool procedural = is_procedural_mode(script_path);
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>NUL", script_path);
+    if (procedural)
+        snprintf(command, sizeof(command), "lambda.exe run \"%s\" 2>NUL", script_path);
+    else
+        snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>NUL", script_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>/dev/null", script_path);
+    if (procedural)
+        snprintf(command, sizeof(command), "./lambda.exe run \"%s\" 2>/dev/null", script_path);
+    else
+        snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>/dev/null", script_path);
 #endif
 
     FILE* pipe = popen(command, "r");
