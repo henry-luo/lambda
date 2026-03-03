@@ -168,6 +168,9 @@ arr.0             // Alt. syntax for const index
 arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
+"hello"[1 to 3]   // "ell" — string slicing
+'hello'[1 to 3]   // 'ell  — symbol slicing
+"café"[2 to 3]    // "fé"  — UTF-8 aware
 ```
 
 **Namespaces (via `import` with bare URI):**
@@ -480,7 +483,7 @@ range(0, 10, 2)        // [0, 2, 4, 6, 8]
 
 **String:**
 
-`replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)`
+`replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)` `ord(str)` `chr(int)`
 
 All three accept both plain strings and named patterns as the second argument:
 ```lambda

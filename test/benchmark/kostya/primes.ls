@@ -3,28 +3,8 @@
 // Adapted from github.com/kostya/benchmarks
 // Expected: pi(1000000) = 78498
 
-pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain = n - sz
-        var extra = [val]
-        var esz = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
-}
-
 pn sieve(limit) {
-    var flags = make_array(limit + 1, true)
+    var flags = fill(limit + 1, true)
     flags[0] = false
     flags[1] = false
     var i = 2

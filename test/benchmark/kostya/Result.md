@@ -1,7 +1,8 @@
 # Kostya Benchmark Results — Lambda Script
 
-**Date**: (pending first run)
-**Platform**: macOS, Apple Silicon
+**Date**: 2026-03-03
+**Platform**: macOS, Apple Silicon (M-series)
+**Build**: Release (LTO, stripped, optimized)
 **Runs per benchmark**: 3 (median reported)
 
 ## Overview
@@ -22,7 +23,18 @@ This suite implements common cross-language benchmarks adapted from [github.com/
 
 ## Results
 
-(Run `python3 test/benchmark/kostya/run_bench.py` to populate)
+| Benchmark | Category | Median Time | Status |
+|-----------|----------|-------------|--------|
+| brainfuck | interp | 391.6 ms | PASS |
+| matmul | numeric | 368.7 ms | PASS |
+| primes | array | 29.8 ms | PASS |
+| base64 | string | 1.101 s | PASS |
+| levenshtein | dp | 35.3 ms | PASS |
+| json_gen | string | 89.5 ms | PASS |
+| collatz | numeric | 2.666 s | PASS |
+
+**Total time**: 4.682 s
+**Geometric mean**: 235.3 ms
 
 ## Origin
 

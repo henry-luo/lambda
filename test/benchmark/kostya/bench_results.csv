@@ -1,0 +1,9 @@
+# Kostya Benchmark Results 2026-03-03 21:55:15, runs=3
+benchmark,category,lambda_ms
+brainfuck,interp,391.622
+matmul,numeric,368.729
+primes,array,29.832
+base64,string,1101.352
+levenshtein,dp,35.297
+json_gen,string,89.461
+collatz,numeric,2665.732

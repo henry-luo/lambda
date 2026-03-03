@@ -20,6 +20,7 @@ void write_js_fn_name(StrBuf* buf, JsFunctionNode* func_node, int counter) {
         strbuf_append_str(buf, "anon");
         strbuf_append_int(buf, counter);
     }
+    strbuf_append_char(buf, '_');
     strbuf_append_int(buf, ts_node_start_byte(func_node->base.node));
 }
 

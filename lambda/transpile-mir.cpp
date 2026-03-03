@@ -3564,6 +3564,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF:
         case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
         case SYSFUNC_BNOT: case SYSFUNC_SHL: case SYSFUNC_SHR:
+        case SYSFUNC_ORD:
             c_ret_tid = LMD_TYPE_INT; break;
         // C functions returning Bool (uint8_t)
         case SYSFUNC_CONTAINS: case SYSFUNC_STARTS_WITH: case SYSFUNC_ENDS_WITH:

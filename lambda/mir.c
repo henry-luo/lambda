@@ -298,6 +298,8 @@ func_obj_t func_list[] = {
     {"fn_split2", (fn_ptr) fn_split},
     {"fn_split3", (fn_ptr) fn_split3},
     {"fn_chars", (fn_ptr) fn_chars},
+    {"fn_ord", (fn_ptr) fn_ord},
+    {"fn_chr", (fn_ptr) fn_chr},
     {"fn_join2", (fn_ptr) fn_join2},
     {"fn_replace3", (fn_ptr) fn_replace},
     {"fn_find2", (fn_ptr) fn_find2},

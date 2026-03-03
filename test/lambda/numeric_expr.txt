@@ -42,9 +42,9 @@ error
 error
 error
 "Modulo with Float (errors):"
-error
-error
-error
+2.5
+2
+0.43
 "Modulo with Boolean/Null (errors):"
 error
 error

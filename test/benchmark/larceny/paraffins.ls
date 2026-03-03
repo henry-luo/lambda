@@ -15,62 +15,17 @@
 // Expected: matches OEIS A000602
 //           nb(17) = 24894, nb(23) = 5731580
 
-pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain = n - sz
-        var extra = [val]
-        var esz = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
-}
-
-// Pure-integer division using binary long division.
-// Returns floor(a/b) as int. Avoids / (returns float) and div (broken in pn).
-pn int_div(a, b) {
-    if (a < b) {
-        return 0
-    }
-    var rem = a
-    var q = 0
-    var power = b
-    var bit = 1
-    while (power + power <= rem) {
-        power = power + power
-        bit = bit + bit
-    }
-    while (bit >= 1) {
-        if (rem >= power) {
-            q = q + bit
-            rem = rem - power
-        }
-        power = shr(power, 1)
-        bit = shr(bit, 1)
-    }
-    return q
-}
-
 // Multiset coefficients: choose k items from n with repetition
 pn ms2(r) {
-    return int_div(r * (r + 1), 2)
+    return r * (r + 1) div 2
 }
 
 pn ms3(r) {
-    return int_div(r * (r + 1) * (r + 2), 6)
+    return r * (r + 1) * (r + 2) div 6
 }
 
 pn ms4(r) {
-    return int_div(r * (r + 1) * (r + 2) * (r + 3), 24)
+    return r * (r + 1) * (r + 2) * (r + 3) div 24
 }
 
 // Count radicals of size k given rcount[] (radical counts for smaller sizes)
@@ -179,7 +134,7 @@ pn nb(n) {
         return 0
     }
     var half = shr(n, 1)
-    var rcount = make_array(half + 1, 0)
+    var rcount = fill(half + 1, 0)
     rcount[0] = 1
 
     var k = 1
