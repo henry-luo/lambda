@@ -115,7 +115,7 @@ fn do_aggregate(data, group_fields, agg_specs) {
 
 fn group_key_str(row, fields) {
     let parts = for (f in fields) string(row[f]);
-    str_join(parts, "|||")
+    join(parts, "|||")
 }
 
 fn build_agg_row(items, group_fields, agg_specs) {

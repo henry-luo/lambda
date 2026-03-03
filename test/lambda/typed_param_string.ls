@@ -18,10 +18,10 @@ fn relay(x) {
 "2. untyped relay"
 relay("Lambda")
 
-// 3. str_join result (sys func returning Item despite STRING type)
-"3. str_join"
+// 3. join result (sys func returning Item despite STRING type)
+"3. join"
 let parts = ["a", "b", "c"]
-greet(str_join(parts, "-"))
+greet(join(parts, "-"))
 
 // 4. Multiple typed params
 fn pair(a: string, b: string) {
