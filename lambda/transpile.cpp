@@ -2331,15 +2331,15 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
 
         // start the loop
         strbuf_append_str(tp->code_buf,
-            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " :
-            is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
-            ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
+            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+            is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
+            ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 
         // generate index variable if present (for i, v in expr)
         if (has_index) {
             strbuf_append_str(tp->code_buf, "  long _");
             strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-            strbuf_append_str(tp->code_buf, "=_idx;\n");
+            strbuf_append_str(tp->code_buf, "=idx;\n");
         }
 
         // construct loop variable
@@ -2347,18 +2347,18 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
         if (expr_type->type_id == LMD_TYPE_RANGE) {
-            strbuf_append_str(tp->code_buf, "=_idx;\n");
+            strbuf_append_str(tp->code_buf, "=idx;\n");
         }
         else if (is_any_array) {
             if (item_type->type_id == LMD_TYPE_STRING) {
-                strbuf_append_str(tp->code_buf, "=fn_string(arr->items[_idx]);\n");
+                strbuf_append_str(tp->code_buf, "=fn_string(arr->items[idx]);\n");
             }
             else {
-                strbuf_append_str(tp->code_buf, "=arr->items[_idx];\n");
+                strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
             }
         }
         else {
-            strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
+            strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
         }
     }
 
@@ -2545,15 +2545,15 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
 
                 // Start the loop
                 strbuf_append_str(tp->code_buf,
-                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " :
-                    is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
-                    ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
+                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+                    is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
+                    ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 
                 // Index variable if present
                 if (loop_node->index_name) {
                     strbuf_append_str(tp->code_buf, "  long _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=_idx;\n");
+                    strbuf_append_str(tp->code_buf, "=idx;\n");
                 }
 
                 // Construct loop variable type
@@ -2575,11 +2575,11 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str(tp->code_buf, " _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
                 if (expr_type->type_id == LMD_TYPE_RANGE) {
-                    strbuf_append_str(tp->code_buf, "=_idx;\n");
+                    strbuf_append_str(tp->code_buf, "=idx;\n");
                 } else if (is_any_array) {
-                    strbuf_append_str(tp->code_buf, "=arr->items[_idx];\n");
+                    strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
                 } else {
-                    strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
+                    strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
                 }
             }
 
