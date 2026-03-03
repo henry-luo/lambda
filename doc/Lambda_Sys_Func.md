@@ -10,12 +10,11 @@ This document provides comprehensive documentation for all built-in system funct
 4. [Date/Time Functions](#datetime-functions)
 5. [String Functions](#string-functions)
 6. [Collection Functions](#collection-functions)
-7. [Vector Functions](#vector-functions)
-8. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
-9. [Variadic Argument Functions](#variadic-argument-functions)
-10. [Input and Format Functions](#io-functions)
-11. [Procedural Functions](#procedural-functions)
-12. [Error Handling](#error-handling)
+7. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
+8. [Variadic Argument Functions](#variadic-argument-functions)
+9. [Input and Format Functions](#io-functions)
+10. [Procedural Functions](#procedural-functions)
+11. [Error Handling](#error-handling)
 
 ---
 
@@ -85,6 +84,8 @@ Basic mathematical operations.
 | `min(vec)` | Minimum in collection | `min([3, 1, 2])` | `1` |
 | `max(a, b)` | Maximum of two values | `max(3, 5)` | `5` |
 | `max(vec)` | Maximum in collection | `max([3, 1, 2])` | `3` |
+| `argmin(vec)` | Index of minimum | `argmin([3, 1, 2])` | `1` |
+| `argmax(vec)` | Index of maximum | `argmax([3, 1, 2])` | `0` |
 
 ```lambda
 abs(-5)            // 5
@@ -97,6 +98,8 @@ min(3, 5)          // 3
 min([3, 1, 2])     // 1
 max(3, 5)          // 5
 max([3, 1, 2])     // 3
+argmin([5, 2, 8, 1])  // 3 (index of 1)
+argmax([5, 2, 8, 1])  // 2 (index of 8)
 ```
 
 ---
@@ -115,6 +118,10 @@ Functions for statistical analysis on collections.
 | `math.deviation(vec)` | Standard deviation | `math.deviation([1, 2, 3])` | `0.816...` |
 | `math.quantile(vec, p)` | p-th quantile | `math.quantile([1,2,3,4], 0.5)` | `2.5` |
 | `math.prod(vec)` | Product of elements | `math.prod([2, 3, 4])` | `24` |
+| `math.cumsum(vec)` | Cumulative sum | `math.cumsum([1, 2, 3])` | `[1, 3, 6]` |
+| `math.cumprod(vec)` | Cumulative product | `math.cumprod([1, 2, 3])` | `[1, 2, 6]` |
+| `math.dot(a, b)` | Dot product | `math.dot([1,2,3], [4,5,6])` | `32` |
+| `math.norm(vec)` | Euclidean norm | `math.norm([3, 4])` | `5` |
 
 ```lambda
 sum([1, 2, 3, 4])           // 10
@@ -125,6 +132,12 @@ math.variance([1, 2, 3])         // 0.666...
 math.deviation([1, 2, 3])        // 0.816...
 math.quantile([1, 2, 3, 4], 0.5) // 2.5
 math.prod([2, 3, 4])             // 24
+
+// Cumulative & linear algebra
+math.cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
+math.cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
+math.dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
+math.norm([3, 4])               // 5 (sqrt(9 + 16))
 ```
 
 ---
@@ -322,18 +335,18 @@ Functions for working with arrays, lists, and other collections.
 
 ### Vector Manipulation
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `reverse(vec)` | Reverse order | `reverse([1, 2, 3])` | `[3, 2, 1]` |
-| `sort(vec)` | Sort ascending | `sort([3, 1, 2])` | `[1, 2, 3]` |
-| `sort(vec, 'desc)` | Sort descending | `sort([1, 2, 3], 'desc)` | `[3, 2, 1]` |
-| `sort(vec, fn)` | Sort by key function | `sort(users, ~.age)` | Sorted by age |
-| `sort(vec, options)` | Sort with options map | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
-| `unique(vec)` | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])` | `[1, 2, 3]` |
-| `concat(v1, v2)` | Concatenate vectors | `concat([1, 2], [3, 4])` | `[1, 2, 3, 4]` |
-| `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` |
-| `drop(vec, n)` | Drop first n elements | `drop([1, 2, 3], 1)` | `[2, 3]` |
-| `zip(v1, v2)` | Pair elements | `zip([1, 2], [3, 4])` | `[(1, 3), (2, 4)]` |
+| Function             | Description                         | Example                                | Result             |
+| -------------------- | ----------------------------------- | -------------------------------------- | ------------------ |
+| `reverse(vec)`       | Reverse order                       | `reverse([1, 2, 3])`                   | `[3, 2, 1]`        |
+| `sort(vec)`          | Sort ascending                      | `sort([3, 1, 2])`                      | `[1, 2, 3]`        |
+| `sort(vec, 'desc)`   | Sort descending                     | `sort([1, 2, 3], 'desc)`               | `[3, 2, 1]`        |
+| `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
+| `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
+| `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
+| `concat(v1, v2)`     | Concatenate vectors                 | `concat([1, 2], [3, 4])`               | `[1, 2, 3, 4]`     |
+| `take(vec, n)`       | First n elements                    | `take([1, 2, 3], 2)`                   | `[1, 2]`           |
+| `drop(vec, n)`       | Drop first n elements               | `drop([1, 2, 3], 1)`                   | `[2, 3]`           |
+| `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
 
 ### Vector Construction
 
@@ -368,60 +381,6 @@ zip([1, 2], ["a", "b"])    // [(1, "a"), (2, "b")]
 
 fill(3, 0)                 // [0, 0, 0]
 range(0, 10, 2)            // [0, 2, 4, 6, 8]
-```
-
----
-
-## Vector Functions
-
-Functions for vector/array computations. These support **element-wise operations** on numeric vectors.
-
-### Aggregation
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
-| `math.prod(vec)` | Product of elements | `math.prod([2, 3, 4])` | `24` |
-| `min(vec)` | Minimum element | `min([3, 1, 2])` | `1` |
-| `max(vec)` | Maximum element | `max([3, 1, 2])` | `3` |
-
-### Index Operations
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `argmin(vec)` | Index of minimum | `argmin([3, 1, 2])` | `1` |
-| `argmax(vec)` | Index of maximum | `argmax([3, 1, 2])` | `0` |
-
-### Cumulative Operations
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.cumsum(vec)` | Cumulative sum | `math.cumsum([1, 2, 3])` | `[1, 3, 6]` |
-| `math.cumprod(vec)` | Cumulative product | `math.cumprod([1, 2, 3])` | `[1, 2, 6]` |
-
-### Linear Algebra
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.dot(a, b)` | Dot product | `math.dot([1,2,3], [4,5,6])` | `32` |
-| `math.norm(vec)` | Euclidean norm | `math.norm([3, 4])` | `5` |
-
-```lambda
-// Aggregation
-sum([1, 2, 3, 4])          // 10
-math.prod([2, 3, 4])            // 24
-
-// Index operations
-argmin([5, 2, 8, 1])       // 3 (index of 1)
-argmax([5, 2, 8, 1])       // 2 (index of 8)
-
-// Cumulative
-math.cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
-math.cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
-
-// Linear algebra
-math.dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
-math.norm([3, 4])               // 5 (sqrt(9 + 16))
 ```
 
 ---
@@ -926,21 +885,15 @@ if (result is error) {
 | `deviation` | 1 | Std deviation |
 | `quantile` | 2 | Quantile |
 | `prod` | 1 | Product |
-| `min` | 1-2 | Minimum |
-| `max` | 1-2 | Maximum |
-| `reduce` | 2 | Reduce with binary fn |
-
-### Vector Functions
-| Function | Args | Description |
-|----------|------|-------------|
 | `cumsum` | 1 | Cumulative sum |
 | `cumprod` | 1 | Cumulative product |
-| `argmin` | 1 | Index of min |
-| `argmax` | 1 | Index of max |
 | `dot` | 2 | Dot product |
 | `norm` | 1 | Euclidean norm |
-| `fill` | 2 | Fill vector |
-| `range` | 3 | Range with step |
+| `min` | 1-2 | Minimum |
+| `max` | 1-2 | Maximum |
+| `argmin` | 1 | Index of min |
+| `argmax` | 1 | Index of max |
+| `reduce` | 2 | Reduce with binary fn |
 
 ### Collection Functions
 | Function | Args | Description |
@@ -956,6 +909,8 @@ if (result is error) {
 | `take` | 2 | Take first n |
 | `drop` | 2 | Drop first n |
 | `zip` | 2 | Zip vectors |
+| `fill` | 2 | Fill vector |
+| `range` | 3 | Range with step |
 
 ### I/O Functions (Pure)
 | Function | Args | Description |
