@@ -39,8 +39,11 @@ int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
-int[]            // Typed int array
-float[]          // Typed float array
+int[]            // Array of ints (same as int*)
+int[5]           // Array of exactly 5 ints
+[int*]           // Bracket form: array of 0+ ints
+[int+]           // Bracket form: array of 1+ ints
+float[]          // Array of floats
 fn (a: int, b: string) bool   // Function type
 fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
@@ -97,7 +100,7 @@ type User {
 **Self reference `~`:**
 ```lambda
 type Vec { x: float, y: float;
-  fn len() => sqrt(x**2 + y**2)
+  fn len() => math.sqrt(x**2 + y**2)
   fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
 }
 ```
@@ -167,15 +170,17 @@ map.key           // Map field access
 map["key"]        // Map field by string
 ```
 
-**Namespaces Support:**
+**Namespaces (via `import` with bare URI):**
 ```lambda
-namespace svg: 'http://www.w3.org/2000/svg'
-namespace xlink: 'http://www.w3.org/1999/xlink'
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
 
 <svg.rect svg.width: 100>   // Namespaced tag & attr
-elem.svg.width              // Namespaced member access
+// desugars to: <svg.rect svg: {width: 100}>
+elem.svg.width              // Chained sub-map access
+elem.svg                    // {width: 100} sub-map
 svg.rect                    // Qualified symbol
-symbol("href", 'xlink_url') // Create namespaced symbol
+symbol("href", 'xlink_url') // Dynamic namespaced symbol
 ```
 
 ## Variables & Declarations
@@ -198,8 +203,8 @@ x = 10       // ERROR E211: cannot reassign let binding
 ```lambda
 var x = 0;         // Mutable variable
 var y: int = 42;   // With type annotation
-var a: int[] = [1, 2, 3];  // Typed int array
-var b: float[] = [0.1, 0.2]; // Typed float array
+var a: int[] = [1, 2, 3];  // Array of ints
+var b: float[] = [0.1, 0.2]; // Array of floats
 x = x + 1          // OK: reassignment
 x = "hello"        // OK: type widening (int → string)
 y = "oops"      // ERROR E201: annotated type enforced
@@ -221,6 +226,14 @@ let a = [1, 2, 3]
 **Comparison:** equal, not equal, less than, less equal, greater than, greater equal
 ```lambda
 ==  !=  <  <=  >  >=
+```
+
+`==` performs **structural deep equality** on all types:
+```lambda
+[1, 2] == [1, 2]             // true  (list/array)
+{a: 1, b: 2} == {b: 2, a: 1} // true  (map, order-independent)
+[1] == [1.0]                  // true  (numeric promotion)
+(1 to 3) == [1, 2, 3]         // true  (cross-type sequence)
 ```
 
 **Logical:** logical and, or, not
@@ -403,7 +416,7 @@ fn multiply(x: int, y: int) => x * y
 let square = (x) => x * x;
 // Procedural function
 pn f(n) { var x=0; while(x<n) {x=x+1}; x }
-// Typed array parameters (native access)
+// Array parameters
 pn advance(pos: float[], vel: float[], n: int) { ... }
 ```
 
@@ -447,11 +460,11 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 
 **Math:**
 
-`abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `sqrt(x)` `log(x)` `log10(x)` `exp(x)` `sin(x)` `cos(x)` `tan(x)`
+`math.pi` `math.e` `abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `math.trunc(x)` `math.sqrt(x)` `math.cbrt(x)` `math.hypot(x,y)` `math.pow(b,e)` `math.log(x)` `math.log2(x)` `math.log10(x)` `math.log1p(x)` `math.exp(x)` `math.exp2(x)` `math.expm1(x)` `math.sin(x)` `math.cos(x)` `math.tan(x)` `math.asin(x)` `math.acos(x)` `math.atan(x)` `math.atan2(y,x)` `math.sinh(x)` `math.cosh(x)` `math.tanh(x)` `math.asinh(x)` `math.acosh(x)` `math.atanh(x)`
 
 **Stats:**
 
-`sum(v)` `avg(v)` `mean(v)` `median(v)` `variance(v)` `deviation(v)` `quantile(v,p)` `prod(v)`
+`sum(v)` `avg(v)` `math.mean(v)` `math.median(v)` `math.variance(v)` `math.deviation(v)` `math.quantile(v,p)` `math.prod(v)`
 
 **Date/Time:**
 
@@ -467,7 +480,7 @@ range(0, 10, 2)        // [0, 2, 4, 6, 8]
 
 **String:**
 
-`replace(str,old,new)` `split(str,sep)` `find(str,pattern)` `normalize(str)`
+`replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)`
 
 All three accept both plain strings and named patterns as the second argument:
 ```lambda
@@ -497,7 +510,7 @@ find("hello world", "lo")            // [{value: "lo", index: 3}]
 
 **Vector:**
 
-`dot(a,b)` `norm(v)` `cumsum(v)` `cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
+`math.dot(a,b)` `math.norm(v)` `math.cumsum(v)` `math.cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
 
 **I/O:**
 
@@ -524,27 +537,37 @@ format(data, 'yaml')                // Format as YAML
 
 **Import Syntax:**
 ```lambda
-import module_name;               // Basic import
-import .relative_module;          // Relative import
-import alias: module_name;        // Import with alias
-import mod1, mod2, alias: mod3;   // Multiple imports
+import .relative_module          // Relative to script's directory
+import .path.to.module           // Nested relative import
+import module_name               // Relative to CWD/project root
+import alias: .module            // Import with alias
 ```
 
 **Export Declarations:**
 ```lambda
-pub PI = 3.14159;             // Export variable
-pub fn square(x) => x * x;    // Export function
+pub PI = 3.14159                 // Export variable
+pub fn square(x) => x * x       // Export function
+pub pn log(msg) { print(msg) }  // Export procedure
+pub type Score = int             // Export type alias
+pub type Counter {               // Export object type
+    value: int = 0;
+    fn double() => value * 2
+}
+pub data^err = input("f", 'json) // Export with error var
 ```
 
-**Module Usage Example:**
+**Module Usage:**
 ```lambda
 // In math_utils.ls:
-pub PI = 3.14159;
-pub fn square(x) => x * x;
+pub PI = 3.14159
+pub type Vec2 { x: float, y: float; fn len() => math.sqrt(x**2 + y**2) }
 
 // In main.ls:
-import math: .math_utils;
-let area = math.PI * math.square(radius);
+import .math_utils
+let area = PI * r ** 2
+let v = {Vec2 x: 3.0, y: 4.0}
+v.len()        // 5.0
+v is Vec2      // true
 ```
 ## Error Handling
 
@@ -581,7 +604,7 @@ else result * 2
 
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` `?` `.?` - Primary, query
-2. `-` `+` `not` - Unary operators
+2. `-` `+` `not` `!` - Unary (`not`: logical NOT, `!`: type negation)
 3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
@@ -590,7 +613,7 @@ else result * 2
 8. `and` - Logical AND
 9. `or` - Logical OR
 10. `to` - Range
-11. `is` `in` - Type operations
+11. `is` `in` - Type operations (`is nan` for NaN detection)
 12. `|` `where` - Pipe and Filter
 
 ## Quick Examples

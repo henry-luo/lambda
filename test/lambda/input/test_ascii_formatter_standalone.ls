@@ -7,7 +7,7 @@ let basic_math = input('test/input/ascii_math_standalone_test.txt', {'type': 'ma
 basic_math
 
 // Test 2: Simple expression with functions
-let func_expr = input('sin(x) + cos(y)', {'type': 'math', 'flavor': 'ascii'})
+let func_expr = input('math.sin(x) + math.cos(y)', {'type': 'math', 'flavor': 'ascii'})
 "Function expression AST:"
 func_expr
 

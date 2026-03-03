@@ -1,7 +1,7 @@
 // chart/transform.ls — Data transform operations for the chart library
 // Applied in order before encoding: filter, aggregate, calculate, bin, sort, fold, flatten
 
-import util: .lambda.package.chart.util
+import util: .util
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data
@@ -74,14 +74,14 @@ pub fn compute_agg(data, op, field) {
     if (op == "count") len(data)
     else if (op == "sum") sum(data | float(~[field]))
     else if (op == "mean" or op == "average") avg(data | float(~[field]))
-    else if (op == "median") median(data | float(~[field]))
+    else if (op == "median") math.median(data | float(~[field]))
     else if (op == "min") min(data | float(~[field]))
     else if (op == "max") max(data | float(~[field]))
     else if (op == "distinct") len(util.unique_vals(data | ~[field]))
-    else if (op == "q1") quantile(data | float(~[field]), 0.25)
-    else if (op == "q3") quantile(data | float(~[field]), 0.75)
-    else if (op == "stdev") sqrt(variance(data | float(~[field])))
-    else if (op == "variance") variance(data | float(~[field]))
+    else if (op == "q1") math.quantile(data | float(~[field]), 0.25)
+    else if (op == "q3") math.quantile(data | float(~[field]), 0.75)
+    else if (op == "stdev") math.sqrt(math.variance(data | float(~[field])))
+    else if (op == "variance") math.variance(data | float(~[field]))
     else 0
 }
 
@@ -115,7 +115,7 @@ fn do_aggregate(data, group_fields, agg_specs) {
 
 fn group_key_str(row, fields) {
     let parts = for (f in fields) string(row[f]);
-    str_join(parts, "|||")
+    join(parts, "|||")
 }
 
 fn build_agg_row(items, group_fields, agg_specs) {

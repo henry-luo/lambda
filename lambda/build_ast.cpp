@@ -31,6 +31,9 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
 // Forward declaration for function building (used by object type methods)
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global);
 
+// Forward declaration for object type building (used by pub type)
+AstNode* build_object_type(Transpiler* tp, TSNode type_node);
+
 // System function definitions with method call support
 // Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
 // is_method_eligible: true if can be called as obj.method() style
@@ -100,33 +103,56 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false},
     {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false},
     {SYSFUNC_SPLIT3, "split", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.str_join(sep)
+    {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},  // arr.join(sep)
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false},
     {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
     {SYSFUNC_FIND3, "find", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
     {SYSFUNC_CHARS, "chars", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},  // chars(str) -> array of 1-char strings
     // vector/array functions - method-eligible on arrays
-    {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CUMPROD, "cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // fill(n, val) - n is count, not self
-    {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.dot(b)
-    {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // statistical functions - method-eligible on collections
-    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // element-wise math functions - method-eligible on numbers/arrays
-    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DOT, "math_dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // math.dot(a, b)
+    {SYSFUNC_NORM, "math_norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // statistical functions - math module
+    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // element-wise math functions - math module
+    {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG, "math_log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG10, "math_log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_EXP, "math_exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SIN, "math_sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_COS, "math_cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TAN, "math_tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // inverse trigonometric - math module
+    {SYSFUNC_ASIN, "math_asin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ACOS, "math_acos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ATAN, "math_atan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ATAN2, "math_atan2", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // hyperbolic - math module
+    {SYSFUNC_SINH, "math_sinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_COSH, "math_cosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TANH, "math_tanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // inverse hyperbolic - math module
+    {SYSFUNC_ASINH, "math_asinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ACOSH, "math_acosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ATANH, "math_atanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // exponential/logarithmic variants - math module
+    {SYSFUNC_EXP2, "math_exp2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_EXPM1, "math_expm1", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG2, "math_log2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // power/root - math module
+    {SYSFUNC_POW_MATH, "math_pow", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CBRT, "math_cbrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TRUNC, "math_trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_HYPOT, "math_hypot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG1P, "math_log1p", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // vector manipulation functions - method-eligible on collections
     {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
@@ -138,7 +164,11 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.drop(n)
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.zip(b)
     {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // range(s,e,step) - constructor, not method
-    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.quantile(p)
+    {SYSFUNC_QUANTILE, "math_quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // math.quantile(arr, p)
+    {SYSFUNC_REDUCE, "reduce", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // reduce(collection, fn)
+    // parse string functions - overloaded with arg count
+    {SYSFUNC_PARSE1, "parse", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true},   // parse(str) -> any^ (auto-detect)
+    {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true},   // parse(str, format) -> any^
     // variadic parameter access - not method-eligible
     {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
     {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
@@ -994,37 +1024,15 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         log_debug("member expr field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
         ast_node->field = (AstNode*)id_node;
 
-        // Check if object is a member expression with namespace prefix as field
-        // e.g., in e.ns.attr, when building the outer expr, object is e.ns where ns is namespace
+        // In v2 namespaces, e.ns.attr is chained access: (e.ns).attr
+        // The sub-map desugaring stores ns attrs as ns: {attr: val}, so
+        // e.ns returns the sub-map and .attr accesses the key within it.
+        // No merging needed — just check for ns.value → qualified symbol.
         if (ast_node->object && ast_node->object->node_type == AST_NODE_PRIMARY) {
             AstPrimaryNode* pri = (AstPrimaryNode*)ast_node->object;
-            if (pri->expr && pri->expr->node_type == AST_NODE_MEMBER_EXPR) {
-                AstFieldNode* inner = (AstFieldNode*)pri->expr;
-                if (inner->field && inner->field->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* ns_ident = (AstIdentNode*)inner->field;
-                    NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
-                    if (ns_entry) {
-                        // Merge: replace object with inner->object, merge field name
-                        // Create qualified name: ns.attr
-                        size_t ns_len = ns_ident->name->len;
-                        size_t attr_len = id_node->name->len;
-                        size_t total_len = ns_len + 1 + attr_len;  // ns.attr
-                        char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
-                        memcpy(buf, ns_ident->name->chars, ns_len);
-                        buf[ns_len] = '.';
-                        memcpy(buf + ns_len + 1, id_node->name->chars, attr_len);
-                        buf[total_len] = '\0';
-                        StrView qualified = {buf, total_len};
-                        id_node->name = name_pool_create_strview(tp->name_pool, qualified);
-                        // Replace object with inner object (skip the namespace member access)
-                        ast_node->object = inner->object;
-                        log_debug("namespace member expr merged: '%.*s'", (int)id_node->name->len, id_node->name->chars);
-                    }
-                }
-            }
-            // Also check if object is just a namespace prefix identifier (for ns.value syntax)
+            // Check if object is just a namespace prefix identifier (for ns.value syntax)
             // e.g., ns.value where ns is a namespace prefix
-            else if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+            if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ns_ident = (AstIdentNode*)pri->expr;
                 NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
                 if (ns_entry) {
@@ -1060,6 +1068,29 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     return (AstNode*)sym_node;
                 }
 
+                // Check for math module constants: math.pi, math.e
+                if (ns_ident->name->len == 4 && memcmp(ns_ident->name->chars, "math", 4) == 0) {
+                    double const_val = 0.0;
+                    bool is_math_const = false;
+                    if (id_node->name->len == 2 && memcmp(id_node->name->chars, "pi", 2) == 0) {
+                        const_val = 3.14159265358979323846;
+                        is_math_const = true;
+                    } else if (id_node->name->len == 1 && id_node->name->chars[0] == 'e') {
+                        const_val = 2.71828182845904523536;
+                        is_math_const = true;
+                    }
+                    if (is_math_const) {
+                        TypeFloat* ft = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+                        ft->double_val = const_val;
+                        arraylist_append(tp->const_list, &ft->double_val);
+                        ft->const_index = tp->const_list->length - 1;
+                        ft->is_const = 1;  ft->is_literal = 1;
+                        AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pn->type = (Type*)ft;
+                        return (AstNode*)pn;
+                    }
+                }
+
                 // Check if object is an aliased import prefix (e.g., helper.val)
                 // by looking up the qualified name "object.field" in scope
                 size_t obj_len = ns_ident->name->len;
@@ -1081,8 +1112,18 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                         resolved->name = q_entry->name;
                         resolved->entry = q_entry;
                         if (q_entry->import && q_entry->node->type->type_id != LMD_TYPE_FUNC) {
-                            resolved->type = alloc_type(tp->pool, q_entry->node->type->type_id, sizeof(Type));
-                            resolved->type->is_const = 0;
+                            // For container types (array, list, map, element, etc.), use the
+                            // original type directly to preserve nested type info (e.g.
+                            // TypeArray::nested). Allocating a bare Type loses this info,
+                            // causing wrong accessor functions (e.g. array_get vs array_int_get).
+                            Type* orig = q_entry->node->type;
+                            TypeId tid = orig->type_id;
+                            if (tid >= LMD_TYPE_CONTAINER) {
+                                resolved->type = orig;
+                            } else {
+                                resolved->type = alloc_type(tp->pool, tid, sizeof(Type));
+                                resolved->type->is_const = 0;
+                            }
                         } else {
                             resolved->type = q_entry->node->type ? q_entry->node->type : &TYPE_ANY;
                         }
@@ -1259,21 +1300,43 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             TSNode inner = ts_node_child(object_node, 0);
             if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
                 module_name = ts_node_source(tp, inner);
-                // Check for known built-in modules
-                if (strview_equal(&module_name, "io")) {
-                    is_builtin_module_call = true;
-                    log_debug("builtin module call detected: %.*s.%.*s()",
+                // Check for known built-in modules, but only if no user-defined
+                // qualified name (e.g., from aliased import) matches module.method
+                if (strview_equal(&module_name, "io") || strview_equal(&module_name, "math")) {
+                    // Check if module.method is already defined via aliased import
+                    char qbuf[256];
+                    snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                         (int)module_name.length, module_name.str,
                         (int)method_name.length, method_name.str);
+                    StrView qview = {qbuf, strlen(qbuf)};
+                    NameEntry* qualified = lookup_name(tp, qview);
+                    if (qualified == NULL) {
+                        is_builtin_module_call = true;
+                        log_debug("builtin module call detected: %.*s.%.*s()",
+                            (int)module_name.length, module_name.str,
+                            (int)method_name.length, method_name.str);
+                    } else {
+                        log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                    }
                 }
             }
         } else if (obj_symbol == sym_identifier) {
             module_name = ts_node_source(tp, object_node);
-            if (strview_equal(&module_name, "io")) {
-                is_builtin_module_call = true;
-                log_debug("builtin module call detected: %.*s.%.*s()",
+            if (strview_equal(&module_name, "io") || strview_equal(&module_name, "math")) {
+                char qbuf[256];
+                snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                     (int)module_name.length, module_name.str,
                     (int)method_name.length, method_name.str);
+                StrView qview = {qbuf, strlen(qbuf)};
+                NameEntry* qualified = lookup_name(tp, qview);
+                if (qualified == NULL) {
+                    is_builtin_module_call = true;
+                    log_debug("builtin module call detected: %.*s.%.*s()",
+                        (int)module_name.length, module_name.str,
+                        (int)method_name.length, method_name.str);
+                } else {
+                    log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                }
             }
         }
     }
@@ -1604,6 +1667,23 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     log_debug("looking up name: %.*s", (int)var_name.length, var_name.str);
     NameEntry* entry = lookup_name(tp, var_name);
     if (!entry) {
+        // In 'that' clause, rewrite bare identifier to ~.name (member access on current item)
+        // Name resolution order: 1) scope names, 2) ~.name fields, 3) system properties
+        if (tp->in_that_clause) {
+            log_debug("that clause: rewriting bare '%.*s' to ~.%.*s",
+                (int)var_name.length, var_name.str, (int)var_name.length, var_name.str);
+            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node(tp,
+                AST_NODE_MEMBER_EXPR, id_node, sizeof(AstFieldNode));
+            // create ~ (current item) as the object
+            AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, id_node, sizeof(AstNode));
+            current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+            field_node->object = current_item;
+            // use the identifier as the field name (without scope lookup)
+            ast_node->type = &TYPE_ANY;
+            field_node->field = (AstNode*)ast_node;
+            field_node->type = &TYPE_ANY;
+            return (AstNode*)field_node;
+        }
         // ident is used for member access, thus we return TYPE_ANY
         ast_node->type = &TYPE_ANY;
     }
@@ -1616,9 +1696,23 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             log_debug("got imported identifier %.*s from module %.*s",
                 (int)entry->name->len, entry->name->chars,
                 (int)entry->import->module.length, entry->import->module.str);
-            ast_node->type = alloc_type(tp->pool, entry->node->type->type_id, sizeof(Type));
-            // defensive code
-            ast_node->type->is_const = 0;
+            if (entry->node->type->type_id == LMD_TYPE_TYPE) {
+                // for imported type definitions (pub type T = ...), preserve the full TypeType wrapper
+                ast_node->type = entry->node->type;
+            } else {
+                // For container types (array, list, map, element, etc.), use the
+                // original type directly to preserve nested type info (e.g.
+                // TypeArray::nested). Allocating a bare Type loses this info,
+                // causing wrong accessor functions (e.g. array_get vs array_int_get).
+                Type* orig = entry->node->type;
+                TypeId tid = orig->type_id;
+                if (tid >= LMD_TYPE_CONTAINER) {
+                    ast_node->type = orig;
+                } else {
+                    ast_node->type = alloc_type(tp->pool, tid, sizeof(Type));
+                    ast_node->type->is_const = 0;
+                }
+            }
         }
         else {
             log_debug("Debug: entry->node->type is %p for identifier %.*s",
@@ -2390,11 +2484,56 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     return (AstNode*)ast_node;
 }
 
+// Build type negation expression: !T → any ! T (exclude type)
+// Creates a TypeBinary(OPERATOR_EXCLUDE, any, T) so that `x is !string` works
+AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
+    log_debug("build type negation expr (!T)");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    // Build the operand (the type to negate)
+    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
+    ast_node->right = build_expr(tp, operand_node);
+    if (!ast_node->right) {
+        log_error("Error: build_type_negation_expr failed to build operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Create synthetic "any" node for the left side
+    AstPrimaryNode* any_node = (AstPrimaryNode*)alloc_ast_node(tp,
+        AST_NODE_PRIMARY, node, sizeof(AstPrimaryNode));
+    any_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ((TypeType*)any_node->type)->type = &TYPE_ANY;
+    ast_node->left = (AstNode*)any_node;
+
+    ast_node->op = OPERATOR_EXCLUDE;
+    ast_node->op_str = {.str = "!", .length = 1};
+
+    type->left = ast_node->left->type;
+    type->right = ast_node->right->type;
+    type->op = OPERATOR_EXCLUDE;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+
+    log_debug("type negation expr created: any ! T, index: %d", type->type_index);
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build unary expr");
-    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
+
+    // Check for ! operator early — it means type negation, not logical NOT
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
     StrView op = ts_node_source(tp, op_node);
+    if (strview_equal(&op, "!")) {
+        return build_type_negation_expr(tp, bi_node);
+    }
+
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
     ast_node->op_str = op;
     if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
@@ -2532,7 +2671,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_PIPE; }
     else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
-    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is alias for 'where'
+    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
     else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE_FILE; }
     else if (strview_equal(&op, "|>>")) { ast_node->op = OPERATOR_PIPE_APPEND; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
@@ -2556,18 +2695,44 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     }
 
+    // For 'that' operator: enable implicit ~.name resolution for bare identifiers
+    bool is_that = strview_equal(&op, "that");
+    bool old_in_that = tp->in_that_clause;
+    if (is_that) tp->in_that_clause = true;
+
     ast_node->right = build_expr(tp, right_node);
 
     // Reset pipe_inject_args after building right side
     if (pipe_inject) {
         tp->pipe_inject_args = 0;
     }
+    // Reset that clause flag
+    tp->in_that_clause = old_in_that;
 
     // Defensive validation: ensure right operand was built successfully
     if (!ast_node->right) {
         log_error("Error: build_binary_expr failed to build right operand");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
+    }
+
+    // Special case: 'expr is nan' — IEEE NaN check
+    // nan is a float value, not a type, so 'is' type-check doesn't work.
+    // Detect NaN literal on RHS and rewrite to OPERATOR_IS_NAN (unary-like check).
+    if (ast_node->op == OPERATOR_IS) {
+        AstNode* rhs = ast_node->right;
+        if (rhs->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)rhs;
+            if (pri->type && pri->type->type_id == LMD_TYPE_FLOAT) {
+                TypeFloat* ft = (TypeFloat*)pri->type;
+                if (__builtin_isnan(ft->double_val)) {
+                    log_debug("build_binary_expr: detected 'expr is nan', rewriting to OPERATOR_IS_NAN");
+                    ast_node->op = OPERATOR_IS_NAN;
+                    ast_node->type = &TYPE_BOOL;
+                    return (AstNode*)ast_node;
+                }
+            }
+        }
     }
 
     // Chained comparison transformation: a < b < c => (a < b) and (b < c)
@@ -3357,6 +3522,19 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
     // determine if this is a type definition based on the parent symbol
     bool is_type_definition = (symbol == SYM_TYPE_DEFINE);
 
+    // for pub_stam: detect 'pub type ...' variants by scanning for the anonymous 'type' keyword
+    if (symbol == SYM_PUB_STAM) {
+        TSNode child = ts_node_child(let_node, 0);
+        int child_count = ts_node_child_count(let_node);
+        for (int i = 0; i < child_count; i++) {
+            child = ts_node_child(let_node, i);
+            if (ts_node_symbol(child) == anon_sym_type) {
+                is_type_definition = true;
+                break;
+            }
+        }
+    }
+
     // 'let' can have multiple name-value declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
@@ -3367,18 +3545,27 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
         if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             TSSymbol child_symbol = ts_node_symbol(child);
-            // defensive check: validate symbol type
-            // type_assign is aliased as assign_expr in the grammar, so we only see SYM_ASSIGN_EXPR
-            if (child_symbol != SYM_ASSIGN_EXPR) {
-                log_error("Error: build_let_and_type_stam expected SYM_ASSIGN_EXPR but got symbol %d", child_symbol);
+
+            AstNode* declare = NULL;
+            if (child_symbol == SYM_OBJECT_TYPE) {
+                // pub type Counter { ... } — object type definition wrapped in pub
+                declare = build_object_type(tp, child);
+                if (declare) {
+                    ((AstObjectTypeNode*)declare)->is_public = true;
+                }
+            } else if (child_symbol == SYM_ASSIGN_EXPR) {
+                // pub x = expr  OR  pub type T = type_expr (aliased as assign_expr)
+                declare = build_assign_expr(tp, child, is_type_definition);
+            } else {
+                log_error("Error: build_let_and_type_stam expected SYM_ASSIGN_EXPR or SYM_OBJECT_TYPE but got symbol %d", child_symbol);
                 // skip invalid node and continue - defensive recovery
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
-            AstNode* declare = build_assign_expr(tp, child, is_type_definition);
+
             // additional defensive check
             if (!declare) {
-                log_error("Error: build_let_and_type_stam failed to build assign expression");
+                log_error("Error: build_let_and_type_stam failed to build declaration");
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
@@ -3397,6 +3584,113 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
     // let statement does not have 'then' clause
     ast_node->type = &LIT_NULL;  // let stam returns null
     return (AstNode*)ast_node;
+}
+
+// ==================== Namespace Attribute Desugaring ====================
+// Desugar ns.attr: val → ns: {attr: val} at AST build time (v2 namespace design)
+
+// Find ns_identifier node from attr_name or direct name node
+// Returns the ns_identifier TSNode, or a null TSNode if not found
+static TSNode find_ns_identifier_in_name(TSNode name_node) {
+    TSSymbol sym = ts_node_symbol(name_node);
+    if (sym == sym_ns_identifier) return name_node;
+    if (sym == sym_attr_name) {
+        // attr_name wraps the actual name node
+        TSNode child = ts_node_named_child(name_node, 0);
+        if (!ts_node_is_null(child) && ts_node_symbol(child) == sym_ns_identifier) {
+            return child;
+        }
+    }
+    TSNode null_node = {};
+    return null_node;
+}
+
+// Build a synthetic map node wrapping a single key-value pair: {attr_name: val_expr}
+// Used for desugaring ns.attr: val → ns: {attr: val}
+static AstNode* build_ns_attr_map(Transpiler* tp, StrView attr_name, AstNode* val_expr, TSNode source_node) {
+    AstMapNode* map_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, source_node, sizeof(AstMapNode));
+    TypeMap* map_type = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    map_node->type = (Type*)map_type;
+
+    // create key_expr: attr_name: val_expr
+    AstNamedNode* key_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, source_node, sizeof(AstNamedNode));
+    key_node->name = name_pool_create_strview(tp->name_pool, attr_name);
+    key_node->as = val_expr;
+    key_node->type = val_expr->type;
+    map_node->item = (AstNode*)key_node;
+
+    // create shape entry
+    ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+    name_view->str = key_node->name->chars;
+    name_view->length = key_node->name->len;
+    entry->name = name_view;
+    entry->type = val_expr->type;
+    entry->byte_offset = 0;
+
+    map_type->shape = entry;
+    map_type->length = 1;
+    map_type->byte_size = type_info[val_expr->type->type_id].byte_size;
+
+    arraylist_append(tp->type_list, map_type);
+    map_type->type_index = tp->type_list->length - 1;
+
+    return (AstNode*)map_node;
+}
+
+// Merge two map AST nodes: append src map's items and shape entries to dst map
+// Used when multiple ns.attr attrs share the same ns prefix
+static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_item) {
+    if (!dst_item || !src_item) return;
+    if (dst_item->type->type_id != LMD_TYPE_MAP || src_item->type->type_id != LMD_TYPE_MAP) return;
+
+    AstMapNode* dst = (AstMapNode*)dst_item;
+    AstMapNode* src = (AstMapNode*)src_item;
+    TypeMap* dst_type = (TypeMap*)dst->type;
+    TypeMap* src_type = (TypeMap*)src->type;
+
+    // append src items to dst item linked list
+    AstNode* last_item = dst->item;
+    while (last_item && last_item->next) last_item = last_item->next;
+    if (last_item) last_item->next = src->item;
+    else dst->item = src->item;
+
+    // append src shape entries to dst shape linked list
+    ShapeEntry* last_entry = dst_type->shape;
+    while (last_entry && last_entry->next) last_entry = last_entry->next;
+    if (last_entry) {
+        // update byte_offset for merged entries
+        int byte_offset = last_entry->byte_offset + type_info[last_entry->type->type_id].byte_size;
+        ShapeEntry* src_entry = src_type->shape;
+        while (src_entry) {
+            src_entry->byte_offset = byte_offset;
+            byte_offset += type_info[src_entry->type->type_id].byte_size;
+            src_entry = src_entry->next;
+        }
+        last_entry->next = src_type->shape;
+    } else {
+        dst_type->shape = src_type->shape;
+    }
+
+    dst_type->length += src_type->length;
+    dst_type->byte_size += src_type->byte_size;
+}
+
+// Find an existing named item (key_expr) in a linked list by key name
+// Returns the AstNamedNode if found, NULL otherwise
+static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name) {
+    AstNode* item = first_item;
+    while (item) {
+        if (item->node_type == AST_NODE_KEY_EXPR) {
+            AstNamedNode* named = (AstNamedNode*)item;
+            if (named->name && named->name->len == name->len &&
+                memcmp(named->name->chars, name->chars, name->len) == 0) {
+                return named;
+            }
+        }
+        item = item->next;
+    }
+    return NULL;
 }
 
 StrView build_key_string(Transpiler* tp, TSNode key_node) {
@@ -3451,6 +3745,42 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
         return ast_node;
     }
 
+    // Check for ns_identifier to desugar: ns.attr: val → ns: {attr: val}
+    TSNode ns_id_node = find_ns_identifier_in_name(name);
+    if (!ts_node_is_null(ns_id_node)) {
+        // extract ns prefix and local attr name from ns_identifier fields
+        TSNode ns_node = ts_node_child_by_field_id(ns_id_node, field_ns);
+        TSNode local_node = ts_node_child_by_field_id(ns_id_node, field_name);
+        if (!ts_node_is_null(ns_node) && !ts_node_is_null(local_node)) {
+            StrView ns_prefix = ts_node_source(tp, ns_node);
+            StrView local_name = ts_node_source(tp, local_node);
+            log_debug("ns attr desugar: %.*s.%.*s → %.*s: {%.*s: val}",
+                (int)ns_prefix.length, ns_prefix.str,
+                (int)local_name.length, local_name.str,
+                (int)ns_prefix.length, ns_prefix.str,
+                (int)local_name.length, local_name.str);
+
+            // set key to ns prefix only
+            ast_node->name = name_pool_create_strview(tp->name_pool, ns_prefix);
+
+            // build value expression
+            TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+            AstNode* val_expr = ts_node_is_null(val_node) ? nullptr : build_expr(tp, val_node);
+            if (!val_expr) {
+                log_error("build_key_expr: missing value for ns.attr");
+                ast_node->type = &TYPE_ANY;
+                ast_node->as = nullptr;
+                return ast_node;
+            }
+
+            // wrap in map: {local_name: val_expr}
+            ast_node->as = build_ns_attr_map(tp, local_name, val_expr, pair_node);
+            ast_node->type = ast_node->as->type;
+            return ast_node;
+        }
+    }
+
+    // Normal (non-namespaced) key handling
     StrView name_view = build_key_string(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
@@ -3699,6 +4029,8 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     log_debug("build_object_type");
     AstObjectTypeNode* ast_node = (AstObjectTypeNode*)alloc_ast_node(tp,
         AST_NODE_OBJECT_TYPE, type_node, sizeof(AstObjectTypeNode));
+    ast_node->is_public = false;
+    ast_node->local_type_index = -1;
 
     // allocate TypeObject (extends TypeMap) for this object type definition
     TypeObject* obj_type = (TypeObject*)pool_calloc(tp->pool, sizeof(TypeObject));
@@ -3792,10 +4124,13 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
             }
         }
         else if (symbol == SYM_THAT_CONSTRAINT) {
-            // object-level constraint: that (expr)
+            // object-level constraint: that (expr) - enable implicit ~.name resolution
             TSNode constraint_expr = ts_node_child_by_field_id(child, FIELD_CONSTRAINT);
             if (!ts_node_is_null(constraint_expr)) {
+                bool old_in_that = tp->in_that_clause;
+                tp->in_that_clause = true;
                 AstNode* constraint = build_expr(tp, constraint_expr);
+                tp->in_that_clause = old_in_that;
                 if (constraint) {
                     if (!prev_constraint) { ast_node->constraints = constraint; }
                     else { prev_constraint->next = constraint; }
@@ -4158,10 +4493,13 @@ AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
         ast_node->base = build_expr(tp, base_node);
     }
 
-    // Build constraint expression
+    // Build constraint expression (inside 'that' clause: enable implicit ~.name resolution)
     TSNode constraint_node = ts_node_child_by_field_id(type_node, FIELD_CONSTRAINT);
     if (!ts_node_is_null(constraint_node)) {
+        bool old_in_that = tp->in_that_clause;
+        tp->in_that_clause = true;
         ast_node->constraint = build_expr(tp, constraint_node);
+        tp->in_that_clause = old_in_that;
     }
 
     // Create TypeConstrained directly (not wrapped in TypeType)
@@ -4560,6 +4898,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         // named map item, or dynamic map expr
         AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
         if (!item) { log_error("build_map: null expr item");  break; }
+
         if (!prev_item) { ast_node->item = item; }
         else { prev_item->next = item; }
         prev_item = item;
@@ -4622,6 +4961,16 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             String* pooled_name = name_pool_create_strview(tp->name_pool, name);
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
+            // look up namespace prefix and set TypeElmt.ns
+            TSNode ns_node = ts_node_child_by_field_id(child, field_ns);
+            if (!ts_node_is_null(ns_node)) {
+                StrView ns_prefix = ts_node_source(tp, ns_node);
+                NamespaceEntry* ns_entry = lookup_namespace_strview(tp, ns_prefix);
+                if (ns_entry) {
+                    type->ns = ns_entry->target;
+                    log_debug("element ns resolved: %.*s → target %p", (int)ns_prefix.length, ns_prefix.str, ns_entry->target);
+                }
+            }
         }
         else if (symbol == SYM_SYMBOL) {  // element name as symbol 'name'
             int start_byte = ts_node_start_byte(child) + 1; // skip leading quote
@@ -4636,6 +4985,21 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
         }
         else {  // attrs
             AstNode* item = (symbol == SYM_ATTR) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+
+            // check for ns attr merging: if key already exists and both are maps, merge
+            if (item->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* new_key = (AstNamedNode*)item;
+                AstNamedNode* existing = find_existing_named_item(ast_node->item, new_key->name);
+                if (existing && existing->as && new_key->as &&
+                    existing->as->type->type_id == LMD_TYPE_MAP && new_key->as->type->type_id == LMD_TYPE_MAP) {
+                    merge_ns_attr_maps(tp, existing->as, new_key->as);
+                    existing->type = existing->as->type;
+                    log_debug("merged ns attr map for key '%.*s'", (int)new_key->name->len, new_key->name->chars);
+                    child = ts_node_next_named_sibling(child);
+                    continue;  // skip adding new entry
+                }
+            }
+
             if (!prev_item) { ast_node->item = item; }
             else { prev_item->next = item; }
             prev_item = item;
@@ -5946,9 +6310,13 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             byte_offset += sizeof(void*);
                         }
                     } else if (child_sym == SYM_THAT_CONSTRAINT) {
+                        // object-level constraint: enable implicit ~.name resolution
                         TSNode constraint_expr = ts_node_child_by_field_id(obj_child, FIELD_CONSTRAINT);
                         if (!ts_node_is_null(constraint_expr)) {
+                            bool old_in_that = tp->in_that_clause;
+                            tp->in_that_clause = true;
                             AstNode* constraint = build_expr(tp, constraint_expr);
+                            tp->in_that_clause = old_in_that;
                             if (constraint) {
                                 if (!prev_constraint) { obj_node->constraints = constraint; }
                                 else { prev_constraint->next = constraint; }
@@ -6375,13 +6743,60 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
             AstLetNode* pub_node = (AstLetNode*)node;
             AstNode* declare = pub_node->declare;
             while (declare) {
-                AstNamedNode* dec_node = (AstNamedNode*)declare;
-                if (has_alias) {
-                    push_qualified_name(tp, (AstNamedNode*)dec_node, import_node, import_node->alias);
+                if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                    // exported object type — register in importing script's type_list
+                    AstObjectTypeNode* obj_node = (AstObjectTypeNode*)declare;
+                    Type* node_type = obj_node->type;
+                    if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* tt = (TypeType*)node_type;
+                        TypeObject* obj_type = (TypeObject*)tt->type;
+                        // re-register in importing script's type_list with new local index
+                        arraylist_append(tp->type_list, (void*)tt);
+                        obj_type->type_index = tp->type_list->length - 1;
+                        log_debug("registered imported object type '%.*s' at local index %d",
+                            (int)obj_node->name->len, obj_node->name->chars, obj_type->type_index);
+                    }
+                    if (has_alias) {
+                        push_qualified_name(tp, (AstNamedNode*)obj_node, import_node, import_node->alias);
+                    } else {
+                        push_name(tp, (AstNamedNode*)obj_node, import_node);
+                    }
+                    log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
                 } else {
-                    push_name(tp, (AstNamedNode*)dec_node, import_node);
+                    AstNamedNode* dec_node = (AstNamedNode*)declare;
+                    if (has_alias) {
+                        push_qualified_name(tp, (AstNamedNode*)dec_node, import_node, import_node->alias);
+                    } else {
+                        push_name(tp, (AstNamedNode*)dec_node, import_node);
+                    }
+                    log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
+                    // also export the error variable for ^err destructuring
+                    if (dec_node->error_name) {
+                        AstNamedNode* err_var = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
+                        err_var->node_type = AST_NODE_ASSIGN;
+                        err_var->name = dec_node->error_name;
+                        err_var->type = &TYPE_ANY;
+                        err_var->as = nullptr;
+                        if (has_alias) {
+                            push_qualified_name(tp, err_var, import_node, import_node->alias);
+                        } else {
+                            push_name(tp, err_var, import_node);
+                        }
+                        log_debug("got pub error var: %.*s", (int)dec_node->error_name->len, dec_node->error_name->chars);
+                    }
+                    // re-register type aliases in importing script's type_list
+                    if (dec_node->type && dec_node->type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* tt = (TypeType*)dec_node->type;
+                        Type* inner = tt->type;
+                        if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT
+                            || inner->type_id == LMD_TYPE_LIST || inner->type_id == LMD_TYPE_ARRAY)) {
+                            arraylist_append(tp->type_list, (void*)tt);
+                            ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
+                            log_debug("registered imported type alias '%.*s' at local index %d",
+                                (int)dec_node->name->len, dec_node->name->chars, ((TypeMap*)inner)->type_index);
+                        }
+                    }
                 }
-                log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
                 declare = declare->next;
             }
         }
@@ -6412,35 +6827,86 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     }
     ts_tree_cursor_delete(&cursor);
     if (ast_node->module.length) {
-        if (ast_node->module.str[0] == '.') {
-            // convert relative import to path
-            log_debug("runtime: %p", tp->runtime);
-            log_debug("runtime dir: %s", tp->runtime->current_dir);
+        // Check if module is a bare URI (symbol literal like 'http://...')
+        // This is a namespace-only import: import ns: 'url'
+        if (ast_node->module.str[0] == '\'') {
+            // strip quotes from URI
+            StrView uri = { .str = ast_node->module.str + 1, .length = ast_node->module.length - 2 };
+            if (ast_node->alias) {
+                Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
+                String* uri_string = name_pool_create_strview(tp->name_pool, uri);
+                target->original = uri_string->chars;
+                add_namespace(tp, ast_node->alias, target);
+                log_debug("bare URI namespace import: %.*s -> %.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)uri.length, uri.str);
+            } else {
+                log_error("bare URI import requires an alias: import alias: 'url'");
+            }
+            // bare URI imports do not load a script — return NULL so they
+            // are not added to the AST child list (no code generation needed)
+            return NULL;
+        }
+        else if (ast_node->module.str[0] == '.') {
+            // relative import: resolve relative to importing script's directory
+            const char* base_dir = tp->directory ? tp->directory : "./";
+            log_debug("import base dir: %s", base_dir);
             StrBuf* buf = strbuf_new();
-            strbuf_append_format(buf, "%s%.*s", tp->runtime->current_dir,
+            strbuf_append_format(buf, "%s%.*s", base_dir,
                 (int)ast_node->module.length - 1, ast_node->module.str + 1);
             char* ch = buf->str + buf->length - (ast_node->module.length - 1);
             while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
             strbuf_append_str(buf, ".ls");
+            ast_node->is_relative = true;
 
             #ifdef SIMPLE_SCHEMA_PARSER
-            // Skip module loading in simple schema parser mode
             ast_node->script = nullptr;
             #else
-            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);  // is_import = true
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
             #endif
 
-            strbuf_free(buf);
-            // import names/definitions from the modules
             if (ast_node->script) {
                 declare_module_import(tp, ast_node);
             }
             else {
-                log_error("Error: failed to load module %.*s", (int)ast_node->module.length, ast_node->module.str);
+                log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str,
+                    tp->reference ? tp->reference : "<unknown>");
+                fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    "  Resolved path: %s\n  Importing script: %s\n",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str,
+                    tp->reference ? tp->reference : "<unknown>");
             }
+            strbuf_free(buf);
         }
         else {
-            log_debug("module type not supported yet: %.*s", (int)ast_node->module.length, ast_node->module.str);
+            // absolute import: resolve from CWD (project root)
+            log_debug("absolute import: %.*s", (int)ast_node->module.length, ast_node->module.str);
+            StrBuf* buf = strbuf_new();
+            strbuf_append_format(buf, "./%.*s",
+                (int)ast_node->module.length, ast_node->module.str);
+            char* ch = buf->str + 2;  // skip "./"
+            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_str(buf, ".ls");
+            ast_node->is_relative = false;
+
+            #ifdef SIMPLE_SCHEMA_PARSER
+            ast_node->script = nullptr;
+            #else
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
+            #endif
+
+            if (ast_node->script) {
+                declare_module_import(tp, ast_node);
+            }
+            else {
+                log_error("Error: failed to load module '%.*s' (resolved: %s)",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str);
+                fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    "  Resolved path: %s\n",
+                    (int)ast_node->module.length, ast_node->module.str, buf->str);
+            }
+            strbuf_free(buf);
         }
     }
     return (AstNode*)ast_node;
@@ -6581,39 +7047,8 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         AstNode* ast = NULL;
         switch (symbol) {
         case SYM_IMPORT_MODULE:
-            // import module
+            // import module (also handles namespace imports: import ns: 'url')
             ast = build_module_import(tp, child);
-            break;
-        case sym_namespace_decl:
-            // namespace declaration: namespace ns1: 'url', ns2: 'url2', ...
-            log_debug("namespace declaration found");
-            {
-                // iterate through namespace_binding children
-                uint32_t binding_count = ts_node_named_child_count(child);
-                for (uint32_t i = 0; i < binding_count; i++) {
-                    TSNode binding = ts_node_named_child(child, i);
-                    if (ts_node_symbol(binding) == sym_namespace_binding) {
-                        TSNode prefix_node = ts_node_child_by_field_id(binding, FIELD_PREFIX);
-                        TSNode uri_node = ts_node_child_by_field_id(binding, FIELD_URI);
-                        if (!ts_node_is_null(prefix_node) && !ts_node_is_null(uri_node)) {
-                            StrView prefix_str = ts_node_source(tp, prefix_node);
-                            String* prefix = name_pool_create_strview(tp->name_pool, prefix_str);
-                            // build target from uri (string, symbol, or identifier)
-                            Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
-                            TSSymbol uri_sym = ts_node_symbol(uri_node);
-                            StrView uri_str = ts_node_source(tp, uri_node);
-                            if (uri_sym == SYM_STRING || uri_sym == SYM_SYMBOL) {
-                                // strip quotes
-                                uri_str.str++;
-                                uri_str.length -= 2;
-                            }
-                            String* uri_string = name_pool_create_strview(tp->name_pool, uri_str);
-                            target->original = uri_string->chars;  // store as original URL string
-                            add_namespace(tp, prefix, target);
-                        }
-                    }
-                }
-            }
             break;
         case SYM_CONTENT:
             ast = build_content(tp, child, true, true);

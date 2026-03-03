@@ -16,6 +16,52 @@
 #include <cstring>
 
 // ============================================================================
+// Helper: Read border width from CSS specified style
+// ============================================================================
+// Parses the CSS border shorthand to extract border width, matching the logic
+// in resolve_css_style.cpp. Handles: explicit length, keyword (thin/medium/thick),
+// and the CSS default of medium (3px) when style is visible but width unspecified.
+static float get_border_width_from_css(LayoutContext* lycon, DomElement* element) {
+    if (!element || !element->specified_style) return 0;
+    CssDeclaration* border_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BORDER);
+    if (!border_decl || !border_decl->value) return 0;
+
+    float bw = -1.0f;
+    bool has_visible_style = false;
+    CssValue* val = border_decl->value;
+
+    auto parse_keyword = [&](CssEnum kw) {
+        if (kw == CSS_VALUE_THIN) bw = 1.0f;
+        else if (kw == CSS_VALUE_MEDIUM) bw = 3.0f;
+        else if (kw == CSS_VALUE_THICK) bw = 5.0f;
+        else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
+                 kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DOUBLE ||
+                 kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
+                 kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET)
+            has_visible_style = true;
+    };
+
+    if (val->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < val->data.list.count; i++) {
+            CssValue* v = val->data.list.values[i];
+            if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER)
+                bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, v);
+            else if (v->type == CSS_VALUE_TYPE_KEYWORD)
+                parse_keyword(v->data.keyword);
+        }
+    } else if (val->type == CSS_VALUE_TYPE_LENGTH || val->type == CSS_VALUE_TYPE_NUMBER) {
+        bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, val);
+    } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+        parse_keyword(val->data.keyword);
+    }
+
+    // CSS spec: visible style with no explicit width defaults to medium (3px)
+    if (has_visible_style && bw < 0) bw = 3.0f;
+    return bw > 0 ? bw : 0;
+}
+
+// ============================================================================
 // Text Measurement (Core Implementation)
 // ============================================================================
 
@@ -646,19 +692,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                     }
-                    // Read border from CSS
-                    CssDeclaration* border_decl = style_tree_get_declaration(
-                        element->specified_style, CSS_PROPERTY_BORDER);
-                    if (border_decl && border_decl->value) {
-                        // border shorthand: width style color
-                        if (border_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                            border_decl->value->data.list.count >= 1) {
-                            CssValue* width_val = border_decl->value->data.list.values[0];
-                            if (width_val && width_val->type == CSS_VALUE_TYPE_LENGTH) {
-                                float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, width_val);
-                                border_left = border_right = bw;
-                            }
-                        }
+                    // Read border: prefer resolved bound, fall back to CSS shorthand
+                    ViewBlock* view_for_bdr = (ViewBlock*)element;
+                    if (view_for_bdr->bound && view_for_bdr->bound->border) {
+                        border_left = view_for_bdr->bound->border->width.left;
+                        border_right = view_for_bdr->bound->border->width.right;
+                    }
+                    if (border_left == 0 && border_right == 0) {
+                        float css_bw = get_border_width_from_css(lycon, element);
+                        if (css_bw > 0) { border_left = css_bw; border_right = css_bw; }
                     }
                     explicit_width += (int)(pad_left + pad_right + border_left + border_right);
                     log_debug("  -> explicit width: %d (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
@@ -935,6 +977,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bdr_left = tbl_view->bound->border->width.left;
                     bdr_right = tbl_view->bound->border->width.right;
                 }
+            }
+            // Fallback: read border from specified CSS if bound not yet resolved
+            if (bdr_left == 0 && bdr_right == 0) {
+                float css_bw = get_border_width_from_css(lycon, element);
+                if (css_bw > 0) { bdr_left = css_bw; bdr_right = css_bw; }
             }
 
             // Only use table-specific result if we actually found table rows/cells.
@@ -1386,6 +1433,93 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         sizes.max_content += total_gap;
         log_debug("  row flex gap: %d items, %.1fpx gap = %dpx total",
                   flex_child_count, flex_gap, total_gap);
+    }
+
+    // CSS 2.1 §12.5.1: For display:list-item with list-style-position:inside,
+    // the marker box is the first inline box in the principal block box.
+    // It contributes to the intrinsic width as inline content.
+    if (view_block->display.outer == CSS_VALUE_LIST_ITEM) {
+        bool is_inside_position = false;
+        bool has_marker = true;  // default list-style-type is 'disc'
+
+        // Check list-style-position — it's an inherited property, so walk up
+        // the ancestor chain if not found directly on this element.
+        if (view_block->blk && view_block->blk->list_style_position == 1) {  // 1 = inside
+            is_inside_position = true;
+        } else {
+            // Walk ancestor chain looking for list-style-position (inherited property)
+            for (DomNode* anc = (DomNode*)element; anc; anc = anc->parent) {
+                if (!anc->is_element()) continue;
+                DomElement* anc_elem = anc->as_element();
+                // Check resolved blk first (if available)
+                ViewBlock* anc_view = (ViewBlock*)anc_elem;
+                if (anc_view->blk && anc_view->blk->list_style_position == 1) {
+                    is_inside_position = true;
+                    break;
+                }
+                if (anc_view->blk && anc_view->blk->list_style_position == 2) {
+                    break;  // explicitly 'outside'
+                }
+                // Check specified style
+                if (anc_elem->specified_style) {
+                    CssDeclaration* lsp_decl = style_tree_get_declaration(
+                        anc_elem->specified_style, CSS_PROPERTY_LIST_STYLE_POSITION);
+                    if (lsp_decl && lsp_decl->value && lsp_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum lsp_val = lsp_decl->value->data.keyword;
+                        if (lsp_val == 1) {  // 1 = inside
+                            is_inside_position = true;
+                        }
+                        break;  // found an explicit value, stop searching
+                    }
+                }
+            }
+        }
+
+        // Check list-style-type (if 'none', no marker) — also inherited
+        if (view_block->blk && view_block->blk->list_style_type == CSS_VALUE_NONE) {
+            has_marker = false;
+        } else {
+            for (DomNode* anc = (DomNode*)element; anc; anc = anc->parent) {
+                if (!anc->is_element()) continue;
+                DomElement* anc_elem = anc->as_element();
+                ViewBlock* anc_view = (ViewBlock*)anc_elem;
+                if (anc_view->blk && anc_view->blk->list_style_type == CSS_VALUE_NONE) {
+                    has_marker = false;
+                    break;
+                }
+                if (anc_view->blk && anc_view->blk->list_style_type != 0) {
+                    break;  // has a non-none type, stop
+                }
+                if (anc_elem->specified_style) {
+                    CssDeclaration* lst_decl = style_tree_get_declaration(
+                        anc_elem->specified_style, CSS_PROPERTY_LIST_STYLE_TYPE);
+                    if (lst_decl && lst_decl->value && lst_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        if (lst_decl->value->data.keyword == CSS_VALUE_NONE) {
+                            has_marker = false;
+                        }
+                        break;  // found explicit value
+                    }
+                }
+            }
+        }
+
+        if (is_inside_position && has_marker) {
+            // Marker width = font_size * 1.375 (matching layout_block.cpp marker creation)
+            float font_size = 16.0f;  // default
+            if (view_block->font && view_block->font->font_size > 0) {
+                font_size = view_block->font->font_size;
+            } else if (lycon->font.current_font_size > 0) {
+                font_size = lycon->font.current_font_size;
+            }
+            float marker_width = font_size * 1.375f;
+
+            // The marker is the first inline box — add to inline content accumulators
+            has_inline_content = true;
+            inline_max_sum += marker_width;
+            inline_min_sum = max(inline_min_sum, marker_width);
+            log_debug("  list-item inside marker: added %.1fpx marker width (font=%.1f)",
+                      marker_width, font_size);
+        }
     }
 
     // CSS 2.1 §16.1: text-indent applies to the first formatted line of a block container.

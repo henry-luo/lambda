@@ -16,7 +16,7 @@ let sq_diffs_x = for (x in test_x) (x - x_mean) ** 2
 let sq_diffs_y = for (y in test_y) (y - y_mean) ** 2
 let x_var = sum(sq_diffs_x)
 let y_var = sum(sq_diffs_y)
-let denominator = sqrt(x_var * y_var)
+let denominator = math.sqrt(x_var * y_var)
 
 let result = if (denominator == 0.0) 0.0 else numerator / denominator
 

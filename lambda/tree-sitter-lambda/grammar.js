@@ -514,11 +514,12 @@ module.exports = grammar({
       optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
     )),
 
-    // Member access
-    member_expr: $ => seq(
+    // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
+    // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
+    member_expr: $ => prec.dynamic(1, seq(
       field('object', $.primary_expr), ".",
       field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type))
-    ),
+    )),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent
     parent_expr: $ => seq(
@@ -542,7 +543,7 @@ module.exports = grammar({
     current_index: _ => '~#',
 
     unary_expr: $ => prec.left(seq(
-      field('operator', choice('not', '-', '+', '^')),
+      field('operator', choice('not', '!', '-', '+', '^')),
       field('operand', $._expr),
     )),
 
@@ -653,8 +654,14 @@ module.exports = grammar({
       'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
-    pub_stam: $ => seq(
-      'pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    pub_stam: $ => choice(
+      // pub variable: pub x = expr, pub y = expr
+      seq('pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))),
+      // pub type alias: pub type T = type_expr
+      seq('pub', 'type', field('declare', alias($.type_assign, $.assign_expr)),
+        repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))),
+      // pub object type: pub type T { ... }
+      seq('pub', field('declare', $.object_type)),
     ),
 
     // Expression-form if: if (cond) expr else expr | else { stam }
@@ -826,7 +833,8 @@ module.exports = grammar({
 
     // var statement for mutable variables (procedural only)
     var_stam: $ => seq(
-      'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+      'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr))),
+      optional(';')
     ),
 
     // assignment statement for mutable variables (procedural only)
@@ -1115,22 +1123,8 @@ module.exports = grammar({
           field('module', choice($.absolute_name, $.relative_name, $.symbol)))
     ),
 
-    _import_stam: $ => choice(
-      seq('import', $.import_module, repeat(seq(',', $.import_module))),
-      $.namespace_decl,
-    ),
-
-    // Namespace declaration: namespace ns1 : 'url', ns2 : "url", ns3: path, ...;
-    namespace_decl: $ => seq(
-      'namespace',
-      $.namespace_binding,
-      repeat(seq(',', $.namespace_binding)),
-    ),
-
-    namespace_binding: $ => seq(
-      field('prefix', $.identifier),
-      ':',
-      field('uri', choice($.string, $.symbol, $.identifier)),
+    _import_stam: $ => seq(
+      'import', $.import_module, repeat(seq(',', $.import_module)),
     ),
   },
 });

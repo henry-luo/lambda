@@ -1,9 +1,9 @@
 // math/atoms/style.ls — Style command rendering (\mathbf, \mathrm, \displaystyle, etc.)
 // Handles font/style overrides that wrap their argument in a new rendering context.
 
-import box: .lambda.package.math.box
-import ctx: .lambda.package.math.context
-import css: .lambda.package.math.css
+import box: lambda.package.math.box
+import ctx: lambda.package.math.context
+import css: lambda.package.math.css
 
 // ============================================================
 // Style command rendering

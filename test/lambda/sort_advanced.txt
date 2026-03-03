@@ -1,0 +1,23 @@
+[{
+    name: "Alice",
+    age: 25
+  }, {
+    name: "Charlie",
+    age: 30
+  }, {
+    name: "Bob",
+    age: 35
+  }]
+["fig", "apple", "banana", "cherry"]
+[{
+    name: "Bob",
+    age: 35
+  }, {
+    name: "Charlie",
+    age: 30
+  }, {
+    name: "Alice",
+    age: 25
+  }]
+[9, 5, 4, 3, 1, 1]
+[1, 2, 3, 4, 5]

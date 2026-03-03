@@ -3,6 +3,7 @@
 #include "layout_table.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/font/font.h"
 #include "../lib/strbuf.h"
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
@@ -29,7 +30,10 @@ static inline bool is_out_of_flow_child(View* child) {
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     View* child = span->first_child;
     if (!child) {
-        // Empty inline element - size includes border and padding per CSS 2.1 §8.1
+        // Truly empty inline element (no children at all) — CSS 2.1 §9.4.2:
+        // Line boxes with no text, no preserved whitespace, and no inline elements
+        // with non-zero margins/padding/borders are zero-height. A truly empty
+        // inline element (e.g., <span></span>) contributes only border+padding.
         float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
         float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
         if (span->bound) {
@@ -56,9 +60,24 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         child = child->next();
     }
     if (!child) {
-        // All children are nil-views or out-of-flow — treat as empty
-        span->width = 0;
-        span->height = 0;
+        // All children are nil-views or out-of-flow — treat as empty but include border+padding
+        // CSS 2.1 §8.1: Empty inline elements still have border+padding in their bounding box
+        float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
+        float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
+        if (span->bound) {
+            if (span->bound->border) {
+                border_left = span->bound->border->width.left;
+                border_right = span->bound->border->width.right;
+                border_top = span->bound->border->width.top;
+                border_bottom = span->bound->border->width.bottom;
+            }
+            pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
+            pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
+            pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
+            pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+        }
+        span->width = (int)(border_left + pad_left + pad_right + border_right);
+        span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
         return;
     }
 
@@ -213,7 +232,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
 
         // CSS 2.1 §9.2.1.1 and §17.2.1: Block children and orphaned table-internal children
-        // both break the inline flow (table-internal elements get anonymous table wrappers)
+        // both break the inline flow. Table-internal elements have been wrapped in anonymous
+        // block-level tables by wrap_orphaned_table_children() when block children exist.
         bool is_block_or_table_internal = child->is_element() &&
             (child_display.outer == CSS_VALUE_BLOCK ||
              is_table_internal_display(child_display.inner) ||
@@ -418,35 +438,46 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     lycon->line.advance_x += inline_left_edge;
 
-    // CSS 2.1 §9.2.1.1 and §17.2.1: Check if inline contains block-level or table-internal children
-    // If so, split into anonymous boxes (and wrap table-internal in anonymous tables)
+    // CSS 2.1 §9.2.1.1 and §17.2.1: Check for block-level and table-internal children
+    // We need to handle two different scenarios:
+    // 1. If ONLY table-internal children (no blocks) → wrap in anonymous inline-table
+    // 2. If block children exist → table-internal treated as block-breaking (block-in-inline)
     bool has_block_children = false;
+    bool has_table_internal = false;
     DomNode* scan = child;
     while (scan) {
         if (scan->is_element()) {
             DisplayValue child_display = resolve_display_value(scan);
             log_debug("block-in-inline scan: child=%s outer=%d inner=%d",
                      scan->node_name(), child_display.outer, child_display.inner);
-            // CSS 2.1 §9.2.1.1: Block children break inline flow
-            // CSS 2.1 §17.2.1: Table-internal children also break inline flow
-            if (child_display.outer == CSS_VALUE_BLOCK ||
-                is_table_internal_display(child_display.inner) ||
-                is_table_internal_display(child_display.outer)) {
+            if (child_display.outer == CSS_VALUE_BLOCK) {
                 has_block_children = true;
-                log_debug("block-in-inline detected: %s contains block/table-internal child %s",
-                         elmt->node_name(), scan->node_name());
-                break;
+            }
+            if (is_table_internal_display(child_display.inner) ||
+                is_table_internal_display(child_display.outer)) {
+                has_table_internal = true;
             }
         }
         scan = scan->next_sibling;
     }
 
-    if (has_block_children) {
-        // CSS 2.1 §17.2.1: Before handling block-in-inline splitting,
-        // wrap any orphaned table-internal children in anonymous table structures
+    // CSS 2.1 §17.2.1: When only table-internal children exist (no block children),
+    // wrap them in anonymous inline-table to participate in inline flow
+    if (has_table_internal && !has_block_children) {
         wrap_orphaned_table_children(lycon, static_cast<DomElement*>(elmt));
-        // Re-get first child after wrapping may have inserted anonymous elements
         child = static_cast<DomElement*>(elmt)->first_child;
+    }
+
+    // If block children exist, table-internal children act as block-breaking
+    if (has_block_children && has_table_internal) {
+        log_debug("block-in-inline detected: %s has both block and table-internal children",
+                 elmt->node_name());
+    }
+
+    if (has_block_children || (has_table_internal && has_block_children)) {
+        // When block children exist alongside table-internal, handle via block-in-inline
+        // splitting. The anonymous block wrappers created by splitting will later call
+        // wrap_orphaned_table_children() during their own layout in layout_block.cpp.
 
         // Handle block-in-inline splitting
         layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
@@ -469,6 +500,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // Normal inline-only content
+    bool had_children = (child != nullptr);
     float start_advance_y = lycon->block.advance_y;
     if (child) {
         log_debug("layout inline children: advance_y %f, line_height %f", lycon->block.advance_y, lycon->block.line_height);
@@ -480,6 +512,53 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Advance past the right border+padding so the next sibling starts after this inline's border
     lycon->line.advance_x += inline_right_edge;
+
+    // CSS 2.1 §10.8.1: For non-replaced inline elements, the inline box height
+    // equals its 'line-height', computed via the half-leading model. Even empty
+    // inline elements contribute their strut to the line box height calculation.
+    // When children produce text output, output_text() applies the half-leading;
+    // for empty inlines (no children at all), we must apply it here explicitly.
+    if (!had_children && lycon->font.font_handle) {
+        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+        float ascender = 0, descender = 0;
+        if (typo.valid && typo.use_typo_metrics) {
+            ascender = typo.ascender;
+            descender = typo.descender;
+        } else {
+            const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+            if (m) {
+                ascender = m->hhea_ascender;
+                descender = -(m->hhea_descender);
+            }
+        }
+        if (ascender > 0 || descender > 0) {
+            if (!lycon->block.line_height_is_normal) {
+                float content_height = ascender + descender;
+                float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+                ascender += half_leading;
+                descender += half_leading;
+            }
+            float va_offset = lycon->line.vertical_align_offset;
+            if (va_offset != 0) {
+                ascender += va_offset;
+                descender -= va_offset;
+            }
+            lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+            lycon->line.max_descender = max(lycon->line.max_descender, descender);
+            if (lycon->block.line_height_is_normal) {
+                float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+                lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
+            }
+            log_debug("empty inline strut: ascender=%.1f, descender=%.1f, line_height=%.1f",
+                     ascender, descender, lycon->block.line_height);
+        }
+        // CSS 2.1 §9.4.2: An inline element with non-zero margins, borders, or
+        // padding makes the line box non-empty (not subject to zero-height rule).
+        // Mark the line as having content so line_break() is called at finalization.
+        if (inline_left_edge > 0 || inline_right_edge > 0) {
+            lycon->line.is_line_start = false;
+        }
+    }
 
     // Detect multi-line: if advance_y changed during child layout, the span wrapped to a new line
     bool span_is_multi_line = (lycon->block.advance_y > start_advance_y + 1.0f);
@@ -540,6 +619,30 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     compute_span_bounding_box(span, span_is_multi_line);
+
+    // CSS 2.1 §10.8.1: Mark collapsed-content inline spans for line-break fixup.
+    // When an inline element has children but all content collapsed (whitespace-only),
+    // the span gets 0×0 from compute_span_bounding_box. However, per CSS 2.1, the
+    // inline box still contributes its line-height to the line box. We store the
+    // span's resolved line-height in content_height as a marker; line_break() will
+    // set the height if the line turns out to have visible content.
+    if (span->height == 0 && span->width == 0 && span->first_child) {
+        // Check if all children are collapsed (RDT_VIEW_NONE)
+        bool all_collapsed = true;
+        DomNode* chk = static_cast<DomElement*>(elmt)->first_child;
+        while (chk) {
+            if (chk->view_type != RDT_VIEW_NONE) {
+                all_collapsed = false;
+                break;
+            }
+            chk = chk->next_sibling;
+        }
+        if (all_collapsed) {
+            span->content_height = lycon->block.line_height;
+            log_debug("marking collapsed inline span %s for line-height fixup (lh=%.1f)",
+                     elmt->node_name(), lycon->block.line_height);
+        }
+    }
 
     // Restore the trailing space on the child so advance_x remains correct
     // for any subsequent layout processing

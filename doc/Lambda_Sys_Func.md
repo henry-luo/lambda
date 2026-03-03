@@ -10,12 +10,11 @@ This document provides comprehensive documentation for all built-in system funct
 4. [Date/Time Functions](#datetime-functions)
 5. [String Functions](#string-functions)
 6. [Collection Functions](#collection-functions)
-7. [Vector Functions](#vector-functions)
-8. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
-9. [Variadic Argument Functions](#variadic-argument-functions)
-10. [Input and Format Functions](#io-functions)
-11. [Procedural Functions](#procedural-functions)
-12. [Error Handling](#error-handling)
+7. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
+8. [Variadic Argument Functions](#variadic-argument-functions)
+9. [Input and Format Functions](#io-functions)
+10. [Procedural Functions](#procedural-functions)
+11. [Error Handling](#error-handling)
 
 ---
 
@@ -85,6 +84,8 @@ Basic mathematical operations.
 | `min(vec)` | Minimum in collection | `min([3, 1, 2])` | `1` |
 | `max(a, b)` | Maximum of two values | `max(3, 5)` | `5` |
 | `max(vec)` | Maximum in collection | `max([3, 1, 2])` | `3` |
+| `argmin(vec)` | Index of minimum | `argmin([3, 1, 2])` | `1` |
+| `argmax(vec)` | Index of maximum | `argmax([3, 1, 2])` | `0` |
 
 ```lambda
 abs(-5)            // 5
@@ -97,6 +98,8 @@ min(3, 5)          // 3
 min([3, 1, 2])     // 1
 max(3, 5)          // 5
 max([3, 1, 2])     // 3
+argmin([5, 2, 8, 1])  // 3 (index of 1)
+argmax([5, 2, 8, 1])  // 2 (index of 8)
 ```
 
 ---
@@ -109,22 +112,32 @@ Functions for statistical analysis on collections.
 |----------|-------------|---------|--------|
 | `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
 | `avg(vec)` | Arithmetic mean | `avg([1, 2, 3])` | `2.0` |
-| `mean(vec)` | Alias for avg | `mean([1, 2, 3])` | `2.0` |
-| `median(vec)` | Median value | `median([1, 3, 2])` | `2` |
-| `variance(vec)` | Population variance | `variance([1, 2, 3])` | `0.666...` |
-| `deviation(vec)` | Standard deviation | `deviation([1, 2, 3])` | `0.816...` |
-| `quantile(vec, p)` | p-th quantile | `quantile([1,2,3,4], 0.5)` | `2.5` |
-| `prod(vec)` | Product of elements | `prod([2, 3, 4])` | `24` |
+| `math.mean(vec)` | Alias for avg | `math.mean([1, 2, 3])` | `2.0` |
+| `math.median(vec)` | Median value | `math.median([1, 3, 2])` | `2` |
+| `math.variance(vec)` | Population variance | `math.variance([1, 2, 3])` | `0.666...` |
+| `math.deviation(vec)` | Standard deviation | `math.deviation([1, 2, 3])` | `0.816...` |
+| `math.quantile(vec, p)` | p-th quantile | `math.quantile([1,2,3,4], 0.5)` | `2.5` |
+| `math.prod(vec)` | Product of elements | `math.prod([2, 3, 4])` | `24` |
+| `math.cumsum(vec)` | Cumulative sum | `math.cumsum([1, 2, 3])` | `[1, 3, 6]` |
+| `math.cumprod(vec)` | Cumulative product | `math.cumprod([1, 2, 3])` | `[1, 2, 6]` |
+| `math.dot(a, b)` | Dot product | `math.dot([1,2,3], [4,5,6])` | `32` |
+| `math.norm(vec)` | Euclidean norm | `math.norm([3, 4])` | `5` |
 
 ```lambda
 sum([1, 2, 3, 4])           // 10
 avg([1, 2, 3, 4])           // 2.5
-mean([1, 2, 3, 4])          // 2.5
-median([1, 3, 2, 4, 5])     // 3
-variance([1, 2, 3])         // 0.666...
-deviation([1, 2, 3])        // 0.816...
-quantile([1, 2, 3, 4], 0.5) // 2.5
-prod([2, 3, 4])             // 24
+math.mean([1, 2, 3, 4])          // 2.5
+math.median([1, 3, 2, 4, 5])     // 3
+math.variance([1, 2, 3])         // 0.666...
+math.deviation([1, 2, 3])        // 0.816...
+math.quantile([1, 2, 3, 4], 0.5) // 2.5
+math.prod([2, 3, 4])             // 24
+
+// Cumulative & linear algebra
+math.cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
+math.cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
+math.dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
+math.norm([3, 4])               // 5 (sqrt(9 + 16))
 ```
 
 ---
@@ -133,30 +146,95 @@ prod([2, 3, 4])             // 24
 
 Functions that apply to each element of a collection and return a collection of the same size. Also work on scalar values.
 
+### Constants
+
+| Constant | Description | Value |
+|----------|-------------|-------|
+| `math.pi` | Pi (π) | `3.1415926536` |
+| `math.e` | Euler's number (e) | `2.7182818285` |
+
+### Trigonometric
+
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `sqrt(x)` | Square root | `sqrt([1, 4, 9])` | `[1, 2, 3]` |
-| `log(x)` | Natural logarithm | `log([1, 2.718...])` | `[0, 1]` |
-| `log10(x)` | Base-10 logarithm | `log10([1, 10, 100])` | `[0, 1, 2]` |
-| `exp(x)` | Exponential (e^x) | `exp([0, 1, 2])` | `[1, e, e²]` |
-| `sin(x)` | Sine | `sin([0, 1.57...])` | `[0, 1]` |
-| `cos(x)` | Cosine | `cos([0, 1.57...])` | `[1, 0]` |
-| `tan(x)` | Tangent | `tan([0, 0.785...])` | `[0, 1]` |
+| `math.sin(x)` | Sine | `math.sin([0, 1.57...])` | `[0, 1]` |
+| `math.cos(x)` | Cosine | `math.cos([0, 1.57...])` | `[1, 0]` |
+| `math.tan(x)` | Tangent | `math.tan([0, 0.785...])` | `[0, 1]` |
+
+### Inverse Trigonometric
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.asin(x)` | Inverse sine (arcsin) | `math.asin(1)` | `1.5707963268` |
+| `math.acos(x)` | Inverse cosine (arccos) | `math.acos(1)` | `0` |
+| `math.atan(x)` | Inverse tangent (arctan) | `math.atan(1)` | `0.7853981634` |
+| `math.atan2(y, x)` | Two-argument arctan | `math.atan2(1, 1)` | `0.7853981634` |
+
+### Hyperbolic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.sinh(x)` | Hyperbolic sine | `math.sinh(1)` | `1.1752011936` |
+| `math.cosh(x)` | Hyperbolic cosine | `math.cosh(0)` | `1` |
+| `math.tanh(x)` | Hyperbolic tangent | `math.tanh(1)` | `0.761594156` |
+
+### Inverse Hyperbolic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.asinh(x)` | Inverse hyperbolic sine | `math.asinh(1)` | `0.881373587` |
+| `math.acosh(x)` | Inverse hyperbolic cosine | `math.acosh(2)` | `1.3169578969` |
+| `math.atanh(x)` | Inverse hyperbolic tangent | `math.atanh(0.5)` | `0.5493061443` |
+
+### Exponential / Logarithmic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.exp(x)` | Exponential (e^x) | `math.exp([0, 1, 2])` | `[1, e, e²]` |
+| `math.exp2(x)` | Base-2 exponential (2^x) | `math.exp2(3)` | `8` |
+| `math.expm1(x)` | exp(x) - 1 (precise for small x) | `math.expm1(0)` | `0` |
+| `math.log(x)` | Natural logarithm | `math.log([1, 2.718...])` | `[0, 1]` |
+| `math.log2(x)` | Base-2 logarithm | `math.log2(8)` | `3` |
+| `math.log10(x)` | Base-10 logarithm | `math.log10([1, 10, 100])` | `[0, 1, 2]` |
+| `math.log1p(x)` | log(1 + x) (precise for small x) | `math.log1p(0)` | `0` |
+
+### Power / Root
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.pow(b, e)` | Power (b^e) | `math.pow(2, 10)` | `1024` |
+| `math.sqrt(x)` | Square root | `math.sqrt([1, 4, 9])` | `[1, 2, 3]` |
+| `math.cbrt(x)` | Cube root | `math.cbrt(27)` | `3` |
+| `math.hypot(x, y)` | Hypotenuse √(x²+y²) | `math.hypot(3, 4)` | `5` |
+
+### Rounding / Sign
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
 | `abs(x)` | Absolute value | `abs([-1, 2, -3])` | `[1, 2, 3]` |
 | `round(x)` | Round | `round([1.4, 1.6])` | `[1, 2]` |
 | `floor(x)` | Floor | `floor([1.7, 2.3])` | `[1, 2]` |
 | `ceil(x)` | Ceiling | `ceil([1.2, 2.8])` | `[2, 3]` |
+| `math.trunc(x)` | Truncate toward zero | `math.trunc([-3.7, 3.7])` | `[-3, 3]` |
 | `sign(x)` | Sign (-1, 0, 1) | `sign([-5, 0, 3])` | `[-1, 0, 1]` |
 
 ```lambda
-sqrt([1, 4, 9])            // [1, 2, 3]
-log([1, 2.718281828])      // [0, 1]
-log10([1, 10, 100])        // [0, 1, 2]
-exp([0, 1])                // [1, 2.718...]
-sin([0, 3.14159/2])        // [0, 1]
-cos([0, 3.14159/2])        // [1, 0]
-abs([-1, 2, -3])           // [1, 2, 3]
-sign([-5, 0, 3])           // [-1, 0, 1]
+math.pi                         // 3.1415926536
+math.e                          // 2.7182818285
+math.sin([0, 3.14159/2])        // [0, 1]
+math.cos([0, 3.14159/2])        // [1, 0]
+math.asin(1)                    // 1.5707963268 (π/2)
+math.atan2(1, 1)                // 0.7853981634 (π/4)
+math.sinh(1)                    // 1.1752011936
+math.exp2(3)                    // 8
+math.log2(8)                    // 3
+math.pow(2, 10)                 // 1024
+math.cbrt(27)                   // 3
+math.hypot(3, 4)                // 5
+math.log1p(0)                   // 0
+math.trunc(3.7)                 // 3
+abs([-1, 2, -3])                // [1, 2, 3]
+sign([-5, 0, 3])                // [-1, 0, 1]
 ```
 
 ---
@@ -252,6 +330,21 @@ split("a1b2c3", digit, true)          // ["a", "1", "b", "2", "c", "3", ""]  —
 split("a,b,c", ",", true)             // ["a", ",", "b", ",", "c"]           — works with strings too
 ```
 
+### join(strs, separator)
+
+Join a list of strings with a separator. Returns a string.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `join(strs, sep)` | Join with separator | `join(["a", "b", "c"], ", ")` | `"a, b, c"` |
+| `join(strs, "")` | Concatenate | `join(["hello", "world"], "")` | `"helloworld"` |
+
+```lambda
+join(["a", "b", "c"], ", ")           // "a, b, c"
+join(["hello"], ", ")                 // "hello"
+join(["x", "y"], "-")                // "x-y"
+```
+
 ### find(str, pattern_or_string)
 
 Find all occurrences of a pattern or substring. Returns a list of match maps `{value, index}`.
@@ -307,16 +400,18 @@ Functions for working with arrays, lists, and other collections.
 
 ### Vector Manipulation
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `reverse(vec)` | Reverse order | `reverse([1, 2, 3])` | `[3, 2, 1]` |
-| `sort(vec)` | Sort ascending | `sort([3, 1, 2])` | `[1, 2, 3]` |
-| `sort(vec, 'desc)` | Sort descending | `sort([1, 2, 3], 'desc)` | `[3, 2, 1]` |
-| `unique(vec)` | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])` | `[1, 2, 3]` |
-| `concat(v1, v2)` | Concatenate vectors | `concat([1, 2], [3, 4])` | `[1, 2, 3, 4]` |
-| `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` |
-| `drop(vec, n)` | Drop first n elements | `drop([1, 2, 3], 1)` | `[2, 3]` |
-| `zip(v1, v2)` | Pair elements | `zip([1, 2], [3, 4])` | `[(1, 3), (2, 4)]` |
+| Function             | Description                         | Example                                | Result             |
+| -------------------- | ----------------------------------- | -------------------------------------- | ------------------ |
+| `reverse(vec)`       | Reverse order                       | `reverse([1, 2, 3])`                   | `[3, 2, 1]`        |
+| `sort(vec)`          | Sort ascending                      | `sort([3, 1, 2])`                      | `[1, 2, 3]`        |
+| `sort(vec, 'desc)`   | Sort descending                     | `sort([1, 2, 3], 'desc)`               | `[3, 2, 1]`        |
+| `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
+| `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
+| `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
+| `concat(v1, v2)`     | Concatenate vectors                 | `concat([1, 2], [3, 4])`               | `[1, 2, 3, 4]`     |
+| `take(vec, n)`       | First n elements                    | `take([1, 2, 3], 2)`                   | `[1, 2]`           |
+| `drop(vec, n)`       | Drop first n elements               | `drop([1, 2, 3], 1)`                   | `[2, 3]`           |
+| `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
 
 ### Vector Construction
 
@@ -334,6 +429,15 @@ any([false, false, true])  // true
 reverse([1, 2, 3])         // [3, 2, 1]
 sort([3, 1, 2])            // [1, 2, 3]
 sort([1, 2, 3], 'desc)     // [3, 2, 1]
+
+// Sort by key function — 2nd arg is fn
+let users = [{name: "Bob", age: 30}, {name: "Alice", age: 25}]
+sort(users, ~.age)         // sorted by age ascending
+sort(users, ~.name)        // sorted by name ascending
+
+// Sort with options map — direction + key
+sort(users, {dir: 'desc, by: ~.age})   // sorted by age descending
+
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
 concat([1, 2], [3, 4])     // [1, 2, 3, 4]
 take([1, 2, 3, 4], 2)      // [1, 2]
@@ -342,60 +446,6 @@ zip([1, 2], ["a", "b"])    // [(1, "a"), (2, "b")]
 
 fill(3, 0)                 // [0, 0, 0]
 range(0, 10, 2)            // [0, 2, 4, 6, 8]
-```
-
----
-
-## Vector Functions
-
-Functions for vector/array computations. These support **element-wise operations** on numeric vectors.
-
-### Aggregation
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
-| `prod(vec)` | Product of elements | `prod([2, 3, 4])` | `24` |
-| `min(vec)` | Minimum element | `min([3, 1, 2])` | `1` |
-| `max(vec)` | Maximum element | `max([3, 1, 2])` | `3` |
-
-### Index Operations
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `argmin(vec)` | Index of minimum | `argmin([3, 1, 2])` | `1` |
-| `argmax(vec)` | Index of maximum | `argmax([3, 1, 2])` | `0` |
-
-### Cumulative Operations
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `cumsum(vec)` | Cumulative sum | `cumsum([1, 2, 3])` | `[1, 3, 6]` |
-| `cumprod(vec)` | Cumulative product | `cumprod([1, 2, 3])` | `[1, 2, 6]` |
-
-### Linear Algebra
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `dot(a, b)` | Dot product | `dot([1,2,3], [4,5,6])` | `32` |
-| `norm(vec)` | Euclidean norm | `norm([3, 4])` | `5` |
-
-```lambda
-// Aggregation
-sum([1, 2, 3, 4])          // 10
-prod([2, 3, 4])            // 24
-
-// Index operations
-argmin([5, 2, 8, 1])       // 3 (index of 1)
-argmax([5, 2, 8, 1])       // 2 (index of 8)
-
-// Cumulative
-cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
-cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
-
-// Linear algebra
-dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
-norm([3, 4])               // 5 (sqrt(9 + 16))
 ```
 
 ---
@@ -413,6 +463,23 @@ Functions that reduce collections to single values.
 | `all(vec)` | All truthy? | `all([true, true])` | `true` |
 | `any(vec)` | Any truthy? | `any([false, true])` | `true` |
 | `len(vec)` | Count elements | `len([1, 2, 3])` | `3` |
+| `reduce(vec, fn)` | Reduce with binary function | `reduce([1,2,3], (a,b) => a+b)` | `6` |
+
+### reduce(vec, fn)
+
+Reduce a collection to a single value by applying a binary function cumulatively. Uses the first element as the initial accumulator.
+
+```lambda
+reduce([1, 2, 3, 4], (a, b) => a + b)     // 10 (sum)
+reduce([1, 2, 3, 4, 5], (a, b) => a * b)   // 120 (product)
+reduce([42], (a, b) => a + b)               // 42 (single element)
+
+// Sort and reduce
+let nums = [5, 3, 8, 1]
+reduce(sort(nums), (acc, x) => acc * 10 + x)   // 1358
+```
+
+> **Note**: Collection must have at least one element. If only one element, it is returned directly without calling the function.
 
 ---
 
@@ -509,6 +576,35 @@ let csv_data = input(@./data.csv, {type: 'csv, delimiter: ','})
 // Auto-detection (based on file extension)
 let auto_data = input(@./document.md)  // Automatically detects Markdown
 ```
+
+#### parse(str) / parse(str, format)
+
+Parse a string into Lambda data structures. Like `input()` but operates on string content instead of file paths/URLs.
+
+| Function | Description | Example |
+|----------|-------------|--------|
+| `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
+| `parse(str, format)` | Parse string with specified format | `parse(str, 'json)` |
+
+**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`
+
+```lambda
+// Parse JSON string
+let data^err = parse("{\"name\": \"Alice\", \"age\": 30}", 'json)
+data.name     // "Alice"
+
+// Auto-detect JSON from content
+let data2^err = parse("{\"x\": 1}")
+data2.x       // 1
+
+// Parse with options map
+let expr^err = parse("x^2 + y", {type: 'math, flavor: 'latex})
+
+// Parse CSV from string
+let csv^err = parse("name,age\nAlice,30\nBob,25", 'csv)
+```
+
+> **Note**: `parse()` can raise errors. Use `let result^err = parse(...)` for error-safe handling.
 
 #### exists(target)
 
@@ -835,13 +931,33 @@ if (result is error) {
 | `floor` | 1 | Round down |
 | `ceil` | 1 | Round up |
 | `sign` | 1 | Sign (-1, 0, 1) |
-| `sqrt` | 1 | Square root |
-| `log` | 1 | Natural log |
-| `log10` | 1 | Base-10 log |
-| `exp` | 1 | Exponential |
-| `sin` | 1 | Sine |
-| `cos` | 1 | Cosine |
-| `tan` | 1 | Tangent |
+| `math.sqrt` | 1 | Square root |
+| `math.cbrt` | 1 | Cube root |
+| `math.hypot` | 2 | Hypotenuse √(x²+y²) |
+| `math.trunc` | 1 | Truncate toward zero |
+| `math.pow` | 2 | Power (b^e) |
+| `math.log` | 1 | Natural log |
+| `math.log2` | 1 | Base-2 log |
+| `math.log10` | 1 | Base-10 log |
+| `math.log1p` | 1 | log(1 + x) |
+| `math.exp` | 1 | Exponential (e^x) |
+| `math.exp2` | 1 | Base-2 exponential |
+| `math.expm1` | 1 | exp(x) - 1 |
+| `math.sin` | 1 | Sine |
+| `math.cos` | 1 | Cosine |
+| `math.tan` | 1 | Tangent |
+| `math.asin` | 1 | Inverse sine |
+| `math.acos` | 1 | Inverse cosine |
+| `math.atan` | 1 | Inverse tangent |
+| `math.atan2` | 2 | Two-arg arctan |
+| `math.sinh` | 1 | Hyperbolic sine |
+| `math.cosh` | 1 | Hyperbolic cosine |
+| `math.tanh` | 1 | Hyperbolic tangent |
+| `math.asinh` | 1 | Inverse hyp. sine |
+| `math.acosh` | 1 | Inverse hyp. cosine |
+| `math.atanh` | 1 | Inverse hyp. tangent |
+| `math.pi` | - | Pi (π) constant |
+| `math.e` | - | Euler's number constant |
 
 ### Statistical Functions
 | Function | Args | Description |
@@ -854,20 +970,15 @@ if (result is error) {
 | `deviation` | 1 | Std deviation |
 | `quantile` | 2 | Quantile |
 | `prod` | 1 | Product |
-| `min` | 1-2 | Minimum |
-| `max` | 1-2 | Maximum |
-
-### Vector Functions
-| Function | Args | Description |
-|----------|------|-------------|
 | `cumsum` | 1 | Cumulative sum |
 | `cumprod` | 1 | Cumulative product |
-| `argmin` | 1 | Index of min |
-| `argmax` | 1 | Index of max |
 | `dot` | 2 | Dot product |
 | `norm` | 1 | Euclidean norm |
-| `fill` | 2 | Fill vector |
-| `range` | 3 | Range with step |
+| `min` | 1-2 | Minimum |
+| `max` | 1-2 | Maximum |
+| `argmin` | 1 | Index of min |
+| `argmax` | 1 | Index of max |
+| `reduce` | 2 | Reduce with binary fn |
 
 ### Collection Functions
 | Function | Args | Description |
@@ -877,17 +988,20 @@ if (result is error) {
 | `all` | 1 | All truthy |
 | `any` | 1 | Any truthy |
 | `reverse` | 1 | Reverse order |
-| `sort` | 1-2 | Sort |
+| `sort` | 1-2 | Sort (dir, key fn, or options map) |
 | `unique` | 1 | Unique elements |
 | `concat` | 2 | Concatenate |
 | `take` | 2 | Take first n |
 | `drop` | 2 | Drop first n |
 | `zip` | 2 | Zip vectors |
+| `fill` | 2 | Fill vector |
+| `range` | 3 | Range with step |
 
 ### I/O Functions (Pure)
 | Function | Args | Description |
 |----------|------|-------------|
 | `input` | 1-2 | Parse file/URL |
+| `parse` | 1-2 | Parse string content |
 | `exists` | 1 | Check if target exists |
 | `format` | 1-2 | Format data as string |
 
@@ -932,4 +1046,5 @@ if (result is error) {
 |----------|------|-------------|
 | `replace` | 3 | Replace pattern/substring in string |
 | `split` | 2-3 | Split string by pattern/substring |
+| `join` | 2 | Join list of strings with separator |
 | `find` | 2 | Find all pattern/substring matches |

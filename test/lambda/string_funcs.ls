@@ -38,9 +38,9 @@
 "18. expect ['hello']:"; split("hello", "x")
 "19. expect ['a', 'b', 'c']:"; split("a::b::c", "::")
 
-"Test str_join:"
-"20. expect 'a, b, c':"; str_join(["a", "b", "c"], ", ")
-"21. expect 'hello':"; str_join(["hello"], ", ")
+"Test join:"
+"20. expect 'a, b, c':"; join(["a", "b", "c"], ", ")
+"21. expect 'hello':"; join(["hello"], ", ")
 
 "Test replace:"
 "22. expect 'hello there':"; replace("hello world", "world", "there")
@@ -92,7 +92,7 @@ let sym1 = 'hello_world'
 "55. replace(s, null, b):"; replace("hello", null, "b")
 "56. slice(null, 0, 1):"; slice(null, 0, 1)
 "57. split(null, sep):"; len(split(null, ","))
-"58. str_join(null, sep):"; str_join(null, ",")
+"58. join(null, sep):"; join(null, ",")
 "59. len(null):"; len(null)
 
 "Test split with null separator (whitespace split):"

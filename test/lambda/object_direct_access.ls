@@ -5,7 +5,7 @@
 // ---- Phase 5: fn method field loading ----
 
 // Test 1: fn method reads float fields directly
-type Vec2 { x: float, y: float; fn mag() => sqrt(x * x + y * y) }
+type Vec2 { x: float, y: float; fn mag() => math.sqrt(x * x + y * y) }
 let v = {Vec2 x: 3.0, y: 4.0}
 v.mag()
 

@@ -33,6 +33,29 @@ extern double fabs(double x);
 extern double floor(double x);
 extern double ceil(double x);
 extern double round(double x);
+// inverse trigonometric
+extern double asin(double x);
+extern double acos(double x);
+extern double atan(double x);
+extern double atan2(double y, double x);
+// hyperbolic
+extern double sinh(double x);
+extern double cosh(double x);
+extern double tanh(double x);
+// inverse hyperbolic
+extern double asinh(double x);
+extern double acosh(double x);
+extern double atanh(double x);
+// exponential/logarithmic variants
+extern double exp2(double x);
+extern double expm1(double x);
+extern double log2(double x);
+// root
+extern double cbrt(double x);
+// truncation / misc
+extern double trunc(double x);
+extern double hypot(double y, double x);
+extern double log1p(double x);
 #endif
 
 // Dry-run mode: when enabled, IO functions return fabricated results
@@ -776,6 +799,7 @@ typedef struct Context {
     Bool fn_ge(Item a, Item b);
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
+    Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
 
     // query operations: search data for items matching a type
@@ -789,28 +813,51 @@ typedef struct Context {
     Item vec_mod(Item a, Item b);
     Item vec_pow(Item a, Item b);
 
-    // vector system functions
-    Item fn_prod(Item a);
-    Item fn_cumsum(Item a);
-    Item fn_cumprod(Item a);
+    // vector system functions (math module)
+    Item fn_math_prod(Item a);
+    Item fn_math_cumsum(Item a);
+    Item fn_math_cumprod(Item a);
     Item fn_argmin(Item a);
     Item fn_argmax(Item a);
     Item fn_fill(Item n, Item value);
-    Item fn_dot(Item a, Item b);
-    Item fn_norm(Item a);
-    // statistical functions
-    Item fn_mean(Item a);
-    Item fn_median(Item a);
-    Item fn_variance(Item a);
-    Item fn_deviation(Item a);
-    // element-wise math functions
-    Item fn_sqrt(Item a);
-    Item fn_log(Item a);
-    Item fn_log10(Item a);
-    Item fn_exp(Item a);
-    Item fn_sin(Item a);
-    Item fn_cos(Item a);
-    Item fn_tan(Item a);
+    Item fn_math_dot(Item a, Item b);
+    Item fn_math_norm(Item a);
+    // statistical functions (math module)
+    Item fn_math_mean(Item a);
+    Item fn_math_median(Item a);
+    Item fn_math_variance(Item a);
+    Item fn_math_deviation(Item a);
+    // element-wise math functions (math module)
+    Item fn_math_sqrt(Item a);
+    Item fn_math_log(Item a);
+    Item fn_math_log10(Item a);
+    Item fn_math_exp(Item a);
+    Item fn_math_sin(Item a);
+    Item fn_math_cos(Item a);
+    Item fn_math_tan(Item a);
+    // inverse trigonometric
+    Item fn_math_asin(Item a);
+    Item fn_math_acos(Item a);
+    Item fn_math_atan(Item a);
+    Item fn_math_atan2(Item a, Item b);
+    // hyperbolic
+    Item fn_math_sinh(Item a);
+    Item fn_math_cosh(Item a);
+    Item fn_math_tanh(Item a);
+    // inverse hyperbolic
+    Item fn_math_asinh(Item a);
+    Item fn_math_acosh(Item a);
+    Item fn_math_atanh(Item a);
+    // exponential/logarithmic variants
+    Item fn_math_exp2(Item a);
+    Item fn_math_expm1(Item a);
+    Item fn_math_log2(Item a);
+    // power/root
+    Item fn_math_pow(Item a, Item b);
+    Item fn_math_cbrt(Item a);
+    Item fn_math_trunc(Item a);
+    Item fn_math_hypot(Item a, Item b);
+    Item fn_math_log1p(Item a);
     Item fn_sign(Item a);
 
     // ============================================================================
@@ -856,7 +903,8 @@ typedef struct Context {
     Item fn_slice(Item a, Item start, Item end);
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
-    Item fn_quantile(Item a, Item p);
+    Item fn_math_quantile(Item a, Item p);
+    Item fn_reduce(Item collection, Item func);
 
     Range* fn_to(Item a, Item b);
 
@@ -888,7 +936,7 @@ typedef struct Context {
     Item fn_split3(Item str, Item sep, Item keep_delim);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     Item fn_chars(Item str);            // chars(str) - decompose into array of characters
-    Item fn_str_join(Item list, Item sep);
+    Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
     Item fn_find2(Item source, Item pattern);
@@ -909,6 +957,8 @@ typedef struct Context {
 
     Item fn_input1(Item url);
     Item fn_input2(Item url, Item options);
+    Item fn_parse1(Item str);
+    Item fn_parse2(Item str, Item options);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error

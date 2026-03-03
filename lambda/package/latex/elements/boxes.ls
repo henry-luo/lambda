@@ -1,7 +1,7 @@
 // latex/elements/boxes.ls — Box commands: \fbox, \mbox, \makebox, \framebox, \parbox, \raisebox, etc.
 // Also low-level boxes: \llap, \rlap, \smash, \phantom, \hphantom, \vphantom
 
-import util: .lambda.package.latex.util
+import util: lambda.package.latex.util
 
 // ============================================================
 // Simple boxes (take pre-rendered items)

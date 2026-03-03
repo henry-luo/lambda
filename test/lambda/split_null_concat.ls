@@ -36,7 +36,7 @@ count_parts("one two three four", " ")
 "===== split and rejoin roundtrip ====="
 
 fn split_rejoin(s, delim) {
-    str_join(split(s, delim), delim)
+    join(split(s, delim), delim)
 }
 
 "roundtrip comma:"

@@ -45,7 +45,7 @@ pn advance(bx, by, bz, bvx, bvy, bvz, bmass, dt) {
             var dy = by[i] - by[j]
             var dz = bz[i] - bz[j]
             var d_squared = dx * dx + dy * dy + dz * dz
-            var distance = sqrt(d_squared)
+            var distance = math.sqrt(d_squared)
             var mag = dt / (d_squared * distance)
 
             bvx[i] = bvx[i] - dx * bmass[j] * mag
@@ -79,7 +79,7 @@ pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
             var dx = bx[i] - bx[j]
             var dy = by[i] - by[j]
             var dz = bz[i] - bz[j]
-            var distance = sqrt(dx * dx + dy * dy + dz * dz)
+            var distance = math.sqrt(dx * dx + dy * dy + dz * dz)
             e = e - (bmass[i] * bmass[j]) / distance
             j = j + 1
         }

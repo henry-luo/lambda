@@ -91,14 +91,66 @@ Item js_document_get_property(Item prop_name);
 /**
  * Get a DOM element property.
  * Supported: tagName, id, className, textContent, children, parentElement,
- *   firstElementChild, lastElementChild, nextElementSibling,
- *   previousElementSibling, childElementCount, nodeType
+ *   parentNode, firstChild, lastChild, firstElementChild, lastElementChild,
+ *   nextSibling, previousSibling, nextElementSibling, previousElementSibling,
+ *   childNodes, childElementCount, nodeType, offsetWidth, offsetHeight,
+ *   clientWidth, clientHeight, data (text nodes)
  * Falls back to getAttribute for unrecognized properties.
  * @param elem       Wrapped DOM element Item
  * @param prop_name  String Item with property name
  * @return Property value as Item
  */
 Item js_dom_get_property(Item elem, Item prop_name);
+
+/**
+ * Set a DOM element property.
+ * Supported: className, id, textContent, data (text nodes)
+ * @param elem       Wrapped DOM element Item
+ * @param prop_name  String Item with property name
+ * @param value      Value to set
+ * @return The value that was set, or ITEM_NULL on failure
+ */
+Item js_dom_set_property(Item elem, Item prop_name, Item value);
+
+/**
+ * Set a CSS inline style property on a DOM element.
+ * Converts camelCase JS property names to CSS hyphenated form.
+ * E.g., "fontFamily" → "font-family", "display" → "display"
+ * @param elem       Wrapped DOM element Item
+ * @param prop_name  String Item with JS-style property name
+ * @param value      String Item with CSS value
+ * @return The value that was set, or ITEM_NULL on failure
+ */
+Item js_dom_set_style_property(Item elem, Item prop_name, Item value);
+Item js_dom_get_style_property(Item elem, Item prop_name);
+
+// =============================================================================
+// Computed Style (window.getComputedStyle)
+// =============================================================================
+
+/**
+ * Get computed style object for a DOM element.
+ * Returns a wrapper object whose properties resolve to computed CSS values.
+ * @param elem   Wrapped DOM element Item
+ * @param pseudo String Item for pseudo-element ("before", "after") or null
+ * @return Computed style wrapper Item
+ */
+Item js_get_computed_style(Item elem, Item pseudo);
+
+/**
+ * Get a computed CSS property value from a computed style wrapper.
+ * @param style_item  Computed style wrapper from js_get_computed_style
+ * @param prop_name   String Item with CSS property name (camelCase or hyphenated)
+ * @return String Item with the computed CSS value
+ */
+Item js_computed_style_get_property(Item style_item, Item prop_name);
+
+/**
+ * Check if an Item is a computed style wrapper object.
+ * @param item  Item to test
+ * @return true if item wraps a computed style
+ */
+bool js_is_computed_style_item(Item item);
 
 // =============================================================================
 // Element Method Dispatcher
@@ -108,7 +160,8 @@ Item js_dom_get_property(Item elem, Item prop_name);
  * Dispatch elem.method(args) calls on DOM elements.
  * Supported: getAttribute, setAttribute, hasAttribute, removeAttribute,
  *   querySelector, querySelectorAll, matches, closest,
- *   appendChild, removeChild, insertBefore
+ *   appendChild, removeChild, insertBefore,
+ *   hasChildNodes, normalize, cloneNode
  * @param elem        Wrapped DOM element Item
  * @param method_name String Item with method name
  * @param args        Array of argument Items

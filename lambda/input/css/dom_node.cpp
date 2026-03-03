@@ -305,22 +305,26 @@ bool DomNode::append_child(DomNode* child) {
     DomElement* element = static_cast<DomElement*>(this);
 
     // Add to parent's child list
+    child->next_sibling = nullptr;
     if (!element->first_child) {
         // First child
         element->first_child = child;
+        element->last_child = child;
         child->prev_sibling = nullptr;
-        child->next_sibling = nullptr;
+    } else if (element->last_child) {
+        // Use last_child for O(1) append
+        element->last_child->next_sibling = child;
+        child->prev_sibling = element->last_child;
+        element->last_child = child;
     } else {
-        // Find last child
+        // last_child not tracked — walk to end
         DomNode* last = element->first_child;
         while (last->next_sibling) {
             last = last->next_sibling;
         }
-
-        // Append after last child
         last->next_sibling = child;
         child->prev_sibling = last;
-        child->next_sibling = nullptr;
+        element->last_child = child;
     }
 
     return true;
@@ -356,6 +360,9 @@ bool DomNode::remove_child(DomNode* child) {
 
     if (child->next_sibling) {
         child->next_sibling->prev_sibling = child->prev_sibling;
+    } else {
+        // Child was last child
+        element->last_child = child->prev_sibling;
     }
 
     // Clear child's relationships

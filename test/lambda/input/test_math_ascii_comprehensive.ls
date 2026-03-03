@@ -10,7 +10,7 @@ basic_test
 
 // Test 2: Functions
 let function_test = input('test/input/ascii_math_functions.txt', {'type': 'math', 'flavor': 'ascii'})
-"2. Trigonometric functions (sin(x) + cos(y)):"
+"2. Trigonometric functions (math.sin(x) + math.cos(y)):"
 function_test
 
 // Test 3: Powers and subscripts

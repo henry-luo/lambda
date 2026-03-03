@@ -10,9 +10,9 @@
 //   4. Size 4 (3.0em) — KaTeX_Size4
 //   5. SVG stacking — top/repeat/bottom segments for arbitrary height
 
-import box: .lambda.package.math.box
-import css: .lambda.package.math.css
-import util: .lambda.package.math.util
+import box: lambda.package.math.box
+import css: lambda.package.math.css
+import util: lambda.package.math.util
 
 // ============================================================
 // Size thresholds (em) — matches KaTeX size fonts

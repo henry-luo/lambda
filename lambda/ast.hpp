@@ -113,9 +113,6 @@ extern "C" {
 #define SYM_OBJECT_LITERAL sym_object_literal
 #define SYM_THAT_CONSTRAINT sym_that_constraint
 
-// Namespace declaration symbols
-#define SYM_NAMESPACE_DECL sym_namespace_decl
-
 // String/Symbol Pattern symbols
 #define SYM_STRING_PATTERN sym_string_pattern
 #define SYM_SYMBOL_PATTERN sym_symbol_pattern
@@ -533,6 +530,8 @@ typedef struct AstObjectTypeNode : AstNamedNode {
     AstNode* base_type;         // base type identifier for inheritance (NULL if none)
     AstNode* methods;           // linked list of fn/pn AST nodes
     AstNode* constraints;       // linked list of that-constraint AST nodes
+    bool is_public;             // true when declared with 'pub type T { ... }'
+    int local_type_index;       // type_index in importing script's type_list (-1 = use TypeObject's own)
 } AstObjectTypeNode;
 
 // Object literal node: {TypeName key: value, ...}
@@ -596,6 +595,7 @@ typedef struct MIR_context *MIR_context_t;
 // Script extends Input to inherit unified memory management
 struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
+    const char* directory;      // directory containing this script (for relative imports)
     int index;                  // index of the script in the runtime scripts list
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
@@ -669,6 +669,10 @@ typedef struct Transpiler : Script {
 
     // unique counter for temporary variables (e.g., error propagation temps)
     int temp_var_counter;
+
+    // 'that' clause context: when true, bare identifiers not found in scope
+    // are rewritten to ~.name (member access on current item)
+    bool in_that_clause;
 
     // Object method transpilation context
     AstObjectTypeNode* method_owner;  // non-null when transpiling a method body

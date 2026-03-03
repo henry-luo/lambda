@@ -51,6 +51,7 @@ extern "C" {
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
 #include "../radiant/pdf/pdf_to_view.hpp"
+#include "../radiant/script_runner.h"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -1666,7 +1667,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
               (void*)dom_root,
               (dom_root->native_element && dom_root->doc) ? "YES" : "NO");
 
-    // Step 3: Initialize CSS engine
+    // Step 2b: Parse CSS before scripts (so getComputedStyle can query styles)
+    // CSS parsing is moved before script execution. The cascade (applying rules
+    // to elements) still happens AFTER scripts, so JS DOM mutations (className
+    // changes, appendChild, etc.) are reflected in the final styles.
+
+    // Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("Failed to create CSS engine");
@@ -1674,7 +1680,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 4: Load external CSS if provided
+    // Load external CSS if provided
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
         log_debug("[Lambda CSS] Loading external CSS: %s", css_filename);
@@ -1687,7 +1693,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
                 free(css_content);
                 external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
                 if (external_stylesheet) {
-                    // Print parsed stylesheet for debugging
                     const char* formatted_css = css_stylesheet_to_string_styled(
                         external_stylesheet, pool, CSS_FORMAT_EXPANDED);
                     if (formatted_css) {
@@ -1706,10 +1711,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    // Step 5: Extract and parse <style> elements
+    // Extract and parse <style> elements
     log_debug("[Lambda CSS] Extracting inline <style> elements...");
     int inline_stylesheet_count = 0;
-    // Use the potentially-updated html_url (may be overridden by <base href>) for CSS resolution
     const char* css_base_path = url_get_href(html_url);
     log_debug("[Lambda CSS] Using base path for CSS: %s", css_base_path);
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
@@ -1727,8 +1731,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    // Store stylesheets in DomDocument for @font-face processing later
-    // (after UiContext is initialized in cmd_layout_main)
+    // Store stylesheets in DomDocument BEFORE scripts
+    // This enables getComputedStyle to do on-demand selector matching
     int total_stylesheets = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
     if (total_stylesheets > 0) {
         dom_doc->stylesheet_capacity = total_stylesheets;
@@ -1743,9 +1747,20 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
                 dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
             }
         }
-        log_debug("[Lambda CSS] Stored %d stylesheets in DomDocument for @font-face processing",
+        log_debug("[Lambda CSS] Stored %d stylesheets in DomDocument for getComputedStyle + @font-face",
                   dom_doc->stylesheet_count);
     }
+
+    // Step 2c: Execute inline <script> elements and body onload handlers
+    // Scripts run after CSS parsing but before CSS cascade.
+    // This enables JS-based DOM mutations (className changes, appendChild, etc.)
+    // to take effect before styles are resolved and layout is computed.
+    // getComputedStyle can now query parsed stylesheets via on-demand matching.
+    dom_doc->root = dom_root;  // set root for JS DOM API access
+    execute_document_scripts(html_root, dom_doc, pool);
+
+    auto t_scripts = high_resolution_clock::now();
+    log_info("[TIMING] load: execute scripts: %.1fms", duration<double, std::milli>(t_scripts - t_dom).count());
 
     // Step 6: Apply CSS cascade (external + <style> elements)
     log_debug("[Lambda CSS] Applying CSS cascade...");

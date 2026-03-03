@@ -1102,6 +1102,7 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index);
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node);
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node);
 
@@ -1272,6 +1273,16 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 
             strbuf_free(var_name);
             return val_reg;
+        }
+        // Imported pub object types — resolve via const_type(type_index)
+        if (entry_node && entry_node->node_type == AST_NODE_OBJECT_TYPE) {
+            AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry_node;
+            if (obj_node->type && obj_node->type->type_id == LMD_TYPE_TYPE) {
+                TypeObject* ot = (TypeObject*)((TypeType*)obj_node->type)->type;
+                log_debug("mir: resolving imported object type '%.*s' via const_type(%d)",
+                    (int)obj_node->name->len, obj_node->name->chars, ot->type_index);
+                return transpile_const_type(mt, ot->type_index);
+            }
         }
     }
 
@@ -1517,7 +1528,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             // Comparisons always return bool
             if (op >= OPERATOR_EQ && op <= OPERATOR_GE)
                 return LMD_TYPE_BOOL;
-            if (op == OPERATOR_IS || op == OPERATOR_IN)
+            if (op == OPERATOR_IS || op == OPERATOR_IS_NAN || op == OPERATOR_IN)
                 return LMD_TYPE_BOOL;
             // AND/OR with both_bool return bool
             if ((op == OPERATOR_AND || op == OPERATOR_OR) && both_bool)
@@ -1776,6 +1787,13 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         return emit_call_2(mt, "fn_to", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+    }
+
+    // IEEE NaN check: expr is nan
+    if (bi->op == OPERATOR_IS_NAN) {
+        MIR_reg_t boxl = transpile_box_item(mt, bi->left);
+        return emit_call_1(mt, "fn_is_nan", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl));
     }
 
     // Type operators
@@ -4590,8 +4608,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_box_bool(mt, val);
         }
 
-        // 1b. IS and IN also return native Bool from fn_is/fn_in
-        if (op == OPERATOR_IS || op == OPERATOR_IN) {
+        // 1b. IS, IS_NAN, and IN also return native Bool from fn_is/fn_in/fn_is_nan
+        if (op == OPERATOR_IS || op == OPERATOR_IS_NAN || op == OPERATOR_IN) {
             return emit_box_bool(mt, val);
         }
 
@@ -6468,6 +6486,18 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
                                         log_debug("mir: registered import var BSS: %s -> %p", var_name->str, bss_item->addr);
                                     }
                                     strbuf_free(var_name);
+                                }
+                                // also register error variable BSS for ^err destructuring
+                                if (named->error_name) {
+                                    StrBuf* err_name = strbuf_new_cap(64);
+                                    strbuf_append_char(err_name, '_');
+                                    strbuf_append_str_n(err_name, named->error_name->chars, named->error_name->len);
+                                    MIR_item_t err_bss = find_import(imp->script->jit_context, err_name->str);
+                                    if (err_bss && err_bss->addr) {
+                                        register_dynamic_import(strdup(err_name->str), err_bss->addr);
+                                        log_debug("mir: registered import error var BSS: %s -> %p", err_name->str, err_bss->addr);
+                                    }
+                                    strbuf_free(err_name);
                                 }
                                 declare = declare->next;
                             }

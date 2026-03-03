@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>  // for va_list
-#include <math.h>    // for sin, cos, tan, sqrt, log, log10, exp, fabs, floor, ceil, round
+#include <math.h>    // for sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh, sqrt, cbrt, log, log2, log10, exp, exp2, expm1, fabs, floor, ceil, round
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"  // for StringBuf functions
 #include "mir.h"
@@ -31,6 +31,9 @@ extern Symbol* fn_name(Item item);
 extern Item fn_find2(Item source, Item pattern);
 extern Item fn_find3(Item source, Item pattern, Item options);
 extern Item fn_split3(Item str, Item sep, Item keep_delim);
+extern Item fn_reduce(Item collection, Item func);
+extern Item fn_parse1(Item str);
+extern Item fn_parse2(Item str, Item options);
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
@@ -92,6 +95,29 @@ func_obj_t func_list[] = {
     {"floor", (fn_ptr) floor},
     {"ceil", (fn_ptr) ceil},
     {"round", (fn_ptr) round},
+    // inverse trigonometric
+    {"asin", (fn_ptr) asin},
+    {"acos", (fn_ptr) acos},
+    {"atan", (fn_ptr) atan},
+    {"atan2", (fn_ptr) atan2},
+    // hyperbolic
+    {"sinh", (fn_ptr) sinh},
+    {"cosh", (fn_ptr) cosh},
+    {"tanh", (fn_ptr) tanh},
+    // inverse hyperbolic
+    {"asinh", (fn_ptr) asinh},
+    {"acosh", (fn_ptr) acosh},
+    {"atanh", (fn_ptr) atanh},
+    // exponential/logarithmic variants
+    {"exp2", (fn_ptr) exp2},
+    {"expm1", (fn_ptr) expm1},
+    {"log2", (fn_ptr) log2},
+    // root
+    {"cbrt", (fn_ptr) cbrt},
+    // truncation
+    {"trunc", (fn_ptr) trunc},
+    {"hypot", (fn_ptr) hypot},
+    {"log1p", (fn_ptr) log1p},
     // Stack overflow protection
     {"lambda_stack_overflow_error", (fn_ptr) lambda_stack_overflow_error},
     // {"printf", (fn_ptr) printf}, // printf does not work
@@ -164,6 +190,7 @@ func_obj_t func_list[] = {
     {"fn_pipe_map", (fn_ptr) fn_pipe_map},
     {"fn_pipe_where", (fn_ptr) fn_pipe_where},
     {"fn_pipe_call", (fn_ptr) fn_pipe_call},
+    // common math functions
     {"fn_round", (fn_ptr) fn_round},
     {"fn_floor", (fn_ptr) fn_floor},
     {"fn_ceil", (fn_ptr) fn_ceil},
@@ -175,29 +202,52 @@ func_obj_t func_list[] = {
     {"fn_avg", (fn_ptr) fn_avg},
     {"fn_pos", (fn_ptr) fn_pos},
     {"fn_neg", (fn_ptr) fn_neg},
-    // vector functions
-    {"fn_prod", (fn_ptr) fn_prod},
-    {"fn_cumsum", (fn_ptr) fn_cumsum},
-    {"fn_cumprod", (fn_ptr) fn_cumprod},
     {"fn_argmin", (fn_ptr) fn_argmin},
     {"fn_argmax", (fn_ptr) fn_argmax},
-    {"fn_fill", (fn_ptr) fn_fill},
-    {"fn_dot", (fn_ptr) fn_dot},
-    {"fn_norm", (fn_ptr) fn_norm},
-    // statistical functions
-    {"fn_mean", (fn_ptr) fn_mean},
-    {"fn_median", (fn_ptr) fn_median},
-    {"fn_variance", (fn_ptr) fn_variance},
-    {"fn_deviation", (fn_ptr) fn_deviation},
-    // element-wise math functions
-    {"fn_sqrt", (fn_ptr) fn_sqrt},
-    {"fn_log", (fn_ptr) fn_log},
-    {"fn_log10", (fn_ptr) fn_log10},
-    {"fn_exp", (fn_ptr) fn_exp},
-    {"fn_sin", (fn_ptr) fn_sin},
-    {"fn_cos", (fn_ptr) fn_cos},
-    {"fn_tan", (fn_ptr) fn_tan},
     {"fn_sign", (fn_ptr) fn_sign},
+    // vector functions (math module)
+    {"fn_math_prod", (fn_ptr) fn_math_prod},
+    {"fn_math_cumsum", (fn_ptr) fn_math_cumsum},
+    {"fn_math_cumprod", (fn_ptr) fn_math_cumprod},
+    {"fn_math_dot", (fn_ptr) fn_math_dot},
+    {"fn_math_norm", (fn_ptr) fn_math_norm},
+    // statistical functions (math module)
+    {"fn_math_mean", (fn_ptr) fn_math_mean},
+    {"fn_math_median", (fn_ptr) fn_math_median},
+    {"fn_math_variance", (fn_ptr) fn_math_variance},
+    {"fn_math_deviation", (fn_ptr) fn_math_deviation},
+    {"fn_math_quantile", (fn_ptr) fn_math_quantile},
+    // element-wise math functions (math module)
+    {"fn_math_sqrt", (fn_ptr) fn_math_sqrt},
+    {"fn_math_log", (fn_ptr) fn_math_log},
+    {"fn_math_log10", (fn_ptr) fn_math_log10},
+    {"fn_math_exp", (fn_ptr) fn_math_exp},
+    {"fn_math_sin", (fn_ptr) fn_math_sin},
+    {"fn_math_cos", (fn_ptr) fn_math_cos},
+    {"fn_math_tan", (fn_ptr) fn_math_tan},
+    // inverse trigonometric (math module)
+    {"fn_math_asin", (fn_ptr) fn_math_asin},
+    {"fn_math_acos", (fn_ptr) fn_math_acos},
+    {"fn_math_atan", (fn_ptr) fn_math_atan},
+    {"fn_math_atan2", (fn_ptr) fn_math_atan2},
+    // hyperbolic (math module)
+    {"fn_math_sinh", (fn_ptr) fn_math_sinh},
+    {"fn_math_cosh", (fn_ptr) fn_math_cosh},
+    {"fn_math_tanh", (fn_ptr) fn_math_tanh},
+    // inverse hyperbolic (math module)
+    {"fn_math_asinh", (fn_ptr) fn_math_asinh},
+    {"fn_math_acosh", (fn_ptr) fn_math_acosh},
+    {"fn_math_atanh", (fn_ptr) fn_math_atanh},
+    // exponential/logarithmic variants (math module)
+    {"fn_math_exp2", (fn_ptr) fn_math_exp2},
+    {"fn_math_expm1", (fn_ptr) fn_math_expm1},
+    {"fn_math_log2", (fn_ptr) fn_math_log2},
+    // power/root (math module)
+    {"fn_math_pow", (fn_ptr) fn_math_pow},
+    {"fn_math_cbrt", (fn_ptr) fn_math_cbrt},
+    {"fn_math_trunc", (fn_ptr) fn_math_trunc},
+    {"fn_math_hypot", (fn_ptr) fn_math_hypot},
+    {"fn_math_log1p", (fn_ptr) fn_math_log1p},
     // unboxed system functions (native types, no Item boxing overhead)
     {"fn_pow_u", (fn_ptr) fn_pow_u},
     {"fn_min2_u", (fn_ptr) fn_min2_u},
@@ -215,6 +265,7 @@ func_obj_t func_list[] = {
     {"fn_ceil_i", (fn_ptr) fn_ceil_i},
     {"fn_round_i", (fn_ptr) fn_round_i},
     // vector manipulation functions
+    {"fn_fill", (fn_ptr) fn_fill},
     {"fn_reverse", (fn_ptr) fn_reverse},
     {"fn_sort1", (fn_ptr) fn_sort1},
     {"fn_sort2", (fn_ptr) fn_sort2},
@@ -226,7 +277,7 @@ func_obj_t func_list[] = {
     {"fn_slice", (fn_ptr) fn_slice},
     {"fn_zip", (fn_ptr) fn_zip},
     {"fn_range3", (fn_ptr) fn_range3},
-    {"fn_quantile", (fn_ptr) fn_quantile},
+    {"fn_reduce", (fn_ptr) fn_reduce},
     {"fn_strcat", (fn_ptr) fn_strcat},
     {"fn_normalize", (fn_ptr) fn_normalize},
     {"fn_normalize1", (fn_ptr) fn_normalize1},
@@ -247,7 +298,7 @@ func_obj_t func_list[] = {
     {"fn_split2", (fn_ptr) fn_split},
     {"fn_split3", (fn_ptr) fn_split3},
     {"fn_chars", (fn_ptr) fn_chars},
-    {"fn_str_join", (fn_ptr) fn_str_join},
+    {"fn_join2", (fn_ptr) fn_join2},
     {"fn_replace3", (fn_ptr) fn_replace},
     {"fn_find2", (fn_ptr) fn_find2},
     {"fn_find3", (fn_ptr) fn_find3},
@@ -290,6 +341,7 @@ func_obj_t func_list[] = {
     {"fn_call2", (fn_ptr) fn_call2},
     {"fn_call3", (fn_ptr) fn_call3},
     {"fn_is", (fn_ptr) fn_is},
+    {"fn_is_nan", (fn_ptr) fn_is_nan},
     {"fn_in", (fn_ptr) fn_in},
     {"fn_query", (fn_ptr) fn_query},
     {"fn_to", (fn_ptr) fn_to},
@@ -301,6 +353,8 @@ func_obj_t func_list[] = {
     {"fn_symbol2", (fn_ptr) fn_symbol2},
     {"fn_type", (fn_ptr) fn_type},    {"fn_name", (fn_ptr) fn_name},    {"fn_input1", (fn_ptr) fn_input1},
     {"fn_input2", (fn_ptr) fn_input2},
+    {"fn_parse1", (fn_ptr) fn_parse1},
+    {"fn_parse2", (fn_ptr) fn_parse2},
     {"fn_format1", (fn_ptr) fn_format1},
     {"fn_format2", (fn_ptr) fn_format2},
     {"fn_error", (fn_ptr) fn_error},
@@ -405,6 +459,11 @@ func_obj_t func_list[] = {
     {"js_dom_wrap_element", (fn_ptr) js_dom_wrap_element},
     {"js_dom_unwrap_element", (fn_ptr) js_dom_unwrap_element},
     {"js_is_dom_node", (fn_ptr) js_is_dom_node},
+    {"js_dom_set_property", (fn_ptr) js_dom_set_property},
+    {"js_dom_set_style_property", (fn_ptr) js_dom_set_style_property},
+    {"js_dom_get_style_property", (fn_ptr) js_dom_get_style_property},
+    // Computed style
+    {"js_get_computed_style", (fn_ptr) js_get_computed_style},
     // StringBuf functions for template literals
     {"stringbuf_new", (fn_ptr) stringbuf_new},
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},

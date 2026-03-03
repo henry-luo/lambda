@@ -55,9 +55,9 @@
 [nan, nan, nan]
 [0, nan]
 "=== Vector Comparisons ==="
-error
-error
-error
+true
+false
+false
 "=== Performance Tests ==="
 5050
 50.5

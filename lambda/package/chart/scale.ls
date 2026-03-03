@@ -3,8 +3,8 @@
 // Scale objects are pure data maps. Use scale_apply / scale_ticks / scale_invert
 // dispatch functions to operate on them.
 
-import util: .lambda.package.chart.util
-import color: .lambda.package.chart.color
+import util: .util
+import color: .color
 
 // ============================================================
 // Scale constructors (return pure data maps)
@@ -60,15 +60,15 @@ pub fn scale_apply(sc, value) {
         let t = util.inv_lerp(sc.domain[0], sc.domain[1], float(value));
         util.lerp(sc.range[0], sc.range[1], t)
     } else if sc.kind == "log" {
-        let log_lo = log(sc.domain[0]) / log(sc.base);
-        let log_hi = log(sc.domain[1]) / log(sc.base);
-        let log_val = log(float(value)) / log(sc.base);
+        let log_lo = math.log(sc.domain[0]) / math.log(sc.base);
+        let log_hi = math.log(sc.domain[1]) / math.log(sc.base);
+        let log_val = math.log(float(value)) / math.log(sc.base);
         let t = util.inv_lerp(log_lo, log_hi, log_val);
         util.lerp(sc.range[0], sc.range[1], t)
     } else if sc.kind == "sqrt" {
-        let sqrt_lo = sqrt(abs(sc.domain[0]));
-        let sqrt_hi = sqrt(abs(sc.domain[1]));
-        let sv = sqrt(abs(float(value)));
+        let sqrt_lo = math.sqrt(abs(sc.domain[0]));
+        let sqrt_hi = math.sqrt(abs(sc.domain[1]));
+        let sv = math.sqrt(abs(float(value)));
         let t = util.inv_lerp(sqrt_lo, sqrt_hi, sv);
         util.lerp(sc.range[0], sc.range[1], t)
     } else if sc.kind == "band" {
@@ -115,8 +115,8 @@ pub fn scale_ticks(sc, count) {
     if sc.kind == "linear" {
         util.nice_ticks(sc.domain[0], sc.domain[1], count)
     } else if sc.kind == "log" {
-        let log_lo = log(sc.domain[0]) / log(sc.base);
-        let log_hi = log(sc.domain[1]) / log(sc.base);
+        let log_lo = math.log(sc.domain[0]) / math.log(sc.base);
+        let log_hi = math.log(sc.domain[1]) / math.log(sc.base);
         let lo_exp = int(floor(log_lo));
         let hi_exp = int(ceil(log_hi));
         for (e in lo_exp to hi_exp) sc.base ** float(e)

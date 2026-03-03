@@ -1,7 +1,7 @@
 // test_math_css.ls — Test math CSS class constants and helpers
 // Coverage: css.ls — class constants, classes(), font_class(), get_stylesheet(), wrap_standalone()
 
-import css: .lambda.package.math.css
+import css: lambda.package.math.css
 
 "===== MATH CSS TESTS ====="
 

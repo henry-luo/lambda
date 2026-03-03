@@ -1,7 +1,7 @@
 // test_latex_pkg.ls — Test script for the LaTeX package
 // Run: ./lambda.exe run test/lambda/test_latex_pkg.ls
 
-import latex: .lambda.package.latex.latex
+import latex: lambda.package.latex.latex
 
 // Simple LaTeX document for testing
 let tex_source = "\\documentclass{article}

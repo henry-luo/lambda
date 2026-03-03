@@ -14,7 +14,7 @@ pub TAU = 6.283185307179586
 // round a number to a "nice" value (1, 2, 5, 10, 20, 50, ...)
 // used for axis tick spacing and domain rounding
 pub fn nice_num(val, rounding) {
-    let exponent = floor(log10(abs(float(val))));
+    let exponent = floor(math.log10(abs(float(val))));
     let fraction = float(val) / (10.0 ** exponent);
     let nice_fraction = if (rounding)
         (if (fraction < 1.5) 1.0
