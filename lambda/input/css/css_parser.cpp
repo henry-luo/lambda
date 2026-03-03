@@ -1522,13 +1522,15 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     while (*pos < token_count) {
         CssTokenType t = tokens[*pos].type;
 
-        // Check for !important
-        if (t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!' &&
-            *pos + 1 < token_count && tokens[*pos + 1].type == CSS_TOKEN_IDENT &&
-            strcmp(tokens[*pos + 1].value, "important") == 0) {
-            is_important = true;
-            (*pos) += 2;
-            break;
+        // Check for !important (whitespace allowed between ! and important per CSS spec)
+        if (t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!') {
+            int next = css_skip_whitespace_tokens(tokens, *pos + 1, token_count);
+            if (next < token_count && tokens[next].type == CSS_TOKEN_IDENT &&
+                strcmp(tokens[next].value, "important") == 0) {
+                is_important = true;
+                *pos = next + 1;
+                break;
+            }
         }
 
         // Stop at semicolon, closing brace, or EOF
