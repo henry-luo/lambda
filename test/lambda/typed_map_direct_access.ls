@@ -27,6 +27,6 @@ let bob: Person = {name: "Bob", age: 25, active: false}
 fn distance(a: Point, b: Point) {
     let dx = a.x - b.x
     let dy = a.y - b.y
-    sqrt(dx * dx + dy * dy)
+    math.sqrt(dx * dx + dy * dy)
 }
 distance({x: 0, y: 0}, {x: 3, y: 4})

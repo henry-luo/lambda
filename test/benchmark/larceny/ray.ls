@@ -18,11 +18,11 @@ pn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
     if (disc < 0.0) {
         return -1.0
     }
-    var t = (0.0 - b - sqrt(disc)) / (2.0 * a)
+    var t = (0.0 - b - math.sqrt(disc)) / (2.0 * a)
     if (t > 0.001) {
         return t
     }
-    t = (0.0 - b + sqrt(disc)) / (2.0 * a)
+    t = (0.0 - b + math.sqrt(disc)) / (2.0 * a)
     if (t > 0.001) {
         return t
     }
@@ -55,7 +55,7 @@ pn benchmark() {
                 var dy = (float(py) - 50.0) / 50.0
                 var dz = 1.0
                 // Normalize
-                var len = sqrt(dx * dx + dy * dy + dz * dz)
+                var len = math.sqrt(dx * dx + dy * dy + dz * dz)
                 dx = dx / len
                 dy = dy / len
                 dz = dz / len

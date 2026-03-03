@@ -789,28 +789,28 @@ typedef struct Context {
     Item vec_mod(Item a, Item b);
     Item vec_pow(Item a, Item b);
 
-    // vector system functions
-    Item fn_prod(Item a);
-    Item fn_cumsum(Item a);
-    Item fn_cumprod(Item a);
+    // vector system functions (math module)
+    Item fn_math_prod(Item a);
+    Item fn_math_cumsum(Item a);
+    Item fn_math_cumprod(Item a);
     Item fn_argmin(Item a);
     Item fn_argmax(Item a);
     Item fn_fill(Item n, Item value);
-    Item fn_dot(Item a, Item b);
-    Item fn_norm(Item a);
-    // statistical functions
-    Item fn_mean(Item a);
-    Item fn_median(Item a);
-    Item fn_variance(Item a);
-    Item fn_deviation(Item a);
-    // element-wise math functions
-    Item fn_sqrt(Item a);
-    Item fn_log(Item a);
-    Item fn_log10(Item a);
-    Item fn_exp(Item a);
-    Item fn_sin(Item a);
-    Item fn_cos(Item a);
-    Item fn_tan(Item a);
+    Item fn_math_dot(Item a, Item b);
+    Item fn_math_norm(Item a);
+    // statistical functions (math module)
+    Item fn_math_mean(Item a);
+    Item fn_math_median(Item a);
+    Item fn_math_variance(Item a);
+    Item fn_math_deviation(Item a);
+    // element-wise math functions (math module)
+    Item fn_math_sqrt(Item a);
+    Item fn_math_log(Item a);
+    Item fn_math_log10(Item a);
+    Item fn_math_exp(Item a);
+    Item fn_math_sin(Item a);
+    Item fn_math_cos(Item a);
+    Item fn_math_tan(Item a);
     Item fn_sign(Item a);
 
     // ============================================================================
@@ -856,7 +856,7 @@ typedef struct Context {
     Item fn_slice(Item a, Item start, Item end);
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
-    Item fn_quantile(Item a, Item p);
+    Item fn_math_quantile(Item a, Item p);
     Item fn_reduce(Item collection, Item func);
 
     Range* fn_to(Item a, Item b);
@@ -889,7 +889,7 @@ typedef struct Context {
     Item fn_split3(Item str, Item sep, Item keep_delim);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     Item fn_chars(Item str);            // chars(str) - decompose into array of characters
-    Item fn_str_join(Item list, Item sep);
+    Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
     Item fn_find2(Item source, Item pattern);

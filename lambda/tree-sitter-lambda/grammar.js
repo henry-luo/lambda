@@ -514,11 +514,12 @@ module.exports = grammar({
       optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
     )),
 
-    // Member access
-    member_expr: $ => seq(
+    // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
+    // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
+    member_expr: $ => prec.dynamic(1, seq(
       field('object', $.primary_expr), ".",
       field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type))
-    ),
+    )),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent
     parent_expr: $ => seq(

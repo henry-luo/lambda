@@ -204,31 +204,31 @@ test_float_error()
 
 fn test_sqrt_error() {
     let a^err = fail()
-    type(sqrt(err))
+    type(math.sqrt(err))
 }
 test_sqrt_error()
 
 fn test_log_error() {
     let a^err = fail()
-    type(log(err))
+    type(math.log(err))
 }
 test_log_error()
 
 fn test_sin_error() {
     let a^err = fail()
-    type(sin(err))
+    type(math.sin(err))
 }
 test_sin_error()
 
 fn test_cos_error() {
     let a^err = fail()
-    type(cos(err))
+    type(math.cos(err))
 }
 test_cos_error()
 
 fn test_exp_error() {
     let a^err = fail()
-    type(exp(err))
+    type(math.exp(err))
 }
 test_exp_error()
 

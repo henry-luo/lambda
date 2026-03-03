@@ -2,9 +2,9 @@
 // When argument has known numeric type, use native C math instead of runtime fn_*
 
 // Section 1: Trigonometric functions with typed float
-fn trig_sin(x: float) { sin(x) }
-fn trig_cos(x: float) { cos(x) }
-fn trig_tan(x: float) { tan(x) }
+fn trig_sin(x: float) { math.sin(x) }
+fn trig_cos(x: float) { math.cos(x) }
+fn trig_tan(x: float) { math.tan(x) }
 
 "1. Trigonometric functions (native)"
 [
@@ -16,10 +16,10 @@ fn trig_tan(x: float) { tan(x) }
 ]
 
 // Section 2: Exponential and logarithmic functions
-fn math_sqrt(x: float) { sqrt(x) }
-fn math_log(x: float) { log(x) }
-fn math_log10(x: float) { log10(x) }
-fn math_exp(x: float) { exp(x) }
+fn math_sqrt(x: float) { math.sqrt(x) }
+fn math_log(x: float) { math.log(x) }
+fn math_log10(x: float) { math.log10(x) }
+fn math_exp(x: float) { math.exp(x) }
 
 "2. Exponential and logarithmic (native)"
 [
@@ -50,7 +50,7 @@ fn math_round(x: float) { round(x) }
 ]
 
 // Section 4: Int argument (promoted to double)
-fn int_sqrt(x: int) { sqrt(x) }
+fn int_sqrt(x: int) { math.sqrt(x) }
 fn int_abs(x: int) { abs(x) }
 
 "4. Int argument (promoted to double)"
@@ -60,8 +60,8 @@ fn int_abs(x: int) { abs(x) }
 ]
 
 // Section 5: Untyped argument (falls back to runtime fn_*)
-fn untyped_sqrt(x) { sqrt(x) }
-fn untyped_sin(x) { sin(x) }
+fn untyped_sqrt(x) { math.sqrt(x) }
+fn untyped_sin(x) { math.sin(x) }
 
 "5. Untyped argument (runtime fn_*)"
 [
@@ -70,8 +70,8 @@ fn untyped_sin(x) { sin(x) }
 ]
 
 // Section 6: Chained math operations
-fn hypotenuse(a: float, b: float) { sqrt(a*a + b*b) }
-fn normalize_angle(x: float) { sin(x) / cos(x) }  // same as tan(x)
+fn hypotenuse(a: float, b: float) { math.sqrt(a*a + b*b) }
+fn normalize_angle(x: float) { math.sin(x) / math.cos(x) }  // same as math.tan(x)
 
 "6. Chained math operations"
 [
@@ -81,7 +81,7 @@ fn normalize_angle(x: float) { sin(x) / cos(x) }  // same as tan(x)
 
 // Section 7: Math in conditionals
 fn safe_sqrt(x: float) { 
-    if (x < 0.0) 0.0 else sqrt(x) 
+    if (x < 0.0) 0.0 else math.sqrt(x) 
 }
 
 "7. Math in conditionals"
@@ -92,9 +92,9 @@ fn safe_sqrt(x: float) {
 
 // Section 8: Math in recursive functions
 fn factorial_approx(n: int) {
-    // Stirling's approximation: n! ≈ sqrt(2*pi*n) * (n/e)^n
+    // Stirling's approximation: n! ≈ math.sqrt(2*pi*n) * (n/e)^n
     if (n <= 1) 1.0
-    else sqrt(6.2831853 * n) * exp(n * log(n) - n)
+    else math.sqrt(6.2831853 * n) * math.exp(n * math.log(n) - n)
 }
 
 "8. Math in recursive/complex expressions"
