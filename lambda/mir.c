@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>  // for va_list
-#include <math.h>    // for sin, cos, tan, sqrt, log, log10, exp, fabs, floor, ceil, round
+#include <math.h>    // for sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh, sqrt, cbrt, log, log2, log10, exp, exp2, expm1, fabs, floor, ceil, round
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"  // for StringBuf functions
 #include "mir.h"
@@ -95,6 +95,29 @@ func_obj_t func_list[] = {
     {"floor", (fn_ptr) floor},
     {"ceil", (fn_ptr) ceil},
     {"round", (fn_ptr) round},
+    // inverse trigonometric
+    {"asin", (fn_ptr) asin},
+    {"acos", (fn_ptr) acos},
+    {"atan", (fn_ptr) atan},
+    {"atan2", (fn_ptr) atan2},
+    // hyperbolic
+    {"sinh", (fn_ptr) sinh},
+    {"cosh", (fn_ptr) cosh},
+    {"tanh", (fn_ptr) tanh},
+    // inverse hyperbolic
+    {"asinh", (fn_ptr) asinh},
+    {"acosh", (fn_ptr) acosh},
+    {"atanh", (fn_ptr) atanh},
+    // exponential/logarithmic variants
+    {"exp2", (fn_ptr) exp2},
+    {"expm1", (fn_ptr) expm1},
+    {"log2", (fn_ptr) log2},
+    // root
+    {"cbrt", (fn_ptr) cbrt},
+    // truncation
+    {"trunc", (fn_ptr) trunc},
+    {"hypot", (fn_ptr) hypot},
+    {"log1p", (fn_ptr) log1p},
     // Stack overflow protection
     {"lambda_stack_overflow_error", (fn_ptr) lambda_stack_overflow_error},
     // {"printf", (fn_ptr) printf}, // printf does not work
@@ -202,6 +225,29 @@ func_obj_t func_list[] = {
     {"fn_math_sin", (fn_ptr) fn_math_sin},
     {"fn_math_cos", (fn_ptr) fn_math_cos},
     {"fn_math_tan", (fn_ptr) fn_math_tan},
+    // inverse trigonometric (math module)
+    {"fn_math_asin", (fn_ptr) fn_math_asin},
+    {"fn_math_acos", (fn_ptr) fn_math_acos},
+    {"fn_math_atan", (fn_ptr) fn_math_atan},
+    {"fn_math_atan2", (fn_ptr) fn_math_atan2},
+    // hyperbolic (math module)
+    {"fn_math_sinh", (fn_ptr) fn_math_sinh},
+    {"fn_math_cosh", (fn_ptr) fn_math_cosh},
+    {"fn_math_tanh", (fn_ptr) fn_math_tanh},
+    // inverse hyperbolic (math module)
+    {"fn_math_asinh", (fn_ptr) fn_math_asinh},
+    {"fn_math_acosh", (fn_ptr) fn_math_acosh},
+    {"fn_math_atanh", (fn_ptr) fn_math_atanh},
+    // exponential/logarithmic variants (math module)
+    {"fn_math_exp2", (fn_ptr) fn_math_exp2},
+    {"fn_math_expm1", (fn_ptr) fn_math_expm1},
+    {"fn_math_log2", (fn_ptr) fn_math_log2},
+    // power/root (math module)
+    {"fn_math_pow", (fn_ptr) fn_math_pow},
+    {"fn_math_cbrt", (fn_ptr) fn_math_cbrt},
+    {"fn_math_trunc", (fn_ptr) fn_math_trunc},
+    {"fn_math_hypot", (fn_ptr) fn_math_hypot},
+    {"fn_math_log1p", (fn_ptr) fn_math_log1p},
     // unboxed system functions (native types, no Item boxing overhead)
     {"fn_pow_u", (fn_ptr) fn_pow_u},
     {"fn_min2_u", (fn_ptr) fn_min2_u},
@@ -295,6 +341,7 @@ func_obj_t func_list[] = {
     {"fn_call2", (fn_ptr) fn_call2},
     {"fn_call3", (fn_ptr) fn_call3},
     {"fn_is", (fn_ptr) fn_is},
+    {"fn_is_nan", (fn_ptr) fn_is_nan},
     {"fn_in", (fn_ptr) fn_in},
     {"fn_query", (fn_ptr) fn_query},
     {"fn_to", (fn_ptr) fn_to},

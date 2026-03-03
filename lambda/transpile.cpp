@@ -174,6 +174,29 @@ static const NativeMathFunc native_math_funcs[] = {
     {"math_log", "log", true, 1},
     {"math_log10", "log10", true, 1},
     {"math_exp", "exp", true, 1},
+    // inverse trigonometric
+    {"math_asin", "asin", true, 1},
+    {"math_acos", "acos", true, 1},
+    {"math_atan", "atan", true, 1},
+    {"math_atan2", "atan2", true, 2},
+    // hyperbolic
+    {"math_sinh", "sinh", true, 1},
+    {"math_cosh", "cosh", true, 1},
+    {"math_tanh", "tanh", true, 1},
+    // inverse hyperbolic
+    {"math_asinh", "asinh", true, 1},
+    {"math_acosh", "acosh", true, 1},
+    {"math_atanh", "atanh", true, 1},
+    // exponential/logarithmic variants
+    {"math_exp2", "exp2", true, 1},
+    {"math_expm1", "expm1", true, 1},
+    {"math_log2", "log2", true, 1},
+    // power/root
+    {"math_pow", "fn_pow_u", true, 2},
+    {"math_cbrt", "cbrt", true, 1},
+    {"math_trunc", "trunc", true, 1},
+    {"math_hypot", "hypot", true, 2},
+    {"math_log1p", "log1p", true, 1},
     // global math functions
     {"abs", "fabs", true, 1},       // Note: fabs for float, but we may prefer fn_abs_i for int
     {"floor", "floor", true, 1},
@@ -1511,9 +1534,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     // nan keyword: emit C constant expression for NaN
                     strbuf_append_str(tp->code_buf, "(0.0/0.0)");
                 } else {
-                    // regular numeric float literal: emit source text directly
+                    // emit the actual double value (handles both source literals and synthesized constants like math.pi)
                     strbuf_append_str(tp->code_buf, "((double)(");
-                    write_node_source(tp, pri_node->node);
+                    strbuf_append_format(tp->code_buf, "%.17g", val);
                     strbuf_append_str(tp->code_buf, "))");
                 }
             }
@@ -1755,6 +1778,12 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    else if (bi_node->op == OPERATOR_IS_NAN) {
+        // IEEE NaN check: expr is nan
+        strbuf_append_str(tp->code_buf, "fn_is_nan(");
+        transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IS) {

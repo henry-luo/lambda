@@ -460,7 +460,7 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 
 **Math:**
 
-`abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `math.sqrt(x)` `math.log(x)` `math.log10(x)` `math.exp(x)` `math.sin(x)` `math.cos(x)` `math.tan(x)`
+`math.pi` `math.e` `abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `math.trunc(x)` `math.sqrt(x)` `math.cbrt(x)` `math.hypot(x,y)` `math.pow(b,e)` `math.log(x)` `math.log2(x)` `math.log10(x)` `math.log1p(x)` `math.exp(x)` `math.exp2(x)` `math.expm1(x)` `math.sin(x)` `math.cos(x)` `math.tan(x)` `math.asin(x)` `math.acos(x)` `math.atan(x)` `math.atan2(y,x)` `math.sinh(x)` `math.cosh(x)` `math.tanh(x)` `math.asinh(x)` `math.acosh(x)` `math.atanh(x)`
 
 **Stats:**
 
@@ -613,7 +613,7 @@ else result * 2
 8. `and` - Logical AND
 9. `or` - Logical OR
 10. `to` - Range
-11. `is` `in` - Type operations
+11. `is` `in` - Type operations (`is nan` for NaN detection)
 12. `|` `where` - Pipe and Filter
 
 ## Quick Examples

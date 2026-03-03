@@ -1528,7 +1528,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             // Comparisons always return bool
             if (op >= OPERATOR_EQ && op <= OPERATOR_GE)
                 return LMD_TYPE_BOOL;
-            if (op == OPERATOR_IS || op == OPERATOR_IN)
+            if (op == OPERATOR_IS || op == OPERATOR_IS_NAN || op == OPERATOR_IN)
                 return LMD_TYPE_BOOL;
             // AND/OR with both_bool return bool
             if ((op == OPERATOR_AND || op == OPERATOR_OR) && both_bool)
@@ -1787,6 +1787,13 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         return emit_call_2(mt, "fn_to", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+    }
+
+    // IEEE NaN check: expr is nan
+    if (bi->op == OPERATOR_IS_NAN) {
+        MIR_reg_t boxl = transpile_box_item(mt, bi->left);
+        return emit_call_1(mt, "fn_is_nan", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl));
     }
 
     // Type operators
@@ -4601,8 +4608,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_box_bool(mt, val);
         }
 
-        // 1b. IS and IN also return native Bool from fn_is/fn_in
-        if (op == OPERATOR_IS || op == OPERATOR_IN) {
+        // 1b. IS, IS_NAN, and IN also return native Bool from fn_is/fn_in/fn_is_nan
+        if (op == OPERATOR_IS || op == OPERATOR_IS_NAN || op == OPERATOR_IN) {
             return emit_box_bool(mt, val);
         }
 

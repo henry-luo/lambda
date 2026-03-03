@@ -1149,6 +1149,204 @@ Item fn_math_tan(Item item) {
     return vec_unary_math(item, tan, "fn_math_tan");
 }
 
+// asin(vec) - element-wise inverse sine
+Item fn_math_asin(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(asin(val));
+    }
+    return vec_unary_math(item, asin, "fn_math_asin");
+}
+
+// acos(vec) - element-wise inverse cosine
+Item fn_math_acos(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(acos(val));
+    }
+    return vec_unary_math(item, acos, "fn_math_acos");
+}
+
+// atan(vec) - element-wise inverse tangent
+Item fn_math_atan(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(atan(val));
+    }
+    return vec_unary_math(item, atan, "fn_math_atan");
+}
+
+// atan2(y, x) - two-argument inverse tangent
+Item fn_math_atan2(Item item_y, Item item_x) {
+    GUARD_ERROR2(item_y, item_x);
+    TypeId type_y = get_type_id(item_y);
+    TypeId type_x = get_type_id(item_x);
+    if (is_scalar_numeric(type_y) && is_scalar_numeric(type_x)) {
+        double y = item_to_double(item_y);
+        double x = item_to_double(item_x);
+        return push_d(atan2(y, x));
+    }
+    log_error("math_atan2: expected numeric arguments");
+    return ItemError;
+}
+
+// sinh(vec) - element-wise hyperbolic sine
+Item fn_math_sinh(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(sinh(val));
+    }
+    return vec_unary_math(item, sinh, "fn_math_sinh");
+}
+
+// cosh(vec) - element-wise hyperbolic cosine
+Item fn_math_cosh(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(cosh(val));
+    }
+    return vec_unary_math(item, cosh, "fn_math_cosh");
+}
+
+// tanh(vec) - element-wise hyperbolic tangent
+Item fn_math_tanh(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(tanh(val));
+    }
+    return vec_unary_math(item, tanh, "fn_math_tanh");
+}
+
+// asinh(vec) - element-wise inverse hyperbolic sine
+Item fn_math_asinh(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(asinh(val));
+    }
+    return vec_unary_math(item, asinh, "fn_math_asinh");
+}
+
+// acosh(vec) - element-wise inverse hyperbolic cosine
+Item fn_math_acosh(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(acosh(val));
+    }
+    return vec_unary_math(item, acosh, "fn_math_acosh");
+}
+
+// atanh(vec) - element-wise inverse hyperbolic tangent
+Item fn_math_atanh(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(atanh(val));
+    }
+    return vec_unary_math(item, atanh, "fn_math_atanh");
+}
+
+// exp2(vec) - element-wise base-2 exponential
+Item fn_math_exp2(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(exp2(val));
+    }
+    return vec_unary_math(item, exp2, "fn_math_exp2");
+}
+
+// expm1(vec) - element-wise exp(x)-1
+Item fn_math_expm1(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(expm1(val));
+    }
+    return vec_unary_math(item, expm1, "fn_math_expm1");
+}
+
+// log2(vec) - element-wise base-2 logarithm
+Item fn_math_log2(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(log2(val));
+    }
+    return vec_unary_math(item, log2, "fn_math_log2");
+}
+
+// pow(base, exp) - math module power function (delegates to fn_pow)
+Item fn_math_pow(Item item_a, Item item_b) {
+    return fn_pow(item_a, item_b);
+}
+
+// cbrt(vec) - element-wise cube root
+Item fn_math_cbrt(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(cbrt(val));
+    }
+    return vec_unary_math(item, cbrt, "fn_math_cbrt");
+}
+
+// trunc(vec) - element-wise truncation toward zero
+Item fn_math_trunc(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(trunc(val));
+    }
+    return vec_unary_math(item, trunc, "fn_math_trunc");
+}
+
+// hypot(y, x) - Euclidean distance sqrt(y*y + x*x)
+Item fn_math_hypot(Item item_y, Item item_x) {
+    GUARD_ERROR2(item_y, item_x);
+    TypeId type_y = get_type_id(item_y);
+    TypeId type_x = get_type_id(item_x);
+    if (is_scalar_numeric(type_y) && is_scalar_numeric(type_x)) {
+        double y = item_to_double(item_y);
+        double x = item_to_double(item_x);
+        return push_d(hypot(y, x));
+    }
+    log_error("math_hypot: expected numeric arguments");
+    return ItemError;
+}
+
+// log1p(vec) - element-wise ln(1+x), precise for small x
+Item fn_math_log1p(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(log1p(val));
+    }
+    return vec_unary_math(item, log1p, "fn_math_log1p");
+}
+
 // sign helper
 static double sign_func(double x) {
     if (x > 0) return 1.0;
