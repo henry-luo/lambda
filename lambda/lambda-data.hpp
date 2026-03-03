@@ -345,7 +345,7 @@ typedef enum SysFunc {
     SYSFUNC_URL_RESOLVE,
     SYSFUNC_SPLIT,
     SYSFUNC_SPLIT3,         // split(str, sep, keep_delim) with 3 args
-    SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
+    SYSFUNC_JOIN,           // join(strs, sep) for strings
     SYSFUNC_REPLACE,
     SYSFUNC_FIND,           // find(str, pattern) - find all matches
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options

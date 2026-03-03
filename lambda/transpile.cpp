@@ -166,13 +166,15 @@ struct NativeMathFunc {
 
 static const NativeMathFunc native_math_funcs[] = {
     // Single-argument functions (use C math library directly)
-    {"sin", "sin", true, 1},
-    {"cos", "cos", true, 1},
-    {"tan", "tan", true, 1},
-    {"sqrt", "sqrt", true, 1},
-    {"log", "log", true, 1},
-    {"log10", "log10", true, 1},
-    {"exp", "exp", true, 1},
+    // math module functions
+    {"math_sin", "sin", true, 1},
+    {"math_cos", "cos", true, 1},
+    {"math_tan", "tan", true, 1},
+    {"math_sqrt", "sqrt", true, 1},
+    {"math_log", "log", true, 1},
+    {"math_log10", "log10", true, 1},
+    {"math_exp", "exp", true, 1},
+    // global math functions
     {"abs", "fabs", true, 1},       // Note: fabs for float, but we may prefer fn_abs_i for int
     {"floor", "floor", true, 1},
     {"ceil", "ceil", true, 1},
@@ -1990,7 +1992,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         // Fast path (no boxing) is only safe for scalar types where the C representation
         // is guaranteed consistent (e.g., both sides produce int32_t, double, bool, etc.).
         // For STRING/SYMBOL/BINARY/containers, different functions may return String* vs Item
-        // at the C level (e.g., fn_string() returns String* but fn_str_join() returns Item),
+        // at the C level (e.g., fn_string() returns String* but fn_join2() returns Item),
         // causing "incompatible types in cond-expression" errors in C2MIR.
         TypeId tid = then_type->type_id;
         if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {

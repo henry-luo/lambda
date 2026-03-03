@@ -886,7 +886,7 @@ pn find_intersection(m1, m2) {
         var discr = b * b - 4 * a * c
         if (discr < 0) { return null }
 
-        var sq = sqrt(discr)
+        var sq = math.sqrt(discr)
         var a2 = 2 * a
         var t1 = (0 - b - sq) / a2
         var t2 = (0 - b + sq) / a2
@@ -936,7 +936,7 @@ pn find_intersection(m1, m2) {
     var pdx = i2x - i1x
     var pdy = i2y - i1y
     var pdz = i2z - i1z
-    var dist = sqrt(pdx * pdx + pdy * pdy + pdz * pdz)
+    var dist = math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz)
     if (dist <= radius) {
         var rx2 = (i1x + i2x) * 0.5
         var ry2 = (i1y + i2y) * 0.5
@@ -972,7 +972,7 @@ pn simulate_frame(numAircraft, tval) {
     while (i < numAircraft) {
         var cs1 = i
         var px1 = tval
-        var py1 = cos(tval) * 2 + i * 3
+        var py1 = math.cos(tval) * 2 + i * 3
         var pz1 = 10
         var a1 = [null, null, null, null]
         a1[0] = cs1
@@ -981,7 +981,7 @@ pn simulate_frame(numAircraft, tval) {
         a1[3] = pz1
         vec_add(frame, a1)
         var cs2 = i + 1
-        var py2 = sin(tval) * 2 + i * 3
+        var py2 = math.sin(tval) * 2 + i * 3
         var a2 = [null, null, null, null]
         a2[0] = cs2
         a2[1] = px1

@@ -22,7 +22,7 @@ true
 9
 "12. expect -1:"
 -1
-"Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:abc18. expect ['hello']:hello19. expect ['a', 'b', 'c']:abcTest str_join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
+"Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:abc18. expect ['hello']:hello19. expect ['a', 'b', 'c']:abcTest join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
 true
 "26. expect false:"
 false
@@ -50,7 +50,7 @@ true
 -1
 "51. trim(null):52. upper(null):53. lower(null):54. replace(null, a, b):55. replace(s, null, b):hello56. slice(null, 0, 1):57. split(null, sep):"
 0
-"58. str_join(null, sep):59. len(null):"
+"58. join(null, sep):59. len(null):"
 0
 "Test split with null separator (whitespace split):60. split on whitespace:"
 2
