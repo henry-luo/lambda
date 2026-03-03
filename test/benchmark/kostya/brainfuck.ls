@@ -75,6 +75,7 @@ pn run_bf(prog, prog_len, jumps) {
 }
 
 pn main() {
+    var __t0 = clock()
     // BF Hello World! program
     let prog = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."
     let prog_len = len(prog)
@@ -86,5 +87,7 @@ pn main() {
         output = run_bf(prog, prog_len, jumps)
         iter = iter + 1
     }
+    var __t1 = clock()
     print(output ++ "\n")
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

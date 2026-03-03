@@ -29,6 +29,7 @@ pn matmul(a, b, c, n) {
 }
 
 pn main() {
+    var __t0 = clock()
     let size = N * N
     var a = fill(size, 0.0)
     var b = fill(size, 0.0)
@@ -55,9 +56,11 @@ pn main() {
         total = total + c[i]
         i = i + 1
     }
+    var __t1 = clock()
 
     // Print truncated sum for verification
     let int_total = int(floor(total))
     print("matmul: sum=" ++ string(int_total) ++ "\n")
     print("matmul: DONE\n")
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

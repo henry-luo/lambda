@@ -30,7 +30,9 @@ pn sieve(limit) {
 }
 
 pn main() {
+    var __t0 = clock()
     let result = sieve(1000000)
+    var __t1 = clock()
     if (result == 78498) {
         print("primes: PASS (" ++ string(result) ++ ")\n")
     } else {
@@ -38,4 +40,5 @@ pn main() {
         print(result)
         print("\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

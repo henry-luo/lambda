@@ -29,6 +29,7 @@ pn populate(depth, node) {
 }
 
 pn main() {
+    var __t0 = clock()
     let min_depth = 4
     let max_depth = 14
     let stretch_depth = max_depth + 1
@@ -52,6 +53,8 @@ pn main() {
         print(string(iterations) ++ " trees of depth " ++ string(depth) ++ " check: " ++ string(total_check) ++ "\n")
         depth = depth + 2
     }
+    var __t1 = clock()
 
     print("long lived tree of depth " ++ string(max_depth) ++ " check: " ++ string(check_tree(long_lived)) ++ "\n")
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

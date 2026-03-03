@@ -171,6 +171,45 @@ The original `paraffins` implementation (building explicit tree structures) caus
 
 The debug build of `lambda.exe` is orders of magnitude slower than release for computation-heavy loops. Benchmarks like `pnpoly`, `brainfuck`, `collatz`, `matmul`, `kostya/primes`, and `triangl` are only practical to run in release mode (`make release`). All 19 benchmarks pass in release mode.
 
+## Node.js Comparison
+
+All 19 benchmarks were also implemented in JavaScript and timed with Node.js v22.13.0 (V8 JIT) on the same machine. Both Lambda and Node.js scripts include in-script timing (`clock()` and `process.hrtime.bigint()` respectively) to separate JIT/startup overhead from pure execution time. Three runs per benchmark, median reported.
+
+### Summary — Total Time (Wall-Clock)
+
+| Suite | Lambda Geo Mean | Node.js Geo Mean | Ratio |
+|-------|----------------|-----------------|-------|
+| Kostya (7) | 212.2 ms | 29.2 ms | 7.3× |
+| Larceny (12) | 64.8 ms | 8.9 ms | 7.3× |
+
+### Summary — Exec Time Only (Excluding JIT/Startup)
+
+| Suite | Lambda Exec Geo Mean | Node.js Exec Geo Mean | Exec Ratio |
+|-------|---------------------|----------------------|------------|
+| Kostya (7) | 187.1 ms | 22.0 ms | 8.5× |
+| Larceny (12) | 37.2 ms | 6.6 ms | 5.6× |
+
+### JIT Overhead
+
+| | Lambda JIT (median) | Node.js JIT (median) |
+|---|--------------------|--------------------|
+| Kostya | ~9 ms | ~3 ms |
+| Larceny | ~6 ms | ~1.2 ms |
+
+Lambda's C2MIR JIT overhead is 4–15 ms per benchmark (parsing + AST + MIR transpilation + compilation). This is negligible for long-running benchmarks but adds 20–80% overhead for sub-10ms benchmarks.
+
+Lambda is roughly **7× slower** than Node.js (V8 JIT) on wall-clock, and **6–9× slower** on pure execution time across these suites. The gap varies from 0.9× (Larceny primes — Lambda exec is *faster*!) to 105× (gcbench — GC stress).
+
+### Key Observations
+
+- **Lambda exec beats Node.js** on one benchmark: Larceny `primes` (0.9× — Lambda 1.5ms vs Node 1.7ms for sieve to 8000). On `paraffins` (1.1×) and `divrec` (1.2×), they are nearly tied.
+- **Closest performance** (2–4×): Simple loop/recursion benchmarks (collatz, ray, puzzle, quicksort) where Lambda's C2MIR JIT generates efficient native code.
+- **Medium gap** (5–15×): Array-heavy and string/DP benchmarks (array1, levenshtein, deriv, diviter) where V8's typed-array and string optimizations provide an advantage.
+- **Largest gap** (25–105×): GC stress (gcbench) and backtracking with array copies (triangl) — Lambda's garbage collector and object allocation are the primary bottleneck in these workloads.
+
+JS benchmark files: `test/benchmark/kostya/*.js`, `test/benchmark/larceny/*.js`
+Timing runner: `temp/run_node_bench.py`
+
 ## Benchmark Design Patterns
 
 Several patterns were established for writing benchmarks in Lambda `pn` mode:
