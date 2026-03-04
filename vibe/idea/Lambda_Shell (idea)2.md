@@ -457,5 +457,5 @@ stream(/var.log.syslog) where ~ ~ /error/ | take(100)
 
 ## See Also
 
-- [Lambda Path Implementation](Lambda_Path_Impl.md) - Path type internals
+- [Lambda Path Implementation](Lambda_Expr_Path_Impl.md) - Path type internals
 - [Lambda System Info](Lambda_Sysinfo.md) - `sys.*` scheme reference
