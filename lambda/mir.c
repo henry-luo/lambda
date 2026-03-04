@@ -5,6 +5,7 @@
 #include <math.h>    // for sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh, sqrt, cbrt, log, log2, log10, exp, exp2, expm1, fabs, floor, ceil, round
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"  // for StringBuf functions
+#include "../lib/hashmap.h"    // for O(1) import resolution
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
@@ -19,6 +20,9 @@ extern void lambda_stack_overflow_error(const char* func_name);
 // Path resolution functions (implemented in path.c)
 extern Item path_resolve_for_iteration(Path* path);
 extern Bool fn_exists(Item path);
+
+// Target equality (implemented in target.cpp, used in func_list)
+extern bool target_equal(Target* a, Target* b);
 
 // Symbol creation functions (implemented in lambda-eval-num.cpp)
 extern Symbol* fn_symbol(Item item);
@@ -546,6 +550,36 @@ func_obj_t func_list[] = {
     {"ri_to_item", (fn_ptr) ri_to_item},
 };
 
+// ============================================================================
+// O(1) Import Resolution via Hashmap
+// ============================================================================
+// Builds a hashmap from func_list[] at init time for O(1) symbol resolution
+// instead of O(n) linear scan on every import.
+
+static struct hashmap* func_map = NULL;
+
+static uint64_t func_obj_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const func_obj_t* e = (const func_obj_t*)item;
+    return hashmap_xxhash3(e->name, strlen(e->name), seed0, seed1);
+}
+
+static int func_obj_compare(const void* a, const void* b, void* udata) {
+    const func_obj_t* fa = (const func_obj_t*)a;
+    const func_obj_t* fb = (const func_obj_t*)b;
+    return strcmp(fa->name, fb->name);
+}
+
+static void init_func_map(void) {
+    if (func_map) return;  // already initialized
+    const size_t len = sizeof(func_list) / sizeof(func_obj_t);
+    func_map = hashmap_new(sizeof(func_obj_t), len * 2,
+        0, 0, func_obj_hash, func_obj_compare, NULL, NULL);
+    for (size_t i = 0; i < len; i++) {
+        hashmap_set(func_map, &func_list[i]);
+    }
+    log_info("func_map initialized: %zu runtime functions", len);
+}
+
 // Dynamic import table for cross-module function/variable resolution
 #define MAX_DYNAMIC_IMPORTS 256
 static func_obj_t dynamic_import_table[MAX_DYNAMIC_IMPORTS];
@@ -575,19 +609,19 @@ void *import_resolver(const char *name) {
             return (void*)dynamic_import_table[i].func;
         }
     }
-    // Check static runtime function table
-    const size_t len = sizeof(func_list) / sizeof(func_obj_t);
-    for (int i = 0; i < len; i++) {
-        if (strcmp(func_list[i].name, name) == 0) {
-            log_debug("found function: %s at %p", name, func_list[i].func);
-            return func_list[i].func;
-        }
+    // Check static runtime function hashmap (O(1) lookup)
+    func_obj_t key = {.name = (char*)name, .func = NULL};
+    const func_obj_t* found = (const func_obj_t*)hashmap_get(func_map, &key);
+    if (found) {
+        log_debug("found function: %s at %p", name, found->func);
+        return (void*)found->func;
     }
     log_error("failed to resolve native fn/pn: %s", name);
     return NULL;
 }
 
 MIR_context_t jit_init(unsigned int optimize_level) {
+    init_func_map();  // build O(1) import resolution hashmap
     MIR_context_t ctx = MIR_init();
     c2mir_init(ctx);
     MIR_gen_init(ctx); // init the JIT generator
@@ -828,7 +862,7 @@ void register_bss_gc_roots(void* mir_ctx) {
 // lambda-error.cpp since they don't use MIR APIs.
 
 #include "lambda-error.h"
-#include "../lib/hashmap.h"
+// note: hashmap.h already included at top of file
 
 // Simple dynamic array for debug info (matches struct in lambda-error.cpp)
 typedef struct {
