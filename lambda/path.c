@@ -12,10 +12,16 @@
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include "lambda.h"
+#include "lambda-path.h"
 #include "sysinfo.h"
 
 #include <string.h>
 #include <stdlib.h>
+
+// Target API functions used by fn_exists() (defined in target.cpp, declarations in lambda.hpp)
+extern Target* item_to_target(uint64_t item, Url* cwd);
+extern bool target_exists(Target* target);
+extern void target_free(Target* target);
 
 // Forward declaration for EvalContext (defined in lambda-data.hpp as C++ class)
 typedef struct EvalContext EvalContext;

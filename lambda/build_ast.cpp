@@ -34,207 +34,132 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 // Forward declaration for object type building (used by pub type)
 AstNode* build_object_type(Transpiler* tp, TSNode type_node);
 
-// System function definitions with method call support
-// Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
-// is_method_eligible: true if can be called as obj.method() style
-// first_param_type: expected type of first param for method calls (LMD_TYPE_ANY for any type)
-SysFuncInfo sys_funcs[] = {
-    // type/conversion functions - all method-eligible
-    // {fn, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type, can_raise}
-    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false, C_RET_INT64},
-    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false, C_RET_TYPE_PTR},
-    {SYSFUNC_NAME, "name", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false, C_RET_SYMBOL},  // name(item) - get local name
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false, C_RET_INT64},
-    {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_BINARY, "binary", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false, C_RET_STRING},
-    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, true, true, LMD_TYPE_ANY, false, C_RET_SYMBOL},
-    {SYSFUNC_SYMBOL2, "symbol", 2, &TYPE_SYMBOL, false, true, false, LMD_TYPE_ANY, false},  // symbol(name, url) - namespaced
-    // datetime functions - overloaded with arg count suffix
-    {SYSFUNC_DATETIME0, "datetime", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false, C_RET_DTIME},  // datetime() - current
-    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_ANY, false, C_RET_DTIME},    // datetime(str) - parse
-    {SYSFUNC_DATE0, "date", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false, C_RET_DTIME},          // date() - current date
-    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false, C_RET_DTIME},          // date(dt) - extract date
-    {SYSFUNC_DATE3, "date", 3, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false, C_RET_DTIME},          // date(y,m,d) - construct
-    {SYSFUNC_TIME0, "time", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false, C_RET_DTIME},          // time() - current time
-    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false, C_RET_DTIME},          // time(dt) - extract time
-    {SYSFUNC_TIME3, "time", 3, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false, C_RET_DTIME},          // time(h,m,s) - construct
-    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY, false, C_RET_DTIME},   // justnow() - ms timestamp
-    // collection functions
-    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // variable args, not method-eligible
-    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // slice(obj, start, end) -> obj.slice(start, end)
-    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false},
-    // min/max - 1-arg is method-eligible, 2-arg is not (no clear "self")
-    {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // min(a,b) - no clear receiver
-    {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // max(a,b) - no clear receiver
-    // aggregation functions - all method-eligible on collections
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // math functions - method-eligible on numbers
-    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // I/O functions - can_raise=true for functions that may fail
-    {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},   // input(path) -> any^
-    {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},   // input(path, format) -> any^
-    {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false, C_RET_STRING},
-    {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false, C_RET_STRING},
-    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY, false},  // not method-eligible
-    // string functions - method-eligible on strings
-    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false, C_RET_BOOL},
-    {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false, C_RET_BOOL},
-    {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false, C_RET_BOOL},
-    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING, false, C_RET_INT64},
-    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING, false, C_RET_INT64},
-    {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_LOWER, "lower", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_UPPER, "upper", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false},
-    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_SPLIT3, "split", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},  // arr.join(sep)
-    {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false},
-    {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_FIND3, "find", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
-    {SYSFUNC_CHARS, "chars", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},  // chars(str) -> array of 1-char strings
-    {SYSFUNC_ORD, "ord", 1, &TYPE_INT64, false, false, false, LMD_TYPE_STRING, false, C_RET_INT64},  // ord(str) -> code point of first char
-    {SYSFUNC_CHR, "chr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_INT, false},  // chr(int) -> 1-char string
-    // vector/array functions - method-eligible on arrays
-    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // fill(n, val) - n is count, not self
-    {SYSFUNC_DOT, "math_dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // math.dot(a, b)
-    {SYSFUNC_NORM, "math_norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // statistical functions - math module
-    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // element-wise math functions - math module
-    {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG, "math_log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG10, "math_log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_EXP, "math_exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SIN, "math_sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_COS, "math_cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_TAN, "math_tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // inverse trigonometric - math module
-    {SYSFUNC_ASIN, "math_asin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ACOS, "math_acos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ATAN, "math_atan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ATAN2, "math_atan2", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // hyperbolic - math module
-    {SYSFUNC_SINH, "math_sinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_COSH, "math_cosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_TANH, "math_tanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // inverse hyperbolic - math module
-    {SYSFUNC_ASINH, "math_asinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ACOSH, "math_acosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_ATANH, "math_atanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // exponential/logarithmic variants - math module
-    {SYSFUNC_EXP2, "math_exp2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_EXPM1, "math_expm1", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG2, "math_log2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // power/root - math module
-    {SYSFUNC_POW_MATH, "math_pow", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CBRT, "math_cbrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_TRUNC, "math_trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_HYPOT, "math_hypot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_LOG1P, "math_log1p", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    // vector manipulation functions - method-eligible on collections
-    {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},  // arr.sort(comparator)
-    {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.concat(b)
-    {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.take(n)
-    {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.drop(n)
-    {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.zip(b)
-    {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // range(s,e,step) - constructor, not method
-    {SYSFUNC_QUANTILE, "math_quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // math.quantile(arr, p)
-    {SYSFUNC_REDUCE, "reduce", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // reduce(collection, fn)
-    // parse string functions - overloaded with arg count
-    {SYSFUNC_PARSE1, "parse", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true, C_RET_RETITEM},   // parse(str) -> any^ (auto-detect)
-    {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true, C_RET_RETITEM},   // parse(str, format) -> any^
-    // variadic parameter access - not method-eligible
-    {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
-    {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
-    // procedural functions - not method-eligible (side effects)
-    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false, C_RET_DTIME},
-    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false, C_RET_DTIME},
-    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false},
-    {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false, C_RET_DOUBLE},
-    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM},   // fetch may fail (deprecated)
-    {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},  // output(data, trg) -> any^ (bytes written or error)
-    {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},  // output(data, trg, options) -> any^
-    {SYSPROC_CMD1, "cmd", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},       // cmd(command) -> any^ (output or error)
-    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},        // cmd(command, args) -> any^ (output or error)
-    // io module functions - procedural (is_proc=true), all can_raise=true for I/O errors
-    {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM},     // io_copy(src, dst) -> null^
-    {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM},     // io_move(src, dst) -> null^
-    {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM}, // io_delete(path) -> null^
-    {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM},   // io_mkdir(path) -> null^
-    {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM},   // io_touch(path) -> null^
-    {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM}, // io_symlink(target, link) -> null^
-    {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM},   // io_chmod(path, mode) -> null^
-    {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true, C_RET_RETITEM}, // io_rename(old, new) -> null^
-    {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},     // io_fetch(target) -> any^
-    {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true, C_RET_RETITEM},     // io_fetch(target, options) -> any^
-    {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false, C_RET_BOOL},     // exists(path) -> bool (never fails)
-    // bitwise functions - operate on integers, not method-eligible
-    {SYSFUNC_BAND, "band", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false, C_RET_INT64, C_ARG_NATIVE},        // band(a, b) -> int
-    {SYSFUNC_BOR, "bor", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false, C_RET_INT64, C_ARG_NATIVE},          // bor(a, b) -> int
-    {SYSFUNC_BXOR, "bxor", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false, C_RET_INT64, C_ARG_NATIVE},        // bxor(a, b) -> int
-    {SYSFUNC_BNOT, "bnot", 1, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false, C_RET_INT64, C_ARG_NATIVE},        // bnot(a) -> int
-    {SYSFUNC_SHL, "shl", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false, C_RET_INT64, C_ARG_NATIVE},          // shl(a, n) -> int
-    {SYSFUNC_SHR, "shr", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false, C_RET_INT64, C_ARG_NATIVE},          // shr(a, n) -> int
-    // vmap functions
-    {SYSFUNC_VMAP_NEW, "map", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},     // map() -> empty vmap
-    {SYSFUNC_VMAP_NEW, "map", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},     // map([k1,v1,...]) -> vmap from array
-    {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false},     // m.set(k, v) -> in-place insert
-};
+// System function definitions — single source of truth in sys_func_registry.cpp
+// See lambda/sys_func_registry.cpp for the complete table.
+extern SysFuncInfo sys_func_defs[];
+extern const int sys_func_def_count;
+
+// ============================================================================
+// O(1) System Function Lookup via Hashmap
+// ============================================================================
+// Two hashmaps:
+//   1. sys_func_map: composite key (name, arg_count) → SysFuncInfo*
+//      Used by get_sys_func_info() and get_sys_func_for_method()
+//   2. sys_func_name_set: name-only key → bool sentinel
+//      Used by is_sys_func_name()
+// Both are lazily initialized on first access.
+
+// Composite key for (name, arg_count) lookups
+typedef struct {
+    const char* name;
+    int name_len;
+    int arg_count;
+    SysFuncInfo* info;
+} SysFuncEntry;
+
+// Name-only key for existence checks
+typedef struct {
+    const char* name;
+    int name_len;
+} SysFuncNameEntry;
+
+static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
+static struct hashmap* sys_func_name_set = NULL;   // name → exists
+
+static uint64_t sys_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SysFuncEntry* e = (const SysFuncEntry*)item;
+    // hash the name and mix in arg_count
+    uint64_t h = hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+    h ^= (uint64_t)(e->arg_count + 2) * 0x9E3779B97F4A7C15ULL;  // +2 to keep -1 distinct
+    return h;
+}
+
+static int sys_func_compare(const void* a, const void* b, void* udata) {
+    const SysFuncEntry* ea = (const SysFuncEntry*)a;
+    const SysFuncEntry* eb = (const SysFuncEntry*)b;
+    if (ea->arg_count != eb->arg_count) return ea->arg_count - eb->arg_count;
+    if (ea->name_len != eb->name_len) return ea->name_len - eb->name_len;
+    return strncmp(ea->name, eb->name, ea->name_len);
+}
+
+static uint64_t sys_func_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SysFuncNameEntry* e = (const SysFuncNameEntry*)item;
+    return hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+}
+
+static int sys_func_name_compare(const void* a, const void* b, void* udata) {
+    const SysFuncNameEntry* ea = (const SysFuncNameEntry*)a;
+    const SysFuncNameEntry* eb = (const SysFuncNameEntry*)b;
+    if (ea->name_len != eb->name_len) return ea->name_len - eb->name_len;
+    return strncmp(ea->name, eb->name, ea->name_len);
+}
+
+static void init_sys_func_maps() {
+    if (sys_func_map) return;  // already initialized
+
+    const size_t count = (size_t)sys_func_def_count;
+
+    sys_func_map = hashmap_new(sizeof(SysFuncEntry), count * 2,
+        0, 0, sys_func_hash, sys_func_compare, NULL, NULL);
+
+    sys_func_name_set = hashmap_new(sizeof(SysFuncNameEntry), count * 2,
+        0, 0, sys_func_name_hash, sys_func_name_compare, NULL, NULL);
+
+    for (size_t i = 0; i < count; i++) {
+        int name_len = (int)strlen(sys_func_defs[i].name);
+
+        // insert into composite-key map
+        SysFuncEntry entry = {
+            .name = sys_func_defs[i].name,
+            .name_len = name_len,
+            .arg_count = sys_func_defs[i].arg_count,
+            .info = &sys_func_defs[i]
+        };
+        hashmap_set(sys_func_map, &entry);
+
+        // insert into name-only set (deduplicates automatically)
+        SysFuncNameEntry name_entry = {
+            .name = sys_func_defs[i].name,
+            .name_len = name_len
+        };
+        hashmap_set(sys_func_name_set, &name_entry);
+    }
+
+    log_info("sys_func maps initialized: %zu entries, %zu unique names",
+             count, hashmap_count(sys_func_name_set));
+}
 
 // Check if a name matches any system function (regardless of arg count)
 // Returns true if the name is reserved for system functions
 bool is_sys_func_name(const char* name, int name_len) {
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        if ((int)strlen(sys_funcs[i].name) == name_len &&
-            strncmp(sys_funcs[i].name, name, name_len) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_sys_func_maps();
+    SysFuncNameEntry key = { .name = name, .name_len = name_len };
+    return hashmap_get(sys_func_name_set, &key) != NULL;
 }
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == arg_count) {
-            log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
-            return &sys_funcs[i];
-        }
+    init_sys_func_maps();
+
+    SysFuncEntry key = {
+        .name = name->str,
+        .name_len = (int)name->length,
+        .arg_count = arg_count,
+        .info = NULL
+    };
+    const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (found) {
+        log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
+        return found->info;
     }
+
     // fallback: match variadic functions (arg_count == -1)
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == -1) {
-            log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
-            return &sys_funcs[i];
-        }
+    key.arg_count = -1;
+    found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (found) {
+        log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
+        return found->info;
     }
+
     log_debug("don't have sys func: %.*s, %d", (int)name->length, name->str, arg_count);
     return NULL;
 }
@@ -243,48 +168,57 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
 // This searches for a sys func where arg_count includes the object (+1)
 // and validates that the function is method-eligible and type-compatible
 SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count, TypeId obj_type_id) {
+    init_sys_func_maps();
+
     // method_arg_count is the count of arguments in parentheses (not including obj)
     // sys func arg_count includes the object, so we add 1
     int total_arg_count = method_arg_count + 1;
 
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        SysFuncInfo* info = &sys_funcs[i];
-        if (strview_equal(method_name, info->name) && info->arg_count == total_arg_count) {
-            // Check if this function is method-eligible
-            if (!info->is_method_eligible) {
-                log_debug("method_call sys func '%.*s' not method-eligible",
-                    (int)method_name->length, method_name->str);
+    SysFuncEntry key = {
+        .name = method_name->str,
+        .name_len = (int)method_name->length,
+        .arg_count = total_arg_count,
+        .info = NULL
+    };
+    const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (!found) {
+        log_debug("method_call no sys func: %.*s, args=%d",
+            (int)method_name->length, method_name->str, total_arg_count);
+        return NULL;
+    }
+
+    SysFuncInfo* info = found->info;
+
+    // Check if this function is method-eligible
+    if (!info->is_method_eligible) {
+        log_debug("method_call sys func '%.*s' not method-eligible",
+            (int)method_name->length, method_name->str);
+        return NULL;
+    }
+
+    // Check type compatibility with first parameter
+    if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
+        if (info->first_param_type != obj_type_id) {
+            // Additional check for numeric types
+            bool type_compatible = false;
+            if (info->first_param_type == LMD_TYPE_NUMBER) {
+                type_compatible = (obj_type_id == LMD_TYPE_INT ||
+                                  obj_type_id == LMD_TYPE_INT64 ||
+                                  obj_type_id == LMD_TYPE_FLOAT ||
+                                  obj_type_id == LMD_TYPE_DECIMAL);
+            }
+            if (!type_compatible) {
+                log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
+                    (int)method_name->length, method_name->str,
+                    info->first_param_type, obj_type_id);
                 return NULL;
             }
-
-            // Check type compatibility with first parameter
-            if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
-                if (info->first_param_type != obj_type_id) {
-                    // Additional check for numeric types
-                    bool type_compatible = false;
-                    if (info->first_param_type == LMD_TYPE_NUMBER) {
-                        type_compatible = (obj_type_id == LMD_TYPE_INT ||
-                                          obj_type_id == LMD_TYPE_INT64 ||
-                                          obj_type_id == LMD_TYPE_FLOAT ||
-                                          obj_type_id == LMD_TYPE_DECIMAL);
-                    }
-                    if (!type_compatible) {
-                        log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
-                            (int)method_name->length, method_name->str,
-                            info->first_param_type, obj_type_id);
-                        return NULL;
-                    }
-                }
-            }
-
-            log_debug("method_call found sys func: %.*s, args=%d",
-                (int)method_name->length, method_name->str, total_arg_count);
-            return info;
         }
     }
-    log_debug("method_call no sys func: %.*s, args=%d",
+
+    log_debug("method_call found sys func: %.*s, args=%d",
         (int)method_name->length, method_name->str, total_arg_count);
-    return NULL;
+    return info;
 }
 
 // Check if arg_type is compatible with param_type for function calls

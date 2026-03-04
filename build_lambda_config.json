@@ -297,6 +297,7 @@
                 "lambda/lambda-decimal.cpp",
                 "lambda/lambda-error.cpp",
                 "lambda/build_ast.cpp",
+                "lambda/sys_func_registry.cpp",
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",
                 "lambda/mark_editor.cpp",

@@ -314,70 +314,8 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
     return left_numeric && right_numeric;
 }
 
-// Math functions that can use native C equivalents when argument is typed numeric
-// Maps Lambda function name to C math function name
-struct NativeMathFunc {
-    const char* lambda_name;
-    const char* c_name;
-    bool returns_float;  // true if returns float, false if returns int
-    int arg_count;       // 1 or 2 arguments
-};
-
-static const NativeMathFunc native_math_funcs[] = {
-    // Single-argument functions (use C math library directly)
-    // math module functions
-    {"math_sin", "sin", true, 1},
-    {"math_cos", "cos", true, 1},
-    {"math_tan", "tan", true, 1},
-    {"math_sqrt", "sqrt", true, 1},
-    {"math_log", "log", true, 1},
-    {"math_log10", "log10", true, 1},
-    {"math_exp", "exp", true, 1},
-    // inverse trigonometric
-    {"math_asin", "asin", true, 1},
-    {"math_acos", "acos", true, 1},
-    {"math_atan", "atan", true, 1},
-    {"math_atan2", "atan2", true, 2},
-    // hyperbolic
-    {"math_sinh", "sinh", true, 1},
-    {"math_cosh", "cosh", true, 1},
-    {"math_tanh", "tanh", true, 1},
-    // inverse hyperbolic
-    {"math_asinh", "asinh", true, 1},
-    {"math_acosh", "acosh", true, 1},
-    {"math_atanh", "atanh", true, 1},
-    // exponential/logarithmic variants
-    {"math_exp2", "exp2", true, 1},
-    {"math_expm1", "expm1", true, 1},
-    {"math_log2", "log2", true, 1},
-    // power/root
-    {"math_pow", "fn_pow_u", true, 2},
-    {"math_cbrt", "cbrt", true, 1},
-    {"math_trunc", "trunc", true, 1},
-    {"math_hypot", "hypot", true, 2},
-    {"math_log1p", "log1p", true, 1},
-    // global math functions
-    {"abs", "fabs", true, 1},       // Note: fabs for float, but we may prefer fn_abs_i for int
-    {"floor", "floor", true, 1},
-    {"ceil", "ceil", true, 1},
-    {"round", "round", true, 1},
-    // Two-argument functions (use our unboxed wrappers)
-    {"pow", "fn_pow_u", true, 2},
-    {NULL, NULL, false, 0}
-};
-
-// Two-argument min/max functions - separate table since they're overloaded
-struct NativeBinaryFunc {
-    const char* lambda_name;
-    const char* c_name_float;    // double version
-    const char* c_name_int;      // int64 version (or NULL if no int version)
-};
-
-static const NativeBinaryFunc native_binary_funcs[] = {
-    {"min", "fn_min2_u", NULL},
-    {"max", "fn_max2_u", NULL},
-    {NULL, NULL, NULL}
-};
+// Native math optimization tables are now in sys_func_registry.cpp
+// (SysFuncInfo fields: native_c_name, native_returns_float, native_arg_count)
 
 // Helper to check if type is numeric (int, int64, or float)
 static inline bool is_numeric_type(TypeId t) {
@@ -411,64 +349,34 @@ static void emit_bitwise_arg(Transpiler* tp, AstNode* arg) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
-// Check if a sys func call can use native C math function
+// Check if a sys func call can use native C math function (single-arg)
 // Returns the C function name if applicable, NULL otherwise
 static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg) {
     if (!sys_fn_node || !sys_fn_node->fn_info || !arg || !arg->type) return NULL;
 
     // Check if argument has known numeric type
     TypeId arg_type = arg->type->type_id;
-    if (!is_numeric_type(arg_type)) {
-        return NULL;
-    }
+    if (!is_numeric_type(arg_type)) return NULL;
 
-    // Look up the function name
-    const char* fn_name = sys_fn_node->fn_info->name;
-    for (int i = 0; native_math_funcs[i].lambda_name != NULL; i++) {
-        if (strcmp(fn_name, native_math_funcs[i].lambda_name) == 0) {
-            return native_math_funcs[i].c_name;
-        }
+    // Use the registry's native_c_name for single-arg native functions
+    if (sys_fn_node->fn_info->native_c_name && sys_fn_node->fn_info->native_arg_count == 1) {
+        return sys_fn_node->fn_info->native_c_name;
     }
     return NULL;
 }
 
-// Check if a sys func call can use native two-arg function
-// Returns info about the function if applicable, NULL otherwise
-static const NativeMathFunc* can_use_native_math_binary(AstSysFuncNode* sys_fn_node, AstNode* arg1, AstNode* arg2) {
+// Check if a sys func call can use native two-arg math function (pow, atan2, hypot, min, max)
+// Returns the C function name if applicable, NULL otherwise
+static const char* can_use_native_math_binary(AstSysFuncNode* sys_fn_node, AstNode* arg1, AstNode* arg2) {
     if (!sys_fn_node || !sys_fn_node->fn_info || !arg1 || !arg2 || !arg1->type || !arg2->type) return NULL;
 
     TypeId type1 = arg1->type->type_id;
     TypeId type2 = arg2->type->type_id;
+    if (!is_numeric_type(type1) || !is_numeric_type(type2)) return NULL;
 
-    if (!is_numeric_type(type1) || !is_numeric_type(type2)) {
-        return NULL;
-    }
-
-    const char* fn_name = sys_fn_node->fn_info->name;
-    for (int i = 0; native_math_funcs[i].lambda_name != NULL; i++) {
-        if (native_math_funcs[i].arg_count == 2 && strcmp(fn_name, native_math_funcs[i].lambda_name) == 0) {
-            return &native_math_funcs[i];
-        }
-    }
-    return NULL;
-}
-
-// Check if a sys func call can use native binary func (min/max)
-static const NativeBinaryFunc* can_use_native_binary_func(AstSysFuncNode* sys_fn_node, AstNode* arg1, AstNode* arg2) {
-    if (!sys_fn_node || !sys_fn_node->fn_info || !arg1 || !arg2 || !arg1->type || !arg2->type) return NULL;
-
-    TypeId type1 = arg1->type->type_id;
-    TypeId type2 = arg2->type->type_id;
-
-    if (!is_numeric_type(type1) || !is_numeric_type(type2)) {
-        return NULL;
-    }
-
-    const char* fn_name = sys_fn_node->fn_info->name;
-    for (int i = 0; native_binary_funcs[i].lambda_name != NULL; i++) {
-        if (strcmp(fn_name, native_binary_funcs[i].lambda_name) == 0) {
-            return &native_binary_funcs[i];
-        }
+    // Use the registry's native_c_name for two-arg native functions
+    if (sys_fn_node->fn_info->native_c_name && sys_fn_node->fn_info->native_arg_count == 2) {
+        return sys_fn_node->fn_info->native_c_name;
     }
     return NULL;
 }
@@ -5052,26 +4960,12 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             return;  // done - skip normal argument handling
         }
 
-        // Check if we can use native two-argument math function (pow)
-        const NativeMathFunc* native_binary_math = can_use_native_math_binary(sys_fn_node, first_arg, second_arg);
+        // Check if we can use native two-argument math function (pow, atan2, hypot, min, max)
+        const char* native_binary_math = can_use_native_math_binary(sys_fn_node, first_arg, second_arg);
         if (native_binary_math && first_arg && second_arg && !second_arg->next) {
             // Use native binary math: push_d(fn_pow_u((double)arg1, (double)arg2))
             strbuf_append_str(tp->code_buf, "push_d(");
-            strbuf_append_str(tp->code_buf, native_binary_math->c_name);
-            strbuf_append_str(tp->code_buf, "((double)(");
-            transpile_expr(tp, first_arg);
-            strbuf_append_str(tp->code_buf, "),(double)(");
-            transpile_expr(tp, second_arg);
-            strbuf_append_str(tp->code_buf, ")))");
-            return;
-        }
-
-        // Check if we can use native binary func (min/max with 2 args)
-        const NativeBinaryFunc* native_binary = can_use_native_binary_func(sys_fn_node, first_arg, second_arg);
-        if (native_binary && first_arg && second_arg && !second_arg->next) {
-            // min/max with two numeric args: push_d(fn_min2_u((double)arg1, (double)arg2))
-            strbuf_append_str(tp->code_buf, "push_d(");
-            strbuf_append_str(tp->code_buf, native_binary->c_name_float);
+            strbuf_append_str(tp->code_buf, native_binary_math);
             strbuf_append_str(tp->code_buf, "((double)(");
             transpile_expr(tp, first_arg);
             strbuf_append_str(tp->code_buf, "),(double)(");
@@ -5134,11 +5028,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             return;
         }
 
-        // Use the sys func name from fn_info, not from TSNode source
-        // This correctly handles method-style calls (obj.method()) which are desugared to sys func calls
-        strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
-        strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->name);
-        if (sys_fn_node->fn_info->is_overloaded) { strbuf_append_int(tp->code_buf, sys_fn_node->fn_info->arg_count); }
+        // Use pre-computed c_func_name from the registry (e.g., "fn_len", "fn_symbol1", "pn_print")
+        strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->c_func_name);
     }
     else {
         TypeId callee_type_id = call_node->function->type ? call_node->function->type->type_id : LMD_TYPE_NULL;
