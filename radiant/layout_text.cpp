@@ -423,6 +423,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.parent_font_handle = lycon->font.font_handle;
     lycon->line.last_text_rect = NULL;
     lycon->line.trailing_space_width = 0;
+    lycon->line.hanging_space_width = 0;
+    lycon->line.last_space_hanging_width = 0;
     lycon->line.is_last_line = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
@@ -1119,6 +1121,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     str++;  // only skip the current space in pre-wrap mode
                 }
                 rect->width -= wd;  // minus away space width at line break
+                // CSS Text 3 §4.1.3: For pre-wrap, trailing preserved spaces at the
+                // end of a wrapped line "hang" — subtract their accumulated width.
+                if (lycon->line.hanging_space_width > 0) {
+                    rect->width -= lycon->line.hanging_space_width;
+                    lycon->line.hanging_space_width = 0;
+                }
                 lycon->line.trailing_space_width = 0;  // already trimmed, don't double-subtract
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
                 line_break(lycon);
@@ -1130,7 +1138,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 log_debug("break at last space");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                     str = lycon->line.last_space + 1;
-                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, lycon->line.last_space_pos);
+                    // CSS Text 3 §4.1.3: For pre-wrap, trailing preserved spaces hang.
+                    float output_width = lycon->line.last_space_pos;
+                    if (lycon->line.last_space_hanging_width > 0) {
+                        output_width -= lycon->line.last_space_hanging_width;
+                        lycon->line.hanging_space_width = 0;
+                    }
+                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text, break at start of text
@@ -1199,6 +1213,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             if (collapse_spaces) {
                 lycon->line.trailing_space_width = wd;
             }
+            // CSS Text 3 §4.1.3: For pre-wrap, track accumulated trailing space
+            // width separately. Used at wrap points to compute hanging space.
+            if (!collapse_spaces && wrap_lines) {
+                lycon->line.hanging_space_width += wd;
+            }
+            // Save hanging_space_width at the time last_space is recorded,
+            // AFTER accumulating the current space. This is used at
+            // break-at-last-space wrap points where non-space chars may have
+            // reset the live hanging_space_width since the last space.
+            lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
         }
         else if (*str == '-') {
             // Hyphens are break opportunities (CSS allows breaking after hyphens)
@@ -1210,6 +1234,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
+            lycon->line.hanging_space_width = 0;
         }
         else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character
@@ -1219,6 +1244,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
+            lycon->line.hanging_space_width = 0;
 
             // Track position for potential break (but don't set last_space)
             // CJK breaks happen before the next character, not after a separator
@@ -1226,6 +1252,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
+            lycon->line.hanging_space_width = 0;
         }
     } while (*str);
     // end of text
@@ -1236,7 +1263,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str = lycon->line.last_space + 1;
                 // Restore advance_x before output_text (it will add the correct width)
                 lycon->line.advance_x = saved_advance_x;
-                output_text(lycon, text_view, rect, str - text_start - rect->start_index, lycon->line.last_space_pos);
+                // CSS Text 3 §4.1.3: For pre-wrap, trailing preserved spaces hang.
+                float output_width = lycon->line.last_space_pos;
+                if (lycon->line.last_space_hanging_width > 0) {
+                    output_width -= lycon->line.last_space_hanging_width;
+                    lycon->line.hanging_space_width = 0;
+                }
+                output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
                 line_break(lycon);
                 if (*str) goto LAYOUT_TEXT;
                 else return;  // end of text

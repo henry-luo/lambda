@@ -446,8 +446,25 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             float child_top = child->y;
             float child_bottom = child->y + child_height;
             if (block->bound) {
-                child_top -= block->bound->margin.top;
-                child_bottom += block->bound->margin.bottom;
+                // CSS 2.1 §8.3.1: Self-collapsing blocks (height=0, no border/padding)
+                // have their margin.bottom set to a "pending chain" value from the margin
+                // collapse algorithm. This value was already consumed by sibling collapse
+                // and must NOT be added to the content extent — it would double-count.
+                bool is_self_collapsing = (child_height == 0);
+                if (is_self_collapsing && block->bound->border) {
+                    float bt = block->bound->border->width.top;
+                    float bb = block->bound->border->width.bottom;
+                    if (bt > 0 || bb > 0) is_self_collapsing = false;
+                }
+                if (is_self_collapsing) {
+                    float pt = block->bound->padding.top;
+                    float pb = block->bound->padding.bottom;
+                    if (pt > 0 || pb > 0) is_self_collapsing = false;
+                }
+                if (!is_self_collapsing) {
+                    child_top -= block->bound->margin.top;
+                    child_bottom += block->bound->margin.bottom;
+                }
             }
             if (!has_block_content || child_top < block_content_min_y) {
                 block_content_min_y = child_top;
