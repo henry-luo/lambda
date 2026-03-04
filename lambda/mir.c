@@ -267,6 +267,12 @@ func_obj_t func_list[] = {
     {"fn_floor_i", (fn_ptr) fn_floor_i},
     {"fn_ceil_i", (fn_ptr) fn_ceil_i},
     {"fn_round_i", (fn_ptr) fn_round_i},
+    // collection length — type-specialized native variants
+    {"fn_len_l", (fn_ptr) fn_len_l},
+    {"fn_len_a", (fn_ptr) fn_len_a},
+    {"fn_len_s", (fn_ptr) fn_len_s},
+    {"fn_len_e", (fn_ptr) fn_len_e},
+    {"fmod", (fn_ptr) fmod},
     // vector manipulation functions
     {"fn_fill", (fn_ptr) fn_fill},
     {"fn_reverse", (fn_ptr) fn_reverse},

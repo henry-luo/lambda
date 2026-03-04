@@ -1153,10 +1153,10 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 | Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 5.1 | Generate native variants for arithmetic (`fn_add_ii`, `fn_add_dd`, etc.) | lambda-data-runtime.cpp | Not started |
-| 5.2 | Generate native variants for `len`, `contains`, `index` | lambda-data-runtime.cpp | Not started |
-| 5.3 | Wire transpiler to select native variants when types are known | transpile.cpp | Not started |
-| 5.4 | Register native variants in MIR table | mir.c | Not started |
+| 5.1 | Native `fn_mod_i`/`fn_idiv_i` for typed integer `%` and `//` operators | lambda-eval-num.cpp, transpile.cpp, build_ast.cpp | ✅ Done |
+| 5.2 | Native `fn_len_l/a/s/e` for typed collections/strings | lambda-eval.cpp, transpile.cpp | ✅ Done |
+| 5.3 | Wire transpiler to select native variants when types are known | transpile.cpp | ✅ Done |
+| 5.4 | Register native variants in MIR table | mir.c | ✅ Done |
 
 ### Phase 6: MIR Transpiler Alignment
 
@@ -1249,6 +1249,28 @@ When a `can_raise` function call has `^` propagation AND appears inside `transpi
 | `lambda/lambda.h` | `item_to_ri()` uses sentinel approach (`.value` = original Item, `.err` = flag). `ri_to_item()` simply returns `.value`. |
 | `lambda/lambda.hpp` | C++ versions updated to match sentinel approach. |
 | `lambda/lambda-embed.h` | Regenerated from updated `lambda.h`. |
+
+### Files Modified (Phase 5)
+
+| File | What was changed |
+|------|-----------------|
+| `lambda/lambda-eval-num.cpp` | `fn_mod_i` and `fn_idiv_i` updated with div-by-zero checks (return `INT64_ERROR` instead of UB). |
+| `lambda/lambda-eval.cpp` | Added `fn_len_l(List*)`, `fn_len_a(Array*)`, `fn_len_s(String*)`, `fn_len_e(Element*)` — all `extern "C" int64_t`. |
+| `lambda/lambda.h` | Declarations for `fn_len_l/a/s/e`; `extern double fmod(double, double)` for C2MIR. |
+| `lambda/lambda-embed.h` | Regenerated from updated `lambda.h`. |
+| `lambda/build_ast.cpp` | Added `OPERATOR_MOD` type inference: `std::max(left, right)` for numeric operands (was falling through to `LMD_TYPE_ANY`). |
+| `lambda/transpile.cpp` | `transpile_binary_expr`: native fast paths for MOD (`fn_mod_i` for int, `fmod` for float) and IDIV (`fn_idiv_i` for int), with boxed fallbacks. `transpile_call_expr`: native `len()` dispatching for typed List/Array/String/Element. Updated `binary_already_returns_item()` and `is_idiv_expr()` to account for native-returning paths (critical fix for boxing correctness). |
+| `lambda/mir.c` | Registered `fn_len_l`, `fn_len_a`, `fn_len_s`, `fn_len_e`, `fmod`. |
+
+### Phase 5 Boxing/Unboxing Correctness (Learned During Phase 5)
+
+When binary operators (`%`, `//`) switch from always-boxed (`fn_mod`, `fn_idiv` returning `Item`) to conditionally-native (`fn_mod_i` returning `int64_t`, `fmod` returning `double`), **three separate functions** must be updated to reflect that the C return type changed:
+
+1. **`binary_already_returns_item()`**: Tells `transpile_box_item()` whether to skip boxing. Before: `MOD/IDIV → true` (always Item). After: returns `false` for native paths so `transpile_box_item` applies `i2it()` or `push_d()`.
+2. **`is_idiv_expr()`**: Special-case check in let/assignment that adds `it2i()` unboxing for IDIV results. Before: always true. After: returns `false` when both operands are INT/INT64 (native `fn_idiv_i` already returns `int64_t`).
+3. **`value_emits_native_type()`**: Uses `binary_already_returns_item()` transitively — automatically fixed.
+
+**Key rule**: When adding a native fast path for a binary operator, always update `binary_already_returns_item()` to return `false` for the native case. Also search for operator-specific workarounds like `is_idiv_expr()`.
 
 ---
 

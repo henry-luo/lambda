@@ -914,7 +914,15 @@ static bool is_idiv_expr(AstNode* node) {
     }
     if (node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* bin = (AstBinaryNode*)node;
-    return bin->op == OPERATOR_IDIV;
+    if (bin->op != OPERATOR_IDIV) return false;
+    // When both operands are INT/INT64, transpiler uses fn_idiv_i which returns
+    // native int64_t — no need for it2i unboxing. Only return true when the
+    // boxed fn_idiv() path is used (returns Item).
+    TypeId lt = bin->left->type ? bin->left->type->type_id : LMD_TYPE_ANY;
+    TypeId rt = bin->right->type ? bin->right->type->type_id : LMD_TYPE_ANY;
+    bool both_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
+                    (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+    return !both_int;  // true only when boxed fn_idiv() is used
 }
 
 // Check if a binary expression uses Item-returning runtime functions (fn_add, fn_sub, fn_mul)
@@ -933,10 +941,17 @@ static bool binary_already_returns_item(AstNode* node) {
                          LMD_TYPE_INT <= rt && rt <= LMD_TYPE_FLOAT);
 
     switch (bin_node->op) {
-    case OPERATOR_IDIV:
+    case OPERATOR_IDIV: {
+        // Native fn_idiv_i for INT/INT64 operands returns int64_t (needs boxing)
+        // Boxed fn_idiv for other types returns Item (no boxing needed)
+        bool both_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
+                        (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+        return !both_int;
+    }
     case OPERATOR_MOD:
-        // Always use Item-returning fn_idiv/fn_mod
-        return true;
+        // Native fn_mod_i (int) or fmod (float) for numeric operands returns native type
+        // Boxed fn_mod for non-numeric returns Item
+        return !both_numeric;
     case OPERATOR_POW:
         // Numeric → push_d(fn_pow_u(...)) returns double* which needs boxing
         // Non-numeric → fn_pow returns Item
@@ -1833,7 +1848,27 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MOD) {
-        // Always use boxed fn_mod() for proper division-by-zero error handling
+        // Native fast path for typed integer mod (fn_mod_i handles div-by-zero)
+        if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64)) {
+            strbuf_append_str(tp->code_buf, "fn_mod_i((int64_t)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(int64_t)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+        // Native fast path for typed float mod
+        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+            strbuf_append_str(tp->code_buf, "fmod((double)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(double)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+        // Fallback: boxed fn_mod() for unknown types
         strbuf_append_str(tp->code_buf, "fn_mod(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -1858,7 +1893,17 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IDIV) {
-        // Always use boxed fn_idiv() for proper division-by-zero error handling
+        // Native fast path for typed integer division (fn_idiv_i handles div-by-zero)
+        if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64)) {
+            strbuf_append_str(tp->code_buf, "fn_idiv_i((int64_t)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(int64_t)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+        // Fallback: boxed fn_idiv() for unknown types
         strbuf_append_str(tp->code_buf, "fn_idiv(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -4971,6 +5016,36 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 emit_bitwise_arg(tp, first_arg);
                 strbuf_append_char(tp->code_buf, ')');
                 return;
+            }
+
+            // ==== Native len() for typed collections/strings ====
+            if (strcmp(fn_name, "len") == 0) {
+                if (arg_type == LMD_TYPE_LIST) {
+                    strbuf_append_str(tp->code_buf, "fn_len_l((List*)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+                if (arg_type == LMD_TYPE_ARRAY || arg_type == LMD_TYPE_ARRAY_INT ||
+                    arg_type == LMD_TYPE_ARRAY_INT64 || arg_type == LMD_TYPE_ARRAY_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "fn_len_a((Array*)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+                if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+                    strbuf_append_str(tp->code_buf, "fn_len_s(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                    return;
+                }
+                if (arg_type == LMD_TYPE_ELEMENT) {
+                    strbuf_append_str(tp->code_buf, "fn_len_e((Element*)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+                // Fallback: use generic fn_len(Item) for unknown types
             }
         }
 

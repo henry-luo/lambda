@@ -2862,6 +2862,16 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             type_id = LMD_TYPE_ANY;
         }
     }
+    else if (ast_node->op == OPERATOR_MOD) {
+        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+            // Modulo preserves type: int%int=int, float%any=float
+            type_id = std::max(left_type, right_type);
+        }
+        else {
+            type_id = LMD_TYPE_ANY;
+        }
+    }
     else if (ast_node->op == OPERATOR_TO) {
         type_id = LMD_TYPE_RANGE;
     }

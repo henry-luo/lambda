@@ -2714,6 +2714,29 @@ int64_t fn_len(Item item) {
     return size;
 }
 
+// Native len variants — type-specialized, avoid Item type switch overhead
+// Used when compile-time type is known.
+
+extern "C" int64_t fn_len_l(List* list) {
+    if (!list) return 0;
+    return list->length;
+}
+
+extern "C" int64_t fn_len_a(Array* arr) {
+    if (!arr) return 0;
+    return arr->length;
+}
+
+extern "C" int64_t fn_len_s(String* str) {
+    if (!str) return 0;
+    return str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str->chars, str->len);
+}
+
+extern "C" int64_t fn_len_e(Element* elmt) {
+    if (!elmt) return 0;
+    return elmt->length;
+}
+
 // substring system function - extracts a substring from start to end (exclusive)
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
     GUARD_ERROR3(str_item, start_item, end_item);

@@ -54,6 +54,7 @@ extern double log2(double x);
 extern double cbrt(double x);
 // truncation / misc
 extern double trunc(double x);
+extern double fmod(double x, double y);
 extern double hypot(double y, double x);
 extern double log1p(double x);
 #endif
@@ -1098,8 +1099,14 @@ typedef struct Context {
     double fn_abs_f(double x);
     int64_t fn_neg_i(int64_t x);
     double fn_neg_f(double x);
-    int64_t fn_mod_i(int64_t a, int64_t b);
-    int64_t fn_idiv_i(int64_t a, int64_t b);
+    int64_t fn_mod_i(int64_t a, int64_t b);    // handles div-by-zero (returns INT64_ERROR)
+    int64_t fn_idiv_i(int64_t a, int64_t b);   // handles div-by-zero (returns INT64_ERROR)
+
+    // Collection length — type-specialized native variants
+    int64_t fn_len_l(List* list);       // list length
+    int64_t fn_len_a(Array* arr);       // array length
+    int64_t fn_len_s(String* str);      // string length (UTF-8 aware)
+    int64_t fn_len_e(Element* elmt);    // element children count
 
     // Boolean operations
     Bool fn_not_u(Bool x);
