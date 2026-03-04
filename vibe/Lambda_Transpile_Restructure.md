@@ -1075,8 +1075,8 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 ## Implementation Plan
 
-> **Status**: Phase 1 (steps 1.1–1.3, 1.5–1.7) and Phase 2 (steps 2.1–2.6) are **complete** as of 2025-07-16.
-> All 570/572 Lambda baseline tests pass (2 pre-existing failures: awfy_cd2, awfy_deltablue2).
+> **Status**: Phase 1 (steps 1.1–1.3, 1.5–1.7) and Phase 2 (steps 2.1–2.7) are **complete** as of 2026-03-04.
+> All 572/572 Lambda baseline tests pass.
 > All 2418 Radiant baseline tests pass.
 
 ### Phase 1: Foundation (Correctness)
@@ -1107,7 +1107,7 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 | 2.4 | Migrate `can_raise` user function boxed wrappers (`_w`) to handle `RetItem` | transpile.cpp | ✅ Done |
 | 2.5 | Update `?` propagation codegen to use `RetItem` | transpile.cpp | ✅ Done |
 | 2.6 | Update `let a^err` destructuring codegen | transpile.cpp | ✅ Done |
-| 2.7 | Migrate `can_raise` system functions to `Ret*` | lambda-eval.cpp, lambda-data-runtime.cpp | Not started |
+| 2.7 | Migrate `can_raise` system functions to `Ret*` | lambda-eval.cpp, lambda-proc.cpp, transpile.cpp, path.c, mir.c | ✅ Done |
 
 ### Phase 3: Dual Version Generation
 
@@ -1115,11 +1115,11 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 | Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 3.1 | Rename current main function to `_n` suffix | transpile.cpp | Not started |
-| 3.2 | Rewrite `define_func_call_wrapper()` as `define_func_boxed()` returning `RetItem` | transpile.cpp | Not started |
+| 3.1 | Rename current main function to `_n` suffix | transpile.cpp | Deferred (cosmetic) |
+| 3.2 | Rewrite `define_func_call_wrapper()` as `define_func_boxed()` returning `RetItem` | transpile.cpp, transpile-mir.cpp | ✅ Done |
 | 3.3 | Update `can_use_unboxed_call()` → `select_call_version()` for all types | transpile.cpp | Not started |
 | 3.4 | Remove `define_func_unboxed()` (subsumed by `_n`) | transpile.cpp | Not started |
-| 3.5 | Update `fn_call*` dispatch to use `_b` functions returning `RetItem` | lambda-eval.cpp | Not started |
+| 3.5 | Update `fn_call*` dispatch to use `_b` functions returning `RetItem` via `FN_FLAG_BOXED_RET` flag | lambda-eval.cpp, lambda.h | ✅ Done |
 
 ### Phase 4: Data-Driven Metadata
 

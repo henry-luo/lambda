@@ -527,7 +527,7 @@ Item fn_call(Function* fn, List* args) {
     void* env = fn->closure_env;
     log_debug("fn_call: arity=%d, arg_count=%d, env=%p", fn->arity, arg_count, env);
 
-    // For closures, env is passed as first argument
+    // For closures, env is passed as first argument (closures never have FN_FLAG_BOXED_RET)
     if (env) {
         switch (arg_count) {
             case 0: return ((Item(*)(void*))fn->ptr)(env);
@@ -544,7 +544,27 @@ Item fn_call(Function* fn, List* args) {
         }
     }
 
-    // Non-closure dispatch
+    // Non-closure dispatch: check if function returns RetItem (_b boxed wrapper)
+    if (fn->flags & FN_FLAG_BOXED_RET) {
+        RetItem ri;
+        switch (arg_count) {
+            case 0: ri = ((RetItem(*)())fn->ptr)(); break;
+            case 1: ri = ((RetItem(*)(Item))fn->ptr)(args->items[0]); break;
+            case 2: ri = ((RetItem(*)(Item,Item))fn->ptr)(args->items[0], args->items[1]); break;
+            case 3: ri = ((RetItem(*)(Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2]); break;
+            case 4: ri = ((RetItem(*)(Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3]); break;
+            case 5: ri = ((RetItem(*)(Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4]); break;
+            case 6: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5]); break;
+            case 7: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]); break;
+            case 8: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7]); break;
+            default:
+                log_error("fn_call: unsupported argument count %d (max 8)", arg_count);
+                return ItemError;
+        }
+        return ri_to_item(ri);
+    }
+
+    // Non-closure, Item-returning dispatch (legacy path)
     switch (arg_count) {
         case 0: return ((Item(*)())fn->ptr)();
         case 1: return ((Item(*)(Item))fn->ptr)(args->items[0]);
@@ -563,6 +583,7 @@ Item fn_call(Function* fn, List* args) {
 
 // Convenience wrappers for common arities (avoid List allocation)
 // For closures, env is passed as the first argument
+// For _b boxed functions (FN_FLAG_BOXED_RET), cast to RetItem return and convert via ri_to_item()
 Item fn_call0(Function* fn) {
     if (!is_valid_function(fn)) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: cannot call non-function value");
@@ -574,6 +595,8 @@ Item fn_call0(Function* fn) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*))fn->ptr)(fn->closure_env);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)())fn->ptr)());
     } else {
         return ((Item(*)())fn->ptr)();
     }
@@ -590,6 +613,8 @@ Item fn_call1(Function* fn, Item a) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)(Item))fn->ptr)(a));
     } else {
         return ((Item(*)(Item))fn->ptr)(a);
     }
@@ -606,6 +631,8 @@ Item fn_call2(Function* fn, Item a, Item b) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)(Item,Item))fn->ptr)(a, b));
     } else {
         return ((Item(*)(Item,Item))fn->ptr)(a, b);
     }
@@ -622,6 +649,8 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)(Item,Item,Item))fn->ptr)(a, b, c));
     } else {
         return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
     }
