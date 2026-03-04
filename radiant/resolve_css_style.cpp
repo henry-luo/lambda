@@ -4743,6 +4743,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break; // lower specificity, skip
             }
 
+            // CSS 2.1: handle 'inherit' keyword - copy parent's computed border-top-width
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* current = (DomElement*)lycon->view;
+                if (current && current->parent && current->parent->is_element()) {
+                    DomElement* parent = (DomElement*)current->parent;
+                    float pw = (parent->bound && parent->bound->border) ? parent->bound->border->width.top : 0.0f;
+                    span->bound->border->width.top = pw;
+                    span->bound->border->width.top_specificity = specificity;
+                    log_debug("[CSS] border-top-width: inherit -> %.2f px", pw);
+                }
+                break;
+            }
+
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->width.top = width;
@@ -4785,6 +4798,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Check specificity before overwriting
             if (specificity < span->bound->border->width.right_specificity) {
                 break; // lower specificity, skip
+            }
+
+            // CSS 2.1: handle 'inherit' keyword - copy parent's computed border-right-width
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* current = (DomElement*)lycon->view;
+                if (current && current->parent && current->parent->is_element()) {
+                    DomElement* parent = (DomElement*)current->parent;
+                    float pw = (parent->bound && parent->bound->border) ? parent->bound->border->width.right : 0.0f;
+                    span->bound->border->width.right = pw;
+                    span->bound->border->width.right_specificity = specificity;
+                    log_debug("[CSS] border-right-width: inherit -> %.2f px", pw);
+                }
+                break;
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -4830,6 +4856,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break; // lower specificity, skip
             }
 
+            // CSS 2.1: handle 'inherit' keyword - copy parent's computed border-bottom-width
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* current = (DomElement*)lycon->view;
+                if (current && current->parent && current->parent->is_element()) {
+                    DomElement* parent = (DomElement*)current->parent;
+                    float pw = (parent->bound && parent->bound->border) ? parent->bound->border->width.bottom : 0.0f;
+                    span->bound->border->width.bottom = pw;
+                    span->bound->border->width.bottom_specificity = specificity;
+                    log_debug("[CSS] border-bottom-width: inherit -> %.2f px", pw);
+                }
+                break;
+            }
+
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->width.bottom = width;
@@ -4871,6 +4910,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Check specificity before overwriting
             if (specificity < span->bound->border->width.left_specificity) {
                 break; // lower specificity, skip
+            }
+
+            // CSS 2.1: handle 'inherit' keyword - copy parent's computed border-left-width
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                DomElement* current = (DomElement*)lycon->view;
+                if (current && current->parent && current->parent->is_element()) {
+                    DomElement* parent = (DomElement*)current->parent;
+                    float pw = (parent->bound && parent->bound->border) ? parent->bound->border->width.left : 0.0f;
+                    span->bound->border->width.left = pw;
+                    span->bound->border->width.left_specificity = specificity;
+                    log_debug("[CSS] border-left-width: inherit -> %.2f px", pw);
+                }
+                break;
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
