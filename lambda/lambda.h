@@ -662,54 +662,17 @@ typedef struct LambdaError LambdaError;
 // ============================================================================
 
 #ifndef __cplusplus
-static inline Map* it2map(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_MAP && tag != LMD_TYPE_VMAP) return null;
-    return (Map*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-static inline List* it2list(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_LIST) return null;
-    return (List*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-static inline Element* it2elmt(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_ELEMENT) return null;
-    return (Element*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-static inline Object* it2obj(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_OBJECT) return null;
-    return (Object*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-static inline Array* it2arr(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_ARRAY) return null;
-    return (Array*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-static inline Range* it2range(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_RANGE) return null;
-    return (Range*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-static inline Path* it2path(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag != LMD_TYPE_PATH) return null;
-    return (Path*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
-
-// Generic container unboxing: Item → void* (any container type)
-static inline void* it2p(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag < LMD_TYPE_LIST || tag > LMD_TYPE_FUNC) return null;
-    return (void*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
-}
+// Container unboxing: Item → native pointer (simple cast).
+// Container Items store direct pointers (no type tag in the high bits),
+// so no masking is needed — just cast to the target pointer type.
+#define it2map(item)    ((Map*)(uintptr_t)(item))
+#define it2list(item)   ((List*)(uintptr_t)(item))
+#define it2elmt(item)   ((Element*)(uintptr_t)(item))
+#define it2obj(item)    ((Object*)(uintptr_t)(item))
+#define it2arr(item)    ((Array*)(uintptr_t)(item))
+#define it2range(item)  ((Range*)(uintptr_t)(item))
+#define it2path(item)   ((Path*)(uintptr_t)(item))
+#define it2p(item)      ((void*)(uintptr_t)(item))
 
 // Container boxing helper: native pointer → Item
 static inline Item p2it(void* ptr) {
