@@ -83,6 +83,7 @@ typedef struct {
 func_obj_t func_list[] = {
     // C library functions
     {"memset", (fn_ptr) memset},
+    {"memcpy", (fn_ptr) memcpy},
     // C math functions (for native math optimization)
     {"sin", (fn_ptr) sin},
     {"cos", (fn_ptr) cos},
@@ -163,7 +164,9 @@ func_obj_t func_list[] = {
     {"push_d", (fn_ptr) push_d},
     {"push_l", (fn_ptr) push_l},
     {"push_l_safe", (fn_ptr) push_l_safe},
+    {"push_d_safe", (fn_ptr) push_d_safe},
     {"push_k", (fn_ptr) push_k},
+    {"push_k_safe", (fn_ptr) push_k_safe},
     {"push_c", (fn_ptr) push_c},
     {"item_keys", (fn_ptr) item_keys},
     {"item_attr", (fn_ptr) item_attr},
@@ -498,6 +501,52 @@ func_obj_t func_list[] = {
     {"array_int_new", (fn_ptr) array_int_new},
     {"array_int_set", (fn_ptr) array_int_set},
     {"get_runtime_pool", (fn_ptr) get_runtime_pool},
+    // container unboxing
+    {"it2map",   (fn_ptr) it2map},
+    {"it2list",  (fn_ptr) it2list},
+    {"it2elmt",  (fn_ptr) it2elmt},
+    {"it2obj",   (fn_ptr) it2obj},
+    {"it2arr",   (fn_ptr) it2arr},
+    {"it2range", (fn_ptr) it2range},
+    {"it2path",  (fn_ptr) it2path},
+    {"it2p",     (fn_ptr) it2p},
+    // container boxing
+    {"p2it",     (fn_ptr) p2it},
+    // error conversion
+    {"err2it",   (fn_ptr) err2it},
+    {"it2err",   (fn_ptr) it2err},
+    // Ret* constructor helpers
+    {"ri_ok",    (fn_ptr) ri_ok},
+    {"ri_err",   (fn_ptr) ri_err},
+    {"rb_ok",    (fn_ptr) rb_ok},
+    {"rb_err",   (fn_ptr) rb_err},
+    {"ri56_ok",  (fn_ptr) ri56_ok},
+    {"ri56_err", (fn_ptr) ri56_err},
+    {"ri64_ok",  (fn_ptr) ri64_ok},
+    {"ri64_err", (fn_ptr) ri64_err},
+    {"rf_ok",    (fn_ptr) rf_ok},
+    {"rf_err",   (fn_ptr) rf_err},
+    {"rs_ok",    (fn_ptr) rs_ok},
+    {"rs_err",   (fn_ptr) rs_err},
+    {"rsy_ok",   (fn_ptr) rsy_ok},
+    {"rsy_err",  (fn_ptr) rsy_err},
+    {"rm_ok",    (fn_ptr) rm_ok},
+    {"rm_err",   (fn_ptr) rm_err},
+    {"rl_ok",    (fn_ptr) rl_ok},
+    {"rl_err",   (fn_ptr) rl_err},
+    {"re_ok",    (fn_ptr) re_ok},
+    {"re_err",   (fn_ptr) re_err},
+    {"ro_ok",    (fn_ptr) ro_ok},
+    {"ro_err",   (fn_ptr) ro_err},
+    {"ra_ok",    (fn_ptr) ra_ok},
+    {"ra_err",   (fn_ptr) ra_err},
+    {"rr_ok",    (fn_ptr) rr_ok},
+    {"rr_err",   (fn_ptr) rr_err},
+    {"rp_ok",    (fn_ptr) rp_ok},
+    {"rp_err",   (fn_ptr) rp_err},
+    // Ret* compatibility shims
+    {"item_to_ri", (fn_ptr) item_to_ri},
+    {"ri_to_item", (fn_ptr) ri_to_item},
 };
 
 // Dynamic import table for cross-module function/variable resolution

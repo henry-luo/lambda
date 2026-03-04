@@ -245,6 +245,25 @@ Item push_l_safe(int64_t val) {
     return push_l(val);
 }
 
+// Safe version of push_d that detects already-boxed FLOAT Items.
+// When the MIR JIT passes a value that's already a boxed FLOAT Item
+// (from a runtime function return), this prevents double-boxing.
+Item push_d_safe(double val) {
+    uint64_t bits;
+    memcpy(&bits, &val, sizeof(bits));
+    uint8_t tag = bits >> 56;
+
+    if (tag == LMD_TYPE_FLOAT) {
+        // Already a boxed FLOAT Item — return as-is
+        log_debug("push_d_safe: already boxed FLOAT");
+        Item result;
+        result.item = bits;
+        return result;
+    }
+    // Raw double value — box normally
+    return push_d(val);
+}
+
 Item push_k(DateTime val) {
     // check for DateTime error sentinel before pushing
     if (DATETIME_IS_ERROR(val)) {
@@ -257,6 +276,24 @@ Item push_k(DateTime val) {
     }
     DateTime *dtptr = gc_nursery_alloc_datetime(context->nursery, val);
     return {.item = k2it(dtptr)};
+}
+
+// Safe version of push_k that detects already-boxed DTIME Items.
+// When the MIR JIT passes a value that's already a boxed DTIME Item
+// (from a runtime function return), this prevents double-boxing.
+Item push_k_safe(DateTime val) {
+    uint64_t bits;
+    memcpy(&bits, &val, sizeof(bits));
+    uint8_t tag = bits >> 56;
+
+    if (tag == LMD_TYPE_DTIME) {
+        // Already a boxed DTIME Item — return as-is
+        log_debug("push_k_safe: already boxed DTIME");
+        Item result;
+        result.item = bits;
+        return result;
+    }
+    return push_k(val);
 }
 
 void heap_destroy() {

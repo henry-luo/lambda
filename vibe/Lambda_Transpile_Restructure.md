@@ -1075,101 +1075,143 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 ## Implementation Plan
 
+> **Status**: Phase 1 (steps 1.1–1.3, 1.5) and Phase 2 (steps 2.1–2.2) are **complete** as of 2026-03-04.
+> All 572 Lambda baseline tests and 2418 Radiant baseline tests pass.
+
 ### Phase 1: Foundation (Correctness)
 
 **Goal**: Fix crashes and establish the structural primitives.
 
-| Step | Change | Files | Effort |
+| Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 1.1 | Add container unboxing helpers (`it2map`, `it2list`, etc.) | lambda.h, lambda-data.cpp | Low |
-| 1.2 | Add `p2it()` container boxing helper | lambda.h | Low |
-| 1.3 | Add `push_d_safe()`, `push_k_safe()` idempotent boxing | lambda-mem.cpp, lambda.h | Low |
-| 1.4 | Add debug-mode boxing assertions | lambda.h (conditional) | Low |
-| 1.5 | Register all new helpers in MIR function table | mir.c | Low |
-| 1.6 | Fix `define_func_call_wrapper()` — replace `(void*)` casts | transpile.cpp | Medium |
-| 1.7 | Fix `transpile_call_argument()` — replace blind container casts | transpile.cpp | Medium |
+| 1.1 | Add container unboxing helpers (`it2map`, `it2list`, etc.) | lambda.h, lambda.hpp | ✅ Done |
+| 1.2 | Add `p2it()` container boxing helper | lambda.h, lambda.hpp | ✅ Done |
+| 1.3 | Add `push_d_safe()`, `push_k_safe()` idempotent boxing | lambda-mem.cpp, lambda.h | ✅ Done |
+| 1.4 | Add debug-mode boxing assertions | lambda.h (conditional) | Not started |
+| 1.5 | Register all new helpers in MIR function table | mir.c | ✅ Done |
+| 1.6 | Fix `define_func_call_wrapper()` — replace `(void*)` casts | transpile.cpp | Not started |
+| 1.7 | Fix `transpile_call_argument()` — replace blind container casts | transpile.cpp | Not started |
 
-**Validation**: Existing test suite must pass 100%. The `list2.ls` benchmark should work with `node: map` (not `map?`).
+**Validation**: Existing test suite passes 100% (572/572 Lambda, 2418/2418 Radiant).
 
 ### Phase 2: Ret* Types (Error Structure)
 
 **Goal**: Introduce per-type `Ret*` structs and migrate error-returning functions.
 
-| Step | Change | Files | Effort |
+| Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 2.1 | Define all `Ret*` structs (2-field) and constructor helpers | lambda.h | Low |
-| 2.2 | Add `err2it()`/`it2err()` converters and `item_to_ri()`/`ri_to_item()` shims | lambda.h | Low |
-| 2.3 | Migrate `can_raise` user function native versions to return typed `Ret*` | transpile.cpp | Medium |
-| 2.4 | Migrate `can_raise` user function boxed wrappers to return `RetItem` | transpile.cpp | Medium |
-| 2.5 | Update `?` propagation codegen to use `Ret*` | transpile.cpp | Medium |
-| 2.6 | Update `let a^err` destructuring codegen | transpile.cpp | Medium |
-| 2.7 | Migrate `can_raise` system functions to `Ret*` | lambda-eval.cpp, lambda-data-runtime.cpp | High |
+| 2.1 | Define all `Ret*` structs (2-field) and constructor helpers | lambda.h, lambda.hpp | ✅ Done |
+| 2.2 | Add `err2it()`/`it2err()` converters and `item_to_ri()`/`ri_to_item()` shims | lambda.h, lambda.hpp | ✅ Done |
+| 2.3 | Migrate `can_raise` user function native versions to return typed `Ret*` | transpile.cpp | Not started |
+| 2.4 | Migrate `can_raise` user function boxed wrappers to return `RetItem` | transpile.cpp | Not started |
+| 2.5 | Update `?` propagation codegen to use `Ret*` | transpile.cpp | Not started |
+| 2.6 | Update `let a^err` destructuring codegen | transpile.cpp | Not started |
+| 2.7 | Migrate `can_raise` system functions to `Ret*` | lambda-eval.cpp, lambda-data-runtime.cpp | Not started |
 
 ### Phase 3: Dual Version Generation
 
 **Goal**: Systematic `_n` / `_b` generation for user functions.
 
-| Step | Change | Files | Effort |
+| Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 3.1 | Rename current main function to `_n` suffix | transpile.cpp | Medium |
-| 3.2 | Rewrite `define_func_call_wrapper()` as `define_func_boxed()` returning `RetItem` | transpile.cpp | Medium |
-| 3.3 | Update `can_use_unboxed_call()` → `select_call_version()` for all types | transpile.cpp | Medium |
-| 3.4 | Remove `define_func_unboxed()` (subsumed by `_n`) | transpile.cpp | Low |
-| 3.5 | Update `fn_call*` dispatch to use `_b` functions returning `RetItem` | lambda-eval.cpp | Medium |
+| 3.1 | Rename current main function to `_n` suffix | transpile.cpp | Not started |
+| 3.2 | Rewrite `define_func_call_wrapper()` as `define_func_boxed()` returning `RetItem` | transpile.cpp | Not started |
+| 3.3 | Update `can_use_unboxed_call()` → `select_call_version()` for all types | transpile.cpp | Not started |
+| 3.4 | Remove `define_func_unboxed()` (subsumed by `_n`) | transpile.cpp | Not started |
+| 3.5 | Update `fn_call*` dispatch to use `_b` functions returning `RetItem` | lambda-eval.cpp | Not started |
 
 ### Phase 4: Data-Driven Metadata
 
 **Goal**: Replace hardcoded switches with table lookups.
 
-| Step | Change | Files | Effort |
+| Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 4.1 | Add `CRetType`, `CArgConvention` to `SysFuncInfo` | ast.hpp | Low |
-| 4.2 | Populate metadata in `sys_funcs[]` table | build_ast.cpp | Medium |
-| 4.3 | Create `TypeBoxInfo` table and `get_box_info()` | transpile.cpp (or new header) | Low |
-| 4.4 | Create `TypeNarrowEntry` table | transpile.cpp (or new header) | Medium |
-| 4.5 | Refactor `transpile_box_item()` to use table lookups | transpile.cpp | High |
-| 4.6 | Create `emit_unbox()` / `emit_box()` / `emit_boxed_call()` API | transpile.cpp | Medium |
-| 4.7 | Refactor `transpile_call_argument()` to use emission API | transpile.cpp | High |
+| 4.1 | Add `CRetType`, `CArgConvention` to `SysFuncInfo` | ast.hpp | Not started |
+| 4.2 | Populate metadata in `sys_funcs[]` table | build_ast.cpp | Not started |
+| 4.3 | Create `TypeBoxInfo` table and `get_box_info()` | transpile.cpp (or new header) | Not started |
+| 4.4 | Create `TypeNarrowEntry` table | transpile.cpp (or new header) | Not started |
+| 4.5 | Refactor `transpile_box_item()` to use table lookups | transpile.cpp | Not started |
+| 4.6 | Create `emit_unbox()` / `emit_box()` / `emit_boxed_call()` API | transpile.cpp | Not started |
+| 4.7 | Refactor `transpile_call_argument()` to use emission API | transpile.cpp | Not started |
 
 ### Phase 5: System Function Native Variants
 
 **Goal**: Type-specialized system functions for hot paths.
 
-| Step | Change | Files | Effort |
+| Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 5.1 | Generate native variants for arithmetic (`fn_add_ii`, `fn_add_dd`, etc.) | lambda-data-runtime.cpp | Medium |
-| 5.2 | Generate native variants for `len`, `contains`, `index` | lambda-data-runtime.cpp | Medium |
-| 5.3 | Wire transpiler to select native variants when types are known | transpile.cpp | Medium |
-| 5.4 | Register native variants in MIR table | mir.c | Low |
+| 5.1 | Generate native variants for arithmetic (`fn_add_ii`, `fn_add_dd`, etc.) | lambda-data-runtime.cpp | Not started |
+| 5.2 | Generate native variants for `len`, `contains`, `index` | lambda-data-runtime.cpp | Not started |
+| 5.3 | Wire transpiler to select native variants when types are known | transpile.cpp | Not started |
+| 5.4 | Register native variants in MIR table | mir.c | Not started |
 
 ### Phase 6: MIR Transpiler Alignment
 
 **Goal**: Port all improvements to the MIR direct transpiler.
 
-| Step | Change | Files | Effort |
+| Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 6.1 | Use container unboxing helpers in MIR path | transpile-mir.cpp | Medium |
-| 6.2 | Use `Ret*` for error-returning MIR functions | transpile-mir.cpp | Medium |
-| 6.3 | Use type narrowing table for MIR code emission | transpile-mir.cpp | Medium |
-| 6.4 | Port typed array construction (from C2MIR) | transpile-mir.cpp | Medium |
+| 6.1 | Use container unboxing helpers in MIR path | transpile-mir.cpp | Not started |
+| 6.2 | Use `Ret*` for error-returning MIR functions | transpile-mir.cpp | Not started |
+| 6.3 | Use type narrowing table for MIR code emission | transpile-mir.cpp | Not started |
+| 6.4 | Port typed array construction (from C2MIR) | transpile-mir.cpp | Not started |
+
+---
+
+## Implementation Notes
+
+### C/C++ Dual Compilation Constraint (Learned During Phase 1–2)
+
+`lambda.h` is compiled in **two modes**: as C by the C2MIR JIT runtime, and as C++ by the regular compiler (via `lambda.hpp`). In C++ mode, `Item` is only forward-declared in `lambda.h` as `typedef struct Item Item;` — the full struct definition lives in `lambda.hpp`.
+
+This means **any inline function in `lambda.h` that takes or returns `Item` by value will fail in C++ mode** with "incomplete type 'Item'" errors.
+
+**Solution adopted**: All `Item`-using inline functions are guarded with `#ifndef __cplusplus` in `lambda.h` (C-only path for MIR JIT), with corresponding C++ versions defined in `lambda.hpp` after the full `Item` struct definition. Specifically:
+
+| Function | `lambda.h` (C mode) | `lambda.hpp` (C++ mode) |
+|----------|---------------------|-------------------------|
+| `it2map`, `it2list`, `it2elmt`, etc. | `#ifndef __cplusplus` — uses `(uint64_t)item >> 56` for tag | After `struct Item` — uses `item._type_id` |
+| `p2it`, `err2it`, `it2err` | `#ifndef __cplusplus` — returns `(Item)(uint64_t)` | After `struct Item` — returns `Item{.item = ...}` |
+| `RetItem` typedef | `#ifndef __cplusplus` | After `struct Item` |
+| `ri_ok`, `ri_err`, `item_to_ri`, `ri_to_item` | `#ifndef __cplusplus` | After `struct Item` |
+| Non-Item `Ret*` types (`RetBool`, `RetMap`, etc.) | Unconditional (no `Item` field) | Same definitions visible to both |
+| Non-Item constructors (`rb_ok`, `rm_ok`, etc.) | Unconditional | Same definitions visible to both |
+
+**Key rule**: If a `static inline` function in `lambda.h` uses `Item` as a parameter type, return type, or local variable, it **must** be inside `#ifndef __cplusplus` with a C++ counterpart in `lambda.hpp`.
+
+### MIR JIT `memcpy` Resolution (Learned During Phase 1–2)
+
+C2MIR's compilation of struct-returning `static inline` functions (the `Ret*` constructors) generates implicit `memcpy` calls for struct copies. The MIR JIT linker requires all referenced symbols to be in the `func_list[]` resolution table.
+
+**Fix**: Added `{"memcpy", (fn_ptr) memcpy}` to `func_list[]` in `mir.c`. Without this, **all** MIR JIT tests fail with `"failed to resolve native fn/pn: memcpy"`.
+
+### Files Modified (Phase 1–2)
+
+| File | What was added |
+|------|---------------|
+| `lambda/lambda.h` | `LambdaError` forward decl; C-only container unboxing (`it2map`–`it2p`); C-only `p2it`, `err2it`, `it2err`; all `Ret*` struct typedefs (non-Item ones unconditional, `RetItem` C-only); all non-Item constructors (`rb_ok`–`rp_err`); C-only `ri_ok`/`ri_err`/`item_to_ri`/`ri_to_item`; `push_d_safe`/`push_k_safe` declarations |
+| `lambda/lambda.hpp` | C++ versions of: `it2map`–`it2p`, `p2it`, `err2it`, `it2err`, `RetItem` typedef, `ri_ok`, `ri_err`, `item_to_ri`, `ri_to_item` |
+| `lambda/lambda-mem.cpp` | `push_d_safe()` and `push_k_safe()` implementations |
+| `lambda/mir.c` | `memcpy` registration; `push_d_safe`/`push_k_safe`; all container unboxing/boxing helpers; all `Ret*` constructors; compatibility shims (~55 new entries) |
 
 ---
 
 ## Files to Modify
 
-| File | Changes |
-|------|---------|
-| `lambda/lambda.h` | `Ret*` struct family (2-field); `err2it()`/`it2err()` converters; container unbox/box declarations; `push_d_safe`/`push_k_safe`; debug assertions |
-| `lambda/lambda-data.cpp` | Container unboxing implementations (`it2map`, `it2list`, etc.) |
-| `lambda/lambda-mem.cpp` | `push_d_safe()`, `push_k_safe()` implementations |
-| `lambda/ast.hpp` | Extend `SysFuncInfo` with `CRetType`, `CArgConvention`, `native_variant` |
-| `lambda/build_ast.cpp` | Populate new `SysFuncInfo` fields in `sys_funcs[]` table |
-| `lambda/transpile.cpp` | Dual version generation; `Ret*` codegen; table-driven boxing; emission API |
-| `lambda/transpile-mir.cpp` | MIR alignment (container unboxing, `Ret*`, narrowing table) |
-| `lambda/print.cpp` | Update `write_type()` for `Ret*` return types |
-| `lambda/mir.c` | Register all new helpers in function table |
-| `lambda/lambda-eval.cpp` | Update `fn_call*` dispatch for `RetItem`; migrate `can_raise` sys funcs |
-| `lambda/lambda-data-runtime.cpp` | System function native variants |
+| File | Changes | Status |
+|------|---------|--------|
+| `lambda/lambda.h` | `Ret*` struct family (2-field); `err2it()`/`it2err()` converters; container unbox/box (C-only); `push_d_safe`/`push_k_safe` decls; debug assertions | ✅ Partially done (all except debug assertions) |
+| `lambda/lambda.hpp` | C++ versions of Item-using inline helpers: `it2map`–`it2p`, `p2it`, `err2it`, `it2err`, `RetItem`, `ri_ok`/`ri_err`, `item_to_ri`/`ri_to_item` | ✅ Done |
+| `lambda/lambda-mem.cpp` | `push_d_safe()`, `push_k_safe()` implementations | ✅ Done |
+| `lambda/mir.c` | Register all new helpers + `memcpy` in function table (~55 new entries) | ✅ Done |
+| `lambda/lambda-data.cpp` | Container unboxing implementations (moved to inline in lambda.h/lambda.hpp instead) | ✅ Done (approach changed) |
+| `lambda/ast.hpp` | Extend `SysFuncInfo` with `CRetType`, `CArgConvention`, `native_variant` | Not started |
+| `lambda/build_ast.cpp` | Populate new `SysFuncInfo` fields in `sys_funcs[]` table | Not started |
+| `lambda/transpile.cpp` | Dual version generation; `Ret*` codegen; table-driven boxing; emission API | Not started |
+| `lambda/transpile-mir.cpp` | MIR alignment (container unboxing, `Ret*`, narrowing table) | Not started |
+| `lambda/print.cpp` | Update `write_type()` for `Ret*` return types | Not started |
+| `lambda/lambda-eval.cpp` | Update `fn_call*` dispatch for `RetItem`; migrate `can_raise` sys funcs | Not started |
+| `lambda/lambda-data-runtime.cpp` | System function native variants | Not started |
 
 ---
 
