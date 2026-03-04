@@ -68,14 +68,20 @@ static bool current_func_returns_retitem(Transpiler* tp) {
     return true;
 }
 
-// Check if the callee of a call node is a user-defined can_raise function (returns RetItem).
-// System functions still return Item even if can_raise — they'll be migrated in Phase 2.7.
+// Check if the callee of a call node returns RetItem.
+// Returns true for: (1) user-defined can_raise functions (non-closure, non-method),
+// and (2) system functions with can_raise=true (Phase 2.7 migration).
 static bool callee_returns_retitem(AstCallNode* call_node) {
     AstNode* fn_expr = call_node->function;
     if (!fn_expr) return false;
     if (fn_expr->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* pri = (AstPrimaryNode*)fn_expr;
         if (pri->expr) fn_expr = pri->expr;
+    }
+    // System function: check can_raise on SysFuncInfo
+    if (fn_expr->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys_fn = (AstSysFuncNode*)fn_expr;
+        return sys_fn->fn_info && sys_fn->fn_info->can_raise;
     }
     if (fn_expr->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)fn_expr;
@@ -89,7 +95,7 @@ static bool callee_returns_retitem(AstCallNode* call_node) {
             }
         }
     }
-    return false; // system function or unknown — returns Item
+    return false;
 }
 
 // hashmap comparison and hashing functions for func_name_map
@@ -2861,6 +2867,10 @@ static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNod
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn = (AstSysFuncNode*)fn_node;
+        bool sys_can_raise = sys_fn->fn_info && sys_fn->fn_info->can_raise;
+
+        // can_raise system functions return RetItem — unwrap to Item for pipe context
+        if (sys_can_raise) strbuf_append_str(tp->code_buf, "ri_to_item(");
 
         // If pipe_inject is set, the fn_info already points to the N+1 arg version
         // Just emit the call with left as first arg
@@ -2883,6 +2893,9 @@ static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNod
         }
 
         strbuf_append_char(tp->code_buf, ')');
+
+        // Close ri_to_item( wrapper
+        if (sys_can_raise) strbuf_append_char(tp->code_buf, ')');
     } else {
         // For user-defined functions, fall back to fn_pipe_call
         strbuf_append_str(tp->code_buf, "fn_pipe_call(");
@@ -3452,19 +3465,19 @@ void transpile_pipe_file_stam(Transpiler* tp, AstBinaryNode *pipe_node) {
     }
 
     if (pipe_node->op == OPERATOR_PIPE_APPEND) {
-        // Use pn_output_append for |>> (append mode)
-        strbuf_append_str(tp->code_buf, "pn_output_append(");
+        // Use pn_output_append for |>> (append mode) — returns RetItem, unwrap to Item
+        strbuf_append_str(tp->code_buf, "ri_to_item(pn_output_append(");
         transpile_box_item(tp, pipe_node->left);  // source data
         strbuf_append_str(tp->code_buf, ", ");
         transpile_box_item(tp, pipe_node->right);  // file path
-        strbuf_append_char(tp->code_buf, ')');
+        strbuf_append_str(tp->code_buf, "))");
     } else {
-        // Use pn_output2 for |> (write mode, default)
-        strbuf_append_str(tp->code_buf, "pn_output2(");
+        // Use pn_output2 for |> (write mode, default) — returns RetItem, unwrap to Item
+        strbuf_append_str(tp->code_buf, "ri_to_item(pn_output2(");
         transpile_box_item(tp, pipe_node->left);  // source data
         strbuf_append_str(tp->code_buf, ", ");
         transpile_box_item(tp, pipe_node->right);  // file path
-        strbuf_append_char(tp->code_buf, ')');
+        strbuf_append_str(tp->code_buf, "))");
     }
 }
 
@@ -4894,7 +4907,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         prop_callee_retitem = callee_returns_retitem(call_node);
         strbuf_append_format(tp->code_buf, "({RetItem _ri%d=", prop_id);
         if (!prop_callee_retitem) {
-            // System function returns Item — wrap in item_to_ri() for uniform RetItem handling
+            // Unknown callee returns Item — wrap in item_to_ri() for uniform RetItem handling
             strbuf_append_str(tp->code_buf, "item_to_ri(");
         }
     }
