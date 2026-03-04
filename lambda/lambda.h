@@ -717,6 +717,9 @@ typedef struct RetPath   { Path*        value; LambdaError* err; } RetPath;
 #ifndef __cplusplus
 typedef struct RetItem   { Item         value; LambdaError* err; } RetItem;
 #endif
+#ifdef __cplusplus
+struct RetItem;  // full definition in lambda.hpp
+#endif
 
 // ============================================================================
 // Ret* constructor helpers
@@ -1172,10 +1175,10 @@ typedef struct Context {
     // returns the name of an element, function, or type as a symbol
     Symbol* fn_name(Item item);
 
-    Item fn_input1(Item url);
-    Item fn_input2(Item url, Item options);
-    Item fn_parse1(Item str);
-    Item fn_parse2(Item str, Item options);
+    RetItem fn_input1(Item url);
+    RetItem fn_input2(Item url, Item options);
+    RetItem fn_parse1(Item str);
+    RetItem fn_parse2(Item str, Item options);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
@@ -1203,24 +1206,24 @@ typedef struct Context {
     // procedural functions
     Item pn_print(Item item);
     double pn_clock();        // clock() - high-resolution monotonic time in seconds
-    Item pn_cmd1(Item cmd);
-    Item pn_cmd2(Item cmd, Item args);
-    Item pn_fetch(Item url, Item options);
-    Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
-    Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
-    Item pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
+    RetItem pn_cmd1(Item cmd);
+    RetItem pn_cmd2(Item cmd, Item args);
+    RetItem pn_fetch(Item url, Item options);
+    RetItem pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
+    RetItem pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
+    RetItem pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
 
     // io module functions (procedural)
-    Item pn_io_copy(Item src, Item dst);
-    Item pn_io_move(Item src, Item dst);
-    Item pn_io_delete(Item path);
-    Item pn_io_mkdir(Item path);
-    Item pn_io_touch(Item path);
-    Item pn_io_symlink(Item target, Item link);
-    Item pn_io_chmod(Item path, Item mode);
-    Item pn_io_rename(Item old_path, Item new_path);
-    Item pn_io_fetch1(Item target);
-    Item pn_io_fetch2(Item target, Item options);
+    RetItem pn_io_copy(Item src, Item dst);
+    RetItem pn_io_move(Item src, Item dst);
+    RetItem pn_io_delete(Item path);
+    RetItem pn_io_mkdir(Item path);
+    RetItem pn_io_touch(Item path);
+    RetItem pn_io_symlink(Item target, Item link);
+    RetItem pn_io_chmod(Item path, Item mode);
+    RetItem pn_io_rename(Item old_path, Item new_path);
+    RetItem pn_io_fetch1(Item target);
+    RetItem pn_io_fetch2(Item target, Item options);
 
     // bitwise functions (integer operations)
     int64_t fn_band(int64_t a, int64_t b);

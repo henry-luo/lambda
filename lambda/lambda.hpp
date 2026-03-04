@@ -174,6 +174,13 @@ extern Item ItemError;
     if (get_type_id(b) == LMD_TYPE_ERROR) return (b); \
     if (get_type_id(c) == LMD_TYPE_ERROR) return (c)
 
+// RetItem-returning error guards: propagate error as RetItem
+#define GUARD_ERROR_RI1(a) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return item_to_ri(a)
+#define GUARD_ERROR_RI2(a, b) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return item_to_ri(a); \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return item_to_ri(b)
+
 // Bool-returning function guards: propagate error as BOOL_ERROR
 #define GUARD_BOOL_ERROR1(a) \
     if (get_type_id(a) == LMD_TYPE_ERROR) return BOOL_ERROR

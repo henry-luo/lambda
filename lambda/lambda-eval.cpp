@@ -1960,7 +1960,7 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
 }
 
-Item fn_input2(Item target_item, Item type) {
+RetItem fn_input2(Item target_item, Item type) {
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
         log_debug("dry-run: fabricated input() call");
@@ -1979,7 +1979,7 @@ Item fn_input2(Item target_item, Item type) {
             }
         }
         String* result_str = heap_strcpy((char*)content, strlen(content));
-        return {.item = s2it(result_str)};
+        return ri_ok({.item = s2it(result_str)});
     }
     String *type_str = NULL, *flavor_str = NULL;
 
@@ -1987,7 +1987,7 @@ Item fn_input2(Item target_item, Item type) {
     TypeId target_type_id = get_type_id(target_item);
     if (target_type_id != LMD_TYPE_STRING && target_type_id != LMD_TYPE_SYMBOL && target_type_id != LMD_TYPE_PATH) {
         log_debug("input target must be a string, symbol, or path, got type: %s", get_type_name(target_type_id));
-        return ItemNull;  // todo: push error
+        return ri_ok(ItemNull);  // todo: push error
     }
 
     // Convert target Item to Target struct
@@ -1995,7 +1995,7 @@ Item fn_input2(Item target_item, Item type) {
     Target* target = item_to_target(target_item.item, cwd);
     if (!target) {
         log_error("fn_input2: failed to convert item to target");
-        return ItemNull;
+        return ri_ok(ItemNull);
     }
 
     log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
@@ -2050,14 +2050,14 @@ Item fn_input2(Item target_item, Item type) {
     else {
         log_debug("input type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
         target_free(target);
-        return ItemNull;  // todo: push error
+        return ri_ok(ItemNull);  // todo: push error
     }
 
     // Check if context is properly initialized
     if (!context) {
         log_debug("Error: context is NULL in fn_input");
         target_free(target);
-        return ItemNull;
+        return ri_ok(ItemNull);
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
@@ -2067,11 +2067,11 @@ Item fn_input2(Item target_item, Item type) {
     target_free(target);
 
     // todo: input should be cached in context
-    return (input && input->root.item) ? input->root : ItemNull;
+    return ri_ok((input && input->root.item) ? input->root : ItemNull);
 }
 
 // declared extern "C" to allow calling from C code (path.c)
-extern "C" Item fn_input1(Item url) {
+extern "C" RetItem fn_input1(Item url) {
     return fn_input2(url, ItemNull);
 }
 
@@ -2080,17 +2080,17 @@ extern "C" Item fn_input1(Item url) {
 // 2nd arg can be a format symbol ('json, 'yaml, etc.) or an options map like input().
 extern "C" Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 
-Item fn_parse2(Item str_item, Item type) {
-    GUARD_ERROR2(str_item, type);
+RetItem fn_parse2(Item str_item, Item type) {
+    GUARD_ERROR_RI2(str_item, type);
 
     // first arg must be a string
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING) {
         log_error("parse: 1st argument must be a string, got type: %s", get_type_name(str_type));
-        return ItemError;
+        return item_to_ri(ItemError);
     }
     String* str = str_item.get_string();
-    if (!str || !str->chars) return ItemNull;
+    if (!str || !str->chars) return ri_ok(ItemNull);
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
@@ -2127,7 +2127,7 @@ Item fn_parse2(Item str_item, Item type) {
     }
     else {
         log_error("parse: 2nd argument must be a format symbol or options map, got type: %s", get_type_name(type_id));
-        return ItemError;
+        return item_to_ri(ItemError);
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)
@@ -2136,10 +2136,10 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     Input* input = input_from_source(str->chars, dummy_url, type_str, flavor_str);
-    return (input && input->root.item) ? input->root : ItemNull;
+    return ri_ok((input && input->root.item) ? input->root : ItemNull);
 }
 
-Item fn_parse1(Item str_item) {
+RetItem fn_parse1(Item str_item) {
     return fn_parse2(str_item, ItemNull);
 }
 

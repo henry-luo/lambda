@@ -32,8 +32,8 @@ extern Item fn_find2(Item source, Item pattern);
 extern Item fn_find3(Item source, Item pattern, Item options);
 extern Item fn_split3(Item str, Item sep, Item keep_delim);
 extern Item fn_reduce(Item collection, Item func);
-extern Item fn_parse1(Item str);
-extern Item fn_parse2(Item str, Item options);
+extern RetItem fn_parse1(Item str);
+extern RetItem fn_parse2(Item str, Item options);
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
