@@ -1111,15 +1111,27 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 ### Phase 3: Dual Version Generation
 
-**Goal**: Systematic `_n` / `_b` generation for user functions.
+**Goal**: Two-version generation for user functions: **native** (typed params, native return) + **`_b` boxed** (Item params, RetItem return).
 
-| Step | Change | Files | Status |
-|------|--------|-------|--------|
-| 3.1 | Rename current main function to `_n` suffix | transpile.cpp | Deferred (cosmetic) |
-| 3.2 | Rewrite `define_func_call_wrapper()` as `define_func_boxed()` returning `RetItem` | transpile.cpp, transpile-mir.cpp | ✅ Done |
-| 3.3 | Update `can_use_unboxed_call()` → `select_call_version()` for all types | transpile.cpp | Not started |
-| 3.4 | Remove `define_func_unboxed()` (subsumed by `_n`) | transpile.cpp | Not started |
-| 3.5 | Update `fn_call*` dispatch to use `_b` functions returning `RetItem` via `FN_FLAG_BOXED_RET` flag | lambda-eval.cpp, lambda.h | ✅ Done |
+**Design decisions**:
+- The **native function** keeps its current name (no `_n` suffix). E.g. `_square_15(int64_t x)` stays as-is.
+- The **`_b` boxed wrapper** uses `_b` suffix. E.g. `_square_b_15(Item x)` → RetItem. Used by `fn_call*` dispatch.
+- The **procedural `main()` function** only generates one boxed version (Item params, RetItem return). No unboxed/native variant needed for the entry point.
+- The **functional script `_mod_main()`** likewise only generates one boxed version. It's the hidden entry point for top-level script evaluation.
+- All other user functions (`fn` and `pn`) generate both native + `_b` versions.
+
+| Step | Change                                                                                            | Files                            | Status              |
+| ---- | ------------------------------------------------------------------------------------------------- | -------------------------------- | ------------------- |
+| 3.1  | Clarify naming: native function keeps current name (no `_n` suffix); procedural `main()` is boxed-only | transpile.cpp                    | ✅ Done (doc only)  |
+| 3.2  | Rewrite `define_func_call_wrapper()` as `define_func_boxed()` returning `RetItem`                 | transpile.cpp, transpile-mir.cpp | ✅ Done              |
+| 3.3  | Fix `can_use_unboxed_call()`: return false when declared return is ANY (native main returns Item, not native scalar); update comments | transpile.cpp                    | ✅ Done              |
+| 3.4  | Remove `define_func_unboxed()` (subsumed by native version); remove `in_unboxed_body` flag; change `_u` suffix to NULL in direct call path | transpile.cpp, ast.hpp           | ✅ Done              |
+| 3.5  | Update `fn_call*` dispatch to use `_b` functions returning `RetItem` via `FN_FLAG_BOXED_RET` flag | lambda-eval.cpp, lambda.h        | ✅ Done              |
+
+**Implementation notes (Phase 3)**:
+- Added `resolve_native_ret_type()` helper in transpile.cpp to centralize return type resolution for native functions. Uses `fn_type->returned` if set, falls back to `body->type`.
+- Content-block body inference (inferring `int64_t` return from last expression of `{ a+b }` when `fn_type->returned == ANY`) was investigated but **deferred** — changing the C return type creates a mismatch with callers that still see `ANY` (e.g. `transpile_call_argument` fast-path passes raw int64_t where Item is expected). Requires updating all call-site code paths first (Phase 4/5 candidate).
+- `can_use_unboxed_call()` is currently defined but unused — retained for future content-block inference work.
 
 ### Phase 4: Data-Driven Metadata
 
