@@ -513,8 +513,26 @@ static int find_first_letter_boundary(const unsigned char* text, int text_len) {
 }
 
 /**
+ * Check if a text node's content is entirely whitespace.
+ * Returns true for empty or whitespace-only content.
+ */
+static bool is_text_all_whitespace(const unsigned char* data) {
+    if (!data) return true;
+    while (*data) {
+        unsigned char c = *data;
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+            return false;
+        }
+        data++;
+    }
+    return true;
+}
+
+/**
  * Find the first text node descendant of an element that contains letter content.
  * Walks depth-first, following inline elements.
+ * Skips whitespace-only text nodes (CSS 2.1 §5.12.2: first-letter applies to
+ * the first letter of the first formatted line, ignoring preceding whitespace).
  * Returns NULL if no text content is found.
  */
 static DomText* find_first_text_node(DomNode* node) {
@@ -522,9 +540,10 @@ static DomText* find_first_text_node(DomNode* node) {
 
     if (node->is_text()) {
         DomText* text = node->as_text();
-        // Check if text has any letter content (not just whitespace)
         unsigned char* data = node->text_data();
-        if (data && *data) {
+        // Skip empty or whitespace-only text nodes so we find the actual
+        // letter content (which may be in a subsequent sibling or nested element)
+        if (data && *data && !is_text_all_whitespace(data)) {
             return text;
         }
         return nullptr;
