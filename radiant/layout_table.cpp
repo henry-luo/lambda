@@ -876,9 +876,27 @@ static float calculate_cell_width_from_columns(ViewTableCell* tcell, float* col_
 // Process a single cell: position, size, layout content, apply alignment
 // Returns the height contribution for the current row (adjusted for rowspan)
 // col_edge_max_border: max resolved border at each column edge (size columns+1), or nullptr
+// col_collapsed: per-column visibility:collapse flags, or nullptr
+// col_original_widths: pre-collapse column widths for correct height computation, or nullptr
 static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, ViewTable* table,
                                float* col_widths, float* col_x_positions, int columns,
-                               float* col_edge_max_border = nullptr) {    ViewBlock* cell = (ViewBlock*)tcell;
+                               float* col_edge_max_border = nullptr,
+                               bool* col_collapsed = nullptr,
+                               float* col_original_widths = nullptr) {
+    ViewBlock* cell = (ViewBlock*)tcell;
+
+    // CSS 2.1 §17.5.5: Detect if ALL columns this cell spans are collapsed.
+    // If so, we lay out at the original (pre-collapse) width for correct height,
+    // then zero the rendered width. Row heights are NOT recalculated.
+    bool cell_is_collapsed = false;
+    if (col_collapsed) {
+        bool all_collapsed = true;
+        int end_col = tcell->td->col_index + tcell->td->col_span;
+        for (int c = tcell->td->col_index; c < end_col && c < columns; c++) {
+            if (!col_collapsed[c]) { all_collapsed = false; break; }
+        }
+        cell_is_collapsed = all_collapsed;
+    }
 
     // Check if this empty cell should have its border/background hidden
     // CSS 2.1 Section 17.6.1: In separated borders model, empty cells can have
@@ -902,8 +920,18 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     // Calculate cell width from columns (for colspan support)
     float cell_width = 0.0f;
     int end_col = tcell->td->col_index + tcell->td->col_span;
-    for (int c = tcell->td->col_index; c < end_col && c < columns; c++) {
-        cell_width += col_widths[c];
+    if (cell_is_collapsed && col_original_widths) {
+        // CSS 2.1 §17.5.5: Use original (pre-collapse) width for content layout
+        // so that row heights are computed correctly ("not recalculated")
+        for (int c = tcell->td->col_index; c < end_col && c < columns; c++) {
+            cell_width += col_original_widths[c];
+        }
+        log_debug("Collapsed cell col=%d: using original width %.1f for layout",
+                 tcell->td->col_index, cell_width);
+    } else {
+        for (int c = tcell->td->col_index; c < end_col && c < columns; c++) {
+            cell_width += col_widths[c];
+        }
     }
 
     // CSS 2.1 §17.6.2: In border-collapse mode, col_widths already include
@@ -929,6 +957,16 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     float cell_height_val = calculate_cell_height(lycon, tcell, table, content_height, explicit_cell_height);
 
     cell->height = cell_height_val;
+
+    // CSS 2.1 §17.5.5: After computing height at original width,
+    // zero the rendered dimensions for collapsed cells.
+    // The height still contributes to row height calculation via height_for_row.
+    if (cell_is_collapsed) {
+        cell->width = 0;
+        cell->height = 0;
+        log_debug("Collapsed cell col=%d row=%d: zeroed to 0x0 (height_for_row=%.1f preserved)",
+                 tcell->td->col_index, tcell->td->row_index, cell_height_val);
+    }
 
     // Apply vertical alignment
     apply_cell_vertical_align(tcell, cell_height_val, content_height);
@@ -1126,6 +1164,8 @@ struct TableMetadata {
     float* row_heights;         // Row heights for rowspan calculation
     float* row_y_positions;     // Row Y positions for rowspan calculation
     bool* row_collapsed;        // Visibility: collapse tracking per row
+    bool* col_collapsed;        // Visibility: collapse tracking per column
+    float* col_original_widths;  // Original column widths before collapse zeroing (for row height calc)
     bool* row_has_percent_height;  // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto
     float* col_edge_max_border;   // Max resolved border at each column edge across all rows (size: column_count + 1)
 
@@ -1148,6 +1188,8 @@ struct TableMetadata {
         row_heights = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
         row_y_positions = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
         row_collapsed = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
+        col_collapsed = (bool*)mem_calloc(cols, sizeof(bool), MEM_CAT_LAYOUT);
+        col_original_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
         row_has_percent_height = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
         col_edge_max_border = (float*)mem_calloc(cols + 1, sizeof(float), MEM_CAT_LAYOUT);
     }
@@ -1160,6 +1202,8 @@ struct TableMetadata {
         mem_free(row_heights);
         mem_free(row_y_positions);
         mem_free(row_collapsed);
+        mem_free(col_collapsed);
+        mem_free(col_original_widths);
         mem_free(row_has_percent_height);
         mem_free(col_edge_max_border);
     }
@@ -4339,6 +4383,9 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     // CSS 2.1 §16.5: Resolve inherited text-transform for cell text measurement
     CssEnum cell_text_transform = get_element_text_transform(cell_elem);
 
+    // CSS 2.1 §15.8: Resolve inherited font-variant for cell text measurement
+    CssEnum cell_font_variant = get_element_font_variant(cell_elem);
+
     // Check if the cell will have pseudo-element generated content (::before/::after)
     // Note: at measurement time, pseudo elements haven't been generated yet,
     // so we check the CSS styles directly via dom_element_has_before/after_content()
@@ -4470,7 +4517,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 // Use unified intrinsic sizing API - measures both widths in one call
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len, cell_text_transform);
+                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant);
 
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
@@ -4593,7 +4640,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
             size_t content_len = strlen(content);
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, content, content_len, cell_text_transform);
+                lycon, content, content_len, cell_text_transform, cell_font_variant);
 
             float text_max = (float)widths.max_content;
             float text_min = (float)widths.min_content;
@@ -4732,6 +4779,50 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
             col += cell->td->col_span;
         }
         current_row++;
+    }
+
+    // CSS 2.1 §17.5.5: Track visibility: collapse for columns
+    // Walk column/colgroup elements and check visibility on each column
+    {
+        int col_idx = 0;
+        for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+            if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+                // Check if the colgroup itself is collapsed
+                bool colgroup_collapsed = is_visibility_collapse((ViewBlock*)child);
+                bool has_col_children = false;
+                for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                    if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
+                        has_col_children = true;
+                        if (col_idx < columns) {
+                            if (colgroup_collapsed || is_visibility_collapse((ViewBlock*)col)) {
+                                meta->col_collapsed[col_idx] = true;
+                                log_debug("Column %d has visibility: collapse", col_idx);
+                            }
+                            col_idx++;
+                        }
+                    }
+                }
+                // Colgroup without col children implicitly defines span columns
+                if (!has_col_children) {
+                    const char* span_str = child->get_attribute("span");
+                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                    if (span <= 0) span = 1;
+                    for (int s = 0; s < span && col_idx < columns; s++) {
+                        if (colgroup_collapsed) {
+                            meta->col_collapsed[col_idx] = true;
+                            log_debug("Column %d has visibility: collapse (from colgroup without children)", col_idx);
+                        }
+                        col_idx++;
+                    }
+                }
+            } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
+                if (col_idx < columns && is_visibility_collapse((ViewBlock*)child)) {
+                    meta->col_collapsed[col_idx] = true;
+                    log_debug("Column %d has visibility: collapse", col_idx);
+                }
+                col_idx++;
+            }
+        }
     }
 
     return meta;
@@ -5706,6 +5797,24 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     } // End of auto layout algorithm guard
 
+    // CSS 2.1 §17.5.5: visibility:collapse on columns.
+    // Zero the widths for collapsed columns. This automatically handles:
+    // - Column element positioning (via col_x_positions)
+    // - Table width calculation (collapsed columns contribute 0)
+    // - Cell positioning (cells shift left as col_x_positions contract)
+    // We save original widths so that cells in collapsed columns can be
+    // laid out at their original width for correct row height computation
+    // (CSS 2.1 §17.5.5: "row heights are not recalculated").
+    for (int i = 0; i < columns; i++) {
+        if (meta->col_collapsed[i]) {
+            meta->col_original_widths[i] = col_widths[i];
+            log_debug("Zeroing collapsed column %d width (was %.1f, saved to original)", i, col_widths[i]);
+            col_widths[i] = 0.0f;
+            meta->col_min_widths[i] = 0.0f;
+            meta->col_max_widths[i] = 0.0f;
+        }
+    }
+
     // Calculate final table width
     float table_width = 0.0f;
     for (int i = 0; i < columns; i++) {
@@ -6467,7 +6576,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     float row_height = 0.0f;
                     ViewTableRow* trow = (ViewTableRow*)row;
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                        float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border);
+                        float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
                         if (height_for_row > row_height) {
                             row_height = height_for_row;
                         }
@@ -6606,7 +6715,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             float row_height = 0.0f;
             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border);
+                float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
                 if (height_for_row > row_height) {
                     row_height = height_for_row;
                 }

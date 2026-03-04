@@ -187,13 +187,20 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
-                                                   CssEnum text_transform = CSS_VALUE_NONE);
+                                                   CssEnum text_transform = CSS_VALUE_NONE,
+                                                   CssEnum font_variant = CSS_VALUE_NONE);
 
 /**
  * Walk up DOM tree to find inherited text-transform value from specified_style.
  * Safe to call during intrinsic sizing (does not use the view tree).
  */
 CssEnum get_element_text_transform(DomElement* element);
+
+/**
+ * Walk up DOM tree to find inherited font-variant value.
+ * Checks elem->font->font_variant (available after CSS resolution).
+ */
+CssEnum get_element_font_variant(DomElement* element);
 
 /**
  * Compute text height when constrained to a given width (CSS Flexbox §9.4).
@@ -204,7 +211,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     size_t length,
                                     float available_width,
                                     float line_height,
-                                    CssEnum text_transform = CSS_VALUE_NONE);
+                                    CssEnum text_transform = CSS_VALUE_NONE,
+                                    CssEnum font_variant = CSS_VALUE_NONE);
 
 /**
  * Measure element intrinsic widths recursively.
