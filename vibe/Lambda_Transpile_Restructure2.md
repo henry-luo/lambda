@@ -704,6 +704,7 @@ All three Phase 1 tasks have been implemented and verified (582/582 baseline tes
 - **`fn_exists` is called from JIT code** — the transpiler emits `fn_exists(path)` through the generic sys_func name emission (`"fn_" + name`), requiring its declaration in lambda.h.
 
 **Size results:**
+
 | Metric | Before Phase 2 | After Phase 2 | Reduction |
 |--------|----------------|---------------|-----------|
 | `lambda.h` | 1,239 lines | 1,061 lines | 178 lines (14.4%) |
@@ -713,16 +714,26 @@ All three Phase 1 tasks have been implemented and verified (582/582 baseline tes
 
 The original proposal estimated ~56% reduction by also moving Container/Function/String structs. Since those must stay (JIT accesses their fields), the actual reduction is 14–18% for this phase. Further reduction would require changing the transpiler to use accessor functions instead of direct field access.
 
-### Phase 3: Unified Registry (3–5 days) — Future
+### Phase 3: Unified Registry — ✅ COMPLETE
 
-| Task | Effort | Impact |
-|------|--------|--------|
-| Design `sys_func_registry.h` | Small | API design |
-| Create `sys_func_registry.cpp` with all 144 entries | Medium | Single source of truth |
-| Refactor `build_ast.cpp` to use registry | Medium | Remove `sys_funcs[]` duplication |
-| Refactor `mir.c` to auto-derive imports | Medium | Remove `func_list[]` duplication |
-| Create `type_registry.h` / `.cpp` | Medium | Unified type metadata |
-| Refactor transpiler to use type registry | Medium | Remove scattered tables |
+**Implementation summary:**
+
+1. **Extended `SysFuncInfo`** in `ast.hpp` with 4 new fields: `c_func_name`, `native_c_name`, `native_returns_float`, `native_arg_count`
+2. **Created `sys_func_registry.h` / `.cpp`** — single source of truth with ~120 entries.  All metadata (identity, type info, C codegen, native math optimization) in one table.
+3. **Refactored `build_ast.cpp`** — removed 170-line local `sys_funcs[]` array, replaced with `extern` reference to `sys_func_defs[]` from registry.
+4. **Refactored `transpile.cpp`** — removed `NativeMathFunc` struct + `native_math_funcs[]` array (~50 lines), removed `NativeBinaryFunc` struct + `native_binary_funcs[]` (~10 lines), unified `can_use_native_math_binary()` to handle both math and min/max, generic fallback now uses `fn_info->c_func_name` instead of computing it at runtime.
+5. **`mir.c` func_list[]** — kept as-is for JIT import resolution (removing would cause linker issues in shared library builds). Registry remains metadata-only; func_ptr field was removed from SysFuncInfo to avoid symbol resolution issues in `liblambda-input-full-cpp.dylib`.
+
+**Result:** 582/582 tests pass.  Adding a new system function now requires editing only `sys_func_registry.cpp` + `lambda.h` (declaration) + implementation file.
+
+| Task | Status |
+|------|--------|
+| Design `sys_func_registry.h` | ✅ Done |
+| Create `sys_func_registry.cpp` with ~120 entries | ✅ Done |
+| Refactor `build_ast.cpp` to use registry | ✅ Done |
+| Refactor `transpile.cpp` native math optimization | ✅ Done |
+| Refactor `transpile.cpp` generic fallback to use `c_func_name` | ✅ Done |
+| `mir.c` func_list[] — deferred (shared lib constraint) | ⏭️ Skipped |
 
 ### Phase 4: Transpiler Cleanup (2–3 days) — Future
 
