@@ -9,6 +9,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void transpile_expr_tco(Transpiler* tp, AstNode *expr_node, bool in_tail_position);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node);
+void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node);
 void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node);
 bool has_typed_params(AstFuncNode* fn_node);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
@@ -502,8 +503,8 @@ bool has_typed_params(AstFuncNode* fn_node) {
     return false;
 }
 
-// Check if a function needs a fn_call*-compatible wrapper (_w suffix).
-// fn_call* casts function pointers to Item(*)(Item,...) ABI.
+// Check if a function needs a fn_call*-compatible boxed wrapper (_b suffix).
+// fn_call* dispatches through function pointers with Item params and RetItem return.
 // A wrapper is needed when the function's native signature doesn't match this ABI:
 //   - Has typed params (native types instead of Item)
 //   - Returns a native type AND has no params (e.g., fn g() { 42 })
@@ -517,12 +518,16 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
     // Functions with typed params need param unboxing wrapper
     if (has_typed_params(fn_node)) return true;
 
+    // can_raise non-closure/non-method functions return RetItem from the main function,
+    // which doesn't match fn_call*'s Item ABI — need a _b wrapper
+    if (fn_type->can_raise) return true;
+
     // Functions with ALL untyped params: body uses Item-level ops → effectively returns Item
     // No wrapper needed (fn_call* can use the function directly)
     if (fn_node->param) return false;
 
     // Functions with NO params: body may return raw native values → needs wrapper
-    if (!fn_type->can_raise) {
+    {
         Type *ret_type = fn_type->returned;
         if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
         if (!ret_type) ret_type = &TYPE_ANY;
@@ -1479,12 +1484,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         strbuf_append_format(tp->code_buf, "  _fn->closure_field_count = %d; _fn; })", cap_count);
                     } else {
                         // Regular function without captures - use to_fn_named for stack traces
-                        strbuf_append_format(tp->code_buf, "to_fn_named(");
-                        // use _w wrapper for functions with non-Item ABI so fn_call* works correctly
-                        if (needs_fn_call_wrapper(fn_node)) {
+                        bool use_boxed = needs_fn_call_wrapper(fn_node);
+                        if (use_boxed) {
+                            // _b wrapper returns RetItem — set FN_FLAG_BOXED_RET on the Function
+                            strbuf_append_str(tp->code_buf, "({ Function* _fn = to_fn_named(");
                             write_fn_name_ex(tp->code_buf, fn_node,
-                                (AstImportNode*)ident_node->entry->import, "_w");
+                                (AstImportNode*)ident_node->entry->import, "_b");
                         } else {
+                            strbuf_append_format(tp->code_buf, "to_fn_named(");
                             write_fn_name(tp->code_buf, fn_node,
                                 (AstImportNode*)ident_node->entry->import);
                         }
@@ -1502,6 +1509,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
                         }
                         strbuf_append_char(tp->code_buf, ')');
+                        if (use_boxed) {
+                            strbuf_append_str(tp->code_buf, "; _fn->flags = FN_FLAG_BOXED_RET; _fn; })");
+                        }
                     }
                 }
                 else if (entry_node->node_type == AST_NODE_STRING_PATTERN || entry_node->node_type == AST_NODE_SYMBOL_PATTERN) {
@@ -6690,11 +6700,11 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     if (!is_closure && !is_method && !is_proc && !as_pointer && has_typed_params(fn_node)) {
         define_func_unboxed(tp, fn_node);
     }
-    // Generate fn_call*-compatible wrapper for functions with non-Item ABI
+    // Generate fn_call*-compatible boxed wrapper for functions with non-Item ABI
     // This covers typed params AND/OR native return types
     // Methods are excluded because they use the closure mechanism already
     if (!is_closure && !is_method && !is_proc && !as_pointer && needs_fn_call_wrapper(fn_node)) {
-        define_func_call_wrapper(tp, fn_node);
+        define_func_boxed(tp, fn_node);
     }
 }
 
@@ -6794,12 +6804,12 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
     tp->in_unboxed_body = prev_in_unboxed;
 }
 
-// Generate fn_call*-compatible wrapper for typed functions.
-// fn_call0..3() cast function pointers to Item(*)(Item,...) and pass boxed Items as args.
+// Generate fn_call*-compatible boxed wrapper for typed functions.
+// fn_call0..3() dispatch through function pointers stored in Function.ptr.
 // If the original function has native-typed params (int64_t, double, etc.), the wrapper
-// accepts Items, unboxes them, calls the original, and boxes the return if needed.
-// Named with _w suffix: _square_w15
-void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
+// accepts Items, unboxes them, calls the original, and returns RetItem.
+// Named with _b suffix: _square_b15
+void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
     if (is_closure) return;  // closures already use Item params
 
@@ -6819,9 +6829,9 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     }
 
     strbuf_append_char(tp->code_buf, '\n');
-    // wrapper always returns Item
-    strbuf_append_str(tp->code_buf, "Item ");
-    write_fn_name_ex(tp->code_buf, fn_node, NULL, "_w");
+    // boxed wrapper always returns RetItem
+    strbuf_append_str(tp->code_buf, "RetItem ");
+    write_fn_name_ex(tp->code_buf, fn_node, NULL, "_b");
     strbuf_append_char(tp->code_buf, '(');
 
     // all params are Item in the wrapper
@@ -6840,36 +6850,40 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     }
     strbuf_append_str(tp->code_buf, "){\n return ");
 
-    // box the return value if the original function returns a native type
+    // box the return value and wrap in RetItem
+    // can_raise main function already returns RetItem — just forward it
+    // non-can_raise: box native result in ri_ok()
     const char* box_prefix = NULL;
     const char* box_suffix = ")";
     if (fn_type->can_raise) {
-        // can_raise main function now returns RetItem — convert to Item via ri_to_item()
-        box_prefix = "ri_to_item(";
+        // can_raise main function returns RetItem — forward directly (no conversion needed)
+        box_prefix = NULL;
     } else {
         switch (boxed_ret_tid) {
         case LMD_TYPE_INT:
         case LMD_TYPE_INT64:
-            box_prefix = "i2it("; break;
+            box_prefix = "ri_ok(i2it("; box_suffix = "))"; break;
         case LMD_TYPE_FLOAT:
-            box_prefix = "push_d("; break;
+            box_prefix = "ri_ok(push_d("; box_suffix = "))"; break;
         case LMD_TYPE_BOOL:
-            box_prefix = "b2it("; break;
+            box_prefix = "ri_ok(b2it("; box_suffix = "))"; break;
         case LMD_TYPE_STRING:
         case LMD_TYPE_BINARY:
-            box_prefix = "s2it("; break;
+            box_prefix = "ri_ok(s2it("; box_suffix = "))"; break;
         case LMD_TYPE_SYMBOL:
-            box_prefix = "y2it("; break;
+            box_prefix = "ri_ok(y2it("; box_suffix = "))"; break;
         case LMD_TYPE_DTIME:
-            box_prefix = "push_k("; break;
+            box_prefix = "ri_ok(push_k("; box_suffix = "))"; break;
         case LMD_TYPE_DECIMAL:
-            box_prefix = "c2it("; break;
+            box_prefix = "ri_ok(c2it("; box_suffix = "))"; break;
         default:
             // container types (Map*, List*, etc.) need p2it() for safe NULL handling
             if (get_container_unbox_fn(boxed_ret_tid)) {
-                box_prefix = "p2it(";
+                box_prefix = "ri_ok(p2it("; box_suffix = "))";
+            } else {
+                // returns Item already, just wrap in ri_ok
+                box_prefix = "ri_ok("; box_suffix = ")";
             }
-            // else returns Item, no boxing needed
             break;
         }
     }
@@ -7053,11 +7067,13 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         strbuf_append_format(tp->code_buf, "  _fn->closure_field_count = %d; _fn; })", cap_count);
     } else {
         // regular function without captures - use to_fn_named for stack traces
-        strbuf_append_format(tp->code_buf, "to_fn_named(");
-        // use _w wrapper for functions with non-Item ABI so fn_call* works correctly
-        if (needs_fn_call_wrapper(fn_node)) {
-            write_fn_name_ex(tp->code_buf, fn_node, NULL, "_w");
+        bool use_boxed = needs_fn_call_wrapper(fn_node);
+        if (use_boxed) {
+            // _b wrapper returns RetItem — set FN_FLAG_BOXED_RET on the Function
+            strbuf_append_str(tp->code_buf, "({ Function* _fn = to_fn_named(");
+            write_fn_name_ex(tp->code_buf, fn_node, NULL, "_b");
         } else {
+            strbuf_append_format(tp->code_buf, "to_fn_named(");
             write_fn_name(tp->code_buf, fn_node, NULL);
         }
         strbuf_append_format(tp->code_buf, ",%d,", arity);
@@ -7074,6 +7090,9 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
             strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
         }
         strbuf_append_char(tp->code_buf, ')');
+        if (use_boxed) {
+            strbuf_append_str(tp->code_buf, "; _fn->flags = FN_FLAG_BOXED_RET; _fn; })");
+        }
     }
 }
 
@@ -7299,22 +7318,22 @@ void write_mod_struct_fields(Transpiler* tp, AstNode *ast_root) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
-                // also add _w wrapper function pointer if this function needs fn_call* wrapper
+                // also add _b boxed wrapper function pointer if this function needs fn_call* wrapper
                 if (node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(func_node)) {
-                    strbuf_append_str(tp->code_buf, "Item (*");
-                    write_fn_name_ex(tp->code_buf, func_node, NULL, "_w");
+                    strbuf_append_str(tp->code_buf, "RetItem (*");
+                    write_fn_name_ex(tp->code_buf, func_node, NULL, "_b");
                     strbuf_append_str(tp->code_buf, ")(");
-                    bool has_w_params = false;
+                    bool has_b_params = false;
                     AstNamedNode *param = func_node->param;
                     while (param) {
-                        if (has_w_params) strbuf_append_str(tp->code_buf, ",");
+                        if (has_b_params) strbuf_append_str(tp->code_buf, ",");
                         strbuf_append_str(tp->code_buf, "Item");
                         param = (AstNamedNode*)param->next;
-                        has_w_params = true;
+                        has_b_params = true;
                     }
                     TypeFunc* fn_type = (TypeFunc*)func_node->type;
                     if (fn_type && fn_type->is_variadic) {
-                        if (has_w_params) strbuf_append_str(tp->code_buf, ",");
+                        if (has_b_params) strbuf_append_str(tp->code_buf, ",");
                         strbuf_append_str(tp->code_buf, "List*");
                     }
                     strbuf_append_str(tp->code_buf, ");\n");
