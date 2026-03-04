@@ -650,6 +650,252 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): ITEM_NULL)
 #define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): ITEM_NULL)
 
+// ============================================================================
+// Forward declaration for structured error handling
+// ============================================================================
+typedef struct LambdaError LambdaError;
+
+// ============================================================================
+// Container unboxing helpers: Item → native container pointer
+// These validate the type tag and extract the pointer; return NULL on mismatch.
+// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
+// ============================================================================
+
+#ifndef __cplusplus
+static inline Map* it2map(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_MAP && tag != LMD_TYPE_VMAP) return null;
+    return (Map*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static inline List* it2list(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_LIST) return null;
+    return (List*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static inline Element* it2elmt(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_ELEMENT) return null;
+    return (Element*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static inline Object* it2obj(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_OBJECT) return null;
+    return (Object*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static inline Array* it2arr(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_ARRAY) return null;
+    return (Array*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static inline Range* it2range(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_RANGE) return null;
+    return (Range*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static inline Path* it2path(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_PATH) return null;
+    return (Path*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+// Generic container unboxing: Item → void* (any container type)
+static inline void* it2p(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag < LMD_TYPE_LIST || tag > LMD_TYPE_FUNC) return null;
+    return (void*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+// Container boxing helper: native pointer → Item
+static inline Item p2it(void* ptr) {
+    if (!ptr) return ITEM_NULL;
+    return (Item)(uint64_t)(uintptr_t)ptr;
+}
+
+// Convert LambdaError* → Error Item (LMD_TYPE_ERROR-tagged pointer)
+static inline Item err2it(LambdaError* err) {
+    if (!err) return ITEM_NULL;
+    return (Item)(((uint64_t)LMD_TYPE_ERROR << 56) | (uint64_t)(uintptr_t)err);
+}
+
+// Convert Error Item → LambdaError* (extract pointer from tagged Item)
+static inline LambdaError* it2err(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_ERROR) return null;
+    return (LambdaError*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+#endif // !__cplusplus
+
+// ============================================================================
+// Per-type Ret* result structs (2-field: value + err)
+// Used by can_raise functions to return typed native values with error info.
+// Size: 16 bytes — fits in rax+rdx on x86-64, x0+x1 on ARM64.
+// err == NULL means success; err != NULL means error (check err->code).
+// ============================================================================
+
+typedef struct RetBool   { bool         value; LambdaError* err; } RetBool;
+typedef struct RetInt56  { int64_t      value; LambdaError* err; } RetInt56;   // Lambda int (56-bit inline)
+typedef struct RetInt64  { int64_t      value; LambdaError* err; } RetInt64;   // int64 (heap-allocated)
+typedef struct RetFloat  { double       value; LambdaError* err; } RetFloat;
+typedef struct RetString { String*      value; LambdaError* err; } RetString;
+typedef struct RetSymbol { Symbol*      value; LambdaError* err; } RetSymbol;
+typedef struct RetMap    { Map*         value; LambdaError* err; } RetMap;
+typedef struct RetList   { List*        value; LambdaError* err; } RetList;
+typedef struct RetElmt   { Element*     value; LambdaError* err; } RetElmt;
+typedef struct RetObj    { Object*      value; LambdaError* err; } RetObj;
+typedef struct RetArray  { Array*       value; LambdaError* err; } RetArray;
+typedef struct RetRange  { Range*       value; LambdaError* err; } RetRange;
+typedef struct RetPath   { Path*        value; LambdaError* err; } RetPath;
+#ifndef __cplusplus
+typedef struct RetItem   { Item         value; LambdaError* err; } RetItem;
+#endif
+
+// ============================================================================
+// Ret* constructor helpers
+// Naming: r + type_abbreviation + _ok / _err
+// ============================================================================
+
+// RetItem (boxed, universal — used by _b trampolines)
+// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
+#ifndef __cplusplus
+static inline RetItem ri_ok(Item value) {
+    RetItem r; r.value = value; r.err = null; return r;
+}
+static inline RetItem ri_err(LambdaError* error) {
+    RetItem r; r.value = ITEM_ERROR; r.err = error; return r;
+}
+#endif
+
+// RetBool
+static inline RetBool rb_ok(bool value) {
+    RetBool r; r.value = value; r.err = null; return r;
+}
+static inline RetBool rb_err(LambdaError* error) {
+    RetBool r; r.value = false; r.err = error; return r;
+}
+
+// RetInt56 (Lambda int)
+static inline RetInt56 ri56_ok(int64_t value) {
+    RetInt56 r; r.value = value; r.err = null; return r;
+}
+static inline RetInt56 ri56_err(LambdaError* error) {
+    RetInt56 r; r.value = 0; r.err = error; return r;
+}
+
+// RetInt64
+static inline RetInt64 ri64_ok(int64_t value) {
+    RetInt64 r; r.value = value; r.err = null; return r;
+}
+static inline RetInt64 ri64_err(LambdaError* error) {
+    RetInt64 r; r.value = 0; r.err = error; return r;
+}
+
+// RetFloat
+static inline RetFloat rf_ok(double value) {
+    RetFloat r; r.value = value; r.err = null; return r;
+}
+static inline RetFloat rf_err(LambdaError* error) {
+    RetFloat r; r.value = 0.0; r.err = error; return r;
+}
+
+// RetString
+static inline RetString rs_ok(String* value) {
+    RetString r; r.value = value; r.err = null; return r;
+}
+static inline RetString rs_err(LambdaError* error) {
+    RetString r; r.value = null; r.err = error; return r;
+}
+
+// RetSymbol
+static inline RetSymbol rsy_ok(Symbol* value) {
+    RetSymbol r; r.value = value; r.err = null; return r;
+}
+static inline RetSymbol rsy_err(LambdaError* error) {
+    RetSymbol r; r.value = null; r.err = error; return r;
+}
+
+// RetMap
+static inline RetMap rm_ok(Map* value) {
+    RetMap r; r.value = value; r.err = null; return r;
+}
+static inline RetMap rm_err(LambdaError* error) {
+    RetMap r; r.value = null; r.err = error; return r;
+}
+
+// RetList
+static inline RetList rl_ok(List* value) {
+    RetList r; r.value = value; r.err = null; return r;
+}
+static inline RetList rl_err(LambdaError* error) {
+    RetList r; r.value = null; r.err = error; return r;
+}
+
+// RetElmt
+static inline RetElmt re_ok(Element* value) {
+    RetElmt r; r.value = value; r.err = null; return r;
+}
+static inline RetElmt re_err(LambdaError* error) {
+    RetElmt r; r.value = null; r.err = error; return r;
+}
+
+// RetObj
+static inline RetObj ro_ok(Object* value) {
+    RetObj r; r.value = value; r.err = null; return r;
+}
+static inline RetObj ro_err(LambdaError* error) {
+    RetObj r; r.value = null; r.err = error; return r;
+}
+
+// RetArray
+static inline RetArray ra_ok(Array* value) {
+    RetArray r; r.value = value; r.err = null; return r;
+}
+static inline RetArray ra_err(LambdaError* error) {
+    RetArray r; r.value = null; r.err = error; return r;
+}
+
+// RetRange
+static inline RetRange rr_ok(Range* value) {
+    RetRange r; r.value = value; r.err = null; return r;
+}
+static inline RetRange rr_err(LambdaError* error) {
+    RetRange r; r.value = null; r.err = error; return r;
+}
+
+// RetPath
+static inline RetPath rp_ok(Path* value) {
+    RetPath r; r.value = value; r.err = null; return r;
+}
+static inline RetPath rp_err(LambdaError* error) {
+    RetPath r; r.value = null; r.err = error; return r;
+}
+
+// ============================================================================
+// Compatibility shims for incremental migration
+// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
+// ============================================================================
+#ifndef __cplusplus
+
+// Wrap a legacy Item-returning function result into RetItem
+static inline RetItem item_to_ri(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag == LMD_TYPE_ERROR)
+        return ri_err((LambdaError*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL));
+    return ri_ok(item);
+}
+
+// Extract Item from RetItem (for legacy callers expecting plain Item)
+static inline Item ri_to_item(RetItem ri) {
+    return ri.err ? err2it(ri.err) : ri.value;
+}
+
+#endif // !__cplusplus
+
 Array* array_fill(Array* arr, int count, ...);
 ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
 ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
@@ -720,7 +966,9 @@ typedef struct Context {
     Item push_d(double dval);
     Item push_l(int64_t lval);
     Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
+    Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
+    Item push_k_safe(DateTime val); // safe boxing: detects already-boxed DTIME Items
     Item push_c(int64_t cval);
 
     #define const_d2it(index)    d2it(rt->consts[index])
