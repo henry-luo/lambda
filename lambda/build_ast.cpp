@@ -209,32 +209,127 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false},     // m.set(k, v) -> in-place insert
 };
 
+// ============================================================================
+// O(1) System Function Lookup via Hashmap
+// ============================================================================
+// Two hashmaps:
+//   1. sys_func_map: composite key (name, arg_count) → SysFuncInfo*
+//      Used by get_sys_func_info() and get_sys_func_for_method()
+//   2. sys_func_name_set: name-only key → bool sentinel
+//      Used by is_sys_func_name()
+// Both are lazily initialized on first access.
+
+// Composite key for (name, arg_count) lookups
+typedef struct {
+    const char* name;
+    int name_len;
+    int arg_count;
+    SysFuncInfo* info;
+} SysFuncEntry;
+
+// Name-only key for existence checks
+typedef struct {
+    const char* name;
+    int name_len;
+} SysFuncNameEntry;
+
+static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
+static struct hashmap* sys_func_name_set = NULL;   // name → exists
+
+static uint64_t sys_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SysFuncEntry* e = (const SysFuncEntry*)item;
+    // hash the name and mix in arg_count
+    uint64_t h = hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+    h ^= (uint64_t)(e->arg_count + 2) * 0x9E3779B97F4A7C15ULL;  // +2 to keep -1 distinct
+    return h;
+}
+
+static int sys_func_compare(const void* a, const void* b, void* udata) {
+    const SysFuncEntry* ea = (const SysFuncEntry*)a;
+    const SysFuncEntry* eb = (const SysFuncEntry*)b;
+    if (ea->arg_count != eb->arg_count) return ea->arg_count - eb->arg_count;
+    if (ea->name_len != eb->name_len) return ea->name_len - eb->name_len;
+    return strncmp(ea->name, eb->name, ea->name_len);
+}
+
+static uint64_t sys_func_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SysFuncNameEntry* e = (const SysFuncNameEntry*)item;
+    return hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+}
+
+static int sys_func_name_compare(const void* a, const void* b, void* udata) {
+    const SysFuncNameEntry* ea = (const SysFuncNameEntry*)a;
+    const SysFuncNameEntry* eb = (const SysFuncNameEntry*)b;
+    if (ea->name_len != eb->name_len) return ea->name_len - eb->name_len;
+    return strncmp(ea->name, eb->name, ea->name_len);
+}
+
+static void init_sys_func_maps() {
+    if (sys_func_map) return;  // already initialized
+
+    const size_t count = sizeof(sys_funcs) / sizeof(sys_funcs[0]);
+
+    sys_func_map = hashmap_new(sizeof(SysFuncEntry), count * 2,
+        0, 0, sys_func_hash, sys_func_compare, NULL, NULL);
+
+    sys_func_name_set = hashmap_new(sizeof(SysFuncNameEntry), count * 2,
+        0, 0, sys_func_name_hash, sys_func_name_compare, NULL, NULL);
+
+    for (size_t i = 0; i < count; i++) {
+        int name_len = (int)strlen(sys_funcs[i].name);
+
+        // insert into composite-key map
+        SysFuncEntry entry = {
+            .name = sys_funcs[i].name,
+            .name_len = name_len,
+            .arg_count = sys_funcs[i].arg_count,
+            .info = &sys_funcs[i]
+        };
+        hashmap_set(sys_func_map, &entry);
+
+        // insert into name-only set (deduplicates automatically)
+        SysFuncNameEntry name_entry = {
+            .name = sys_funcs[i].name,
+            .name_len = name_len
+        };
+        hashmap_set(sys_func_name_set, &name_entry);
+    }
+
+    log_info("sys_func maps initialized: %zu entries, %zu unique names",
+             count, hashmap_count(sys_func_name_set));
+}
+
 // Check if a name matches any system function (regardless of arg count)
 // Returns true if the name is reserved for system functions
 bool is_sys_func_name(const char* name, int name_len) {
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        if ((int)strlen(sys_funcs[i].name) == name_len &&
-            strncmp(sys_funcs[i].name, name, name_len) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_sys_func_maps();
+    SysFuncNameEntry key = { .name = name, .name_len = name_len };
+    return hashmap_get(sys_func_name_set, &key) != NULL;
 }
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == arg_count) {
-            log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
-            return &sys_funcs[i];
-        }
+    init_sys_func_maps();
+
+    SysFuncEntry key = {
+        .name = name->str,
+        .name_len = (int)name->length,
+        .arg_count = arg_count,
+        .info = NULL
+    };
+    const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (found) {
+        log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
+        return found->info;
     }
+
     // fallback: match variadic functions (arg_count == -1)
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == -1) {
-            log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
-            return &sys_funcs[i];
-        }
+    key.arg_count = -1;
+    found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (found) {
+        log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
+        return found->info;
     }
+
     log_debug("don't have sys func: %.*s, %d", (int)name->length, name->str, arg_count);
     return NULL;
 }
@@ -243,48 +338,57 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
 // This searches for a sys func where arg_count includes the object (+1)
 // and validates that the function is method-eligible and type-compatible
 SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count, TypeId obj_type_id) {
+    init_sys_func_maps();
+
     // method_arg_count is the count of arguments in parentheses (not including obj)
     // sys func arg_count includes the object, so we add 1
     int total_arg_count = method_arg_count + 1;
 
-    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
-        SysFuncInfo* info = &sys_funcs[i];
-        if (strview_equal(method_name, info->name) && info->arg_count == total_arg_count) {
-            // Check if this function is method-eligible
-            if (!info->is_method_eligible) {
-                log_debug("method_call sys func '%.*s' not method-eligible",
-                    (int)method_name->length, method_name->str);
+    SysFuncEntry key = {
+        .name = method_name->str,
+        .name_len = (int)method_name->length,
+        .arg_count = total_arg_count,
+        .info = NULL
+    };
+    const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (!found) {
+        log_debug("method_call no sys func: %.*s, args=%d",
+            (int)method_name->length, method_name->str, total_arg_count);
+        return NULL;
+    }
+
+    SysFuncInfo* info = found->info;
+
+    // Check if this function is method-eligible
+    if (!info->is_method_eligible) {
+        log_debug("method_call sys func '%.*s' not method-eligible",
+            (int)method_name->length, method_name->str);
+        return NULL;
+    }
+
+    // Check type compatibility with first parameter
+    if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
+        if (info->first_param_type != obj_type_id) {
+            // Additional check for numeric types
+            bool type_compatible = false;
+            if (info->first_param_type == LMD_TYPE_NUMBER) {
+                type_compatible = (obj_type_id == LMD_TYPE_INT ||
+                                  obj_type_id == LMD_TYPE_INT64 ||
+                                  obj_type_id == LMD_TYPE_FLOAT ||
+                                  obj_type_id == LMD_TYPE_DECIMAL);
+            }
+            if (!type_compatible) {
+                log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
+                    (int)method_name->length, method_name->str,
+                    info->first_param_type, obj_type_id);
                 return NULL;
             }
-
-            // Check type compatibility with first parameter
-            if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
-                if (info->first_param_type != obj_type_id) {
-                    // Additional check for numeric types
-                    bool type_compatible = false;
-                    if (info->first_param_type == LMD_TYPE_NUMBER) {
-                        type_compatible = (obj_type_id == LMD_TYPE_INT ||
-                                          obj_type_id == LMD_TYPE_INT64 ||
-                                          obj_type_id == LMD_TYPE_FLOAT ||
-                                          obj_type_id == LMD_TYPE_DECIMAL);
-                    }
-                    if (!type_compatible) {
-                        log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
-                            (int)method_name->length, method_name->str,
-                            info->first_param_type, obj_type_id);
-                        return NULL;
-                    }
-                }
-            }
-
-            log_debug("method_call found sys func: %.*s, args=%d",
-                (int)method_name->length, method_name->str, total_arg_count);
-            return info;
         }
     }
-    log_debug("method_call no sys func: %.*s, args=%d",
+
+    log_debug("method_call found sys func: %.*s, args=%d",
         (int)method_name->length, method_name->str, total_arg_count);
-    return NULL;
+    return info;
 }
 
 // Check if arg_type is compatible with param_type for function calls
