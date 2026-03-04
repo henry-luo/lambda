@@ -527,7 +527,7 @@ Item fn_call(Function* fn, List* args) {
     void* env = fn->closure_env;
     log_debug("fn_call: arity=%d, arg_count=%d, env=%p", fn->arity, arg_count, env);
 
-    // For closures, env is passed as first argument
+    // For closures, env is passed as first argument (closures never have FN_FLAG_BOXED_RET)
     if (env) {
         switch (arg_count) {
             case 0: return ((Item(*)(void*))fn->ptr)(env);
@@ -544,7 +544,27 @@ Item fn_call(Function* fn, List* args) {
         }
     }
 
-    // Non-closure dispatch
+    // Non-closure dispatch: check if function returns RetItem (_b boxed wrapper)
+    if (fn->flags & FN_FLAG_BOXED_RET) {
+        RetItem ri;
+        switch (arg_count) {
+            case 0: ri = ((RetItem(*)())fn->ptr)(); break;
+            case 1: ri = ((RetItem(*)(Item))fn->ptr)(args->items[0]); break;
+            case 2: ri = ((RetItem(*)(Item,Item))fn->ptr)(args->items[0], args->items[1]); break;
+            case 3: ri = ((RetItem(*)(Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2]); break;
+            case 4: ri = ((RetItem(*)(Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3]); break;
+            case 5: ri = ((RetItem(*)(Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4]); break;
+            case 6: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5]); break;
+            case 7: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]); break;
+            case 8: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7]); break;
+            default:
+                log_error("fn_call: unsupported argument count %d (max 8)", arg_count);
+                return ItemError;
+        }
+        return ri_to_item(ri);
+    }
+
+    // Non-closure, Item-returning dispatch (legacy path)
     switch (arg_count) {
         case 0: return ((Item(*)())fn->ptr)();
         case 1: return ((Item(*)(Item))fn->ptr)(args->items[0]);
@@ -563,6 +583,7 @@ Item fn_call(Function* fn, List* args) {
 
 // Convenience wrappers for common arities (avoid List allocation)
 // For closures, env is passed as the first argument
+// For _b boxed functions (FN_FLAG_BOXED_RET), cast to RetItem return and convert via ri_to_item()
 Item fn_call0(Function* fn) {
     if (!is_valid_function(fn)) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: cannot call non-function value");
@@ -574,6 +595,8 @@ Item fn_call0(Function* fn) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*))fn->ptr)(fn->closure_env);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)())fn->ptr)());
     } else {
         return ((Item(*)())fn->ptr)();
     }
@@ -590,6 +613,8 @@ Item fn_call1(Function* fn, Item a) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)(Item))fn->ptr)(a));
     } else {
         return ((Item(*)(Item))fn->ptr)(a);
     }
@@ -606,6 +631,8 @@ Item fn_call2(Function* fn, Item a, Item b) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)(Item,Item))fn->ptr)(a, b));
     } else {
         return ((Item(*)(Item,Item))fn->ptr)(a, b);
     }
@@ -622,6 +649,8 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
     }
     if (fn->closure_env) {
         return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
+    } else if (fn->flags & FN_FLAG_BOXED_RET) {
+        return ri_to_item(((RetItem(*)(Item,Item,Item))fn->ptr)(a, b, c));
     } else {
         return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
     }
@@ -1960,7 +1989,7 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
 }
 
-Item fn_input2(Item target_item, Item type) {
+RetItem fn_input2(Item target_item, Item type) {
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
         log_debug("dry-run: fabricated input() call");
@@ -1979,7 +2008,7 @@ Item fn_input2(Item target_item, Item type) {
             }
         }
         String* result_str = heap_strcpy((char*)content, strlen(content));
-        return {.item = s2it(result_str)};
+        return ri_ok({.item = s2it(result_str)});
     }
     String *type_str = NULL, *flavor_str = NULL;
 
@@ -1987,7 +2016,7 @@ Item fn_input2(Item target_item, Item type) {
     TypeId target_type_id = get_type_id(target_item);
     if (target_type_id != LMD_TYPE_STRING && target_type_id != LMD_TYPE_SYMBOL && target_type_id != LMD_TYPE_PATH) {
         log_debug("input target must be a string, symbol, or path, got type: %s", get_type_name(target_type_id));
-        return ItemNull;  // todo: push error
+        return ri_ok(ItemNull);  // todo: push error
     }
 
     // Convert target Item to Target struct
@@ -1995,7 +2024,7 @@ Item fn_input2(Item target_item, Item type) {
     Target* target = item_to_target(target_item.item, cwd);
     if (!target) {
         log_error("fn_input2: failed to convert item to target");
-        return ItemNull;
+        return ri_ok(ItemNull);
     }
 
     log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
@@ -2050,14 +2079,14 @@ Item fn_input2(Item target_item, Item type) {
     else {
         log_debug("input type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
         target_free(target);
-        return ItemNull;  // todo: push error
+        return ri_ok(ItemNull);  // todo: push error
     }
 
     // Check if context is properly initialized
     if (!context) {
         log_debug("Error: context is NULL in fn_input");
         target_free(target);
-        return ItemNull;
+        return ri_ok(ItemNull);
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
@@ -2067,11 +2096,11 @@ Item fn_input2(Item target_item, Item type) {
     target_free(target);
 
     // todo: input should be cached in context
-    return (input && input->root.item) ? input->root : ItemNull;
+    return ri_ok((input && input->root.item) ? input->root : ItemNull);
 }
 
 // declared extern "C" to allow calling from C code (path.c)
-extern "C" Item fn_input1(Item url) {
+extern "C" RetItem fn_input1(Item url) {
     return fn_input2(url, ItemNull);
 }
 
@@ -2080,17 +2109,17 @@ extern "C" Item fn_input1(Item url) {
 // 2nd arg can be a format symbol ('json, 'yaml, etc.) or an options map like input().
 extern "C" Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 
-Item fn_parse2(Item str_item, Item type) {
-    GUARD_ERROR2(str_item, type);
+RetItem fn_parse2(Item str_item, Item type) {
+    GUARD_ERROR_RI2(str_item, type);
 
     // first arg must be a string
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING) {
         log_error("parse: 1st argument must be a string, got type: %s", get_type_name(str_type));
-        return ItemError;
+        return item_to_ri(ItemError);
     }
     String* str = str_item.get_string();
-    if (!str || !str->chars) return ItemNull;
+    if (!str || !str->chars) return ri_ok(ItemNull);
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
@@ -2127,7 +2156,7 @@ Item fn_parse2(Item str_item, Item type) {
     }
     else {
         log_error("parse: 2nd argument must be a format symbol or options map, got type: %s", get_type_name(type_id));
-        return ItemError;
+        return item_to_ri(ItemError);
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)
@@ -2136,10 +2165,10 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     Input* input = input_from_source(str->chars, dummy_url, type_str, flavor_str);
-    return (input && input->root.item) ? input->root : ItemNull;
+    return ri_ok((input && input->root.item) ? input->root : ItemNull);
 }
 
-Item fn_parse1(Item str_item) {
+RetItem fn_parse1(Item str_item) {
     return fn_parse2(str_item, ItemNull);
 }
 
@@ -2683,6 +2712,29 @@ int64_t fn_len(Item item) {
         break;
     }
     return size;
+}
+
+// Native len variants — type-specialized, avoid Item type switch overhead
+// Used when compile-time type is known.
+
+extern "C" int64_t fn_len_l(List* list) {
+    if (!list) return 0;
+    return list->length;
+}
+
+extern "C" int64_t fn_len_a(Array* arr) {
+    if (!arr) return 0;
+    return arr->length;
+}
+
+extern "C" int64_t fn_len_s(String* str) {
+    if (!str) return 0;
+    return str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str->chars, str->len);
+}
+
+extern "C" int64_t fn_len_e(Element* elmt) {
+    if (!elmt) return 0;
+    return elmt->length;
 }
 
 // substring system function - extracts a substring from start to end (exclusive)

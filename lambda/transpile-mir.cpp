@@ -1301,11 +1301,11 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 
             // Handle imported function references
             if (ident->entry->import) {
-                // Get the function name (use wrapper for typed params)
+                // Get the function name (use boxed wrapper for typed params)
                 StrBuf* fn_import_name = strbuf_new_cap(64);
                 bool use_wrapper = (entry_node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(fn_node));
                 if (use_wrapper) {
-                    write_fn_name_ex(fn_import_name, fn_node, NULL, "_w");
+                    write_fn_name_ex(fn_import_name, fn_node, NULL, "_b");
                 } else {
                     write_fn_name(fn_import_name, fn_node, NULL);
                 }
@@ -3718,11 +3718,11 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
 
             // Determine the import function name:
-            // Use wrapper (_w) for typed-param functions, direct for untyped
+            // Use boxed wrapper (_b) for typed-param functions, direct for untyped
             StrBuf* fn_import_name = strbuf_new_cap(64);
             bool use_wrapper = (entry_node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(fn_node));
             if (use_wrapper) {
-                write_fn_name_ex(fn_import_name, fn_node, NULL, "_w");
+                write_fn_name_ex(fn_import_name, fn_node, NULL, "_b");
             } else {
                 write_fn_name(fn_import_name, fn_node, NULL);
             }
@@ -6450,10 +6450,10 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
                             AstFuncNode* fn_node = (AstFuncNode*)mod_child;
                             TypeFunc* fn_type = (TypeFunc*)fn_node->type;
                             if (fn_type && fn_type->is_public) {
-                                // Register the wrapper version if it exists, otherwise direct
+                                // Register the boxed wrapper version if it exists, otherwise direct
                                 StrBuf* fn_name = strbuf_new_cap(64);
                                 if (mod_child->node_type != AST_NODE_PROC && needs_fn_call_wrapper(fn_node)) {
-                                    write_fn_name_ex(fn_name, fn_node, NULL, "_w");
+                                    write_fn_name_ex(fn_name, fn_node, NULL, "_b");
                                     void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
                                     if (fn_ptr) {
                                         register_dynamic_import(strdup(fn_name->str), fn_ptr);

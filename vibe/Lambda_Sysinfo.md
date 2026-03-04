@@ -400,6 +400,6 @@ The following paths are reserved for future implementation:
 
 ## See Also
 
-- [Lambda Path Mapping](Lambda_Path.md) - URL and file path mapping to Lambda paths
+- [Lambda Path Mapping](Lambda_Expr_Path.md) - URL and file path mapping to Lambda paths
 - [Lambda File System](Lambda_File%20(idea).md) - File system operations proposal
 - [Lambda Reference](../doc/Lambda_Reference.md) - Core language reference

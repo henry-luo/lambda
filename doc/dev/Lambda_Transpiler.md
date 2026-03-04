@@ -49,7 +49,6 @@ typedef struct Transpiler : Script {
     AstFuncNode* current_closure;  // non-null inside a closure body
     AstFuncNode* tco_func;        // non-null inside a TCO-enabled function
     bool in_tail_position;         // tail position tracking for TCO
-    bool in_unboxed_body;          // inside unboxed (_u) function variant
     int pipe_inject_args;          // pipe context: extra arg count
     int temp_var_counter;          // unique counter for generated temps
     AstObjectTypeNode* method_owner;  // non-null inside method body

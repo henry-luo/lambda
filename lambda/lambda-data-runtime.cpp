@@ -12,7 +12,7 @@ void array_set(Array* arr, int index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 Item typeditem_to_item(TypedItem *titem);
-Item fn_input1(Item url);
+RetItem fn_input1(Item url);
 
 // External: path resolution for iteration (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);

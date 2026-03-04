@@ -54,6 +54,7 @@ extern double log2(double x);
 extern double cbrt(double x);
 // truncation / misc
 extern double trunc(double x);
+extern double fmod(double x, double y);
 extern double hypot(double y, double x);
 extern double log1p(double x);
 #endif
@@ -362,13 +363,17 @@ Item item_spread(Item item);
 
 typedef void* (*fn_ptr)();
 
+// Function flags (stored in Function.flags field)
+#define FN_FLAG_BOXED_RET  0x01  // bit 0: fn->ptr returns RetItem instead of Item
+
 // Function as first-class value
 // Supports both direct function references and closures
 struct Function {
     uint8_t type_id;
     uint8_t arity;               // number of parameters (0-255)
     uint8_t closure_field_count;  // number of Item fields in closure_env (0 if not a closure)
-    // --- 5 bytes padding --- (offset 3..7)
+    uint8_t flags;               // function flags (FN_FLAG_BOXED_RET, etc.)
+    // --- 4 bytes padding --- (offset 4..7)
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
@@ -650,6 +655,222 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): ITEM_NULL)
 #define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): ITEM_NULL)
 
+// ============================================================================
+// Forward declaration for structured error handling
+// ============================================================================
+typedef struct LambdaError LambdaError;
+
+// ============================================================================
+// Container unboxing helpers: Item → native container pointer
+// These validate the type tag and extract the pointer; return NULL on mismatch.
+// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
+// ============================================================================
+
+#ifndef __cplusplus
+// Container unboxing: Item → native pointer (simple cast).
+// Container Items store direct pointers (no type tag in the high bits),
+// so no masking is needed — just cast to the target pointer type.
+#define it2map(item)    ((Map*)(uintptr_t)(item))
+#define it2list(item)   ((List*)(uintptr_t)(item))
+#define it2elmt(item)   ((Element*)(uintptr_t)(item))
+#define it2obj(item)    ((Object*)(uintptr_t)(item))
+#define it2arr(item)    ((Array*)(uintptr_t)(item))
+#define it2range(item)  ((Range*)(uintptr_t)(item))
+#define it2path(item)   ((Path*)(uintptr_t)(item))
+#define it2p(item)      ((void*)(uintptr_t)(item))
+
+// Container boxing helper: native pointer → Item
+static inline Item p2it(void* ptr) {
+    if (!ptr) return ITEM_NULL;
+    return (Item)(uint64_t)(uintptr_t)ptr;
+}
+
+// Convert LambdaError* → Error Item (LMD_TYPE_ERROR-tagged pointer)
+static inline Item err2it(LambdaError* err) {
+    if (!err) return ITEM_NULL;
+    return (Item)(((uint64_t)LMD_TYPE_ERROR << 56) | (uint64_t)(uintptr_t)err);
+}
+
+// Convert Error Item → LambdaError* (extract pointer from tagged Item)
+static inline LambdaError* it2err(Item item) {
+    uint8_t tag = (uint64_t)item >> 56;
+    if (tag != LMD_TYPE_ERROR) return null;
+    return (LambdaError*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL);
+}
+#endif // !__cplusplus
+
+// ============================================================================
+// Per-type Ret* result structs (2-field: value + err)
+// Used by can_raise functions to return typed native values with error info.
+// Size: 16 bytes — fits in rax+rdx on x86-64, x0+x1 on ARM64.
+// err == NULL means success; err != NULL means error (check err->code).
+// ============================================================================
+
+typedef struct RetBool   { bool         value; LambdaError* err; } RetBool;
+typedef struct RetInt56  { int64_t      value; LambdaError* err; } RetInt56;   // Lambda int (56-bit inline)
+typedef struct RetInt64  { int64_t      value; LambdaError* err; } RetInt64;   // int64 (heap-allocated)
+typedef struct RetFloat  { double       value; LambdaError* err; } RetFloat;
+typedef struct RetString { String*      value; LambdaError* err; } RetString;
+typedef struct RetSymbol { Symbol*      value; LambdaError* err; } RetSymbol;
+typedef struct RetMap    { Map*         value; LambdaError* err; } RetMap;
+typedef struct RetList   { List*        value; LambdaError* err; } RetList;
+typedef struct RetElmt   { Element*     value; LambdaError* err; } RetElmt;
+typedef struct RetObj    { Object*      value; LambdaError* err; } RetObj;
+typedef struct RetArray  { Array*       value; LambdaError* err; } RetArray;
+typedef struct RetRange  { Range*       value; LambdaError* err; } RetRange;
+typedef struct RetPath   { Path*        value; LambdaError* err; } RetPath;
+#ifndef __cplusplus
+typedef struct RetItem   { Item         value; LambdaError* err; } RetItem;
+#endif
+#ifdef __cplusplus
+struct RetItem;  // full definition in lambda.hpp
+#endif
+
+// ============================================================================
+// Ret* constructor helpers
+// Naming: r + type_abbreviation + _ok / _err
+// ============================================================================
+
+// RetItem (boxed, universal — used by _b trampolines)
+// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
+#ifndef __cplusplus
+static inline RetItem ri_ok(Item value) {
+    RetItem r; r.value = value; r.err = null; return r;
+}
+static inline RetItem ri_err(LambdaError* error) {
+    RetItem r; r.value = ITEM_ERROR; r.err = error; return r;
+}
+#endif
+
+// RetBool
+static inline RetBool rb_ok(bool value) {
+    RetBool r; r.value = value; r.err = null; return r;
+}
+static inline RetBool rb_err(LambdaError* error) {
+    RetBool r; r.value = false; r.err = error; return r;
+}
+
+// RetInt56 (Lambda int)
+static inline RetInt56 ri56_ok(int64_t value) {
+    RetInt56 r; r.value = value; r.err = null; return r;
+}
+static inline RetInt56 ri56_err(LambdaError* error) {
+    RetInt56 r; r.value = 0; r.err = error; return r;
+}
+
+// RetInt64
+static inline RetInt64 ri64_ok(int64_t value) {
+    RetInt64 r; r.value = value; r.err = null; return r;
+}
+static inline RetInt64 ri64_err(LambdaError* error) {
+    RetInt64 r; r.value = 0; r.err = error; return r;
+}
+
+// RetFloat
+static inline RetFloat rf_ok(double value) {
+    RetFloat r; r.value = value; r.err = null; return r;
+}
+static inline RetFloat rf_err(LambdaError* error) {
+    RetFloat r; r.value = 0.0; r.err = error; return r;
+}
+
+// RetString
+static inline RetString rs_ok(String* value) {
+    RetString r; r.value = value; r.err = null; return r;
+}
+static inline RetString rs_err(LambdaError* error) {
+    RetString r; r.value = null; r.err = error; return r;
+}
+
+// RetSymbol
+static inline RetSymbol rsy_ok(Symbol* value) {
+    RetSymbol r; r.value = value; r.err = null; return r;
+}
+static inline RetSymbol rsy_err(LambdaError* error) {
+    RetSymbol r; r.value = null; r.err = error; return r;
+}
+
+// RetMap
+static inline RetMap rm_ok(Map* value) {
+    RetMap r; r.value = value; r.err = null; return r;
+}
+static inline RetMap rm_err(LambdaError* error) {
+    RetMap r; r.value = null; r.err = error; return r;
+}
+
+// RetList
+static inline RetList rl_ok(List* value) {
+    RetList r; r.value = value; r.err = null; return r;
+}
+static inline RetList rl_err(LambdaError* error) {
+    RetList r; r.value = null; r.err = error; return r;
+}
+
+// RetElmt
+static inline RetElmt re_ok(Element* value) {
+    RetElmt r; r.value = value; r.err = null; return r;
+}
+static inline RetElmt re_err(LambdaError* error) {
+    RetElmt r; r.value = null; r.err = error; return r;
+}
+
+// RetObj
+static inline RetObj ro_ok(Object* value) {
+    RetObj r; r.value = value; r.err = null; return r;
+}
+static inline RetObj ro_err(LambdaError* error) {
+    RetObj r; r.value = null; r.err = error; return r;
+}
+
+// RetArray
+static inline RetArray ra_ok(Array* value) {
+    RetArray r; r.value = value; r.err = null; return r;
+}
+static inline RetArray ra_err(LambdaError* error) {
+    RetArray r; r.value = null; r.err = error; return r;
+}
+
+// RetRange
+static inline RetRange rr_ok(Range* value) {
+    RetRange r; r.value = value; r.err = null; return r;
+}
+static inline RetRange rr_err(LambdaError* error) {
+    RetRange r; r.value = null; r.err = error; return r;
+}
+
+// RetPath
+static inline RetPath rp_ok(Path* value) {
+    RetPath r; r.value = value; r.err = null; return r;
+}
+static inline RetPath rp_err(LambdaError* error) {
+    RetPath r; r.value = null; r.err = error; return r;
+}
+
+// ============================================================================
+// Compatibility shims for incremental migration
+// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
+// ============================================================================
+#ifndef __cplusplus
+
+// Wrap a legacy Item-returning function result into RetItem
+// Note: Error Items (from fn_error()) don't carry a real LambdaError* pointer.
+// They're just tagged values (LMD_TYPE_ERROR in high 8 bits, pointer=0).
+// So we store the error Item in .value and use .err as a boolean sentinel.
+static inline RetItem item_to_ri(Item item) {
+    RetItem r;
+    r.value = item;
+    r.err = ((uint64_t)item >> 56 == LMD_TYPE_ERROR) ? (LambdaError*)1 : null;
+    return r;
+}
+
+// Extract Item from RetItem (for legacy callers expecting plain Item)
+// .value always holds the actual Item — whether error or normal value.
+static inline Item ri_to_item(RetItem ri) {
+    return ri.value;
+}
+
+#endif // !__cplusplus
+
 Array* array_fill(Array* arr, int count, ...);
 ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
 ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
@@ -720,7 +941,9 @@ typedef struct Context {
     Item push_d(double dval);
     Item push_l(int64_t lval);
     Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
+    Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
+    Item push_k_safe(DateTime val); // safe boxing: detects already-boxed DTIME Items
     Item push_c(int64_t cval);
 
     #define const_d2it(index)    d2it(rt->consts[index])
@@ -876,8 +1099,14 @@ typedef struct Context {
     double fn_abs_f(double x);
     int64_t fn_neg_i(int64_t x);
     double fn_neg_f(double x);
-    int64_t fn_mod_i(int64_t a, int64_t b);
-    int64_t fn_idiv_i(int64_t a, int64_t b);
+    int64_t fn_mod_i(int64_t a, int64_t b);    // handles div-by-zero (returns INT64_ERROR)
+    int64_t fn_idiv_i(int64_t a, int64_t b);   // handles div-by-zero (returns INT64_ERROR)
+
+    // Collection length — type-specialized native variants
+    int64_t fn_len_l(List* list);       // list length
+    int64_t fn_len_a(Array* arr);       // array length
+    int64_t fn_len_s(String* str);      // string length (UTF-8 aware)
+    int64_t fn_len_e(Element* elmt);    // element children count
 
     // Boolean operations
     Bool fn_not_u(Bool x);
@@ -957,10 +1186,10 @@ typedef struct Context {
     // returns the name of an element, function, or type as a symbol
     Symbol* fn_name(Item item);
 
-    Item fn_input1(Item url);
-    Item fn_input2(Item url, Item options);
-    Item fn_parse1(Item str);
-    Item fn_parse2(Item str, Item options);
+    RetItem fn_input1(Item url);
+    RetItem fn_input2(Item url, Item options);
+    RetItem fn_parse1(Item str);
+    RetItem fn_parse2(Item str, Item options);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
@@ -988,24 +1217,24 @@ typedef struct Context {
     // procedural functions
     Item pn_print(Item item);
     double pn_clock();        // clock() - high-resolution monotonic time in seconds
-    Item pn_cmd1(Item cmd);
-    Item pn_cmd2(Item cmd, Item args);
-    Item pn_fetch(Item url, Item options);
-    Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
-    Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
-    Item pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
+    RetItem pn_cmd1(Item cmd);
+    RetItem pn_cmd2(Item cmd, Item args);
+    RetItem pn_fetch(Item url, Item options);
+    RetItem pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
+    RetItem pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
+    RetItem pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
 
     // io module functions (procedural)
-    Item pn_io_copy(Item src, Item dst);
-    Item pn_io_move(Item src, Item dst);
-    Item pn_io_delete(Item path);
-    Item pn_io_mkdir(Item path);
-    Item pn_io_touch(Item path);
-    Item pn_io_symlink(Item target, Item link);
-    Item pn_io_chmod(Item path, Item mode);
-    Item pn_io_rename(Item old_path, Item new_path);
-    Item pn_io_fetch1(Item target);
-    Item pn_io_fetch2(Item target, Item options);
+    RetItem pn_io_copy(Item src, Item dst);
+    RetItem pn_io_move(Item src, Item dst);
+    RetItem pn_io_delete(Item path);
+    RetItem pn_io_mkdir(Item path);
+    RetItem pn_io_touch(Item path);
+    RetItem pn_io_symlink(Item target, Item link);
+    RetItem pn_io_chmod(Item path, Item mode);
+    RetItem pn_io_rename(Item old_path, Item new_path);
+    RetItem pn_io_fetch1(Item target);
+    RetItem pn_io_fetch2(Item target, Item options);
 
     // bitwise functions (integer operations)
     int64_t fn_band(int64_t a, int64_t b);
