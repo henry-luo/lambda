@@ -501,15 +501,6 @@ func_obj_t func_list[] = {
     {"array_int_new", (fn_ptr) array_int_new},
     {"array_int_set", (fn_ptr) array_int_set},
     {"get_runtime_pool", (fn_ptr) get_runtime_pool},
-    // container unboxing
-    {"it2map",   (fn_ptr) it2map},
-    {"it2list",  (fn_ptr) it2list},
-    {"it2elmt",  (fn_ptr) it2elmt},
-    {"it2obj",   (fn_ptr) it2obj},
-    {"it2arr",   (fn_ptr) it2arr},
-    {"it2range", (fn_ptr) it2range},
-    {"it2path",  (fn_ptr) it2path},
-    {"it2p",     (fn_ptr) it2p},
     // container boxing
     {"p2it",     (fn_ptr) p2it},
     // error conversion

@@ -285,46 +285,18 @@ struct Object : Container {
 // C versions are in lambda.h (where Item = uint64_t)
 // ============================================================================
 
-static inline Map* it2map(Item item) {
-    if (item._type_id != LMD_TYPE_MAP && item._type_id != LMD_TYPE_VMAP) return null;
-    return (Map*)(uintptr_t)item.item;
-}
+// Container unboxing: Item → native pointer.
+// Container Items store direct pointers (no type tag in the high bits),
+// so just return the typed union field.
 
-static inline List* it2list(Item item) {
-    if (item._type_id != LMD_TYPE_LIST) return null;
-    return (List*)(uintptr_t)item.item;
-}
-
-static inline Element* it2elmt(Item item) {
-    if (item._type_id != LMD_TYPE_ELEMENT) return null;
-    return (Element*)(uintptr_t)item.item;
-}
-
-static inline Object* it2obj(Item item) {
-    if (item._type_id != LMD_TYPE_OBJECT) return null;
-    return (Object*)(uintptr_t)item.item;
-}
-
-static inline Array* it2arr(Item item) {
-    if (item._type_id != LMD_TYPE_ARRAY) return null;
-    return (Array*)(uintptr_t)item.item;
-}
-
-static inline Range* it2range(Item item) {
-    if (item._type_id != LMD_TYPE_RANGE) return null;
-    return (Range*)(uintptr_t)item.item;
-}
-
-static inline Path* it2path(Item item) {
-    if (item._type_id != LMD_TYPE_PATH) return null;
-    return (Path*)(uintptr_t)item.item;
-}
-
-static inline void* it2p(Item item) {
-    TypeId tid = item._type_id;
-    if (tid < LMD_TYPE_LIST || tid > LMD_TYPE_FUNC) return null;
-    return (void*)(uintptr_t)item.item;
-}
+static inline Map*     it2map(Item item)   { return item.map; }
+static inline List*    it2list(Item item)   { return item.list; }
+static inline Element* it2elmt(Item item)   { return item.element; }
+static inline Object*  it2obj(Item item)    { return item.object; }
+static inline Array*   it2arr(Item item)    { return item.array; }
+static inline Range*   it2range(Item item)  { return item.range; }
+static inline Path*    it2path(Item item)   { return item.path; }
+static inline void*    it2p(Item item)      { return (void*)item.container; }
 
 static inline Item p2it(void* ptr) {
     if (!ptr) return ItemNull;
