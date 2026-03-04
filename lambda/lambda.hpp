@@ -174,6 +174,13 @@ extern Item ItemError;
     if (get_type_id(b) == LMD_TYPE_ERROR) return (b); \
     if (get_type_id(c) == LMD_TYPE_ERROR) return (c)
 
+// RetItem-returning error guards: propagate error as RetItem
+#define GUARD_ERROR_RI1(a) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return item_to_ri(a)
+#define GUARD_ERROR_RI2(a, b) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return item_to_ri(a); \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return item_to_ri(b)
+
 // Bool-returning function guards: propagate error as BOOL_ERROR
 #define GUARD_BOOL_ERROR1(a) \
     if (get_type_id(a) == LMD_TYPE_ERROR) return BOOL_ERROR
@@ -279,3 +286,57 @@ struct Object : Container {
     ConstItem get(const char* key_str) const;
     bool has_field(const char* field_name) const;
 };
+
+// ============================================================================
+// C++ versions of Item-using inline helpers (Item is fully defined here)
+// C versions are in lambda.h (where Item = uint64_t)
+// ============================================================================
+
+// Container unboxing: Item → native pointer.
+// Container Items store direct pointers (no type tag in the high bits),
+// so just return the typed union field.
+
+static inline Map*     it2map(Item item)   { return item.map; }
+static inline List*    it2list(Item item)   { return item.list; }
+static inline Element* it2elmt(Item item)   { return item.element; }
+static inline Object*  it2obj(Item item)    { return item.object; }
+static inline Array*   it2arr(Item item)    { return item.array; }
+static inline Range*   it2range(Item item)  { return item.range; }
+static inline Path*    it2path(Item item)   { return item.path; }
+static inline void*    it2p(Item item)      { return (void*)item.container; }
+
+static inline Item p2it(void* ptr) {
+    if (!ptr) return ItemNull;
+    return Item{.item = (uint64_t)(uintptr_t)ptr};
+}
+
+static inline Item err2it(LambdaError* err) {
+    if (!err) return ItemNull;
+    return Item{.item = ((uint64_t)LMD_TYPE_ERROR << 56) | (uint64_t)(uintptr_t)err};
+}
+
+static inline LambdaError* it2err(Item item) {
+    if (item._type_id != LMD_TYPE_ERROR) return null;
+    return (LambdaError*)(uintptr_t)(item.item & 0x00FFFFFFFFFFFFFFULL);
+}
+
+// RetItem — C++ version (Item is complete here)
+typedef struct RetItem { Item value; LambdaError* err; } RetItem;
+
+static inline RetItem ri_ok(Item value) {
+    RetItem r; r.value = value; r.err = null; return r;
+}
+static inline RetItem ri_err(LambdaError* error) {
+    RetItem r; r.value = ItemError; r.err = error; return r;
+}
+
+static inline RetItem item_to_ri(Item item) {
+    RetItem r;
+    r.value = item;
+    r.err = (item._type_id == LMD_TYPE_ERROR) ? (LambdaError*)1 : nullptr;
+    return r;
+}
+
+static inline Item ri_to_item(RetItem ri) {
+    return ri.value;
+}

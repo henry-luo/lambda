@@ -2208,15 +2208,21 @@ extern "C" double fn_neg_f(double x) {
     return -x;
 }
 
-// Integer modulo
+// Integer modulo (handles div-by-zero: returns INT64_ERROR)
 extern "C" int64_t fn_mod_i(int64_t a, int64_t b) {
-    // Note: caller is responsible for ensuring b != 0
+    if (b == 0) {
+        log_error("modulo by zero error");
+        return INT64_ERROR;
+    }
     return a % b;
 }
 
-// Integer division
+// Integer division (handles div-by-zero: returns INT64_ERROR)
 extern "C" int64_t fn_idiv_i(int64_t a, int64_t b) {
-    // Note: caller is responsible for ensuring b != 0
+    if (b == 0) {
+        log_error("integer division by zero error");
+        return INT64_ERROR;
+    }
     return a / b;
 }
 

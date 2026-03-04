@@ -8,9 +8,10 @@ extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void transpile_expr_tco(Transpiler* tp, AstNode *expr_node, bool in_tail_position);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
-void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node);
+void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node);
 void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node);
 bool has_typed_params(AstFuncNode* fn_node);
+Type* resolve_native_ret_type(AstFuncNode* fn_node);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global);
@@ -36,6 +37,162 @@ static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* 
 static void emit_direct_field_write(Transpiler* tp, AstNode* object, ShapeEntry* field, AstNode* value);
 static void emit_struct_typedefs(Transpiler* tp);
 static bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type);
+
+// Return the unbox function name for a given container TypeId (Item → native pointer).
+// Returns NULL for non-container or unknown types (caller should fall back to transpile_box_item).
+static const char* get_container_unbox_fn(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_MAP:     return "it2map";
+    case LMD_TYPE_LIST:    return "it2list";
+    case LMD_TYPE_ELEMENT: return "it2elmt";
+    case LMD_TYPE_OBJECT:  return "it2obj";
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_ARRAY_FLOAT:
+                           return "it2arr";
+    case LMD_TYPE_RANGE:   return "it2range";
+    case LMD_TYPE_PATH:    return "it2path";
+    case LMD_TYPE_FUNC:    return "it2p";  // generic container unbox for Function*
+    default:               return NULL;
+    }
+}
+
+// ============================================================================
+// Phase 4: TypeBoxInfo — centralized type metadata table
+// Maps TypeId → C type name, unbox/box function names, literal boxing functions,
+// and default zero values. Used by emit helpers and refactored boxing/unboxing code.
+// ============================================================================
+
+typedef struct TypeBoxInfo {
+    TypeId type_id;
+    const char* c_type;        // C type string: "int64_t", "double", "Map*", etc.
+    const char* unbox_fn;      // Item → native: "it2i", "it2map", etc. (NULL if N/A)
+    const char* box_fn;        // native → Item: "i2it", "push_d", etc. (NULL for containers)
+    const char* const_box_fn;  // literal → Item: "const_l2it", etc. (NULL if no literal path)
+    const char* zero_value;    // default/zero value for missing params: "0", "NULL", etc.
+} TypeBoxInfo;
+
+static const TypeBoxInfo type_box_table[] = {
+    // scalars: have both box and unbox functions
+    {LMD_TYPE_BOOL,       "bool",      "it2b",     "b2it",    NULL,          "0"},
+    {LMD_TYPE_INT,        "int64_t",   "it2i",     "i2it",    NULL,          "0"},
+    {LMD_TYPE_INT64,      "int64_t",   "it2l",     "push_l",  "const_l2it",  "0"},
+    {LMD_TYPE_FLOAT,      "double",    "it2d",     "push_d",  "const_d2it",  "0.0"},
+    {LMD_TYPE_DTIME,      "DateTime",  "it2k",     "push_k",  "const_k2it",  "{0}"},
+    {LMD_TYPE_DECIMAL,    "Decimal*",  "it2c",     "c2it",    "const_c2it",  "NULL"},
+    // string-like types
+    {LMD_TYPE_STRING,     "String*",   "it2s",     "s2it",    "const_s2it",  "NULL"},
+    {LMD_TYPE_SYMBOL,     "Symbol*",   "it2s",     "y2it",    "const_y2it",  "NULL"},
+    {LMD_TYPE_BINARY,     "String*",   "it2s",     "x2it",    "const_x2it",  "NULL"},
+    // containers: have unbox_fn, box uses (Item)(ptr) cast (box_fn=NULL)
+    {LMD_TYPE_MAP,        "Map*",      "it2map",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_LIST,       "List*",     "it2list",  NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ELEMENT,    "Element*",  "it2elmt",  NULL,      NULL,          "NULL"},
+    {LMD_TYPE_OBJECT,     "Object*",   "it2obj",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY,      "Array*",    "it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_INT,  "ArrayInt*", "it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_INT64,"ArrayInt64*","it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_FLOAT,"ArrayFloat*","it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_RANGE,      "Range*",    "it2range", NULL,      NULL,          "NULL"},
+    {LMD_TYPE_PATH,       "Path*",     "it2path",  NULL,      NULL,          "NULL"},
+    {LMD_TYPE_FUNC,       "Function*", "it2p",     NULL,      NULL,          "NULL"},
+    {LMD_TYPE_TYPE,       "Type*",     NULL,        NULL,      NULL,          "NULL"},
+};
+static const int TYPE_BOX_TABLE_SIZE = sizeof(type_box_table) / sizeof(type_box_table[0]);
+
+// Look up boxing/unboxing metadata for a given TypeId.
+// Returns NULL for ANY, NULL, ERROR, NUMBER, and other types not in the table.
+static const TypeBoxInfo* get_box_info(TypeId tid) {
+    for (int i = 0; i < TYPE_BOX_TABLE_SIZE; i++) {
+        if (type_box_table[i].type_id == tid) return &type_box_table[i];
+    }
+    return NULL;
+}
+
+// ============================================================================
+// Emit helpers: table-driven box/unbox emission
+// ============================================================================
+
+// Emit the opening of an unbox wrapper: "it2i(" for INT, "it2map(" for MAP, etc.
+// Returns true if a wrapper was emitted (caller must emit closing ")").
+static bool emit_unbox_open(Transpiler* tp, TypeId tid) {
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (info && info->unbox_fn) {
+        strbuf_append_str(tp->code_buf, info->unbox_fn);
+        strbuf_append_char(tp->code_buf, '(');
+        return true;
+    }
+    return false;
+}
+
+// Emit the opening of a box wrapper: "i2it(" for INT, "push_d(" for FLOAT, etc.
+// For container types (box_fn=NULL), emits "(Item)(" cast instead.
+// Returns true if a wrapper was emitted (caller must emit closing ")").
+static bool emit_box_open(Transpiler* tp, TypeId tid) {
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (!info) return false;
+    if (info->box_fn) {
+        strbuf_append_str(tp->code_buf, info->box_fn);
+        strbuf_append_char(tp->code_buf, '(');
+    } else {
+        // container pointer: use (Item)(ptr) cast
+        strbuf_append_str(tp->code_buf, "(Item)(");
+    }
+    return true;
+}
+
+// Emit the default/zero value for a given TypeId (for missing parameters).
+// Returns true if a value was emitted, false if type is unknown.
+static bool emit_zero_value(Transpiler* tp, TypeId tid) {
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (info) {
+        strbuf_append_str(tp->code_buf, info->zero_value);
+        return true;
+    }
+    return false;
+}
+
+// Check if the current function context returns RetItem (can_raise, non-closure, non-method).
+// Used to determine whether return statements should produce RetItem or Item.
+static bool current_func_returns_retitem(Transpiler* tp) {
+    if (!tp->current_func_node) return false;
+    TypeFunc* fn_type = (TypeFunc*)tp->current_func_node->type;
+    if (!fn_type || !fn_type->can_raise) return false;
+    if (tp->current_func_node->captures) return false; // closures return Item
+    if (tp->method_owner) return false; // methods return Item
+    return true;
+}
+
+// Check if the callee of a call node returns RetItem.
+// Returns true for: (1) user-defined can_raise functions (non-closure, non-method),
+// and (2) system functions with can_raise=true (Phase 2.7 migration).
+static bool callee_returns_retitem(AstCallNode* call_node) {
+    AstNode* fn_expr = call_node->function;
+    if (!fn_expr) return false;
+    if (fn_expr->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)fn_expr;
+        if (pri->expr) fn_expr = pri->expr;
+    }
+    // System function: check can_raise on SysFuncInfo
+    if (fn_expr->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys_fn = (AstSysFuncNode*)fn_expr;
+        return sys_fn->fn_info && sys_fn->fn_info->can_raise;
+    }
+    if (fn_expr->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)fn_expr;
+        if (ident->entry && ident->entry->node) {
+            AstNode* entry_node = ident->entry->node;
+            if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC) {
+                AstFuncNode* fn_node = (AstFuncNode*)entry_node;
+                if (fn_node->captures) return false; // closures return Item
+                TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                return fn_type && fn_type->can_raise;
+            }
+        }
+    }
+    return false;
+}
 
 // hashmap comparison and hashing functions for func_name_map
 static int func_name_cmp(const void *a, const void *b, void *udata) {
@@ -316,58 +473,44 @@ static const NativeBinaryFunc* can_use_native_binary_func(AstSysFuncNode* sys_fn
     return NULL;
 }
 
-// Check if all arguments can use the unboxed call path
-// Returns true if we can call the _u version directly
+// Check if a direct call to the native function returns a native scalar that
+// the caller can't detect via fn_type->returned (which is still ANY).
+// When true, the call site wraps with i2it() to convert native int64_t → Item.
+// When the declared return IS a scalar, transpile_box_item handles boxing instead.
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     if (!fn_node || !has_typed_params(fn_node)) return false;
 
-    // Don't use unboxed for procs - no _u version is generated for them
+    // Procs don't have native scalar returns
     if (fn_node->node_type == AST_NODE_PROC) return false;
 
-    // Don't use unboxed for TCO functions - they need the goto-based implementation
+    // TCO functions use goto-based implementation, return Item
     if (should_use_tco(fn_node)) {
         return false;
     }
 
-    // Check that the function has a specific return type (not ANY)
-    // This is required so transpile_box_item can properly wrap the result
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-    Type* ret_type = fn_type ? fn_type->returned : nullptr;
+    Type* declared_ret = fn_type ? fn_type->returned : nullptr;
+    Type* native_ret = resolve_native_ret_type(fn_node);
 
-    log_debug("can_use_unboxed_call: fn=%.*s ret_type=%d",
+    log_debug("can_use_unboxed_call: fn=%.*s declared=%d native=%d",
         (int)fn_node->name->len, fn_node->name->chars,
-        ret_type ? ret_type->type_id : -1);
+        declared_ret ? declared_ret->type_id : -1,
+        native_ret ? native_ret->type_id : -1);
 
-    // If the boxed version already returns a native type (explicit scalar return),
-    // there's no benefit to using the unboxed version - they're the same
-    if (ret_type && (ret_type->type_id == LMD_TYPE_INT ||
-                     ret_type->type_id == LMD_TYPE_FLOAT ||
-                     ret_type->type_id == LMD_TYPE_BOOL)) {
-        log_debug("can_use_unboxed_call: returning false (boxed already returns native)");
+    // If declared return is already a specific scalar, transpile_box_item handles
+    // boxing at the call site — no need for i2it wrapping here.
+    if (declared_ret && (declared_ret->type_id == LMD_TYPE_INT ||
+                         declared_ret->type_id == LMD_TYPE_FLOAT ||
+                         declared_ret->type_id == LMD_TYPE_BOOL)) {
+        log_debug("can_use_unboxed_call: false (declared scalar, transpile_box_item handles)");
         return false;
     }
 
-    // If return type is ANY, try to infer from body's last expression
-    if ((!ret_type || ret_type->type_id == LMD_TYPE_ANY) && fn_node->body) {
-        if (fn_node->body->node_type == AST_NODE_CONTENT) {
-            AstListNode* content = (AstListNode*)fn_node->body;
-            AstNode* last_expr = content->item;
-            while (last_expr && last_expr->next) {
-                last_expr = last_expr->next;
-            }
-            if (last_expr && last_expr->type) {
-                ret_type = last_expr->type;
-                log_debug("inferred ret_type from content: %d", ret_type->type_id);
-            }
-        } else if (fn_node->body->type) {
-            ret_type = fn_node->body->type;
-            log_debug("inferred ret_type from body: %d", ret_type->type_id);
-        }
-    }
-
-    // Only use unboxed if return type is a specific scalar (INT for now)
-    if (!ret_type || ret_type->type_id != LMD_TYPE_INT) {
-        log_debug("can_use_unboxed_call: returning false (ret_type not INT)");
+    // If native return is a scalar but declared is ANY, the caller (transpile_box_item)
+    // doesn't know the native function returns int64_t — we need i2it wrapping.
+    // Currently only INT is handled; FLOAT/BOOL can be added later.
+    if (!native_ret || native_ret->type_id != LMD_TYPE_INT) {
+        log_debug("can_use_unboxed_call: false (native ret_type not INT)");
         return false;
     }
 
@@ -441,8 +584,8 @@ bool has_typed_params(AstFuncNode* fn_node) {
     return false;
 }
 
-// Check if a function needs a fn_call*-compatible wrapper (_w suffix).
-// fn_call* casts function pointers to Item(*)(Item,...) ABI.
+// Check if a function needs a fn_call*-compatible boxed wrapper (_b suffix).
+// fn_call* dispatches through function pointers with Item params and RetItem return.
 // A wrapper is needed when the function's native signature doesn't match this ABI:
 //   - Has typed params (native types instead of Item)
 //   - Returns a native type AND has no params (e.g., fn g() { 42 })
@@ -456,12 +599,16 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
     // Functions with typed params need param unboxing wrapper
     if (has_typed_params(fn_node)) return true;
 
+    // can_raise non-closure/non-method functions return RetItem from the main function,
+    // which doesn't match fn_call*'s Item ABI — need a _b wrapper
+    if (fn_type->can_raise) return true;
+
     // Functions with ALL untyped params: body uses Item-level ops → effectively returns Item
     // No wrapper needed (fn_call* can use the function directly)
     if (fn_node->param) return false;
 
     // Functions with NO params: body may return raw native values → needs wrapper
-    if (!fn_type->can_raise) {
+    {
         Type *ret_type = fn_type->returned;
         if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
         if (!ret_type) ret_type = &TYPE_ANY;
@@ -479,7 +626,7 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
 }
 
 // Write function name with optional suffix for boxed/unboxed versions
-// suffix: NULL for legacy names, "_b" for boxed, "_u" for unboxed
+// suffix: NULL for native names, "_b" for boxed wrapper
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix) {
     if (import) {
         strbuf_append_format(strbuf, "m%d.", import->script->index);
@@ -862,7 +1009,15 @@ static bool is_idiv_expr(AstNode* node) {
     }
     if (node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* bin = (AstBinaryNode*)node;
-    return bin->op == OPERATOR_IDIV;
+    if (bin->op != OPERATOR_IDIV) return false;
+    // When both operands are INT/INT64, transpiler uses fn_idiv_i which returns
+    // native int64_t — no need for it2i unboxing. Only return true when the
+    // boxed fn_idiv() path is used (returns Item).
+    TypeId lt = bin->left->type ? bin->left->type->type_id : LMD_TYPE_ANY;
+    TypeId rt = bin->right->type ? bin->right->type->type_id : LMD_TYPE_ANY;
+    bool both_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
+                    (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+    return !both_int;  // true only when boxed fn_idiv() is used
 }
 
 // Check if a binary expression uses Item-returning runtime functions (fn_add, fn_sub, fn_mul)
@@ -881,10 +1036,17 @@ static bool binary_already_returns_item(AstNode* node) {
                          LMD_TYPE_INT <= rt && rt <= LMD_TYPE_FLOAT);
 
     switch (bin_node->op) {
-    case OPERATOR_IDIV:
+    case OPERATOR_IDIV: {
+        // Native fn_idiv_i for INT/INT64 operands returns int64_t (needs boxing)
+        // Boxed fn_idiv for other types returns Item (no boxing needed)
+        bool both_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
+                        (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+        return !both_int;
+    }
     case OPERATOR_MOD:
-        // Always use Item-returning fn_idiv/fn_mod
-        return true;
+        // Native fn_mod_i (int) or fmod (float) for numeric operands returns native type
+        // Boxed fn_mod for non-numeric returns Item
+        return !both_numeric;
     case OPERATOR_POW:
         // Numeric → push_d(fn_pow_u(...)) returns double* which needs boxing
         // Non-numeric → fn_pow returns Item
@@ -934,6 +1096,43 @@ static bool direct_call_returns_item(AstNode* node) {
     // body uses Item-level operations → returns Item effectively
     if (fn_node->param && !has_typed_params(fn_node)) return true;
     return false;
+}
+
+// Table-driven scalar boxing: handles BOOL, INT, INT64, FLOAT, DTIME, DECIMAL,
+// STRING, SYMBOL, BINARY. Checks for optional/closure params and captured vars
+// (already stored as Item), then handles literal and non-literal boxing.
+// Returns true if the value was emitted, false if the caller should handle it.
+static bool try_box_scalar(Transpiler* tp, AstNode* item) {
+    TypeId tid = item->type->type_id;
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (!info || !info->box_fn) return false;  // not a scalar we can box via table
+
+    // Check if this is a param/closure/captured reference (already Item at runtime)
+    if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
+        emit_param_item(tp, item);
+        return true;
+    }
+    if (is_captured_var_ref(tp, item)) {
+        emit_captured_var_item(tp, item);
+        return true;
+    }
+
+    // Literal path: const_X2it(const_index)
+    if (item->type->is_literal && info->const_box_fn) {
+        strbuf_append_str(tp->code_buf, info->const_box_fn);
+        strbuf_append_char(tp->code_buf, '(');
+        TypeConst* ct = (TypeConst*)item->type;
+        strbuf_append_int(tp->code_buf, ct->const_index);
+        strbuf_append_char(tp->code_buf, ')');
+        return true;
+    }
+
+    // Non-literal: box_fn(expr)
+    strbuf_append_str(tp->code_buf, info->box_fn);
+    strbuf_append_char(tp->code_buf, '(');
+    transpile_expr(tp, item);
+    strbuf_append_char(tp->code_buf, ')');
+    return true;
 }
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
@@ -1023,141 +1222,17 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             transpile_expr(tp, item);
         }
         break;
-    case LMD_TYPE_BOOL:
-        // Check if this is a closure parameter (already Item type at runtime)
-        if (is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        strbuf_append_str(tp->code_buf, "b2it(");
-        transpile_expr(tp, item);
-        strbuf_append_char(tp->code_buf, ')');
-        break;
-    case LMD_TYPE_INT: {
-        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
-        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-
-        strbuf_append_str(tp->code_buf, "i2it(");
-        transpile_expr(tp, item);
-        strbuf_append_char(tp->code_buf, ')');
-        break;
-    }
-    case LMD_TYPE_INT64:
-        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
-        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_l2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
-        }
-        else {
-            log_enter();
-            log_debug("transpile_box_item: push_l");
-            strbuf_append_str(tp->code_buf, "push_l(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-            log_leave();
-        }
-        break;
-    case LMD_TYPE_FLOAT:
-        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
-        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_d2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        else {
-            strbuf_append_str(tp->code_buf, "push_d(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        break;
-    case LMD_TYPE_DTIME:
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_k2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        else {
-            // non-literal datetime expression
-            strbuf_append_str(tp->code_buf, "push_k(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        break;
-    case LMD_TYPE_DECIMAL:
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_c2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        else {
-            // non-literal decimal expression
-            strbuf_append_str(tp->code_buf, "c2it(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
+    case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT:  case LMD_TYPE_DTIME:  case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
+        // Table-driven scalar boxing: handles optional/closure params, captured vars,
+        // literal const boxing, and non-literal boxing via TypeBoxInfo table
+        try_box_scalar(tp, item);
         break;
     case LMD_TYPE_NUMBER:
         // NUMBER type is a union of int/float - transpile the expression directly
         transpile_expr(tp, item);
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
-            item->type->type_id == LMD_TYPE_SYMBOL ? 'y' :
-            item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
-        if (item->type->is_literal) {
-            strbuf_append_format(tp->code_buf, "const_%c2it(", t);
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
-        }
-        else {
-            strbuf_append_format(tp->code_buf, "%c2it(", t);
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        break;
-    }
     case LMD_TYPE_LIST:
         // Single-value CONTENT blocks are handled above (before the switch).
         // Multi-value content/list: list_end() already returns Item.
@@ -1197,47 +1272,38 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     if (entry_node && (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC)) {
                         AstFuncNode* fn_node = (AstFuncNode*)entry_node;
                         TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-                        // If function can raise errors, it returns Item - no boxing needed
-                        if (fn_type && fn_type->can_raise) {
-                            log_debug("transpile_box_item: function '%.*s' can_raise, returns Item - no boxing",
-                                (int)fn_node->name->len, fn_node->name->chars);
-                            transpile_expr(tp, item);
+                        // If function can raise errors, it returns RetItem — extract Item via ri_to_item()
+                        // UNLESS '^' propagation is active — in that case, the propagation pattern
+                        // already extracts .value (an Item) from the RetItem, so no wrapping needed.
+                        if (fn_type && fn_type->can_raise && !fn_node->captures) {
+                            if (call_node->propagate) {
+                                // '^' propagation handles RetItem→Item extraction — emit as-is
+                                log_debug("transpile_box_item: function '%.*s' can_raise with ^ propagation - no wrapping",
+                                    (int)fn_node->name->len, fn_node->name->chars);
+                                transpile_expr(tp, item);
+                            } else {
+                                log_debug("transpile_box_item: function '%.*s' can_raise, returns RetItem - wrap in ri_to_item()",
+                                    (int)fn_node->name->len, fn_node->name->chars);
+                                strbuf_append_str(tp->code_buf, "ri_to_item(");
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                            }
                             break;
                         }
-                        if (fn_type && fn_type->returned && fn_type->returned->type_id != LMD_TYPE_ANY) {
-                            // function has a typed return - need to box it appropriately
-                            TypeId ret_type_id = fn_type->returned->type_id;
-                            log_debug("transpile_box_item: forward-ref call to '%.*s' with return type %d",
-                                (int)fn_node->name->len, fn_node->name->chars, ret_type_id);
-                            if (ret_type_id == LMD_TYPE_FLOAT) {
-                                strbuf_append_str(tp->code_buf, "push_d(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (ret_type_id == LMD_TYPE_INT) {
-                                strbuf_append_str(tp->code_buf, "i2it(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (ret_type_id == LMD_TYPE_INT64) {
-                                strbuf_append_str(tp->code_buf, "push_l(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (ret_type_id == LMD_TYPE_BOOL) {
-                                strbuf_append_str(tp->code_buf, "b2it(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (ret_type_id == LMD_TYPE_STRING || ret_type_id == LMD_TYPE_SYMBOL || ret_type_id == LMD_TYPE_BINARY) {
-                                char t = ret_type_id == LMD_TYPE_STRING ? 's' :
-                                    ret_type_id == LMD_TYPE_SYMBOL ? 'y' : 'x';
-                                strbuf_append_format(tp->code_buf, "%c2it(", t);
+                        // Check the actual native return type — may differ from fn_type->returned
+                        // when resolve_native_ret_type infers a scalar from the body.
+                        Type* native_ret = resolve_native_ret_type(fn_node);
+                        TypeId native_ret_id = native_ret ? native_ret->type_id : LMD_TYPE_ANY;
+                        if (native_ret_id != LMD_TYPE_ANY) {
+                            // function returns a native type - need to box it appropriately
+                            log_debug("transpile_box_item: call to '%.*s' with native return type %d",
+                                (int)fn_node->name->len, fn_node->name->chars, native_ret_id);
+                            if (emit_box_open(tp, native_ret_id)) {
                                 transpile_expr(tp, item);
                                 strbuf_append_char(tp->code_buf, ')');
                                 break;
                             }
-                            // for other types (containers), fall through to default behavior
+                            // for unknown types, fall through to default behavior
                         }
                     }
                 }
@@ -1282,24 +1348,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     // access captured variable via env
                     // env stores Items, so we may need to unbox depending on usage
                     TypeId type_id = pri_node->type->type_id;
-                    if (type_id == LMD_TYPE_INT) {
-                        strbuf_append_str(tp->code_buf, "it2i(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_INT64) {
-                        strbuf_append_str(tp->code_buf, "it2l(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2d(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_BOOL) {
-                        strbuf_append_str(tp->code_buf, "it2b(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
-                        strbuf_append_str(tp->code_buf, "it2s(cenv->");
+                    const TypeBoxInfo* info = get_box_info(type_id);
+                    if (info && info->unbox_fn) {
+                        strbuf_append_str(tp->code_buf, info->unbox_fn);
+                        strbuf_append_str(tp->code_buf, "(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
@@ -1322,24 +1374,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 if (needs_unboxing) {
                     // parameter passed as Item - needs unboxing to actual type
                     TypeId type_id = pri_node->type->type_id;
-                    if (type_id == LMD_TYPE_INT) {
-                        strbuf_append_str(tp->code_buf, "it2i(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_INT64) {
-                        strbuf_append_str(tp->code_buf, "it2l(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2d(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_BOOL) {
-                        strbuf_append_str(tp->code_buf, "it2b(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
-                        strbuf_append_str(tp->code_buf, "it2s(_");
+                    const TypeBoxInfo* info = get_box_info(type_id);
+                    if (info && info->unbox_fn) {
+                        strbuf_append_str(tp->code_buf, info->unbox_fn);
+                        strbuf_append_str(tp->code_buf, "(_");
                         strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
@@ -1407,12 +1445,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         strbuf_append_format(tp->code_buf, "  _fn->closure_field_count = %d; _fn; })", cap_count);
                     } else {
                         // Regular function without captures - use to_fn_named for stack traces
-                        strbuf_append_format(tp->code_buf, "to_fn_named(");
-                        // use _w wrapper for functions with non-Item ABI so fn_call* works correctly
-                        if (needs_fn_call_wrapper(fn_node)) {
+                        bool use_boxed = needs_fn_call_wrapper(fn_node);
+                        if (use_boxed) {
+                            // _b wrapper returns RetItem — set FN_FLAG_BOXED_RET on the Function
+                            strbuf_append_str(tp->code_buf, "({ Function* _fn = to_fn_named(");
                             write_fn_name_ex(tp->code_buf, fn_node,
-                                (AstImportNode*)ident_node->entry->import, "_w");
+                                (AstImportNode*)ident_node->entry->import, "_b");
                         } else {
+                            strbuf_append_format(tp->code_buf, "to_fn_named(");
                             write_fn_name(tp->code_buf, fn_node,
                                 (AstImportNode*)ident_node->entry->import);
                         }
@@ -1430,6 +1470,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
                         }
                         strbuf_append_char(tp->code_buf, ')');
+                        if (use_boxed) {
+                            strbuf_append_str(tp->code_buf, "; _fn->flags = FN_FLAG_BOXED_RET; _fn; })");
+                        }
                     }
                 }
                 else if (entry_node->node_type == AST_NODE_STRING_PATTERN || entry_node->node_type == AST_NODE_SYMBOL_PATTERN) {
@@ -1762,7 +1805,27 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MOD) {
-        // Always use boxed fn_mod() for proper division-by-zero error handling
+        // Native fast path for typed integer mod (fn_mod_i handles div-by-zero)
+        if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64)) {
+            strbuf_append_str(tp->code_buf, "fn_mod_i((int64_t)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(int64_t)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+        // Native fast path for typed float mod
+        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+            strbuf_append_str(tp->code_buf, "fmod((double)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(double)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+        // Fallback: boxed fn_mod() for unknown types
         strbuf_append_str(tp->code_buf, "fn_mod(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -1787,7 +1850,17 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IDIV) {
-        // Always use boxed fn_idiv() for proper division-by-zero error handling
+        // Native fast path for typed integer division (fn_idiv_i handles div-by-zero)
+        if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64)) {
+            strbuf_append_str(tp->code_buf, "fn_idiv_i((int64_t)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(int64_t)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+            return;
+        }
+        // Fallback: boxed fn_idiv() for unknown types
         strbuf_append_str(tp->code_buf, "fn_idiv(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -2089,23 +2162,54 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     // error destructuring: let name^err_name = expr
     if (asn_node->error_name) {
         int tmp_id = tp->temp_var_counter++;
-        // emit temp variable for the full result (may be value or error)
-        strbuf_append_format(tp->code_buf, "\n Item et%d=", tmp_id);
-        transpile_expr(tp, asn_node->as);
-        strbuf_append_char(tp->code_buf, ';');
 
-        // emit value variable: null if error, value otherwise
-        strbuf_append_str(tp->code_buf, "\n ");
-        if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
-        write_var_name(tp->code_buf, asn_node, NULL);
-        strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?ITEM_NULL:et%d;", tmp_id, tmp_id);
+        // Check if the RHS is a call to a user can_raise function (returns RetItem directly)
+        AstNode* rhs_expr = asn_node->as;
+        AstNode* rhs_check = rhs_expr;
+        if (rhs_check->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)rhs_check;
+            if (pri->expr) rhs_check = pri->expr;
+        }
+        bool rhs_retitem = (rhs_check->node_type == AST_NODE_CALL_EXPR) &&
+                           callee_returns_retitem((AstCallNode*)rhs_check);
 
-        // emit error variable: error if error, null otherwise
-        strbuf_append_str(tp->code_buf, "\n ");
-        if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
-        strbuf_append_str(tp->code_buf, "_");
-        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
-        strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?et%d:ITEM_NULL;", tmp_id, tmp_id);
+        if (rhs_retitem) {
+            // RHS returns RetItem — use structured .value / .err fields
+            strbuf_append_format(tp->code_buf, "\n RetItem _ri%d=", tmp_id);
+            transpile_expr(tp, rhs_expr);
+            strbuf_append_char(tp->code_buf, ';');
+
+            // emit value variable: null if error, value otherwise
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            write_var_name(tp->code_buf, asn_node, NULL);
+            strbuf_append_format(tp->code_buf, "=_ri%d.err?ITEM_NULL:_ri%d.value;", tmp_id, tmp_id);
+
+            // emit error variable: error Item is stored in .value (sentinel approach)
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            strbuf_append_str(tp->code_buf, "_");
+            strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+            strbuf_append_format(tp->code_buf, "=_ri%d.err?_ri%d.value:ITEM_NULL;", tmp_id, tmp_id);
+        } else {
+            // RHS returns Item (system function or non-call) — use legacy item_type_id check
+            strbuf_append_format(tp->code_buf, "\n Item et%d=", tmp_id);
+            transpile_expr(tp, rhs_expr);
+            strbuf_append_char(tp->code_buf, ';');
+
+            // emit value variable: null if error, value otherwise
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            write_var_name(tp->code_buf, asn_node, NULL);
+            strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?ITEM_NULL:et%d;", tmp_id, tmp_id);
+
+            // emit error variable: error if error, null otherwise
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            strbuf_append_str(tp->code_buf, "_");
+            strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+            strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?et%d:ITEM_NULL;", tmp_id, tmp_id);
+        }
 
         tp->current_assign_name = prev_assign_name;
         return;
@@ -2764,6 +2868,10 @@ static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNod
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn = (AstSysFuncNode*)fn_node;
+        bool sys_can_raise = sys_fn->fn_info && sys_fn->fn_info->can_raise;
+
+        // can_raise system functions return RetItem — unwrap to Item for pipe context
+        if (sys_can_raise) strbuf_append_str(tp->code_buf, "ri_to_item(");
 
         // If pipe_inject is set, the fn_info already points to the N+1 arg version
         // Just emit the call with left as first arg
@@ -2786,6 +2894,9 @@ static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNod
         }
 
         strbuf_append_char(tp->code_buf, ')');
+
+        // Close ri_to_item( wrapper
+        if (sys_can_raise) strbuf_append_char(tp->code_buf, ')');
     } else {
         // For user-defined functions, fall back to fn_pipe_call
         strbuf_append_str(tp->code_buf, "fn_pipe_call(");
@@ -3283,6 +3394,9 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
         tp->in_tail_position = true;
     }
 
+    // Check if enclosing function returns RetItem (can_raise, non-closure, non-method)
+    bool func_retitem = current_func_returns_retitem(tp);
+
     strbuf_append_str(tp->code_buf, "\nreturn ");
     if (return_node->value) {
         // check if enclosing function returns native type (not Item)
@@ -3300,27 +3414,44 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
         if (func_returns_native) {
             transpile_expr(tp, return_node->value);
         } else {
+            // can_raise functions return RetItem — wrap boxed value in item_to_ri()
+            if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
             transpile_box_item(tp, return_node->value);
+            if (func_retitem) strbuf_append_char(tp->code_buf, ')');
         }
     } else {
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        if (func_retitem)
+            strbuf_append_str(tp->code_buf, "ri_ok(ITEM_NULL)");
+        else
+            strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
     strbuf_append_char(tp->code_buf, ';');
 
     tp->in_tail_position = prev_in_tail;
 }
 
-// raise statement - returns an error value from function
-// For now, raise expr simply returns expr (the error value)
-// Future: validate expr is error type, set error metadata
+// raise statement — returns an error value from function.
+// In can_raise functions returning RetItem, wraps error in ri_err(it2err(...)).
 void transpile_raise(Transpiler* tp, AstRaiseNode *raise_node) {
     log_debug("transpile raise stam");
+    bool func_retitem = current_func_returns_retitem(tp);
     strbuf_append_str(tp->code_buf, "\nreturn ");
-    if (raise_node->value) {
-        transpile_box_item(tp, raise_node->value);
+    if (func_retitem) {
+        // can_raise function returns RetItem — wrap error in item_to_ri()
+        // (item_to_ri detects error tag and creates ri_err internally)
+        strbuf_append_str(tp->code_buf, "item_to_ri(");
+        if (raise_node->value) {
+            transpile_box_item(tp, raise_node->value);
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        }
+        strbuf_append_char(tp->code_buf, ')');
     } else {
-        // raise with no value - return generic error
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        if (raise_node->value) {
+            transpile_box_item(tp, raise_node->value);
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        }
     }
     strbuf_append_char(tp->code_buf, ';');
 }
@@ -3335,19 +3466,19 @@ void transpile_pipe_file_stam(Transpiler* tp, AstBinaryNode *pipe_node) {
     }
 
     if (pipe_node->op == OPERATOR_PIPE_APPEND) {
-        // Use pn_output_append for |>> (append mode)
-        strbuf_append_str(tp->code_buf, "pn_output_append(");
+        // Use pn_output_append for |>> (append mode) — returns RetItem, unwrap to Item
+        strbuf_append_str(tp->code_buf, "ri_to_item(pn_output_append(");
         transpile_box_item(tp, pipe_node->left);  // source data
         strbuf_append_str(tp->code_buf, ", ");
         transpile_box_item(tp, pipe_node->right);  // file path
-        strbuf_append_char(tp->code_buf, ')');
+        strbuf_append_str(tp->code_buf, "))");
     } else {
-        // Use pn_output2 for |> (write mode, default)
-        strbuf_append_str(tp->code_buf, "pn_output2(");
+        // Use pn_output2 for |> (write mode, default) — returns RetItem, unwrap to Item
+        strbuf_append_str(tp->code_buf, "ri_to_item(pn_output2(");
         transpile_box_item(tp, pipe_node->left);  // source data
         strbuf_append_str(tp->code_buf, ", ");
         transpile_box_item(tp, pipe_node->right);  // file path
-        strbuf_append_char(tp->code_buf, ')');
+        strbuf_append_str(tp->code_buf, "))");
     }
 }
 
@@ -4451,20 +4582,8 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
             // No default value - use null/zero for missing parameters
             // For typed params, use native zero values to match the function's native param types
             if (param_type && !param_type->is_optional) {
-                switch (param_type->type_id) {
-                case LMD_TYPE_INT:
-                case LMD_TYPE_INT64:
-                    strbuf_append_str(tp->code_buf, "0");
-                    break;
-                case LMD_TYPE_FLOAT:
-                    strbuf_append_str(tp->code_buf, "0.0");
-                    break;
-                case LMD_TYPE_BOOL:
-                    strbuf_append_str(tp->code_buf, "0");
-                    break;
-                default:
+                if (!emit_zero_value(tp, param_type->type_id)) {
                     strbuf_append_str(tp->code_buf, "ITEM_NULL");
-                    break;
                 }
             } else {
                 strbuf_append_str(tp->code_buf, "ITEM_NULL");
@@ -4583,20 +4702,18 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 transpile_box_item(tp, value);
             }
         }
-        // container pointer types: cast Item to Map*/Object*/Element*
-        // (MIR JIT uses different calling conv for pointer vs uint64_t params)
-        else if (param_type->type_id == LMD_TYPE_MAP ||
-                 param_type->type_id == LMD_TYPE_OBJECT ||
-                 param_type->type_id == LMD_TYPE_ELEMENT) {
+        // container pointer types: safely unbox Item to Map*/Object*/Element*/List*/Array*/Range*/Path*
+        else if (get_container_unbox_fn(param_type->type_id)) {
             if (value_emits_native_type(tp, value, param_type->type_id)) {
                 // value already produces native pointer — emit directly
                 transpile_expr(tp, value);
             } else {
-                // value produces Item — cast to container pointer type
-                strbuf_append_str(tp->code_buf, "(");
-                write_type(tp->code_buf, (Type*)param_type);
-                strbuf_append_str(tp->code_buf, ")");
+                // value produces Item — use safe type-checking unbox helper
+                const char* unbox_fn = get_container_unbox_fn(param_type->type_id);
+                strbuf_append_str(tp->code_buf, unbox_fn);
+                strbuf_append_char(tp->code_buf, '(');
                 transpile_box_item(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
             }
         }
         else {
@@ -4691,26 +4808,26 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
                     strbuf_append_str(tp->code_buf, "it2b(");
                     transpile_expr(tp, arg);
                     strbuf_append_char(tp->code_buf, ')');
-                } else if (param_tid == LMD_TYPE_MAP || param_tid == LMD_TYPE_OBJECT ||
-                           param_tid == LMD_TYPE_ELEMENT) {
-                    // cast Item to container pointer
-                    strbuf_append_str(tp->code_buf, "(");
-                    write_type(tp->code_buf, param_type);
-                    strbuf_append_str(tp->code_buf, ")");
+                } else if (get_container_unbox_fn(param_tid)) {
+                    // safely unbox Item to container pointer
+                    const char* unbox_fn = get_container_unbox_fn(param_tid);
+                    strbuf_append_str(tp->code_buf, unbox_fn);
+                    strbuf_append_char(tp->code_buf, '(');
                     transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
                 } else {
                     transpile_expr(tp, arg);
                 }
-            } else if (param_tid == LMD_TYPE_MAP || param_tid == LMD_TYPE_OBJECT ||
-                       param_tid == LMD_TYPE_ELEMENT) {
-                // same type but may need Item→pointer cast
+            } else if (get_container_unbox_fn(param_tid)) {
+                // same type but may need Item→pointer unbox
                 if (value_emits_native_type(tp, arg, param_tid)) {
                     transpile_expr(tp, arg);
                 } else {
-                    strbuf_append_str(tp->code_buf, "(");
-                    write_type(tp->code_buf, param_type);
-                    strbuf_append_str(tp->code_buf, ")");
+                    const char* unbox_fn = get_container_unbox_fn(param_tid);
+                    strbuf_append_str(tp->code_buf, unbox_fn);
+                    strbuf_append_char(tp->code_buf, '(');
                     transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
                 }
             } else {
                 transpile_expr(tp, arg);
@@ -4770,11 +4887,18 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         return;
     }
 
-    // '?' propagation: emit opening wrapper before the call
+    // '^' propagation: emit opening wrapper before the call
+    // Use RetItem for structured error checking instead of sentinel-value LMD_TYPE_ERROR
     int prop_id = -1;
+    bool prop_callee_retitem = false;  // true if callee returns RetItem directly
     if (call_node->propagate) {
         prop_id = tp->temp_var_counter;  // will be incremented at the end
-        strbuf_append_format(tp->code_buf, "({Item ep%d=", prop_id);
+        prop_callee_retitem = callee_returns_retitem(call_node);
+        strbuf_append_format(tp->code_buf, "({RetItem _ri%d=", prop_id);
+        if (!prop_callee_retitem) {
+            // Unknown callee returns Item — wrap in item_to_ri() for uniform RetItem handling
+            strbuf_append_str(tp->code_buf, "item_to_ri(");
+        }
     }
 
     // TCO: Check if this is a tail-recursive call that should be transformed to goto
@@ -4793,8 +4917,6 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     bool is_sys_func = (call_node->function->node_type == AST_NODE_SYS_FUNC);
     bool is_fn_variable = false;  // true if calling through a function variable (need fn_call)
     bool is_direct_call = true;   // true if we can use direct function call
-    bool use_unboxed = false;     // true if calling the unboxed version (need to rebox result)
-    TypeId unboxed_return_type = LMD_TYPE_ANY;  // return type of unboxed version for boxing
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
@@ -4839,6 +4961,36 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 emit_bitwise_arg(tp, first_arg);
                 strbuf_append_char(tp->code_buf, ')');
                 return;
+            }
+
+            // ==== Native len() for typed collections/strings ====
+            if (strcmp(fn_name, "len") == 0) {
+                if (arg_type == LMD_TYPE_LIST) {
+                    strbuf_append_str(tp->code_buf, "fn_len_l((List*)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+                if (arg_type == LMD_TYPE_ARRAY || arg_type == LMD_TYPE_ARRAY_INT ||
+                    arg_type == LMD_TYPE_ARRAY_INT64 || arg_type == LMD_TYPE_ARRAY_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "fn_len_a((Array*)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+                if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+                    strbuf_append_str(tp->code_buf, "fn_len_s(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                    return;
+                }
+                if (arg_type == LMD_TYPE_ELEMENT) {
+                    strbuf_append_str(tp->code_buf, "fn_len_e((Element*)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+                // Fallback: use generic fn_len(Item) for unknown types
             }
         }
 
@@ -5064,36 +5216,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC)) {
                     // Direct function reference - use direct call
                     fn_node = (AstFuncNode*)entry_node;  // save for named args lookup
-                    // Check if we can use the unboxed version
-                    use_unboxed = can_use_unboxed_call(call_node, fn_node);
-                    if (use_unboxed && fn_type) {
-                        // Get return type to verify we can handle it
-                        Type* ret_type = fn_type->returned;
-                        if (!ret_type || ret_type->type_id == LMD_TYPE_ANY) {
-                            // Try to infer from body's last expression
-                            if (fn_node->body) {
-                                AstNode* last_expr = fn_node->body;
-                                while (last_expr->next) last_expr = last_expr->next;
-                                ret_type = last_expr->type;
-                            }
-                        }
-                        unboxed_return_type = ret_type ? ret_type->type_id : LMD_TYPE_ANY;
-                        // Only use unboxed for int return type (most common case)
-                        // Boxing is handled by transpile_box_item when the result is used
-                        if (unboxed_return_type != LMD_TYPE_INT) {
-                            // For other types, fall back to boxed version for now
-                            use_unboxed = false;
-                        }
-                    }
-                    // Wrap unboxed INT call with i2it() for proper boxing
-                    // But skip if we're inside an unboxed body (already working with native types)
-                    bool need_box_wrapper = use_unboxed && unboxed_return_type == LMD_TYPE_INT && !tp->in_unboxed_body;
-                    if (need_box_wrapper) {
-                        strbuf_append_str(tp->code_buf, "i2it(");
-                    }
                     write_fn_name_ex(tp->code_buf, fn_node,
                         (AstImportNode*)ident_node->entry->import,
-                        use_unboxed ? "_u" : NULL);
+                        NULL);
                 } else if (entry_node && entry_node->node_type == AST_NODE_PARAM) {
                     // Function parameter - use fn_call for dynamic dispatch
                     is_fn_variable = true;
@@ -5374,17 +5499,21 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     strbuf_append_char(tp->code_buf, ')');
 
-    // Close the i2it() wrapper for unboxed INT calls (but not inside unboxed body)
-    if (use_unboxed && unboxed_return_type == LMD_TYPE_INT && !tp->in_unboxed_body) {
-        strbuf_append_char(tp->code_buf, ')');
-    }
-
-    // '?' propagation: wrap call result in error check
+    // '^' propagation: wrap call result in error check using RetItem
     if (call_node->propagate) {
+        if (!prop_callee_retitem) {
+            strbuf_append_char(tp->code_buf, ')');  // close item_to_ri(
+        }
         // use unique counter for temp variable to avoid name collisions
         int prop_id = tp->temp_var_counter++;
-        // close the statement expression: check error, return if error, else yield value
-        strbuf_append_format(tp->code_buf, "; if(item_type_id(ep%d)==LMD_TYPE_ERROR) return ep%d; ep%d;})", prop_id, prop_id, prop_id);
+        // close the statement expression: check RetItem.err, return error or yield value
+        if (current_func_returns_retitem(tp)) {
+            // enclosing function returns RetItem — forward the entire RetItem as-is
+            strbuf_append_format(tp->code_buf, "; if(_ri%d.err) return _ri%d; _ri%d.value;})", prop_id, prop_id, prop_id);
+        } else {
+            // enclosing function returns Item (closure/method) — return the error Item from .value
+            strbuf_append_format(tp->code_buf, "; if(_ri%d.err) return _ri%d.value; _ri%d.value;})", prop_id, prop_id, prop_id);
+        }
     }
 
     tp->in_tail_position = prev_in_tail;
@@ -6124,6 +6253,26 @@ void transpile_parent_expr(Transpiler* tp, AstParentNode *parent_node) {
     }
 }
 
+// Resolve the native C return type for a function.
+// Uses fn_type->returned if set, falls back to body->type.
+// Does NOT infer from content-block last expression — that would change the
+// C return type to int64_t while callers still see ANY, causing type mismatches
+// (e.g. transpile_call_argument fast-path passes raw int64_t as Item).
+// Future: content-block inference requires updating ALL call-site code paths
+// (transpile_call_argument, transpile_box_item, etc.) to check actual C return type.
+Type* resolve_native_ret_type(AstFuncNode* fn_node) {
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+    Type* ret_type = fn_type->returned;
+    // If no declared return type, try body type
+    if (!ret_type && fn_node->body) {
+        ret_type = fn_node->body->type;
+    }
+    if (!ret_type) {
+        ret_type = &TYPE_ANY;
+    }
+    return ret_type;
+}
+
 // Emit a forward declaration for a function (just signature, no body)
 void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
@@ -6131,9 +6280,11 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
 
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
-    // functions that can raise errors must also return Item
-    if (is_closure || fn_type->can_raise) {
+    // can_raise non-closure functions return RetItem (structured error return)
+    if (is_closure) {
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (fn_type->can_raise && tp->method_owner == nullptr) {
+        strbuf_append_str(tp->code_buf, "RetItem");
     } else if (tp->method_owner != nullptr) {
         // Methods are called via fn_call* (closure mechanism), must return Item
         strbuf_append_str(tp->code_buf, "Item");
@@ -6142,11 +6293,7 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
         // Force Item return so fn_call* and direct calls work correctly
         strbuf_append_str(tp->code_buf, "Item");
     } else {
-        Type *ret_type = fn_type->returned ? fn_type->returned : (fn_node->body ? fn_node->body->type : &TYPE_ANY);
-        if (!ret_type) {
-            ret_type = &TYPE_ANY;
-        }
-        write_type(tp->code_buf, ret_type);
+        write_type(tp->code_buf, resolve_native_ret_type(fn_node));
     }
     strbuf_append_char(tp->code_buf, ' ');
     write_fn_name(tp->code_buf, fn_node, NULL);
@@ -6205,19 +6352,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
-    // Functions that can raise errors must also return Item (since they return either value or error)
-    Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
+    // can_raise non-closure functions return RetItem (structured error return)
+    Type *ret_type = resolve_native_ret_type(fn_node);
     TypeFunc* fn_type_check = (TypeFunc*)fn_node->type;
-    if (!ret_type && fn_node->body) {
-        ret_type = fn_node->body->type;
-    }
-    if (!ret_type) {
-        ret_type = &TYPE_ANY;
-    }
-    if (is_closure || fn_type_check->can_raise) {
-        // Functions that can raise errors must return Item
-        // (since they can return either the success value or an error)
+    if (is_closure) {
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (fn_type_check->can_raise && tp->method_owner == nullptr) {
+        // can_raise functions return RetItem (structured {value, err} pair)
+        strbuf_append_str(tp->code_buf, "RetItem");
     } else if (tp->method_owner != nullptr) {
         // Methods are called via fn_call* (closure mechanism), must return Item
         strbuf_append_str(tp->code_buf, "Item");
@@ -6399,7 +6541,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // Return error value matching the function's return type
         Type* fn_ret = fn_type ? fn_type->returned : nullptr;
         TypeId ret_tid = fn_ret ? fn_ret->type_id : LMD_TYPE_ANY;
-        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
+        bool tco_retitem = fn_type && fn_type->can_raise && !is_closure && !is_method;
+        if (tco_retitem) {
+            strbuf_append_str(tp->code_buf, "return item_to_ri(ITEM_ERROR); }\n");
+        } else if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
             strbuf_append_str(tp->code_buf, "return 0; }\n");
         } else if (ret_tid == LMD_TYPE_FLOAT) {
             strbuf_append_str(tp->code_buf, "return 0.0; }\n");
@@ -6447,16 +6592,22 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstFuncNode* prev_func_node = tp->current_func_node;
     tp->current_func_node = fn_node;
 
+    // Check if this function returns RetItem (can_raise, non-closure, non-method)
+    bool func_retitem = fn_type_check->can_raise && !is_closure && !is_method;
+    const char* default_null_return = func_retitem ? "\n return ri_ok(ITEM_NULL);\n}\n" : "\n return ITEM_NULL;\n}\n";
+
     // for procedures, use procedural content transpilation
     bool is_proc = (fn_node->node_type == AST_NODE_PROC);
     if (is_proc && fn_node->body->node_type == AST_NODE_CONTENT) {
         strbuf_append_str(tp->code_buf, " return ");
+        if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
         transpile_proc_content(tp, (AstListNode*)fn_node->body);
+        if (func_retitem) strbuf_append_char(tp->code_buf, ')');
         strbuf_append_str(tp->code_buf, ";\n}\n");
     } else if (is_proc && fn_node->body->node_type == AST_NODE_ASSIGN_STAM) {
         // single assignment statement in pn body (flattened content)
         transpile_assign_stam(tp, (AstAssignStamNode*)fn_node->body);
-        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+        strbuf_append_str(tp->code_buf, default_null_return);
     } else if (fn_node->body->node_type == AST_NODE_RAISE_STAM) {
         // raise statement already generates return, don't add another
         transpile_raise(tp, (AstRaiseNode*)fn_node->body);
@@ -6470,14 +6621,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // (expression form would embed return statements inside ternary)
         strbuf_append_str(tp->code_buf, "\n ");
         transpile_if_stam(tp, (AstIfNode*)fn_node->body);
-        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+        strbuf_append_str(tp->code_buf, default_null_return);
     } else if (is_proc && (fn_node->body->node_type == AST_NODE_WHILE_STAM ||
                            fn_node->body->node_type == AST_NODE_FOR_STAM ||
                            fn_node->body->node_type == AST_NODE_MATCH_EXPR)) {
         // single loop/match as proc body — transpile as statement + default return
         strbuf_append_str(tp->code_buf, "\n ");
         transpile_expr(tp, fn_node->body);
-        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+        strbuf_append_str(tp->code_buf, default_null_return);
     } else {
         strbuf_append_str(tp->code_buf, " return ");
         // Check if we need to box the return value
@@ -6500,11 +6651,16 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
             }
         }
 
+        // can_raise non-closure/non-method functions return RetItem — wrap in item_to_ri()
+        bool wrap_retitem = fn_type_check->can_raise && !is_closure && !is_method;
+        if (wrap_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
+
         if (needs_boxing) {
             transpile_box_item(tp, fn_node->body);
         } else {
             transpile_expr(tp, fn_node->body);
         }
+        if (wrap_retitem) strbuf_append_char(tp->code_buf, ')');
         strbuf_append_str(tp->code_buf, ";\n}\n");
     }
 
@@ -6524,143 +6680,40 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // restore current function context
     tp->current_func_node = prev_func_node;
 
-    // For typed functions (non-closure, non-proc, non-method), generate an unboxed version
-    // The unboxed version uses native types for params AND return (no boxing overhead)
-    if (!is_closure && !is_method && !is_proc && !as_pointer && has_typed_params(fn_node)) {
-        define_func_unboxed(tp, fn_node);
-    }
-    // Generate fn_call*-compatible wrapper for functions with non-Item ABI
+    // Generate fn_call*-compatible boxed wrapper for functions with non-Item ABI
     // This covers typed params AND/OR native return types
     // Methods are excluded because they use the closure mechanism already
     if (!is_closure && !is_method && !is_proc && !as_pointer && needs_fn_call_wrapper(fn_node)) {
-        define_func_call_wrapper(tp, fn_node);
+        define_func_boxed(tp, fn_node);
     }
 }
 
-// Generate unboxed version of a typed function
-// This version uses native C types for all params and return value
-// Named with _u suffix: _square_u15
-void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
-    // Determine the native return type
-    // For content blocks { expr }, get the type from the last expression
-    Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
-
-    // If the boxed version already returns a native type (explicit scalar return),
-    // there's no need to generate an unboxed version - they would be identical
-    if (ret_type && (ret_type->type_id == LMD_TYPE_INT ||
-                     ret_type->type_id == LMD_TYPE_FLOAT ||
-                     ret_type->type_id == LMD_TYPE_BOOL)) {
-        return;
-    }
-
-    // If return type is ANY (implicit), try to infer from function body
-    if ((!ret_type || ret_type->type_id == LMD_TYPE_ANY) && fn_node->body) {
-        // If body is a content block, get the type of the last item
-        if (fn_node->body->node_type == AST_NODE_CONTENT) {
-            AstListNode* content = (AstListNode*)fn_node->body;
-            // Find the last item in the content list
-            AstNode* last_item = content->item;
-            while (last_item && last_item->next) {
-                last_item = last_item->next;
-            }
-            if (last_item && last_item->type && last_item->type->type_id != LMD_TYPE_ANY) {
-                ret_type = last_item->type;
-            }
-        } else if (fn_node->body->type && fn_node->body->type->type_id != LMD_TYPE_ANY) {
-            ret_type = fn_node->body->type;
-        }
-    }
-
-    if (!ret_type || ret_type->type_id == LMD_TYPE_ANY) {
-        // Cannot determine a specific return type, skip generating unboxed version
-        return;
-    }
-
-    // Only generate unboxed version for types where can_use_unboxed_call would use it.
-    // Currently only INT is used. STRING/SYMBOL/BINARY return types would produce
-    // broken _u functions (body returns Item but signature says String*).
-    if (ret_type->type_id != LMD_TYPE_INT && ret_type->type_id != LMD_TYPE_INT64) {
-        return;
-    }
-
-    strbuf_append_char(tp->code_buf, '\n');
-    write_type(tp->code_buf, ret_type);
-    strbuf_append_char(tp->code_buf, ' ');
-    write_fn_name_ex(tp->code_buf, fn_node, NULL, "_u");
-
-    // Write params with native types
-    strbuf_append_char(tp->code_buf, '(');
-    bool has_params = false;
-    AstNamedNode *param = fn_node->param;
-    while (param) {
-        if (has_params) strbuf_append_str(tp->code_buf, ",");
-        TypeParam* param_type = (TypeParam*)param->type;
-        // For optional params, still use Item (need to check for null)
-        if (param_type->is_optional) {
-            strbuf_append_str(tp->code_buf, "Item");
-        } else {
-            write_type(tp->code_buf, param->type);
-        }
-        strbuf_append_str(tp->code_buf, " _");
-        strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
-        param = (AstNamedNode*)param->next;
-        has_params = true;
-    }
-
-    // Handle variadic
-    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-    if (fn_type && fn_type->is_variadic) {
-        if (has_params) strbuf_append_str(tp->code_buf, ",");
-        strbuf_append_str(tp->code_buf, "List* vargs");
-    }
-
-    strbuf_append_str(tp->code_buf, "){\n");
-
-    // Variadic setup
-    if (fn_type && fn_type->is_variadic) {
-        strbuf_append_str(tp->code_buf, " set_vargs(vargs);\n");
-    }
-
-    // Function body - return without boxing
-    // Set flag so recursive calls don't get wrapped with i2it()
-    bool prev_in_unboxed = tp->in_unboxed_body;
-    tp->in_unboxed_body = true;
-
-    strbuf_append_str(tp->code_buf, " return ");
-    transpile_expr(tp, fn_node->body);
-    strbuf_append_str(tp->code_buf, ";\n}\n");
-
-    tp->in_unboxed_body = prev_in_unboxed;
-}
-
-// Generate fn_call*-compatible wrapper for typed functions.
-// fn_call0..3() cast function pointers to Item(*)(Item,...) and pass boxed Items as args.
+// Generate fn_call*-compatible boxed wrapper for typed functions.
+// fn_call0..3() dispatch through function pointers stored in Function.ptr.
 // If the original function has native-typed params (int64_t, double, etc.), the wrapper
-// accepts Items, unboxes them, calls the original, and boxes the return if needed.
-// Named with _w suffix: _square_w15
-void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
+// accepts Items, unboxes them, calls the original, and returns RetItem.
+// Named with _b suffix: _square_b15
+void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
     if (is_closure) return;  // closures already use Item params
 
     if (!needs_fn_call_wrapper(fn_node)) return;  // already matches fn_call* ABI
 
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-    Type *ret_type = fn_type->returned;
-    if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
-    if (!ret_type) ret_type = &TYPE_ANY;
+    Type *ret_type = resolve_native_ret_type(fn_node);
 
     // Determine the boxed version's return type to know if we need to box the result
     TypeId boxed_ret_tid;
     if (fn_type->can_raise) {
-        boxed_ret_tid = LMD_TYPE_ANY;  // returns Item
+        boxed_ret_tid = LMD_TYPE_ANY;  // can_raise functions return RetItem — handled via ri_to_item()
     } else {
         boxed_ret_tid = ret_type->type_id;
     }
 
     strbuf_append_char(tp->code_buf, '\n');
-    // wrapper always returns Item
-    strbuf_append_str(tp->code_buf, "Item ");
-    write_fn_name_ex(tp->code_buf, fn_node, NULL, "_w");
+    // boxed wrapper always returns RetItem
+    strbuf_append_str(tp->code_buf, "RetItem ");
+    write_fn_name_ex(tp->code_buf, fn_node, NULL, "_b");
     strbuf_append_char(tp->code_buf, '(');
 
     // all params are Item in the wrapper
@@ -6679,28 +6732,42 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     }
     strbuf_append_str(tp->code_buf, "){\n return ");
 
-    // box the return value if the original function returns a native type
+    // box the return value and wrap in RetItem
+    // can_raise main function already returns RetItem — just forward it
+    // non-can_raise: box native result in ri_ok()
     const char* box_prefix = NULL;
     const char* box_suffix = ")";
-    switch (boxed_ret_tid) {
-    case LMD_TYPE_INT:
-    case LMD_TYPE_INT64:
-        box_prefix = "i2it("; break;
-    case LMD_TYPE_FLOAT:
-        box_prefix = "push_d("; break;
-    case LMD_TYPE_BOOL:
-        box_prefix = "b2it("; break;
-    case LMD_TYPE_STRING:
-    case LMD_TYPE_BINARY:
-        box_prefix = "s2it("; break;
-    case LMD_TYPE_SYMBOL:
-        box_prefix = "y2it("; break;
-    case LMD_TYPE_DTIME:
-        box_prefix = "push_k("; break;
-    case LMD_TYPE_DECIMAL:
-        box_prefix = "c2it("; break;
-    default:
-        break;  // returns Item, no boxing needed
+    if (fn_type->can_raise) {
+        // can_raise main function returns RetItem — forward directly (no conversion needed)
+        box_prefix = NULL;
+    } else {
+        switch (boxed_ret_tid) {
+        case LMD_TYPE_INT:
+        case LMD_TYPE_INT64:
+            box_prefix = "ri_ok(i2it("; box_suffix = "))"; break;
+        case LMD_TYPE_FLOAT:
+            box_prefix = "ri_ok(push_d("; box_suffix = "))"; break;
+        case LMD_TYPE_BOOL:
+            box_prefix = "ri_ok(b2it("; box_suffix = "))"; break;
+        case LMD_TYPE_STRING:
+        case LMD_TYPE_BINARY:
+            box_prefix = "ri_ok(s2it("; box_suffix = "))"; break;
+        case LMD_TYPE_SYMBOL:
+            box_prefix = "ri_ok(y2it("; box_suffix = "))"; break;
+        case LMD_TYPE_DTIME:
+            box_prefix = "ri_ok(push_k("; box_suffix = "))"; break;
+        case LMD_TYPE_DECIMAL:
+            box_prefix = "ri_ok(c2it("; box_suffix = "))"; break;
+        default:
+            // container types (Map*, List*, etc.) need p2it() for safe NULL handling
+            if (get_container_unbox_fn(boxed_ret_tid)) {
+                box_prefix = "ri_ok(p2it("; box_suffix = "))";
+            } else {
+                // returns Item already, just wrap in ri_ok
+                box_prefix = "ri_ok("; box_suffix = ")";
+            }
+            break;
+        }
     }
     if (box_prefix) strbuf_append_str(tp->code_buf, box_prefix);
 
@@ -6728,13 +6795,23 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
             case LMD_TYPE_BOOL:   unbox_fn = "it2b("; break;
             case LMD_TYPE_STRING:
             case LMD_TYPE_BINARY: unbox_fn = "it2s("; break;
-            default:
-                // pointer types: cast from Item
-                strbuf_append_str(tp->code_buf, "(void*)_");
-                strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+            default: {
+                // container/pointer types: use safe type-checking unbox helpers
+                const char* container_fn = get_container_unbox_fn(param_type->type_id);
+                if (container_fn) {
+                    strbuf_append_str(tp->code_buf, container_fn);
+                    strbuf_append_str(tp->code_buf, "(_");
+                    strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else {
+                    // unknown type — pass Item through as-is
+                    strbuf_append_char(tp->code_buf, '_');
+                    strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+                }
                 param = (AstNamedNode*)param->next;
                 has_params = true;
                 continue;
+            }
             }
             strbuf_append_str(tp->code_buf, unbox_fn);
             strbuf_append_char(tp->code_buf, '_');
@@ -6872,11 +6949,13 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         strbuf_append_format(tp->code_buf, "  _fn->closure_field_count = %d; _fn; })", cap_count);
     } else {
         // regular function without captures - use to_fn_named for stack traces
-        strbuf_append_format(tp->code_buf, "to_fn_named(");
-        // use _w wrapper for functions with non-Item ABI so fn_call* works correctly
-        if (needs_fn_call_wrapper(fn_node)) {
-            write_fn_name_ex(tp->code_buf, fn_node, NULL, "_w");
+        bool use_boxed = needs_fn_call_wrapper(fn_node);
+        if (use_boxed) {
+            // _b wrapper returns RetItem — set FN_FLAG_BOXED_RET on the Function
+            strbuf_append_str(tp->code_buf, "({ Function* _fn = to_fn_named(");
+            write_fn_name_ex(tp->code_buf, fn_node, NULL, "_b");
         } else {
+            strbuf_append_format(tp->code_buf, "to_fn_named(");
             write_fn_name(tp->code_buf, fn_node, NULL);
         }
         strbuf_append_format(tp->code_buf, ",%d,", arity);
@@ -6893,6 +6972,9 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
             strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
         }
         strbuf_append_char(tp->code_buf, ')');
+        if (use_boxed) {
+            strbuf_append_str(tp->code_buf, "; _fn->flags = FN_FLAG_BOXED_RET; _fn; })");
+        }
     }
 }
 
@@ -7118,22 +7200,22 @@ void write_mod_struct_fields(Transpiler* tp, AstNode *ast_root) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
-                // also add _w wrapper function pointer if this function needs fn_call* wrapper
+                // also add _b boxed wrapper function pointer if this function needs fn_call* wrapper
                 if (node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(func_node)) {
-                    strbuf_append_str(tp->code_buf, "Item (*");
-                    write_fn_name_ex(tp->code_buf, func_node, NULL, "_w");
+                    strbuf_append_str(tp->code_buf, "RetItem (*");
+                    write_fn_name_ex(tp->code_buf, func_node, NULL, "_b");
                     strbuf_append_str(tp->code_buf, ")(");
-                    bool has_w_params = false;
+                    bool has_b_params = false;
                     AstNamedNode *param = func_node->param;
                     while (param) {
-                        if (has_w_params) strbuf_append_str(tp->code_buf, ",");
+                        if (has_b_params) strbuf_append_str(tp->code_buf, ",");
                         strbuf_append_str(tp->code_buf, "Item");
                         param = (AstNamedNode*)param->next;
-                        has_w_params = true;
+                        has_b_params = true;
                     }
                     TypeFunc* fn_type = (TypeFunc*)func_node->type;
                     if (fn_type && fn_type->is_variadic) {
-                        if (has_w_params) strbuf_append_str(tp->code_buf, ",");
+                        if (has_b_params) strbuf_append_str(tp->code_buf, ",");
                         strbuf_append_str(tp->code_buf, "List*");
                     }
                     strbuf_append_str(tp->code_buf, ");\n");
