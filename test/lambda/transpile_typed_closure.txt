@@ -1,0 +1,22 @@
+"1. Typed outer, untyped inner"
+[15, 5]
+"2. Both typed"
+[15, 5]
+"3. Int multiplier closure"
+[30, 35]
+"4. Bool typed closure"
+[42, null]
+"5. String typed closure"
+["Hello World", "Hi Lambda"]
+"6. Multiple typed captures"
+[13, 6]
+"7. Mixed typed/untyped captures"
+[37, 110]
+"8. Nested typed closures"
+[13, 46]
+"9. Higher-order with typed closure"
+[15, 21]
+"10. Typed closure returning container"
+[[1, 2], [10, 20]]
+"11. Let variable capture"
+[20, 13]

@@ -58,6 +58,101 @@ static const char* get_container_unbox_fn(TypeId type_id) {
     }
 }
 
+// ============================================================================
+// Phase 4: TypeBoxInfo — centralized type metadata table
+// Maps TypeId → C type name, unbox/box function names, literal boxing functions,
+// and default zero values. Used by emit helpers and refactored boxing/unboxing code.
+// ============================================================================
+
+typedef struct TypeBoxInfo {
+    TypeId type_id;
+    const char* c_type;        // C type string: "int64_t", "double", "Map*", etc.
+    const char* unbox_fn;      // Item → native: "it2i", "it2map", etc. (NULL if N/A)
+    const char* box_fn;        // native → Item: "i2it", "push_d", etc. (NULL for containers)
+    const char* const_box_fn;  // literal → Item: "const_l2it", etc. (NULL if no literal path)
+    const char* zero_value;    // default/zero value for missing params: "0", "NULL", etc.
+} TypeBoxInfo;
+
+static const TypeBoxInfo type_box_table[] = {
+    // scalars: have both box and unbox functions
+    {LMD_TYPE_BOOL,       "bool",      "it2b",     "b2it",    NULL,          "0"},
+    {LMD_TYPE_INT,        "int64_t",   "it2i",     "i2it",    NULL,          "0"},
+    {LMD_TYPE_INT64,      "int64_t",   "it2l",     "push_l",  "const_l2it",  "0"},
+    {LMD_TYPE_FLOAT,      "double",    "it2d",     "push_d",  "const_d2it",  "0.0"},
+    {LMD_TYPE_DTIME,      "DateTime",  "it2k",     "push_k",  "const_k2it",  "{0}"},
+    {LMD_TYPE_DECIMAL,    "Decimal*",  "it2c",     "c2it",    "const_c2it",  "NULL"},
+    // string-like types
+    {LMD_TYPE_STRING,     "String*",   "it2s",     "s2it",    "const_s2it",  "NULL"},
+    {LMD_TYPE_SYMBOL,     "Symbol*",   "it2s",     "y2it",    "const_y2it",  "NULL"},
+    {LMD_TYPE_BINARY,     "String*",   "it2s",     "x2it",    "const_x2it",  "NULL"},
+    // containers: have unbox_fn, box uses (Item)(ptr) cast (box_fn=NULL)
+    {LMD_TYPE_MAP,        "Map*",      "it2map",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_LIST,       "List*",     "it2list",  NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ELEMENT,    "Element*",  "it2elmt",  NULL,      NULL,          "NULL"},
+    {LMD_TYPE_OBJECT,     "Object*",   "it2obj",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY,      "Array*",    "it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_INT,  "ArrayInt*", "it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_INT64,"ArrayInt64*","it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_FLOAT,"ArrayFloat*","it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_RANGE,      "Range*",    "it2range", NULL,      NULL,          "NULL"},
+    {LMD_TYPE_PATH,       "Path*",     "it2path",  NULL,      NULL,          "NULL"},
+    {LMD_TYPE_FUNC,       "Function*", "it2p",     NULL,      NULL,          "NULL"},
+    {LMD_TYPE_TYPE,       "Type*",     NULL,        NULL,      NULL,          "NULL"},
+};
+static const int TYPE_BOX_TABLE_SIZE = sizeof(type_box_table) / sizeof(type_box_table[0]);
+
+// Look up boxing/unboxing metadata for a given TypeId.
+// Returns NULL for ANY, NULL, ERROR, NUMBER, and other types not in the table.
+static const TypeBoxInfo* get_box_info(TypeId tid) {
+    for (int i = 0; i < TYPE_BOX_TABLE_SIZE; i++) {
+        if (type_box_table[i].type_id == tid) return &type_box_table[i];
+    }
+    return NULL;
+}
+
+// ============================================================================
+// Emit helpers: table-driven box/unbox emission
+// ============================================================================
+
+// Emit the opening of an unbox wrapper: "it2i(" for INT, "it2map(" for MAP, etc.
+// Returns true if a wrapper was emitted (caller must emit closing ")").
+static bool emit_unbox_open(Transpiler* tp, TypeId tid) {
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (info && info->unbox_fn) {
+        strbuf_append_str(tp->code_buf, info->unbox_fn);
+        strbuf_append_char(tp->code_buf, '(');
+        return true;
+    }
+    return false;
+}
+
+// Emit the opening of a box wrapper: "i2it(" for INT, "push_d(" for FLOAT, etc.
+// For container types (box_fn=NULL), emits "(Item)(" cast instead.
+// Returns true if a wrapper was emitted (caller must emit closing ")").
+static bool emit_box_open(Transpiler* tp, TypeId tid) {
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (!info) return false;
+    if (info->box_fn) {
+        strbuf_append_str(tp->code_buf, info->box_fn);
+        strbuf_append_char(tp->code_buf, '(');
+    } else {
+        // container pointer: use (Item)(ptr) cast
+        strbuf_append_str(tp->code_buf, "(Item)(");
+    }
+    return true;
+}
+
+// Emit the default/zero value for a given TypeId (for missing parameters).
+// Returns true if a value was emitted, false if type is unknown.
+static bool emit_zero_value(Transpiler* tp, TypeId tid) {
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (info) {
+        strbuf_append_str(tp->code_buf, info->zero_value);
+        return true;
+    }
+    return false;
+}
+
 // Check if the current function context returns RetItem (can_raise, non-closure, non-method).
 // Used to determine whether return statements should produce RetItem or Item.
 static bool current_func_returns_retitem(Transpiler* tp) {
@@ -1003,6 +1098,43 @@ static bool direct_call_returns_item(AstNode* node) {
     return false;
 }
 
+// Table-driven scalar boxing: handles BOOL, INT, INT64, FLOAT, DTIME, DECIMAL,
+// STRING, SYMBOL, BINARY. Checks for optional/closure params and captured vars
+// (already stored as Item), then handles literal and non-literal boxing.
+// Returns true if the value was emitted, false if the caller should handle it.
+static bool try_box_scalar(Transpiler* tp, AstNode* item) {
+    TypeId tid = item->type->type_id;
+    const TypeBoxInfo* info = get_box_info(tid);
+    if (!info || !info->box_fn) return false;  // not a scalar we can box via table
+
+    // Check if this is a param/closure/captured reference (already Item at runtime)
+    if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
+        emit_param_item(tp, item);
+        return true;
+    }
+    if (is_captured_var_ref(tp, item)) {
+        emit_captured_var_item(tp, item);
+        return true;
+    }
+
+    // Literal path: const_X2it(const_index)
+    if (item->type->is_literal && info->const_box_fn) {
+        strbuf_append_str(tp->code_buf, info->const_box_fn);
+        strbuf_append_char(tp->code_buf, '(');
+        TypeConst* ct = (TypeConst*)item->type;
+        strbuf_append_int(tp->code_buf, ct->const_index);
+        strbuf_append_char(tp->code_buf, ')');
+        return true;
+    }
+
+    // Non-literal: box_fn(expr)
+    strbuf_append_str(tp->code_buf, info->box_fn);
+    strbuf_append_char(tp->code_buf, '(');
+    transpile_expr(tp, item);
+    strbuf_append_char(tp->code_buf, ')');
+    return true;
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
@@ -1090,141 +1222,17 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             transpile_expr(tp, item);
         }
         break;
-    case LMD_TYPE_BOOL:
-        // Check if this is a closure parameter (already Item type at runtime)
-        if (is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        strbuf_append_str(tp->code_buf, "b2it(");
-        transpile_expr(tp, item);
-        strbuf_append_char(tp->code_buf, ')');
-        break;
-    case LMD_TYPE_INT: {
-        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
-        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-
-        strbuf_append_str(tp->code_buf, "i2it(");
-        transpile_expr(tp, item);
-        strbuf_append_char(tp->code_buf, ')');
-        break;
-    }
-    case LMD_TYPE_INT64:
-        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
-        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_l2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
-        }
-        else {
-            log_enter();
-            log_debug("transpile_box_item: push_l");
-            strbuf_append_str(tp->code_buf, "push_l(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-            log_leave();
-        }
-        break;
-    case LMD_TYPE_FLOAT:
-        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
-        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
-            break;
-        }
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_d2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        else {
-            strbuf_append_str(tp->code_buf, "push_d(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        break;
-    case LMD_TYPE_DTIME:
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_k2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        else {
-            // non-literal datetime expression
-            strbuf_append_str(tp->code_buf, "push_k(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        break;
-    case LMD_TYPE_DECIMAL:
-        if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "const_c2it(");
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        else {
-            // non-literal decimal expression
-            strbuf_append_str(tp->code_buf, "c2it(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
+    case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT:  case LMD_TYPE_DTIME:  case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
+        // Table-driven scalar boxing: handles optional/closure params, captured vars,
+        // literal const boxing, and non-literal boxing via TypeBoxInfo table
+        try_box_scalar(tp, item);
         break;
     case LMD_TYPE_NUMBER:
         // NUMBER type is a union of int/float - transpile the expression directly
         transpile_expr(tp, item);
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-        // Check if this is a captured variable reference (already Item in closure env)
-        if (is_captured_var_ref(tp, item)) {
-            emit_captured_var_item(tp, item);  // emit cenv->varname directly (already an Item)
-            break;
-        }
-        char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
-            item->type->type_id == LMD_TYPE_SYMBOL ? 'y' :
-            item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
-        if (item->type->is_literal) {
-            strbuf_append_format(tp->code_buf, "const_%c2it(", t);
-            TypeConst *item_type = (TypeConst*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
-        }
-        else {
-            strbuf_append_format(tp->code_buf, "%c2it(", t);
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
-        }
-        break;
-    }
     case LMD_TYPE_LIST:
         // Single-value CONTENT blocks are handled above (before the switch).
         // Multi-value content/list: list_end() already returns Item.
@@ -1290,35 +1298,12 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                             // function returns a native type - need to box it appropriately
                             log_debug("transpile_box_item: call to '%.*s' with native return type %d",
                                 (int)fn_node->name->len, fn_node->name->chars, native_ret_id);
-                            if (native_ret_id == LMD_TYPE_FLOAT) {
-                                strbuf_append_str(tp->code_buf, "push_d(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (native_ret_id == LMD_TYPE_INT) {
-                                strbuf_append_str(tp->code_buf, "i2it(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (native_ret_id == LMD_TYPE_INT64) {
-                                strbuf_append_str(tp->code_buf, "push_l(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (native_ret_id == LMD_TYPE_BOOL) {
-                                strbuf_append_str(tp->code_buf, "b2it(");
-                                transpile_expr(tp, item);
-                                strbuf_append_char(tp->code_buf, ')');
-                                break;
-                            } else if (native_ret_id == LMD_TYPE_STRING || native_ret_id == LMD_TYPE_SYMBOL || native_ret_id == LMD_TYPE_BINARY) {
-                                char t = native_ret_id == LMD_TYPE_STRING ? 's' :
-                                    native_ret_id == LMD_TYPE_SYMBOL ? 'y' : 'x';
-                                strbuf_append_format(tp->code_buf, "%c2it(", t);
+                            if (emit_box_open(tp, native_ret_id)) {
                                 transpile_expr(tp, item);
                                 strbuf_append_char(tp->code_buf, ')');
                                 break;
                             }
-                            // for other types (containers), fall through to default behavior
+                            // for unknown types, fall through to default behavior
                         }
                     }
                 }
@@ -1363,24 +1348,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     // access captured variable via env
                     // env stores Items, so we may need to unbox depending on usage
                     TypeId type_id = pri_node->type->type_id;
-                    if (type_id == LMD_TYPE_INT) {
-                        strbuf_append_str(tp->code_buf, "it2i(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_INT64) {
-                        strbuf_append_str(tp->code_buf, "it2l(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2d(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_BOOL) {
-                        strbuf_append_str(tp->code_buf, "it2b(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
-                        strbuf_append_str(tp->code_buf, "it2s(cenv->");
+                    const TypeBoxInfo* info = get_box_info(type_id);
+                    if (info && info->unbox_fn) {
+                        strbuf_append_str(tp->code_buf, info->unbox_fn);
+                        strbuf_append_str(tp->code_buf, "(cenv->");
                         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
@@ -1403,24 +1374,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 if (needs_unboxing) {
                     // parameter passed as Item - needs unboxing to actual type
                     TypeId type_id = pri_node->type->type_id;
-                    if (type_id == LMD_TYPE_INT) {
-                        strbuf_append_str(tp->code_buf, "it2i(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_INT64) {
-                        strbuf_append_str(tp->code_buf, "it2l(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_FLOAT) {
-                        strbuf_append_str(tp->code_buf, "it2d(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_BOOL) {
-                        strbuf_append_str(tp->code_buf, "it2b(_");
-                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                        strbuf_append_char(tp->code_buf, ')');
-                    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
-                        strbuf_append_str(tp->code_buf, "it2s(_");
+                    const TypeBoxInfo* info = get_box_info(type_id);
+                    if (info && info->unbox_fn) {
+                        strbuf_append_str(tp->code_buf, info->unbox_fn);
+                        strbuf_append_str(tp->code_buf, "(_");
                         strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
@@ -4625,20 +4582,8 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
             // No default value - use null/zero for missing parameters
             // For typed params, use native zero values to match the function's native param types
             if (param_type && !param_type->is_optional) {
-                switch (param_type->type_id) {
-                case LMD_TYPE_INT:
-                case LMD_TYPE_INT64:
-                    strbuf_append_str(tp->code_buf, "0");
-                    break;
-                case LMD_TYPE_FLOAT:
-                    strbuf_append_str(tp->code_buf, "0.0");
-                    break;
-                case LMD_TYPE_BOOL:
-                    strbuf_append_str(tp->code_buf, "0");
-                    break;
-                default:
+                if (!emit_zero_value(tp, param_type->type_id)) {
                     strbuf_append_str(tp->code_buf, "ITEM_NULL");
-                    break;
                 }
             } else {
                 strbuf_append_str(tp->code_buf, "ITEM_NULL");

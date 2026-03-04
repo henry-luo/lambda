@@ -1139,13 +1139,13 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 | Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 4.1 | Add `CRetType`, `CArgConvention` to `SysFuncInfo` | ast.hpp | Not started |
-| 4.2 | Populate metadata in `sys_funcs[]` table | build_ast.cpp | Not started |
-| 4.3 | Create `TypeBoxInfo` table and `get_box_info()` | transpile.cpp (or new header) | Not started |
-| 4.4 | Create `TypeNarrowEntry` table | transpile.cpp (or new header) | Not started |
-| 4.5 | Refactor `transpile_box_item()` to use table lookups | transpile.cpp | Not started |
-| 4.6 | Create `emit_unbox()` / `emit_box()` / `emit_boxed_call()` API | transpile.cpp | Not started |
-| 4.7 | Refactor `transpile_call_argument()` to use emission API | transpile.cpp | Not started |
+| 4.1 | Add `CRetType`, `CArgConvention` to `SysFuncInfo` | ast.hpp | ✅ Done |
+| 4.2 | Populate metadata in `sys_funcs[]` table | build_ast.cpp | ✅ Done |
+| 4.3 | Create `TypeBoxInfo` table and `get_box_info()` | transpile.cpp | ✅ Done |
+| 4.4 | Create `TypeNarrowEntry` table | transpile.cpp | Deferred (Phase 5 handles inline) |
+| 4.5 | Refactor `transpile_box_item()` to use `try_box_scalar()` table lookup | transpile.cpp | ✅ Done |
+| 4.6 | Create `emit_unbox_open()` / `emit_box_open()` / `emit_zero_value()` API | transpile.cpp | ✅ Done |
+| 4.7 | Refactor `transpile_call_argument()` zero-default + param unboxing via table | transpile.cpp | ✅ Done |
 
 ### Phase 5: System Function Native Variants
 
@@ -1268,6 +1268,24 @@ When binary operators (`%`, `//`) switch from always-boxed (`fn_mod`, `fn_idiv` 
 
 1. **`binary_already_returns_item()`**: Tells `transpile_box_item()` whether to skip boxing. Before: `MOD/IDIV → true` (always Item). After: returns `false` for native paths so `transpile_box_item` applies `i2it()` or `push_d()`.
 2. **`is_idiv_expr()`**: Special-case check in let/assignment that adds `it2i()` unboxing for IDIV results. Before: always true. After: returns `false` when both operands are INT/INT64 (native `fn_idiv_i` already returns `int64_t`).
+
+### Files Modified (Phase 4)
+
+| File | What was changed |
+|------|-----------------|
+| `lambda/ast.hpp` | Added `CRetType` enum (10 values: C_RET_ITEM, C_RET_RETITEM, C_RET_INT64, C_RET_DOUBLE, C_RET_BOOL, C_RET_STRING, C_RET_SYMBOL, C_RET_DTIME, C_RET_TYPE_PTR, C_RET_CONTAINER) and `CArgConvention` enum (C_ARG_ITEM, C_ARG_NATIVE). Extended `SysFuncInfo` struct with `c_ret_type` and `c_arg_conv` fields (default 0 = C_RET_ITEM/C_ARG_ITEM). |
+| `lambda/build_ast.cpp` | Populated ~36 `sys_funcs[]` entries with non-default `CRetType`/`CArgConvention`: int64-returning (len, int64, index_of, ord, bitwise ops), bool-returning (contains, starts_with, ends_with, exists), string-returning (string, format1/2), symbol-returning (name, symbol1), datetime-returning (9 DT funcs + now/today/justnow), double-returning (clock), RetItem-returning (all can_raise: input, parse, fetch, io ops, cmd), native-arg (bitwise ops). |
+| `lambda/transpile.cpp` | Added `TypeBoxInfo` struct and `type_box_table[]` (22 entries mapping TypeId → c_type/unbox_fn/box_fn/const_box_fn/zero_value). Added `get_box_info()` lookup, `emit_unbox_open()`/`emit_box_open()`/`emit_zero_value()` helpers, and `try_box_scalar()` unified scalar boxing function. Refactored: `transpile_box_item()` type switch (9 scalar type cases → single `try_box_scalar()` call), `transpile_box_item()` ANY/ERROR native_ret boxing (6-way if/else chain → `emit_box_open()`), `transpile_primary_expr()` captured-var + param unboxing (per-type if/else chains → `get_box_info()` table lookup), `transpile_call_argument()` zero-default switch (4 cases → `emit_zero_value()`). |
+
+### Phase 4 Design Decisions
+
+**`TypeBoxInfo` table approach**: A flat array with linear scan via `get_box_info(TypeId)` rather than a direct-indexed array. TypeId values are not dense (there are gaps), and the table has only 22 entries, so linear scan is negligible overhead compared to the code emission it gates. The table centralizes all type-specific strings (C type names, boxing/unboxing function names, literal constructors, zero values) that were previously spread across multiple switch statements.
+
+**`try_box_scalar()` unification**: The original `transpile_box_item()` had 9 separate case blocks for scalar types, each with slightly different combinations of optional-param/closure-param/captured-var checks. The unified function applies all three checks uniformly for all scalar types. This fixes latent issues where some types (BOOL, DTIME, DECIMAL, STRING) were missing `is_optional_param_ref()` checks — previously these would incorrectly attempt native boxing on an already-Item value.
+
+**Phase 4.4 (TypeNarrowEntry) deferred**: The original plan called for a type-narrowing table, but Phase 5's inline native variants handle the hot-path narrowing cases (MOD, IDIV, len) directly. Additional narrowing can be added later as needed.
+
+**`CArgConvention` scope**: Currently only `C_ARG_NATIVE` is used for the 6 bitwise operators (band/bor/bxor/bnot/shl/shr) which take `int64_t` directly instead of `Item`. This enables the transpiler to skip boxing when passing typed int arguments to these functions.
 3. **`value_emits_native_type()`**: Uses `binary_already_returns_item()` transitively — automatically fixed.
 
 **Key rule**: When adding a native fast path for a binary operator, always update `binary_already_returns_item()` to return `false` for the native case. Also search for operator-specific workarounds like `is_idiv_expr()`.
@@ -1283,9 +1301,9 @@ When binary operators (`%`, `//`) switch from always-boxed (`fn_mod`, `fn_idiv` 
 | `lambda/lambda-mem.cpp` | `push_d_safe()`, `push_k_safe()` implementations | ✅ Done |
 | `lambda/mir.c` | Register all new helpers + `memcpy` in function table (~55 new entries) | ✅ Done |
 | `lambda/lambda-data.cpp` | Container unboxing implementations (moved to inline in lambda.h/lambda.hpp instead) | ✅ Done (approach changed) |
-| `lambda/ast.hpp` | Extend `SysFuncInfo` with `CRetType`, `CArgConvention`, `native_variant` | Not started |
-| `lambda/build_ast.cpp` | Populate new `SysFuncInfo` fields in `sys_funcs[]` table | Not started |
-| `lambda/transpile.cpp` | Dual version generation; `Ret*` codegen; table-driven boxing; emission API | ✅ Partially done (Phase 1.6–1.7: container cast fixes, Phase 2.3–2.6: RetItem codegen) |
+| `lambda/ast.hpp` | Extend `SysFuncInfo` with `CRetType`, `CArgConvention`, `native_variant` | ✅ Done (CRetType + CArgConvention; native_variant deferred) |
+| `lambda/build_ast.cpp` | Populate new `SysFuncInfo` fields in `sys_funcs[]` table | ✅ Done (~36 entries with non-default CRetType/CArgConvention) |
+| `lambda/transpile.cpp` | Dual version generation; `Ret*` codegen; table-driven boxing; emission API | ✅ Done (Phases 1–5: container casts, RetItem codegen, TypeBoxInfo table, try_box_scalar, emit helpers, native variants) |
 | `lambda/transpile-mir.cpp` | MIR alignment (container unboxing, `Ret*`, narrowing table) | Not started |
 | `lambda/print.cpp` | Update `write_type()` for `Ret*` return types | Not started |
 | `lambda/lambda-eval.cpp` | Update `fn_call*` dispatch for `RetItem`; migrate `can_raise` sys funcs | Not started |
