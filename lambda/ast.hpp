@@ -377,6 +377,11 @@ typedef struct SysFuncInfo {
     bool can_raise;             // function may return error (T^ return type)
     CRetType c_ret_type;        // C-level return type (default: C_RET_ITEM)
     CArgConvention c_arg_conv;  // C-level argument convention (default: C_ARG_ITEM)
+    // --- Unified registry fields (Phase 3) ---
+    const char* c_func_name;    // C function name emitted by transpiler ("fn_len", "pn_print", etc.)
+    const char* native_c_name;  // Native C math function for optimization ("fabs", "sin", etc.), NULL if none
+    bool native_returns_float;  // True if native function returns double
+    int native_arg_count;       // Number of args for native function (1 or 2), 0 if not applicable
 } SysFuncInfo;
 
 typedef struct AstSysFuncNode : AstNode {
