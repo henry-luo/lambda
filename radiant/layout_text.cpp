@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cctype>
 #include <cwctype>
+#include <utf8proc.h>
 using namespace std::chrono;
 
 // External timing accumulators from layout.cpp
@@ -24,12 +25,13 @@ extern int64_t g_text_layout_count;
  * Apply CSS font-variant: small-caps transformation.
  * Converts lowercase characters to uppercase. The actual size reduction
  * is handled by using a smaller font size during glyph measurement.
+ * Uses utf8proc for proper Unicode case conversion.
  */
 static inline uint32_t apply_small_caps(uint32_t codepoint) {
     if (codepoint < 128) {
         return std::toupper(codepoint);
     } else {
-        return std::towupper(codepoint);
+        return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
     }
 }
 
@@ -53,6 +55,8 @@ static inline bool has_small_caps(LayoutContext* lycon) {
 
 /**
  * Apply CSS text-transform to a single Unicode codepoint.
+ * Uses utf8proc for proper Unicode case mapping (handles Latin-1 supplement,
+ * Latin Extended, and all other Unicode blocks per Unicode standard).
  * @param codepoint Input Unicode codepoint
  * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
  * @param is_word_start True if this is the first character of a word (for capitalize)
@@ -60,25 +64,22 @@ static inline bool has_small_caps(LayoutContext* lycon) {
  */
 uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
     if (text_transform == CSS_VALUE_UPPERCASE) {
-        // Convert to uppercase
         if (codepoint < 128) {
             return std::toupper(codepoint);
         } else {
-            return std::towupper(codepoint);
+            return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
         }
     } else if (text_transform == CSS_VALUE_LOWERCASE) {
-        // Convert to lowercase
         if (codepoint < 128) {
             return std::tolower(codepoint);
         } else {
-            return std::towlower(codepoint);
+            return (uint32_t)utf8proc_tolower((utf8proc_int32_t)codepoint);
         }
     } else if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
-        // Capitalize first letter of each word
         if (codepoint < 128) {
             return std::toupper(codepoint);
         } else {
-            return std::towupper(codepoint);
+            return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
         }
     }
     return codepoint;

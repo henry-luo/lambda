@@ -484,7 +484,36 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // Advance past the right border+padding
         lycon->line.advance_x += inline_right_edge;
-        compute_span_bounding_box(span, true);  // block-in-inline always multi-line
+
+        // CSS 2.1 §9.2.1.1: When an inline element contains block-level children,
+        // it is split into anonymous block boxes spanning the full content width of
+        // the containing block. The inline element's bounding box should encompass
+        // this full extent, so getBoundingClientRect() matches the browser.
+        // Compute vertical union from children, horizontal from the parent block.
+        compute_span_bounding_box(span, true);  // get vertical bounds from children
+
+        // Override horizontal bounds to match the parent block's content area
+        ViewElement* parent_block = span->parent_view();
+        if (parent_block && parent_block->is_block()) {
+            ViewBlock* pb = (ViewBlock*)parent_block;
+            float pb_border_left = 0, pb_border_right = 0;
+            float pb_pad_left = 0, pb_pad_right = 0;
+            if (pb->bound) {
+                if (pb->bound->border) {
+                    pb_border_left = pb->bound->border->width.left;
+                    pb_border_right = pb->bound->border->width.right;
+                }
+                pb_pad_left = pb->bound->padding.left > 0 ? pb->bound->padding.left : 0;
+                pb_pad_right = pb->bound->padding.right > 0 ? pb->bound->padding.right : 0;
+            }
+            float content_left = pb_border_left + pb_pad_left;
+            float content_width = pb->width - pb_border_left - pb_border_right - pb_pad_left - pb_pad_right;
+            if (content_width < 0) content_width = 0;
+            span->x = (int)content_left;
+            span->width = (int)content_width;
+            log_debug("block-in-inline: span bounds set to parent content area: x=%d, w=%d (pb_w=%d, bl=%f, br=%f)",
+                      span->x, span->width, pb->width, pb_border_left, pb_border_right);
+        }
 
         // Apply CSS relative positioning after normal layout
         if (span->position && span->position->position == CSS_VALUE_RELATIVE) {

@@ -518,6 +518,11 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
         case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
         case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
+            // CSS 2.1 §8.5.1: border-width accepts only <length> and thin|medium|thick.
+            // Percentage values are invalid and must be rejected.
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                return false;
+            }
             // Border widths must be non-negative
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (value->data.length.value < 0) {
