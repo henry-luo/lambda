@@ -1164,14 +1164,32 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 | Step | Change | Files | Status |
 |------|--------|-------|--------|
-| 6.1 | Use container unboxing helpers in MIR path | transpile-mir.cpp | Not started |
-| 6.2 | Use `Ret*` for error-returning MIR functions | transpile-mir.cpp | Not started |
-| 6.3 | Use type narrowing table for MIR code emission | transpile-mir.cpp | Not started |
-| 6.4 | Port typed array construction (from C2MIR) | transpile-mir.cpp | Not started |
+| 6.1 | Use container unboxing helpers in MIR path | transpile-mir.cpp | ✅ Done |
+| 6.2 | Use `Ret*` for error-returning MIR functions | transpile-mir.cpp | Deferred (major arch change; tests pass with current `ITEM_ERROR` sentinel) |
+| 6.3 | Use type narrowing table for MIR code emission | transpile-mir.cpp | ✅ Done |
+| 6.4 | Port typed array construction (from C2MIR) | transpile-mir.cpp | ✅ Done (ArrayInt/ArrayFloat already implemented; ArrayInt64 gap is non-critical) |
 
 ---
 
 ## Implementation Notes
+
+### Files Modified (Phase 6)
+
+| File | What was changed |
+|------|-----------------|
+| `lambda/transpile-mir.cpp` | **6.1**: Added `emit_unbox_container()` and `emit_unbox_int_mask()` helpers (AND-mask with `0x00FFFFFFFFFFFFFF` to strip upper 8 type-tag bits). Extended `emit_unbox()` with cases for all container types (ARRAY, LIST, MAP, ELEMENT, OBJECT, RANGE, FUNC, TYPE, PATH, VMAP). Replaced 3 manual AND-mask patterns: index-assign (`arr[i] = val`), for-range offset/limit extraction. **6.3**: Updated `get_effective_type()` with IDIV/MOD early-return block — both-INT operands return `LMD_TYPE_INT`, float MOD returns `LMD_TYPE_FLOAT`. Rewrote `transpile_binary()` IDIV/MOD: 3-tier dispatch (native int via `fn_idiv_i`/`fn_mod_i`, native float via `fmod`, boxed fallback via `fn_idiv`/`fn_mod`). Updated `transpile_box_item()` boxing switches for BINARY nodes: added `OPERATOR_IDIV`/`OPERATOR_MOD` → `emit_box_int` in both_int case, added `OPERATOR_MOD` → `emit_box_float` in both_float and int_float cases. Added native `len()` dispatch: `fn_len_l` for LIST, `fn_len_a` for ARRAY variants, `fn_len_s` for STRING/SYMBOL, `fn_len_e` for ELEMENT (each passes unboxed pointer and returns native int64_t). |
+
+### Phase 6 Boxing Correctness (Learned During Phase 6)
+
+When adding native fast paths in the MIR direct transpiler, **three code locations** must agree on which operations return native values vs boxed Items:
+
+1. **`get_effective_type()`**: Determines compile-time type of an expression result. Must return native TypeId (e.g., `LMD_TYPE_INT`) for operations that return native values.
+2. **`transpile_binary()`**: Emits the actual MIR instructions. Must match `get_effective_type()` — if it returns a native register, `get_effective_type()` must return the corresponding native type.
+3. **`transpile_box_item()`**: Decides whether to box the result. Must enumerate all cases where `transpile_binary()` returns native values and apply the appropriate `emit_box_*()`.
+
+**INT64 exclusion**: INT64 is deliberately excluded from native IDIV/MOD paths because `transpile_expr()` returns inconsistent values for INT64 operands — raw int64 from literals but boxed Items from generic binary fallback. All INT64 arithmetic goes through the generic boxed path. See the existing `Note:` comment in `transpile_binary()` near the arithmetic ops section.
+
+**MIR register types**: MIR enforces strict type checking at module finalization. If `fmod()` returns `MIR_T_D` (double) but the function signature expects `MIR_T_I64` return, MIR reports: `"unexpected operand mode for operand #1. Got 'double', expected 'int'"`. The fix is ensuring the result gets boxed via `emit_box_float()` before use as an Item.
 
 ### C/C++ Dual Compilation Constraint (Learned During Phase 1–2)
 
