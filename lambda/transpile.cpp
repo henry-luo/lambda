@@ -37,6 +37,61 @@ static void emit_direct_field_write(Transpiler* tp, AstNode* object, ShapeEntry*
 static void emit_struct_typedefs(Transpiler* tp);
 static bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type);
 
+// Return the unbox function name for a given container TypeId (Item → native pointer).
+// Returns NULL for non-container or unknown types (caller should fall back to transpile_box_item).
+static const char* get_container_unbox_fn(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_MAP:     return "it2map";
+    case LMD_TYPE_LIST:    return "it2list";
+    case LMD_TYPE_ELEMENT: return "it2elmt";
+    case LMD_TYPE_OBJECT:  return "it2obj";
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_ARRAY_FLOAT:
+                           return "it2arr";
+    case LMD_TYPE_RANGE:   return "it2range";
+    case LMD_TYPE_PATH:    return "it2path";
+    case LMD_TYPE_FUNC:    return "it2p";  // generic container unbox for Function*
+    default:               return NULL;
+    }
+}
+
+// Check if the current function context returns RetItem (can_raise, non-closure, non-method).
+// Used to determine whether return statements should produce RetItem or Item.
+static bool current_func_returns_retitem(Transpiler* tp) {
+    if (!tp->current_func_node) return false;
+    TypeFunc* fn_type = (TypeFunc*)tp->current_func_node->type;
+    if (!fn_type || !fn_type->can_raise) return false;
+    if (tp->current_func_node->captures) return false; // closures return Item
+    if (tp->method_owner) return false; // methods return Item
+    return true;
+}
+
+// Check if the callee of a call node is a user-defined can_raise function (returns RetItem).
+// System functions still return Item even if can_raise — they'll be migrated in Phase 2.7.
+static bool callee_returns_retitem(AstCallNode* call_node) {
+    AstNode* fn_expr = call_node->function;
+    if (!fn_expr) return false;
+    if (fn_expr->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)fn_expr;
+        if (pri->expr) fn_expr = pri->expr;
+    }
+    if (fn_expr->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)fn_expr;
+        if (ident->entry && ident->entry->node) {
+            AstNode* entry_node = ident->entry->node;
+            if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC) {
+                AstFuncNode* fn_node = (AstFuncNode*)entry_node;
+                if (fn_node->captures) return false; // closures return Item
+                TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                return fn_type && fn_type->can_raise;
+            }
+        }
+    }
+    return false; // system function or unknown — returns Item
+}
+
 // hashmap comparison and hashing functions for func_name_map
 static int func_name_cmp(const void *a, const void *b, void *udata) {
     (void)udata;
@@ -1197,11 +1252,22 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     if (entry_node && (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC)) {
                         AstFuncNode* fn_node = (AstFuncNode*)entry_node;
                         TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-                        // If function can raise errors, it returns Item - no boxing needed
-                        if (fn_type && fn_type->can_raise) {
-                            log_debug("transpile_box_item: function '%.*s' can_raise, returns Item - no boxing",
-                                (int)fn_node->name->len, fn_node->name->chars);
-                            transpile_expr(tp, item);
+                        // If function can raise errors, it returns RetItem — extract Item via ri_to_item()
+                        // UNLESS '^' propagation is active — in that case, the propagation pattern
+                        // already extracts .value (an Item) from the RetItem, so no wrapping needed.
+                        if (fn_type && fn_type->can_raise && !fn_node->captures) {
+                            if (call_node->propagate) {
+                                // '^' propagation handles RetItem→Item extraction — emit as-is
+                                log_debug("transpile_box_item: function '%.*s' can_raise with ^ propagation - no wrapping",
+                                    (int)fn_node->name->len, fn_node->name->chars);
+                                transpile_expr(tp, item);
+                            } else {
+                                log_debug("transpile_box_item: function '%.*s' can_raise, returns RetItem - wrap in ri_to_item()",
+                                    (int)fn_node->name->len, fn_node->name->chars);
+                                strbuf_append_str(tp->code_buf, "ri_to_item(");
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                            }
                             break;
                         }
                         if (fn_type && fn_type->returned && fn_type->returned->type_id != LMD_TYPE_ANY) {
@@ -2089,23 +2155,54 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     // error destructuring: let name^err_name = expr
     if (asn_node->error_name) {
         int tmp_id = tp->temp_var_counter++;
-        // emit temp variable for the full result (may be value or error)
-        strbuf_append_format(tp->code_buf, "\n Item et%d=", tmp_id);
-        transpile_expr(tp, asn_node->as);
-        strbuf_append_char(tp->code_buf, ';');
 
-        // emit value variable: null if error, value otherwise
-        strbuf_append_str(tp->code_buf, "\n ");
-        if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
-        write_var_name(tp->code_buf, asn_node, NULL);
-        strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?ITEM_NULL:et%d;", tmp_id, tmp_id);
+        // Check if the RHS is a call to a user can_raise function (returns RetItem directly)
+        AstNode* rhs_expr = asn_node->as;
+        AstNode* rhs_check = rhs_expr;
+        if (rhs_check->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)rhs_check;
+            if (pri->expr) rhs_check = pri->expr;
+        }
+        bool rhs_retitem = (rhs_check->node_type == AST_NODE_CALL_EXPR) &&
+                           callee_returns_retitem((AstCallNode*)rhs_check);
 
-        // emit error variable: error if error, null otherwise
-        strbuf_append_str(tp->code_buf, "\n ");
-        if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
-        strbuf_append_str(tp->code_buf, "_");
-        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
-        strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?et%d:ITEM_NULL;", tmp_id, tmp_id);
+        if (rhs_retitem) {
+            // RHS returns RetItem — use structured .value / .err fields
+            strbuf_append_format(tp->code_buf, "\n RetItem _ri%d=", tmp_id);
+            transpile_expr(tp, rhs_expr);
+            strbuf_append_char(tp->code_buf, ';');
+
+            // emit value variable: null if error, value otherwise
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            write_var_name(tp->code_buf, asn_node, NULL);
+            strbuf_append_format(tp->code_buf, "=_ri%d.err?ITEM_NULL:_ri%d.value;", tmp_id, tmp_id);
+
+            // emit error variable: error Item is stored in .value (sentinel approach)
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            strbuf_append_str(tp->code_buf, "_");
+            strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+            strbuf_append_format(tp->code_buf, "=_ri%d.err?_ri%d.value:ITEM_NULL;", tmp_id, tmp_id);
+        } else {
+            // RHS returns Item (system function or non-call) — use legacy item_type_id check
+            strbuf_append_format(tp->code_buf, "\n Item et%d=", tmp_id);
+            transpile_expr(tp, rhs_expr);
+            strbuf_append_char(tp->code_buf, ';');
+
+            // emit value variable: null if error, value otherwise
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            write_var_name(tp->code_buf, asn_node, NULL);
+            strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?ITEM_NULL:et%d;", tmp_id, tmp_id);
+
+            // emit error variable: error if error, null otherwise
+            strbuf_append_str(tp->code_buf, "\n ");
+            if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+            strbuf_append_str(tp->code_buf, "_");
+            strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+            strbuf_append_format(tp->code_buf, "=(item_type_id(et%d)==LMD_TYPE_ERROR)?et%d:ITEM_NULL;", tmp_id, tmp_id);
+        }
 
         tp->current_assign_name = prev_assign_name;
         return;
@@ -3283,6 +3380,9 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
         tp->in_tail_position = true;
     }
 
+    // Check if enclosing function returns RetItem (can_raise, non-closure, non-method)
+    bool func_retitem = current_func_returns_retitem(tp);
+
     strbuf_append_str(tp->code_buf, "\nreturn ");
     if (return_node->value) {
         // check if enclosing function returns native type (not Item)
@@ -3300,27 +3400,44 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
         if (func_returns_native) {
             transpile_expr(tp, return_node->value);
         } else {
+            // can_raise functions return RetItem — wrap boxed value in item_to_ri()
+            if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
             transpile_box_item(tp, return_node->value);
+            if (func_retitem) strbuf_append_char(tp->code_buf, ')');
         }
     } else {
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        if (func_retitem)
+            strbuf_append_str(tp->code_buf, "ri_ok(ITEM_NULL)");
+        else
+            strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
     strbuf_append_char(tp->code_buf, ';');
 
     tp->in_tail_position = prev_in_tail;
 }
 
-// raise statement - returns an error value from function
-// For now, raise expr simply returns expr (the error value)
-// Future: validate expr is error type, set error metadata
+// raise statement — returns an error value from function.
+// In can_raise functions returning RetItem, wraps error in ri_err(it2err(...)).
 void transpile_raise(Transpiler* tp, AstRaiseNode *raise_node) {
     log_debug("transpile raise stam");
+    bool func_retitem = current_func_returns_retitem(tp);
     strbuf_append_str(tp->code_buf, "\nreturn ");
-    if (raise_node->value) {
-        transpile_box_item(tp, raise_node->value);
+    if (func_retitem) {
+        // can_raise function returns RetItem — wrap error in item_to_ri()
+        // (item_to_ri detects error tag and creates ri_err internally)
+        strbuf_append_str(tp->code_buf, "item_to_ri(");
+        if (raise_node->value) {
+            transpile_box_item(tp, raise_node->value);
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        }
+        strbuf_append_char(tp->code_buf, ')');
     } else {
-        // raise with no value - return generic error
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        if (raise_node->value) {
+            transpile_box_item(tp, raise_node->value);
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        }
     }
     strbuf_append_char(tp->code_buf, ';');
 }
@@ -4583,20 +4700,18 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 transpile_box_item(tp, value);
             }
         }
-        // container pointer types: cast Item to Map*/Object*/Element*
-        // (MIR JIT uses different calling conv for pointer vs uint64_t params)
-        else if (param_type->type_id == LMD_TYPE_MAP ||
-                 param_type->type_id == LMD_TYPE_OBJECT ||
-                 param_type->type_id == LMD_TYPE_ELEMENT) {
+        // container pointer types: safely unbox Item to Map*/Object*/Element*/List*/Array*/Range*/Path*
+        else if (get_container_unbox_fn(param_type->type_id)) {
             if (value_emits_native_type(tp, value, param_type->type_id)) {
                 // value already produces native pointer — emit directly
                 transpile_expr(tp, value);
             } else {
-                // value produces Item — cast to container pointer type
-                strbuf_append_str(tp->code_buf, "(");
-                write_type(tp->code_buf, (Type*)param_type);
-                strbuf_append_str(tp->code_buf, ")");
+                // value produces Item — use safe type-checking unbox helper
+                const char* unbox_fn = get_container_unbox_fn(param_type->type_id);
+                strbuf_append_str(tp->code_buf, unbox_fn);
+                strbuf_append_char(tp->code_buf, '(');
                 transpile_box_item(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
             }
         }
         else {
@@ -4691,26 +4806,26 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
                     strbuf_append_str(tp->code_buf, "it2b(");
                     transpile_expr(tp, arg);
                     strbuf_append_char(tp->code_buf, ')');
-                } else if (param_tid == LMD_TYPE_MAP || param_tid == LMD_TYPE_OBJECT ||
-                           param_tid == LMD_TYPE_ELEMENT) {
-                    // cast Item to container pointer
-                    strbuf_append_str(tp->code_buf, "(");
-                    write_type(tp->code_buf, param_type);
-                    strbuf_append_str(tp->code_buf, ")");
+                } else if (get_container_unbox_fn(param_tid)) {
+                    // safely unbox Item to container pointer
+                    const char* unbox_fn = get_container_unbox_fn(param_tid);
+                    strbuf_append_str(tp->code_buf, unbox_fn);
+                    strbuf_append_char(tp->code_buf, '(');
                     transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
                 } else {
                     transpile_expr(tp, arg);
                 }
-            } else if (param_tid == LMD_TYPE_MAP || param_tid == LMD_TYPE_OBJECT ||
-                       param_tid == LMD_TYPE_ELEMENT) {
-                // same type but may need Item→pointer cast
+            } else if (get_container_unbox_fn(param_tid)) {
+                // same type but may need Item→pointer unbox
                 if (value_emits_native_type(tp, arg, param_tid)) {
                     transpile_expr(tp, arg);
                 } else {
-                    strbuf_append_str(tp->code_buf, "(");
-                    write_type(tp->code_buf, param_type);
-                    strbuf_append_str(tp->code_buf, ")");
+                    const char* unbox_fn = get_container_unbox_fn(param_tid);
+                    strbuf_append_str(tp->code_buf, unbox_fn);
+                    strbuf_append_char(tp->code_buf, '(');
                     transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
                 }
             } else {
                 transpile_expr(tp, arg);
@@ -4770,11 +4885,18 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         return;
     }
 
-    // '?' propagation: emit opening wrapper before the call
+    // '^' propagation: emit opening wrapper before the call
+    // Use RetItem for structured error checking instead of sentinel-value LMD_TYPE_ERROR
     int prop_id = -1;
+    bool prop_callee_retitem = false;  // true if callee returns RetItem directly
     if (call_node->propagate) {
         prop_id = tp->temp_var_counter;  // will be incremented at the end
-        strbuf_append_format(tp->code_buf, "({Item ep%d=", prop_id);
+        prop_callee_retitem = callee_returns_retitem(call_node);
+        strbuf_append_format(tp->code_buf, "({RetItem _ri%d=", prop_id);
+        if (!prop_callee_retitem) {
+            // System function returns Item — wrap in item_to_ri() for uniform RetItem handling
+            strbuf_append_str(tp->code_buf, "item_to_ri(");
+        }
     }
 
     // TCO: Check if this is a tail-recursive call that should be transformed to goto
@@ -5379,12 +5501,21 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
 
-    // '?' propagation: wrap call result in error check
+    // '^' propagation: wrap call result in error check using RetItem
     if (call_node->propagate) {
+        if (!prop_callee_retitem) {
+            strbuf_append_char(tp->code_buf, ')');  // close item_to_ri(
+        }
         // use unique counter for temp variable to avoid name collisions
         int prop_id = tp->temp_var_counter++;
-        // close the statement expression: check error, return if error, else yield value
-        strbuf_append_format(tp->code_buf, "; if(item_type_id(ep%d)==LMD_TYPE_ERROR) return ep%d; ep%d;})", prop_id, prop_id, prop_id);
+        // close the statement expression: check RetItem.err, return error or yield value
+        if (current_func_returns_retitem(tp)) {
+            // enclosing function returns RetItem — forward the entire RetItem as-is
+            strbuf_append_format(tp->code_buf, "; if(_ri%d.err) return _ri%d; _ri%d.value;})", prop_id, prop_id, prop_id);
+        } else {
+            // enclosing function returns Item (closure/method) — return the error Item from .value
+            strbuf_append_format(tp->code_buf, "; if(_ri%d.err) return _ri%d.value; _ri%d.value;})", prop_id, prop_id, prop_id);
+        }
     }
 
     tp->in_tail_position = prev_in_tail;
@@ -6131,9 +6262,11 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
 
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
-    // functions that can raise errors must also return Item
-    if (is_closure || fn_type->can_raise) {
+    // can_raise non-closure functions return RetItem (structured error return)
+    if (is_closure) {
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (fn_type->can_raise && tp->method_owner == nullptr) {
+        strbuf_append_str(tp->code_buf, "RetItem");
     } else if (tp->method_owner != nullptr) {
         // Methods are called via fn_call* (closure mechanism), must return Item
         strbuf_append_str(tp->code_buf, "Item");
@@ -6205,7 +6338,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
-    // Functions that can raise errors must also return Item (since they return either value or error)
+    // can_raise non-closure functions return RetItem (structured error return)
     Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
     TypeFunc* fn_type_check = (TypeFunc*)fn_node->type;
     if (!ret_type && fn_node->body) {
@@ -6214,10 +6347,11 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     if (!ret_type) {
         ret_type = &TYPE_ANY;
     }
-    if (is_closure || fn_type_check->can_raise) {
-        // Functions that can raise errors must return Item
-        // (since they can return either the success value or an error)
+    if (is_closure) {
         strbuf_append_str(tp->code_buf, "Item");
+    } else if (fn_type_check->can_raise && tp->method_owner == nullptr) {
+        // can_raise functions return RetItem (structured {value, err} pair)
+        strbuf_append_str(tp->code_buf, "RetItem");
     } else if (tp->method_owner != nullptr) {
         // Methods are called via fn_call* (closure mechanism), must return Item
         strbuf_append_str(tp->code_buf, "Item");
@@ -6399,7 +6533,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // Return error value matching the function's return type
         Type* fn_ret = fn_type ? fn_type->returned : nullptr;
         TypeId ret_tid = fn_ret ? fn_ret->type_id : LMD_TYPE_ANY;
-        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
+        bool tco_retitem = fn_type && fn_type->can_raise && !is_closure && !is_method;
+        if (tco_retitem) {
+            strbuf_append_str(tp->code_buf, "return item_to_ri(ITEM_ERROR); }\n");
+        } else if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
             strbuf_append_str(tp->code_buf, "return 0; }\n");
         } else if (ret_tid == LMD_TYPE_FLOAT) {
             strbuf_append_str(tp->code_buf, "return 0.0; }\n");
@@ -6447,16 +6584,22 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstFuncNode* prev_func_node = tp->current_func_node;
     tp->current_func_node = fn_node;
 
+    // Check if this function returns RetItem (can_raise, non-closure, non-method)
+    bool func_retitem = fn_type_check->can_raise && !is_closure && !is_method;
+    const char* default_null_return = func_retitem ? "\n return ri_ok(ITEM_NULL);\n}\n" : "\n return ITEM_NULL;\n}\n";
+
     // for procedures, use procedural content transpilation
     bool is_proc = (fn_node->node_type == AST_NODE_PROC);
     if (is_proc && fn_node->body->node_type == AST_NODE_CONTENT) {
         strbuf_append_str(tp->code_buf, " return ");
+        if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
         transpile_proc_content(tp, (AstListNode*)fn_node->body);
+        if (func_retitem) strbuf_append_char(tp->code_buf, ')');
         strbuf_append_str(tp->code_buf, ";\n}\n");
     } else if (is_proc && fn_node->body->node_type == AST_NODE_ASSIGN_STAM) {
         // single assignment statement in pn body (flattened content)
         transpile_assign_stam(tp, (AstAssignStamNode*)fn_node->body);
-        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+        strbuf_append_str(tp->code_buf, default_null_return);
     } else if (fn_node->body->node_type == AST_NODE_RAISE_STAM) {
         // raise statement already generates return, don't add another
         transpile_raise(tp, (AstRaiseNode*)fn_node->body);
@@ -6470,14 +6613,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         // (expression form would embed return statements inside ternary)
         strbuf_append_str(tp->code_buf, "\n ");
         transpile_if_stam(tp, (AstIfNode*)fn_node->body);
-        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+        strbuf_append_str(tp->code_buf, default_null_return);
     } else if (is_proc && (fn_node->body->node_type == AST_NODE_WHILE_STAM ||
                            fn_node->body->node_type == AST_NODE_FOR_STAM ||
                            fn_node->body->node_type == AST_NODE_MATCH_EXPR)) {
         // single loop/match as proc body — transpile as statement + default return
         strbuf_append_str(tp->code_buf, "\n ");
         transpile_expr(tp, fn_node->body);
-        strbuf_append_str(tp->code_buf, "\n return ITEM_NULL;\n}\n");
+        strbuf_append_str(tp->code_buf, default_null_return);
     } else {
         strbuf_append_str(tp->code_buf, " return ");
         // Check if we need to box the return value
@@ -6500,11 +6643,16 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
             }
         }
 
+        // can_raise non-closure/non-method functions return RetItem — wrap in item_to_ri()
+        bool wrap_retitem = fn_type_check->can_raise && !is_closure && !is_method;
+        if (wrap_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
+
         if (needs_boxing) {
             transpile_box_item(tp, fn_node->body);
         } else {
             transpile_expr(tp, fn_node->body);
         }
+        if (wrap_retitem) strbuf_append_char(tp->code_buf, ')');
         strbuf_append_str(tp->code_buf, ";\n}\n");
     }
 
@@ -6652,7 +6800,7 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     // Determine the boxed version's return type to know if we need to box the result
     TypeId boxed_ret_tid;
     if (fn_type->can_raise) {
-        boxed_ret_tid = LMD_TYPE_ANY;  // returns Item
+        boxed_ret_tid = LMD_TYPE_ANY;  // can_raise functions return RetItem — handled via ri_to_item()
     } else {
         boxed_ret_tid = ret_type->type_id;
     }
@@ -6682,25 +6830,35 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
     // box the return value if the original function returns a native type
     const char* box_prefix = NULL;
     const char* box_suffix = ")";
-    switch (boxed_ret_tid) {
-    case LMD_TYPE_INT:
-    case LMD_TYPE_INT64:
-        box_prefix = "i2it("; break;
-    case LMD_TYPE_FLOAT:
-        box_prefix = "push_d("; break;
-    case LMD_TYPE_BOOL:
-        box_prefix = "b2it("; break;
-    case LMD_TYPE_STRING:
-    case LMD_TYPE_BINARY:
-        box_prefix = "s2it("; break;
-    case LMD_TYPE_SYMBOL:
-        box_prefix = "y2it("; break;
-    case LMD_TYPE_DTIME:
-        box_prefix = "push_k("; break;
-    case LMD_TYPE_DECIMAL:
-        box_prefix = "c2it("; break;
-    default:
-        break;  // returns Item, no boxing needed
+    if (fn_type->can_raise) {
+        // can_raise main function now returns RetItem — convert to Item via ri_to_item()
+        box_prefix = "ri_to_item(";
+    } else {
+        switch (boxed_ret_tid) {
+        case LMD_TYPE_INT:
+        case LMD_TYPE_INT64:
+            box_prefix = "i2it("; break;
+        case LMD_TYPE_FLOAT:
+            box_prefix = "push_d("; break;
+        case LMD_TYPE_BOOL:
+            box_prefix = "b2it("; break;
+        case LMD_TYPE_STRING:
+        case LMD_TYPE_BINARY:
+            box_prefix = "s2it("; break;
+        case LMD_TYPE_SYMBOL:
+            box_prefix = "y2it("; break;
+        case LMD_TYPE_DTIME:
+            box_prefix = "push_k("; break;
+        case LMD_TYPE_DECIMAL:
+            box_prefix = "c2it("; break;
+        default:
+            // container types (Map*, List*, etc.) need p2it() for safe NULL handling
+            if (get_container_unbox_fn(boxed_ret_tid)) {
+                box_prefix = "p2it(";
+            }
+            // else returns Item, no boxing needed
+            break;
+        }
     }
     if (box_prefix) strbuf_append_str(tp->code_buf, box_prefix);
 
@@ -6728,13 +6886,23 @@ void define_func_call_wrapper(Transpiler* tp, AstFuncNode *fn_node) {
             case LMD_TYPE_BOOL:   unbox_fn = "it2b("; break;
             case LMD_TYPE_STRING:
             case LMD_TYPE_BINARY: unbox_fn = "it2s("; break;
-            default:
-                // pointer types: cast from Item
-                strbuf_append_str(tp->code_buf, "(void*)_");
-                strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+            default: {
+                // container/pointer types: use safe type-checking unbox helpers
+                const char* container_fn = get_container_unbox_fn(param_type->type_id);
+                if (container_fn) {
+                    strbuf_append_str(tp->code_buf, container_fn);
+                    strbuf_append_str(tp->code_buf, "(_");
+                    strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else {
+                    // unknown type — pass Item through as-is
+                    strbuf_append_char(tp->code_buf, '_');
+                    strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+                }
                 param = (AstNamedNode*)param->next;
                 has_params = true;
                 continue;
+            }
             }
             strbuf_append_str(tp->code_buf, unbox_fn);
             strbuf_append_char(tp->code_buf, '_');

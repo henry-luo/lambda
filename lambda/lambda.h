@@ -882,16 +882,20 @@ static inline RetPath rp_err(LambdaError* error) {
 #ifndef __cplusplus
 
 // Wrap a legacy Item-returning function result into RetItem
+// Note: Error Items (from fn_error()) don't carry a real LambdaError* pointer.
+// They're just tagged values (LMD_TYPE_ERROR in high 8 bits, pointer=0).
+// So we store the error Item in .value and use .err as a boolean sentinel.
 static inline RetItem item_to_ri(Item item) {
-    uint8_t tag = (uint64_t)item >> 56;
-    if (tag == LMD_TYPE_ERROR)
-        return ri_err((LambdaError*)(uintptr_t)((uint64_t)item & 0x00FFFFFFFFFFFFFFULL));
-    return ri_ok(item);
+    RetItem r;
+    r.value = item;
+    r.err = ((uint64_t)item >> 56 == LMD_TYPE_ERROR) ? (LambdaError*)1 : null;
+    return r;
 }
 
 // Extract Item from RetItem (for legacy callers expecting plain Item)
+// .value always holds the actual Item — whether error or normal value.
 static inline Item ri_to_item(RetItem ri) {
-    return ri.err ? err2it(ri.err) : ri.value;
+    return ri.value;
 }
 
 #endif // !__cplusplus

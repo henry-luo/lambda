@@ -352,11 +352,12 @@ static inline RetItem ri_err(LambdaError* error) {
 }
 
 static inline RetItem item_to_ri(Item item) {
-    if (item._type_id == LMD_TYPE_ERROR)
-        return ri_err((LambdaError*)(uintptr_t)(item.item & 0x00FFFFFFFFFFFFFFULL));
-    return ri_ok(item);
+    RetItem r;
+    r.value = item;
+    r.err = (item._type_id == LMD_TYPE_ERROR) ? (LambdaError*)1 : nullptr;
+    return r;
 }
 
 static inline Item ri_to_item(RetItem ri) {
-    return ri.err ? err2it(ri.err) : ri.value;
+    return ri.value;
 }
