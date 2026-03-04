@@ -1,0 +1,14 @@
+"1. Basic bitwise ops"
+[15, 255, 240, -1, 16, 16]
+"2. Typed function bitwise ops"
+[15, 255, 240, -1, 16, 16]
+"3. Computed bitwise"
+[15, 8, 13, true, false]
+"4. Untyped bitwise"
+[15, 255]
+"5. RGB encode/decode"
+[16744512, 255, 128, 64]
+"6. Bitwise results boxed in list"
+[3, 6, 6, 0, 12, 3]
+"7. Edge cases"
+[0, 0, 0, 0, 0, 0]

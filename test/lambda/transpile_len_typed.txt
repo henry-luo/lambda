@@ -1,0 +1,16 @@
+"1. Typed string len"
+[5, 13, 3]
+"2. Inline collection len"
+[4, 1, 3, 0]
+"3. len in boolean expressions"
+[false, false, true, true]
+"4. len in arithmetic"
+[63, 30]
+"5. Untyped len fallback"
+[3, 5, 0]
+"6. len result as int"
+[13, 11]
+"7. Chained len"
+["longer string", "hello world"]
+"8. Element len"
+1

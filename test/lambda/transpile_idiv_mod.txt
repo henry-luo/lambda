@@ -1,0 +1,15 @@
+"1. Basic div and mod"
+[3, 2, -3, -2, 14, 2]
+"2. Typed int div/mod"
+[3, 3, -3, 14, 1, 2, -1, 2]
+"3. Float mod"
+[1.5, 2]
+"4. Div/mod in expressions"
+[true, false, true, false]
+[3, 2]
+"5. Digit sum via div/mod"
+[6, 27, 1]
+"6. Div/mod with variables"
+[4, 2]
+"7. Untyped div/mod"
+[3, 2]
