@@ -1075,8 +1075,9 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 
 ## Implementation Plan
 
-> **Status**: Phase 1 (steps 1.1–1.3, 1.5) and Phase 2 (steps 2.1–2.2) are **complete** as of 2026-03-04.
-> All 572 Lambda baseline tests and 2418 Radiant baseline tests pass.
+> **Status**: Phase 1 (steps 1.1–1.3, 1.5–1.7) and Phase 2 (steps 2.1–2.6) are **complete** as of 2025-07-16.
+> All 570/572 Lambda baseline tests pass (2 pre-existing failures: awfy_cd2, awfy_deltablue2).
+> All 2418 Radiant baseline tests pass.
 
 ### Phase 1: Foundation (Correctness)
 
@@ -1089,8 +1090,8 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 | 1.3 | Add `push_d_safe()`, `push_k_safe()` idempotent boxing | lambda-mem.cpp, lambda.h | ✅ Done |
 | 1.4 | Add debug-mode boxing assertions | lambda.h (conditional) | Not started |
 | 1.5 | Register all new helpers in MIR function table | mir.c | ✅ Done |
-| 1.6 | Fix `define_func_call_wrapper()` — replace `(void*)` casts | transpile.cpp | Not started |
-| 1.7 | Fix `transpile_call_argument()` — replace blind container casts | transpile.cpp | Not started |
+| 1.6 | Fix `define_func_call_wrapper()` — replace `(void*)` casts | transpile.cpp | ✅ Done |
+| 1.7 | Fix `transpile_call_argument()` — replace blind container casts | transpile.cpp | ✅ Done |
 
 **Validation**: Existing test suite passes 100% (572/572 Lambda, 2418/2418 Radiant).
 
@@ -1102,10 +1103,10 @@ All new helpers must be registered in `mir.c`'s function table for JIT resolutio
 |------|--------|-------|--------|
 | 2.1 | Define all `Ret*` structs (2-field) and constructor helpers | lambda.h, lambda.hpp | ✅ Done |
 | 2.2 | Add `err2it()`/`it2err()` converters and `item_to_ri()`/`ri_to_item()` shims | lambda.h, lambda.hpp | ✅ Done |
-| 2.3 | Migrate `can_raise` user function native versions to return typed `Ret*` | transpile.cpp | Not started |
-| 2.4 | Migrate `can_raise` user function boxed wrappers to return `RetItem` | transpile.cpp | Not started |
-| 2.5 | Update `?` propagation codegen to use `Ret*` | transpile.cpp | Not started |
-| 2.6 | Update `let a^err` destructuring codegen | transpile.cpp | Not started |
+| 2.3 | Migrate `can_raise` user function native versions to return `RetItem` | transpile.cpp | ✅ Done |
+| 2.4 | Migrate `can_raise` user function boxed wrappers (`_w`) to handle `RetItem` | transpile.cpp | ✅ Done |
+| 2.5 | Update `?` propagation codegen to use `RetItem` | transpile.cpp | ✅ Done |
+| 2.6 | Update `let a^err` destructuring codegen | transpile.cpp | ✅ Done |
 | 2.7 | Migrate `can_raise` system functions to `Ret*` | lambda-eval.cpp, lambda-data-runtime.cpp | Not started |
 
 ### Phase 3: Dual Version Generation
@@ -1185,6 +1186,40 @@ C2MIR's compilation of struct-returning `static inline` functions (the `Ret*` co
 
 **Fix**: Added `{"memcpy", (fn_ptr) memcpy}` to `func_list[]` in `mir.c`. Without this, **all** MIR JIT tests fail with `"failed to resolve native fn/pn: memcpy"`.
 
+### Error Item Sentinel Approach (Learned During Phase 2.3–2.6)
+
+Lambda's `fn_error()` returns `ItemError = {._type_id = LMD_TYPE_ERROR}` — a tagged zero with **no embedded `LambdaError*` pointer**. Error details are stored in the runtime context via `set_runtime_error()`, not in the Item itself.
+
+This means `item_to_ri()` cannot extract a real `LambdaError*` from error Items (the lower 56 bits are 0). Initial implementations using `ri_err(it2err(fn_error(...)))` silently produced `RetItem{.err = NULL}`, losing the error.
+
+**Solution adopted**: Use `.err` as a **boolean sentinel** (non-null = error, NULL = success):
+
+```c
+static inline RetItem item_to_ri(Item item) {
+    RetItem r;
+    r.value = item;  // ALWAYS store the original Item
+    r.err = ((uint64_t)item >> 56 == LMD_TYPE_ERROR) ? (LambdaError*)1 : null;
+    return r;
+}
+
+static inline Item ri_to_item(RetItem ri) {
+    return ri.value;  // .value holds the actual value (error or normal)
+}
+```
+
+This has cascading implications:
+- **`^` propagation**: Forward the entire `RetItem` (`return _ri;`) instead of extracting `.err`
+- **`let a^err` destructuring**: Error variable reads `_ri.value` (the error Item), not `err2it(_ri.err)`
+- **`_w` wrapper**: `ri_to_item()` simply returns `.value` — works for both error and success
+
+**Key rule**: `.err` is a flag, not a usable pointer. Never dereference it. Never pass it to `err2it()`.
+
+### `transpile_box_item` Double-Wrapping (Learned During Phase 2.3–2.6)
+
+When a `can_raise` function call has `^` propagation AND appears inside `transpile_box_item()`, both paths try to handle `RetItem → Item` conversion. The `^` propagation yields `Item` (via `_ri.value`), but `transpile_box_item()` also wraps in `ri_to_item()` — causing a type conflict (passing `Item` where `RetItem` is expected).
+
+**Fix**: In `transpile_box_item()`, check `call_node->propagate` before applying `ri_to_item()`. When propagation is active, the `^` pattern already extracts `.value` as `Item`, so no wrapping is needed.
+
 ### Files Modified (Phase 1–2)
 
 | File | What was added |
@@ -1193,6 +1228,15 @@ C2MIR's compilation of struct-returning `static inline` functions (the `Ret*` co
 | `lambda/lambda.hpp` | C++ versions of: `it2map`–`it2p`, `p2it`, `err2it`, `it2err`, `RetItem` typedef, `ri_ok`, `ri_err`, `item_to_ri`, `ri_to_item` |
 | `lambda/lambda-mem.cpp` | `push_d_safe()` and `push_k_safe()` implementations |
 | `lambda/mir.c` | `memcpy` registration; `push_d_safe`/`push_k_safe`; all container unboxing/boxing helpers; all `Ret*` constructors; compatibility shims (~55 new entries) |
+
+### Files Modified (Phase 1.6–1.7, Phase 2.3–2.6)
+
+| File | What was changed |
+|------|-----------------|
+| `lambda/transpile.cpp` | Phase 1.6: `define_func_call_wrapper()` — replaced `(void*)` container casts with `it2map()`/`it2list()` etc., added `p2it()` boxing for container returns. Phase 1.7: `transpile_call_argument()` — replaced blind `(Type*)` casts with safe unbox helpers in normal and TCO paths. Phase 2.3: `can_raise` non-closure/non-method functions emit `RetItem` return type, function body wrapped in `item_to_ri()`. Phase 2.4: `_w` wrapper uses `ri_to_item()` for `can_raise`. Phase 2.5: `^` propagation uses `RetItem` temp var, forwards entire struct on error. Phase 2.6: `let a^err` dual path (RetItem for user can_raise calls, legacy Item for system functions). |
+| `lambda/lambda.h` | `item_to_ri()` uses sentinel approach (`.value` = original Item, `.err` = flag). `ri_to_item()` simply returns `.value`. |
+| `lambda/lambda.hpp` | C++ versions updated to match sentinel approach. |
+| `lambda/lambda-embed.h` | Regenerated from updated `lambda.h`. |
 
 ---
 
@@ -1207,7 +1251,7 @@ C2MIR's compilation of struct-returning `static inline` functions (the `Ret*` co
 | `lambda/lambda-data.cpp` | Container unboxing implementations (moved to inline in lambda.h/lambda.hpp instead) | ✅ Done (approach changed) |
 | `lambda/ast.hpp` | Extend `SysFuncInfo` with `CRetType`, `CArgConvention`, `native_variant` | Not started |
 | `lambda/build_ast.cpp` | Populate new `SysFuncInfo` fields in `sys_funcs[]` table | Not started |
-| `lambda/transpile.cpp` | Dual version generation; `Ret*` codegen; table-driven boxing; emission API | Not started |
+| `lambda/transpile.cpp` | Dual version generation; `Ret*` codegen; table-driven boxing; emission API | ✅ Partially done (Phase 1.6–1.7: container cast fixes, Phase 2.3–2.6: RetItem codegen) |
 | `lambda/transpile-mir.cpp` | MIR alignment (container unboxing, `Ret*`, narrowing table) | Not started |
 | `lambda/print.cpp` | Update `write_type()` for `Ret*` return types | Not started |
 | `lambda/lambda-eval.cpp` | Update `fn_call*` dispatch for `RetItem`; migrate `can_raise` sys funcs | Not started |
