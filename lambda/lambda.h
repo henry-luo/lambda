@@ -121,16 +121,7 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
-// TypeKind: sub-classification for LMD_TYPE_TYPE variants
-// Type structs (TypeUnary, TypeBinary, TypePattern) all share type_id = LMD_TYPE_TYPE
-// but are distinguished by their kind field.
-enum TypeKind {
-    TYPE_KIND_SIMPLE = 0,   // base Type (e.g., int, string, map, etc.)
-    TYPE_KIND_UNARY,        // TypeUnary: occurrence operators (?, +, *, [n])
-    TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
-    TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
-    TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
-};
+// TypeKind enum moved to lambda.hpp (not needed by JIT)
 
 // Get human-readable name for a TypeId (for error messages)
 // Implemented in lambda-data.cpp (not inlined — saves ~30 lines from JIT-embedded header)
@@ -368,188 +359,19 @@ typedef struct Pool Pool;
 typedef struct Path Path;
 typedef struct PathMeta PathMeta;
 
-// Path metadata structure (optional, allocated on demand)
-// Stores file/directory metadata without loading content
-struct PathMeta {
-    int64_t size;           // file size in bytes (-1 for dirs or unknown)
-    DateTime modified;      // last modification time
-    uint8_t flags;          // is_dir (bit 0), is_link (bit 1)
-    uint8_t mode;           // Unix permissions (compressed to 8 bits: rwx for owner)
-};
+// Path/PathMeta full definitions, path enums, macros, and most Path API
+// moved to lambda-path.h (not needed by JIT-compiled code).
+// Target/Name structs and APIs moved to lambda.hpp.
 
-// Path metadata flags
-#define PATH_META_IS_DIR   0x01
-#define PATH_META_IS_LINK  0x02
-
-// Path segment type flags (stored in flags field)
-// These distinguish between regular segments, wildcards, and dynamic segments
-// Note: Named with LPATH_ prefix to avoid conflict with validator's PathSegmentType
-typedef enum {
-    LPATH_SEG_NORMAL = 0,        // regular segment (literal string)
-    LPATH_SEG_WILDCARD = 1,      // single wildcard (*) - match one segment
-    LPATH_SEG_WILDCARD_REC = 2,  // recursive wildcard (**) - match zero or more segments
-    LPATH_SEG_DYNAMIC = 3,       // dynamic segment (runtime-computed, name is NULL until resolved)
-} LPathSegmentType;
-
-// Path flags (bits 0-1 for segment type, bit 7 for metadata loaded)
-#define PATH_FLAG_META_LOADED  0x80  // bit 7: metadata has been stat'd and loaded
-
-struct Path {
-    TypeId type_id;         // LMD_TYPE_PATH
-    uint8_t flags;          // segment type (bits 0-1), metadata loaded (bit 7)
-    const char* name;       // segment name (interned via name_pool), NULL for wildcards
-    Path* parent;           // parent segment (NULL for root schemes)
-    uint64_t result;        // cached resolved content (0 = not resolved yet)
-    PathMeta* meta;         // optional metadata (NULL until stat'd)
-};
-
-// Helper macros for path segment type
-#define PATH_GET_SEG_TYPE(p)      ((LPathSegmentType)((p)->flags & 0x03))
-#define PATH_SET_SEG_TYPE(p, t)   ((p)->flags = ((p)->flags & 0xFC) | ((t) & 0x03))
-
-// Path scheme identifiers (predefined roots)
-typedef enum {
-    PATH_SCHEME_FILE = 0,   // file://
-    PATH_SCHEME_HTTP,       // http://
-    PATH_SCHEME_HTTPS,      // https://
-    PATH_SCHEME_SYS,        // sys:// (system info)
-    PATH_SCHEME_REL,        // . (relative path)
-    PATH_SCHEME_PARENT,     // .. (parent directory)
-    PATH_SCHEME_COUNT
-} PathScheme;
-
-// Path API (defined in path.c)
-void path_init(void);                                   // Initialize root scheme paths
-Path* path_get_root(PathScheme scheme);                 // Get predefined root path
-Path* path_append(Path* parent, const char* segment);   // Append segment to path
-Path* path_append_len(Path* parent, const char* segment, size_t len);
-const char* path_get_scheme_name(Path* path);           // Get scheme name (file, http, etc.)
-PathScheme path_get_scheme(Path* path);                 // Get scheme type (PATH_SCHEME_FILE, etc.)
-bool path_is_root(Path* path);                          // Check if path is a root scheme
-bool path_is_absolute(Path* path);                      // Check if path is absolute (not . or ..)
-int path_depth(Path* path);                             // Get path depth (segment count)
-void path_to_string(Path* path, void* out);             // Convert to string (StrBuf*)
-void path_to_os_path(Path* path, void* out);            // Convert to OS path (StrBuf*)
-
-// New Path API: path_new, path_extend, path_concat
+// Path construction API (called by JIT-generated code)
 Path* path_new(Pool* pool, int scheme);                           // Create new path with scheme
 Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
 Path* path_concat(Pool* pool, Path* base, Path* suffix);          // Concatenate two paths
-
-// Wildcard support for glob patterns
 Path* path_wildcard(Pool* pool, Path* base);                      // Add * wildcard segment
 Path* path_wildcard_recursive(Pool* pool, Path* base);            // Add ** wildcard segment
-bool path_is_wildcard(Path* path);                                // Check if segment is *
-bool path_is_wildcard_recursive(Path* path);                      // Check if segment is **
-bool path_has_wildcards(Path* path);                              // Check if path has any wildcards
 
-// Path content loading (lazy evaluation support)
-Item path_load_content(Path* path);                               // Load path content (file/URL)
-int64_t path_get_length(Path* path);                              // Get path content length (triggers load)
-Item path_get_item(Path* path, int64_t index);                    // Get item at index (triggers load)
-
-// ============================================================================
-// Target: Unified I/O target for input/output operations
-// ============================================================================
-// Supports both URL strings and Lambda Path objects
-// - URLs: file://, http://, https://, sys:// etc. (parsed from string/symbol)
-// - Paths: Lambda's cross-platform path type
-
-// Forward declaration for Url (defined in lib/url.h)
-typedef struct Url Url;
-
-// Target scheme (derived from URL or Path)
-typedef enum {
-    TARGET_SCHEME_FILE = 0,     // local file (file:// or relative path)
-    TARGET_SCHEME_HTTP,         // HTTP URL
-    TARGET_SCHEME_HTTPS,        // HTTPS URL
-    TARGET_SCHEME_SYS,          // system info (sys://)
-    TARGET_SCHEME_FTP,          // FTP (future)
-    TARGET_SCHEME_DATA,         // data: URL (future)
-    TARGET_SCHEME_UNKNOWN       // unrecognized scheme
-} TargetScheme;
-
-// Target type (how the target was specified)
-typedef enum {
-    TARGET_TYPE_URL = 0,        // parsed from URL string
-    TARGET_TYPE_PATH            // Lambda Path object
-} TargetType;
-
-// Target structure - unified I/O target
-typedef struct Target {
-    TargetScheme scheme;        // scheme type (file, http, https, sys, etc.)
-    TargetType type;            // source type (url or path)
-    uint64_t url_hash;          // hash of normalized URL for fast equality comparison
-    const char* original;       // original input string (for relative path preservation)
-    union {
-        Url* url;               // parsed URL (when type == TARGET_TYPE_URL)
-        Path* path;             // Lambda Path (when type == TARGET_TYPE_PATH)
-    };
-} Target;
-
-// Target API (defined in target.c)
-// item_to_target: Convert Item to Target
-// - string/symbol: parse as URL
-// - path: use directly
-// - other types: return error
-// Note: Takes uint64_t to avoid C/C++ Item type mismatch
-Target* item_to_target(uint64_t item, Url* cwd);
-
-// target_to_local_path: Convert Target to local OS file path
-// - Resolves relative paths against cwd
-// - Returns NULL for non-file schemes (http, https, etc.)
-// - Caller must free the returned StrBuf
-void* target_to_local_path(Target* target, Url* cwd);
-
-// target_to_url_string: Get URL string representation
-// - For URL targets: returns href
-// - For Path targets: converts to URL string (file:// for local paths)
-const char* target_to_url_string(Target* target, void* out_buf);
-
-// target_is_local: Check if target is a local file (not http/https)
-bool target_is_local(Target* target);
-
-// target_is_remote: Check if target is a remote URL (http/https)
-bool target_is_remote(Target* target);
-
-// target_is_dir: Check if target is a directory (local targets only)
-// Returns false for remote URLs or if stat fails
-bool target_is_dir(Target* target);
-
-// target_exists: Check if target exists (file or directory, local targets only)
-// Returns false for remote URLs (would need HTTP HEAD request)
-bool target_exists(Target* target);
-
-// target_free: Free target and its contents
-void target_free(Target* target);
-
-// target_equal: Check if two targets refer to the same resource (by URL hash)
-bool target_equal(Target* a, Target* b);
-
-// Name - a qualified name with optional namespace
-// Pool-managed (no refcount). Used for element tag names and map field names.
-typedef struct Name {
-    String* name;       // local name (interned via name_pool)
-    Target* ns;         // namespace target (NULL for unqualified names)
-} Name;
-
-// name_equal: Check if two names are equal (by local name pointer and namespace hash)
-static inline bool name_equal(const Name* a, const Name* b) {
-    if (a == b) return true;
-    if (!a || !b) return false;
-    if (a->name != b->name) return false;  // interned strings: pointer equality
-    if (a->ns == b->ns) return true;       // same namespace pointer (or both NULL)
-    if (!a->ns || !b->ns) return false;    // one has ns, one doesn't
-    return target_equal(a->ns, b->ns);
-}
-
-// Path resolution for iteration (returns list for dirs, content for files)
-Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration
-bool path_ends_with_wildcard(Path* path);                         // Check if leaf is * or **
-void path_load_metadata(Path* path);                              // Load metadata via stat()
-
-// System function: exists() - check if file/directory exists
-Bool fn_exists(Item path);                                        // Check if path exists
+// System function: exists() - check if file/directory exists (called by JIT)
+Bool fn_exists(Item path);
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);

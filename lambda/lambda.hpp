@@ -1,6 +1,87 @@
 
 #pragma once
 #include "lambda.h"
+#include "lambda-path.h"
+
+// ============================================================================
+// Definitions moved from lambda.h to keep the JIT-embedded header slim.
+// These are only needed by the C++ runtime, not by JIT-compiled code.
+// ============================================================================
+
+// TypeKind: sub-classification for LMD_TYPE_TYPE variants
+// Type structs (TypeUnary, TypeBinary, TypePattern) all share type_id = LMD_TYPE_TYPE
+// but are distinguished by their kind field.
+enum TypeKind {
+    TYPE_KIND_SIMPLE = 0,   // base Type (e.g., int, string, map, etc.)
+    TYPE_KIND_UNARY,        // TypeUnary: occurrence operators (?, +, *, [n])
+    TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
+    TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
+    TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
+};
+
+// ============================================================================
+// Target: Unified I/O target for input/output operations
+// ============================================================================
+
+// Forward declaration for Url (defined in lib/url.h)
+typedef struct Url Url;
+
+// Target scheme (derived from URL or Path)
+typedef enum {
+    TARGET_SCHEME_FILE = 0,     // local file (file:// or relative path)
+    TARGET_SCHEME_HTTP,         // HTTP URL
+    TARGET_SCHEME_HTTPS,        // HTTPS URL
+    TARGET_SCHEME_SYS,          // system info (sys://)
+    TARGET_SCHEME_FTP,          // FTP (future)
+    TARGET_SCHEME_DATA,         // data: URL (future)
+    TARGET_SCHEME_UNKNOWN       // unrecognized scheme
+} TargetScheme;
+
+// Target type (how the target was specified)
+typedef enum {
+    TARGET_TYPE_URL = 0,        // parsed from URL string
+    TARGET_TYPE_PATH            // Lambda Path object
+} TargetType;
+
+// Target structure - unified I/O target
+typedef struct Target {
+    TargetScheme scheme;        // scheme type (file, http, https, sys, etc.)
+    TargetType type;            // source type (url or path)
+    uint64_t url_hash;          // hash of normalized URL for fast equality comparison
+    const char* original;       // original input string (for relative path preservation)
+    union {
+        Url* url;               // parsed URL (when type == TARGET_TYPE_URL)
+        Path* path;             // Lambda Path (when type == TARGET_TYPE_PATH)
+    };
+} Target;
+
+// Target API (defined in target.cpp)
+Target* item_to_target(uint64_t item, Url* cwd);
+void* target_to_local_path(Target* target, Url* cwd);
+const char* target_to_url_string(Target* target, void* out_buf);
+bool target_is_local(Target* target);
+bool target_is_remote(Target* target);
+bool target_is_dir(Target* target);
+bool target_exists(Target* target);
+void target_free(Target* target);
+bool target_equal(Target* a, Target* b);
+
+// Name - a qualified name with optional namespace
+// Pool-managed (no refcount). Used for element tag names and map field names.
+typedef struct Name {
+    String* name;       // local name (interned via name_pool)
+    Target* ns;         // namespace target (NULL for unqualified names)
+} Name;
+
+// name_equal: Check if two names are equal (by local name pointer and namespace hash)
+static inline bool name_equal(const Name* a, const Name* b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->name != b->name) return false;  // interned strings: pointer equality
+    if (a->ns == b->ns) return true;       // same namespace pointer (or both NULL)
+    if (!a->ns || !b->ns) return false;    // one has ns, one doesn't
+    return target_equal(a->ns, b->ns);
+}
 
 typedef struct ConstItem ConstItem;
 

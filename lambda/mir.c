@@ -21,6 +21,9 @@ extern void lambda_stack_overflow_error(const char* func_name);
 extern Item path_resolve_for_iteration(Path* path);
 extern Bool fn_exists(Item path);
 
+// Target equality (implemented in target.cpp, used in func_list)
+extern bool target_equal(Target* a, Target* b);
+
 // Symbol creation functions (implemented in lambda-eval-num.cpp)
 extern Symbol* fn_symbol(Item item);
 extern Item fn_symbol2(Item name, Item url);

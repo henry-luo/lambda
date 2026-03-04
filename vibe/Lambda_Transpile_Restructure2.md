@@ -14,8 +14,9 @@ These changes complement the earlier refactoring proposal ([Lambda_Transpile_Res
 
 | File | Lines | Role |
 |------|-------|------|
-| `lambda/lambda.h` | 1,239 | C header embedded into every JIT module via `lambda-embed.h` (4,115 lines xxd) |
-| `lambda/lambda.hpp` | 342 | C++ Item class, extends `lambda.h` |
+| `lambda/lambda.h` | 1,061 | C header embedded into every JIT module via `lambda-embed.h` (3,393 lines xxd) |
+| `lambda/lambda.hpp` | 423 | C++ Item class, extends `lambda.h` + moved type/target/name definitions |
+| `lambda/lambda-path.h` | 84 | Full Path/PathMeta struct definitions, path enums, macros, and Path API (new, Phase 2) |
 | `lambda/lambda-data.hpp` | 650 | Full data structures, used by C++ runtime only |
 | `lambda/build_ast.cpp` | ~7,200 | AST builder with 144 sys_func entries, **hashmap lookup (O(1))** |
 | `lambda/transpile.cpp` | 8,002 | C code generator with scattered dispatch tables |
@@ -683,15 +684,34 @@ All three Phase 1 tasks have been implemented and verified (582/582 baseline tes
 
 ### ~~Phase 1: Quick Wins~~ — Done
 
-### Phase 2: Header Diet (2–3 days) — Next Up
+### ~~Phase 2: Header Diet~~ — ✅ COMPLETED (4 Mar 2026)
 
-| Task | Effort | Impact |
-|------|--------|--------|
-| Move full struct definitions to `lambda.hpp` | Medium | Enables `lambda.h` slimming |
-| Replace full struct defs in `lambda.h` with forward decls | Medium | ~56% size reduction |
-| Remove Path/Target/Name from `lambda.h` | Small | Further reduction |
-| Update all include sites | Small | Mechanical |
-| Verify JIT compilation still works | Medium | Critical validation |
+| Task | Status | Details |
+|------|--------|---------|
+| Move TypeKind enum to `lambda.hpp` | ✅ Done | Not needed by JIT, moved to runtime-only header |
+| Move Path/PathMeta structs + enums/macros + Path API to `lambda-path.h` | ✅ Done | New C-compatible header for full path definitions. Included by `path.c` (C) and `lambda.hpp` (C++) |
+| Move Target struct + enums + API to `lambda.hpp` | ✅ Done | JIT never accesses Target internals |
+| Move Name struct + name_equal to `lambda.hpp` | ✅ Done | JIT never uses Name |
+| Keep Function struct in `lambda.h` | ✅ Kept | JIT code accesses `->closure_field_count`, `->flags`, `->ptr` directly |
+| Keep Container/Range/List/Array*/Map/Object/Element in `lambda.h` | ✅ Kept | JIT code accesses struct fields for for-loops and direct field access |
+| Add `fn_exists` declaration back to `lambda.h` | ✅ Done | Transpiler emits `fn_exists()` calls via generic sys_func path |
+| Fix `mir.c` extern declarations for `target_equal` | ✅ Done | Added extern since full Target API moved out |
+| Fix `path.c` to include `lambda-path.h` + target externs | ✅ Done | `fn_exists()` in path.c calls `item_to_target`/`target_exists`/`target_free` |
+
+**Key findings:**
+- **Function struct must stay in lambda.h** — the transpiler generates code that directly accesses `_fn->closure_field_count`, `_fn->flags = FN_FLAG_BOXED_RET`, and `_fn->ptr`. This was incorrectly assumed to be opaque in the original proposal.
+- **Container struct definitions must stay** — JIT code accesses `Range.start/end`, `List.items/length`, `Map.data`, `Element.items/length/data`, `String.chars/len` etc. The original proposal's claim that these were not accessed by JIT was wrong.
+- **`fn_exists` is called from JIT code** — the transpiler emits `fn_exists(path)` through the generic sys_func name emission (`"fn_" + name`), requiring its declaration in lambda.h.
+
+**Size results:**
+| Metric | Before Phase 2 | After Phase 2 | Reduction |
+|--------|----------------|---------------|-----------|
+| `lambda.h` | 1,239 lines | 1,061 lines | 178 lines (14.4%) |
+| `lambda-embed.h` (JIT payload) | 4,115 lines | 3,393 lines | 722 lines (17.5%) |
+| `lambda.hpp` | 342 lines | 423 lines | +81 lines (moved in) |
+| `lambda-path.h` (new) | — | 84 lines | New file |
+
+The original proposal estimated ~56% reduction by also moving Container/Function/String structs. Since those must stay (JIT accesses their fields), the actual reduction is 14–18% for this phase. Further reduction would require changing the transpiler to use accessor functions instead of direct field access.
 
 ### Phase 3: Unified Registry (3–5 days) — Future
 
