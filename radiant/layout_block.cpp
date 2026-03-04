@@ -3056,12 +3056,31 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                             if (!child_is_float) {
                                 // Found first in-flow element child
                                 float child_mt = child_vb->bound ? child_vb->bound->margin.top : 0;
-                                // If child bound isn't resolved yet, try the specified style tree
-                                if (!child_vb->bound && child_elem->specified_style) {
+                                // If child margin isn't resolved yet (bound NULL or margin
+                                // still at default 0), try the specified style tree.
+                                // Children haven't been through dom_node_resolve_style yet
+                                // at this point, so bound margins may be unresolved.
+                                if (child_mt == 0 && child_elem->specified_style) {
+                                    // Try individual margin-top property first
                                     CssDeclaration* mt_decl = style_tree_get_declaration(
                                         child_elem->specified_style, CSS_PROPERTY_MARGIN_TOP);
                                     if (mt_decl && mt_decl->value) {
-                                        child_mt = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, mt_decl->value);
+                                        float resolved = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, mt_decl->value);
+                                        if (resolved > child_mt) child_mt = resolved;
+                                    }
+                                    // Also try shorthand 'margin' property (e.g. margin: 1em)
+                                    if (child_mt == 0) {
+                                        CssDeclaration* m_decl = style_tree_get_declaration(
+                                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
+                                        if (m_decl && m_decl->value) {
+                                            const CssValue* top_val = m_decl->value;
+                                            // For multi-value shorthand, first value is top
+                                            if (top_val->type == CSS_VALUE_TYPE_LIST && top_val->data.list.count > 0) {
+                                                top_val = top_val->data.list.values[0];
+                                            }
+                                            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, top_val);
+                                            if (resolved > child_mt) child_mt = resolved;
+                                        }
                                     }
                                 }
                                 if (child_mt > own_margin_top) {
@@ -3171,6 +3190,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
                 // Signal margin collapsing section to skip collapse for this block
                 pa_block->saved_clear_y = clear_y;
+                // Mark the block itself so child layout knows not to double-adjust y
+                if (block->bound) block->bound->has_clearance = true;
                 log_debug("[CLEARANCE] Applied: y=%.1f, saved_clear_y=%.1f", block->y, clear_y);
 
                 // CSS 2.1 §9.5.2: After clearance moves the element below the floats,
@@ -3480,6 +3501,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     if (!oof) {
                         has_any_in_flow = true;
                         if (!is_block_self_collapsing(vb)) {
+                            all_self_collapsing = false;
+                            break;
+                        }
+                        // CSS 2.1 §9.5.2: clearance breaks margin adjacency.
+                        // A self-collapsing child with clearance creates real space
+                        // (its y position is non-zero due to clearance), so the
+                        // parent's margins do NOT collapse through.
+                        if (vb->bound && vb->bound->clearance_in_margin_chain) {
                             all_self_collapsing = false;
                             break;
                         }
@@ -4314,6 +4343,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     bool has_self_collapsing_margins = first_child_self_collapsing &&
                         (block->bound->margin.bottom != 0 || has_margin_chain(block->bound));
                     if (!has_clearance && (block->bound->margin.top != 0 || has_self_collapsing_margins)) {
+                        // CSS 2.1 §9.5.2: If the PARENT had clearance applied, the parent's
+                        // position is fixed by clearance. The child's margin collapses with the
+                        // parent's margin conceptually, but the clearance hypothetical position
+                        // already accounted for the child's margin contribution. Skip the parent
+                        // y-adjustment to avoid double-counting.
+                        bool parent_has_clearance = parent && parent->bound && parent->bound->has_clearance;
                         if (parent && parent->parent && !parent_creates_bfc &&
                             parent_padding_top == 0 && parent_border_top == 0) {
                             // CSS 2.1 §8.3.1: collapse child and parent margins
@@ -4373,9 +4408,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 }
                             }
 
-                            parent->y += margin_top - parent_margin_top - sibling_collapse;
-                            if (parent->bound) {
-                                parent->bound->margin.top = margin_top - sibling_collapse;
+                            if (!parent_has_clearance) {
+                                parent->y += margin_top - parent_margin_top - sibling_collapse;
+                                if (parent->bound) {
+                                    parent->bound->margin.top = margin_top - sibling_collapse;
+                                }
+                            } else {
+                                log_debug("[CLEARANCE] Parent has clearance — skipping y adjustment (margin would be %f)", margin_top);
                             }
                             block->y = 0;  block->bound->margin.top = 0;
                             parent_child_collapsed = true;
