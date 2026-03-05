@@ -1,4 +1,5 @@
 #include <time.h>
+#include <stdlib.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
@@ -7,6 +8,85 @@
 
 #if _WIN32
 #include <windows.h>
+#endif
+
+// ============================================================================
+// Phase-Level Profiling (enabled by LAMBDA_PROFILE=1 environment variable)
+// ============================================================================
+// Stores timing data in memory during compilation, dumps to file at cleanup.
+// Zero overhead when disabled — all gated by profile_enabled flag.
+
+#define PROFILE_MAX_SCRIPTS 64
+
+typedef struct PhaseProfile {
+    const char* script_path;
+    double parse_ms;
+    double ast_ms;
+    double transpile_ms;
+    double jit_init_ms;
+    double file_write_ms;
+    double c2mir_ms;
+    double mir_gen_ms;
+    int code_len;
+} PhaseProfile;
+
+bool profile_enabled = false;
+bool profile_checked = false;
+PhaseProfile profile_data[PROFILE_MAX_SCRIPTS];
+int profile_count = 0;
+
+bool is_profile_enabled() {
+    if (!profile_checked) {
+        const char* env = getenv("LAMBDA_PROFILE");
+        profile_enabled = (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0));
+        profile_checked = true;
+    }
+    return profile_enabled;
+}
+
+// High-resolution profiling timer (cross-platform)
+#ifdef _WIN32
+typedef LARGE_INTEGER profile_time_t;
+void profile_get_time(profile_time_t* t) { QueryPerformanceCounter(t); }
+double elapsed_ms_val(profile_time_t t0, profile_time_t t1) {
+    LARGE_INTEGER freq; QueryPerformanceFrequency(&freq);
+    return (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
+}
+#else
+typedef struct timespec profile_time_t;
+void profile_get_time(profile_time_t* t) { clock_gettime(CLOCK_MONOTONIC, t); }
+double elapsed_ms_val(profile_time_t t0, profile_time_t t1) {
+    long sec = t1.tv_sec - t0.tv_sec;
+    long nsec = t1.tv_nsec - t0.tv_nsec;
+    if (nsec < 0) { sec--; nsec += 1000000000L; }
+    return sec * 1000.0 + nsec / 1e6;
+}
+#endif
+
+void profile_dump_to_file() {
+    if (!profile_enabled || profile_count == 0) return;
+    create_dir_recursive("temp");
+    FILE* f = fopen("temp/phase_profile.txt", "w");
+    if (!f) return;
+    fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1)\n");
+    fprintf(f, "# script | parse | ast | transpile | jit_init | file_write | c2mir | mir_gen | total | code_len\n");
+    for (int i = 0; i < profile_count; i++) {
+        PhaseProfile* p = &profile_data[i];
+        double total = p->parse_ms + p->ast_ms + p->transpile_ms +
+                       p->jit_init_ms + p->file_write_ms + p->c2mir_ms + p->mir_gen_ms;
+        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\n",
+                p->script_path, p->parse_ms, p->ast_ms, p->transpile_ms,
+                p->jit_init_ms, p->file_write_ms, p->c2mir_ms, p->mir_gen_ms,
+                total, p->code_len);
+    }
+    fclose(f);
+}
+
+// ============================================================================
+// Existing timing helpers (for log_debug output)
+// ============================================================================
+
+#if _WIN32
 
 // Windows-specific timing implementation
 typedef struct {
@@ -569,6 +649,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     log_notice("Start transpiling %s...", script_path);
     win_timer start, end;
 
+    // Phase profiling: use high-res timer for release-accurate timing
+    bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS;
+    profile_time_t p0, p1, p2, p3, p4, p5, p6, p7;
+    if (profiling) profile_get_time(&p0);
+
     // create a parser
     get_time(&start);
     // parse the source
@@ -580,6 +665,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
     get_time(&end);
     print_elapsed_time("parsing", start, end);
+
+    if (profiling) profile_get_time(&p1);
 
     // print the syntax tree as an s-expr
     print_ts_root(tp->source, tp->syntax_tree);
@@ -627,6 +714,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("building AST", start, end);
 
+    if (profiling) profile_get_time(&p2);
+
     // Check for errors during AST building
     if (tp->error_count > 0) {
         log_error("compiled '%s' with error!!", script_path);
@@ -645,6 +734,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("transpiling", start, end);
 
+    if (profiling) profile_get_time(&p3);
+
     // Check for errors during transpilation
     if (tp->error_count > 0) {
         log_error("compiled '%s' with error!!", script_path);
@@ -655,6 +746,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // JIT compile the C code
     get_time(&start);
     tp->jit_context = jit_init(tp->runtime->optimize_level);
+
+    if (profiling) profile_get_time(&p4);
+
     // compile user code to MIR
     log_debug("compiling to MIR...");
     // Write transpiled code for debugging (module index as suffix)
@@ -666,15 +760,38 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         snprintf(transpiled_filename, sizeof(transpiled_filename), "_transpiled_%d.c", script->index);
     }
     write_text_file(transpiled_filename, tp->code_buf->str);
+
+    if (profiling) profile_get_time(&p5);
+
+    int profile_code_len = (int)tp->code_buf->length;
     char* code = tp->code_buf->str + lambda_lambda_h_len;
     // printf("code len: %d\n", (int)strlen(code));
     log_debug("transpiled code (first 500 chars):\n---------%.500s", code);
     fflush(NULL);  // force flush all open streams for large log
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
+
+    if (profiling) profile_get_time(&p6);
+
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;
     // generate native code and return the function
     tp->main_func = (main_func_t)jit_gen_func(tp->jit_context, "main");
     get_time(&end);
+
+    if (profiling) profile_get_time(&p7);
+
+    // Record profiling data
+    if (profiling) {
+        PhaseProfile* prof = &profile_data[profile_count++];
+        prof->script_path = script_path;
+        prof->parse_ms = elapsed_ms_val(p0, p1);
+        prof->ast_ms = elapsed_ms_val(p1, p2);
+        prof->transpile_ms = elapsed_ms_val(p2, p3);
+        prof->jit_init_ms = elapsed_ms_val(p3, p4);
+        prof->file_write_ms = elapsed_ms_val(p4, p5);
+        prof->c2mir_ms = elapsed_ms_val(p5, p6);
+        prof->mir_gen_ms = elapsed_ms_val(p6, p7);
+        prof->code_len = profile_code_len;
+    }
 
     // Build debug info table for stack traces (after MIR_link has assigned addresses)
     // Pass func_name_map so MIR internal names are mapped to Lambda user-friendly names
@@ -1054,6 +1171,9 @@ void runtime_init(Runtime* runtime) {
 }
 
 void runtime_cleanup(Runtime* runtime) {
+    // Dump profiling data if enabled (before freeing anything)
+    profile_dump_to_file();
+
     if (runtime->parser) ts_parser_delete(runtime->parser);
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {
