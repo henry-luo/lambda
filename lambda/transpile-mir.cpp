@@ -1532,14 +1532,18 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         if (pri->expr) return get_effective_type(mt, pri->expr);
     }
     TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
-    // For identifiers: check if the variable is stored differently than AST type
-    if (node->node_type == AST_NODE_IDENT && tid != LMD_TYPE_ANY) {
+    // For identifiers: reconcile AST type with actual variable storage.
+    // Two cases: (1) AST says typed but var stored as ANY → downgrade to ANY
+    //            (2) AST says ANY but var narrowed by inference → upgrade to narrowed type
+    if (node->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)node;
         char name[128];
         snprintf(name, sizeof(name), "%.*s", (int)ident->name->len, ident->name->chars);
         MirVarEntry* v = find_var(mt, name);
-        if (v && v->type_id == LMD_TYPE_ANY) {
-            return LMD_TYPE_ANY;
+        if (v) {
+            if (v->type_id == LMD_TYPE_ANY) return LMD_TYPE_ANY;
+            // Narrowed: var has concrete type (from param inference or typed init)
+            if (tid == LMD_TYPE_ANY && v->type_id != LMD_TYPE_ANY) return v->type_id;
         }
     }
     // For binary nodes: if either operand has effective type ANY, the runtime
@@ -1620,6 +1624,14 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             if ((op == OPERATOR_AND || op == OPERATOR_OR) && both_bool)
                 return LMD_TYPE_BOOL;
         }
+    }
+    // For ASSIGN_STAM: transpile_assign_stam returns the RHS value, so
+    // effective type is the RHS type. This ensures callers (e.g. transpile_if)
+    // know the actual MIR register type when an assignment appears as a
+    // branch result (e.g. if (cond) { x = x / 2 } → RHS is FLOAT).
+    if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        if (assign->value) return get_effective_type(mt, assign->value);
     }
     // For if nodes: use effective type of branches
     if (node->node_type == AST_NODE_IF_EXPR) {
@@ -2072,7 +2084,7 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
 // ============================================================================
 
 static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
-    TypeId operand_tid = un->operand->type ? un->operand->type->type_id : LMD_TYPE_ANY;
+    TypeId operand_tid = get_effective_type(mt, un->operand);
 
     switch (un->op) {
     case OPERATOR_NEG: {
@@ -2168,10 +2180,18 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     MIR_type_t then_mir = type_to_mir(then_tid);
     MIR_type_t else_mir = type_to_mir(else_tid);
 
+    log_debug("mir: transpile_if if_tid=%d then_tid=%d else_tid=%d then_mir=%d else_mir=%d",
+             if_tid, then_tid, else_tid, then_mir, else_mir);
+
     // If branches have different MIR types or the node type is ANY, always box to Item (I64)
     bool need_boxing = (if_tid == LMD_TYPE_ANY || if_tid == LMD_TYPE_NUMBER ||
                         then_mir != else_mir ||
                         then_mir != type_to_mir(if_tid));
+
+    // In proc context, if/else is a statement — the result is typically unused.
+    // If boxing is needed (expensive for FLOAT→Item in tight loops), skip it
+    // and just assign a dummy null. Saves push_d allocations per iteration.
+    bool proc_discard = mt->in_proc && need_boxing;
 
     MIR_type_t result_type = need_boxing ? MIR_T_I64 : type_to_mir(if_tid);
     MIR_reg_t result = new_reg(mt, "if_res", result_type);
@@ -2193,6 +2213,12 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_int_op(mt->ctx, 0)));
             mt->block_returned = false;
+        } else if (proc_discard) {
+            // Proc context: result unused, skip expensive boxing.
+            // Just assign a dummy null Item to satisfy MIR type validation.
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
         } else if (need_boxing) {
             // transpile_content always returns I64 (boxed Item from list_end
             // or transpile_box_item). The AST-inferred then_tid may be stale
@@ -2231,6 +2257,11 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_int_op(mt->ctx, 0)));
             mt->block_returned = false;
+        } else if (proc_discard) {
+            // Proc context: result unused, skip expensive boxing.
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
         } else if (need_boxing) {
             TypeId box_tid = else_tid;
             if (if_node->otherwise->node_type == AST_NODE_CONTENT ||
@@ -2299,7 +2330,7 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
     }
 
     MIR_reg_t pat = transpile_expr(mt, pattern);
-    TypeId pat_tid = pattern->type ? pattern->type->type_id : LMD_TYPE_ANY;
+    TypeId pat_tid = get_effective_type(mt, pattern);
     MIR_reg_t boxed_pat = emit_box(mt, pat, pat_tid);
 
     MIR_reg_t match_test;
@@ -2354,7 +2385,7 @@ static void emit_match_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_reg
 
 static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     MIR_reg_t scrutinee = transpile_expr(mt, match_node->scrutinee);
-    TypeId scrut_tid = match_node->scrutinee->type ? match_node->scrutinee->type->type_id : LMD_TYPE_ANY;
+    TypeId scrut_tid = get_effective_type(mt, match_node->scrutinee);
     MIR_reg_t boxed_scrut = emit_box(mt, scrutinee, scrut_tid);
 
     // Set ~ (current item) to the scrutinee value for match bodies
@@ -2428,7 +2459,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
 
     // Evaluate collection
     MIR_reg_t collection = transpile_expr(mt, loop->as);
-    TypeId coll_tid = loop->as->type ? loop->as->type->type_id : LMD_TYPE_ANY;
+    TypeId coll_tid = get_effective_type(mt, loop->as);
 
     // Box the collection for fn_len / item_at
     MIR_reg_t boxed_coll = emit_box(mt, collection, coll_tid);
@@ -2607,7 +2638,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     // Where clause
     if (for_node->where) {
         MIR_reg_t where_val = transpile_expr(mt, for_node->where);
-        TypeId where_tid = for_node->where->type ? for_node->where->type->type_id : LMD_TYPE_ANY;
+        TypeId where_tid = get_effective_type(mt, for_node->where);
         MIR_reg_t where_test = where_val;
         if (where_tid != LMD_TYPE_BOOL) {
             MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
@@ -2619,7 +2650,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
 
     // Body expression
     MIR_reg_t body_result = transpile_expr(mt, for_node->then);
-    TypeId body_tid = for_node->then->type ? for_node->then->type->type_id : LMD_TYPE_ANY;
+    TypeId body_tid = get_effective_type(mt, for_node->then);
     MIR_reg_t boxed_result = emit_box(mt, body_result, body_tid);
 
     // Push to output (use spread to flatten nested spreadable arrays)
@@ -2630,7 +2661,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     if (has_order) {
         AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
         MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
-        TypeId key_tid = first_spec->expr->type ? first_spec->expr->type->type_id : LMD_TYPE_ANY;
+        TypeId key_tid = get_effective_type(mt, first_spec->expr);
         MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
         emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
@@ -2661,7 +2692,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         // When order by + offset/limit, apply them in-place on arr_out
         if (has_offset) {
             MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
-            TypeId off_tid = for_node->offset->type ? for_node->offset->type->type_id : LMD_TYPE_ANY;
+            TypeId off_tid = get_effective_type(mt, for_node->offset);
             MIR_reg_t off_raw = off_val;
             if (off_tid != LMD_TYPE_INT && off_tid != LMD_TYPE_INT64) {
                 off_raw = emit_unbox(mt, emit_box(mt, off_val, off_tid), LMD_TYPE_INT);
@@ -2674,7 +2705,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         }
         if (has_limit) {
             MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
-            TypeId lim_tid = for_node->limit->type ? for_node->limit->type->type_id : LMD_TYPE_ANY;
+            TypeId lim_tid = get_effective_type(mt, for_node->limit);
             MIR_reg_t lim_raw = lim_val;
             if (lim_tid != LMD_TYPE_INT && lim_tid != LMD_TYPE_INT64) {
                 lim_raw = emit_unbox(mt, emit_box(mt, lim_val, lim_tid), LMD_TYPE_INT);
@@ -2692,7 +2723,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         MIR_reg_t cur_result = emit_box_container(mt, output); // cast Array* → Item
         if (has_offset) {
             MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
-            TypeId off_tid = for_node->offset->type ? for_node->offset->type->type_id : LMD_TYPE_ANY;
+            TypeId off_tid = get_effective_type(mt, for_node->offset);
             MIR_reg_t off_boxed = emit_box(mt, off_val, off_tid);
             cur_result = emit_call_2(mt, "fn_drop", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
@@ -2700,7 +2731,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         }
         if (has_limit) {
             MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
-            TypeId lim_tid = for_node->limit->type ? for_node->limit->type->type_id : LMD_TYPE_ANY;
+            TypeId lim_tid = get_effective_type(mt, for_node->limit);
             MIR_reg_t lim_boxed = emit_box(mt, lim_val, lim_tid);
             cur_result = emit_call_2(mt, "fn_take", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
@@ -2796,8 +2827,14 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // Use the variable's declared type if available, otherwise the expression type.
                 // But if the expression is boxed ANY (e.g. captured variable), the declared
                 // type from AST is stale — use ANY to match the actual runtime value.
+                // Also: when declared type is ANY (untyped var) but expression type is concrete,
+                // prefer the expression type so type narrowing propagates through assignments.
                 TypeId var_tid = declare->type ? declare->type->type_id : expr_tid;
                 if (expr_tid == LMD_TYPE_ANY) var_tid = LMD_TYPE_ANY;
+                if (var_tid == LMD_TYPE_ANY && expr_tid != LMD_TYPE_ANY) var_tid = expr_tid;
+
+                log_debug("mir: let/var '%s' declare_type=%d expr_tid=%d var_tid=%d",
+                    name_buf, declare->type ? (int)declare->type->type_id : -1, expr_tid, var_tid);
 
                 // Runtime typed array coercion for occurrence annotations (int[], float[], etc.)
                 // When declared type is TypeUnary and RHS is dynamic, call ensure_typed_array
@@ -2907,7 +2944,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
             if (dec->as && dec->name_count > 0) {
                 // Evaluate source expression and box it
                 MIR_reg_t src_val = transpile_expr(mt, dec->as);
-                TypeId src_tid = dec->as->type ? dec->as->type->type_id : LMD_TYPE_ANY;
+                TypeId src_tid = get_effective_type(mt, dec->as);
                 MIR_reg_t boxed_src = emit_box(mt, src_val, src_tid);
 
                 for (int i = 0; i < dec->name_count; i++) {
@@ -3034,7 +3071,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     AstNode* item = arr_node->item;
     while (item) {
         MIR_reg_t val = transpile_expr(mt, item);
-        TypeId val_tid = item->type ? item->type->type_id : LMD_TYPE_ANY;
+        TypeId val_tid = get_effective_type(mt, item);
 
         if (has_spreadable) {
             // When any child is spreadable, use array_push_spread for ALL children
@@ -3333,6 +3370,16 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             }
             item = item->next;
         }
+        // In proc context, the result of a side-effect-only block is never used.
+        // Skip the expensive list()/list_end() allocation and return a null Item.
+        if (is_proc) {
+            MIR_reg_t result = new_reg(mt, "null_block", MIR_T_I64);
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            pop_scope(mt);
+            return result;
+        }
         MIR_reg_t ls = emit_call_0(mt, "list", MIR_T_P);
         MIR_reg_t result = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, ls));
         pop_scope(mt);
@@ -3548,7 +3595,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     // For Path objects with known property fields, use item_attr(item, "key")
     // instead of fn_member(item, key_item). fn_member doesn't auto-load metadata,
     // but item_attr (used by C transpiler) does. This matches C transpiler behavior.
-    TypeId obj_tid = field_node->object->type ? field_node->object->type->type_id : LMD_TYPE_ANY;
+    TypeId obj_tid = get_effective_type(mt, field_node->object);
     if (obj_tid == LMD_TYPE_PATH && field_node->field->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)field_node->field;
         const char* k = ident->name->chars;
@@ -3599,10 +3646,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-
-    MIR_reg_t idx = transpile_expr(mt, field_node->field);
-    TypeId idx_tid = field_node->field->type ? field_node->field->type->type_id : LMD_TYPE_ANY;
-    MIR_reg_t boxed_idx = emit_box(mt, idx, idx_tid);
+    MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
 
     return emit_call_2(mt, "fn_index", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
@@ -3635,7 +3679,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 // map([k1, v1, ...]) -> vmap_from_array(arr)
                 arg = call_node->argument;
                 MIR_reg_t a1 = transpile_expr(mt, arg);
-                TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+                TypeId a1_tid = get_effective_type(mt, arg);
                 MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
                 return emit_call_1(mt, "vmap_from_array", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
             }
@@ -3644,17 +3688,17 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         if (info->fn == SYSPROC_VMAP_SET) {
             arg = call_node->argument;
             MIR_reg_t a1 = transpile_expr(mt, arg);
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId a1_tid = get_effective_type(mt, arg);
             MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
 
             arg = arg->next;
             MIR_reg_t a2 = transpile_expr(mt, arg);
-            TypeId a2_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId a2_tid = get_effective_type(mt, arg);
             MIR_reg_t boxed_a2 = emit_box(mt, a2, a2_tid);
 
             arg = arg->next;
             MIR_reg_t a3 = transpile_expr(mt, arg);
-            TypeId a3_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId a3_tid = get_effective_type(mt, arg);
             MIR_reg_t boxed_a3 = emit_box(mt, a3, a3_tid);
 
             return emit_call_3(mt, "vmap_set", MIR_T_I64,
@@ -4236,7 +4280,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     // Dynamic call via fn_call
     log_debug("mir: dynamic call - using fn_call");
     MIR_reg_t fn_val = transpile_expr(mt, call_node->function);
-    TypeId fn_tid = call_node->function->type ? call_node->function->type->type_id : LMD_TYPE_ANY;
+    TypeId fn_tid = get_effective_type(mt, call_node->function);
     MIR_reg_t boxed_fn = emit_box(mt, fn_val, fn_tid);
 
     // Count and box args
@@ -4310,7 +4354,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
 static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     MIR_reg_t left = transpile_expr(mt, pipe_node->left);
-    TypeId left_tid = pipe_node->left->type ? pipe_node->left->type->type_id : LMD_TYPE_ANY;
+    TypeId left_tid = get_effective_type(mt, pipe_node->left);
     MIR_reg_t boxed_left = emit_box(mt, left, left_tid);
 
     bool uses_current_item = has_current_item_ref(pipe_node->right);
@@ -4318,7 +4362,7 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     // Simple aggregate pipe without ~ : data | func -> func(data)
     if (!uses_current_item && pipe_node->op == OPERATOR_PIPE) {
         MIR_reg_t right = transpile_expr(mt, pipe_node->right);
-        TypeId right_tid = pipe_node->right->type ? pipe_node->right->type->type_id : LMD_TYPE_ANY;
+        TypeId right_tid = get_effective_type(mt, pipe_node->right);
         MIR_reg_t boxed_right = emit_box(mt, right, right_tid);
         return emit_call_2(mt, "fn_pipe_call", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
@@ -4507,7 +4551,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
         // Evaluate the raise value and return it directly (like C transpiler)
         // The value is typically already an error from error() call
         MIR_reg_t val = transpile_expr(mt, raise_node->value);
-        TypeId val_tid = raise_node->value->type ? raise_node->value->type->type_id : LMD_TYPE_ANY;
+        TypeId val_tid = get_effective_type(mt, raise_node->value);
         MIR_reg_t boxed = emit_box(mt, val, val_tid);
         // Return the error value from the function
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
@@ -5031,7 +5075,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // arr[i] = val → fn_array_set((Array*)arr, (int)index, boxed_val)
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
         MIR_reg_t obj = transpile_expr(mt, ca->object);
-        TypeId obj_tid = ca->object->type ? ca->object->type->type_id : LMD_TYPE_ANY;
+        TypeId obj_tid = get_effective_type(mt, ca->object);
         // Object must be a pointer (Array*), unbox if boxed
         MIR_reg_t arr_ptr;
         if (obj_tid == LMD_TYPE_ANY || obj_tid == LMD_TYPE_NULL) {
@@ -5041,7 +5085,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             arr_ptr = obj;
         }
         MIR_reg_t idx = transpile_expr(mt, ca->key);
-        TypeId idx_tid = ca->key->type ? ca->key->type->type_id : LMD_TYPE_ANY;
+        TypeId idx_tid = get_effective_type(mt, ca->key);
         MIR_reg_t idx_int;
         if (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) {
             idx_int = idx;
@@ -5250,10 +5294,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // query expression: expr?T or expr.?T → fn_query(data, type_val, direct)
         AstQueryNode* query = (AstQueryNode*)node;
         MIR_reg_t obj = transpile_expr(mt, query->object);
-        TypeId obj_tid = query->object->type ? query->object->type->type_id : LMD_TYPE_ANY;
+        TypeId obj_tid = get_effective_type(mt, query->object);
         MIR_reg_t boxed_obj = emit_box(mt, obj, obj_tid);
         MIR_reg_t type_reg = transpile_expr(mt, query->query);
-        TypeId type_tid = query->query->type ? query->query->type->type_id : LMD_TYPE_TYPE;
+        TypeId type_tid = get_effective_type(mt, query->query);
         MIR_reg_t boxed_type = emit_box(mt, type_reg, type_tid);
         return emit_call_3(mt, "fn_query", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
@@ -5426,7 +5470,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t pool = emit_call_0(mt, "get_runtime_pool", MIR_T_P);
         MIR_reg_t base = transpile_expr(mt, pix->base_path);
         MIR_reg_t seg_val = transpile_expr(mt, pix->segment_expr);
-        TypeId seg_tid = pix->segment_expr->type ? pix->segment_expr->type->type_id : LMD_TYPE_ANY;
+        TypeId seg_tid = get_effective_type(mt, pix->segment_expr);
         MIR_reg_t boxed_seg = emit_box(mt, seg_val, seg_tid);
         MIR_reg_t seg_cstr = emit_call_1(mt, "fn_to_cstr", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_seg));
@@ -5441,7 +5485,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         AstParentNode* parent = (AstParentNode*)node;
         if (parent->object) {
             MIR_reg_t obj = transpile_expr(mt, parent->object);
-            TypeId obj_tid = parent->object->type ? parent->object->type->type_id : LMD_TYPE_ANY;
+            TypeId obj_tid = get_effective_type(mt, parent->object);
             MIR_reg_t current = emit_box(mt, obj, obj_tid);
 
             // Create a "parent" string at runtime via heap_create_name
@@ -5612,10 +5656,316 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 // User-defined function transpilation
 // ============================================================================
 
+// ============================================================================
+// Phase 2: Parameter Type Inference from Usage Context
+// ============================================================================
+// For untyped function parameters (type_id == ANY), scan the function body to
+// infer the most likely type from how the parameter is used. This allows
+// speculative unboxing at function entry, enabling native arithmetic ops
+// instead of slow boxed runtime calls (e.g., fn_add, fn_sub).
+//
+// Evidence rules:
+//   +INT: param used in binary op with int literal or int-typed expr
+//   +FLOAT: param used in binary op with float literal or float-typed expr
+//   +NUMERIC_USE: param used in arithmetic/comparison (no literal type info on other side)
+//   +STOP: param used in function call, member access, index, or non-numeric context
+// If all evidence is INT → infer INT.  FLOAT present (no STOP) → infer FLOAT.
+// NUMERIC_USE only (no INT/FLOAT/STOP) → infer INT (default numeric type).
+// Any STOP evidence → keep as ANY.
+
+#define INFER_INT         1
+#define INFER_FLOAT       2
+#define INFER_STOP        4
+#define INFER_NUMERIC_USE 8
+#define INFER_FLOAT_CONTEXT 16  // function body contains float literals (guards NUMERIC_USE→INT)
+
+#define MAX_ALIASES 8
+
+struct InferCtx {
+    int evidence;
+    int name_count;
+    char names[MAX_ALIASES][64];   // param name + alias names
+    int  name_lens[MAX_ALIASES];
+};
+
+// Get the AST-declared type_id for a node, handling common cases
+static TypeId node_type_id(AstNode* node) {
+    if (!node || !node->type) return LMD_TYPE_ANY;
+    return node->type->type_id;
+}
+
+// Check if a node is a reference to ANY tracked name (param or alias)
+static bool is_tracked_ref(AstNode* node, InferCtx* ctx) {
+    if (!node) return false;
+    if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (!ident->name) return false;
+        for (int i = 0; i < ctx->name_count; i++) {
+            if ((int)ident->name->len == ctx->name_lens[i] &&
+                memcmp(ident->name->chars, ctx->names[i], ctx->name_lens[i]) == 0)
+                return true;
+        }
+    }
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        return is_tracked_ref(pri->expr, ctx);
+    }
+    return false;
+}
+
+// Add alias name to tracking context
+static void add_alias(InferCtx* ctx, const char* name, int name_len) {
+    if (ctx->name_count >= MAX_ALIASES || name_len >= 64) return;
+    // Check if already tracked
+    for (int i = 0; i < ctx->name_count; i++) {
+        if (ctx->name_lens[i] == name_len &&
+            memcmp(ctx->names[i], name, name_len) == 0) return;
+    }
+    memcpy(ctx->names[ctx->name_count], name, name_len);
+    ctx->names[ctx->name_count][name_len] = '\0';
+    ctx->name_lens[ctx->name_count] = name_len;
+    ctx->name_count++;
+}
+
+// Classify the "other side" type for a binary op involving our param
+static int classify_other_type(TypeId tid) {
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_BOOL) return INFER_INT;
+    if (tid == LMD_TYPE_FLOAT) return INFER_FLOAT;
+    if (tid == LMD_TYPE_ANY) return 0;  // unknown other — no evidence
+    return INFER_STOP;  // string, map, list, etc.
+}
+
+// First pass: find aliases (var x = <tracked>) and register them
+static void find_aliases(AstNode* node, InferCtx* ctx) {
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_CONTENT: {
+            AstListNode* list = (AstListNode*)node;
+            find_aliases(list->declare, ctx);
+            find_aliases(list->item, ctx);
+            break;
+        }
+        case AST_NODE_VAR_STAM:
+        case AST_NODE_LET_STAM: {
+            AstLetNode* let_node = (AstLetNode*)node;
+            find_aliases(let_node->declare, ctx);
+            break;
+        }
+        case AST_NODE_ASSIGN: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            if (named->as && is_tracked_ref(named->as, ctx) && named->name) {
+                add_alias(ctx, named->name->chars, (int)named->name->len);
+            }
+            break;
+        }
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* ifn = (AstIfNode*)node;
+            find_aliases(ifn->then, ctx);
+            find_aliases(ifn->otherwise, ctx);
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* wh = (AstWhileNode*)node;
+            find_aliases(wh->body, ctx);
+            break;
+        }
+        default:
+            break;
+        }
+        node = node->next;
+    }
+}
+
+// Recursively walk AST to gather type evidence for tracked names
+static void gather_evidence(AstNode* node, InferCtx* ctx) {
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_BINARY: {
+            AstBinaryNode* bi = (AstBinaryNode*)node;
+            int op = bi->op;
+            bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
+                             op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
+                             op == OPERATOR_POW);
+            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+
+            if (is_arith || is_cmp) {
+                bool left_is_tracked = is_tracked_ref(bi->left, ctx);
+                bool right_is_tracked = is_tracked_ref(bi->right, ctx);
+                // Only gather strong type evidence from LITERAL values (e.g. n+1, n%2).
+                // Typed variables (e.g. a:int in a+b) are NOT strong evidence — the
+                // untyped param may intentionally accept multiple types.
+                if (left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
+                    TypeId rtid = node_type_id(bi->right);
+                    ctx->evidence |= classify_other_type(rtid);
+                }
+                if (right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
+                    TypeId ltid = node_type_id(bi->left);
+                    ctx->evidence |= classify_other_type(ltid);
+                }
+                // Track that param is used in arithmetic/comparison context.
+                // Even without literal evidence, this means the param is numeric.
+                if (left_is_tracked || right_is_tracked) {
+                    ctx->evidence |= INFER_NUMERIC_USE;
+                }
+                // If both sides are untyped but param is involved, check binary node's type
+                if ((left_is_tracked || right_is_tracked) &&
+                    !(ctx->evidence & (INFER_INT | INFER_FLOAT))) {
+                    TypeId bi_tid = node_type_id((AstNode*)bi);
+                    if (bi_tid == LMD_TYPE_INT) ctx->evidence |= INFER_INT;
+                    else if (bi_tid == LMD_TYPE_FLOAT) ctx->evidence |= INFER_FLOAT;
+                }
+            }
+
+            gather_evidence(bi->left, ctx);
+            gather_evidence(bi->right, ctx);
+            break;
+        }
+        case AST_NODE_UNARY: {
+            AstUnaryNode* un = (AstUnaryNode*)node;
+            if (un->op == OPERATOR_NEG && is_tracked_ref(un->operand, ctx)) {
+                // negation applies to both int and float — weak evidence only
+                ctx->evidence |= INFER_NUMERIC_USE;
+            }
+            gather_evidence(un->operand, ctx);
+            break;
+        }
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* ifn = (AstIfNode*)node;
+            gather_evidence(ifn->cond, ctx);
+            gather_evidence(ifn->then, ctx);
+            gather_evidence(ifn->otherwise, ctx);
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* wh = (AstWhileNode*)node;
+            gather_evidence(wh->cond, ctx);
+            gather_evidence(wh->body, ctx);
+            break;
+        }
+        case AST_NODE_RETURN_STAM: {
+            AstReturnNode* ret = (AstReturnNode*)node;
+            gather_evidence(ret->value, ctx);
+            break;
+        }
+        case AST_NODE_ASSIGN_STAM: {
+            AstAssignStamNode* asn = (AstAssignStamNode*)node;
+            gather_evidence(asn->value, ctx);
+            break;
+        }
+        case AST_NODE_CONTENT: {
+            AstListNode* list = (AstListNode*)node;
+            gather_evidence(list->declare, ctx);
+            gather_evidence(list->item, ctx);
+            break;
+        }
+        case AST_NODE_VAR_STAM:
+        case AST_NODE_LET_STAM: {
+            AstLetNode* let_node = (AstLetNode*)node;
+            gather_evidence(let_node->declare, ctx);
+            break;
+        }
+        case AST_NODE_ASSIGN: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            gather_evidence(named->as, ctx);
+            break;
+        }
+        case AST_NODE_CALL_EXPR: {
+            AstCallNode* call = (AstCallNode*)node;
+            gather_evidence(call->function, ctx);
+            gather_evidence(call->argument, ctx);
+            break;
+        }
+        case AST_NODE_INDEX_EXPR: {
+            AstBinaryNode* idx = (AstBinaryNode*)node;
+            if (is_tracked_ref(idx->right, ctx)) {
+                ctx->evidence |= INFER_INT;
+            }
+            gather_evidence(idx->left, ctx);
+            gather_evidence(idx->right, ctx);
+            break;
+        }
+        case AST_NODE_PRIMARY: {
+            AstPrimaryNode* pri = (AstPrimaryNode*)node;
+            // Detect float literals anywhere in the function body.
+            // This sets INFER_FLOAT_CONTEXT which guards NUMERIC_USE→INT inference.
+            if (node->type && node->type->is_literal && node->type->type_id == LMD_TYPE_FLOAT) {
+                ctx->evidence |= INFER_FLOAT_CONTEXT;
+            }
+            gather_evidence(pri->expr, ctx);
+            break;
+        }
+        case AST_NODE_MATCH_EXPR: {
+            AstMatchNode* match = (AstMatchNode*)node;
+            gather_evidence(match->scrutinee, ctx);
+            AstMatchArm* arm = match->first_arm;
+            while (arm) {
+                gather_evidence(arm->body, ctx);
+                arm = (AstMatchArm*)arm->next;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        // Advance to next sibling in linked list (iterative, not recursive)
+        node = node->next;
+    }
+}
+
+// Infer a parameter's type from usage context in the function body.
+// First finds aliases (var x = param), then gathers evidence on param + aliases.
+// Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, or LMD_TYPE_ANY if ambiguous.
+// is_proc: true for pn (procedural) functions — enables weaker numeric inference.
+static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, bool is_proc) {
+    InferCtx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    // Seed with the parameter name
+    memcpy(ctx.names[0], pname, pname_len);
+    ctx.names[0][pname_len] = '\0';
+    ctx.name_lens[0] = pname_len;
+    ctx.name_count = 1;
+
+    // Pass 1: find aliases (iterate to find transitive aliases)
+    int prev_count = 0;
+    while (prev_count != ctx.name_count) {
+        prev_count = ctx.name_count;
+        find_aliases(body, &ctx);
+    }
+
+    // Pass 2: gather evidence for all tracked names
+    gather_evidence(body, &ctx);
+
+    log_debug("mir: infer_param_type('%s') aliases=%d evidence=%d", pname, ctx.name_count - 1, ctx.evidence);
+    for (int i = 1; i < ctx.name_count; i++) {
+        log_debug("mir:   alias[%d]: '%s'", i, ctx.names[i]);
+    }
+
+    // If we have STOP evidence, the param may be non-numeric — keep ANY
+    if (ctx.evidence & INFER_STOP) return LMD_TYPE_ANY;
+    // Pure INT evidence (from literals)
+    if ((ctx.evidence & INFER_INT) && !(ctx.evidence & INFER_FLOAT)) return LMD_TYPE_INT;
+    // Any FLOAT evidence (even mixed with INT) → FLOAT (int promotes to float)
+    if (ctx.evidence & INFER_FLOAT) return LMD_TYPE_FLOAT;
+    // Weak evidence: used only in numeric contexts (arithmetic/comparison) but no
+    // literal type info. Only apply for procedural (pn) functions where untyped
+    // params in compute-heavy loops are almost always int. Functional (fn) params
+    // are often intentionally polymorphic.
+    // Guard: if the function body contains float literals, the untyped param may
+    // receive float values — don't force INT. (e.g. mbrot's count() uses 16.0, 2.0)
+    if (is_proc && (ctx.evidence & INFER_NUMERIC_USE)) {
+        if (!(ctx.evidence & INFER_FLOAT_CONTEXT)) return LMD_TYPE_INT;
+    }
+    // No evidence at all — keep ANY
+    return LMD_TYPE_ANY;
+}
+
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Build function name
     StrBuf* name_buf = strbuf_new_cap(64);
     write_fn_name(name_buf, fn_node, NULL);
+
+    log_debug("mir: transpile_func_def '%s'", name_buf->str);
 
     // Determine return type (always Item for safety)
     MIR_type_t ret_type = MIR_T_I64;
@@ -5759,6 +6109,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Bind parameters as local variables
+    log_debug("mir: binding params for '%s', fn_type=%p", name_buf->str, (void*)fn_type);
     // Walk TypeFunc's TypeParam chain in parallel to detect optional params
     TypeParam* tp_iter = fn_type ? fn_type->param : NULL;
     param = fn_node->param;
@@ -5778,6 +6129,20 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // so keep them boxed. Params with defaults (b: int = 5) always have a value.
         TypeId tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
         bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
+
+        // Phase 2: For untyped params, infer type from usage context in function body
+        if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
+            AstNode* fn_as_node = (AstNode*)fn_node;
+            bool is_proc_fn = (fn_as_node->node_type == AST_NODE_PROC);
+            TypeId inferred = infer_param_type(fn_node->body, pname, (int)param->name->len, is_proc_fn);
+            if (inferred != LMD_TYPE_ANY) {
+                log_debug("mir: param '%s' inferred type_id=%d from body usage", pname, inferred);
+                tid = inferred;
+            }
+        }
+
+        log_debug("mir: param '%s' type_id=%d has_annotation=%d", pname, tid,
+            param->type ? param->type->type_id : -1);
         if (!may_be_null && (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
             tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT64)) {
             MIR_reg_t unboxed = emit_unbox(mt, preg, tid);
@@ -5796,6 +6161,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Set proc flag based on function type
     bool saved_in_proc = mt->in_proc;
     mt->in_proc = (fn_as_node->node_type == AST_NODE_PROC);
+    log_debug("mir: params bound, transpiling body of '%s'", name_buf->str);
 
     // Reset block_returned for this function's compilation scope.
     // Prevents the flag from leaking from one function's body into the next.

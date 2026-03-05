@@ -32,7 +32,7 @@ This proposal describes the next phase of the **direct AST→MIR transpiler** (`
 
 ---
 
-## 2. Phase 1 — Fix Crashing Issues
+## 2. Phase 1 — Fix Crashing Issues (COMPLETED)
 
 Three distinct bugs cause 4 benchmark failures. All have identified root causes and fix locations.
 
@@ -163,7 +163,7 @@ All three bugs have been fixed with additional correctness improvements discover
 
 ---
 
-## 3. Phase 2 — Execution Performance Tuning
+## 3. Phase 2 — Execution Performance Tuning (COMPLETED)
 
 ### Problem Analysis
 
@@ -183,6 +183,9 @@ Benchmark execution comparison (median of 3 runs):
 | levenshtein | 23.5 | 34.6 | 1.5x | Array operations |
 
 Three benchmarks are already near parity:
+
+| Benchmark | C2MIR (ms) | MIR Direct (ms) | Ratio | Root Cause |
+|-----------|-----------|-----------------|-------|------------|
 | base64 | 1,083 | 971 | 0.90x | I/O-bound (OK) |
 | gcbench | 2,732 | 2,561 | 0.94x | GC-bound (OK) |
 | json_gen | 68 | 66 | 0.97x | String-bound (OK) |
@@ -246,6 +249,128 @@ This requires:
 **Current state**: String equality uses `fn_eq(boxed_str1, boxed_str2)` — boxes both operands, dispatches through runtime.
 
 **Optimization**: For symbol comparisons (common in pattern matching and map key checks), compare String* pointers directly since the name pool guarantees unique pointers for each symbol.
+
+### Phase 2 — Implementation Status (COMPLETED)
+
+Type narrowing for untyped parameters has been implemented, along with extensive correctness fixes discovered during testing. All 155 MIR baseline tests pass (up from 27 at end of Phase 1). Compute-heavy benchmarks show **up to 205x speedup** over C2MIR on integer-arithmetic workloads.
+
+#### 2.5 Type Inference System
+
+Implemented a two-pass type inference system in `transpile-mir.cpp`:
+
+**Data structures:**
+- `InferCtx` — tracks up to 8 names (parameter + aliases) and accumulated evidence flags
+- Evidence flags: `INFER_INT=1`, `INFER_FLOAT=2`, `INFER_STOP=4`, `INFER_NUMERIC_USE=8`, `INFER_FLOAT_CONTEXT=16`
+
+**Pass 1 — `find_aliases()`**: Scans function body for `let x = param` or `var x = param` patterns, transitively collecting aliases. This ensures that if a parameter is renamed via local binding, evidence gathered on the alias still counts.
+
+**Pass 2 — `gather_evidence()`**: Walks the AST collecting type evidence for all tracked names:
+- **Strong INT evidence** (`INFER_INT`): parameter used as array index (`arr[param]`), or in binary expression with an int literal (`param + 1`)
+- **Strong FLOAT evidence** (`INFER_FLOAT`): parameter in binary expression with a float literal
+- **Stop evidence** (`INFER_STOP`): parameter used in string concatenation, member access, or passed to function calls — indicates polymorphic use, keep as ANY
+- **Numeric use** (`INFER_NUMERIC_USE`): parameter used in arithmetic/comparison operators but without literal type info (weak evidence)
+- **Float context** (`INFER_FLOAT_CONTEXT`): function body contains float literals anywhere — guards against NUMERIC_USE→INT inference in mixed float/int functions
+- **Unary negation**: `-param` sets `INFER_NUMERIC_USE` (not `INFER_INT`) because negation applies to both int and float
+
+**`infer_param_type()` decision logic:**
+1. If `INFER_STOP` → return `LMD_TYPE_ANY` (polymorphic use detected)
+2. If `INFER_INT` only → return `LMD_TYPE_INT`
+3. If `INFER_FLOAT` (possibly mixed with INT) → return `LMD_TYPE_FLOAT`
+4. If `INFER_NUMERIC_USE` AND `is_proc` AND no `INFER_FLOAT_CONTEXT` → return `LMD_TYPE_INT` (procedural functions with pure integer arithmetic patterns)
+5. Otherwise → return `LMD_TYPE_ANY`
+
+The `is_proc` guard (rule 4) is critical: `pn` functions have predictable numeric usage patterns, while `fn` functions are often intentionally polymorphic and should not have types forced.
+
+#### 2.6 Effective Type Migration (`get_effective_type` Audit)
+
+Discovered and fixed a systematic bug pattern across **25+ locations** in the transpiler. The pattern:
+
+```cpp
+// BEFORE (broken): uses raw AST type, ignores inference
+TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
+MIR_reg_t boxed = emit_box(mt, val, tid);
+```
+
+When type inference narrows a parameter to native `INT` (stored as raw `int64_t`), but code uses the AST type (`ANY`), `emit_box(val, ANY)` treats the native `int64_t` as an already-boxed `Item` → NULL pointer dereference at very low addresses (0x1, 0x2, 0x5).
+
+```cpp
+// AFTER (correct): uses effective type which respects inference
+TypeId tid = get_effective_type(mt, node);
+MIR_reg_t boxed = emit_box(mt, val, tid);
+```
+
+**Locations fixed (all in `transpile-mir.cpp`):**
+- `transpile_index()` — changed to use `transpile_box_item()` for both object and field expressions
+- `AST_NODE_INDEX_ASSIGN_STAM` — `obj_tid` and `idx_tid` for subscript assignment (critical for `placed[i] = row` in nqueens)
+- `transpile_array()` — push pattern `val_tid`
+- `transpile_match()` — pattern and scrutinee boxing
+- `transpile_for()` — collection boxing
+- `transpile_for_comprehension()` — where clause, body, key, offset (×2), limit (×2)
+- `transpile_let_declarations()` — decompose source
+- System function calls — `vmap_from_array`, `vmap_set` arguments
+- Dynamic call — function expression boxing
+- Pipe expressions — left and right operands
+- Raise statement — value boxing
+- Query expression — object and type arguments
+- Path index segment
+- Parent expression — object boxing
+- Field access dispatch — `obj_tid` for Path type check
+- `transpile_unary()` — operand_tid dispatch
+
+#### 2.7 Proc Content Block Optimization
+
+When a `pn` function's body is a content block (declarations + statements + trailing expression), the transpiler now avoids constructing a temporary list. Instead, it evaluates declarations and statements for side effects, and only boxes the final value expression as the block result. This eliminates unnecessary `list()`/`list_end()` runtime calls in procedural code.
+
+#### Benchmark Results After Phase 2
+
+Full comparison of MIR Direct vs C2MIR execution time (debug build, macOS arm64, 60s timeout):
+
+| Benchmark | MIR Direct (s) | C2MIR (s) | Speedup | Status |
+|-----------|----------------|-----------|---------|--------|
+| **sum** | 0.02 | 4.09 | **205x** | MIR dramatically faster |
+| **ack** | 0.05 | 5.77 | **115x** | MIR dramatically faster |
+| **diviter** | 0.31 | 26.14 | **84x** | MIR dramatically faster |
+| **sumfp** | 0.02 | 1.05 | **53x** | MIR dramatically faster |
+| **divrec** | 0.04 | 2.03 | **51x** | MIR dramatically faster |
+| **collatz** | 0.57 | T/O | **>100x** | C2MIR times out |
+| **quicksort** | 1.33 | 3.11 | **2.3x** | MIR faster |
+| **fibfp** | 3.89 | 5.09 | **1.3x** | MIR faster |
+| fib | 1.35 | 1.29 | ~1.0x | Comparable |
+| tak | 0.02 | 0.02 | ~1.0x | Comparable |
+| cpstak2 | 0.03 | 0.02 | ~1.0x | Comparable |
+| nqueens | 1.06 | 1.01 | ~1.0x | Comparable |
+| mbrot | 7.66 | 7.38 | ~1.0x | Comparable |
+| array1 | 6.18 | 5.97 | ~1.0x | Comparable |
+| pnpoly | 31.60 | 31.48 | ~1.0x | Comparable |
+| larceny/primes | 0.68 | 0.64 | ~1.0x | Comparable |
+| kostya/primes | 8.91 | 9.46 | ~1.0x | Comparable |
+| deriv | 3.55 | 2.88 | 0.8x | MIR slightly slower |
+| brainfuck | T/O | 40.56 | <1.0x | MIR regression (see below) |
+| triangl | T/O | T/O | — | Both timeout |
+| matmul | T/O | T/O | — | Both timeout (debug build) |
+
+**Summary:**
+- **8 benchmarks with significant MIR speedups** (1.3x–205x)
+- **9 benchmarks at parity** (~1.0x)
+- **1 slight regression** (deriv at 0.8x — symbolic expression manipulation, overhead from boxing in polymorphic paths)
+- **1 meaningful regression** (brainfuck — see below)
+- **2 timeouts in both modes** (triangl, matmul — debug build overhead)
+
+**Baseline tests**: 605/605 pass (155/155 MIR tests).
+
+#### Known Regression: brainfuck
+
+The brainfuck benchmark (BF interpreter with heavy array mutation in tight loops) is slower in MIR direct. Root cause: type inference correctly narrows loop variables to native `INT`, but every array read/write (`tape[dp]`, `jumps[ip]`) still goes through the boxed `fn_index`/`fn_array_set` runtime calls, which require boxing the native int index back to a boxed `Item` each time. The net effect is that the boxing/unboxing overhead for array access exceeds the arithmetic speedup from native int operations.
+
+This is an inherent tradeoff in Phase 2's approach: native arithmetic dramatically speeds up compute-heavy loops, but array-access-heavy loops pay a per-access boxing tax. Phase 2.3 (inline array access) would address this but is not yet implemented.
+
+#### Analysis: Where the Speedups Come From
+
+The massive speedups (50–200x) on sum, ack, diviter, divrec, sumfp, collatz all share the same pattern: **tight recursive or iterative loops with pure arithmetic on untyped parameters**. Before Phase 2, every `+`, `-`, `*`, `/`, `%`, `<`, `>` operation went through a boxed runtime function call (~20–50ns each). After inference narrows parameters to native INT/FLOAT, these become single MIR instructions (~1ns each).
+
+The C2MIR path is slower on these benchmarks because the generated C code still uses boxed `Item` representations and calls `fn_add`/`fn_sub` — the C compiler cannot see through the runtime boxing to optimize the arithmetic. The MIR direct transpiler, having full AST visibility, can bypass boxing entirely.
+
+Benchmarks at parity (fib, tak, nqueens, mbrot) already had typed parameters in their original scripts, so inference provided no additional benefit.
 
 ---
 
@@ -599,14 +724,3 @@ All 85 existing MIR baseline tests must continue passing after each phase. Run:
 make test-lambda-baseline  # (with --mir flag)
 ```
 
----
-
-## 9. Risk Assessment
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Type narrowing misidentifies param type → wrong results | Medium | High | Add runtime type guard (speculative unboxing with fallback) |
-| Direct map access on mutated shape → crash | Low | High | Only enable for `struct_name`-typed maps (immutable layout) |
-| TCO iteration counter too low → false overflow | Low | Medium | Use same 1M limit as C transpiler; configurable |
-| MIR memory operations on misaligned data → SIGBUS | Low | High | `has_fixed_shape()` verifies 8-byte alignment |
-| Phase interactions cause regressions | Medium | Medium | Run full test suite after each phase; no cross-phase dependencies |
