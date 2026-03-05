@@ -496,6 +496,7 @@ env-debug:
 
 # Main build target (incremental) - Windows/MSYS2 optimized
 build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "🔧 Windows/MSYS2 detected - using optimized build configuration..."
 	@echo "🔧 Setting up MINGW64 toolchain environment..."
@@ -562,6 +563,7 @@ build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 
 # Debug build - Now uses Premake with MINGW64 preference
 debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	$(call mingw64_env_check)
 	$(call mingw64_toolchain_verify)
@@ -603,6 +605,7 @@ else
 endif
 	@echo "Release build completed."
 	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
+	@touch .lambda_release_build
 	$(call mingw64_dll_check)
 
 # Force rebuild (clean + build)
@@ -660,6 +663,9 @@ clean:
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
 	@rm -f lambda-linux.exe
+	@rm -f .lambda_release_build
+	@rm -f .lambda_release_backup.exe
+	@rm -f .lambda_build_backup.exe
 	@rm -f temp/_transpiled*.c
 	@echo "Build artifacts and executables cleaned."
 
@@ -1764,7 +1770,20 @@ build-test: build-lambda-input
 	@echo "Building configurations..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
-	cd build/premake && premake5 gmake --file=../../premake5.mac.lua && $(MAKE) config=debug_native -j$(JOBS)
+	cd build/premake && premake5 gmake --file=../../premake5.mac.lua
+	@# If last build was release, rebuild lambda.exe incrementally in release mode
+	@if [ -f .lambda_release_build ]; then \
+		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
+		$(MAKE) -C build/premake config=release_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"; \
+		cp -p lambda.exe .lambda_build_backup.exe; \
+	fi
+	@echo "Building all test executables (debug mode)..."
+	$(MAKE) -C build/premake config=debug_native -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	@# Restore release lambda.exe over the debug one
+	@if [ -f .lambda_build_backup.exe ]; then \
+		echo "Restoring release lambda.exe..."; \
+		mv .lambda_build_backup.exe lambda.exe; \
+	fi
 
 # Capture browser layout references using Puppeteer
 # Usage:
