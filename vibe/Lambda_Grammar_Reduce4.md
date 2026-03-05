@@ -631,6 +631,110 @@ Removed `pattern_any` rule and its reference in `primary_type`.
 
 ---
 
+## Proposal 15: Reuse `raise_expr` inside `raise_stam` — APPLIED ✓
+
+**Impact: Negligible (−0.07%)**
+
+`raise_expr` and `raise_stam` had nearly identical structure, differing only by an optional `;`:
+
+```js
+// Before: two rules with duplicated 'raise' + expr structure
+raise_expr: $ => prec.right(seq('raise', field('value', $._expr))),
+raise_stam: $ => prec.right(seq('raise', field('value', $._expr), optional(';'))),
+```
+
+This created a GLR conflict `[$.raise_expr, $.raise_stam]` because the parser couldn't decide which rule to use when `raise` appeared in an `else { ... }` block.
+
+### Applied Change
+
+Rewrote `raise_stam` to wrap `raise_expr` instead of duplicating its structure:
+
+```js
+// After: raise_stam wraps raise_expr
+raise_stam: $ => prec.right(seq($.raise_expr, optional(';'))),
+```
+
+The GLR conflict changed from `[$.raise_expr, $.raise_stam]` to `[$._expr, $.raise_stam]` — the total conflict count stayed at 14.
+
+**AST builder changes:**
+- Updated `build_raise_stam` to find the `raise_expr` child node (first child) and read the `value` field from it, instead of reading `value` directly from the `raise_stam` node.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,525,508 B | 7,520,133 B | **−5,375 B (−0.07%)** |
+| STATE_COUNT | 5,741 | 5,738 | **−3** |
+| LARGE_STATE_COUNT | 593 | 591 | **−2** |
+| SYMBOL_COUNT | 221 | 221 | No change |
+| TOKEN_COUNT | 94 | 94 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Negligible size impact but cleaner grammar — eliminates duplicated `'raise' + expr` structure. The conflict wasn't removed, only changed form.
+
+---
+
+## Proposal 16: Merge Path Prefix Tokens into `_path_prefix` — APPLIED ✓
+
+**Impact: Medium (−2.76%)**
+
+`path_expr` used three separate visible rules for its prefix:
+
+```js
+// Before: 3 separate rules
+path_root: _ => '/',     // absolute file path
+path_self: _ => '.',     // relative path
+path_parent: _ => '..',  // parent path
+
+path_expr: $ => prec.right(seq(
+  choice($.path_root, $.path_self, $.path_parent),
+  optional(field('field', ...))
+)),
+```
+
+Each created its own symbol ID, adding columns to every large state row. `path_root` and `path_self` were only used in `path_expr`, while `path_parent` was also used in `parent_expr`.
+
+### Applied Change
+
+Replaced the three-rule choice with a single hidden `_path_prefix` token:
+
+```js
+// After: single hidden token for path_expr prefix
+_path_prefix: _ => token(choice('/', '.', '..')),
+
+path_expr: $ => prec.right(seq(
+  $._path_prefix,
+  optional(field('field', ...))
+)),
+
+// path_parent kept separately for parent_expr
+path_parent: _ => '..',
+```
+
+Removed `path_root` and `path_self` rules entirely. `path_parent` remains for `parent_expr`.
+
+**AST builder changes:**
+- Removed `SYM_PATH_ROOT` and `SYM_PATH_SELF` macros from `ast.hpp`.
+- Updated `collect_path_segments_if_path` to determine path scheme from the `path_expr` source text (first characters) instead of checking the first child's symbol:
+  - `'/'` → `PATH_SCHEME_FILE`
+  - `'..'` → `PATH_SCHEME_PARENT`
+  - `'.'` → `PATH_SCHEME_REL`
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,520,133 B | 7,312,649 B | **−207,484 B (−2.76%)** |
+| STATE_COUNT | 5,738 | 5,720 | **−18** |
+| LARGE_STATE_COUNT | 591 | 528 | **−63** |
+| SYMBOL_COUNT | 221 | 220 | **−1** |
+| TOKEN_COUNT | 94 | 95 | +1 |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Unexpectedly large reduction (−2.76%) from removing just 2 visible symbols. The LARGE_STATE_COUNT drop (−63) shows these path symbols were contributing significantly to large state row widths. TOKEN_COUNT increased by 1 because the new `_path_prefix` hidden token was added while `path_root` and `path_self` were removed as symbols but their underlying anonymous tokens (`'/'`, `'.'`) still exist.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -649,6 +753,8 @@ Removed `pattern_any` rule and its reference in `primary_type`.
 | 12th | #12 — Merge datetime token | Low | Medium | ✅ Applied (−3.11%, −2 SYM) |
 | 13th | #13 — Merge binary token | Low | Medium-High | ✅ Applied (−5.24%, −5 SYM) |
 | 14th | #14 — Merge pattern_any token | Low | Low | ✅ Applied (−0.43%, −1 SYM) |
+| 15th | #15 — Reuse raise_expr in raise_stam | Low | Negligible | ✅ Applied (−0.07%) |
+| 16th | #16 — Merge path prefix tokens | Low | Medium | ✅ Applied (−2.76%, −1 SYM) |
 
 ### Cumulative Results
 
@@ -664,6 +770,8 @@ Removed `pattern_any` rule and its reference in `primary_type`.
 | + Proposal 12 (datetime token) | 7,976,424 | 5,841 | 1,469 | 227 | 99 |
 | + Proposal 13 (binary token) | 7,558,156 | 5,741 | 598 | 222 | 95 |
 | + Proposal 14 (pattern_any merge) | 7,525,508 | 5,741 | 593 | 221 | 94 |
-| **Total reduction** | **−3,106,201 (−29.2%)** | **−524** | **−1,539** | **−41** | **−30** |
+| + Proposal 15 (raise_stam reuse) | 7,520,133 | 5,738 | 591 | 221 | 94 |
+| + Proposal 16 (path prefix merge) | 7,312,649 | 5,720 | 528 | 220 | 95 |
+| **Total reduction** | **−3,319,060 (−31.2%)** | **−545** | **−1,604** | **−42** | **−29** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

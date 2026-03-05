@@ -47,9 +47,7 @@ extern "C" {
 #define SYM_PATH_WILDCARD sym_path_wildcard
 #define SYM_PATH_WILDCARD_RECURSIVE sym_path_wildcard_recursive
 
-// Path root tokens: / for absolute, . for relative, .. for parent
-#define SYM_PATH_ROOT sym_path_root
-#define SYM_PATH_SELF sym_path_self
+// Path tokens: .. for parent (kept separate for parent_expr)\n// SYM_PATH_ROOT and SYM_PATH_SELF removed — merged into _path_prefix token
 #define SYM_PATH_PARENT sym_path_parent
 #define SYM_PATH_EXPR sym_path_expr
 #define SYM_PARENT_EXPR sym_parent_expr   // expr.. parent access shorthand
