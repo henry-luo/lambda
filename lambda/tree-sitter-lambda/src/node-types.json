@@ -976,14 +976,6 @@
           "named": true
         },
         {
-          "type": "string_pattern",
-          "named": true
-        },
-        {
-          "type": "symbol_pattern",
-          "named": true
-        },
-        {
           "type": "type_stam",
           "named": true
         },
@@ -1037,32 +1029,6 @@
     "type": "continue_stam",
     "named": true,
     "fields": {}
-  },
-  {
-    "type": "direct_query_expr",
-    "named": true,
-    "fields": {
-      "object": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_expr",
-            "named": true
-          }
-        ]
-      },
-      "query": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_type",
-            "named": true
-          }
-        ]
-      }
-    }
   },
   {
     "type": "document",
@@ -3526,10 +3492,6 @@
           "named": true
         },
         {
-          "type": "direct_query_expr",
-          "named": true
-        },
-        {
           "type": "element",
           "named": true
         },
@@ -3774,6 +3736,20 @@
           {
             "type": "primary_expr",
             "named": true
+          }
+        ]
+      },
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": ".?",
+            "named": false
+          },
+          {
+            "type": "?",
+            "named": false
           }
         ]
       },
@@ -4163,90 +4139,6 @@
     }
   },
   {
-    "type": "string_pattern",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "pattern": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "concat_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "unary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "symbol_pattern",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "pattern": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "concat_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "unary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "that_constraint",
     "named": true,
     "fields": {
@@ -4305,6 +4197,24 @@
           {
             "type": "assign_expr",
             "named": true
+          }
+        ]
+      },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "string",
+            "named": false
+          },
+          {
+            "type": "symbol",
+            "named": false
+          },
+          {
+            "type": "type",
+            "named": false
           }
         ]
       }
@@ -4799,11 +4709,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "t'",
