@@ -19,6 +19,7 @@ pn check(node) {
 }
 
 pn main() {
+    var __t0 = clock()
     let min_depth = 4
     var max_depth = N
     if (min_depth + 2 > max_depth) {
@@ -47,4 +48,6 @@ pn main() {
     }
 
     print("long lived tree of depth " ++ string(max_depth) ++ "\t check: " ++ string(check(long_lived)) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

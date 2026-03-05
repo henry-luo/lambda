@@ -54,6 +54,7 @@ pn output_reverse_complement(header, seq) {
 }
 
 pn main() {
+    var __t0 = clock()
     let text^err = input(INPUT_PATH, 'text')
     let lines = split(text, "\n")
     var num_lines = len(lines)
@@ -81,4 +82,6 @@ pn main() {
     if (len(seq) > 0) {
         output_reverse_complement(header, seq)
     }
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

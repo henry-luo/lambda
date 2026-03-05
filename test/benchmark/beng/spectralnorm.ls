@@ -73,6 +73,7 @@ pn mul_AtAv(n, v, out) {
 }
 
 pn main() {
+    var __t0 = clock()
     var u = fill(N, 1.0)
     var v = fill(N, 0.0)
 
@@ -93,4 +94,6 @@ pn main() {
     }
 
     print(format9(math.sqrt(vBv / vv)) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }
