@@ -403,6 +403,44 @@ The C2MIR path is slower on these benchmarks because the generated C code still 
 
 Benchmarks at parity (fib, tak, nqueens, mbrot) already had typed parameters in their original scripts, so inference provided no additional benefit.
 
+#### R7RS Benchmarks (release build, internal `__TIMING__` in ms)
+
+| Benchmark | MIR Direct (ms) | C2MIR (ms) | Speedup | Notes |
+|-----------|-----------------|------------|---------|-------|
+| **sum2** | 0.28 | 3.1 | **11x** | MIR dramatically faster |
+| **nqueens2** | 19.0 | 119 | **6.3x** | MIR dramatically faster |
+| **sumfp2** | 0.07 | 0.4 | **5.6x** | MIR faster |
+| **fft2** | 3.8 | 9.8 | **2.6x** | MIR faster |
+| **mbrot2** | 1.3 | 3.3 | **2.6x** | MIR faster |
+| fib2 | 2.6 | 2.2 | ~1.0x | Comparable |
+| cpstak2 | 0.6 | 0.3 | 0.5x | MIR slower |
+| tak2 | 0.4 | 0.2 | 0.5x | MIR slower |
+| fibfp2 | 14.5 | 4.3 | 0.30x | MIR slower (float recursion) |
+| ack2 | 205 | 10.4 | 0.05x | MIR much slower (deep recursion) |
+
+**Notable**: `ack2` is a significant regression — Ackermann function with extremely deep recursion. MIR function call overhead per frame is higher than C2MIR's optimized call sequence. Phase 4 (TCO) may help if the recursion is tail-callable, otherwise this reflects MIR's per-call overhead on micro-benchmarks.
+
+#### AWFY Benchmarks (release build, internal `__TIMING__` in ms)
+
+| Benchmark | MIR Direct (ms) | C2MIR (ms) | Speedup | Notes |
+|-----------|-----------------|------------|---------|-------|
+| **cd2** | 559 | 881 | **1.6x** | MIR faster (collision detection) |
+| **storage2** | 6.9 | 8.3 | **1.2x** | MIR slightly faster |
+| richards2 | 58 | 51 | 0.88x | MIR slightly slower |
+| queens2 | 0.2 | 0.3 | ~1.0x | Comparable |
+| sieve2 | 0.3 | 0.3 | ~1.0x | Comparable |
+| deltablue2 | 7.5 | 5.4 | 0.72x | MIR slower (constraint solving) |
+| havlak2 | 269 | 167 | 0.62x | MIR slower (graph-heavy, map access) |
+| nbody2 | 3.7 | 2.3 | 0.62x | MIR slower (float struct access) |
+| mandelbrot2 | 165 | 80 | 0.48x | MIR slower (float-heavy) |
+| bounce2 | 0.3 | 0.2 | 0.67x | MIR slower |
+| towers2 | 0.6 | 0.1 | 0.17x | MIR slower (deep recursion + map) |
+| permute2 | 0.4 | 0.08 | 0.20x | MIR slower (deep recursion + map) |
+
+**3 pre-existing failures** (unrelated to MIR transpiler changes): list2 (incorrect result), nbody2 (floating point mismatch), json2 (runtime error). These fail identically in MIR mode.
+
+**AWFY Analysis**: Most AWFY benchmarks that show MIR regressions are map/struct-heavy (towers, permute, havlak, deltablue use maps as objects with field access). Phase 3 (direct map/struct field access) should significantly improve these. Float-heavy benchmarks (mandelbrot2, nbody2) suggest MIR's float handling has overhead compared to C2MIR's optimized float code paths.
+
 ---
 
 ## 4. Phase 3 — Direct Map/Struct Field Access
