@@ -1,0 +1,20 @@
+/etc.hosts
+/usr.local.bin
+path
+http.api.example.com
+https.secure.api
+.test.input.dir
+/etc.'nginx.conf'
+/home.user.'config.json'
+/etc.config
+/src.*
+/src.**
+[/a, /b, http.x]
+{
+  input: /data.input,
+  output: /data.output
+}
+/etc.config
+/home.user.documents.projects.lambda.test
+true
+false
