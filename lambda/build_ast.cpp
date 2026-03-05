@@ -5509,8 +5509,10 @@ AstNode* build_raise_stam(Transpiler* tp, TSNode raise_node) {
 
     AstRaiseNode* ast_node = (AstRaiseNode*)alloc_ast_node(tp, AST_NODE_RAISE_STAM, raise_node, sizeof(AstRaiseNode));
 
-    // build required error value
-    TSNode value_node = ts_node_child_by_field_id(raise_node, FIELD_VALUE);
+    // raise_stam now wraps a raise_expr child — get the value from it
+    TSNode raise_expr_node = ts_node_child(raise_node, 0);
+    TSNode value_node = ts_node_is_null(raise_expr_node) ? raise_expr_node
+                        : ts_node_child_by_field_id(raise_expr_node, FIELD_VALUE);
     if (!ts_node_is_null(value_node)) {
         ast_node->value = build_expr(tp, value_node);
         ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ERROR;
