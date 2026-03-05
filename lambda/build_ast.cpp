@@ -6572,11 +6572,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_base_type(tp, expr_node);
     case SYM_PRIMARY_TYPE:
         return build_primary_type(tp, expr_node);
-    case sym_unary_type: {
-        // unary_type is a wrapper - unwrap to the actual child (primary_type or negation_type)
-        TSNode child = ts_node_named_child(expr_node, 0);
-        return build_expr(tp, child);
-    }
+    case sym_unary_type:
+        return build_expr(tp, ts_node_named_child(expr_node, 0));
     case SYM_BINARY_TYPE:
         return build_binary_type(tp, expr_node);
     case SYM_ERROR_UNION_TYPE:
