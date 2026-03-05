@@ -1987,6 +1987,7 @@ int main(int argc, char *argv[]) {
         // Execute script with run_main enabled
         int result = run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
 
+        runtime_cleanup(&runtime);
         log_finish();
         return result;
     }
@@ -2097,6 +2098,9 @@ int main(int argc, char *argv[]) {
     }
 
     cleanup_utf8proc_support();
+
+    // Clean up runtime (dumps profiling data if LAMBDA_PROFILE=1)
+    runtime_cleanup(&runtime);
 
     // Note: memtrack_shutdown is called via atexit handler
 
