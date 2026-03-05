@@ -9,8 +9,7 @@ extern "C" {
 #include "../lib/mempool.h"
 
 #define SYM_NULL sym_null
-#define SYM_TRUE sym_true
-#define SYM_FALSE sym_false
+#define SYM_NAMED_VALUE sym_named_value
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
 #define SYM_DECIMAL sym_decimal

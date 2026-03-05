@@ -277,10 +277,8 @@ module.exports = grammar({
     },
 
     // Note: 'null' is now part of $.base_type, no separate rule needed
-    true: _ => 'true',
-    false: _ => 'false',
-    inf: _ => 'inf',
-    nan: _ => 'nan',
+    // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
+    named_value: _ => token(choice('true', 'false', 'inf', 'nan')),
 
     // Containers: list, array, map, element
 
@@ -335,8 +333,7 @@ module.exports = grammar({
       $.symbol,
       $._datetime,
       $.binary,
-      $.true,
-      $.false,
+      $.named_value,
     ),
 
     map_item: $ => seq(
@@ -430,10 +427,7 @@ module.exports = grammar({
 
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
-      $.true,
-      $.false,
-      $.inf,
-      $.nan,
+      $.named_value,
       $._number,
       $._datetime,
       $.string,
