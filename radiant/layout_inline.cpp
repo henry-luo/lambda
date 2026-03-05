@@ -791,7 +791,39 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
+    // CSS 2.1 §10.6.1: Store span's resolved line-height for use by
+    // view_vertical_align() to compute the inline box Y/height.
+    // For inline non-replaced elements, the inline box height equals line-height,
+    // not the union of children's visual extent.
+    span->content_height = lycon->block.line_height;
+
     compute_span_bounding_box(span, span_is_multi_line);
+
+    // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height
+    // should reflect the font's content area + border + padding, not the union of
+    // children's visual extent. When children contain tall replaced elements (images,
+    // inline-blocks) that extend beyond the font content area, cap the span's height.
+    // Use font_get_cell_height() which matches the text rect height and browser behavior.
+    if (span->height > 0) {
+        struct FontHandle* fh = span->font ? span->font->font_handle : lycon->font.font_handle;
+        if (fh) {
+            float content_area = font_get_cell_height(fh);
+            float bt = 0, bb = 0, pt_val = 0, pb_val = 0;
+            if (span->bound) {
+                if (span->bound->border) {
+                    bt = span->bound->border->width.top;
+                    bb = span->bound->border->width.bottom;
+                }
+                pt_val = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
+                pb_val = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+            }
+            int expected_height = (int)(content_area + bt + pt_val + pb_val + bb);
+            if (span->height > expected_height) {
+                span->height = expected_height;
+                log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
+            }
+        }
+    }
 
     // CSS 2.1 §10.8.1: Mark collapsed-content inline spans for line-break fixup.
     // When an inline element has children but all content collapsed (whitespace-only),

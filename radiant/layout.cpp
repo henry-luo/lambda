@@ -742,6 +742,66 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // have shifted (e.g., baseline alignment with half-leading offsets).
         // Always recompute to ensure the span's bounds reflect final child positions.
         compute_span_bounding_box(span, false);
+
+        // CSS 2.1 §10.6.1: For inline non-replaced elements, getBoundingClientRect()
+        // reports the font's content area + border + padding, NOT the full extent
+        // of children. When children include tall replaced elements that extend
+        // beyond the span's font content area, we need to override both Y and height.
+        // For text-only spans, compute_span_bounding_box already gives correct results.
+        //
+        // When span has no explicit font (span->font == NULL), it inherits the parent
+        // font — which is in lycon->font (restored by span_vertical_align above).
+        struct FontHandle* span_fh = span->font ? span->font->font_handle : lycon->font.font_handle;
+        float span_asc = 0, span_desc = 0;
+        if (span->font) {
+            span_asc = span->font->ascender;
+            span_desc = span->font->descender;
+        } else if (lycon->font.style) {
+            span_asc = lycon->font.style->ascender;
+            span_desc = lycon->font.style->descender;
+        }
+        if (span->content_height > 0 && span_fh && (span_asc > 0 || span_desc > 0)) {
+            float content_area = font_get_cell_height(span_fh);
+            float bt = 0, bb = 0, pt = 0, pb = 0;
+            if (span->bound) {
+                if (span->bound->border) {
+                    bt = span->bound->border->width.top;
+                    bb = span->bound->border->width.bottom;
+                }
+                pt = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
+                pb = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+            }
+            int expected_height = (int)(content_area + bt + pt + pb + bb);
+            if (span->height > expected_height) {
+                // Children extend beyond the font content area (e.g., tall image).
+                // Override both Y and height. Y is computed from the baseline position
+                // using the half-leading model.
+                float span_lh = span->content_height;
+                float hhea_content = span_asc + span_desc;
+                float half_leading = (span_lh - hhea_content) / 2.0f;
+                float item_baseline = span_asc + half_leading;
+
+                CssEnum align = (span->in_line && span->in_line->vertical_align) ?
+                    span->in_line->vertical_align : lycon->line.vertical_align;
+                float valign_offset = (span->in_line && span->in_line->vertical_align) ?
+                    span->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
+                float line_height = max(lycon->block.line_height,
+                    lycon->line.max_ascender + lycon->line.max_descender);
+                float vertical_offset = calculate_vertical_align_offset(lycon, align,
+                    span_lh, line_height, lycon->line.max_ascender, item_baseline, valign_offset);
+
+                // Position the content area top: inline_box_top + half_leading
+                // The baseline is at inline_box_top + item_baseline
+                // Content area top = baseline - ascender_for_content_area
+                // For matching browser: content_area_top ≈ inline_box_top + half_leading
+                // Since cell_height may differ from hhea, adjust by centering difference
+                span->y = (int)(lycon->block.advance_y + vertical_offset + half_leading - bt - pt);
+                span->height = expected_height;
+                log_debug("inline box override (tall child): y=%d, h=%d, area=%.1f",
+                         span->y, span->height, content_area);
+            }
+            // Else: text-only content — compute_span_bounding_box result is correct
+        }
     }
     else {
         log_debug("view_vertical_align: unknown view type %d", view->view_type);
