@@ -6850,11 +6850,21 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     }
 
     // Execute (no imports — use standard path)
+    // Save original C2MIR context (created by load_script) before overwriting
+    MIR_context_t c2mir_ctx = runner.script->jit_context;
     runner.script->jit_context = ctx;  // store for BSS root registration
     Input* output = execute_script_and_create_output(&runner, run_main);
 
-    // Cleanup MIR context
+    // Cleanup MIR direct context
     jit_cleanup(ctx);
+
+    // Cleanup original C2MIR context (leaked when we overwrote jit_context)
+    if (c2mir_ctx && c2mir_ctx != ctx) {
+        jit_cleanup(c2mir_ctx);
+    }
+
+    // Null out to prevent double-cleanup in runtime_cleanup
+    runner.script->jit_context = NULL;
 
     return output;
 }
