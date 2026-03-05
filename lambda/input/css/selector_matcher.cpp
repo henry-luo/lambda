@@ -3,7 +3,6 @@
 #include "../../../lib/arraylist.h"
 #include "../../../lib/str.h"
 #include <string.h>
-#include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
 
@@ -1200,21 +1199,21 @@ void selector_matcher_reset_statistics(SelectorMatcher* matcher) {
 
 void selector_matcher_print_info(SelectorMatcher* matcher) {
     if (!matcher) {
-        printf("Selector Matcher: NULL\n");
+        log_info("Selector Matcher: NULL");
         return;
     }
 
-    printf("Selector Matcher:\n");
-    printf("  Cache enabled: %s\n", matcher->cache_enabled ? "yes" : "no");
-    printf("  Strict mode: %s\n", matcher->strict_mode ? "yes" : "no");
-    printf("  Case-sensitive attributes: %s\n", matcher->case_sensitive_attrs ? "yes" : "no");
-    printf("  Total matches: %llu\n", (unsigned long long)matcher->total_matches);
-    printf("  Cache hits: %llu\n", (unsigned long long)matcher->cache_hits);
-    printf("  Cache misses: %llu\n", (unsigned long long)matcher->cache_misses);
+    log_info("Selector Matcher:");
+    log_info("  Cache enabled: %s", matcher->cache_enabled ? "yes" : "no");
+    log_info("  Strict mode: %s", matcher->strict_mode ? "yes" : "no");
+    log_info("  Case-sensitive attributes: %s", matcher->case_sensitive_attrs ? "yes" : "no");
+    log_info("  Total matches: %llu", (unsigned long long)matcher->total_matches);
+    log_info("  Cache hits: %llu", (unsigned long long)matcher->cache_hits);
+    log_info("  Cache misses: %llu", (unsigned long long)matcher->cache_misses);
 
     if (matcher->total_matches > 0) {
         double hit_rate = (double)matcher->cache_hits / (double)matcher->total_matches;
-        printf("  Cache hit rate: %.2f%%\n", hit_rate * 100.0);
+        log_info("  Cache hit rate: %.2f%%", hit_rate * 100.0);
     }
 }
 
