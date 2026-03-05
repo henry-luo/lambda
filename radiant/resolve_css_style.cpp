@@ -2386,8 +2386,33 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
         // CSS 2.1 §17.5: Border handling for table-internal elements depends on
         // the border model (separated vs collapsed), which is a property of the
-        // ancestor table element. This must be resolved during table layout,
-        // not during CSS resolution. Borders are left as-is here.
+        // ancestor table element. In the collapsed model, borders on rows,
+        // row-groups, columns contribute to conflict resolution. In the separated
+        // model, borders don't apply to these elements. Since we can't determine
+        // the border model here, leave borders as-is for table layout to handle.
+
+        // CSS 2.1 §10.3, §17.5.3: 'width' does not apply to table-row,
+        // table-row-group, table-header-group, table-footer-group,
+        // table-column, or table-column-group elements.
+        // CSS 2.1 §10.5, §17.5.3: 'height' does not apply to table-column
+        // or table-column-group elements.
+        if (is_row_or_rowgroup || is_column) {
+            ViewBlock* block = (ViewBlock*)span;
+            if (block->blk) {
+                if (block->blk->given_width >= 0) {
+                    log_debug("[CSS] Zeroing given_width on table internal element (display.inner=%d)", di);
+                    block->blk->given_width = -1;
+                    block->blk->given_width_type = CSS_VALUE_AUTO;
+                    block->blk->given_width_percent = NAN;
+                }
+                if (is_column && block->blk->given_height >= 0) {
+                    log_debug("[CSS] Zeroing given_height on table column element (display.inner=%d)", di);
+                    block->blk->given_height = -1;
+                    block->blk->given_height_type = CSS_VALUE_AUTO;
+                    block->blk->given_height_percent = NAN;
+                }
+            }
+        }
     }
 }
 

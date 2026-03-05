@@ -68,7 +68,8 @@ static float get_border_width_from_css(LayoutContext* lycon, DomElement* element
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
-                                                   CssEnum text_transform) {
+                                                   CssEnum text_transform,
+                                                   CssEnum font_variant) {
     TextIntrinsicWidths result = {0, 0};
 
     if (!text || length == 0) {
@@ -205,6 +206,16 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
             codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         }
+
+        // CSS font-variant: small-caps — convert lowercase to uppercase glyphs
+        // rendered at ~0.7× size (CSS 2.1 §15.8, matching layout_text.cpp)
+        bool is_small_caps_lower = false;
+        if (font_variant == CSS_VALUE_SMALL_CAPS) {
+            uint32_t original = codepoint;
+            codepoint = apply_text_transform(codepoint, CSS_VALUE_UPPERCASE, false);
+            is_small_caps_lower = (codepoint != original);
+        }
+
         is_word_start = false;  // No longer at word start after first character
 
         // Get glyph index for the (possibly transformed) codepoint
@@ -219,6 +230,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                 float advance = glyph->advance_x / pixel_ratio;
+                // small-caps: scale advance for lowercase-origin characters
+                if (is_small_caps_lower) advance *= 0.7f;
                 // Apply letter-spacing
                 // CSS 2.1 §16.4: letter-spacing after every character (including last)
                 if (lycon->font.style) {
@@ -245,7 +258,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // Get glyph advance via font module (returns CSS pixels directly)
         GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
         if (ginfo.id != 0) {
-            float advance = ginfo.advance_x + kerning;
+            // small-caps: scale advance for lowercase-origin characters
+            float advance = ginfo.advance_x * (is_small_caps_lower ? 0.7f : 1.0f) + kerning;
 
             // Apply letter-spacing (CSS 2.1 §16.4: after every character including last)
             if (lycon->font.style) {
@@ -290,7 +304,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     size_t length,
                                     float available_width,
                                     float line_height,
-                                    CssEnum text_transform) {
+                                    CssEnum text_transform,
+                                    CssEnum font_variant) {
     if (!text || length == 0 || available_width <= 0 || line_height <= 0) {
         return line_height;  // at least one line
     }
@@ -372,6 +387,15 @@ float compute_text_height_at_width(LayoutContext* lycon,
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
             codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         }
+
+        // CSS font-variant: small-caps scaling (matching measure_text_intrinsic_widths)
+        bool is_small_caps_lower = false;
+        if (font_variant == CSS_VALUE_SMALL_CAPS) {
+            uint32_t original = codepoint;
+            codepoint = apply_text_transform(codepoint, CSS_VALUE_UPPERCASE, false);
+            is_small_caps_lower = (codepoint != original);
+        }
+
         is_word_start = false;
 
         float advance = 0;
@@ -383,13 +407,15 @@ float compute_text_height_at_width(LayoutContext* lycon,
                     kerning = font_get_kerning_by_index(lycon->font.font_handle, prev_glyph, glyph_index);
                 }
                 GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
-                advance = (ginfo.id != 0) ? ginfo.advance_x + kerning : 11.0f;
+                float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+                advance = (ginfo.id != 0) ? ginfo.advance_x * sc_scale + kerning : 11.0f;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
                 LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
                 if (glyph) {
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     advance = glyph->advance_x / pixel_ratio;
+                    if (is_small_caps_lower) advance *= 0.7f;
                 } else {
                     advance = 11.0f;
                 }
@@ -516,6 +542,23 @@ CssEnum get_element_text_transform(DomElement* element) {
                         return val;
                     }
                 }
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NONE;
+}
+
+// Helper to get font-variant property from an element, traversing parent chain
+// since font-variant is an inherited property.
+// Uses elem->font (available after CSS resolution) rather than specified_style.
+CssEnum get_element_font_variant(DomElement* element) {
+    DomNode* node = element;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->font && elem->font->font_variant == CSS_VALUE_SMALL_CAPS) {
+                return CSS_VALUE_SMALL_CAPS;
             }
         }
         node = node->parent;
@@ -1230,9 +1273,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
                 // Get text-transform from parent element (text inherits from parent)
                 CssEnum text_transform = get_element_text_transform(element);
+                CssEnum font_variant = get_element_font_variant(element);
 
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                    lycon, normalized_buffer, out_pos, text_transform);
+                    lycon, normalized_buffer, out_pos, text_transform, font_variant);
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
@@ -1761,11 +1805,13 @@ float calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
         if (text) {
             // Get text-transform from parent element (text inherits from parent)
             CssEnum text_transform = CSS_VALUE_NONE;
+            CssEnum font_variant = CSS_VALUE_NONE;
             if (node->parent && node->parent->is_element()) {
                 text_transform = get_element_text_transform(node->parent->as_element());
+                font_variant = get_element_font_variant(node->parent->as_element());
             }
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text), text_transform);
+                lycon, text, strlen(text), text_transform, font_variant);
             return widths.min_content;
         }
         return 0;
@@ -1788,11 +1834,13 @@ float calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
         if (text) {
             // Get text-transform from parent element (text inherits from parent)
             CssEnum text_transform = CSS_VALUE_NONE;
+            CssEnum font_variant = CSS_VALUE_NONE;
             if (node->parent && node->parent->is_element()) {
                 text_transform = get_element_text_transform(node->parent->as_element());
+                font_variant = get_element_font_variant(node->parent->as_element());
             }
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text), text_transform);
+                lycon, text, strlen(text), text_transform, font_variant);
             return widths.max_content;
         }
         return 0;
@@ -1841,13 +1889,15 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Estimate how many lines the text will take based on available width
         if (width > 0) {
             size_t text_len = strlen(text);
-            // Get text-transform from parent element (text inherits from parent)
+            // Get text-transform and font-variant from parent element (inherited)
             CssEnum text_transform = CSS_VALUE_NONE;
+            CssEnum font_variant = CSS_VALUE_NONE;
             if (node->parent && node->parent->is_element()) {
                 text_transform = get_element_text_transform(node->parent->as_element());
+                font_variant = get_element_font_variant(node->parent->as_element());
             }
             // Measure text width using intrinsic sizing
-            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len, text_transform);
+            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len, text_transform, font_variant);
             float text_width = widths.max_content;
 
             // Calculate number of lines (rounded up)
