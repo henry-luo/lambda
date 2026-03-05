@@ -2210,11 +2210,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
             ast_node->type = ast_node->expr->type;
         }
     }
-    else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
-        ast_node->type = &LIT_BOOL;
-    }
-    else if (symbol == sym_inf || symbol == sym_nan) {
-        ast_node->type = build_lit_float(tp, child);
+    else if (symbol == SYM_NAMED_VALUE) {
+        StrView text = ts_node_source(tp, child);
+        if (strview_equal(&text, "true") || strview_equal(&text, "false")) {
+            ast_node->type = &LIT_BOOL;
+        } else {
+            ast_node->type = build_lit_float(tp, child);
+        }
     }
     else if (symbol == SYM_INT) {
         // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
@@ -6568,15 +6570,15 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_DATETIME:  case SYM_TIME:
         return build_lit_node(tp, expr_node, false, symbol);
         break;
-    case SYM_TRUE:  case SYM_FALSE: {
-        AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        b_node->type = &LIT_BOOL;
-        return (AstNode*)b_node;
-    }
-    case sym_inf:  case sym_nan: {
-        AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        f_node->type = build_lit_float(tp, expr_node);
-        return (AstNode*)f_node;
+    case SYM_NAMED_VALUE: {
+        AstPrimaryNode* nv_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        StrView text = ts_node_source(tp, expr_node);
+        if (strview_equal(&text, "true") || strview_equal(&text, "false")) {
+            nv_node->type = &LIT_BOOL;
+        } else {
+            nv_node->type = build_lit_float(tp, expr_node);
+        }
+        return (AstNode*)nv_node;
     }
     case SYM_INT: {
         AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));

@@ -3496,10 +3496,6 @@
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
           "type": "float",
           "named": true
         },
@@ -3521,10 +3517,6 @@
         },
         {
           "type": "index_expr",
-          "named": true
-        },
-        {
-          "type": "inf",
           "named": true
         },
         {
@@ -3552,7 +3544,7 @@
           "named": true
         },
         {
-          "type": "nan",
+          "type": "named_value",
           "named": true
         },
         {
@@ -3593,10 +3585,6 @@
         },
         {
           "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
           "named": true
         },
         {
@@ -3643,10 +3631,6 @@
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
           "type": "float",
           "named": true
         },
@@ -3668,6 +3652,10 @@
         },
         {
           "type": "map_type",
+          "named": true
+        },
+        {
+          "type": "named_value",
           "named": true
         },
         {
@@ -3696,10 +3684,6 @@
         },
         {
           "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
           "named": true
         }
       ]
@@ -3886,15 +3870,15 @@
             "named": true
           },
           {
-            "type": "false",
-            "named": true
-          },
-          {
             "type": "float",
             "named": true
           },
           {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "named_value",
             "named": true
           },
           {
@@ -3911,10 +3895,6 @@
           },
           {
             "type": "time",
-            "named": true
-          },
-          {
-            "type": "true",
             "named": true
           }
         ]
@@ -3940,15 +3920,15 @@
             "named": true
           },
           {
-            "type": "false",
-            "named": true
-          },
-          {
             "type": "float",
             "named": true
           },
           {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "named_value",
             "named": true
           },
           {
@@ -3965,10 +3945,6 @@
           },
           {
             "type": "time",
-            "named": true
-          },
-          {
-            "type": "true",
             "named": true
           }
         ]
@@ -4592,10 +4568,6 @@
     "named": false
   },
   {
-    "type": "false",
-    "named": true
-  },
-  {
     "type": "float",
     "named": true
   },
@@ -4632,10 +4604,6 @@
     "named": false
   },
   {
-    "type": "inf",
-    "named": true
-  },
-  {
     "type": "is",
     "named": false
   },
@@ -4652,7 +4620,7 @@
     "named": false
   },
   {
-    "type": "nan",
+    "type": "named_value",
     "named": true
   },
   {
@@ -4701,11 +4669,11 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
@@ -4730,10 +4698,6 @@
   {
     "type": "to",
     "named": false
-  },
-  {
-    "type": "true",
-    "named": true
   },
   {
     "type": "type",
