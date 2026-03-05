@@ -442,11 +442,14 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     var result = benchmark()
+    var __t1 = clock()
     if (result == 1) {
         print("Richards: PASS\n")
     }
     if (result == 0) {
         print("Richards: FAIL\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

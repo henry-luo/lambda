@@ -1120,7 +1120,9 @@ pn verify_result(collisions: int, numAircraft: int) {
 }
 
 pn main() {
+    var __t0 = clock()
     var collisions: int = cd(100)
+    var __t1 = clock()
     print("collisions=")
     print(collisions)
     print("\n")
@@ -1131,5 +1133,6 @@ pn main() {
     if (ok == 0) {
         print("CD: FAIL\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
     return 0
 }
