@@ -45,7 +45,6 @@ extern "C" {
 
 // Path wildcards for glob patterns
 #define SYM_PATH_WILDCARD sym_path_wildcard
-#define SYM_PATH_WILDCARD_RECURSIVE sym_path_wildcard_recursive
 
 // Path tokens: .. for parent (kept separate for parent_expr)\n// SYM_PATH_ROOT and SYM_PATH_SELF removed — merged into _path_prefix token
 #define SYM_PATH_PARENT sym_path_parent

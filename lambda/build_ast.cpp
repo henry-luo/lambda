@@ -835,15 +835,10 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
                 arraylist_append(segments, seg);
             }
             else if (field_sym == SYM_PATH_WILDCARD) {
+                StrView wc_src = ts_node_source(tp, field_node);
                 AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
                 seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD;
-                arraylist_append(segments, seg);
-            }
-            else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
-                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
-                seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD_REC;
+                seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
                 arraylist_append(segments, seg);
             }
         }
@@ -886,17 +881,10 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
                 arraylist_append(segments, seg);
             }
             else if (field_sym == SYM_PATH_WILDCARD) {
-                // single wildcard (*) - match one segment
+                StrView wc_src = ts_node_source(tp, field_node);
                 AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
                 seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD;
-                arraylist_append(segments, seg);
-            }
-            else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
-                // recursive wildcard (**) - match zero or more segments
-                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
-                seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD_REC;
+                seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
                 arraylist_append(segments, seg);
             }
             return scheme;

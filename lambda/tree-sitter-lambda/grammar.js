@@ -31,9 +31,6 @@ const decimal_literal = choice(
   seq('.', decimal_digits),
 );
 
-const base64_unit = /[A-Za-z0-9+/]{4}/;
-const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
-
 // need to exclude relational exprs in attr (to avoid conflicts with element tags)
 // pipe operators are always included
 function binary_expr($, in_attr) {
@@ -90,15 +87,6 @@ function type_pattern(type_expr) {
       field('operator', operator),
       field('right', type_expr),
     )),
-  );
-}
-
-function time() {
-  // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm or hh
-  return seq(digit, digit, optional(seq(':', digit, digit)), optional(seq(':', digit, digit)),
-    optional((seq('.', digit, digit, digit))),
-    // timezone
-    optional(choice('z', 'Z', seq(choice('+', '-'), digit, digit, optional(seq(':', digit, digit)))))
   );
 }
 
@@ -449,10 +437,8 @@ module.exports = grammar({
       '(', comma_sep( field('argument', choice($.named_argument, $._expr)) ), ')',
     ),
 
-    import: _ => token('import'),
-
     call_expr: $ => prec.right(100, seq(
-      field('function', choice($.primary_expr, $.import)),
+      field('function', choice($.primary_expr, 'import')),
       $._arguments,
       optional(field('propagate', '^')),
     )),
@@ -483,14 +469,14 @@ module.exports = grammar({
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
       $._path_prefix,
-      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
+      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.base_type)))
     )),
 
     // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
     // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
     member_expr: $ => prec.dynamic(1, seq(
       field('object', $.primary_expr), ".",
-      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type))
+      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.base_type))
     )),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent
@@ -500,9 +486,8 @@ module.exports = grammar({
       repeat(seq('_', $.path_parent))   // _.. for additional parent levels
     ),
 
-    // Path wildcards for glob patterns
-    path_wildcard: _ => token('*'),               // single wildcard: match one segment
-    path_wildcard_recursive: _ => token('**'),    // recursive wildcard: match zero or more segments
+    // Path wildcard: * (single segment) or ** (recursive, zero or more segments)
+    path_wildcard: _ => token(choice('**', '*')),
 
     binary_expr: $ => choice(
       ...binary_expr($, false),
@@ -565,7 +550,7 @@ module.exports = grammar({
       '{', field('body', $.content), '}',
     ),
 
-    // fn with expr body
+    // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier),

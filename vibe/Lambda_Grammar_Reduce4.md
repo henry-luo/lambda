@@ -735,6 +735,100 @@ Removed `path_root` and `path_self` rules entirely. `path_parent` remains for `p
 
 ---
 
+## Proposal 17: Remove `import` Rule, Use String Literal — APPLIED ✓
+
+**Impact: Low (−0.55%)**
+
+`import` was defined as a standalone named rule:
+
+```js
+// Before: named rule wrapping a token
+import: _ => token('import'),
+```
+
+It was only used in one place — `call_expr` — to allow `import(...)` as a function call syntax. Since `'import'` already exists as an anonymous keyword in `_import_stam`, the named rule was redundant.
+
+### Applied Change
+
+Removed the `import` rule and used the `'import'` string literal directly:
+
+```js
+// Before
+import: _ => token('import'),
+call_expr: $ => prec.right(100, seq(
+  field('function', choice($.primary_expr, $.import)),
+  ...
+)),
+
+// After
+call_expr: $ => prec.right(100, seq(
+  field('function', choice($.primary_expr, 'import')),
+  ...
+)),
+```
+
+**AST builder changes:** None needed. The builder reads the function name via `ts_node_source()` and doesn't check for `sym_import` anywhere.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,312,649 B | 7,272,412 B | **−40,237 B (−0.55%)** |
+| STATE_COUNT | 5,720 | 5,719 | −1 |
+| LARGE_STATE_COUNT | 528 | 528 | No change |
+| SYMBOL_COUNT | 220 | 219 | **−1** |
+| TOKEN_COUNT | 95 | 95 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** A simple cleanup — the named `import` rule added a symbol ID for no benefit. Removing it eliminates one column from every large state row. No AST builder changes required.
+
+---
+
+## Proposal 18: Merge `path_wildcard_recursive` into `path_wildcard` Token — APPLIED ✓
+
+**Impact: Low (−0.31%)**
+
+Path wildcards used two separate grammar rules:
+
+```js
+// Before: two rules
+path_wildcard: _ => token('*'),               // single wildcard: match one segment
+path_wildcard_recursive: _ => token('**'),    // recursive wildcard: match zero or more segments
+```
+
+Both were used in `path_expr` and `member_expr` field choices. Each created its own symbol ID.
+
+### Applied Change
+
+Merged into a single `path_wildcard` token:
+
+```js
+// After: single token
+path_wildcard: _ => token(choice('**', '*')),
+```
+
+`'**'` is listed first in the choice to ensure it takes priority over `'*'` during tokenization (longest match). Removed `path_wildcard_recursive` from `path_expr` and `member_expr` field choices.
+
+**AST builder changes:**
+- Removed `SYM_PATH_WILDCARD_RECURSIVE` macro from `ast.hpp`.
+- Both `SYM_PATH_WILDCARD` cases in `collect_path_segments_if_path` now check source text length: `length == 2` → `LPATH_SEG_WILDCARD_REC`, otherwise `LPATH_SEG_WILDCARD`.
+- Transpilers (`transpile.cpp`, `transpile-mir.cpp`) unchanged — they reference the AST segment type enum, not grammar symbols.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,272,412 B | 7,250,003 B | **−22,409 B (−0.31%)** |
+| STATE_COUNT | 5,719 | 5,701 | **−18** |
+| LARGE_STATE_COUNT | 528 | 524 | **−4** |
+| SYMBOL_COUNT | 219 | 218 | **−1** |
+| TOKEN_COUNT | 95 | 96 | +1 |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Same token consolidation pattern. The two wildcards share a single grammar role (path field segment), so merging into one token and deferring `*` vs `**` distinction to the AST builder is a clean separation.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -755,6 +849,8 @@ Removed `path_root` and `path_self` rules entirely. `path_parent` remains for `p
 | 14th | #14 — Merge pattern_any token | Low | Low | ✅ Applied (−0.43%, −1 SYM) |
 | 15th | #15 — Reuse raise_expr in raise_stam | Low | Negligible | ✅ Applied (−0.07%) |
 | 16th | #16 — Merge path prefix tokens | Low | Medium | ✅ Applied (−2.76%, −1 SYM) |
+| 17th | #17 — Remove import rule | Low | Low | ✅ Applied (−0.55%, −1 SYM) |
+| 18th | #18 — Merge path wildcards | Low | Low | ✅ Applied (−0.31%, −1 SYM) |
 
 ### Cumulative Results
 
@@ -772,6 +868,8 @@ Removed `path_root` and `path_self` rules entirely. `path_parent` remains for `p
 | + Proposal 14 (pattern_any merge) | 7,525,508 | 5,741 | 593 | 221 | 94 |
 | + Proposal 15 (raise_stam reuse) | 7,520,133 | 5,738 | 591 | 221 | 94 |
 | + Proposal 16 (path prefix merge) | 7,312,649 | 5,720 | 528 | 220 | 95 |
-| **Total reduction** | **−3,319,060 (−31.2%)** | **−545** | **−1,604** | **−42** | **−29** |
+| + Proposal 17 (remove import rule) | 7,272,412 | 5,719 | 528 | 219 | 95 |
+| + Proposal 18 (path wildcard merge) | 7,250,003 | 5,701 | 524 | 218 | 96 |
+| **Total reduction** | **−3,381,706 (−31.8%)** | **−564** | **−1,608** | **−44** | **−28** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.
