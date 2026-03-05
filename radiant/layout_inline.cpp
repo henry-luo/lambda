@@ -31,9 +31,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
     View* child = span->first_child;
     if (!child) {
         // Truly empty inline element (no children at all) — CSS 2.1 §9.4.2:
-        // Line boxes with no text, no preserved whitespace, and no inline elements
-        // with non-zero margins/padding/borders are zero-height. A truly empty
-        // inline element (e.g., <span></span>) contributes only border+padding.
+        // A line box is zero-height when it contains no text, no preserved whitespace,
+        // and no inline elements with non-zero inline-direction decorations.
+        // Per browser behavior, only horizontal (inline-direction) borders/padding/margins
+        // keep a line box non-zero-height. Vertical-only borders (top/bottom) do not.
         float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
         float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
         if (span->bound) {
@@ -48,8 +49,16 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
             pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
             pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
         }
-        span->width = (int)(border_left + pad_left + pad_right + border_right);
-        span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
+        float inline_sum = border_left + pad_left + pad_right + border_right;
+        if (inline_sum > 0) {
+            // Horizontal decorations keep the inline box "present" — include all edges
+            span->width = (int)inline_sum;
+            span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
+        } else {
+            // No horizontal decorations — the inline box is invisible, collapse to zero
+            span->width = 0;
+            span->height = 0;
+        }
         return;
     }
 
@@ -60,8 +69,9 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         child = child->next();
     }
     if (!child) {
-        // All children are nil-views or out-of-flow — treat as empty but include border+padding
-        // CSS 2.1 §8.1: Empty inline elements still have border+padding in their bounding box
+        // All children are nil-views or out-of-flow — treat as effectively empty.
+        // CSS 2.1 §9.4.2: Only inline-direction (horizontal) decorations keep the
+        // line box non-zero-height. If no horizontal border/padding exists, collapse.
         float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
         float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
         if (span->bound) {
@@ -76,8 +86,14 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
             pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
             pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
         }
-        span->width = (int)(border_left + pad_left + pad_right + border_right);
-        span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
+        float inline_sum = border_left + pad_left + pad_right + border_right;
+        if (inline_sum > 0) {
+            span->width = (int)inline_sum;
+            span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
+        } else {
+            span->width = 0;
+            span->height = 0;
+        }
         return;
     }
 
@@ -125,26 +141,37 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
     }
 
+    // CSS 2.1 §9.4.2: If children have zero content extent AND the span has no
+    // horizontal (inline-direction) decorations, the span generates no visible
+    // inline box — collapse to zero. This handles nested empty spans.
+    float left_edge = border_left + pad_left;
+    float right_edge = border_right + pad_right;
+    float inline_sum = left_edge + right_edge;
+    int content_width = max_x - min_x;
+    int content_height = max_y - min_y;
+    if (content_width == 0 && content_height == 0 && inline_sum == 0) {
+        span->width = 0;
+        span->height = 0;
+        return;
+    }
+
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
     // of the inline box. For single-line spans, border+padding expand the bounding box
     // symmetrically. For multi-line spans, left border+padding only appears on the
     // first line fragment and right on the last — the union bounding box cannot simply
     // add both edges, so we skip horizontal expansion for multi-line.
-    float left_edge = border_left + pad_left;
-    float right_edge = border_right + pad_right;
-
     if (is_multi_line) {
         // Multi-line: don't add horizontal border+padding to union bounding box
         span->x = min_x;
         span->y = min_y - (int)border_top - (int)pad_top;
-        span->width = max_x - min_x;
-        span->height = (max_y - min_y) + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
+        span->width = content_width;
+        span->height = content_height + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
     } else {
         // Single-line: include horizontal border+padding in bounding box
         span->x = min_x - (int)left_edge;
         span->y = min_y - (int)border_top - (int)pad_top;
-        span->width = (max_x - min_x) + (int)left_edge + (int)right_edge;
-        span->height = (max_y - min_y) + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
+        span->width = content_width + (int)left_edge + (int)right_edge;
+        span->height = content_height + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
     }
 }
 
@@ -533,24 +560,38 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         compute_span_bounding_box(span, true);  // get vertical bounds from children
 
         // CSS 2.1 §9.2.1.1: Extend span bounding box to cover the trailing anonymous
-        // block's strut. The span's children only include visible content (block child),
-        // but advance_y now accounts for the trailing anonymous block. Expand the span's
-        // height to match the flow extent (advance_y relative to span's y).
+        // block's strut. Only do this when the span has inline-end decorations that
+        // caused a trailing strut to be generated. Without inline-end decorations,
+        // advance_y may include the block child's margins which should NOT be part
+        // of the span's bounding box (margins are outside the border box).
         {
-            float span_bottom = span->y + span->height;
-            float flow_bottom = lycon->block.advance_y;
-            if (flow_bottom > span_bottom) {
-                // Add border-bottom to the expanded height
-                float border_bottom = 0, pad_bottom = 0;
-                if (span->bound) {
-                    if (span->bound->border)
-                        border_bottom = span->bound->border->width.bottom;
-                    if (span->bound->padding.bottom > 0)
-                        pad_bottom = span->bound->padding.bottom;
+            bool has_inline_end = false;
+            if (span->bound) {
+                bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
+                float end_border = 0, end_padding = 0;
+                if (span->bound->border) {
+                    end_border = is_rtl ? span->bound->border->width.left
+                                        : span->bound->border->width.right;
                 }
-                span->height = (int)(flow_bottom - span->y + border_bottom + pad_bottom);
-                log_debug("block-in-inline: extended span height to %d (flow_bottom=%.1f, span_y=%d)",
-                          span->height, flow_bottom, span->y);
+                end_padding = is_rtl ? (span->bound->padding.left > 0 ? span->bound->padding.left : 0)
+                                     : (span->bound->padding.right > 0 ? span->bound->padding.right : 0);
+                has_inline_end = (end_border > 0 || end_padding > 0);
+            }
+            if (has_inline_end) {
+                float span_bottom = span->y + span->height;
+                float flow_bottom = lycon->block.advance_y;
+                if (flow_bottom > span_bottom) {
+                    float border_bottom = 0, pad_bottom = 0;
+                    if (span->bound) {
+                        if (span->bound->border)
+                            border_bottom = span->bound->border->width.bottom;
+                        if (span->bound->padding.bottom > 0)
+                            pad_bottom = span->bound->padding.bottom;
+                    }
+                    span->height = (int)(flow_bottom - span->y + border_bottom + pad_bottom);
+                    log_debug("block-in-inline: extended span height to %d (flow_bottom=%.1f, span_y=%d)",
+                              span->height, flow_bottom, span->y);
+                }
             }
         }
 
