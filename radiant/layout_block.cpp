@@ -2577,21 +2577,129 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     current_y = next_y;
                 }
             } else {
-                // No explicit width - element will shrink to fit, just calculate intrusion
-                // CSS 2.1 §9.5: Use full vertical extent to find the maximum float intrusion
+                // No explicit width - element may shrink to fit beside the float.
+                // CSS 2.1 §9.5: "The border box of a table, a block-level replaced element,
+                // or an element in the normal flow that establishes a new block formatting
+                // context... must not overlap the margin box of any floats in the same BFC.
+                // If necessary, implementations should clear the said element by placing it
+                // below any preceding floats, but may place it adjacent to such floats if
+                // there is sufficient space."
+                //
+                // For auto-width elements we distinguish two cases:
+                //  (a) Tables and block-level replaced elements have rigid intrinsic
+                //      min-content widths; if the min-content exceeds the available
+                //      space beside the float, the element must step down rather than
+                //      overflow.
+                //  (b) Other BFC elements (overflow:hidden divs, etc.) simply accept
+                //      the reduced available width; their content will wrap or overflow
+                //      within the narrower space.
                 FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, element_border_box_height);
                 float local_left = space.left - x_in_bfc;
                 float local_right = space.right - x_in_bfc;
                 float float_intrusion_left = max(0.0f, local_left);
                 float float_intrusion_right = max(0.0f, pa_block->content_width - local_right);
+                float available_beside_float = pa_block->content_width - float_intrusion_left - float_intrusion_right;
 
-                if (space.has_left_float && float_intrusion_left > 0) {
-                    bfc_float_offset_x = float_intrusion_left;
+                // Determine whether this element has a rigid intrinsic min-content width
+                // that prevents it from shrinking into the available space.
+                // Tables: column min-widths form a hard lower bound on table width.
+                // Block-level replaced elements: intrinsic dimensions are fixed.
+                bool is_table = (block->display.inner == CSS_VALUE_TABLE ||
+                                 block->view_type == RDT_VIEW_TABLE);
+                bool has_rigid_min_width = is_table || is_block_level_replaced;
+
+                // Compute min-content width for rigid elements
+                float min_required = 0;
+                bool should_step_down = false;
+                if (has_rigid_min_width && block->is_element()) {
+                    IntrinsicSizes isizes = measure_element_intrinsic_widths(lycon, (DomElement*)block);
+                    min_required = isizes.min_content;
+                    // Add border/padding (min_content is content-box width)
+                    if (block->bound) {
+                        min_required += block->bound->padding.left + block->bound->padding.right;
+                        if (block->bound->border) {
+                            min_required += block->bound->border->width.left + block->bound->border->width.right;
+                        }
+                    }
+
+                    if (min_required > available_beside_float + 0.5f) {
+                        should_step_down = true;
+                        log_debug("[BFC Float Avoid] Rigid auto-width element (table/replaced) "
+                                  "min-content=%.1f > available=%.1f, stepping down",
+                                  min_required, available_beside_float);
+                    }
                 }
-                bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
 
-                log_debug("[BFC Float Avoid] Auto-width element (h=%.1f): offset_x=%.1f, width_reduction=%.1f",
-                          element_border_box_height, bfc_float_offset_x, bfc_available_width_reduction);
+                if (!should_step_down) {
+                    // Element can shrink to fit beside the float
+                    if (space.has_left_float && float_intrusion_left > 0) {
+                        bfc_float_offset_x = float_intrusion_left;
+                    }
+                    bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
+
+                    log_debug("[BFC Float Avoid] Auto-width shrink-to-fit: "
+                              "avail=%.1f, offset_x=%.1f, width_reduction=%.1f",
+                              available_beside_float,
+                              bfc_float_offset_x, bfc_available_width_reduction);
+                } else {
+                    // Element's min-content exceeds space beside float - step down
+                    // through float boundaries until sufficient space is found.
+
+                    int max_iters = 100;
+                    while (max_iters-- > 0) {
+                        float query_height = element_border_box_height;
+                        if (block->blk && block->blk->given_height < 0 &&
+                            parent_bfc->lowest_float_bottom > current_y) {
+                            query_height = parent_bfc->lowest_float_bottom - current_y;
+                        }
+                        FloatAvailableSpace step_space = block_context_space_at_y(
+                            parent_bfc, current_y, query_height);
+
+                        float sl = step_space.left - x_in_bfc;
+                        float sr = step_space.right - x_in_bfc;
+                        float eff_left = max(sl, 0.0f);
+                        float eff_right = min(sr, pa_block->content_width);
+                        float avail = max(0.0f, eff_right - eff_left);
+
+                        log_debug("[BFC Float Avoid] Rigid step check y=%.1f: "
+                                  "space=(%.1f,%.1f), avail=%.1f, min_required=%.1f",
+                                  current_y, step_space.left, step_space.right,
+                                  avail, min_required);
+
+                        if (avail >= min_required ||
+                            (!step_space.has_left_float && !step_space.has_right_float)) {
+                            // Found Y where element fits
+                            float fi_left = max(0.0f, sl);
+                            float fi_right = max(0.0f, pa_block->content_width - sr);
+                            if (step_space.has_left_float && fi_left > 0) {
+                                bfc_float_offset_x = fi_left;
+                            }
+                            bfc_available_width_reduction = fi_left + fi_right;
+                            break;
+                        }
+
+                        // Find next float boundary to step to
+                        float next_y = FLT_MAX;
+                        for (FloatBox* fb = parent_bfc->left_floats; fb; fb = fb->next) {
+                            if (fb->margin_box_bottom > current_y && fb->margin_box_bottom < next_y)
+                                next_y = fb->margin_box_bottom;
+                        }
+                        for (FloatBox* fb = parent_bfc->right_floats; fb; fb = fb->next) {
+                            if (fb->margin_box_bottom > current_y && fb->margin_box_bottom < next_y)
+                                next_y = fb->margin_box_bottom;
+                        }
+
+                        if (next_y == FLT_MAX || next_y <= current_y) break;
+                        log_debug("[BFC Float Avoid] Rigid step down: y=%.1f -> y=%.1f",
+                                  current_y, next_y);
+                        current_y = next_y;
+                    }
+                }
+
+                log_debug("[BFC Float Avoid] Auto-width final (h=%.1f): offset_x=%.1f, "
+                          "width_reduction=%.1f, current_y=%.1f",
+                          element_border_box_height, bfc_float_offset_x,
+                          bfc_available_width_reduction, current_y);
             }
 
             // Calculate total shift needed in local coordinates
