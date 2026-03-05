@@ -779,21 +779,37 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-                Container *container = item.container;
-                *(Container**)field_ptr = container;
+                // item.container on ITEM_NULL gives bogus (Container*)0x0100000000000000
+                // instead of NULL — must check value type to store raw NULL for null items
+                if (get_type_id(item) == LMD_TYPE_NULL) {
+                    *(Container**)field_ptr = nullptr;
+                } else {
+                    *(Container**)field_ptr = item.container;
+                }
                 break;
             }
             case LMD_TYPE_TYPE: {
-                *(void**)field_ptr = (void*)item.type;
+                if (get_type_id(item) == LMD_TYPE_NULL) {
+                    *(void**)field_ptr = nullptr;
+                } else {
+                    *(void**)field_ptr = (void*)item.type;
+                }
                 break;
             }
             case LMD_TYPE_FUNC: {
-                Function* fn = item.function;
-                *(Function**)field_ptr = fn;
+                if (get_type_id(item) == LMD_TYPE_NULL) {
+                    *(Function**)field_ptr = nullptr;
+                } else {
+                    *(Function**)field_ptr = item.function;
+                }
                 break;
             }
             case LMD_TYPE_PATH: {
-                *(Path**)field_ptr = item.path;
+                if (get_type_id(item) == LMD_TYPE_NULL) {
+                    *(Path**)field_ptr = nullptr;
+                } else {
+                    *(Path**)field_ptr = item.path;
+                }
                 break;
             }
             case LMD_TYPE_ANY: { // a special case

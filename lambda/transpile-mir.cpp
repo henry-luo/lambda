@@ -943,6 +943,84 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
 }
 
 // ============================================================================
+// Phase 3: Direct Map/Struct Field Access helpers
+// ============================================================================
+
+// Check if a map type has a fixed shape suitable for direct field access:
+// - must be a named type (from `type Name = { ... }` declaration)
+// - all fields are named (no spread entries)
+// - all byte offsets are 8-byte aligned
+static bool mir_has_fixed_shape(TypeMap* map_type) {
+    if (!map_type->struct_name) return false;
+    if (!map_type->shape || map_type->length == 0) return false;
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (!field->name) return false;
+        if (field->byte_offset % sizeof(void*) != 0) return false;
+        field = field->next;
+    }
+    return true;
+}
+
+// Find a named field in a map shape at compile time
+static ShapeEntry* mir_find_shape_field(TypeMap* map_type, const char* name, int name_len) {
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (field->name && (int)field->name->length == name_len &&
+            strncmp(field->name->str, name, name_len) == 0) {
+            return field;
+        }
+        field = field->next;
+    }
+    return NULL;
+}
+
+// Resolve the stored-data type for a shape field.
+// Type-defined maps have LMD_TYPE_TYPE wrapper on shape entries; unwrap to
+// get the actual data type (e.g., LMD_TYPE_INT).
+static TypeId mir_resolve_field_type(ShapeEntry* field) {
+    Type* t = field->type;
+    if (t && t->type_id == LMD_TYPE_TYPE) {
+        Type* inner = ((TypeType*)t)->type;
+        if (inner) return inner->type_id;
+    }
+    return t ? t->type_id : LMD_TYPE_ANY;
+}
+
+// Check if a field type is eligible for direct access optimization
+static bool mir_is_direct_access_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
+    case LMD_TYPE_PATH:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Check if a type is a container type whose runtime storage format is a raw pointer
+// (not a tagged Item). The runtime's map_field_store stores raw Container* for these
+// types, so MIR direct read must re-tag and direct write must strip the tag.
+static bool mir_is_container_field_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+    case LMD_TYPE_LIST: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
+    case LMD_TYPE_PATH:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// ============================================================================
 // Global variable BSS access helpers
 // ============================================================================
 
@@ -3703,6 +3781,153 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 // Member/Index access
 // ============================================================================
 
+// Emit direct field READ from a packed map/object data struct.
+// Map/Object layout: [TypeId(1) flags(1) pad(6)] [void* type @8] [void* data @16] [int data_cap @24]
+// data points to packed struct where each field is 8-byte aligned.
+// Returns native value for scalars (INT/FLOAT/BOOL/STRING) or tagged Item for containers.
+// obj_boxed: pre-computed tagged Item for the object (avoids double-evaluation).
+static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_boxed, ShapeEntry* field) {
+    TypeId type_id = mir_resolve_field_type(field);
+    int64_t offset = field->byte_offset;
+
+    // strip tag from boxed Item → raw Map*/Object*
+    MIR_reg_t map_ptr = emit_unbox_container(mt, obj_boxed);
+
+    // load data pointer from Map* + 16
+    MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+
+    if (type_id == LMD_TYPE_FLOAT) {
+        // double stored at data + offset → load as MIR_T_D
+        MIR_reg_t result = new_reg(mt, "dfld", MIR_T_D);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1)));
+        return result;
+    }
+
+    if (mir_is_container_field_type(type_id)) {
+        // Runtime stores raw Container* pointer (NULL/0 for null values).
+        // MIR uses tagged Items for containers, so re-tag the loaded pointer:
+        //   raw == 0 → ItemNull;  raw != 0 → (type_tag << 56) | raw_ptr
+        MIR_reg_t raw = new_reg(mt, "cfraw", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
+
+        MIR_reg_t result = new_reg(mt, "cftag", MIR_T_I64);
+        MIR_insn_t null_lbl = MIR_new_label(mt->ctx);
+        MIR_insn_t done_lbl = MIR_new_label(mt->ctx);
+
+        // if raw == 0, field is null
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, null_lbl),
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 0)));
+        // non-null: tag raw pointer with field type
+        uint64_t tag = (uint64_t)type_id << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, (int64_t)tag)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done_lbl)));
+        // null: produce ItemNull
+        MIR_append_insn(mt->ctx, mt->current_func_item, null_lbl);
+        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        MIR_append_insn(mt->ctx, mt->current_func_item, done_lbl);
+        return result;
+    }
+
+    // Scalar types: load 8 bytes as int64
+    // INT/INT64: native int64 value
+    // BOOL: bool (1 byte) in 8-byte zero-padded slot → safe to read 8 bytes
+    // STRING/SYMBOL/BINARY: raw pointer (String*/Symbol*)
+    MIR_reg_t result = new_reg(mt, "mfld", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
+    return result;
+}
+
+// Emit direct field WRITE to a packed map/object data struct.
+// Stores value at data + byte_offset. Value must be native type for scalars,
+// or tagged Item for containers.
+static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
+    ShapeEntry* field, AstNode* value) {
+    TypeId type_id = mir_resolve_field_type(field);
+    int64_t offset = field->byte_offset;
+
+    // get tagged Item for the object, strip tag → raw Map*/Object*
+    MIR_reg_t obj_item = transpile_expr(mt, object);
+    MIR_reg_t map_ptr = emit_unbox_container(mt, obj_item);
+
+    // load data pointer from Map* + 16
+    MIR_reg_t data_ptr = new_reg(mt, "dwptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+
+    if (type_id == LMD_TYPE_FLOAT) {
+        // value should be native double from transpile_expr for FLOAT-typed expressions
+        TypeId val_tid = get_effective_type(mt, value);
+        MIR_reg_t val;
+        if (val_tid == LMD_TYPE_FLOAT) {
+            val = transpile_expr(mt, value);
+        } else if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64) {
+            // int → float promotion
+            MIR_reg_t int_val = transpile_expr(mt, value);
+            val = new_reg(mt, "i2d", MIR_T_D);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, val),
+                MIR_new_reg_op(mt->ctx, int_val)));
+        } else {
+            // fallback: box then unbox to double
+            MIR_reg_t boxed = transpile_box_item(mt, value);
+            val = emit_unbox(mt, boxed, LMD_TYPE_FLOAT);
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1),
+            MIR_new_reg_op(mt->ctx, val)));
+        return;
+    }
+
+    if (type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_BOOL) {
+        // store native int64 value
+        TypeId val_tid = get_effective_type(mt, value);
+        MIR_reg_t val;
+        if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64 || val_tid == LMD_TYPE_BOOL) {
+            val = transpile_expr(mt, value);
+        } else {
+            // fallback: box then unbox
+            MIR_reg_t boxed = transpile_box_item(mt, value);
+            val = emit_unbox(mt, boxed, type_id);
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
+            MIR_new_reg_op(mt->ctx, val)));
+        return;
+    }
+
+    if (type_id == LMD_TYPE_STRING) {
+        // store native String* pointer
+        TypeId val_tid = get_effective_type(mt, value);
+        MIR_reg_t val;
+        if (val_tid == LMD_TYPE_STRING) {
+            val = transpile_expr(mt, value);  // native String*
+        } else {
+            // fallback: box then unbox to String*
+            MIR_reg_t boxed = transpile_box_item(mt, value);
+            val = emit_unbox(mt, boxed, LMD_TYPE_STRING);
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
+            MIR_new_reg_op(mt->ctx, val)));
+        return;
+    }
+
+    // container and other pointer types: strip tag, store raw pointer
+    // (runtime's map_field_store stores raw Container*/pointer, not tagged Items)
+    MIR_reg_t val = transpile_box_item(mt, value);
+    MIR_reg_t raw = emit_unbox_container(mt, val);  // strip tag → raw ptr (0 for null)
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
+        MIR_new_reg_op(mt->ctx, raw)));
+}
+
 static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     // Use transpile_box_item for the object to ensure proper boxing.
     // This is critical for types like DTIME/INT64/DECIMAL where transpile_expr
@@ -3731,6 +3956,31 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
                 MIR_T_P, MIR_new_reg_op(mt->ctx, key_ptr));
         }
         // Non-property field on path: use fn_member which extends the path
+    }
+
+    // ==================================================================
+    // Phase 3: Direct map/object field access optimization
+    // For typed maps/objects with fixed shape, bypass fn_member runtime call
+    // and load field directly from packed data struct.
+    // Use AST type (not get_effective_type) because parameters stored as
+    // boxed ANY still have correct AST type from type annotations.
+    // ==================================================================
+    TypeId ast_obj_tid = field_node->object->type ? field_node->object->type->type_id : LMD_TYPE_ANY;
+    if ((ast_obj_tid == LMD_TYPE_MAP || ast_obj_tid == LMD_TYPE_OBJECT) &&
+        field_node->field->node_type == AST_NODE_IDENT &&
+        field_node->object->type) {
+        TypeMap* map_type = (TypeMap*)field_node->object->type;
+        if (mir_has_fixed_shape(map_type)) {
+            AstIdentNode* ident = (AstIdentNode*)field_node->field;
+            ShapeEntry* se = mir_find_shape_field(map_type,
+                ident->name->chars, ident->name->len);
+            if (se && se->type && mir_is_direct_access_type(mir_resolve_field_type(se))) {
+                log_debug("mir: direct field read: %.*s (type=%d offset=%lld)",
+                    (int)ident->name->len, ident->name->chars,
+                    mir_resolve_field_type(se), (long long)se->byte_offset);
+                return emit_mir_direct_field_read(mt, boxed_obj, se);
+            }
+        }
     }
 
     // Field name for member access: extract name from ident and create boxed string Item
@@ -5554,6 +5804,35 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_MEMBER_ASSIGN_STAM: {
         // obj.field = val → fn_map_set(boxed_obj, boxed_key, boxed_val)
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+
+        // ==================================================================
+        // Phase 3: Direct field write optimization for typed maps/objects
+        // ==================================================================
+        if (ca->object->type && ca->key->node_type == AST_NODE_IDENT) {
+            TypeId obj_type_id = ca->object->type->type_id;
+            if (obj_type_id == LMD_TYPE_MAP || obj_type_id == LMD_TYPE_OBJECT) {
+                TypeMap* map_type = (TypeMap*)ca->object->type;
+                if (mir_has_fixed_shape(map_type)) {
+                    AstIdentNode* ident = (AstIdentNode*)ca->key;
+                    ShapeEntry* se = mir_find_shape_field(map_type,
+                        ident->name->chars, ident->name->len);
+                    if (se && se->type && mir_is_direct_access_type(mir_resolve_field_type(se))) {
+                        log_debug("mir: direct field write: %.*s (type=%d offset=%lld)",
+                            (int)ident->name->len, ident->name->chars,
+                            mir_resolve_field_type(se), (long long)se->byte_offset);
+                        emit_mir_direct_field_write(mt, ca->object, se, ca->value);
+                        // Return null (void statement)
+                        MIR_reg_t r = new_reg(mt, "void", MIR_T_I64);
+                        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                        return r;
+                    }
+                }
+            }
+        }
+
+        // Fallback: runtime fn_map_set
         MIR_reg_t obj = transpile_box_item(mt, ca->object);
         // Key: if it's an ident, emit as string constant; otherwise box it
         MIR_reg_t key;
