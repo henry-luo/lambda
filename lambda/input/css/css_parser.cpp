@@ -20,6 +20,23 @@
 #include <string.h>
 #include <stdio.h>
 
+// helper: map a functional pseudo-class name to its selector type
+static CssSelectorType css_functional_pseudo_type(const char* func_name) {
+    if (strcmp(func_name, "nth-child") == 0)         return CSS_SELECTOR_PSEUDO_NTH_CHILD;
+    if (strcmp(func_name, "nth-of-type") == 0)       return CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
+    if (strcmp(func_name, "nth-last-child") == 0)    return CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
+    if (strcmp(func_name, "nth-last-of-type") == 0)  return CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
+    if (strcmp(func_name, "not") == 0)               return CSS_SELECTOR_PSEUDO_NOT;
+    if (strcmp(func_name, "is") == 0)                return CSS_SELECTOR_PSEUDO_IS;
+    if (strcmp(func_name, "where") == 0)             return CSS_SELECTOR_PSEUDO_WHERE;
+    if (strcmp(func_name, "has") == 0)               return CSS_SELECTOR_PSEUDO_HAS;
+    if (strcmp(func_name, "lang") == 0)              return CSS_SELECTOR_PSEUDO_LANG;
+    if (strcmp(func_name, "dir") == 0)               return CSS_SELECTOR_PSEUDO_DIR;
+    if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0)
+        return CSS_SELECTOR_PSEUDO_IS;               // Shadow DOM — treat like :is()
+    return CSS_SELECTOR_PSEUDO_NOT;                   // unknown — default fallback
+}
+
 // Helper: Skip whitespace and comment tokens
 int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_count) {
     int pos = start;
@@ -471,52 +488,11 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             value->data.color.type = CSS_COLOR_RGB;
 
             const char* hex_str = token->value;
-            if (hex_str && hex_str[0] == '#') {
-                size_t len = strlen(hex_str + 1);
-                unsigned int hex_val = 0;
-
-                if (len == 6) {
-                    if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
-                        value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
-                        value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
-                        value->data.color.data.rgba.b = hex_val & 0xFF;
-                        value->data.color.data.rgba.a = 255;
-                    }
-                } else if (len == 3) {
-                    if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
-                        unsigned int r = (hex_val >> 8) & 0xF;
-                        unsigned int g = (hex_val >> 4) & 0xF;
-                        unsigned int b = hex_val & 0xF;
-                        value->data.color.data.rgba.r = (r << 4) | r;
-                        value->data.color.data.rgba.g = (g << 4) | g;
-                        value->data.color.data.rgba.b = (b << 4) | b;
-                        value->data.color.data.rgba.a = 255;
-                    }
-                } else if (len == 8) {
-                    if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
-                        value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
-                        value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
-                        value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
-                        value->data.color.data.rgba.a = hex_val & 0xFF;
-                    }
-                } else if (len == 4) {
-                    if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
-                        unsigned int r = (hex_val >> 12) & 0xF;
-                        unsigned int g = (hex_val >> 8) & 0xF;
-                        unsigned int b = (hex_val >> 4) & 0xF;
-                        unsigned int a = hex_val & 0xF;
-                        value->data.color.data.rgba.r = (r << 4) | r;
-                        value->data.color.data.rgba.g = (g << 4) | g;
-                        value->data.color.data.rgba.b = (b << 4) | b;
-                        value->data.color.data.rgba.a = (a << 4) | a;
-                    }
-                } else {
-                    value->data.color.data.rgba.r = 0;
-                    value->data.color.data.rgba.g = 0;
-                    value->data.color.data.rgba.b = 0;
-                    value->data.color.data.rgba.a = 255;
-                }
-            } else {
+            if (!hex_str || !css_parse_hex_to_rgba(hex_str,
+                    &value->data.color.data.rgba.r,
+                    &value->data.color.data.rgba.g,
+                    &value->data.color.data.rgba.b,
+                    &value->data.color.data.rgba.a)) {
                 value->data.color.data.rgba.r = 0;
                 value->data.color.data.rgba.g = 0;
                 value->data.color.data.rgba.b = 0;
@@ -993,34 +969,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         }
 
         // Map function name to pseudo-class type
-        if (strcmp(func_name, "nth-child") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_NTH_CHILD;
-        } else if (strcmp(func_name, "nth-of-type") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
-        } else if (strcmp(func_name, "nth-last-child") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
-        } else if (strcmp(func_name, "nth-last-of-type") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
-        } else if (strcmp(func_name, "not") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_NOT;
-        } else if (strcmp(func_name, "is") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_IS;
-        } else if (strcmp(func_name, "where") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_WHERE;
-        } else if (strcmp(func_name, "has") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_HAS;
-        } else if (strcmp(func_name, "lang") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_LANG;
-        } else if (strcmp(func_name, "dir") == 0) {
-            selector->type = CSS_SELECTOR_PSEUDO_DIR;
-        } else if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0) {
-            // :host() is for Shadow DOM
-            selector->type = CSS_SELECTOR_PSEUDO_IS; // treat similar to :is()
+        selector->type = css_functional_pseudo_type(func_name);
+        if (selector->type == CSS_SELECTOR_PSEUDO_IS &&
+            (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0)) {
             log_debug(" Shadow DOM function: '%s()'", func_name);
-        } else {
-            // Accept unknown pseudo-class functions
-            selector->type = CSS_SELECTOR_PSEUDO_NOT; // default fallback
-            log_debug(" Generic functional pseudo-class: '%s()'", func_name);
         }
 
         selector->value = func_name;
@@ -1287,34 +1239,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 }
 
                 // Map function name to pseudo-class type
-                if (strcmp(func_name, "nth-child") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_NTH_CHILD;
-                } else if (strcmp(func_name, "nth-of-type") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
-                } else if (strcmp(func_name, "nth-last-child") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
-                } else if (strcmp(func_name, "nth-last-of-type") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
-                } else if (strcmp(func_name, "not") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_NOT;
-                } else if (strcmp(func_name, "is") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_IS;
-                } else if (strcmp(func_name, "where") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_WHERE;
-                } else if (strcmp(func_name, "has") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_HAS;
-                } else if (strcmp(func_name, "lang") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_LANG;
-                } else if (strcmp(func_name, "dir") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_DIR;
-                } else if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0) {
-                    // :host() is for Shadow DOM
-                    selector->type = CSS_SELECTOR_PSEUDO_IS; // treat similar to :is()
+                selector->type = css_functional_pseudo_type(func_name);
+                if (selector->type == CSS_SELECTOR_PSEUDO_IS &&
+                    (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0)) {
                     log_debug(" Shadow DOM pseudo-class: ':%s()'", func_name);
-                } else {
-                    // Accept unknown functional pseudo-classes
-                    selector->type = CSS_SELECTOR_PSEUDO_NOT; // default fallback
-                    log_debug(" Generic functional pseudo-class: ':%s()'", func_name);
                 }
 
                 selector->value = func_name;
