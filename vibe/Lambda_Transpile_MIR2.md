@@ -23,12 +23,12 @@ This proposal describes the next phase of the **direct AST→MIR transpiler** (`
 
 ### Priority Order
 
-| Phase | Area | Impact | Effort | Status |
-|-------|------|--------|--------|--------|
-| Phase 1 | Bug fixes (3 distinct bugs) | Correctness — 4 benchmarks | Low | ✅ Done |
+| Phase   | Area                                 | Impact                               | Effort | Status |
+| ------- | ------------------------------------ | ------------------------------------ | ------ | ------ |
+| Phase 1 | Bug fixes (3 distinct bugs)          | Correctness — 4 benchmarks           | Low    | ✅ Done |
 | Phase 2 | Type narrowing + inline array access | 2–205x speedup on compute benchmarks | Medium | ✅ Done |
-| Phase 3 | Direct map/struct field access | O(1) vs O(n) field lookup | Medium | ⏳ |
-| Phase 4 | Tail call optimization | Stack overflow safety for recursion | Medium | ⏳ |
+| Phase 3 | Direct map/struct field access       | O(1) vs O(n) field lookup            | Medium | ✅ Done |
+| Phase 4 | Tail call optimization               | Stack overflow safety for recursion  | Medium | ⏳      |
 
 ---
 
@@ -443,130 +443,124 @@ Benchmarks at parity (fib, tak, nqueens, mbrot) already had typed parameters in 
 
 ---
 
-## 4. Phase 3 — Direct Map/Struct Field Access
+## 4. Phase 3 — Direct Map/Struct Field Access (COMPLETED)
 
 ### Problem
 
-Every `map.field` and `obj.field` access in the MIR transpiler goes through a runtime hash-lookup call:
+Every `map.field` and `obj.field` access in the MIR transpiler went through a runtime hash-lookup call:
 
 ```cpp
-// Current: transpile_member() at line 3484
+// Before: transpile_member()
 MIR_reg_t result = emit_call_2(mt, "fn_member", MIR_T_I64,
     MIR_T_I64, boxed_obj, MIR_T_I64, boxed_field);
 ```
 
 The C transpiler, by contrast, uses **direct byte-offset loads** for maps with known shapes — O(1) pointer arithmetic vs O(n) hash lookup.
 
-### C Transpiler's Approach
+### Implementation
 
-The C transpiler's `emit_direct_field_read()` (transpile.cpp:4794) generates:
-```c
-// For point.x where x is int at byte_offset=0:
-*(int64_t*)((char*)(point)->data + 0)
-```
+#### 3.1 Helper Functions Added (~line 950 in transpile-mir.cpp) ✅
 
-**Eligibility check** (`has_fixed_shape()` at transpile.cpp:4682):
-- Map must have a `struct_name` (from a named type definition: `type Point = {x: int, y: float}`)
-- All fields must be named (no spread entries)
-- All `byte_offset` values must be 8-byte aligned
+Six static helper functions implement the shape analysis and direct access:
 
-### MIR Implementation Plan
+- **`mir_has_fixed_shape(TypeMap*)`** — Checks eligibility: requires `struct_name` (named type), all fields named, all `byte_offset` values 8-byte aligned.
+- **`mir_find_shape_field(TypeMap*, chars, len)`** — Walks shape linked list to find field by name → returns `ShapeEntry*`.
+- **`mir_resolve_field_type(ShapeEntry*)`** — Unwraps `LMD_TYPE_TYPE` wrapper on type-defined shape entries to get the actual data type (e.g., `LMD_TYPE_INT`).
+- **`mir_is_direct_access_type(TypeId)`** — Returns true for all types eligible for direct access (scalars, strings, containers, PATH).
+- **`mir_is_container_field_type(TypeId)`** — Returns true for container types (MAP, LIST, ARRAY, etc.) whose runtime storage format is a raw pointer rather than a tagged Item. Used to handle the re-tagging/stripping needed on read/write.
 
-#### 4.1 Shape Eligibility Check
+#### 3.2 Direct Field Read (`emit_mir_direct_field_read`) ✅
 
-Add a new function `mir_has_fixed_shape()` that replicates the C transpiler's logic:
+Map/Object layout: `[TypeId(1) flags(1) pad(6)] [void* type @8] [void* data @16] [int data_cap @24]`
 
-```cpp
-static bool mir_has_fixed_shape(Type* type) {
-    if (!type) return false;
-    TypeId tid = type->type_id;
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT && tid != LMD_TYPE_ELEMENT) return false;
-    TypeMap* map_type = (TypeMap*)type;
-    if (!map_type->struct_name) return false;  // anonymous map literal
-    ShapeEntry* field = map_type->shape;
-    while (field) {
-        if (!field->name) return false;  // spread entry
-        if (field->byte_offset % sizeof(void*) != 0) return false;  // misaligned
-        field = field->next;
-    }
-    return true;
-}
-```
-
-#### 4.2 Direct Field Read via MIR Memory Operations
-
-When `transpile_member()` encounters a field access on a fixed-shape map/object, emit inline MIR instructions instead of calling `fn_member`:
+The data pointer points to a packed struct where each field is 8-byte aligned.
 
 ```
 // Pseudo-MIR for point.x where x: int, byte_offset=0
-//
-// Step 1: Get Container* from boxed Item (strip tag bits)
-container_ptr = obj_item & 0x00FFFFFFFFFFFFFF   // mask off TypeId tag
-//
-// Step 2: Load data pointer from Container struct
-// Container layout: { TypeId type; int count; Item* data; }
-data_ptr = load [container_ptr + offsetof(Container, data)]
-//
-// Step 3: Load typed value at field's byte_offset
-value = load_i64 [data_ptr + 0]    // byte_offset=0, type=int64_t
+map_ptr = emit_unbox_container(obj_boxed)   // strip tag → raw Map*
+data_ptr = load [map_ptr + 16]              // Map.data pointer
+
+// FLOAT fields: load as MIR_T_D (native double)
+// Scalar fields (INT/INT64/BOOL/STRING): load 8 bytes as MIR_T_I64
+// Container fields (MAP/LIST/etc.): load raw pointer, re-tag:
+//   raw == 0 → ItemNull;  raw != 0 → (type_tag << 56) | raw_ptr
+value = load [data_ptr + byte_offset]
 ```
 
-In MIR API terms:
+**Container field re-tagging**: The runtime's `map_field_store()` stores raw `Container*` pointers (NULL/0x0 for null values), not tagged Items. The MIR transpiler uses tagged Items internally. On read, container fields require re-tagging:
 
 ```cpp
-// Untag the Item to get Container*
-MIR_reg_t ptr = new_reg(mt, "cptr", MIR_T_I64);
-emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-    MIR_new_reg_op(mt->ctx, ptr),
-    MIR_new_reg_op(mt->ctx, boxed_obj),
-    MIR_new_uint_op(mt->ctx, 0x00FFFFFFFFFFFFFFULL)));
-
-// Load Container.data pointer (offset depends on struct layout)
-MIR_reg_t data = new_reg(mt, "data", MIR_T_P);
-emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-    MIR_new_reg_op(mt->ctx, data),
-    MIR_new_mem_op(mt->ctx, MIR_T_P, offsetof(Container, data), ptr, 0, 1)));
-
-// Load field value at byte_offset
-MIR_type_t field_mir_type = type_to_mir(field->type->type_id);  // MIR_T_I64, MIR_T_D, etc.
-MIR_reg_t value = new_reg(mt, "fval", field_mir_type);
-emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-    MIR_new_reg_op(mt->ctx, value),
-    MIR_new_mem_op(mt->ctx, field_mir_type, field->byte_offset, data, 0, 1)));
+// Branching logic for container-typed fields:
+raw = load [data_ptr + offset]       // raw pointer (0 = null)
+if raw == 0:
+    result = ITEM_NULL               // 0x0100000000000000
+else:
+    result = (type_tag << 56) | raw  // re-tag with field type
 ```
 
-#### 4.3 Direct Field Write
+**Double-evaluation fix**: The function signature accepts `MIR_reg_t obj_boxed` (pre-computed tagged Item) instead of `AstNode* object`, avoiding re-evaluating the object expression when the caller (`transpile_member`) has already computed `boxed_obj`.
 
-For assignment (`obj.x = value`), emit the reverse:
+#### 3.3 Direct Field Write (`emit_mir_direct_field_write`) ✅
 
+Inverse of read. Handles type-specific storage:
+
+- **FLOAT**: Transpiles value, handles int→float promotion (`MIR_I2D`), stores as `MIR_T_D` at offset.
+- **INT/INT64/BOOL**: Transpiles value, stores as `MIR_T_I64` at offset.
+- **STRING**: Transpiles value as native `String*`, stores at offset.
+- **Container types**: Boxes value via `transpile_box_item()`, then **strips the tag** via `emit_unbox_container()` before storing the raw pointer. This matches the runtime's `map_field_store()` convention.
+
+#### 3.4 Integration Points ✅
+
+**Read path** — `transpile_member()` (~line 3930): After computing `boxed_obj` and checking Path properties, checks Phase 3 eligibility using AST type (not `get_effective_type()`, since parameters stored as boxed ANY still have correct AST type from annotations). If the object type is MAP/OBJECT with fixed shape and the field is found with a direct-access-eligible type, calls `emit_mir_direct_field_read()` with the pre-computed `boxed_obj`.
+
+**Write path** — `MEMBER_ASSIGN_STAM` (~line 5765): Before the `fn_map_set` fallback, checks shape eligibility on `ca->object->type`. If eligible, calls `emit_mir_direct_field_write()` and returns a null Item.
+
+**Fallback**: When `mir_has_fixed_shape()` returns false (anonymous maps, computed keys, spread entries), both paths fall through to the existing `fn_member()`/`fn_map_set()` runtime calls.
+
+#### 3.5 C Transpiler Container Field Bug Fix ✅
+
+Discovered and fixed the same raw-pointer vs tagged-Item mismatch in the C transpiler (`transpile.cpp`):
+
+- **Read** (`emit_direct_field_read`, default case): Changed `(Item)(*(void**)...)` → `p2it(*(void**)...)` which correctly converts NULL→ITEM_NULL via the `p2it()` helper.
+- **Write** (`emit_direct_field_write`, default case): Added `& 0x00FFFFFFFFFFFFFFULL` mask to strip the type tag byte before storing, matching runtime's `map_field_store()` convention.
+
+#### 3.6 Fixed: GC Interaction with Typed Maps ✅
+
+**Symptom**: SIGSEGV crash (or silently wrong results) when typed maps with container-typed fields (e.g., `type Node = {left: map, right: map}`) undergo heavy allocation pressure.
+
+**Root cause — stale `m->data` pointer during direct map construction**: The C transpiler generated inline field writes like:
+```c
+*(void**)((char*)(m)->data + offset) = (void*)((uint64_t)(make_tree(depth-1)) & MASK);
 ```
-// Pseudo-MIR for obj.x = value (int field at byte_offset=0)
-container_ptr = obj_item & MASK
-data_ptr = load [container_ptr + offsetof(Container, data)]
-store_i64 [data_ptr + 0] = value
-```
+The C compiler may evaluate `(char*)(m)->data` into a register **before** evaluating the RHS `make_tree(depth-1)`. If the RHS triggers allocations → GC → `gc_compact_data()` moves `m->data` from nursery to tenured (updating `m->data`), the register still holds the **stale nursery address**. The subsequent store writes to freed memory. This caused either silent data corruption (wrong check counts growing with depth) or SIGSEGV when the corrupted data was later dereferenced.
 
-When the value being assigned is already a native type matching the field type, store directly. When it's a boxed Item, unbox first.
+**Fix — two-phase map construction** (`transpile.cpp`): All field value expressions are first evaluated into temp variables (`_tf0`, `_tf1`, ...) where GC can safely fire. Only after all values are computed does the generated code read `m->data` (now guaranteed stable) and write the temps at their byte offsets. No GC-triggering operations occur between reading `m->data` and writing to it.
 
-#### 4.4 Method Body Field Loading
+**Secondary fix** (`lambda-data.cpp`): Added null-type checks in `set_fields()` for container/TYPE/FUNC/PATH fields. When `get_type_id(item) == LMD_TYPE_NULL`, stores `nullptr` instead of `item.container` (which would reinterpret ITEM_NULL `0x0100000000000000` as a bogus non-NULL pointer).
 
-**Current** (transpile-mir.cpp:5753–5787): Each field loaded via `fn_member()` + `heap_create_symbol()` — two function calls per field.
+**Validation**: gcbench2 stress test (typed maps, depth 4–14, thousands of iterations) passes with correct check counts. 605/605 baseline, 155/155 MIR tests pass.
 
-**Optimized**: Load `self->data` once, then read each field by byte offset:
+### Phase 3 — Benchmark Results (Release Build)
 
-```
-// Method prologue: load all fields from self via direct offset
-self_container = self_item & MASK
-self_data = load [self_container + offsetof(Container, data)]
-field_x = load_i64 [self_data + 0]    // x: int at offset 0
-field_y = load_f64 [self_data + 8]    // y: float at offset 8
-```
+**AWFY2 struct-heavy benchmarks** (internal `__TIMING__` in ms, post-Phase 3 vs pre-Phase 3):
 
-This eliminates N `fn_member` calls and N `heap_create_symbol` calls per method invocation.
+| Benchmark | Before (ms) | After (ms) | Speedup | Notes |
+|-----------|-------------|------------|---------|-------|
+| **permute2** | 0.40 | 0.18 | **2.2x** | Map field access in hot loop |
+| **storage2** | 6.9 | 5.3 | **1.3x** | Struct-heavy allocation |
+| **deltablue2** | 7.5 | 5.8 | **1.3x** | Constraint solving with objects |
+| **towers2** | 0.60 | 0.48 | **1.25x** | Deep recursion + map access |
+| cd2 | 559 | 731 | 0.76x | Regression (investigation needed) |
 
-#### 4.5 Fallback
+**Larceny deriv benchmark** (typed version, C2MIR path):
 
-When `mir_has_fixed_shape()` returns false (anonymous maps, computed keys, spread entries), fall through to the existing `fn_member()` call path. No behavior change for dynamic maps.
+| Benchmark | Untyped (ms) | Typed (ms) | Speedup | Notes |
+|-----------|-------------|------------|---------|-------|
+| deriv vs deriv2 | ~58 | ~54 | **~7%** | INT fields (e.t) benefit; MAP fields modest |
+
+**Note**: The deriv benchmark's modest improvement reflects that map creation (`fn_map_set`) and function call overhead dominate. Container-typed fields (MAP) require re-tagging on read (null branch), limiting optimization. Pure scalar fields like `e.t: int` get the full O(1) benefit.
+
+**Baseline tests**: 605/605 pass (155/155 MIR tests). No regressions.
 
 ---
 
@@ -718,16 +712,19 @@ mt->in_tail_position = false;
 
 **Validation**: All benchmarks equal or faster than C2MIR. brainfuck: 3.27s (was T/O). 605/605 baseline tests pass.
 
-### Phase 3: Direct Map Access (Estimated: 2–3 days)
+### Phase 3: Direct Map/Struct Field Access ✅
 
-| Task | File | Description |
-|------|------|-------------|
-| 3a | transpile-mir.cpp | Add `mir_has_fixed_shape()` eligibility check |
-| 3b | transpile-mir.cpp | Implement `emit_direct_field_read()` with MIR memory ops |
-| 3c | transpile-mir.cpp | Implement `emit_direct_field_write()` |
-| 3d | transpile-mir.cpp | Optimize method body field loading (eliminate `fn_member` + `heap_create_symbol`) |
+| Task | File | Description | Status |
+|------|------|-------------|--------|
+| 3a | transpile-mir.cpp | Add `mir_has_fixed_shape()` + shape helper functions | ✅ |
+| 3b | transpile-mir.cpp | Implement `emit_mir_direct_field_read()` with container re-tagging | ✅ |
+| 3c | transpile-mir.cpp | Implement `emit_mir_direct_field_write()` with tag stripping | ✅ |
+| 3d | transpile-mir.cpp | Fix double-evaluation (pass `MIR_reg_t` instead of `AstNode*`) | ✅ |
+| 3e | transpile.cpp | Fix C transpiler container field read (use `p2it()`) | ✅ |
+| 3f | transpile.cpp | Fix C transpiler container field write (mask tag byte) | ✅ |
+| 3g | — | Method body field loading optimization | Deferred |
 
-**Validation**: Run struct-heavy benchmarks. Field access should be O(1). No regression in dynamic map tests.
+**Validation**: 605/605 baseline, 155/155 MIR. AWFY struct benchmarks: permute2 2.2x, storage2 1.3x, deltablue2 1.3x, towers2 1.25x. GC stale-pointer bug with typed map construction identified and fixed (see §3.6).
 
 ### Phase 4: Tail Call Optimization (Estimated: 2–3 days)
 
@@ -750,15 +747,18 @@ mt->in_tail_position = false;
 | TCO fields (unused) | transpile-mir.cpp | 140–142 | `tco_func`, `tco_label` |
 | Binary expression dispatch | transpile-mir.cpp | 1650–2035 | `transpile_binary()` |
 | Effective type inference | transpile-mir.cpp | 1530–1610 | `get_effective_type()` |
-| Member access (runtime) | transpile-mir.cpp | 3484–3541 | `transpile_member()` |
+| Phase 3 shape helpers | transpile-mir.cpp | ~950 | `mir_has_fixed_shape()`, `mir_find_shape_field()`, `mir_resolve_field_type()`, `mir_is_direct_access_type()`, `mir_is_container_field_type()` |
+| Direct field read (MIR) | transpile-mir.cpp | ~3775 | `emit_mir_direct_field_read()` |
+| Direct field write (MIR) | transpile-mir.cpp | ~3850 | `emit_mir_direct_field_write()` |
+| Member access + Phase 3 read | transpile-mir.cpp | ~3930 | `transpile_member()` |
+| Member assign + Phase 3 write | transpile-mir.cpp | ~5765 | `MEMBER_ASSIGN_STAM` case |
 | User function transpilation | transpile-mir.cpp | 5600–5800 | `transpile_user_func()` |
-| Method field loading | transpile-mir.cpp | 5753–5787 | within `transpile_user_func()` |
 | Entry point | transpile-mir.cpp | 6495–6730 | `run_script_mir()` |
 | TCO eligibility (reuse) | safety_analyzer.cpp | 183–213 | `should_use_tco()` |
 | Tail position detection (reuse) | safety_analyzer.cpp | 97–167 | `has_tail_call()` |
 | Shape system | lambda-data.hpp | 185–202 | `ShapeEntry`, `TypeMap` |
-| C direct field read (reference) | transpile.cpp | 4794–4856 | `emit_direct_field_read()` |
-| C direct field write (reference) | transpile.cpp | 4895–4980 | `emit_direct_field_write()` |
+| C direct field read | transpile.cpp | 4794–4856 | `emit_direct_field_read()` |
+| C direct field write | transpile.cpp | 4897–4990 | `emit_direct_field_write()` |
 | C TCO prologue (reference) | transpile.cpp | 5424–5486 | `define_func()` |
 | C tail call xform (reference) | transpile-call.cpp | 289–410 | `transpile_tail_call()` |
 | Container struct layout | lambda-data.hpp | ~150 | `Container { TypeId type; int count; Item* data; }` |
