@@ -291,6 +291,41 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         child = child->next_sibling;
     }
 
+    // CSS 2.1 §9.2.1.1: When an inline element with border/padding is split by
+    // a block child, the trailing anonymous block contains the span's continuation
+    // (with the inline-end edge: border-right/padding-right in LTR, or
+    // border-left/padding-left in RTL). Even if the trailing content is only
+    // whitespace (which collapses), the span's inline-end edge generates a strut
+    // that creates a non-zero-height line box in the trailing anonymous block.
+    // Per CSS 2.1 §9.4.2, a line box is non-zero-height when it contains an inline
+    // element with non-zero inline-direction padding or border. Account for this by
+    // advancing advance_y by one line-height when:
+    // 1. A block child was encountered (the inline was split)
+    // 2. The trailing anonymous block is empty (is_line_start still true)
+    // 3. The span has non-zero inline-END decoration (border/padding on the end side)
+    if (!in_inline_sequence || lycon->line.is_line_start) {
+        // The last content was a block child, or trailing inline content was whitespace-only.
+        // Check if the span has inline-end decoration that would keep the line box open.
+        bool has_inline_end_decoration = false;
+        if (span->bound) {
+            bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
+            float end_border = 0, end_padding = 0;
+            if (span->bound->border) {
+                end_border = is_rtl ? span->bound->border->width.left
+                                    : span->bound->border->width.right;
+            }
+            end_padding = is_rtl ? (span->bound->padding.left > 0 ? span->bound->padding.left : 0)
+                                 : (span->bound->padding.right > 0 ? span->bound->padding.right : 0);
+            has_inline_end_decoration = (end_border > 0 || end_padding > 0);
+        }
+        if (has_inline_end_decoration) {
+            float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
+            lycon->block.advance_y += line_height;
+            log_debug("block-in-inline: trailing anonymous block strut: advance_y += %.1f (inline-end decoration)",
+                      line_height);
+        }
+    }
+
     // Note: Don't call line_break() here - the caller is responsible for line breaking.
     // This function may be called for nested inlines, and the outer inline may have
     // more siblings to process on the same line.
@@ -436,6 +471,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         inline_left_edge += span->bound->padding.left;
         inline_right_edge += span->bound->padding.right;
     }
+    // CSS 2.1 §8.3: Track pending inline left edges for line break re-application.
+    // If the span's first content wraps to a new line, line_reset() will re-apply
+    // the pending edges so the content starts correctly indented on the new line.
+    float saved_inline_pending = lycon->line.inline_start_edge_pending;
+    lycon->line.inline_start_edge_pending += inline_left_edge;
     lycon->line.advance_x += inline_left_edge;
 
     // CSS 2.1 §9.2.1.1 and §17.2.1: Check for block-level and table-internal children
@@ -492,6 +532,28 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Compute vertical union from children, horizontal from the parent block.
         compute_span_bounding_box(span, true);  // get vertical bounds from children
 
+        // CSS 2.1 §9.2.1.1: Extend span bounding box to cover the trailing anonymous
+        // block's strut. The span's children only include visible content (block child),
+        // but advance_y now accounts for the trailing anonymous block. Expand the span's
+        // height to match the flow extent (advance_y relative to span's y).
+        {
+            float span_bottom = span->y + span->height;
+            float flow_bottom = lycon->block.advance_y;
+            if (flow_bottom > span_bottom) {
+                // Add border-bottom to the expanded height
+                float border_bottom = 0, pad_bottom = 0;
+                if (span->bound) {
+                    if (span->bound->border)
+                        border_bottom = span->bound->border->width.bottom;
+                    if (span->bound->padding.bottom > 0)
+                        pad_bottom = span->bound->padding.bottom;
+                }
+                span->height = (int)(flow_bottom - span->y + border_bottom + pad_bottom);
+                log_debug("block-in-inline: extended span height to %d (flow_bottom=%.1f, span_y=%d)",
+                          span->height, flow_bottom, span->y);
+            }
+        }
+
         // Override horizontal bounds to match the parent block's content area
         ViewElement* parent_block = span->parent_view();
         if (parent_block && parent_block->is_block()) {
@@ -542,6 +604,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Advance past the right border+padding so the next sibling starts after this inline's border
     lycon->line.advance_x += inline_right_edge;
 
+    // CSS 2.1 §8.3: Now that this span is closing, remove its contribution from
+    // the pending inline edges if it wasn't consumed by content output.
+    // If output_text() was called inside this span, pending was cleared to 0.
+    // If no content was output (empty span), restore saved value so the
+    // parent's pending state is unaffected.
+    if (lycon->line.inline_start_edge_pending > saved_inline_pending) {
+        lycon->line.inline_start_edge_pending = saved_inline_pending;
+    }
+
     // CSS 2.1 §10.8.1: For non-replaced inline elements, the inline box height
     // equals its 'line-height', computed via the half-leading model. Even empty
     // inline elements contribute their strut to the line box height calculation.
@@ -589,8 +660,40 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    // Detect multi-line: if advance_y changed during child layout, the span wrapped to a new line
-    bool span_is_multi_line = (lycon->block.advance_y > start_advance_y + 1.0f);
+    // CSS 2.1 §8.5.1: Detect multi-line by checking if children are on different lines.
+    // We can't just check advance_y — if the entire span wraps to a new line,
+    // advance_y changes but the span has content on only one line (single fragment).
+    // Multi-line means the span's content itself spans multiple lines, requiring
+    // left border+padding only on the first fragment and right on the last.
+    bool span_is_multi_line = false;
+    {
+        View* first_content = span->first_child;
+        // skip nil-views and out-of-flow children
+        while (first_content && (first_content->view_type == RDT_VIEW_NONE || is_out_of_flow_child(first_content)))
+            first_content = first_content->next();
+        if (first_content) {
+            float first_y = first_content->y;
+            // Check 1: different DOM children on different y-positions
+            View* c = first_content->next();
+            while (c) {
+                if (c->view_type != RDT_VIEW_NONE && !is_out_of_flow_child(c)) {
+                    if (c->y != first_y) {
+                        span_is_multi_line = true;
+                        break;
+                    }
+                }
+                c = c->next();
+            }
+            // Check 2: a single text child may wrap across lines without creating
+            // multiple DOM children. Detect by checking if advance_y has moved at
+            // least one full line past the first child's y (text wrapped internally).
+            if (!span_is_multi_line && lycon->block.line_height > 0) {
+                if (lycon->block.advance_y >= first_y + lycon->block.line_height) {
+                    span_is_multi_line = true;
+                }
+            }
+        }
+    }
 
     // CSS 2.1 §16.6.1: Trailing whitespace at end of a line should not expand
     // the inline element's bounding box. We trim trailing whitespace from the

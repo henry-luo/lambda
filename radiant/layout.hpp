@@ -162,6 +162,9 @@ typedef struct Linebox {
                                     // for pre-wrap mode; used to compute hanging space at wrap points
     float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
     bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
+    float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
+                                      // inline spans that haven't produced content yet; re-applied
+                                      // after line break so the span's first content is indented
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
 

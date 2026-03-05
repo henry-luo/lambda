@@ -2371,6 +2371,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         if (!has_inline_after) {
             // Float is the last inline content or followed by block - position below current line
+            // Lambda processes text before the float sequentially (no mid-line reflow),
+            // so the float must go below the current line to avoid overlapping placed text.
             float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
             block->y = pa_block->advance_y + line_height;
             log_debug("Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)",

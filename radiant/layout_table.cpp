@@ -2133,10 +2133,51 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
             if (collapse_decl && collapse_decl->value) {
                 CssValue* val = (CssValue*)collapse_decl->value;
                 if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                    if (val->data.keyword == CSS_VALUE_COLLAPSE || val->data.keyword == CSS_VALUE_COLLAPSE_TABLE) {
+                    CssEnum kw = val->data.keyword;
+                    if (kw == CSS_VALUE_INHERIT) {
+                        // Walk up the DOM tree to find ancestor's border-collapse value
+                        // border-collapse is an inherited property (CSS 2.1 §17.6)
+                        DomNode* ancestor = element->parent;
+                        bool resolved = false;
+                        while (ancestor) {
+                            if (ancestor->is_element()) {
+                                DomElement* anc_elem = ancestor->as_element();
+                                if (anc_elem->specified_style) {
+                                    CssDeclaration* anc_decl = style_tree_get_declaration(
+                                        anc_elem->specified_style,
+                                        CSS_PROPERTY_BORDER_COLLAPSE);
+                                    if (anc_decl && anc_decl->value) {
+                                        CssValue* anc_val = (CssValue*)anc_decl->value;
+                                        if (anc_val->type == CSS_VALUE_TYPE_KEYWORD) {
+                                            CssEnum anc_kw = anc_val->data.keyword;
+                                            if (anc_kw == CSS_VALUE_COLLAPSE || anc_kw == CSS_VALUE_COLLAPSE_TABLE) {
+                                                table->tb->border_collapse = true;
+                                                log_debug("Table border-collapse: inherit -> collapse (from ancestor)");
+                                                resolved = true;
+                                            } else if (anc_kw == CSS_VALUE_SEPARATE) {
+                                                table->tb->border_collapse = false;
+                                                log_debug("Table border-collapse: inherit -> separate (from ancestor)");
+                                                resolved = true;
+                                            }
+                                            // If ancestor also has inherit, keep walking up
+                                            if (anc_kw != CSS_VALUE_INHERIT) break;
+                                        }
+                                    } else {
+                                        break; // ancestor has no declaration, stop
+                                    }
+                                }
+                            }
+                            ancestor = ancestor->parent;
+                        }
+                        if (!resolved) {
+                            // CSS 2.1 initial value for border-collapse is 'separate'
+                            table->tb->border_collapse = false;
+                            log_debug("Table border-collapse: inherit -> separate (initial, no ancestor)");
+                        }
+                    } else if (kw == CSS_VALUE_COLLAPSE || kw == CSS_VALUE_COLLAPSE_TABLE) {
                         table->tb->border_collapse = true;
                         log_debug("Table border-collapse: collapse (true)");
-                    } else if (val->data.keyword == CSS_VALUE_SEPARATE) {
+                    } else if (kw == CSS_VALUE_SEPARATE) {
                         table->tb->border_collapse = false;
                         log_debug("Table border-collapse: separate (false)");
                     }
