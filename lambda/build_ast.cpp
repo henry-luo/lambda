@@ -2359,14 +2359,17 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == SYM_QUERY_EXPR || symbol == SYM_DIRECT_QUERY_EXPR) {
+    else if (symbol == SYM_QUERY_EXPR) {
         // query expression: expr?T (recursive) or expr.?T (direct)
         AstQueryNode* query_node = (AstQueryNode*)alloc_ast_node(tp, AST_NODE_QUERY_EXPR, child, sizeof(AstQueryNode));
         TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
         query_node->object = build_expr(tp, object_node);
         TSNode query_type_node = ts_node_child_by_field_id(child, FIELD_QUERY);
         query_node->query = build_primary_type(tp, query_type_node);
-        query_node->direct = (symbol == SYM_DIRECT_QUERY_EXPR);
+        // determine direct vs recursive from the operator field
+        TSNode op_node = ts_node_child_by_field_id(child, FIELD_OP);
+        StrView op = ts_node_source(tp, op_node);
+        query_node->direct = (op.length == 2);  // ".?" is direct, "?" is recursive
         // query always returns a list of matches
         query_node->type = alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
         log_debug("build query_expr: direct=%d", query_node->direct);
@@ -3461,6 +3464,45 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
 }
 
 AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
+    // For type_stam: check the 'kind' field to detect string/symbol pattern definitions
+    bool is_string_pattern = false;
+    bool is_symbol_pattern = false;
+    if (symbol == SYM_TYPE_DEFINE) {
+        TSNode kind_node = ts_node_child_by_field_id(let_node, FIELD_KIND);
+        if (!ts_node_is_null(kind_node)) {
+            StrView kind = ts_node_source(tp, kind_node);
+            if (strview_equal(&kind, "string")) {
+                is_string_pattern = true;
+            } else if (strview_equal(&kind, "symbol")) {
+                is_symbol_pattern = true;
+            }
+        }
+    }
+
+    // For string/symbol pattern definitions, build pattern nodes
+    if (is_string_pattern || is_symbol_pattern) {
+        // Build from declare children (type_assign aliased as assign_expr)
+        TSTreeCursor cursor = ts_tree_cursor_new(let_node);
+        bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+        AstNode* first = NULL;
+        AstNode* prev = NULL;
+        while (has_node) {
+            TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+            if (field_id == FIELD_DECLARE) {
+                TSNode child = ts_tree_cursor_current_node(&cursor);
+                AstNode* pattern = build_string_pattern(tp, child, is_symbol_pattern);
+                if (pattern) {
+                    if (prev) prev->next = pattern;
+                    else first = pattern;
+                    prev = pattern;
+                }
+            }
+            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        }
+        ts_tree_cursor_delete(&cursor);
+        return first;
+    }
+
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp,
         symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM :
         symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
@@ -6607,11 +6649,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return NULL;
     case SYM_COMMENT:
         return NULL;
-    // String/Symbol Pattern nodes
-    case SYM_STRING_PATTERN:
-        return build_string_pattern(tp, expr_node, false);
-    case SYM_SYMBOL_PATTERN:
-        return build_string_pattern(tp, expr_node, true);
     case SYM_INDEX:
         // This is likely a parsing error - index tokens should not appear as standalone expressions
         // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
@@ -6968,8 +7005,11 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // Get pattern expression — now uses unified _type_expr, built via build_expr()
-    TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
+    // Get pattern expression — from type_assign's 'as' field (or legacy 'pattern' field)
+    TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_AS);
+    if (ts_node_is_null(pattern_node)) {
+        pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
+    }
     ast_node->as = build_expr(tp, pattern_node);
 
     // Type is pattern type
