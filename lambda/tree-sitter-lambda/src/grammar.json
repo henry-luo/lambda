@@ -706,44 +706,6 @@
         ]
       }
     },
-    "index": {
-      "type": "TOKEN",
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "0"
-              },
-              {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "PATTERN",
-                    "value": "[1-9]"
-                  },
-                  {
-                    "type": "CHOICE",
-                    "members": [
-                      {
-                        "type": "PATTERN",
-                        "value": "\\d+"
-                      },
-                      {
-                        "type": "BLANK"
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    },
     "named_value": {
       "type": "TOKEN",
       "content": {
@@ -3317,7 +3279,7 @@
                     },
                     {
                       "type": "SYMBOL",
-                      "name": "index"
+                      "name": "integer"
                     },
                     {
                       "type": "SYMBOL",
@@ -3372,7 +3334,7 @@
                 },
                 {
                   "type": "SYMBOL",
-                  "name": "index"
+                  "name": "integer"
                 },
                 {
                   "type": "SYMBOL",
