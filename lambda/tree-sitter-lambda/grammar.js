@@ -693,27 +693,25 @@ module.exports = grammar({
     match_expr: $ => seq(
       'match', field('scrutinee', $._expr),
       '{',
-      repeat1(choice($.match_arm_expr, $.match_arm_stam, $.match_default_expr, $.match_default_stam)),
+      repeat1(choice($.match_arm, $.match_default)),
       '}'
     ),
 
-    match_arm_expr: $ => prec.right(seq(
+    match_arm: $ => prec.right(seq(
       'case', field('pattern', $._type_expr),
-      ':', field('body', $._expr)
+      choice(
+        seq(':', field('body', $._expr)),
+        seq('{', field('body', $.content), '}')
+      )
     )),
 
-    match_default_expr: $ => prec.right(seq(
-      'default', ':', field('body', $._expr)
+    match_default: $ => prec.right(seq(
+      'default',
+      choice(
+        seq(':', field('body', $._expr)),
+        seq('{', field('body', $.content), '}')
+      )
     )),
-
-    match_arm_stam: $ => seq(
-      'case', field('pattern', $._type_expr),
-      '{', field('body', $.content), '}'
-    ),
-
-    match_default_stam: $ => seq(
-      'default', '{', field('body', $.content), '}'
-    ),
 
     // Loop variable binding with optional index and 'in' or 'at' keyword
     // Single variable: for v in expr

@@ -2712,7 +2712,7 @@
     }
   },
   {
-    "type": "match_arm_expr",
+    "type": "match_arm",
     "named": true,
     "fields": {
       "body": {
@@ -2721,6 +2721,10 @@
         "types": [
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "content",
             "named": true
           },
           {
@@ -2786,49 +2790,7 @@
     }
   },
   {
-    "type": "match_arm_stam",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "content",
-            "named": true
-          }
-        ]
-      },
-      "pattern": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "concat_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "unary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "match_default_expr",
+    "type": "match_default",
     "named": true,
     "fields": {
       "body": {
@@ -2837,6 +2799,10 @@
         "types": [
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "content",
             "named": true
           },
           {
@@ -2869,22 +2835,6 @@
           },
           {
             "type": "unary_expr",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "match_default_stam",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "content",
             "named": true
           }
         ]
@@ -2943,19 +2893,11 @@
       "required": true,
       "types": [
         {
-          "type": "match_arm_expr",
+          "type": "match_arm",
           "named": true
         },
         {
-          "type": "match_arm_stam",
-          "named": true
-        },
-        {
-          "type": "match_default_expr",
-          "named": true
-        },
-        {
-          "type": "match_default_stam",
+          "type": "match_default",
           "named": true
         }
       ]
@@ -4849,19 +4791,19 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
     "named": false
+  },
+  {
+    "type": "symbol",
+    "named": true
   },
   {
     "type": "t'",

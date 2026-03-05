@@ -3044,8 +3044,8 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
         if (!ts_node_is_named(child)) continue;
         TSSymbol sym = ts_node_symbol(child);
 
-        bool is_arm = (sym == SYM_MATCH_ARM_EXPR || sym == SYM_MATCH_ARM_STAM);
-        bool is_default = (sym == SYM_MATCH_DEFAULT_EXPR || sym == SYM_MATCH_DEFAULT_STAM);
+        bool is_arm = (sym == SYM_MATCH_ARM);
+        bool is_default = (sym == SYM_MATCH_DEFAULT);
         if (!is_arm && !is_default) continue;
 
         AstMatchArm* arm = (AstMatchArm*)alloc_ast_node(tp, AST_NODE_MATCH_ARM, child, sizeof(AstMatchArm));
