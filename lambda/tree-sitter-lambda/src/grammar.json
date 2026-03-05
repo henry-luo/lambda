@@ -6204,16 +6204,8 @@
         "type": "SEQ",
         "members": [
           {
-            "type": "STRING",
-            "value": "raise"
-          },
-          {
-            "type": "FIELD",
-            "name": "value",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_expr"
-            }
+            "type": "SYMBOL",
+            "name": "raise_expr"
           },
           {
             "type": "CHOICE",
@@ -8116,7 +8108,7 @@
       "_expr"
     ],
     [
-      "raise_expr",
+      "_expr",
       "raise_stam"
     ],
     [

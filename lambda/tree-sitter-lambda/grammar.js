@@ -142,7 +142,7 @@ module.exports = grammar({
     [$._attr_expr, $._expr],                       // else { expr } in if_expr: block content vs map
     [$.attr_binary_expr, $._expr],                 // else { expr + ... } binary in block vs map
     [$._statement, $._expr],                       // else { stam } in if_expr: statement vs expr in block
-    [$.raise_expr, $.raise_stam],                  // else { raise expr } in block
+    [$._expr, $.raise_stam],                       // raise expr could be raise_expr or start of raise_stam
     [$.let_expr, $.let_stam],                      // else { let x = ... } in block
     [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
     [$._type_expr, $.concat_type],                 // unary_type could be complete or start of concat
@@ -796,10 +796,9 @@ module.exports = grammar({
     )),
 
     // raise statement (procedural only) - raises an error to caller
-    // use prec.right to prefer consuming expression when present
+    // Reuses raise_expr to avoid GLR conflict between raise_expr and raise_stam
     raise_stam: $ => prec.right(seq(
-      'raise',
-      field('value', $._expr),
+      $.raise_expr,
       optional(';')
     )),
 
