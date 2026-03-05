@@ -80,6 +80,7 @@ These ambiguities are **language-level** — they exist because the same tokens 
 | Inline `_content_expr` and `_expr_stam` | **+0.7% (10.7 MB)** | Inlining expands alternatives at use sites, adding states |
 | Move `range_type` from `primary_type` to `_compound_type` | **Same conflict** | Shift-reduce conflict moves from `[range_type, primary_type]` to `[range_type, unary_type]` |
 | Flatten Type Hierarchy (Proposal 2): remove `unary_type`, `_quantified_type`, `_compound_type`; fold into 3-layer `primary_type → _unary_type → _type_expr` | **~0% (-1 KB)** | LARGE_STATE_COUNT −89, SYMBOL_COUNT −6, but STATE_COUNT +73. Net file size unchanged. All 600/605 baseline tests pass. **Kept** — cleaner grammar, marginal improvement in large states. |
+| Combine 20 `base_type` keywords into single `_base_type_kw` token | **−20.2% (−2.1 MB)** | SYMBOL_COUNT −19, TOKEN_COUNT −20, LARGE_STATE_COUNT −570. Keywords only used via `base_type` merged into one token; 4 keywords used elsewhere (`error`, `type`, `string`, `symbol`) kept separate. All 445/451 non-MIR tests pass (same 5 pre-existing failures). **Kept.** |
 #### Key Insight
 
 The `attr_binary_expr` + `_attr_expr` design is the **optimal grammar-level solution** for the `<`/`>` element ambiguity. It statically excludes relational operators from element context without GLR overhead. The cost is 14 duplicate binary operator states — but the alternative (GLR conflicts) costs 330+ additional large states.
@@ -312,17 +313,60 @@ match_default: $ => seq('default',
 
 ---
 
-## Proposal 9: Reduce `base_type` Keywords
+## Proposal 9: Reduce `base_type` Keywords — APPLIED ✓ (via token consolidation)
 
-**Impact: Low (1–2% reduction)**
+**Original estimate: Low (1–2% reduction)**
+**Actual result: −20.2% (−2.1 MB) — the largest single improvement**
 
-`base_type` has 22 keyword alternatives. Some keywords (`entity`, `object`, `type`, `function`) only appear in specific grammar positions (e.g., `entity_type`, `object_type`, `type_stam`). They could be parsed as identifiers and distinguished in the AST builder, removing them from `base_type`.
+The original proposal suggested removing 5 rarely-used keywords from `base_type`. Instead, a more effective approach was found: consolidating 20 of the 24 `base_type` keywords into a single `token()` rule.
 
-**Candidates for removal from `base_type`:** `entity`, `object`, `type`, `function`, `range`.
+### Analysis
 
-**Removes:** ~5 keyword tokens from `ts_lex_keywords`, slightly reduces state fan-out.
+`base_type` had 24 keyword alternatives. Each keyword created its own anonymous terminal symbol (`anon_sym_null`, `anon_sym_int`, etc.), adding 24 columns to every large state row.
 
-**Risk:** Medium — must verify no ambiguity when these are parsed as identifiers in expression position.
+4 keywords are also used as standalone string literals elsewhere in the grammar:
+- `'error'` — in `error_type_pattern`
+- `'type'` — in `type_stam`, `entity_type`, `object_type`, `pub_stam`
+- `'string'` — in `string_pattern`
+- `'symbol'` — in `symbol_pattern`
+
+These 4 must remain separate. The other 20 (`null`, `any`, `bool`, `int64`, `int`, `float`, `decimal`, `number`, `datetime`, `date`, `time`, `binary`, `range`, `list`, `array`, `map`, `element`, `entity`, `object`, `function`) are ONLY referenced through `base_type`.
+
+### Applied Change
+
+```js
+// New: single token for 20 keywords only used via base_type
+_base_type_kw: _ => token(prec(1, choice(
+  'null', 'any', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
+  'datetime', 'date', 'time', 'binary', 'range',
+  'list', 'array', 'map', 'element', 'entity', 'object', 'function'
+))),
+
+// base_type now uses the combined token + 4 standalone keywords
+base_type: $ => prec(1, choice(
+  $._base_type_kw,
+  'error', 'type', 'string', 'symbol'
+)),
+```
+
+No changes needed in `build_ast.cpp` — the AST builder reads the text content of the `base_type` node via `ts_node_source()`, which returns the same keyword string regardless of whether it came from `_base_type_kw` or individual anonymous symbols.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 10,631,709 B | 8,482,463 B | **−2,149,246 B (−20.2%)** |
+| STATE_COUNT | 6,265 | 6,264 | −1 |
+| LARGE_STATE_COUNT | 2,052 | 1,482 | **−570** |
+| SYMBOL_COUNT | 256 | 237 | **−19** |
+| TOKEN_COUNT | 124 | 104 | **−20** |
+| Non-MIR tests | 445/451 | 445/451 | No change (same 5 pre-existing) |
+
+**Verdict: Kept.** The 19 fewer symbol columns removed from each of the 2,052 large state rows dramatically shrinks the dense `ts_parse_table`. 570 states dropped below the large-state threshold and moved to the compact `ts_small_parse_table` representation.
+
+### Key Insight
+
+Token consolidation is the most effective parser reduction technique found. Each symbol ID eliminated removes one column from every large state row — a multiplicative effect. Combining N keywords that share a single grammar role into one `token()` rule removes N−1 symbols at no cost to parsing correctness.
 
 ---
 
