@@ -105,6 +105,7 @@ pn offset_momentum(bvx, bvy, bvz, bmass) {
 }
 
 pn main() {
+    var __t0 = clock()
     var bx = [0.0,
         4.84143144246472090e+00,
         8.34336671824457987e+00,
@@ -150,4 +151,6 @@ pn main() {
         i = i + 1
     }
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

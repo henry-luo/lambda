@@ -21,6 +21,7 @@ string pat9 = "agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "aataccct"
 string header_pat = ">" \.*
 
 pn main() {
+    var __t0 = clock()
     let text^err = input(INPUT_PATH, 'text')
     var original_len = len(text)
 
@@ -59,4 +60,6 @@ pn main() {
     print(string(original_len) ++ "\n")
     print(string(clean_len) ++ "\n")
     print(string(len(result)) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

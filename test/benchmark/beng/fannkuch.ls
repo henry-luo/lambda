@@ -6,6 +6,7 @@
 let N = 7
 
 pn main() {
+    var __t0 = clock()
     var n = N
     var perm = fill(n, 0)
     var perm1 = fill(n, 0)
@@ -89,4 +90,6 @@ pn main() {
 
     print(string(checksum) ++ "\n")
     print("Pfannkuchen(" ++ string(n) ++ ") = " ++ string(max_flips) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

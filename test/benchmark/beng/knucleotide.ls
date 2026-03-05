@@ -137,6 +137,7 @@ pn print_count(seq, kmer) {
 }
 
 pn main() {
+    var __t0 = clock()
     let text^err = input(INPUT_PATH, 'text')
     let seq = extract_three(text)
 
@@ -150,4 +151,6 @@ pn main() {
     print_count(seq, "GGTATT")
     print_count(seq, "GGTATTTTAATT")
     print_count(seq, "GGTATTTTAATTTATAGT")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }
