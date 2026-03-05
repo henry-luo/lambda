@@ -3640,10 +3640,6 @@
           "named": true
         },
         {
-          "type": "pattern_any",
-          "named": true
-        },
-        {
           "type": "pattern_char_class",
           "named": true
         },
@@ -4581,10 +4577,6 @@
     "named": true
   },
   {
-    "type": "pattern_any",
-    "named": true
-  },
-  {
     "type": "pattern_char_class",
     "named": true
   },
@@ -4614,11 +4606,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "that",

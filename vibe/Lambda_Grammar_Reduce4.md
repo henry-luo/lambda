@@ -590,6 +590,47 @@ Removed `hex_binary` and `base64_binary` rules entirely. The `binary` token simp
 
 ---
 
+## Proposal 14: Merge `pattern_any` into `pattern_char_class` — APPLIED ✓
+
+**Impact: Low (−0.43%)**
+
+`pattern_any` was a separate grammar rule for the `\.` (any character) pattern atom, while `pattern_char_class` handled `\d`, `\w`, `\s`, `\a`. Both produce the same AST node type (`AST_NODE_PATTERN_CHAR_CLASS`) — the only difference is the `char_class` enum value.
+
+### Applied Change
+
+Added `\.` as a 5th choice in the `pattern_char_class` token:
+
+```js
+// Before: two separate rules
+pattern_char_class: _ => token(choice('\\d', '\\w', '\\s', '\\a')),
+pattern_any: _ => '\\.',
+
+// After: single rule
+pattern_char_class: _ => token(choice('\\d', '\\w', '\\s', '\\a', '\\.')),
+```
+
+Removed `pattern_any` rule and its reference in `primary_type`.
+
+**AST builder changes:**
+- Removed two duplicate `case SYM_PATTERN_ANY` blocks (in `build_primary_type` and `build_expr`) that constructed `AstPatternCharClassNode` with `PATTERN_ANY`.
+- The existing `build_pattern_char_class` function already had a `default` case in its switch that maps to `PATTERN_ANY`, so `\.` is handled correctly without any new logic.
+- Removed `SYM_PATTERN_ANY` macro from `ast.hpp`.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,558,156 B | 7,525,508 B | **−32,648 B (−0.43%)** |
+| STATE_COUNT | 5,741 | 5,741 | No change |
+| LARGE_STATE_COUNT | 598 | 593 | **−5** |
+| SYMBOL_COUNT | 222 | 221 | **−1** |
+| TOKEN_COUNT | 95 | 94 | **−1** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Modest but clean reduction. A straightforward application of the token consolidation pattern — merging a rule that produces the same AST node type into the existing token. Eliminates one symbol and 12 lines of duplicate AST builder code.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -607,6 +648,7 @@ Removed `hex_binary` and `base64_binary` rules entirely. The `binary` token simp
 | 11th | #11 — Merge named values token | Low | Low-Medium | ✅ Applied (−1.71%, −3 SYM) |
 | 12th | #12 — Merge datetime token | Low | Medium | ✅ Applied (−3.11%, −2 SYM) |
 | 13th | #13 — Merge binary token | Low | Medium-High | ✅ Applied (−5.24%, −5 SYM) |
+| 14th | #14 — Merge pattern_any token | Low | Low | ✅ Applied (−0.43%, −1 SYM) |
 
 ### Cumulative Results
 
@@ -621,6 +663,7 @@ Removed `hex_binary` and `base64_binary` rules entirely. The `binary` token simp
 | + Proposal 11 (named_value token) | 8,232,241 | 6,226 | 1,479 | 229 | 101 |
 | + Proposal 12 (datetime token) | 7,976,424 | 5,841 | 1,469 | 227 | 99 |
 | + Proposal 13 (binary token) | 7,558,156 | 5,741 | 598 | 222 | 95 |
-| **Total reduction** | **−3,073,553 (−28.9%)** | **−524** | **−1,534** | **−40** | **−29** |
+| + Proposal 14 (pattern_any merge) | 7,525,508 | 5,741 | 593 | 221 | 94 |
+| **Total reduction** | **−3,106,201 (−29.2%)** | **−524** | **−1,539** | **−41** | **−30** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

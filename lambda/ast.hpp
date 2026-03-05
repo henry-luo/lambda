@@ -110,7 +110,7 @@ extern "C" {
 
 // String/Symbol Pattern symbols
 #define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
-#define SYM_PATTERN_ANY sym_pattern_any
+// SYM_PATTERN_ANY removed — merged into SYM_PATTERN_CHAR_CLASS
 #define SYM_OCCURRENCE_COUNT sym_occurrence_count
 // Unified type/pattern symbols
 #define SYM_TYPE_SEQ sym_type_seq
