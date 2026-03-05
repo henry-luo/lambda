@@ -276,8 +276,6 @@ void css_engine_clear_errors(CssEngine* engine);
 
 // Enhanced CSS functions (for backward compatibility)
 void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule);
-bool css_enhanced_nesting_parent_matches(const CssSelector* selector, const CssStyleNode* node);
-bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssStyleNode* node);
 
 #ifdef __cplusplus
 }

@@ -9,6 +9,7 @@ extern "C" {
 #include "../../../lib/hashmap.h"
 }
 #include "css_value.hpp"
+#include "css_style.hpp"
 
 static const CssEnumInfo css_value_definitions[] = {
     {"_undef", 6, CSS_VALUE__UNDEF, CSS_VALUE_GROUP__UNDEF},
@@ -496,4 +497,98 @@ CssEnum css_enum_by_name(const char* name) {
     }
 
     return CSS_VALUE__UNDEF;
+}
+
+// ============================================================================
+// CSS Unit string <-> enum mapping
+// ============================================================================
+
+// unit-string table for bidirectional lookup
+struct CssUnitEntry {
+    const char* name;
+    size_t      name_len;
+    CssUnit     unit;
+};
+
+static const CssUnitEntry css_unit_table[] = {
+    // absolute length units
+    {"px",   2, CSS_UNIT_PX},
+    {"cm",   2, CSS_UNIT_CM},
+    {"mm",   2, CSS_UNIT_MM},
+    {"in",   2, CSS_UNIT_IN},
+    {"pt",   2, CSS_UNIT_PT},
+    {"pc",   2, CSS_UNIT_PC},
+    {"q",    1, CSS_UNIT_Q},
+    // font-relative length units
+    {"em",   2, CSS_UNIT_EM},
+    {"ex",   2, CSS_UNIT_EX},
+    {"cap",  3, CSS_UNIT_CAP},
+    {"ch",   2, CSS_UNIT_CH},
+    {"ic",   2, CSS_UNIT_IC},
+    {"rem",  3, CSS_UNIT_REM},
+    {"lh",   2, CSS_UNIT_LH},
+    {"rlh",  3, CSS_UNIT_RLH},
+    // viewport units
+    {"vw",   2, CSS_UNIT_VW},
+    {"vh",   2, CSS_UNIT_VH},
+    {"vi",   2, CSS_UNIT_VI},
+    {"vb",   2, CSS_UNIT_VB},
+    {"vmin", 4, CSS_UNIT_VMIN},
+    {"vmax", 4, CSS_UNIT_VMAX},
+    // small/large/dynamic viewport units
+    {"svw",  3, CSS_UNIT_SVW},
+    {"svh",  3, CSS_UNIT_SVH},
+    {"lvw",  3, CSS_UNIT_LVW},
+    {"lvh",  3, CSS_UNIT_LVH},
+    {"dvw",  3, CSS_UNIT_DVW},
+    {"dvh",  3, CSS_UNIT_DVH},
+    // container query units
+    {"cqw",  3, CSS_UNIT_CQW},
+    {"cqh",  3, CSS_UNIT_CQH},
+    {"cqi",  3, CSS_UNIT_CQI},
+    {"cqb",  3, CSS_UNIT_CQB},
+    {"cqmin",5, CSS_UNIT_CQMIN},
+    {"cqmax",5, CSS_UNIT_CQMAX},
+    // angle units
+    {"deg",  3, CSS_UNIT_DEG},
+    {"grad", 4, CSS_UNIT_GRAD},
+    {"rad",  3, CSS_UNIT_RAD},
+    {"turn", 4, CSS_UNIT_TURN},
+    // time units
+    {"s",    1, CSS_UNIT_S},
+    {"ms",   2, CSS_UNIT_MS},
+    // frequency units
+    {"hz",   2, CSS_UNIT_HZ},
+    {"khz",  3, CSS_UNIT_KHZ},
+    // resolution units
+    {"dpi",  3, CSS_UNIT_DPI},
+    {"dpcm", 4, CSS_UNIT_DPCM},
+    {"dppx", 4, CSS_UNIT_DPPX},
+    // flex units
+    {"fr",   2, CSS_UNIT_FR},
+    // percentage
+    {"%",    1, CSS_UNIT_PERCENT},
+};
+
+static const size_t css_unit_table_count = sizeof(css_unit_table) / sizeof(css_unit_table[0]);
+
+CssUnit css_unit_from_string(const char* unit_str, size_t length) {
+    if (!unit_str || length == 0) return CSS_UNIT_NONE;
+    for (size_t i = 0; i < css_unit_table_count; i++) {
+        if (css_unit_table[i].name_len == length &&
+            str_icmp(unit_str, length, css_unit_table[i].name, css_unit_table[i].name_len) == 0) {
+            return css_unit_table[i].unit;
+        }
+    }
+    return CSS_UNIT_NONE;
+}
+
+const char* css_unit_to_string(CssUnit unit) {
+    for (size_t i = 0; i < css_unit_table_count; i++) {
+        if (css_unit_table[i].unit == unit) {
+            return css_unit_table[i].name;
+        }
+    }
+    if (unit == CSS_UNIT_NONE) return "";
+    return "unknown";
 }

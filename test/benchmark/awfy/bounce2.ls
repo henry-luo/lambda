@@ -89,7 +89,9 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     let result = benchmark()
+    var __t1 = clock()
     if (result == 1331) {
         print("Bounce: PASS\n")
     } else {
@@ -97,4 +99,5 @@ pn main() {
         print(result)
         print("\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

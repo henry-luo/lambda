@@ -611,11 +611,14 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     var result: int = benchmark()
+    var __t1 = clock()
     if (result == 1) {
         print("Json: PASS\n")
     }
     if (result == 0) {
         print("Json: FAIL\n")
     }
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

@@ -1037,6 +1037,7 @@ pn projection_test(n) {
 }
 
 pn main() {
+    var __t0 = clock()
     var r1 = chain_test(100)
     if (r1 == 0) {
         print("DeltaBlue: FAIL (chain)\n")
@@ -1047,5 +1048,7 @@ pn main() {
         print("DeltaBlue: FAIL (projection)\n")
         return 0
     }
+    var __t1 = clock()
     print("DeltaBlue: PASS\n")
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

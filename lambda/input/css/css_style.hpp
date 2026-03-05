@@ -934,7 +934,12 @@ CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count);
 void css_value_destroy(CssValue* value);
 
 // Unit and value utilities
+CssUnit css_unit_from_string(const char* unit_str, size_t length);
 const char* css_unit_to_string(CssUnit unit);
+
+// Hex color parsing utility
+// hex_str must start with '#'; returns true on success, writes RGBA channels.
+bool css_parse_hex_to_rgba(const char* hex_str, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a);
 const char* css_color_type_to_string(CssColorType type);
 bool css_unit_is_length(CssUnit unit);
 bool css_unit_is_angle(CssUnit unit);
