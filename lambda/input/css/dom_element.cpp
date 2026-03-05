@@ -40,6 +40,39 @@ void log_dom_element_timing() {
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* document, DomElement* parent);
 DomElement* build_dom_tree_from_element_with_input(Element* elem, DomDocument* document, DomElement* parent);
 
+// helper: append a DomNode child to a parent's sibling chain
+static void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
+    child->parent = parent;
+    if (!parent->first_child) {
+        parent->first_child = child;
+        parent->last_child = child;
+        child->prev_sibling = nullptr;
+        child->next_sibling = nullptr;
+    } else {
+        DomNode* last = parent->last_child;
+        if (!last) {
+            last = parent->first_child;
+            while (last->next_sibling) last = last->next_sibling;
+        }
+        last->next_sibling = child;
+        child->prev_sibling = last;
+        child->next_sibling = nullptr;
+        parent->last_child = child;
+    }
+}
+
+// helper: extract a name string from a CssValue (works for counter names, attr names, etc.)
+static const char* css_value_extract_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    return nullptr;
+}
+
 // ============================================================================
 // DOM Document Creation and Destruction
 // ============================================================================
@@ -1213,16 +1246,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 if (func->arg_count >= 1) {
                     log_debug("[Counter] counter() arg[0] type=%d", (int)func->args[0]->type);
 
-                    // Counter name could be STRING, KEYWORD, or CUSTOM
-                    const char* counter_name = nullptr;
-                    if (func->args[0]->type == CSS_VALUE_TYPE_STRING) {
-                        counter_name = func->args[0]->data.string;
-                    } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                        counter_name = info ? info->name : nullptr;
-                    } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
-                        counter_name = func->args[0]->data.custom_property.name;
-                    }
+                    const char* counter_name = css_value_extract_name(func->args[0]);
 
                     uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
 
@@ -1245,16 +1269,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
             } else if (strcmp(func->name, "counters") == 0) {
                 // counters(name, separator) or counters(name, separator, style)
                 if (func->arg_count >= 2) {
-                    // Counter name could be STRING, KEYWORD, or CUSTOM
-                    const char* counter_name = nullptr;
-                    if (func->args[0]->type == CSS_VALUE_TYPE_STRING) {
-                        counter_name = func->args[0]->data.string;
-                    } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                        counter_name = info ? info->name : nullptr;
-                    } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
-                        counter_name = func->args[0]->data.custom_property.name;
-                    }
+                    const char* counter_name = css_value_extract_name(func->args[0]);
 
                     const char* separator = func->args[1]->data.string;
                     uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
@@ -1275,18 +1290,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 }
             } else if (strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
                 // attr(attribute-name) in content property
-                const char* attr_name = NULL;
-                CssValue* arg0 = func->args[0];
-                if (arg0) {
-                    if (arg0->type == CSS_VALUE_TYPE_STRING) {
-                        attr_name = arg0->data.string;
-                    } else if (arg0->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(arg0->data.keyword);
-                        attr_name = info ? info->name : NULL;
-                    } else if (arg0->type == CSS_VALUE_TYPE_CUSTOM) {
-                        attr_name = arg0->data.custom_property.name;
-                    }
-                }
+                const char* attr_name = css_value_extract_name(func->args[0]);
                 if (attr_name) {
                     const char* attr_value = dom_element_get_attribute(element, attr_name);
                     log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
@@ -1328,16 +1332,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                     temp_buffer[0] = '\0';
 
                     if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
-                        // Extract counter name
-                        const char* counter_name = nullptr;
-                        if (func->args[0]->type == CSS_VALUE_TYPE_STRING) {
-                            counter_name = func->args[0]->data.string;
-                        } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                            counter_name = info ? info->name : nullptr;
-                        } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
-                            counter_name = func->args[0]->data.custom_property.name;
-                        }
+                        const char* counter_name = css_value_extract_name(func->args[0]);
 
                         uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
                         if (func->arg_count >= 2 && func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1359,16 +1354,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                             log_debug("[Counter] counter(%s, style=%u) = '%s'", counter_name, style_type, temp_buffer);
                         }
                     } else if (strcmp(func->name, "counters") == 0 && func->arg_count >= 2) {
-                        // Extract counter name
-                        const char* counter_name = nullptr;
-                        if (func->args[0]->type == CSS_VALUE_TYPE_STRING) {
-                            counter_name = func->args[0]->data.string;
-                        } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                            counter_name = info ? info->name : nullptr;
-                        } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
-                            counter_name = func->args[0]->data.custom_property.name;
-                        }
+                        const char* counter_name = css_value_extract_name(func->args[0]);
 
                         const char* separator = func->args[1]->data.string;
                         uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
@@ -1393,16 +1379,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 }
                 if (func && func->name && strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
                     // Handle attr() function in list
-                    const char* attr_name = NULL;
-                    CssValue* arg0 = func->args[0];
-                    if (arg0) {
-                        if (arg0->type == CSS_VALUE_TYPE_STRING) attr_name = arg0->data.string;
-                        else if (arg0->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(arg0->data.keyword);
-                            attr_name = info ? info->name : NULL;
-                        }
-                        else if (arg0->type == CSS_VALUE_TYPE_CUSTOM) attr_name = arg0->data.custom_property.name;
-                    }
+                    const char* attr_name = css_value_extract_name(func->args[0]);
                     if (attr_name) {
                         const char* attr_value = dom_element_get_attribute(element, attr_name);
                         if (attr_value) {
@@ -1570,31 +1547,8 @@ bool dom_element_link_child(DomElement* parent, DomElement* child) {
         return false;
     }
 
-    // Set parent relationship
-    child->parent = parent;
-
     // Add to parent's DOM sibling chain
-    if (!parent->first_child) {
-        // First child
-        parent->first_child = child;
-        parent->last_child = child;
-        child->prev_sibling = NULL;
-        child->next_sibling = NULL;
-    } else {
-        // Append to last child (use last_child for efficiency)
-        DomNode* last = parent->last_child;
-        if (!last) {
-            // Fallback if last_child not properly maintained
-            last = parent->first_child;
-            while (last->next_sibling) {
-                last = last->next_sibling;
-            }
-        }
-        last->next_sibling = child;
-        child->prev_sibling = last;
-        child->next_sibling = NULL;
-        parent->last_child = child;
-    }
+    dom_append_to_sibling_chain(parent, child);
 
     log_debug("dom_element_link_child: linked child to DOM chain (Lambda tree unchanged)");
     return true;
@@ -1642,29 +1596,7 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
     log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent->native_element->length);
 
     // Update DOM sibling chain
-    child->parent = parent;
-
-    if (!parent->first_child) {
-        // First child
-        parent->first_child = child;
-        parent->last_child = child;
-        child->prev_sibling = NULL;
-        child->next_sibling = NULL;
-    } else {
-        // Append to last child (use last_child for efficiency)
-        DomNode* last = parent->last_child;
-        if (!last) {
-            // Fallback if last_child not properly maintained
-            last = parent->first_child;
-            while (last->next_sibling) {
-                last = last->next_sibling;
-            }
-        }
-        last->next_sibling = child;
-        child->prev_sibling = last;
-        child->next_sibling = NULL;
-        parent->last_child = child;
-    }
+    dom_append_to_sibling_chain(parent, child);
 
     log_debug("dom_element_append_child: appended element to parent (both Lambda tree and DOM chain updated)");
 
@@ -2255,28 +2187,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     }
 
     // Add to DOM sibling chain
-    text_node->parent = parent;
-    if (!parent->first_child) {
-        // First child
-        parent->first_child = text_node;
-        parent->last_child = text_node;
-        text_node->prev_sibling = nullptr;
-        text_node->next_sibling = nullptr;
-    } else {
-        // Append to last child (use last_child for efficiency)
-        DomNode* last = parent->last_child;
-        if (!last) {
-            // Fallback if last_child not properly maintained
-            last = parent->first_child;
-            while (last->next_sibling) {
-                last = last->next_sibling;
-            }
-        }
-        last->next_sibling = text_node;
-        text_node->prev_sibling = last;
-        text_node->next_sibling = nullptr;
-        parent->last_child = text_node;
-    }
+    dom_append_to_sibling_chain(parent, text_node);
 
     // Update parent element pointer (INLINE mode: no-op, but kept for consistency)
     parent->native_element = result.element;
@@ -2508,28 +2419,7 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
     }
 
     // Add to DOM sibling chain
-    comment_node->parent = parent;
-    if (!parent->first_child) {
-        // First child
-        parent->first_child = comment_node;
-        parent->last_child = comment_node;
-        comment_node->prev_sibling = nullptr;
-        comment_node->next_sibling = nullptr;
-    } else {
-        // Append to last child (use last_child for efficiency)
-        DomNode* last = parent->last_child;
-        if (!last) {
-            // Fallback if last_child not properly maintained
-            last = parent->first_child;
-            while (last->next_sibling) {
-                last = last->next_sibling;
-            }
-        }
-        last->next_sibling = comment_node;
-        comment_node->prev_sibling = last;
-        comment_node->next_sibling = nullptr;
-        parent->last_child = comment_node;
-    }
+    dom_append_to_sibling_chain(parent, comment_node);
 
     log_debug("dom_element_append_comment: appended comment '%s'", comment_content);
 
@@ -2753,27 +2643,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = dom_comment_create(child_elem, dom_elem);
                 if (comment_node) {
-                    comment_node->parent = dom_elem;
-
                     // Add to DOM sibling chain
-                    if (!dom_elem->first_child) {
-                        dom_elem->first_child = comment_node;
-                        dom_elem->last_child = comment_node;
-                        comment_node->prev_sibling = nullptr;
-                        comment_node->next_sibling = nullptr;
-                    } else {
-                        // Use last_child for O(1) append
-                        DomNode* last = dom_elem->last_child;
-                        if (!last) {
-                            // Fallback if last_child not set
-                            last = dom_elem->first_child;
-                            while (last->next_sibling) last = last->next_sibling;
-                        }
-                        last->next_sibling = comment_node;
-                        comment_node->prev_sibling = last;
-                        comment_node->next_sibling = nullptr;
-                        dom_elem->last_child = comment_node;
-                    }
+                    dom_append_to_sibling_chain(dom_elem, comment_node);
 
                     log_debug("  Created comment node at index %lld: '%s'",
                               i, comment_node->content);
@@ -2804,31 +2675,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                 // Create text node (preserves Lambda String reference)
                 DomText* text_node = dom_text_create(text_str, dom_elem);
                 if (text_node) {
-                    text_node->parent = dom_elem;
-
                     // Add text node to DOM sibling chain
-                    if (!dom_elem->first_child) {
-                        // First child
-                        dom_elem->first_child = text_node;
-                        dom_elem->last_child = text_node;
-                        text_node->prev_sibling = nullptr;
-                        text_node->next_sibling = nullptr;
-                    } else {
-                        // Use last_child for O(1) append
-                        DomNode* last = dom_elem->last_child;
-                        if (!last) {
-                            // Fallback if last_child not set (shouldn't happen)
-                            last = dom_elem->first_child;
-                            while (last->next_sibling) {
-                                last = last->next_sibling;
-                            }
-                        }
-                        // Append text node to last child
-                        last->next_sibling = text_node;
-                        text_node->prev_sibling = last;
-                        text_node->next_sibling = nullptr;
-                        dom_elem->last_child = text_node;
-                    }
+                    dom_append_to_sibling_chain(dom_elem, text_node);
 
                     log_debug("  Created text node at index %lld: '%s' (len=%zu)",
                               i, text_str->chars, text_str->len);
@@ -2841,31 +2689,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                 // Create symbol text node (will be resolved at render time)
                 DomText* text_node = dom_text_create_symbol(symbol_str, dom_elem);
                 if (text_node) {
-                    text_node->parent = dom_elem;
-
                     // Add symbol node to DOM sibling chain
-                    if (!dom_elem->first_child) {
-                        // First child
-                        dom_elem->first_child = text_node;
-                        dom_elem->last_child = text_node;
-                        text_node->prev_sibling = nullptr;
-                        text_node->next_sibling = nullptr;
-                    } else {
-                        // Use last_child for O(1) append
-                        DomNode* last = dom_elem->last_child;
-                        if (!last) {
-                            // Fallback if last_child not set (shouldn't happen)
-                            last = dom_elem->first_child;
-                            while (last->next_sibling) {
-                                last = last->next_sibling;
-                            }
-                        }
-                        // Append symbol node to last child
-                        last->next_sibling = text_node;
-                        text_node->prev_sibling = last;
-                        text_node->next_sibling = nullptr;
-                        dom_elem->last_child = text_node;
-                    }
+                    dom_append_to_sibling_chain(dom_elem, text_node);
 
                     log_debug("  Created symbol node at index %lld: '%s' (len=%zu)",
                               i, symbol_str->chars, symbol_str->len);

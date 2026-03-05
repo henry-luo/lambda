@@ -282,6 +282,30 @@ inline char* read_expected_output(const char* expected_file_path) {
     return content;
 }
 
+// Helper function to strip __TIMING__ lines from output (benchmark instrumentation)
+inline void strip_timing_lines(char* output) {
+    if (!output) return;
+    char* read = output;
+    char* write = output;
+    while (*read) {
+        // check if current line starts with __TIMING__:
+        if (strncmp(read, "__TIMING__:", 11) == 0) {
+            // skip this entire line
+            while (*read && *read != '\n') read++;
+            if (*read == '\n') read++;
+            continue;
+        }
+        // copy this line
+        while (*read && *read != '\n') {
+            *write++ = *read++;
+        }
+        if (*read == '\n') {
+            *write++ = *read++;
+        }
+    }
+    *write = '\0';
+}
+
 // Helper function to test lambda script against expected output file
 inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural, bool use_mir = false) {
     // Get script name for better error messages
@@ -295,6 +319,10 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path;
 
     // Trim whitespace from actual output
+    trim_trailing_whitespace(actual_output);
+
+    // Strip __TIMING__ lines (benchmark instrumentation — variable across runs)
+    strip_timing_lines(actual_output);
     trim_trailing_whitespace(actual_output);
 
     // Compare outputs
