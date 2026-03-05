@@ -31,9 +31,6 @@ const decimal_literal = choice(
   seq('.', decimal_digits),
 );
 
-const base64_unit = /[A-Za-z0-9+/]{4}/;
-const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
-
 // need to exclude relational exprs in attr (to avoid conflicts with element tags)
 // pipe operators are always included
 function binary_expr($, in_attr) {
@@ -93,15 +90,6 @@ function type_pattern(type_expr) {
   );
 }
 
-function time() {
-  // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm or hh
-  return seq(digit, digit, optional(seq(':', digit, digit)), optional(seq(':', digit, digit)),
-    optional((seq('.', digit, digit, digit))),
-    // timezone
-    optional(choice('z', 'Z', seq(choice('+', '-'), digit, digit, optional(seq(':', digit, digit)))))
-  );
-}
-
 function _attr_content_type($) {
   return choice(
     seq(alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
@@ -132,7 +120,6 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._number,
-    $._datetime,
   ],
 
   conflicts: $ => [
@@ -143,7 +130,7 @@ module.exports = grammar({
     [$._attr_expr, $._expr],                       // else { expr } in if_expr: block content vs map
     [$.attr_binary_expr, $._expr],                 // else { expr + ... } binary in block vs map
     [$._statement, $._expr],                       // else { stam } in if_expr: statement vs expr in block
-    [$.raise_expr, $.raise_stam],                  // else { raise expr } in block
+    [$._expr, $.raise_stam],                       // raise expr could be raise_expr or start of raise_stam
     [$.let_expr, $.let_stam],                      // else { let x = ... } in block
     [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
     [$._type_expr, $.concat_type],                 // unary_type could be complete or start of concat
@@ -242,14 +229,9 @@ module.exports = grammar({
       "'",
     )),
 
-    binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
-
-    // whitespace allowed in hex and base64 binary
-    hex_binary: _ => token(seq(optional("\\x"), repeat1(/[0-9a-fA-F\s]/))),
-
-    base64_binary: _ => token(seq("\\64",
-      repeat1(choice(base64_unit, /\s+/)), optional(base64_padding)
-    )),
+    // binary token: b'...' containing hex or base64 data
+    // Actual parsing done by AST builder
+    binary: _ => token(seq("b'", repeat(/[^']/), "'")),
 
     _number: $ => choice($.integer, $.float, $.decimal),
 
@@ -262,25 +244,19 @@ module.exports = grammar({
       return token( seq(choice(decimal_literal, integer_literal), choice('n','N')) );
     },
 
-    // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
-    time: _ => token.immediate(time()),
-    // date-time
-    datetime: _ => token.immediate(
-      seq(optional('-'), digit, digit, digit, digit, optional(seq('-', digit, digit)), optional(seq('-', digit, digit)),
-        optional(seq(/\s+|T|t/, time()))
-      )),
+    // datetime token: t'...' containing date/time text
+    // Actual parsing done by AST builder via datetime_parse()
+    datetime: _ => token(seq(
+      "t'",
+      repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)),
+      "'",
+    )),
 
-    _datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
 
-    index: $ => {
-      return token(integer_literal);
-    },
 
     // Note: 'null' is now part of $.base_type, no separate rule needed
-    true: _ => 'true',
-    false: _ => 'false',
-    inf: _ => 'inf',
-    nan: _ => 'nan',
+    // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
+    named_value: _ => token(choice('true', 'false', 'inf', 'nan')),
 
     // Containers: list, array, map, element
 
@@ -290,8 +266,6 @@ module.exports = grammar({
       $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
-      $.string_pattern,
-      $.symbol_pattern,
     ),
 
     _content_expr: $ => choice(
@@ -335,10 +309,9 @@ module.exports = grammar({
       $._number,
       $.string,
       $.symbol,
-      $._datetime,
+      $.datetime,
       $.binary,
-      $.true,
-      $.false,
+      $.named_value,
     ),
 
     map_item: $ => seq(
@@ -416,7 +389,6 @@ module.exports = grammar({
     _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
-      $.spread_expr,
       $.binary_expr,
       $.let_expr,
       $.if_expr,
@@ -432,12 +404,9 @@ module.exports = grammar({
 
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
-      $.true,
-      $.false,
-      $.inf,
-      $.nan,
+      $.named_value,
       $._number,
-      $._datetime,
+      $.datetime,
       $.string,
       $.symbol,
       $.binary,
@@ -465,10 +434,8 @@ module.exports = grammar({
       '(', comma_sep( field('argument', choice($.named_argument, $._expr)) ), ')',
     ),
 
-    import: _ => token('import'),
-
     call_expr: $ => prec.right(100, seq(
-      field('function', choice($.primary_expr, $.import)),
+      field('function', choice($.primary_expr, 'import')),
       $._arguments,
       optional(field('propagate', '^')),
     )),
@@ -485,30 +452,28 @@ module.exports = grammar({
       field('query', $.primary_type),
     ),
 
-    // Path root: / for absolute file paths
-    path_root: _ => '/',
+    // Path prefix: /, ., or .. for path expressions
+    // Combines path_root, path_self, path_parent into single token for path_expr
+    _path_prefix: _ => token(choice('/', '.', '..')),
 
-    // Variadic marker: ... (higher priority than path_self and path_parent)
+    // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
 
-    // Path self: . for relative paths (current directory)
-    path_self: _ => '.',
-
-    // Path parent: .. for parent directory
+    // Path parent: .. for parent directory (kept separate for parent_expr)
     path_parent: _ => '..',
 
     // Path expression: /, ., or .. optionally followed by a field
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
-      choice($.path_root, $.path_self, $.path_parent),
-      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
+      $._path_prefix,
+      optional(field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type)))
     )),
 
     // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
     // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
     member_expr: $ => prec.dynamic(1, seq(
       field('object', $.primary_expr), ".",
-      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type))
+      field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent
@@ -518,9 +483,8 @@ module.exports = grammar({
       repeat(seq('_', $.path_parent))   // _.. for additional parent levels
     ),
 
-    // Path wildcards for glob patterns
-    path_wildcard: _ => token('*'),               // single wildcard: match one segment
-    path_wildcard_recursive: _ => token('**'),    // recursive wildcard: match zero or more segments
+    // Path wildcard: * (single segment) or ** (recursive, zero or more segments)
+    path_wildcard: _ => token(choice('**', '*')),
 
     binary_expr: $ => choice(
       ...binary_expr($, false),
@@ -532,14 +496,9 @@ module.exports = grammar({
     // Current key/index reference in pipe context
     current_index: _ => '~#',
 
+    // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
-      field('operator', choice('not', '!', '-', '+', '^')),
-      field('operand', $._expr),
-    )),
-
-    // Spread expression: *expr - spreads array/list items into container
-    spread_expr: $ => prec.left(seq(
-      field('operator', '*'),
+      field('operator', choice('not', '!', '-', '+', '^', '*')),
       field('operand', $._expr),
     )),
 
@@ -583,7 +542,7 @@ module.exports = grammar({
       '{', field('body', $.content), '}',
     ),
 
-    // fn with expr body
+    // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier),
@@ -812,10 +771,9 @@ module.exports = grammar({
     )),
 
     // raise statement (procedural only) - raises an error to caller
-    // use prec.right to prefer consuming expression when present
+    // Reuses raise_expr to avoid GLR conflict between raise_expr and raise_stam
     raise_stam: $ => prec.right(seq(
-      'raise',
-      field('value', $._expr),
+      $.raise_expr,
       optional(';')
     )),
 
@@ -925,8 +883,7 @@ module.exports = grammar({
       $.element_type,
       $.fn_type,
       // String/symbol pattern atoms (unified into type system)
-      $.pattern_char_class,     // \d, \w, \s, \a
-      $.pattern_any,            // \. (any character)
+      $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
       $.negation_type,          // !T - prefix negation
     ),
 
@@ -1051,8 +1008,11 @@ module.exports = grammar({
       '}'
     )),
 
+    // type_stam handles type aliases, string patterns, and symbol patterns.
+    // The leading keyword distinguishes them; AST builder checks the text.
     type_stam: $ => seq(
-      'type', field('declare', alias($.type_assign, $.assign_expr)),
+      field('kind', choice('type', 'string', 'symbol')),
+      field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
@@ -1069,28 +1029,11 @@ module.exports = grammar({
       '\\w',  // word [a-zA-Z0-9_]
       '\\s',  // whitespace
       '\\a',  // alpha [a-zA-Z]
+      '\\.',  // any character
     )),
 
-    // Backslash-dot matches any character
-    pattern_any: _ => '\\.',
-
-    // String pattern definition: string name = type_expr
-    // type_expr now includes concat_type for pattern concatenation.
-    string_pattern: $ => prec.right(seq(
-      'string',
-      field('name', $.identifier),
-      '=',
-      field('pattern', $._type_expr),
-    )),
-
-    // Symbol pattern definition: symbol name = type_expr
-    // type_expr now includes concat_type for pattern concatenation.
-    symbol_pattern: $ => prec.right(seq(
-      'symbol',
-      field('name', $.identifier),
-      '=',
-      field('pattern', $._type_expr),
-    )),    
+    // NOTE: string_pattern and symbol_pattern are now handled by type_stam.
+    // type_stam's 'kind' field distinguishes 'type' vs 'string' vs 'symbol'.
 
     // ==================== Module Imports ====================
     relative_name: $ => repeat1(seq(

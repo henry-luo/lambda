@@ -1751,11 +1751,20 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
                   dom_doc->stylesheet_count);
     }
 
-    // Step 2c: Execute inline <script> elements and body onload handlers
-    // Scripts run after CSS parsing but before CSS cascade.
-    // This enables JS-based DOM mutations (className changes, appendChild, etc.)
-    // to take effect before styles are resolved and layout is computed.
-    // getComputedStyle can now query parsed stylesheets via on-demand matching.
+    // Step 2c: Apply inline style="" attributes BEFORE scripts
+    // Inline style="" attributes from HTML are applied first as the baseline.
+    // JS style modifications (element.style.xxx = 'value') are applied after
+    // via dom_element_apply_inline_style with a later source_order, so they
+    // correctly override the original HTML inline styles in the cascade.
+    // This also ensures the HTML→DOM tree mapping is pristine (no JS mutations yet).
+    log_debug("[Lambda CSS] Applying inline style attributes (before scripts)...");
+    apply_inline_styles_to_tree(dom_root, html_root, pool);
+
+    // Step 2d: Execute inline <script> elements and body onload handlers
+    // Scripts run after inline style application so JS style changes override HTML attrs.
+    // Scripts run before stylesheet cascade so JS DOM mutations (className changes,
+    // appendChild, removeChild, etc.) take effect before styles are resolved.
+    // getComputedStyle can query parsed stylesheets via on-demand matching.
     dom_doc->root = dom_root;  // set root for JS DOM API access
     execute_document_scripts(html_root, dom_doc, pool);
 
@@ -1806,10 +1815,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     }
 
     auto t_inline_done = high_resolution_clock::now();
-
-    // Step 7: Apply inline style="" attributes (highest priority)
-    log_debug("[Lambda CSS] Applying inline style attributes...");
-    apply_inline_styles_to_tree(dom_root, html_root, pool);
     log_debug("[Lambda CSS] CSS cascade complete");
 
     auto t_cascade = high_resolution_clock::now();

@@ -799,23 +799,24 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
     TSSymbol symbol = ts_node_symbol(node);
 
     // New path tokens: /, ., ..
-    if (symbol == SYM_PATH_ROOT) {
-        return PATH_SCHEME_FILE;  // / is absolute file path
-    }
-    if (symbol == SYM_PATH_SELF) {
-        return PATH_SCHEME_REL;   // . is relative path
-    }
+    // _path_prefix is a hidden token, so standalone path_root/path_self won't appear
+    // path_parent is still a separate visible symbol for parent_expr
     if (symbol == SYM_PATH_PARENT) {
         return PATH_SCHEME_PARENT; // .. is parent path
     }
 
-    // path_expr: (/ | . | ..) optional(field)
+    // path_expr: _path_prefix optional(field)
     if (symbol == SYM_PATH_EXPR) {
-        // determine scheme from first child (path_root, path_self, or path_parent)
-        TSNode first_child = ts_node_child(node, 0);
-        TSSymbol first_sym = ts_node_symbol(first_child);
-        int scheme = (first_sym == SYM_PATH_ROOT) ? PATH_SCHEME_FILE :
-                     (first_sym == SYM_PATH_PARENT) ? PATH_SCHEME_PARENT : PATH_SCHEME_REL;
+        // determine scheme from path_expr source text (first char(s) are the prefix)
+        StrView source = ts_node_source(tp, node);
+        int scheme;
+        if (source.length >= 1 && source.str[0] == '/') {
+            scheme = PATH_SCHEME_FILE;
+        } else if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
+            scheme = PATH_SCHEME_PARENT;
+        } else {
+            scheme = PATH_SCHEME_REL;
+        }
 
         // check for optional field
         TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
@@ -834,15 +835,10 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
                 arraylist_append(segments, seg);
             }
             else if (field_sym == SYM_PATH_WILDCARD) {
+                StrView wc_src = ts_node_source(tp, field_node);
                 AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
                 seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD;
-                arraylist_append(segments, seg);
-            }
-            else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
-                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
-                seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD_REC;
+                seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
                 arraylist_append(segments, seg);
             }
         }
@@ -885,17 +881,10 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
                 arraylist_append(segments, seg);
             }
             else if (field_sym == SYM_PATH_WILDCARD) {
-                // single wildcard (*) - match one segment
+                StrView wc_src = ts_node_source(tp, field_node);
                 AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
                 seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD;
-                arraylist_append(segments, seg);
-            }
-            else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
-                // recursive wildcard (**) - match zero or more segments
-                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
-                seg->name = NULL;
-                seg->type = LPATH_SEG_WILDCARD_REC;
+                seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
                 arraylist_append(segments, seg);
             }
             return scheme;
@@ -1703,29 +1692,35 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // Empty strings ("" or '') map to null in Lambda
     // With single-token strings/symbols, we parse the raw token text directly
-    // Binary is still a multi-node structure: b' + hex_binary/base64_binary + '
+    // Binary is now a single token: b'content'
     String* str;
     log_debug("build lit string with symbol: %d", symbol);
 
-    // Handle binary separately since it has child nodes
+    // Handle binary separately — extract content between b' and '
     if (symbol == SYM_BINARY) {
         TypeString* str_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeString));
         str_type->is_const = 1;  str_type->is_literal = 1;
 
-        // Binary has a child node (hex_binary or base64_binary)
-        int cnt = ts_node_named_child_count(node);
-        if (cnt == 0) {
+        int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+        const char* raw = tp->source + start;
+        int raw_len = end - start;
+
+        // Skip b' prefix (2 chars) and trailing ' (1 char)
+        const char* content_start = raw + 2;
+        int content_len = raw_len - 3;
+
+        // Skip leading/trailing whitespace inside the quotes
+        while (content_len > 0 && (*content_start == ' ' || *content_start == '\n' || *content_start == '\r' || *content_start == '\t')) { content_start++; content_len--; }
+        while (content_len > 0 && (content_start[content_len - 1] == ' ' || content_start[content_len - 1] == '\n' || content_start[content_len - 1] == '\r' || content_start[content_len - 1] == '\t')) { content_len--; }
+
+        if (content_len <= 0) {
             log_debug("build_lit_string: empty binary literal, returning null type");
             return &LIT_NULL;
         }
 
-        TSNode child = ts_node_named_child(node, 0);
-        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        int content_len = end - start;
-
         str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
         str_type->string = str;
-        memcpy(str->chars, tp->source + start, content_len);
+        memcpy(str->chars, content_start, content_len);
         str->chars[content_len] = '\0';
         str->len = content_len;
         str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
@@ -1995,14 +1990,21 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int datetime_len = end - start;
 
     TypeDateTime* dt_type = (TypeDateTime*)alloc_type(tp->pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
     dt_type->is_const = 1;  dt_type->is_literal = 1;
 
-    // Use tp->source string directly
-    const char* datetime_start = tp->source + start;
-    // Parse the DateTime string directly using ast_pool without allocating datetime_str
+    // Token is t'...' — skip the t' prefix and trailing '
+    const char* raw = tp->source + start;
+    int raw_len = end - start;
+    const char* datetime_start = raw + 2;  // skip t'
+    int datetime_len = raw_len - 3;        // exclude t' and trailing '
+
+    // Skip leading/trailing whitespace inside the quotes
+    while (datetime_len > 0 && *datetime_start == ' ') { datetime_start++; datetime_len--; }
+    while (datetime_len > 0 && datetime_start[datetime_len - 1] == ' ') { datetime_len--; }
+
+    // Parse the DateTime string directly using ast_pool
     char* parse_end = NULL;
     DateTime* dt = datetime_parse(tp->pool, datetime_start, DATETIME_PARSE_LAMBDA, &parse_end);
 
@@ -2210,11 +2212,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
             ast_node->type = ast_node->expr->type;
         }
     }
-    else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
-        ast_node->type = &LIT_BOOL;
-    }
-    else if (symbol == sym_inf || symbol == sym_nan) {
-        ast_node->type = build_lit_float(tp, child);
+    else if (symbol == SYM_NAMED_VALUE) {
+        StrView text = ts_node_source(tp, child);
+        if (strview_equal(&text, "true") || strview_equal(&text, "false")) {
+            ast_node->type = &LIT_BOOL;
+        } else {
+            ast_node->type = build_lit_float(tp, child);
+        }
     }
     else if (symbol == SYM_INT) {
         // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
@@ -2249,7 +2253,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
         ast_node->type = build_lit_string(tp, child, symbol);
     }
-    else if (symbol == SYM_DATETIME || symbol == SYM_TIME) {
+    else if (symbol == SYM_DATETIME) {
         ast_node->type = build_lit_datetime(tp, child, symbol);
     }
     else if (symbol == SYM_IDENT) {
@@ -2462,6 +2466,8 @@ AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node);
+
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build unary expr");
 
@@ -2470,6 +2476,10 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     StrView op = ts_node_source(tp, op_node);
     if (strview_equal(&op, "!")) {
         return build_type_negation_expr(tp, bi_node);
+    }
+    // * operator is spread — route to build_spread_expr
+    if (strview_equal(&op, "*")) {
+        return build_spread_expr(tp, bi_node);
     }
 
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
@@ -3464,6 +3474,45 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
 }
 
 AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
+    // For type_stam: check the 'kind' field to detect string/symbol pattern definitions
+    bool is_string_pattern = false;
+    bool is_symbol_pattern = false;
+    if (symbol == SYM_TYPE_DEFINE) {
+        TSNode kind_node = ts_node_child_by_field_id(let_node, FIELD_KIND);
+        if (!ts_node_is_null(kind_node)) {
+            StrView kind = ts_node_source(tp, kind_node);
+            if (strview_equal(&kind, "string")) {
+                is_string_pattern = true;
+            } else if (strview_equal(&kind, "symbol")) {
+                is_symbol_pattern = true;
+            }
+        }
+    }
+
+    // For string/symbol pattern definitions, build pattern nodes
+    if (is_string_pattern || is_symbol_pattern) {
+        // Build from declare children (type_assign aliased as assign_expr)
+        TSTreeCursor cursor = ts_tree_cursor_new(let_node);
+        bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+        AstNode* first = NULL;
+        AstNode* prev = NULL;
+        while (has_node) {
+            TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+            if (field_id == FIELD_DECLARE) {
+                TSNode child = ts_tree_cursor_current_node(&cursor);
+                AstNode* pattern = build_string_pattern(tp, child, is_symbol_pattern);
+                if (pattern) {
+                    if (prev) prev->next = pattern;
+                    else first = pattern;
+                    prev = pattern;
+                }
+            }
+            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        }
+        ts_tree_cursor_delete(&cursor);
+        return first;
+    }
+
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp,
         symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM :
         symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
@@ -4501,14 +4550,6 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
             return build_range_type(tp, child);
         case SYM_PATTERN_CHAR_CLASS:
             return build_pattern_char_class(tp, child);
-        case SYM_PATTERN_ANY: {
-            // Build a char class node for '\.'
-            AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
-                alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
-            ast_node->char_class = PATTERN_ANY;
-            ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-            return (AstNode*)ast_node;
-        }
         case SYM_COMMENT:
             break; // skip comments
         default: // literal values
@@ -5463,8 +5504,10 @@ AstNode* build_raise_stam(Transpiler* tp, TSNode raise_node) {
 
     AstRaiseNode* ast_node = (AstRaiseNode*)alloc_ast_node(tp, AST_NODE_RAISE_STAM, raise_node, sizeof(AstRaiseNode));
 
-    // build required error value
-    TSNode value_node = ts_node_child_by_field_id(raise_node, FIELD_VALUE);
+    // raise_stam now wraps a raise_expr child — get the value from it
+    TSNode raise_expr_node = ts_node_child(raise_node, 0);
+    TSNode value_node = ts_node_is_null(raise_expr_node) ? raise_expr_node
+                        : ts_node_child_by_field_id(raise_expr_node, FIELD_VALUE);
     if (!ts_node_is_null(value_node)) {
         ast_node->value = build_expr(tp, value_node);
         ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ERROR;
@@ -6430,8 +6473,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_expr(tp, expr_node);
     case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
-    case SYM_SPREAD_EXPR:
-        return build_spread_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
     case SYM_CURRENT_ITEM:
@@ -6526,18 +6567,20 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_func(tp, expr_node, false, false);
     case SYM_STRING:  case SYM_SYMBOL:  case SYM_BINARY:
         return build_lit_node(tp, expr_node, true, symbol);
-    case SYM_DATETIME:  case SYM_TIME:
-        return build_lit_node(tp, expr_node, false, symbol);
-        break;
-    case SYM_TRUE:  case SYM_FALSE: {
-        AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        b_node->type = &LIT_BOOL;
-        return (AstNode*)b_node;
+    case SYM_DATETIME: {
+        AstPrimaryNode* dt_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        dt_node->type = build_lit_datetime(tp, expr_node, symbol);
+        return (AstNode*)dt_node;
     }
-    case sym_inf:  case sym_nan: {
-        AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        f_node->type = build_lit_float(tp, expr_node);
-        return (AstNode*)f_node;
+    case SYM_NAMED_VALUE: {
+        AstPrimaryNode* nv_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        StrView text = ts_node_source(tp, expr_node);
+        if (strview_equal(&text, "true") || strview_equal(&text, "false")) {
+            nv_node->type = &LIT_BOOL;
+        } else {
+            nv_node->type = build_lit_float(tp, expr_node);
+        }
+        return (AstNode*)nv_node;
     }
     case SYM_INT: {
         AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
@@ -6594,13 +6637,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_negation_type(tp, expr_node);
     case SYM_PATTERN_CHAR_CLASS:
         return build_pattern_char_class(tp, expr_node);
-    case SYM_PATTERN_ANY: {
-        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, expr_node, sizeof(AstPatternCharClassNode));
-        ast_node->char_class = PATTERN_ANY;
-        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
-    }
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
@@ -6609,18 +6645,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         // already processed
         return NULL;
     case SYM_COMMENT:
-        return NULL;
-    // String/Symbol Pattern nodes
-    case SYM_STRING_PATTERN:
-        return build_string_pattern(tp, expr_node, false);
-    case SYM_SYMBOL_PATTERN:
-        return build_string_pattern(tp, expr_node, true);
-    case SYM_INDEX:
-        // This is likely a parsing error - index tokens should not appear as standalone expressions
-        // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
-        // or case like "12.34.56"
-        record_semantic_error(tp, expr_node, ERR_INVALID_LITERAL,
-            "Unexpected token - possible malformed number or range (use 'to' instead of '..')");
         return NULL;
     default:
         log_debug("unknown syntax node: %s", ts_node_type(expr_node));
@@ -6887,7 +6911,7 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
         default: ast_node->char_class = PATTERN_ANY; break;
         }
     } else {
-        // Single dot for any character
+        // \. for any character
         ast_node->char_class = PATTERN_ANY;
     }
 
@@ -6971,8 +6995,11 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // Get pattern expression — now uses unified _type_expr, built via build_expr()
-    TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
+    // Get pattern expression — from type_assign's 'as' field (or legacy 'pattern' field)
+    TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_AS);
+    if (ts_node_is_null(pattern_node)) {
+        pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
+    }
     ast_node->as = build_expr(tp, pattern_node);
 
     // Type is pattern type
