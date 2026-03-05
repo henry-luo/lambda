@@ -65,10 +65,8 @@ extern "C" {
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
 #define SYM_MATCH_EXPR sym_match_expr
-#define SYM_MATCH_ARM_EXPR sym_match_arm_expr
-#define SYM_MATCH_DEFAULT_EXPR sym_match_default_expr
-#define SYM_MATCH_ARM_STAM sym_match_arm_stam
-#define SYM_MATCH_DEFAULT_STAM sym_match_default_stam
+#define SYM_MATCH_ARM sym_match_arm
+#define SYM_MATCH_DEFAULT sym_match_default
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
 #define SYM_PUB_STAM sym_pub_stam
