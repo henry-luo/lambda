@@ -4664,14 +4664,6 @@
     "named": false
   },
   {
-    "type": "any",
-    "named": false
-  },
-  {
-    "type": "array",
-    "named": false
-  },
-  {
     "type": "as",
     "named": false
   },
@@ -4690,14 +4682,6 @@
   {
     "type": "base64_binary",
     "named": true
-  },
-  {
-    "type": "binary",
-    "named": false
-  },
-  {
-    "type": "bool",
-    "named": false
   },
   {
     "type": "break",
@@ -4728,24 +4712,12 @@
     "named": true
   },
   {
-    "type": "date",
-    "named": false
-  },
-  {
     "type": "datetime",
     "named": true
   },
   {
-    "type": "datetime",
-    "named": false
-  },
-  {
     "type": "decimal",
     "named": true
-  },
-  {
-    "type": "decimal",
-    "named": false
   },
   {
     "type": "default",
@@ -4760,15 +4732,7 @@
     "named": false
   },
   {
-    "type": "element",
-    "named": false
-  },
-  {
     "type": "else",
-    "named": false
-  },
-  {
-    "type": "entity",
     "named": false
   },
   {
@@ -4781,10 +4745,6 @@
   },
   {
     "type": "float",
-    "named": false
-  },
-  {
-    "type": "float",
     "named": true
   },
   {
@@ -4793,10 +4753,6 @@
   },
   {
     "type": "for",
-    "named": false
-  },
-  {
-    "type": "function",
     "named": false
   },
   {
@@ -4828,14 +4784,6 @@
     "named": true
   },
   {
-    "type": "int",
-    "named": false
-  },
-  {
-    "type": "int64",
-    "named": false
-  },
-  {
     "type": "is",
     "named": false
   },
@@ -4848,14 +4796,6 @@
     "named": false
   },
   {
-    "type": "list",
-    "named": false
-  },
-  {
-    "type": "map",
-    "named": false
-  },
-  {
     "type": "match",
     "named": false
   },
@@ -4865,18 +4805,6 @@
   },
   {
     "type": "not",
-    "named": false
-  },
-  {
-    "type": "null",
-    "named": false
-  },
-  {
-    "type": "number",
-    "named": false
-  },
-  {
-    "type": "object",
     "named": false
   },
   {
@@ -4916,20 +4844,16 @@
     "named": false
   },
   {
-    "type": "range",
-    "named": false
-  },
-  {
     "type": "return",
     "named": false
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
@@ -4945,10 +4869,6 @@
   },
   {
     "type": "that",
-    "named": false
-  },
-  {
-    "type": "time",
     "named": false
   },
   {

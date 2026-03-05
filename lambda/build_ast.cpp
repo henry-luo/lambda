@@ -6770,6 +6770,16 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     }
     ts_tree_cursor_delete(&cursor);
     if (ast_node->module.length) {
+        // Check for built-in module imports (e.g., `import math`, `import io`)
+        // These modules are recognized at call sites by the AST builder
+        // and do not require loading an external script file.
+        if (strview_equal(&ast_node->module, "math") ||
+            strview_equal(&ast_node->module, "io")) {
+            log_debug("built-in module import: %.*s (no file loading needed)",
+                (int)ast_node->module.length, ast_node->module.str);
+            return NULL;  // no-op: built-in modules are resolved at call sites
+        }
+
         // Check if module is a bare URI (symbol literal like 'http://...')
         // This is a namespace-only import: import ns: 'url'
         if (ast_node->module.str[0] == '\'') {

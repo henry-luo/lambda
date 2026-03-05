@@ -6994,6 +6994,98 @@
         ]
       }
     },
+    "_base_type_kw": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "null"
+            },
+            {
+              "type": "STRING",
+              "value": "any"
+            },
+            {
+              "type": "STRING",
+              "value": "bool"
+            },
+            {
+              "type": "STRING",
+              "value": "int64"
+            },
+            {
+              "type": "STRING",
+              "value": "int"
+            },
+            {
+              "type": "STRING",
+              "value": "float"
+            },
+            {
+              "type": "STRING",
+              "value": "decimal"
+            },
+            {
+              "type": "STRING",
+              "value": "number"
+            },
+            {
+              "type": "STRING",
+              "value": "datetime"
+            },
+            {
+              "type": "STRING",
+              "value": "date"
+            },
+            {
+              "type": "STRING",
+              "value": "time"
+            },
+            {
+              "type": "STRING",
+              "value": "binary"
+            },
+            {
+              "type": "STRING",
+              "value": "range"
+            },
+            {
+              "type": "STRING",
+              "value": "list"
+            },
+            {
+              "type": "STRING",
+              "value": "array"
+            },
+            {
+              "type": "STRING",
+              "value": "map"
+            },
+            {
+              "type": "STRING",
+              "value": "element"
+            },
+            {
+              "type": "STRING",
+              "value": "entity"
+            },
+            {
+              "type": "STRING",
+              "value": "object"
+            },
+            {
+              "type": "STRING",
+              "value": "function"
+            }
+          ]
+        }
+      }
+    },
     "base_type": {
       "type": "PREC",
       "value": 1,
@@ -7001,12 +7093,8 @@
         "type": "CHOICE",
         "members": [
           {
-            "type": "STRING",
-            "value": "null"
-          },
-          {
-            "type": "STRING",
-            "value": "any"
+            "type": "SYMBOL",
+            "name": "_base_type_kw"
           },
           {
             "type": "STRING",
@@ -7014,43 +7102,7 @@
           },
           {
             "type": "STRING",
-            "value": "bool"
-          },
-          {
-            "type": "STRING",
-            "value": "int64"
-          },
-          {
-            "type": "STRING",
-            "value": "int"
-          },
-          {
-            "type": "STRING",
-            "value": "float"
-          },
-          {
-            "type": "STRING",
-            "value": "decimal"
-          },
-          {
-            "type": "STRING",
-            "value": "number"
-          },
-          {
-            "type": "STRING",
-            "value": "datetime"
-          },
-          {
-            "type": "STRING",
-            "value": "date"
-          },
-          {
-            "type": "STRING",
-            "value": "time"
-          },
-          {
-            "type": "STRING",
-            "value": "symbol"
+            "value": "type"
           },
           {
             "type": "STRING",
@@ -7058,43 +7110,7 @@
           },
           {
             "type": "STRING",
-            "value": "binary"
-          },
-          {
-            "type": "STRING",
-            "value": "range"
-          },
-          {
-            "type": "STRING",
-            "value": "list"
-          },
-          {
-            "type": "STRING",
-            "value": "array"
-          },
-          {
-            "type": "STRING",
-            "value": "map"
-          },
-          {
-            "type": "STRING",
-            "value": "element"
-          },
-          {
-            "type": "STRING",
-            "value": "entity"
-          },
-          {
-            "type": "STRING",
-            "value": "object"
-          },
-          {
-            "type": "STRING",
-            "value": "type"
-          },
-          {
-            "type": "STRING",
-            "value": "function"
+            "value": "symbol"
           }
         ]
       }

@@ -860,10 +860,18 @@ module.exports = grammar({
     )),
 
     // Built-in types as reserved keywords
-    base_type: _ => prec(1, choice(
-      'null', 'any', 'error', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
-      'datetime', 'date', 'time', 'symbol', 'string', 'binary', 'range',
-      'list', 'array', 'map', 'element', 'entity', 'object', 'type', 'function'
+    // _base_type_kw combines 20 keywords only used via base_type into a single token,
+    // reducing SYMBOL_COUNT by 19. Keywords also used standalone elsewhere
+    // ('error', 'type', 'string', 'symbol') remain as separate keywords.
+    _base_type_kw: _ => token(prec(1, choice(
+      'null', 'any', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
+      'datetime', 'date', 'time', 'binary', 'range',
+      'list', 'array', 'map', 'element', 'entity', 'object', 'function'
+    ))),
+
+    base_type: $ => prec(1, choice(
+      $._base_type_kw,
+      'error', 'type', 'string', 'symbol'
     )),
 
     // list_type for tuple types and pattern grouping
