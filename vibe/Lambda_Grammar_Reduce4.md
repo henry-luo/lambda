@@ -397,6 +397,53 @@ Token consolidation is the most effective parser reduction technique found. Each
 
 ---
 
+## Proposal 10: Merge `string_pattern`/`symbol_pattern` into `type_stam` — APPLIED ✓
+
+**Impact: Low (−0.28%)**
+
+`string_pattern` and `symbol_pattern` were standalone grammar rules with identical structure to `type_stam` (via `type_assign`):
+
+```js
+// Before: 3 separate rules
+type_stam:      'type'   identifier = _type_expr
+string_pattern: 'string' identifier = _type_expr
+symbol_pattern: 'symbol' identifier = _type_expr
+```
+
+### Applied Change
+
+Merged all three into `type_stam` by parameterizing the leading keyword:
+
+```js
+type_stam: $ => seq(
+  field('kind', choice('type', 'string', 'symbol')),
+  field('declare', alias($.type_assign, $.assign_expr)),
+  repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
+),
+```
+
+Removed `string_pattern` and `symbol_pattern` rules and their references in `_expr_stam`.
+
+**AST builder changes:**
+- `build_let_and_type_stam` now reads the `kind` field text via `ts_node_source()`. If `"string"` or `"symbol"`, routes to `build_string_pattern` instead of `build_assign_expr`.
+- `build_string_pattern` updated to read `FIELD_AS` (from `type_assign`) with fallback to `FIELD_PATTERN`.
+- Removed `SYM_STRING_PATTERN` and `SYM_SYMBOL_PATTERN` macros from `ast.hpp` and their `case` branches from `build_expr`.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,399,363 B | 8,375,586 B | **−23,777 B (−0.28%)** |
+| STATE_COUNT | 6,241 | 6,226 | −15 |
+| LARGE_STATE_COUNT | 1,480 | 1,480 | No change |
+| SYMBOL_COUNT | 234 | 232 | **−2** |
+| TOKEN_COUNT | 104 | 104 | No change |
+| Tests | 450/451 | **605/605** | All pass |
+
+**Verdict: Kept.** Modest size reduction (−24 KB, −2 symbols). Cleaner grammar — three near-identical rules consolidated into one. Also eliminates `'string'` and `'symbol'` as standalone anonymous keywords, which is a prerequisite for potentially merging them into `_base_type_kw` in the future.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -410,6 +457,7 @@ Token consolidation is the most effective parser reduction technique found. Each
 | 7th | #4 — Strategic inlining | Low | Medium | ❌ Failed (+0.7%) |
 | 8th | #7 — Consolidate access exprs | Medium | Low-Medium | ✅ Partial (−0.96%, −1 SYM) |
 | 9th | #9 — Reduce base_type keywords | Medium | Low | ✅ Applied (−20.2%, −19 SYM) |
+| 10th | #10 — Merge patterns into type_stam | Low | Low | ✅ Applied (−0.28%, −2 SYM) |
 
 ### Cumulative Results
 
@@ -420,6 +468,7 @@ Token consolidation is the most effective parser reduction technique found. Each
 | + Proposal 9 (_base_type_kw) | 8,482,463 | 6,264 | 1,482 | 237 | 104 |
 | + Proposal 8 (match arms) | 8,480,465 | 6,264 | 1,482 | 235 | 104 |
 | + Proposal 7 (query merge) | 8,399,363 | 6,241 | 1,480 | 234 | 104 |
-| **Total reduction** | **−2,232,346 (−21.0%)** | **−24** | **−652** | **−28** | **−20** |
+| + Proposal 10 (pattern merge) | 8,375,586 | 6,226 | 1,480 | 232 | 104 |
+| **Total reduction** | **−2,256,123 (−21.2%)** | **−39** | **−652** | **−30** | **−20** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

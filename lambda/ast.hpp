@@ -111,8 +111,6 @@ extern "C" {
 #define SYM_THAT_CONSTRAINT sym_that_constraint
 
 // String/Symbol Pattern symbols
-#define SYM_STRING_PATTERN sym_string_pattern
-#define SYM_SYMBOL_PATTERN sym_symbol_pattern
 #define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
 #define SYM_PATTERN_ANY sym_pattern_any
 #define SYM_OCCURRENCE_COUNT sym_occurrence_count

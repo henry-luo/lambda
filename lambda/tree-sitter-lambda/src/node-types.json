@@ -976,14 +976,6 @@
           "named": true
         },
         {
-          "type": "string_pattern",
-          "named": true
-        },
-        {
-          "type": "symbol_pattern",
-          "named": true
-        },
-        {
           "type": "type_stam",
           "named": true
         },
@@ -4147,90 +4139,6 @@
     }
   },
   {
-    "type": "string_pattern",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "pattern": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "concat_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "unary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "symbol_pattern",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "pattern": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "concat_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "unary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "that_constraint",
     "named": true,
     "fields": {
@@ -4289,6 +4197,24 @@
           {
             "type": "assign_expr",
             "named": true
+          }
+        ]
+      },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "string",
+            "named": false
+          },
+          {
+            "type": "symbol",
+            "named": false
+          },
+          {
+            "type": "type",
+            "named": false
           }
         ]
       }
@@ -4775,11 +4701,11 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
