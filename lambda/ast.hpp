@@ -9,8 +9,7 @@ extern "C" {
 #include "../lib/mempool.h"
 
 #define SYM_NULL sym_null
-#define SYM_TRUE sym_true
-#define SYM_FALSE sym_false
+#define SYM_NAMED_VALUE sym_named_value
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
 #define SYM_DECIMAL sym_decimal
@@ -19,7 +18,6 @@ extern "C" {
 // Note: string_content, symbol_content, escape_sequence no longer exist
 // as strings and symbols are now single tokens that include escapes
 #define SYM_DATETIME sym_datetime
-#define SYM_TIME sym_time
 #define SYM_BINARY sym_binary
 
 #define SYM_CONTENT sym_content
@@ -49,9 +47,7 @@ extern "C" {
 #define SYM_PATH_WILDCARD sym_path_wildcard
 #define SYM_PATH_WILDCARD_RECURSIVE sym_path_wildcard_recursive
 
-// Path root tokens: / for absolute, . for relative, .. for parent
-#define SYM_PATH_ROOT sym_path_root
-#define SYM_PATH_SELF sym_path_self
+// Path tokens: .. for parent (kept separate for parent_expr)\n// SYM_PATH_ROOT and SYM_PATH_SELF removed — merged into _path_prefix token
 #define SYM_PATH_PARENT sym_path_parent
 #define SYM_PATH_EXPR sym_path_expr
 #define SYM_PARENT_EXPR sym_parent_expr   // expr.. parent access shorthand
@@ -112,7 +108,7 @@ extern "C" {
 
 // String/Symbol Pattern symbols
 #define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
-#define SYM_PATTERN_ANY sym_pattern_any
+// SYM_PATTERN_ANY removed — merged into SYM_PATTERN_CHAR_CLASS
 #define SYM_OCCURRENCE_COUNT sym_occurrence_count
 // Unified type/pattern symbols
 #define SYM_TYPE_SEQ sym_type_seq
