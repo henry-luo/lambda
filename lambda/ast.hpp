@@ -36,7 +36,6 @@ extern "C" {
 #define SYM_INDEX_EXPR sym_index_expr
 #define SYM_CALL_EXPR sym_call_expr
 #define SYM_QUERY_EXPR sym_query_expr
-#define SYM_DIRECT_QUERY_EXPR sym_direct_query_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_UNARY_EXPR sym_unary_expr
 #define SYM_SPREAD_EXPR sym_spread_expr
@@ -135,6 +134,7 @@ extern "C" {
 #define FIELD_AS field_as
 #define FIELD_TYPE field_type
 #define FIELD_OBJECT field_object
+#define FIELD_OP field_op
 #define FIELD_FIELD field_field
 #define FIELD_BODY field_body
 #define FIELD_DECLARE field_declare
