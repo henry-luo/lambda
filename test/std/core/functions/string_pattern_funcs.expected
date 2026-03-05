@@ -1,0 +1,26 @@
+{
+  value: "world",
+  index: 6
+}
+{
+  value: "abc",
+  index: 0
+}
+{
+  value: "abc",
+  index: 3
+}
+"hello LambdaaaXXccabchelloworldonetwothree"
+{
+  value: "123",
+  index: 3
+}
+"abcNUMdefNUMhelloworldtest"
+{
+  value: "hello",
+  index: 0
+}
+{
+  value: "world",
+  index: 6
+}
