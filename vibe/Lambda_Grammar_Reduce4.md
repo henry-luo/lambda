@@ -397,6 +397,519 @@ Token consolidation is the most effective parser reduction technique found. Each
 
 ---
 
+## Proposal 10: Merge `string_pattern`/`symbol_pattern` into `type_stam` — APPLIED ✓
+
+**Impact: Low (−0.28%)**
+
+`string_pattern` and `symbol_pattern` were standalone grammar rules with identical structure to `type_stam` (via `type_assign`):
+
+```js
+// Before: 3 separate rules
+type_stam:      'type'   identifier = _type_expr
+string_pattern: 'string' identifier = _type_expr
+symbol_pattern: 'symbol' identifier = _type_expr
+```
+
+### Applied Change
+
+Merged all three into `type_stam` by parameterizing the leading keyword:
+
+```js
+type_stam: $ => seq(
+  field('kind', choice('type', 'string', 'symbol')),
+  field('declare', alias($.type_assign, $.assign_expr)),
+  repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
+),
+```
+
+Removed `string_pattern` and `symbol_pattern` rules and their references in `_expr_stam`.
+
+**AST builder changes:**
+- `build_let_and_type_stam` now reads the `kind` field text via `ts_node_source()`. If `"string"` or `"symbol"`, routes to `build_string_pattern` instead of `build_assign_expr`.
+- `build_string_pattern` updated to read `FIELD_AS` (from `type_assign`) with fallback to `FIELD_PATTERN`.
+- Removed `SYM_STRING_PATTERN` and `SYM_SYMBOL_PATTERN` macros from `ast.hpp` and their `case` branches from `build_expr`.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,399,363 B | 8,375,586 B | **−23,777 B (−0.28%)** |
+| STATE_COUNT | 6,241 | 6,226 | −15 |
+| LARGE_STATE_COUNT | 1,480 | 1,480 | No change |
+| SYMBOL_COUNT | 234 | 232 | **−2** |
+| TOKEN_COUNT | 104 | 104 | No change |
+| Tests | 450/451 | **605/605** | All pass |
+
+**Verdict: Kept.** Modest size reduction (−24 KB, −2 symbols). Cleaner grammar — three near-identical rules consolidated into one. Also eliminates `'string'` and `'symbol'` as standalone anonymous keywords, which is a prerequisite for potentially merging them into `_base_type_kw` in the future.
+
+---
+
+## Proposal 11: Merge `true`/`false`/`inf`/`nan` into `named_value` Token — APPLIED ✓
+
+**Impact: Low-Medium (−1.71%)**
+
+Four simple keyword rules existed as separate grammar rules:
+
+```js
+// Before: 4 separate rules
+true:  _ => 'true',
+false: _ => 'false',
+inf:   _ => 'inf',
+nan:   _ => 'nan',
+```
+
+Each created its own symbol ID. They were used in `_non_null_literal` (`true`, `false`) and `primary_expr` (all four).
+
+### Applied Change
+
+Merged all four into a single `named_value` token rule:
+
+```js
+named_value: _ => token(choice('true', 'false', 'inf', 'nan')),
+```
+
+Replaced `$.true`, `$.false`, `$.inf`, `$.nan` with `$.named_value` in `_non_null_literal` and `primary_expr`.
+
+**AST builder changes:**
+- Replaced `SYM_TRUE`/`SYM_FALSE`/`sym_inf`/`sym_nan` with single `SYM_NAMED_VALUE` macro.
+- Both `build_primary_expr` and `build_expr` check the source text via `strview_equal()` to distinguish `"true"`/`"false"` (bool) from `"inf"`/`"nan"` (float).
+
+**Design note:** Initially implemented as a 2-rule pattern (`_named_value` hidden token + `named_value` visible wrapper), but merging into a single visible token rule eliminated one symbol and produced a much larger reduction (−143 KB vs −35 KB).
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,375,586 B | 8,232,241 B | **−143,345 B (−1.71%)** |
+| STATE_COUNT | 6,226 | 6,226 | No change |
+| LARGE_STATE_COUNT | 1,480 | 1,479 | **−1** |
+| SYMBOL_COUNT | 232 | 229 | **−3** |
+| TOKEN_COUNT | 104 | 101 | **−3** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Applying the same token consolidation pattern as `_base_type_kw` (Proposal 9) to value keywords. The larger-than-expected reduction comes from eliminating 3 symbol columns from large state rows.
+
+---
+
+## Proposal 12: Merge `time`/`datetime`/`_datetime` into Single `datetime` Token — APPLIED ✓
+
+**Impact: Medium (−3.11%)**
+
+Datetime literals used 3 grammar rules with a complex token structure:
+
+```js
+// Before: 3 rules with complex regex patterns
+time: _ => token.immediate(time()),  // hh:mm:ss.sss with timezone
+datetime: _ => token.immediate(      // yyyy-mm-dd + optional time
+  seq(optional('-'), digit, digit, digit, digit, ...)),
+_datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
+```
+
+The `time()` helper function was a complex multi-part regex (hours, minutes, seconds, milliseconds, timezone) inlined into both `time` and `datetime` rules, expanding parse tables significantly. The `_datetime` hidden rule was inlined, making `datetime` and `time` visible child nodes inside `primary_expr`.
+
+### Applied Change
+
+Replaced all three rules with a single simple `datetime` token that captures the entire `t'...'` literal:
+
+```js
+datetime: _ => token(seq(
+  "t'",
+  repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)),
+  "'",
+)),
+```
+
+Actual datetime parsing is deferred to the AST builder's existing `datetime_parse()` function, which already handled all date/time formats.
+
+**Grammar changes:**
+- Removed `time` and `_datetime` rules.
+- Removed `$._datetime` from the `inline` list.
+- Changed `$._datetime` references to `$.datetime` in `_non_null_literal` and `primary_expr`.
+
+**AST builder changes:**
+- Removed `SYM_TIME` macro from `ast.hpp`; merged `case SYM_TIME` into `case SYM_DATETIME`.
+- Updated `build_lit_datetime` to skip the `t'` prefix (2 chars) and trailing `'` (1 char), plus trim inner whitespace, before calling `datetime_parse()`.
+- Fixed `build_expr` switch to call `build_lit_datetime` directly instead of routing through `build_lit_node` → `build_lit_string` (which was a pre-existing bug for datetime).
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,232,241 B | 7,976,424 B | **−255,817 B (−3.11%)** |
+| STATE_COUNT | 6,226 | 5,841 | **−385** |
+| LARGE_STATE_COUNT | 1,479 | 1,469 | **−10** |
+| SYMBOL_COUNT | 229 | 227 | **−2** |
+| TOKEN_COUNT | 101 | 99 | **−2** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** The second-largest single improvement after Proposal 9. The large STATE_COUNT drop (−385) comes from eliminating the complex `time()` regex expansion from parse tables. Moving datetime validation from grammar to AST builder is a clean separation — the grammar just captures the `t'...'` envelope, the builder does semantic parsing.
+
+---
+
+## Proposal 13: Merge `hex_binary`/`base64_binary` into Single `binary` Token — APPLIED ✓
+
+### Rationale
+
+The `binary` rule had a complex structure with two child token rules:
+
+```js
+// OLD: Three rules, internal structure exposed to parser
+binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
+hex_binary: _ => /[0-9a-fA-F\s]*/,
+base64_binary: _ => /[a-zA-Z0-9+\/=\s]*/,
+```
+
+The parser had to manage the choice between `hex_binary` and `base64_binary` as separate symbols, adding states and symbols to the parse tables. Since the AST builder already needs to inspect the content to determine the encoding format anyway, the grammar can be simplified to a single envelope token.
+
+### Changes
+
+**Grammar (`grammar.js`)**:
+```js
+// NEW: Single token, content parsing deferred to AST builder
+binary: _ => token(seq("b'", repeat(/[^']/), "'")),
+```
+
+Removed `hex_binary` and `base64_binary` rules entirely. The `binary` token simply captures everything between `b'` and `'`.
+
+**AST Builder (`build_ast.cpp`)**:
+- Updated `build_lit_string` binary handling to extract content between `b'` and `'` directly (skip 2 prefix chars, 1 suffix char, trim whitespace) instead of accessing child nodes `SYM_HEX_BINARY`/`SYM_BASE64_BINARY`.
+- The existing `decode_hex()`/`decode_base64()` functions still handle the actual decoding — only the source text extraction changed.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,976,424 B | 7,558,156 B | **−418,268 B (−5.24%)** |
+| STATE_COUNT | 5,841 | 5,741 | **−100** |
+| LARGE_STATE_COUNT | 1,469 | 598 | **−871** |
+| SYMBOL_COUNT | 227 | 222 | **−5** |
+| TOKEN_COUNT | 99 | 95 | **−4** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** The largest single improvement by file size (−5.24%) and a massive LARGE_STATE_COUNT reduction (−871, from 1,469 to 598). This is the same envelope-token pattern used in Proposals 11 and 12 — the grammar captures just the delimiters, and the AST builder handles semantic parsing of the content. The dramatic LARGE_STATE_COUNT drop suggests the `hex_binary`/`base64_binary` choice was creating many large parse states due to overlapping character classes.
+
+---
+
+## Proposal 14: Merge `pattern_any` into `pattern_char_class` — APPLIED ✓
+
+**Impact: Low (−0.43%)**
+
+`pattern_any` was a separate grammar rule for the `\.` (any character) pattern atom, while `pattern_char_class` handled `\d`, `\w`, `\s`, `\a`. Both produce the same AST node type (`AST_NODE_PATTERN_CHAR_CLASS`) — the only difference is the `char_class` enum value.
+
+### Applied Change
+
+Added `\.` as a 5th choice in the `pattern_char_class` token:
+
+```js
+// Before: two separate rules
+pattern_char_class: _ => token(choice('\\d', '\\w', '\\s', '\\a')),
+pattern_any: _ => '\\.',
+
+// After: single rule
+pattern_char_class: _ => token(choice('\\d', '\\w', '\\s', '\\a', '\\.')),
+```
+
+Removed `pattern_any` rule and its reference in `primary_type`.
+
+**AST builder changes:**
+- Removed two duplicate `case SYM_PATTERN_ANY` blocks (in `build_primary_type` and `build_expr`) that constructed `AstPatternCharClassNode` with `PATTERN_ANY`.
+- The existing `build_pattern_char_class` function already had a `default` case in its switch that maps to `PATTERN_ANY`, so `\.` is handled correctly without any new logic.
+- Removed `SYM_PATTERN_ANY` macro from `ast.hpp`.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,558,156 B | 7,525,508 B | **−32,648 B (−0.43%)** |
+| STATE_COUNT | 5,741 | 5,741 | No change |
+| LARGE_STATE_COUNT | 598 | 593 | **−5** |
+| SYMBOL_COUNT | 222 | 221 | **−1** |
+| TOKEN_COUNT | 95 | 94 | **−1** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Modest but clean reduction. A straightforward application of the token consolidation pattern — merging a rule that produces the same AST node type into the existing token. Eliminates one symbol and 12 lines of duplicate AST builder code.
+
+---
+
+## Proposal 15: Reuse `raise_expr` inside `raise_stam` — APPLIED ✓
+
+**Impact: Negligible (−0.07%)**
+
+`raise_expr` and `raise_stam` had nearly identical structure, differing only by an optional `;`:
+
+```js
+// Before: two rules with duplicated 'raise' + expr structure
+raise_expr: $ => prec.right(seq('raise', field('value', $._expr))),
+raise_stam: $ => prec.right(seq('raise', field('value', $._expr), optional(';'))),
+```
+
+This created a GLR conflict `[$.raise_expr, $.raise_stam]` because the parser couldn't decide which rule to use when `raise` appeared in an `else { ... }` block.
+
+### Applied Change
+
+Rewrote `raise_stam` to wrap `raise_expr` instead of duplicating its structure:
+
+```js
+// After: raise_stam wraps raise_expr
+raise_stam: $ => prec.right(seq($.raise_expr, optional(';'))),
+```
+
+The GLR conflict changed from `[$.raise_expr, $.raise_stam]` to `[$._expr, $.raise_stam]` — the total conflict count stayed at 14.
+
+**AST builder changes:**
+- Updated `build_raise_stam` to find the `raise_expr` child node (first child) and read the `value` field from it, instead of reading `value` directly from the `raise_stam` node.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,525,508 B | 7,520,133 B | **−5,375 B (−0.07%)** |
+| STATE_COUNT | 5,741 | 5,738 | **−3** |
+| LARGE_STATE_COUNT | 593 | 591 | **−2** |
+| SYMBOL_COUNT | 221 | 221 | No change |
+| TOKEN_COUNT | 94 | 94 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Negligible size impact but cleaner grammar — eliminates duplicated `'raise' + expr` structure. The conflict wasn't removed, only changed form.
+
+---
+
+## Proposal 16: Merge Path Prefix Tokens into `_path_prefix` — APPLIED ✓
+
+**Impact: Medium (−2.76%)**
+
+`path_expr` used three separate visible rules for its prefix:
+
+```js
+// Before: 3 separate rules
+path_root: _ => '/',     // absolute file path
+path_self: _ => '.',     // relative path
+path_parent: _ => '..',  // parent path
+
+path_expr: $ => prec.right(seq(
+  choice($.path_root, $.path_self, $.path_parent),
+  optional(field('field', ...))
+)),
+```
+
+Each created its own symbol ID, adding columns to every large state row. `path_root` and `path_self` were only used in `path_expr`, while `path_parent` was also used in `parent_expr`.
+
+### Applied Change
+
+Replaced the three-rule choice with a single hidden `_path_prefix` token:
+
+```js
+// After: single hidden token for path_expr prefix
+_path_prefix: _ => token(choice('/', '.', '..')),
+
+path_expr: $ => prec.right(seq(
+  $._path_prefix,
+  optional(field('field', ...))
+)),
+
+// path_parent kept separately for parent_expr
+path_parent: _ => '..',
+```
+
+Removed `path_root` and `path_self` rules entirely. `path_parent` remains for `parent_expr`.
+
+**AST builder changes:**
+- Removed `SYM_PATH_ROOT` and `SYM_PATH_SELF` macros from `ast.hpp`.
+- Updated `collect_path_segments_if_path` to determine path scheme from the `path_expr` source text (first characters) instead of checking the first child's symbol:
+  - `'/'` → `PATH_SCHEME_FILE`
+  - `'..'` → `PATH_SCHEME_PARENT`
+  - `'.'` → `PATH_SCHEME_REL`
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,520,133 B | 7,312,649 B | **−207,484 B (−2.76%)** |
+| STATE_COUNT | 5,738 | 5,720 | **−18** |
+| LARGE_STATE_COUNT | 591 | 528 | **−63** |
+| SYMBOL_COUNT | 221 | 220 | **−1** |
+| TOKEN_COUNT | 94 | 95 | +1 |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Unexpectedly large reduction (−2.76%) from removing just 2 visible symbols. The LARGE_STATE_COUNT drop (−63) shows these path symbols were contributing significantly to large state row widths. TOKEN_COUNT increased by 1 because the new `_path_prefix` hidden token was added while `path_root` and `path_self` were removed as symbols but their underlying anonymous tokens (`'/'`, `'.'`) still exist.
+
+---
+
+## Proposal 17: Remove `import` Rule, Use String Literal — APPLIED ✓
+
+**Impact: Low (−0.55%)**
+
+`import` was defined as a standalone named rule:
+
+```js
+// Before: named rule wrapping a token
+import: _ => token('import'),
+```
+
+It was only used in one place — `call_expr` — to allow `import(...)` as a function call syntax. Since `'import'` already exists as an anonymous keyword in `_import_stam`, the named rule was redundant.
+
+### Applied Change
+
+Removed the `import` rule and used the `'import'` string literal directly:
+
+```js
+// Before
+import: _ => token('import'),
+call_expr: $ => prec.right(100, seq(
+  field('function', choice($.primary_expr, $.import)),
+  ...
+)),
+
+// After
+call_expr: $ => prec.right(100, seq(
+  field('function', choice($.primary_expr, 'import')),
+  ...
+)),
+```
+
+**AST builder changes:** None needed. The builder reads the function name via `ts_node_source()` and doesn't check for `sym_import` anywhere.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,312,649 B | 7,272,412 B | **−40,237 B (−0.55%)** |
+| STATE_COUNT | 5,720 | 5,719 | −1 |
+| LARGE_STATE_COUNT | 528 | 528 | No change |
+| SYMBOL_COUNT | 220 | 219 | **−1** |
+| TOKEN_COUNT | 95 | 95 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** A simple cleanup — the named `import` rule added a symbol ID for no benefit. Removing it eliminates one column from every large state row. No AST builder changes required.
+
+---
+
+## Proposal 18: Merge `path_wildcard_recursive` into `path_wildcard` Token — APPLIED ✓
+
+**Impact: Low (−0.31%)**
+
+Path wildcards used two separate grammar rules:
+
+```js
+// Before: two rules
+path_wildcard: _ => token('*'),               // single wildcard: match one segment
+path_wildcard_recursive: _ => token('**'),    // recursive wildcard: match zero or more segments
+```
+
+Both were used in `path_expr` and `member_expr` field choices. Each created its own symbol ID.
+
+### Applied Change
+
+Merged into a single `path_wildcard` token:
+
+```js
+// After: single token
+path_wildcard: _ => token(choice('**', '*')),
+```
+
+`'**'` is listed first in the choice to ensure it takes priority over `'*'` during tokenization (longest match). Removed `path_wildcard_recursive` from `path_expr` and `member_expr` field choices.
+
+**AST builder changes:**
+- Removed `SYM_PATH_WILDCARD_RECURSIVE` macro from `ast.hpp`.
+- Both `SYM_PATH_WILDCARD` cases in `collect_path_segments_if_path` now check source text length: `length == 2` → `LPATH_SEG_WILDCARD_REC`, otherwise `LPATH_SEG_WILDCARD`.
+- Transpilers (`transpile.cpp`, `transpile-mir.cpp`) unchanged — they reference the AST segment type enum, not grammar symbols.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,272,412 B | 7,250,003 B | **−22,409 B (−0.31%)** |
+| STATE_COUNT | 5,719 | 5,701 | **−18** |
+| LARGE_STATE_COUNT | 528 | 524 | **−4** |
+| SYMBOL_COUNT | 219 | 218 | **−1** |
+| TOKEN_COUNT | 95 | 96 | +1 |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Same token consolidation pattern. The two wildcards share a single grammar role (path field segment), so merging into one token and deferring `*` vs `**` distinction to the AST builder is a clean separation.
+
+---
+
+## Proposal 19: Merge `spread_expr` into `unary_expr` — APPLIED ✓
+
+**Impact: Low-Medium (−1.21%)**
+
+`spread_expr` was a standalone rule identical in structure to `unary_expr`, differing only by the operator (`*`):
+
+```js
+// Before: two separate rules
+unary_expr: $ => prec.left(seq(
+  field('operator', choice('not', '!', '-', '+', '^')),
+  field('operand', $._expr),
+)),
+spread_expr: $ => prec.left(seq(
+  field('operator', '*'),
+  field('operand', $._expr),
+)),
+```
+
+Both `unary_expr` and `spread_expr` were alternatives in `_expr`.
+
+### Applied Change
+
+Merged `spread_expr` into `unary_expr` by adding `'*'` to the operator choice:
+
+```js
+// After: single rule
+unary_expr: $ => prec.left(seq(
+  field('operator', choice('not', '!', '-', '+', '^', '*')),
+  field('operand', $._expr),
+)),
+```
+
+Removed `spread_expr` from `_expr` and the grammar rules.
+
+**Note:** Initially attempted wrapping the operator choice in `token(choice(...))`, but this failed (36 test failures). The operators `!`, `*`, `-`, `+` are all shared with `binary_expr` as anonymous symbols. Wrapping them into a `token()` creates a new token ID that conflicts with those existing anonymous keywords. The merge without `token()` works correctly because tree-sitter shares the anonymous symbols.
+
+**AST builder changes:**
+- Added `*` operator check in `build_unary_expr` that routes to `build_spread_expr` (via forward declaration).
+- Removed `SYM_SPREAD_EXPR` macro from `ast.hpp` and its `case` branch from `build_expr`.
+- `build_spread_expr` function unchanged — it still receives the node and reads `FIELD_OPERAND`.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,250,003 B | 7,162,013 B | **−87,990 B (−1.21%)** |
+| STATE_COUNT | 5,701 | 5,672 | **−29** |
+| LARGE_STATE_COUNT | 524 | 520 | **−4** |
+| SYMBOL_COUNT | 218 | 217 | **−1** |
+| TOKEN_COUNT | 96 | 96 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Solid reduction (−1.21%) from a simple structural merge. Eliminates one symbol and a duplicate rule. The `token()` wrapper approach was proven non-viable for operators shared across expression types — an important finding for future optimization attempts.
+
+---
+
+## Proposal 20: Remove `index` rule — use `integer` directly
+
+**Rationale:** The `index` rule is defined as `index: $ => token(integer_literal)` — identical to the existing `integer: _ => token(integer_literal)`. Both produce the same token pattern. The `index` rule is only used in `path_expr` and `member_expr` field choices to allow integer-based field access (e.g., `data.0`). Replacing `$.index` with `$.integer` eliminates a redundant symbol.
+
+**Changes:**
+
+- **grammar.js**: Removed `index` rule entirely. Replaced `$.index` with `$.integer` in `path_expr` and `member_expr` field choices.
+- **ast.hpp**: Removed `SYM_INDEX` macro.
+- **build_ast.cpp**: Removed `SYM_INDEX` case (standalone error handler) from `build_expr` switch — integer tokens in that position now route through the existing `SYM_INTEGER` → `build_lit_node` path, which is the correct behavior.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,162,013 B | 7,001,274 B | **−160,739 B (−2.24%)** |
+| STATE_COUNT | 5,672 | 5,643 | **−29** |
+| LARGE_STATE_COUNT | 520 | 516 | **−4** |
+| SYMBOL_COUNT | 217 | 215 | **−2** |
+| TOKEN_COUNT | 96 | 96 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Excellent reduction (−2.24%) for a trivial change. Removes a completely redundant rule that was an exact duplicate of `integer`.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -410,6 +923,17 @@ Token consolidation is the most effective parser reduction technique found. Each
 | 7th | #4 — Strategic inlining | Low | Medium | ❌ Failed (+0.7%) |
 | 8th | #7 — Consolidate access exprs | Medium | Low-Medium | ✅ Partial (−0.96%, −1 SYM) |
 | 9th | #9 — Reduce base_type keywords | Medium | Low | ✅ Applied (−20.2%, −19 SYM) |
+| 10th | #10 — Merge patterns into type_stam | Low | Low | ✅ Applied (−0.28%, −2 SYM) |
+| 11th | #11 — Merge named values token | Low | Low-Medium | ✅ Applied (−1.71%, −3 SYM) |
+| 12th | #12 — Merge datetime token | Low | Medium | ✅ Applied (−3.11%, −2 SYM) |
+| 13th | #13 — Merge binary token | Low | Medium-High | ✅ Applied (−5.24%, −5 SYM) |
+| 14th | #14 — Merge pattern_any token | Low | Low | ✅ Applied (−0.43%, −1 SYM) |
+| 15th | #15 — Reuse raise_expr in raise_stam | Low | Negligible | ✅ Applied (−0.07%) |
+| 16th | #16 — Merge path prefix tokens | Low | Medium | ✅ Applied (−2.76%, −1 SYM) |
+| 17th | #17 — Remove import rule | Low | Low | ✅ Applied (−0.55%, −1 SYM) |
+| 18th | #18 — Merge path wildcards | Low | Low | ✅ Applied (−0.31%, −1 SYM) |
+| 19th | #19 — Merge spread into unary | Low | Low-Medium | ✅ Applied (−1.21%, −1 SYM) |
+| 20th | #20 — Remove index rule | Low | Medium | ✅ Applied (−2.24%, −2 SYM) |
 
 ### Cumulative Results
 
@@ -420,6 +944,17 @@ Token consolidation is the most effective parser reduction technique found. Each
 | + Proposal 9 (_base_type_kw) | 8,482,463 | 6,264 | 1,482 | 237 | 104 |
 | + Proposal 8 (match arms) | 8,480,465 | 6,264 | 1,482 | 235 | 104 |
 | + Proposal 7 (query merge) | 8,399,363 | 6,241 | 1,480 | 234 | 104 |
-| **Total reduction** | **−2,232,346 (−21.0%)** | **−24** | **−652** | **−28** | **−20** |
+| + Proposal 10 (pattern merge) | 8,375,586 | 6,226 | 1,480 | 232 | 104 |
+| + Proposal 11 (named_value token) | 8,232,241 | 6,226 | 1,479 | 229 | 101 |
+| + Proposal 12 (datetime token) | 7,976,424 | 5,841 | 1,469 | 227 | 99 |
+| + Proposal 13 (binary token) | 7,558,156 | 5,741 | 598 | 222 | 95 |
+| + Proposal 14 (pattern_any merge) | 7,525,508 | 5,741 | 593 | 221 | 94 |
+| + Proposal 15 (raise_stam reuse) | 7,520,133 | 5,738 | 591 | 221 | 94 |
+| + Proposal 16 (path prefix merge) | 7,312,649 | 5,720 | 528 | 220 | 95 |
+| + Proposal 17 (remove import rule) | 7,272,412 | 5,719 | 528 | 219 | 95 |
+| + Proposal 18 (path wildcard merge) | 7,250,003 | 5,701 | 524 | 218 | 96 |
+| + Proposal 19 (spread into unary) | 7,162,013 | 5,672 | 520 | 217 | 96 |
+| + Proposal 20 (remove index rule) | 7,001,274 | 5,643 | 516 | 215 | 96 |
+| **Total reduction** | **−3,630,435 (−34.1%)** | **−622** | **−1,616** | **−47** | **−28** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.
