@@ -257,11 +257,11 @@ The AST builder can distinguish clause kinds by their keyword.
 
 ---
 
-## Proposal 7: Consolidate Access Expressions
+## Proposal 7: Consolidate Access Expressions — PARTIALLY APPLIED ✓
 
-**Impact: Low-Medium (2–4% reduction)**
+**Original estimate: Low-Medium (2–4% reduction)**
 
-`path_expr`, `member_expr`, and `parent_expr` all handle `.`-based access and generate 3 conflicts with `$._expr`:
+`path_expr`, `member_expr`, `parent_expr`, `query_expr`, and `direct_query_expr` all handle access operations. They generate 4 conflicts with `$._expr`:
 
 ```
 [$._expr, $.member_expr]
@@ -270,34 +270,51 @@ The AST builder can distinguish clause kinds by their keyword.
 [$._expr, $.direct_query_expr]
 ```
 
-**Proposed change:** Unify into a single `access_expr`:
+### Conservative Approach Applied
+
+Merging all 5 into one `access_expr` was too risky — `member_expr` is referenced in `assign_expr` targets, and `path_expr`/`parent_expr` have fundamentally different structures. Instead, only `query_expr` and `direct_query_expr` were merged since they have identical structure except for the operator (`?` vs `.?`):
 
 ```js
-access_expr: $ => choice(
-  // member: expr.field
-  prec.dynamic(1, seq(field('object', $.primary_expr), '.', field('field', choice(...)))),
-  // parent: expr..
-  seq(field('object', $.primary_expr), '..', repeat(seq('_', '..'))),
-  // path: /, ., .. with optional segment
-  prec.right(seq(choice('/', '.', '..'), optional(field('field', choice(...))))),
+query_expr: $ => seq(
+  field('object', $.primary_expr),
+  field('op', choice('?', '.?')),
+  field('query', $.primary_type),
 ),
 ```
 
-The AST builder reconstructs `member_expr`, `parent_expr`, `path_expr` node types from the structure.
+The AST builder determines direct vs recursive from the `op` field length:
+```cpp
+TSNode op_node = ts_node_child_by_field_id(child, FIELD_OP);
+StrView op = ts_node_source(tp, op_node);
+query_node->direct = (op.length == 2);  // ".?" = direct, "?" = recursive
+```
 
-**Removes:** 2 symbol IDs, reduces conflicts from 4 to ~2.
+Conflicts reduced from 4 to 3 (two query conflicts → one).
 
-**Risk:** Medium — the AST builder needs to classify access kind by structure. Test carefully.
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,480,465 B | 8,399,363 B | **−81,102 B (−0.96%)** |
+| STATE_COUNT | 6,264 | 6,241 | **−23** |
+| LARGE_STATE_COUNT | 1,482 | 1,480 | **−2** |
+| SYMBOL_COUNT | 235 | 234 | **−1** |
+| TOKEN_COUNT | 104 | 104 | No change |
+| Non-MIR tests | 450/451 | 450/451 | No change |
+
+**Verdict: Kept.** Modest size reduction but cleaner grammar — two nearly-identical rules consolidated into one.
 
 ---
 
-## Proposal 8: Merge Match Arm Forms
+## Proposal 8: Merge Match Arm Forms — APPLIED ✓
 
-**Impact: Low (1–2% reduction)**
+**Original estimate: Low (1–2% reduction)**
 
-`match_expr` has 4 arm types: `match_arm_expr`, `match_arm_stam`, `match_default_expr`, `match_default_stam`.
+`match_expr` had 4 arm types: `match_arm_expr`, `match_arm_stam`, `match_default_expr`, `match_default_stam`.
 
-**Proposed change:** Merge into 2 rules:
+### Applied Change
+
+Merged into 2 rules using `choice()` for the body form:
 
 ```js
 match_arm: $ => seq('case', field('pattern', $._type_expr),
@@ -308,9 +325,18 @@ match_default: $ => seq('default',
 ),
 ```
 
-**Removes:** 2 symbol IDs.
+### Results
 
-**Risk:** Low — trivial AST builder update.
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,482,463 B | 8,480,465 B | **−1,998 B (−0.02%)** |
+| STATE_COUNT | 6,264 | 6,264 | No change |
+| LARGE_STATE_COUNT | 1,482 | 1,482 | No change |
+| SYMBOL_COUNT | 237 | 235 | **−2** |
+| TOKEN_COUNT | 104 | 104 | No change |
+| Non-MIR tests | 450/451 | 450/451 | No change |
+
+**Verdict: Kept.** Minimal size impact but cleaner grammar — 4 near-identical rules reduced to 2.
 
 ---
 
@@ -373,18 +399,27 @@ Token consolidation is the most effective parser reduction technique found. Each
 
 ## Recommended Implementation Order
 
-| Priority | Proposal | Risk | Impact |
-|----------|----------|------|--------|
-| 1st | #1 — Merge binary/attr_binary | Low | High |
-| 2nd | #5 — Group primary_expr | Low | Medium |
-| 3rd | #3 — Unify expr/stam duals | Low | Medium-High |
-| 4th | #2 — Flatten type hierarchy | Medium | High |
-| 5th | #8 — Merge match arms | Low | Low |
-| 6th | #6 — Merge for-loop clauses | Low | Low-Medium |
-| 7th | #4 — Strategic inlining | Low | Medium |
-| 8th | #7 — Consolidate access exprs | Medium | Low-Medium |
-| 9th | #9 — Reduce base_type keywords | Medium | Low |
+| Priority | Proposal | Risk | Impact | Status |
+|----------|----------|------|--------|--------|
+| 1st | #1 — Merge binary/attr_binary | Low | High | ❌ Failed (+10%) |
+| 2nd | #5 — Group primary_expr | Low | Medium | ❌ Failed (+0.83%) |
+| 3rd | #3 — Unify expr/stam duals | Low | Medium-High | Not tried |
+| 4th | #2 — Flatten type hierarchy | Medium | High | ✅ Applied (~0%, −89 LARGE) |
+| 5th | #8 — Merge match arms | Low | Low | ✅ Applied (−0.02%, −2 SYM) |
+| 6th | #6 — Merge for-loop clauses | Low | Low-Medium | Not tried |
+| 7th | #4 — Strategic inlining | Low | Medium | ❌ Failed (+0.7%) |
+| 8th | #7 — Consolidate access exprs | Medium | Low-Medium | ✅ Partial (−0.96%, −1 SYM) |
+| 9th | #9 — Reduce base_type keywords | Medium | Low | ✅ Applied (−20.2%, −19 SYM) |
+
+### Cumulative Results
+
+| Change | File Size | STATE | LARGE | SYMBOL | TOKEN |
+|--------|-----------|-------|-------|--------|-------|
+| Original | 10,631,709 | 6,265 | 2,132 | 262 | 124 |
+| + Proposal 2 (flatten types) | 10,631,709 | 6,265 | 2,043 | 256 | 124 |
+| + Proposal 9 (_base_type_kw) | 8,482,463 | 6,264 | 1,482 | 237 | 104 |
+| + Proposal 8 (match arms) | 8,480,465 | 6,264 | 1,482 | 235 | 104 |
+| + Proposal 7 (query merge) | 8,399,363 | 6,241 | 1,480 | 234 | 104 |
+| **Total reduction** | **−2,232,346 (−21.0%)** | **−24** | **−652** | **−28** | **−20** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.
-
-**Combined realistic estimate:** applying proposals 1–5 could reduce the parser from ~10.6 MB to roughly **5–7 MB** (35–50% reduction).

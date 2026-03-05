@@ -3586,10 +3586,6 @@
           },
           {
             "type": "SYMBOL",
-            "name": "direct_query_expr"
-          },
-          {
-            "type": "SYMBOL",
             "name": "_parenthesized_expr"
           },
           {
@@ -3781,33 +3777,21 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "?"
-        },
-        {
           "type": "FIELD",
-          "name": "query",
+          "name": "op",
           "content": {
-            "type": "SYMBOL",
-            "name": "primary_type"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "?"
+              },
+              {
+                "type": "STRING",
+                "value": ".?"
+              }
+            ]
           }
-        }
-      ]
-    },
-    "direct_query_expr": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "object",
-          "content": {
-            "type": "SYMBOL",
-            "name": "primary_expr"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": ".?"
         },
         {
           "type": "FIELD",
@@ -8706,10 +8690,6 @@
     [
       "_expr",
       "query_expr"
-    ],
-    [
-      "_expr",
-      "direct_query_expr"
     ],
     [
       "list",

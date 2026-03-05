@@ -138,8 +138,7 @@ module.exports = grammar({
   conflicts: $ => [
     [$._expr, $.member_expr],
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
-    [$._expr, $.query_expr],                       // expr ? could end expr or start query
-    [$._expr, $.direct_query_expr],                // expr .? could end expr or start direct query
+    [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
     [$._attr_expr, $._expr],                       // else { expr } in if_expr: block content vs map
     [$.attr_binary_expr, $._expr],                 // else { expr + ... } binary in block vs map
@@ -454,8 +453,7 @@ module.exports = grammar({
       $.member_expr,
       $.parent_expr,  // expr.. for parent access shorthand
       $.call_expr,
-      $.query_expr,         // expr?T - descendant query by type
-      $.direct_query_expr,  // expr.?T - self + attrs/content query
+      $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_item,   // ~ for pipe context
@@ -480,18 +478,10 @@ module.exports = grammar({
       '[', field('field', $._expr), ']',
     )),
 
-    // Query expression: expr?T — recursive descendant search by type
-    // Returns a list of all matching values in the subtree
+    // Query expression: expr?T (recursive) or expr.?T (direct)
     query_expr: $ => seq(
       field('object', $.primary_expr),
-      '?',
-      field('query', $.primary_type),
-    ),
-
-    // Direct query: expr.?T — search self + attributes + direct content only
-    direct_query_expr: $ => seq(
-      field('object', $.primary_expr),
-      '.?',
+      field('op', choice('?', '.?')),
       field('query', $.primary_type),
     ),
 
