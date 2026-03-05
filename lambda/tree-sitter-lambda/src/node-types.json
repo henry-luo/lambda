@@ -771,7 +771,7 @@
         "types": [
           {
             "type": "import",
-            "named": true
+            "named": false
           },
           {
             "type": "primary_expr",
@@ -2192,11 +2192,6 @@
     }
   },
   {
-    "type": "import",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "import_module",
     "named": true,
     "fields": {
@@ -2875,10 +2870,6 @@
             "named": true
           },
           {
-            "type": "path_wildcard_recursive",
-            "named": true
-          },
-          {
             "type": "symbol",
             "named": true
           }
@@ -3379,26 +3370,12 @@
             "named": true
           },
           {
-            "type": "path_wildcard_recursive",
-            "named": true
-          },
-          {
             "type": "symbol",
             "named": true
           }
         ]
       }
     }
-  },
-  {
-    "type": "path_wildcard",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "path_wildcard_recursive",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "primary_expr",
@@ -4513,6 +4490,10 @@
   },
   {
     "type": "path_parent",
+    "named": true
+  },
+  {
+    "type": "path_wildcard",
     "named": true
   },
   {
