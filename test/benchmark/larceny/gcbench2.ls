@@ -23,7 +23,7 @@ pn check_tree(node: Node) {
 pn main() {
     var __t0 = clock()
     let min_depth = 4
-    let max_depth = 12
+    let max_depth = 14
     let stretch_depth = max_depth + 1
 
     // Stretch tree
@@ -48,5 +48,5 @@ pn main() {
     var __t1 = clock()
 
     print("long lived tree of depth " ++ string(max_depth) ++ " check: " ++ string(check_tree(long_lived)) ++ "\n")
-    print("__TIMING__:" ++ string(__t1 - __t0) ++ "\n")
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }
