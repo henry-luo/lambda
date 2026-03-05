@@ -7093,10 +7093,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "pattern_any"
-        },
-        {
-          "type": "SYMBOL",
           "name": "negation_type"
         }
       ]
@@ -7919,13 +7915,13 @@
           {
             "type": "STRING",
             "value": "\\a"
+          },
+          {
+            "type": "STRING",
+            "value": "\\."
           }
         ]
       }
-    },
-    "pattern_any": {
-      "type": "STRING",
-      "value": "\\."
     },
     "relative_name": {
       "type": "REPEAT1",

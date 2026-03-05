@@ -909,8 +909,7 @@ module.exports = grammar({
       $.element_type,
       $.fn_type,
       // String/symbol pattern atoms (unified into type system)
-      $.pattern_char_class,     // \d, \w, \s, \a
-      $.pattern_any,            // \. (any character)
+      $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
       $.negation_type,          // !T - prefix negation
     ),
 
@@ -1056,10 +1055,8 @@ module.exports = grammar({
       '\\w',  // word [a-zA-Z0-9_]
       '\\s',  // whitespace
       '\\a',  // alpha [a-zA-Z]
+      '\\.',  // any character
     )),
-
-    // Backslash-dot matches any character
-    pattern_any: _ => '\\.',
 
     // NOTE: string_pattern and symbol_pattern are now handled by type_stam.
     // type_stam's 'kind' field distinguishes 'type' vs 'string' vs 'symbol'.

@@ -4555,14 +4555,6 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
             return build_range_type(tp, child);
         case SYM_PATTERN_CHAR_CLASS:
             return build_pattern_char_class(tp, child);
-        case SYM_PATTERN_ANY: {
-            // Build a char class node for '\.'
-            AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
-                alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
-            ast_node->char_class = PATTERN_ANY;
-            ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-            return (AstNode*)ast_node;
-        }
         case SYM_COMMENT:
             break; // skip comments
         default: // literal values
@@ -6650,13 +6642,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_negation_type(tp, expr_node);
     case SYM_PATTERN_CHAR_CLASS:
         return build_pattern_char_class(tp, expr_node);
-    case SYM_PATTERN_ANY: {
-        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, expr_node, sizeof(AstPatternCharClassNode));
-        ast_node->char_class = PATTERN_ANY;
-        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
-    }
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
@@ -6938,7 +6923,7 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
         default: ast_node->char_class = PATTERN_ANY; break;
         }
     } else {
-        // Single dot for any character
+        // \. for any character
         ast_node->char_class = PATTERN_ANY;
     }
 
