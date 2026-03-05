@@ -1039,32 +1039,6 @@
     "fields": {}
   },
   {
-    "type": "direct_query_expr",
-    "named": true,
-    "fields": {
-      "object": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_expr",
-            "named": true
-          }
-        ]
-      },
-      "query": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "document",
     "named": true,
     "root": true,
@@ -3526,10 +3500,6 @@
           "named": true
         },
         {
-          "type": "direct_query_expr",
-          "named": true
-        },
-        {
           "type": "element",
           "named": true
         },
@@ -3774,6 +3744,20 @@
           {
             "type": "primary_expr",
             "named": true
+          }
+        ]
+      },
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": ".?",
+            "named": false
+          },
+          {
+            "type": "?",
+            "named": false
           }
         ]
       },
@@ -4791,19 +4775,19 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
-  },
-  {
-    "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
     "named": true
+  },
+  {
+    "type": "symbol",
+    "named": false
   },
   {
     "type": "t'",
