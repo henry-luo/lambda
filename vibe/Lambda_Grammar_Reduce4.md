@@ -30,6 +30,8 @@ Parse tables account for **92.3%** of the file. Each of the 2,132 large states i
 
 ---
 
+## Original Proposals (Preserved for Reference)
+
 ## Proposal 1: Merge `binary_expr` and `attr_binary_expr`
 
 **Impact: High (10–15% reduction)**
@@ -55,37 +57,84 @@ _attr_expr: $ => choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, 
 - The duplicate binary operator state fan-out
 
 **Risk:** Low — the AST builder validation is a simple check on `binary_expr` operator field content within an `attr` parent.
+### Experimental Results
+
+All proposals below were implemented and tested. **None produced a net parser size reduction.** This section documents the findings.
+#### Why Grammar-Level Restructuring Cannot Reduce This Parser
+
+The Lambda grammar has 15 GLR conflicts representing intrinsic ambiguities:
+- **Element tag ambiguity:** `<` and `>` are both element delimiters AND relational operators
+- **Postfix ambiguity:** `.`, `..`, `?`, `.?` after expressions
+- **Block ambiguity:** `else { ... }` could be block content or map literal
+- **Type occurrence:** `T[n]` could be occurrence or end-of-type + array
+- **Range vs literal:** A literal could be standalone or start of `literal to literal`
+
+These ambiguities are **language-level** — they exist because the same tokens serve multiple purposes. Grammar restructuring can only **move** conflicts between rules, never eliminate them. Every experiment confirmed this:
+
+| Experiment | Result | Mechanism |
+|-----------|--------|-----------|
+| Remove `attr_binary_expr`, use `$._expr` in elements | **+10% (11.6 MB)** | 3 new GLR conflicts for `<`/`>` ambiguity create more states than the duplicate binary operator approach |
+| Add `_literal_expr`/`_container_expr` grouping in `primary_expr` | **Build error** | New intermediate symbols conflict with `_content_expr`'s `repeat1(string,...)` |
+| Group `primary_expr` with `_value_expr`/`_access_expr` (Proposal 5, retry) | **+0.83% (+88 KB)** | Hidden rules still add symbol IDs to parse table (+2 to SYMBOL_COUNT), widening every large state row. No state reduction. Reverted. |
+| Merge `match_arm_expr`/`match_arm_stam` into single rule | **+0.7% (10.7 MB)** | Internal `choice(: expr, { stam })` adds branching states |
+| Inline `_content_expr` and `_expr_stam` | **+0.7% (10.7 MB)** | Inlining expands alternatives at use sites, adding states |
+| Move `range_type` from `primary_type` to `_compound_type` | **Same conflict** | Shift-reduce conflict moves from `[range_type, primary_type]` to `[range_type, unary_type]` |
+| Flatten Type Hierarchy (Proposal 2): remove `unary_type`, `_quantified_type`, `_compound_type`; fold into 3-layer `primary_type → _unary_type → _type_expr` | **~0% (-1 KB)** | LARGE_STATE_COUNT −89, SYMBOL_COUNT −6, but STATE_COUNT +73. Net file size unchanged. All 600/605 baseline tests pass. **Kept** — cleaner grammar, marginal improvement in large states. |
+#### Key Insight
+
+The `attr_binary_expr` + `_attr_expr` design is the **optimal grammar-level solution** for the `<`/`>` element ambiguity. It statically excludes relational operators from element context without GLR overhead. The cost is 14 duplicate binary operator states — but the alternative (GLR conflicts) costs 330+ additional large states.
+
+Tree-sitter's LALR/GLR state count is determined by **token-level lookahead**, not rule-level structure. Restructuring rules (merging, inlining, flattening) changes the rule graph but not the set of tokens valid at each parse position, so state count stays the same or increases.
+#### Viable Paths Forward (Require Language/Architecture Changes)
+
+1. **External scanner for element `>`** — A C scanner tracking element nesting could tokenize `>` differently inside elements, eliminating `attr_binary_expr`. Requires new `scanner.c` infrastructure.
+
+2. **Element syntax change** — Using explicit close tags (`<div>...</div>`) or different delimiters would eliminate the `<`/`>` ambiguity entirely.
+
+3. **Parser compression** — Post-process `parser.c` to compress the parse tables (run-length encoding, shared row deduplication). This is a build-tool change, not a grammar change.
+
+4. **Tree-sitter version upgrade** — Newer tree-sitter versions may have better state merging or table compression.
 
 ---
 
-## Proposal 2: Flatten Type Expression Hierarchy
+## Proposal 2: Flatten Type Expression Hierarchy — APPLIED ✓
 
-**Impact: High (10–15% reduction)**
+**Original estimate: High (10–15% reduction)**
 
-The type system currently has 7 structural layers:
+The type system originally had 7 structural layers:
 
 ```
 primary_type → unary_type → _quantified_type → occurrence_type / concat_type / constrained_type
     → _compound_type → binary_type → _type_expr (+ error_union_type)
 ```
 
-Each layer adds reduction states across every context where types appear (parameters, return types, attrs, element types, map types, array types, type aliases, match arms, constrained types, fn types — at least 12 contexts).
-
-**Proposed change:** Flatten to 3 layers:
+**Applied change:** Flattened to 3 layers:
 
 ```
-primary_type → _unary_type (occurrence/negation) → _type_expr (binary/concat/constrained/error)
+primary_type → unary_type (occurrence) → _type_expr (binary/concat/constrained/error)
 ```
 
-Concretely:
-- Merge `_quantified_type` and `_compound_type` into `_type_expr` directly.
-- Make `concat_type` and `constrained_type` use `_type_expr` directly with appropriate precedence.
-- Use `inline` for the removed intermediate rules.
+Specific changes made:
+- **Removed `unary_type` named rule** — folded `negation_type` into `primary_type` directly; renamed hidden `_unary_type` to visible `unary_type` as `choice(occurrence_type, primary_type)`
+- **Removed `_quantified_type`** — `occurrence_type` and `primary_type` now grouped under `unary_type`
+- **Removed `_compound_type`** — `constrained_type` and `concat_type` moved directly into `_type_expr`
+- Updated `occurrence_type` operand from `$.unary_type` to `$.primary_type`
+- Updated `constrained_type` base from `$._quantified_type` to `$.unary_type`
+- Updated `concat_type` terms from `$._quantified_type` to `$.unary_type`
+- Updated 3 conflicts and precedence declarations
+- Removed dead `sym_unary_type` case from `build_ast.cpp`, added pass-through handler for new visible `unary_type` node
 
-**Removes:**
-- 4 conflicts: `[$._quantified_type, $.occurrence_type]`, `[$._compound_type, $.concat_type]`, `[$._compound_type, $.constrained_type]`, `[$.range_type, $.primary_type]`
+### Results
 
-**Risk:** Medium — precedence declarations need careful adjustment. Test with `make test-lambda-baseline` after change.
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 10,608,627 B | 10,607,520 B | **−1,107 B (~0%)** |
+| STATE_COUNT | 6,179 | 6,252 | +73 |
+| LARGE_STATE_COUNT | 2,132 | 2,043 | **−89** |
+| SYMBOL_COUNT | 262 | 256 | **−6** |
+| Baseline tests | 600/605 | 600/605 | No change |
+
+**Verdict: Kept.** The net file size is essentially unchanged, but the grammar is cleaner with 6 fewer symbols, 89 fewer large states, and 4 fewer intermediate rules. The original 10–15% estimate was wrong — the type hierarchy layers were not the main driver of state count. The improvement comes from fewer symbols (smaller dense rows in large states) offsetting the slightly higher total state count.
 
 ---
 
