@@ -2466,6 +2466,8 @@ AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node);
+
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build unary expr");
 
@@ -2474,6 +2476,10 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     StrView op = ts_node_source(tp, op_node);
     if (strview_equal(&op, "!")) {
         return build_type_negation_expr(tp, bi_node);
+    }
+    // * operator is spread — route to build_spread_expr
+    if (strview_equal(&op, "*")) {
+        return build_spread_expr(tp, bi_node);
     }
 
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
@@ -6467,8 +6473,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_expr(tp, expr_node);
     case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
-    case SYM_SPREAD_EXPR:
-        return build_spread_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
     case SYM_CURRENT_ITEM:

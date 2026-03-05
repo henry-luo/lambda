@@ -391,7 +391,6 @@ module.exports = grammar({
     _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
-      $.spread_expr,
       $.binary_expr,
       $.let_expr,
       $.if_expr,
@@ -499,14 +498,9 @@ module.exports = grammar({
     // Current key/index reference in pipe context
     current_index: _ => '~#',
 
+    // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
-      field('operator', choice('not', '!', '-', '+', '^')),
-      field('operand', $._expr),
-    )),
-
-    // Spread expression: *expr - spreads array/list items into container
-    spread_expr: $ => prec.left(seq(
-      field('operator', '*'),
+      field('operator', choice('not', '!', '-', '+', '^', '*')),
       field('operand', $._expr),
     )),
 

@@ -2914,10 +2914,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "spread_expr"
-        },
-        {
-          "type": "SYMBOL",
           "name": "binary_expr"
         },
         {
@@ -4310,33 +4306,12 @@
                 {
                   "type": "STRING",
                   "value": "^"
+                },
+                {
+                  "type": "STRING",
+                  "value": "*"
                 }
               ]
-            }
-          },
-          {
-            "type": "FIELD",
-            "name": "operand",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_expr"
-            }
-          }
-        ]
-      }
-    },
-    "spread_expr": {
-      "type": "PREC_LEFT",
-      "value": 0,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "FIELD",
-            "name": "operator",
-            "content": {
-              "type": "STRING",
-              "value": "*"
             }
           },
           {
