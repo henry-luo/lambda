@@ -7637,6 +7637,10 @@
         {
           "type": "SYMBOL",
           "name": "pattern_any"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "negation_type"
         }
       ]
     },
@@ -7645,41 +7649,11 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "primary_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "negation_type"
-        }
-      ]
-    },
-    "_quantified_type": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
           "name": "occurrence_type"
         },
         {
           "type": "SYMBOL",
-          "name": "unary_type"
-        }
-      ]
-    },
-    "_compound_type": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "constrained_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "concat_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_quantified_type"
+          "name": "primary_type"
         }
       ]
     },
@@ -7697,7 +7671,7 @@
               "name": "operand",
               "content": {
                 "type": "SYMBOL",
-                "name": "unary_type"
+                "name": "primary_type"
               }
             },
             {
@@ -7827,13 +7801,13 @@
           "members": [
             {
               "type": "SYMBOL",
-              "name": "_quantified_type"
+              "name": "unary_type"
             },
             {
               "type": "REPEAT1",
               "content": {
                 "type": "SYMBOL",
-                "name": "_quantified_type"
+                "name": "unary_type"
               }
             }
           ]
@@ -7866,7 +7840,15 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "_compound_type"
+          "name": "unary_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "constrained_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "concat_type"
         },
         {
           "type": "SYMBOL",
@@ -7886,7 +7868,7 @@
           "name": "base",
           "content": {
             "type": "SYMBOL",
-            "name": "_quantified_type"
+            "name": "unary_type"
           }
         },
         {
@@ -8742,15 +8724,15 @@
       "let_stam"
     ],
     [
-      "_quantified_type",
+      "unary_type",
       "occurrence_type"
     ],
     [
-      "_compound_type",
+      "_type_expr",
       "concat_type"
     ],
     [
-      "_compound_type",
+      "_type_expr",
       "constrained_type"
     ],
     [
@@ -8880,7 +8862,7 @@
     [
       {
         "type": "SYMBOL",
-        "name": "unary_type"
+        "name": "occurrence_type"
       },
       {
         "type": "SYMBOL",
