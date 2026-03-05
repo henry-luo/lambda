@@ -241,14 +241,9 @@ module.exports = grammar({
       "'",
     )),
 
-    binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
-
-    // whitespace allowed in hex and base64 binary
-    hex_binary: _ => token(seq(optional("\\x"), repeat1(/[0-9a-fA-F\s]/))),
-
-    base64_binary: _ => token(seq("\\64",
-      repeat1(choice(base64_unit, /\s+/)), optional(base64_padding)
-    )),
+    // binary token: b'...' containing hex or base64 data
+    // Actual parsing done by AST builder
+    binary: _ => token(seq("b'", repeat(/[^']/), "'")),
 
     _number: $ => choice($.integer, $.float, $.decimal),
 

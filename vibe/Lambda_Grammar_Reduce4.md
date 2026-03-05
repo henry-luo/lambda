@@ -546,6 +546,50 @@ Actual datetime parsing is deferred to the AST builder's existing `datetime_pars
 
 ---
 
+## Proposal 13: Merge `hex_binary`/`base64_binary` into Single `binary` Token — APPLIED ✓
+
+### Rationale
+
+The `binary` rule had a complex structure with two child token rules:
+
+```js
+// OLD: Three rules, internal structure exposed to parser
+binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
+hex_binary: _ => /[0-9a-fA-F\s]*/,
+base64_binary: _ => /[a-zA-Z0-9+\/=\s]*/,
+```
+
+The parser had to manage the choice between `hex_binary` and `base64_binary` as separate symbols, adding states and symbols to the parse tables. Since the AST builder already needs to inspect the content to determine the encoding format anyway, the grammar can be simplified to a single envelope token.
+
+### Changes
+
+**Grammar (`grammar.js`)**:
+```js
+// NEW: Single token, content parsing deferred to AST builder
+binary: _ => token(seq("b'", repeat(/[^']/), "'")),
+```
+
+Removed `hex_binary` and `base64_binary` rules entirely. The `binary` token simply captures everything between `b'` and `'`.
+
+**AST Builder (`build_ast.cpp`)**:
+- Updated `build_lit_string` binary handling to extract content between `b'` and `'` directly (skip 2 prefix chars, 1 suffix char, trim whitespace) instead of accessing child nodes `SYM_HEX_BINARY`/`SYM_BASE64_BINARY`.
+- The existing `decode_hex()`/`decode_base64()` functions still handle the actual decoding — only the source text extraction changed.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,976,424 B | 7,558,156 B | **−418,268 B (−5.24%)** |
+| STATE_COUNT | 5,841 | 5,741 | **−100** |
+| LARGE_STATE_COUNT | 1,469 | 598 | **−871** |
+| SYMBOL_COUNT | 227 | 222 | **−5** |
+| TOKEN_COUNT | 99 | 95 | **−4** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** The largest single improvement by file size (−5.24%) and a massive LARGE_STATE_COUNT reduction (−871, from 1,469 to 598). This is the same envelope-token pattern used in Proposals 11 and 12 — the grammar captures just the delimiters, and the AST builder handles semantic parsing of the content. The dramatic LARGE_STATE_COUNT drop suggests the `hex_binary`/`base64_binary` choice was creating many large parse states due to overlapping character classes.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -562,6 +606,7 @@ Actual datetime parsing is deferred to the AST builder's existing `datetime_pars
 | 10th | #10 — Merge patterns into type_stam | Low | Low | ✅ Applied (−0.28%, −2 SYM) |
 | 11th | #11 — Merge named values token | Low | Low-Medium | ✅ Applied (−1.71%, −3 SYM) |
 | 12th | #12 — Merge datetime token | Low | Medium | ✅ Applied (−3.11%, −2 SYM) |
+| 13th | #13 — Merge binary token | Low | Medium-High | ✅ Applied (−5.24%, −5 SYM) |
 
 ### Cumulative Results
 
@@ -575,6 +620,7 @@ Actual datetime parsing is deferred to the AST builder's existing `datetime_pars
 | + Proposal 10 (pattern merge) | 8,375,586 | 6,226 | 1,480 | 232 | 104 |
 | + Proposal 11 (named_value token) | 8,232,241 | 6,226 | 1,479 | 229 | 101 |
 | + Proposal 12 (datetime token) | 7,976,424 | 5,841 | 1,469 | 227 | 99 |
-| **Total reduction** | **−2,655,285 (−25.0%)** | **−424** | **−663** | **−35** | **−25** |
+| + Proposal 13 (binary token) | 7,558,156 | 5,741 | 598 | 222 | 95 |
+| **Total reduction** | **−3,073,553 (−28.9%)** | **−524** | **−1,534** | **−40** | **−29** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

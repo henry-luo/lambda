@@ -1703,29 +1703,35 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // Empty strings ("" or '') map to null in Lambda
     // With single-token strings/symbols, we parse the raw token text directly
-    // Binary is still a multi-node structure: b' + hex_binary/base64_binary + '
+    // Binary is now a single token: b'content'
     String* str;
     log_debug("build lit string with symbol: %d", symbol);
 
-    // Handle binary separately since it has child nodes
+    // Handle binary separately — extract content between b' and '
     if (symbol == SYM_BINARY) {
         TypeString* str_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeString));
         str_type->is_const = 1;  str_type->is_literal = 1;
 
-        // Binary has a child node (hex_binary or base64_binary)
-        int cnt = ts_node_named_child_count(node);
-        if (cnt == 0) {
+        int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+        const char* raw = tp->source + start;
+        int raw_len = end - start;
+
+        // Skip b' prefix (2 chars) and trailing ' (1 char)
+        const char* content_start = raw + 2;
+        int content_len = raw_len - 3;
+
+        // Skip leading/trailing whitespace inside the quotes
+        while (content_len > 0 && (*content_start == ' ' || *content_start == '\n' || *content_start == '\r' || *content_start == '\t')) { content_start++; content_len--; }
+        while (content_len > 0 && (content_start[content_len - 1] == ' ' || content_start[content_len - 1] == '\n' || content_start[content_len - 1] == '\r' || content_start[content_len - 1] == '\t')) { content_len--; }
+
+        if (content_len <= 0) {
             log_debug("build_lit_string: empty binary literal, returning null type");
             return &LIT_NULL;
         }
 
-        TSNode child = ts_node_named_child(node, 0);
-        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        int content_len = end - start;
-
         str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
         str_type->string = str;
-        memcpy(str->chars, tp->source + start, content_len);
+        memcpy(str->chars, content_start, content_len);
         str->chars[content_len] = '\0';
         str->len = content_len;
         str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
