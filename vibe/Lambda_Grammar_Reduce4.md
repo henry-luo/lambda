@@ -829,6 +829,62 @@ path_wildcard: _ => token(choice('**', '*')),
 
 ---
 
+## Proposal 19: Merge `spread_expr` into `unary_expr` — APPLIED ✓
+
+**Impact: Low-Medium (−1.21%)**
+
+`spread_expr` was a standalone rule identical in structure to `unary_expr`, differing only by the operator (`*`):
+
+```js
+// Before: two separate rules
+unary_expr: $ => prec.left(seq(
+  field('operator', choice('not', '!', '-', '+', '^')),
+  field('operand', $._expr),
+)),
+spread_expr: $ => prec.left(seq(
+  field('operator', '*'),
+  field('operand', $._expr),
+)),
+```
+
+Both `unary_expr` and `spread_expr` were alternatives in `_expr`.
+
+### Applied Change
+
+Merged `spread_expr` into `unary_expr` by adding `'*'` to the operator choice:
+
+```js
+// After: single rule
+unary_expr: $ => prec.left(seq(
+  field('operator', choice('not', '!', '-', '+', '^', '*')),
+  field('operand', $._expr),
+)),
+```
+
+Removed `spread_expr` from `_expr` and the grammar rules.
+
+**Note:** Initially attempted wrapping the operator choice in `token(choice(...))`, but this failed (36 test failures). The operators `!`, `*`, `-`, `+` are all shared with `binary_expr` as anonymous symbols. Wrapping them into a `token()` creates a new token ID that conflicts with those existing anonymous keywords. The merge without `token()` works correctly because tree-sitter shares the anonymous symbols.
+
+**AST builder changes:**
+- Added `*` operator check in `build_unary_expr` that routes to `build_spread_expr` (via forward declaration).
+- Removed `SYM_SPREAD_EXPR` macro from `ast.hpp` and its `case` branch from `build_expr`.
+- `build_spread_expr` function unchanged — it still receives the node and reads `FIELD_OPERAND`.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,250,003 B | 7,162,013 B | **−87,990 B (−1.21%)** |
+| STATE_COUNT | 5,701 | 5,672 | **−29** |
+| LARGE_STATE_COUNT | 524 | 520 | **−4** |
+| SYMBOL_COUNT | 218 | 217 | **−1** |
+| TOKEN_COUNT | 96 | 96 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Solid reduction (−1.21%) from a simple structural merge. Eliminates one symbol and a duplicate rule. The `token()` wrapper approach was proven non-viable for operators shared across expression types — an important finding for future optimization attempts.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -851,6 +907,7 @@ path_wildcard: _ => token(choice('**', '*')),
 | 16th | #16 — Merge path prefix tokens | Low | Medium | ✅ Applied (−2.76%, −1 SYM) |
 | 17th | #17 — Remove import rule | Low | Low | ✅ Applied (−0.55%, −1 SYM) |
 | 18th | #18 — Merge path wildcards | Low | Low | ✅ Applied (−0.31%, −1 SYM) |
+| 19th | #19 — Merge spread into unary | Low | Low-Medium | ✅ Applied (−1.21%, −1 SYM) |
 
 ### Cumulative Results
 
@@ -870,6 +927,7 @@ path_wildcard: _ => token(choice('**', '*')),
 | + Proposal 16 (path prefix merge) | 7,312,649 | 5,720 | 528 | 220 | 95 |
 | + Proposal 17 (remove import rule) | 7,272,412 | 5,719 | 528 | 219 | 95 |
 | + Proposal 18 (path wildcard merge) | 7,250,003 | 5,701 | 524 | 218 | 96 |
-| **Total reduction** | **−3,381,706 (−31.8%)** | **−564** | **−1,608** | **−44** | **−28** |
+| + Proposal 19 (spread into unary) | 7,162,013 | 5,672 | 520 | 217 | 96 |
+| **Total reduction** | **−3,469,696 (−32.6%)** | **−593** | **−1,612** | **−45** | **−28** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

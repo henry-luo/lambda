@@ -36,7 +36,6 @@ extern "C" {
 #define SYM_QUERY_EXPR sym_query_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_UNARY_EXPR sym_unary_expr
-#define SYM_SPREAD_EXPR sym_spread_expr
 #define SYM_BINARY_EXPR sym_binary_expr
 #define SYM_BINARY_EXPR_NO_PIPE sym_binary_expr_no_pipe
 #define SYM_EXPR sym__expr
