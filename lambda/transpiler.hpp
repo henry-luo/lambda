@@ -80,6 +80,19 @@ void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* impor
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
 bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
+// Transpiler shared functions (used by transpile.cpp and transpile-call.cpp)
+void transpile_expr(Transpiler* tp, AstNode *expr_node);
+void transpile_box_item(Transpiler* tp, AstNode *node);
+void transpile_call_expr(Transpiler* tp, AstCallNode *call_node);
+bool callee_returns_retitem(AstCallNode* call_node);
+bool current_func_returns_retitem(Transpiler* tp);
+bool emit_zero_value(Transpiler* tp, TypeId tid);
+bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type);
+const char* get_container_unbox_fn(TypeId type_id);
+bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
+bool has_typed_params(AstFuncNode* fn_node);
+Type* resolve_native_ret_type(AstFuncNode* fn_node);
+
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);

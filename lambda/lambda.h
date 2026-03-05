@@ -740,17 +740,20 @@ typedef struct Context {
     Item push_k_safe(DateTime val); // safe boxing: detects already-boxed DTIME Items
     Item push_c(int64_t cval);
 
-    #define const_d2it(index)    d2it(rt->consts[index])
-    #define const_l2it(index)    l2it(rt->consts[index])
-    #define const_c2it(index)    c2it(rt->consts[index])
-    #define const_s2it(index)    s2it(rt->consts[index])
-    #define const_y2it(index)    y2it(rt->consts[index])
-    #define const_k2it(index)    k2it(rt->consts[index])
-    #define const_x2it(index)    x2it(rt->consts[index])
+    // Const pool pointer — modules override this single macro to redirect to module-local consts
+    #define _const_pool  rt->consts
 
-    #define const_s(index)      ((String*)rt->consts[index])
-    #define const_c(index)      ((Decimal*)rt->consts[index])
-    #define const_k(index)      (*(DateTime*)rt->consts[index])
+    #define const_d2it(index)    d2it(_const_pool[index])
+    #define const_l2it(index)    l2it(_const_pool[index])
+    #define const_c2it(index)    c2it(_const_pool[index])
+    #define const_s2it(index)    s2it(_const_pool[index])
+    #define const_y2it(index)    y2it(_const_pool[index])
+    #define const_k2it(index)    k2it(_const_pool[index])
+    #define const_x2it(index)    x2it(_const_pool[index])
+
+    #define const_s(index)      ((String*)_const_pool[index])
+    #define const_c(index)      ((Decimal*)_const_pool[index])
+    #define const_k(index)      (*(DateTime*)_const_pool[index])
 
     // item unboxing
     int64_t it2l(Item item);

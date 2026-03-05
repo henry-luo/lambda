@@ -735,10 +735,10 @@ The original proposal estimated ~56% reduction by also moving Container/Function
 | Refactor `transpile.cpp` generic fallback to use `c_func_name` | ✅ Done |
 | `mir.c` func_list[] — deferred (shared lib constraint) | ⏭️ Skipped |
 
-### Phase 4: Transpiler Cleanup (2–3 days) — Future
+### Phase 4: Transpiler Cleanup — ✅ COMPLETED
 
-| Task | Effort | Impact |
-|------|--------|--------|
-| Data-driven native optimization | Medium | Replace ~200 lines of strcmp chains |
-| Extract `transpile-call.cpp` | Small | Better modularity |
-| Const macro cleanup | Small | Simpler module import pattern |
+| Task | Status | Details |
+|------|--------|---------|
+| Const macro cleanup | ✅ Done | Added `_const_pool` indirection in `lambda.h`. Module import override reduced from 20 lines (10 undefs + 10 redefs) to 2 lines. |
+| Data-driven native optimization | ✅ Done | Replaced all `strcmp(fn_name, ...)` chains with enum-based dispatch (`fn_info->fn == SYSFUNC_*`). Collapsed 5 identical bitwise binary patterns (band/bor/bxor/shl/shr, ~43 lines) into 10 lines using `c_arg_conv == C_ARG_NATIVE`. Removed dead `neg()` code path (never reachable as SysFuncNode). |
+| Extract `transpile-call.cpp` | ✅ Done | Extracted ~993 lines: `transpile_call_expr`, `transpile_call_argument`, `transpile_tail_call`, `is_tco_tail_call`, `find_param_by_name`, plus helper functions (`emit_bitwise_arg`, `can_use_native_math`, `is_integer_type`, etc.). Made 5 shared static functions non-static (`callee_returns_retitem`, `current_func_returns_retitem`, `emit_zero_value`, `value_emits_native_type`, `get_container_unbox_fn`) and declared them in `transpiler.hpp`. transpile.cpp: 7,892 → 6,881 lines. |
