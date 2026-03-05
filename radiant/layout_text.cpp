@@ -429,6 +429,12 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.is_last_line = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
+    // CSS 2.1 §8.3: Re-apply pending inline left edges from spans that haven't
+    // produced content yet. When an inline span's margin+border+padding is added
+    // but its first content wraps to a new line, the edges must follow to the new
+    // line because that's where the span's first line fragment actually starts.
+    lycon->line.advance_x += lycon->line.inline_start_edge_pending;
+
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     // Apply text-indent offset to advance_x for the first line only
     if (lycon->block.is_first_line && lycon->block.text_indent != 0) {
@@ -455,6 +461,7 @@ void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.effective_left = left;
     lycon->line.effective_right = right;
     lycon->line.has_float_intrusion = false;
+    lycon->line.inline_start_edge_pending = 0;  // no pending inline edges at block start
     line_reset(lycon);
     lycon->line.vertical_align = CSS_VALUE_BASELINE;  // vertical-align does not inherit
     lycon->line.vertical_align_offset = 0;
@@ -715,7 +722,22 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
     if (view) {
         if (view->view_type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
         else if (view->view_type == RDT_VIEW_INLINE) {
-            return view_has_line_filled(lycon, view);
+            // CSS 2.1 §8.3: When checking if the line is filled from inside an
+            // inline span, account for the span's right margin+border+padding.
+            // These will be added to advance_x after the span's content is done,
+            // so the lookahead must include them to avoid greedy over-placement.
+            ViewSpan* sp = (ViewSpan*)view;
+            float right_edge = 0;
+            if (sp->bound) {
+                right_edge += sp->bound->margin.right;
+                if (sp->bound->border)
+                    right_edge += sp->bound->border->width.right;
+                right_edge += sp->bound->padding.right;
+            }
+            lycon->line.advance_x += right_edge;
+            LineFillStatus result = view_has_line_filled(lycon, view);
+            lycon->line.advance_x -= right_edge;
+            return result;
         }
         log_debug("unknown view type");
     }
@@ -728,6 +750,9 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->width = text_width;
     lycon->line.advance_x += text_width;
     lycon->line.last_text_rect = rect;  // track for trailing whitespace trimming
+    // CSS 2.1 §8.3: Inline content has been placed on this line, so any pending
+    // inline left edges (margin+border+padding) have been consumed.
+    lycon->line.inline_start_edge_pending = 0;
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     // When line-height is explicitly set, the inline box height equals line-height.
     // Leading = line-height - content_height is split half above and half below.

@@ -154,6 +154,10 @@ struct MirTranspiler {
 
     // Whether we're inside a proc function body (pn)
     bool in_proc;
+
+    // Set when a return/break/continue emits a terminal instruction.
+    // Used to skip dead-code boxing that causes MIR type mismatches.
+    bool block_returned;
 };
 
 // ============================================================================
@@ -1569,6 +1573,19 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
 
         TypeId lt = get_effective_type(mt, bi->left);
         TypeId rt = get_effective_type(mt, bi->right);
+
+        // Comparisons ALWAYS return bool regardless of operand types.
+        // Must check BEFORE the ANY short-circuit below, because comparison
+        // operators (fn_eq/fn_gt/etc.) return Bool (uint8_t 0/1), not Item.
+        // If we returned ANY, the raw 0/1 would be stored as a boxed Item
+        // and later dereferenced as a pointer → SIGSEGV.
+        {
+            int op_ck = bi->op;
+            if (op_ck >= OPERATOR_EQ && op_ck <= OPERATOR_GE) return LMD_TYPE_BOOL;
+            if (op_ck == OPERATOR_IS || op_ck == OPERATOR_IS_NAN || op_ck == OPERATOR_IN)
+                return LMD_TYPE_BOOL;
+        }
+
         if (lt == LMD_TYPE_ANY || rt == LMD_TYPE_ANY) return LMD_TYPE_ANY;
 
         // Infer result type from operand types when AST type is not set.
@@ -2030,6 +2047,18 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
 
+    // Comparison functions (fn_eq/fn_ne/fn_lt/fn_gt/fn_le/fn_ge) return Bool
+    // (uint8_t) but we declare MIR_T_I64 as return type. On some ABIs the
+    // upper bytes of the return register may contain garbage. Mask to 0xFF
+    // to ensure a clean 0/1 value that can be safely used as a native bool.
+    if (bi->op >= OPERATOR_EQ && bi->op <= OPERATOR_GE) {
+        MIR_reg_t clean = new_reg(mt, "cmask", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, clean),
+            MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, 0xFF)));
+        return clean;
+    }
+
     // NOTE: The general fallback is only reached for non-native type combinations
     // or POW (which breaks out of the native block). ADD/SUB/MUL/DIV with native
     // types are handled above, IDIV/MOD are intercepted at the top of this function.
@@ -2156,8 +2185,25 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     if (if_node->then) {
         push_scope(mt);  // isolate branch variables
         MIR_reg_t then_val = transpile_expr(mt, if_node->then);
-        if (need_boxing) {
-            MIR_reg_t boxed = emit_box(mt, then_val, then_tid);
+        if (mt->block_returned) {
+            // Branch contains a terminal statement (return/break/continue).
+            // Code after MIR_RET is unreachable, but MIR still validates types.
+            // Assign a dummy I64 value to the result register instead of boxing
+            // (which could cause type mismatch: e.g. emit_box_float on an I64).
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, 0)));
+            mt->block_returned = false;
+        } else if (need_boxing) {
+            // transpile_content always returns I64 (boxed Item from list_end
+            // or transpile_box_item). The AST-inferred then_tid may be stale
+            // (e.g. FLOAT for a side-effect-only block). Use ANY for CONTENT
+            // branches to avoid type mismatches like emit_box_float(I64_reg).
+            TypeId box_tid = then_tid;
+            if (if_node->then->node_type == AST_NODE_CONTENT ||
+                if_node->then->node_type == AST_NODE_LIST) {
+                box_tid = LMD_TYPE_ANY;
+            }
+            MIR_reg_t boxed = emit_box(mt, then_val, box_tid);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, boxed)));
         } else if (result_type == MIR_T_D) {
@@ -2180,8 +2226,18 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     if (if_node->otherwise) {
         push_scope(mt);  // isolate branch variables
         MIR_reg_t else_val = transpile_expr(mt, if_node->otherwise);
-        if (need_boxing) {
-            MIR_reg_t boxed = emit_box(mt, else_val, else_tid);
+        if (mt->block_returned) {
+            // Same as above: terminal in else branch
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, 0)));
+            mt->block_returned = false;
+        } else if (need_boxing) {
+            TypeId box_tid = else_tid;
+            if (if_node->otherwise->node_type == AST_NODE_CONTENT ||
+                if_node->otherwise->node_type == AST_NODE_LIST) {
+                box_tid = LMD_TYPE_ANY;
+            }
+            MIR_reg_t boxed = emit_box(mt, else_val, box_tid);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, boxed)));
         } else if (result_type == MIR_T_D) {
@@ -4476,7 +4532,12 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
 static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     if (ret_node->value) {
         MIR_reg_t val = transpile_expr(mt, ret_node->value);
-        TypeId val_tid = ret_node->value->type ? ret_node->value->type->type_id : LMD_TYPE_ANY;
+        // Use get_effective_type instead of AST type to match the actual
+        // register type returned by transpile_expr. AST may say FLOAT but
+        // the variable is stored as ANY (boxed Item / I64) when params are
+        // untyped, causing emit_box_float to receive an I64 register → MIR
+        // type validation error "Got 'int', expected 'double'".
+        TypeId val_tid = get_effective_type(mt, ret_node->value);
         MIR_reg_t boxed = emit_box(mt, val, val_tid);
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
     } else {
@@ -4486,6 +4547,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     MIR_reg_t r = new_reg(mt, "ret_dummy", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, 0)));
+    mt->block_returned = true;
     return r;
 }
 
@@ -5735,6 +5797,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     bool saved_in_proc = mt->in_proc;
     mt->in_proc = (fn_as_node->node_type == AST_NODE_PROC);
 
+    // Reset block_returned for this function's compilation scope.
+    // Prevents the flag from leaking from one function's body into the next.
+    bool saved_block_returned = mt->block_returned;
+    mt->block_returned = false;
+
     // For methods: load object fields from _self into local scope
     TypeObject* saved_method_owner = mt->method_owner;
     MIR_reg_t saved_self_reg = mt->self_reg;
@@ -5803,6 +5870,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_closure = saved_closure;
     mt->env_reg = saved_env_reg;
     mt->in_proc = saved_in_proc;
+    mt->block_returned = saved_block_returned;
     mt->method_owner = saved_method_owner;
     mt->self_reg = saved_self_reg;
 
