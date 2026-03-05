@@ -469,22 +469,20 @@ module.exports = grammar({
       field('query', $.primary_type),
     ),
 
-    // Path root: / for absolute file paths
-    path_root: _ => '/',
+    // Path prefix: /, ., or .. for path expressions
+    // Combines path_root, path_self, path_parent into single token for path_expr
+    _path_prefix: _ => token(choice('/', '.', '..')),
 
-    // Variadic marker: ... (higher priority than path_self and path_parent)
+    // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
 
-    // Path self: . for relative paths (current directory)
-    path_self: _ => '.',
-
-    // Path parent: .. for parent directory
+    // Path parent: .. for parent directory (kept separate for parent_expr)
     path_parent: _ => '..',
 
     // Path expression: /, ., or .. optionally followed by a field
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
-      choice($.path_root, $.path_self, $.path_parent),
+      $._path_prefix,
       optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive, $.base_type)))
     )),
 

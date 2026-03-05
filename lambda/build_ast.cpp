@@ -799,23 +799,24 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
     TSSymbol symbol = ts_node_symbol(node);
 
     // New path tokens: /, ., ..
-    if (symbol == SYM_PATH_ROOT) {
-        return PATH_SCHEME_FILE;  // / is absolute file path
-    }
-    if (symbol == SYM_PATH_SELF) {
-        return PATH_SCHEME_REL;   // . is relative path
-    }
+    // _path_prefix is a hidden token, so standalone path_root/path_self won't appear
+    // path_parent is still a separate visible symbol for parent_expr
     if (symbol == SYM_PATH_PARENT) {
         return PATH_SCHEME_PARENT; // .. is parent path
     }
 
-    // path_expr: (/ | . | ..) optional(field)
+    // path_expr: _path_prefix optional(field)
     if (symbol == SYM_PATH_EXPR) {
-        // determine scheme from first child (path_root, path_self, or path_parent)
-        TSNode first_child = ts_node_child(node, 0);
-        TSSymbol first_sym = ts_node_symbol(first_child);
-        int scheme = (first_sym == SYM_PATH_ROOT) ? PATH_SCHEME_FILE :
-                     (first_sym == SYM_PATH_PARENT) ? PATH_SCHEME_PARENT : PATH_SCHEME_REL;
+        // determine scheme from path_expr source text (first char(s) are the prefix)
+        StrView source = ts_node_source(tp, node);
+        int scheme;
+        if (source.length >= 1 && source.str[0] == '/') {
+            scheme = PATH_SCHEME_FILE;
+        } else if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
+            scheme = PATH_SCHEME_PARENT;
+        } else {
+            scheme = PATH_SCHEME_REL;
+        }
 
         // check for optional field
         TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);

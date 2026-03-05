@@ -3388,35 +3388,7 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "path_parent",
-          "named": true
-        },
-        {
-          "type": "path_root",
-          "named": true
-        },
-        {
-          "type": "path_self",
-          "named": true
-        }
-      ]
     }
-  },
-  {
-    "type": "path_root",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "path_self",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "path_wildcard",
@@ -4565,11 +4537,11 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
