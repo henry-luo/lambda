@@ -290,8 +290,6 @@ module.exports = grammar({
       $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
-      $.string_pattern,
-      $.symbol_pattern,
     ),
 
     _content_expr: $ => choice(
@@ -1051,8 +1049,11 @@ module.exports = grammar({
       '}'
     )),
 
+    // type_stam handles type aliases, string patterns, and symbol patterns.
+    // The leading keyword distinguishes them; AST builder checks the text.
     type_stam: $ => seq(
-      'type', field('declare', alias($.type_assign, $.assign_expr)),
+      field('kind', choice('type', 'string', 'symbol')),
+      field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
@@ -1074,23 +1075,8 @@ module.exports = grammar({
     // Backslash-dot matches any character
     pattern_any: _ => '\\.',
 
-    // String pattern definition: string name = type_expr
-    // type_expr now includes concat_type for pattern concatenation.
-    string_pattern: $ => prec.right(seq(
-      'string',
-      field('name', $.identifier),
-      '=',
-      field('pattern', $._type_expr),
-    )),
-
-    // Symbol pattern definition: symbol name = type_expr
-    // type_expr now includes concat_type for pattern concatenation.
-    symbol_pattern: $ => prec.right(seq(
-      'symbol',
-      field('name', $.identifier),
-      '=',
-      field('pattern', $._type_expr),
-    )),    
+    // NOTE: string_pattern and symbol_pattern are now handled by type_stam.
+    // type_stam's 'kind' field distinguishes 'type' vs 'string' vs 'symbol'.
 
     // ==================== Module Imports ====================
     relative_name: $ => repeat1(seq(
