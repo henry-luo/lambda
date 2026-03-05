@@ -4,221 +4,12 @@
 #include "css_style_node.hpp"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <time.h>
 #include "../../../lib/str.h"
 
-// Forward declarations for functions defined later in this file
-static void css_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule);
-static void css_apply_rule_to_element(CssRule* rule, CssStyleNode* element, Pool* pool);
-
-// Forward declarations for missing style node and engine functions
+// Forward declarations
 int css_style_node_compare(const void* a, const void* b, void* udata);
 void css_style_node_cleanup(void* node, void* udata);
-CssEngine* css_engine_create(Pool* pool);
-void css_engine_destroy(CssEngine* engine);
-CssEngine* css_engine_create(Pool* pool);
-
-// Style node management functions (proper implementations)
-static void css_style_node_init(CssStyleNode* node, const char* element_name, Pool* pool) {
-    if (!node || !pool) return;
-    memset(node, 0, sizeof(CssStyleNode));
-    // CssStyleNode represents a single property, not an element
-    // Element name is not stored in style nodes
-    node->property_id = static_cast<CssPropertyId>(0);
-    node->winning_declaration = nullptr;
-    node->losing_declarations = nullptr;
-    node->losing_count = 0;
-    node->losing_capacity = 0;
-    node->has_custom_property = false;
-}
-
-static void css_style_node_set_element_name(CssStyleNode* node, const char* element_name) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // Element names are handled by DomElement structures
-    // This function is a no-op as it doesn't apply to style nodes
-    (void)node;
-    (void)element_name;
-}
-
-static void css_style_node_add_class(CssStyleNode* node, const char* class_name) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // Class names are handled by DomElement structures
-    // This function is a no-op as it doesn't apply to style nodes
-    (void)node;
-    (void)class_name;
-}
-
-static void css_style_node_add_property(CssStyleNode* node, const char* prop_name,
-                                       void* value, Pool* pool) {
-    // Set the property on this style node
-    if (!node || !prop_name || !value || !pool) return;
-
-    // Convert property name to ID
-    CssPropertyId prop_id = css_property_id_from_name(prop_name);
-    if (prop_id == 0) return; // Unknown property
-
-    node->property_id = prop_id;
-
-    // Create a declaration for this property with value
-    CssSpecificity spec = css_specificity_create(0, 0, 0, 0, false);
-    CssDeclaration* decl = css_declaration_create(prop_id, value, spec, CSS_ORIGIN_AUTHOR, pool);
-    if (decl) {
-        node->winning_declaration = decl;
-    }
-}
-
-// Additional style node query functions
-static bool css_style_node_has_class(CssStyleNode* node, const char* class_name) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // Class checking should be done on DomElement structures
-    // Return false as this doesn't apply to style nodes
-    (void)node;
-    (void)class_name;
-    return false;
-}
-
-static bool css_style_node_matches_id(CssStyleNode* node, const char* id) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // ID matching should be done on DomElement structures
-    // Return false as this doesn't apply to style nodes
-    (void)node;
-    (void)id;
-    return false;
-}
-
-static bool css_style_node_matches_element_name(CssStyleNode* node, const char* element_name) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // Element name matching should be done on DomElement structures
-    // Return false as this doesn't apply to style nodes
-    (void)node;
-    (void)element_name;
-    return false;
-}
-
-// Enhanced CSS4+ pseudo-selector functions
-static bool css_enhanced_pseudo_has_matches(CssStyleNode* node, CssSelectorComponent* component) {
-    // :has() pseudo-class matching
-    // This would require checking if the node's element has descendants matching a selector
-    // For now, return false as this requires full DOM traversal context
-    (void)node;
-    (void)component;
-    return false;
-}
-
-static bool css_enhanced_pseudo_is_matches(CssStyleNode* node, CssSelectorComponent* component) {
-    // :is() pseudo-class matching (matches any selector in a list)
-    // This would require checking if the node's element matches any selector in the component
-    // For now, return false as this requires full selector matching context
-    (void)node;
-    (void)component;
-    return false;
-}
-
-static bool css_enhanced_pseudo_where_matches(CssStyleNode* node, CssSelectorComponent* component) {
-    // :where() pseudo-class matching (same as :is() but with 0 specificity)
-    // This would require checking if the node's element matches any selector in the component
-    // For now, return false as this requires full selector matching context
-    (void)node;
-    (void)component;
-    return false;
-}
-
-static bool css_enhanced_pseudo_not_matches(CssStyleNode* node, CssSelectorComponent* component) {
-    // :not() pseudo-class matching (matches if element doesn't match selector)
-    // This would require checking if the node's element does NOT match the selector
-    // For now, return false as this requires full selector matching context
-    (void)node;
-    (void)component;
-    return false;
-}
-
-static bool css_nesting_parent_matches(CssStyleNode* node, CssSelectorComponent* component) {
-    // CSS nesting parent selector (&) matching
-    // This would require checking if the node's element matches the parent selector context
-    // For now, return false as this requires nesting context
-    (void)node;
-    (void)component;
-    return false;
-}
-
-// CSS pseudo-class matching
-bool css_pseudo_class_matches(CssEngine* engine,
-                             CssSelectorType pseudo_type,
-                             CssStyleNode* element) {
-    // Basic pseudo-class matching implementation
-    if (!engine || !element) return false;
-
-    // Pseudo-classes require DOM element context, not just style nodes
-    // This function should be refactored to work with DomElement instead
-    // For now, return false for all pseudo-classes
-    (void)pseudo_type;
-    return false;
-}
-
-static void css_style_node_set_id(CssStyleNode* node, const char* id) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // ID setting should be done on DomElement structures
-    // This is a no-op for style nodes
-    (void)node;
-    (void)id;
-}
-
-static void css_style_node_add_attribute_selector(CssStyleNode* node, const char* attr_name, const char* attr_value) {
-    // Note: CssStyleNode is for CSS properties, not DOM elements
-    // Attribute selectors should be handled on DomElement structures
-    // This is a no-op for style nodes
-    (void)node;
-    (void)attr_name;
-    (void)attr_value;
-}
-
-// Enhanced rule matching functions
-static bool css_enhanced_rule_matches_element(CssRule* rule, CssStyleNode* element) {
-    // Rule matching requires DOM element context, not just style nodes
-    // CssStyleNode represents a single property, not an element
-    // This function should be refactored to work with DomElement
-    if (!rule || !element) return false;
-    return false; // Cannot match rules to style nodes directly
-}
-
-static void css_enhanced_sort_rules_by_cascade(CssRule** rules, int rule_count) {
-    // Sort CSS rules by cascade priority (specificity, origin, source order)
-    if (!rules || rule_count <= 1) return;
-
-    // Simple bubble sort by cascade order
-    // In production, use qsort or merge sort for better performance
-    for (int i = 0; i < rule_count - 1; i++) {
-        for (int j = 0; j < rule_count - i - 1; j++) {
-            CssRule* rule_a = rules[j];
-            CssRule* rule_b = rules[j + 1];
-
-            if (!rule_a || !rule_b) continue;
-
-            // Simple comparison based on cached specificity
-            // Lower specificity should come first (so higher specificity wins)
-            if (rule_a->cached_specificity > rule_b->cached_specificity) {
-                // Swap
-                CssRule* temp = rules[j];
-                rules[j] = rules[j + 1];
-                rules[j + 1] = temp;
-            }
-        }
-    }
-}
-
-static void css_enhanced_apply_rule_to_element(CssRule* rule, CssStyleNode* element, Pool* pool) {
-    // Apply CSS rule declarations to an element
-    // Note: This should work with DomElement and style trees, not CssStyleNode directly
-    if (!rule || !element || !pool) return;
-
-    // CssStyleNode represents a property, not an element
-    // Rule application requires a style tree and DOM element context
-    // This is a placeholder that does nothing without proper context
-    (void)rule;
-    (void)element;
-    (void)pool;
-}
 
 // Enhanced CSS Engine creation
 CssEngine* css_engine_create(Pool* pool) {
@@ -520,52 +311,6 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
     }
 }
 
-// Enhanced cascade integration
-bool css_enhanced_apply_cascade(CssEngine* engine,
-                               CssStyleNode* element,
-                               CssStylesheet** stylesheets,
-                               int stylesheet_count) {
-    if (!engine || !element || !stylesheets) return false;
-
-    clock_t start_time = clock();
-
-    // Collect all matching rules from all stylesheets
-    CssRule** matching_rules = (CssRule**)pool_alloc(engine->pool, 1000 * sizeof(CssRule*));
-    int matching_count = 0;
-
-    for (int i = 0; i < stylesheet_count; i++) {
-        CssStylesheet* stylesheet = stylesheets[i];
-        if (!stylesheet) continue;
-
-        for (int j = 0; j < stylesheet->rule_count; j++) {
-            CssRule* rule = stylesheet->rules[j];
-            if (!rule) continue;
-
-            // Check if any selector in the rule matches the element
-            if (css_enhanced_rule_matches_element(rule, element)) {
-                if (matching_count < 1000) {
-                    matching_rules[matching_count++] = rule;
-                }
-            }
-        }
-    }
-
-    // Sort rules by cascade priority (specificity, source order, importance, etc.)
-    css_enhanced_sort_rules_by_cascade(matching_rules, matching_count);
-
-    // Apply rules in cascade order
-    for (int i = 0; i < matching_count; i++) {
-        CssRule* rule = matching_rules[i];
-        css_enhanced_apply_rule_to_element(rule, element, engine->pool);
-    }
-
-    clock_t end_time = clock();
-    engine->stats.cascade_time += ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
-    engine->stats.cascade_calculations++;
-
-    return true;
-}
-
 // Statistics and monitoring
 void css_engine_update_stats(CssEngine* engine) {
     if (!engine) return;
@@ -579,21 +324,15 @@ void css_engine_update_stats(CssEngine* engine) {
 void css_engine_print_stats(CssEngine* engine) {
     if (!engine) return;
 
-    printf("CSS Enhanced Engine Statistics:\n");
-    printf("  Rules parsed: %d\n", engine->stats.rules_parsed);
-    printf("  Selectors cached: %d\n", engine->stats.selectors_cached);
-    printf("  Values computed: %d\n", engine->stats.values_computed);
-    printf("  Cascade calculations: %d\n", engine->stats.cascade_calculations);
-    printf("  Parse time: %.4f seconds\n", engine->stats.parse_time);
-    printf("  Cascade time: %.4f seconds\n", engine->stats.cascade_time);
-    printf("  Memory usage: %zu bytes\n", engine->stats.memory_usage);
-
-    printf("\nFeatures enabled:\n");
-    printf("  CSS Nesting: %s\n", engine->features.css_nesting ? "Yes" : "No");
-    printf("  Cascade Layers: %s\n", engine->features.css_cascade_layers ? "Yes" : "No");
-    printf("  Container Queries: %s\n", engine->features.css_container_queries ? "Yes" : "No");
-    printf("  CSS Scope: %s\n", engine->features.css_scope ? "Yes" : "No");
-    printf("  Color Level 4: %s\n", engine->features.css_color_4 ? "Yes" : "No");
+    log_info("css engine stats: rules_parsed=%zu selectors_cached=%zu values_computed=%zu cascade_calcs=%zu",
+             engine->stats.rules_parsed, engine->stats.selectors_cached,
+             engine->stats.values_computed, engine->stats.cascade_calculations);
+    log_info("css engine timing: parse=%.4fs cascade=%.4fs memory=%zu bytes",
+             engine->stats.parse_time, engine->stats.cascade_time, engine->stats.memory_usage);
+    log_info("css features: nesting=%d layers=%d containers=%d scope=%d color4=%d",
+             engine->features.css_nesting, engine->features.css_cascade_layers,
+             engine->features.css_container_queries, engine->features.css_scope,
+             engine->features.css_color_4);
 }
 
 double css_engine_get_parse_time(CssEngine* engine) {
@@ -632,26 +371,6 @@ CssStyleEngine* css_style_engine_create(Pool* pool) {
 void css_style_engine_destroy(CssStyleEngine* engine) {
     (void)engine;
     // Memory managed by pool
-}
-
-// ============================================================================
-// CSS Enhanced Functions - Implementation
-// ============================================================================
-
-bool css_enhanced_nesting_parent_matches(const CssSelector* selector, const CssStyleNode* node) {
-    // CSS nesting parent selector (&) matching
-    // This would require checking if the node's element matches the parent selector context
-    // For now, return false as this requires full DOM traversal context
-    (void)selector; (void)node;
-    return false; // Requires nesting context
-}
-
-bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssStyleNode* node) {
-    // Enhanced pseudo-class matching
-    // This would require checking if the node's element matches pseudo-class state
-    // For now, return false as this requires full selector matching context
-    (void)selector; (void)node;
-    return false; // Requires DOM element context
 }
 
 // ============================================================================

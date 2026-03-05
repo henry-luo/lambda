@@ -112,49 +112,9 @@ static bool property_uses_comma_separated_list(CssPropertyId property_id) {
     }
 }
 
+// Delegates to the canonical css_unit_to_string() in css_value.cpp.
 static const char* unit_to_string(CssUnit unit) {
-    switch (unit) {
-        // Absolute units
-        case CSS_UNIT_PX: return "px";
-        case CSS_UNIT_CM: return "cm";
-        case CSS_UNIT_MM: return "mm";
-        case CSS_UNIT_IN: return "in";
-        case CSS_UNIT_PT: return "pt";
-        case CSS_UNIT_PC: return "pc";
-        case CSS_UNIT_Q: return "Q";
-        // Font-relative units
-        case CSS_UNIT_EM: return "em";
-        case CSS_UNIT_REM: return "rem";
-        case CSS_UNIT_EX: return "ex";
-        case CSS_UNIT_CAP: return "cap";
-        case CSS_UNIT_CH: return "ch";
-        case CSS_UNIT_IC: return "ic";
-        case CSS_UNIT_LH: return "lh";
-        case CSS_UNIT_RLH: return "rlh";
-        // Viewport units
-        case CSS_UNIT_VW: return "vw";
-        case CSS_UNIT_VH: return "vh";
-        case CSS_UNIT_VI: return "vi";
-        case CSS_UNIT_VB: return "vb";
-        case CSS_UNIT_VMIN: return "vmin";
-        case CSS_UNIT_VMAX: return "vmax";
-        case CSS_UNIT_PERCENT: return "%";
-        // Angle units
-        case CSS_UNIT_DEG: return "deg";
-        case CSS_UNIT_RAD: return "rad";
-        case CSS_UNIT_GRAD: return "grad";
-        case CSS_UNIT_TURN: return "turn";
-        // Time units
-        case CSS_UNIT_S: return "s";
-        case CSS_UNIT_MS: return "ms";
-        // Flex units
-        case CSS_UNIT_FR: return "fr";
-        // Resolution units
-        case CSS_UNIT_DPI: return "dpi";
-        case CSS_UNIT_DPCM: return "dpcm";
-        case CSS_UNIT_DPPX: return "dppx";
-        default: return "";
-    }
+    return css_unit_to_string(unit);
 }
 
 // Helper function to format numbers cleanly (without unnecessary trailing zeros)

@@ -2,69 +2,81 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../../lib/str.h"
+#include "../input-utils.hpp"
 #include <ctype.h>
 #include <assert.h>
 
 // Helper function to parse CSS unit from string
+// Delegates to the canonical css_unit_from_string() in css_value.cpp
 static CssUnit parse_css_unit(const char* unit_str, size_t length) {
-    if (!unit_str || length == 0) return CSS_UNIT_NONE;
+    return css_unit_from_string(unit_str, length);
+}
 
-    // Create null-terminated string for comparison
-    char unit[16];
-    if (length >= sizeof(unit)) return CSS_UNIT_NONE;
-    strncpy(unit, unit_str, length);
-    unit[length] = '\0';
+// Helper: tokenize a CSS numeric value (number, percentage, or dimension).
+// `start` is the beginning of the token (may include a sign or leading dot).
+// `pos` on entry points past any sign/dot prefix to the first digit position.
+// On return, `*pos_ptr` is advanced past the full number+unit/percentage.
+static void tokenize_number(const char* input, size_t length, size_t start,
+                            size_t* pos_ptr, CssToken* token, Pool* pool) {
+    size_t pos = *pos_ptr;
 
-    // Absolute units
-    if (strcmp(unit, "px") == 0) return CSS_UNIT_PX;
-    if (strcmp(unit, "cm") == 0) return CSS_UNIT_CM;
-    if (strcmp(unit, "mm") == 0) return CSS_UNIT_MM;
-    if (strcmp(unit, "in") == 0) return CSS_UNIT_IN;
-    if (strcmp(unit, "pt") == 0) return CSS_UNIT_PT;
-    if (strcmp(unit, "pc") == 0) return CSS_UNIT_PC;
-    if (strcmp(unit, "q") == 0) return CSS_UNIT_Q;
+    // parse integer part
+    while (pos < length && isdigit(input[pos])) {
+        pos++;
+    }
 
-    // Font-relative units
-    if (strcmp(unit, "em") == 0) return CSS_UNIT_EM;
-    if (strcmp(unit, "ex") == 0) return CSS_UNIT_EX;
-    if (strcmp(unit, "cap") == 0) return CSS_UNIT_CAP;
-    if (strcmp(unit, "ch") == 0) return CSS_UNIT_CH;
-    if (strcmp(unit, "ic") == 0) return CSS_UNIT_IC;
-    if (strcmp(unit, "rem") == 0) return CSS_UNIT_REM;
-    if (strcmp(unit, "lh") == 0) return CSS_UNIT_LH;
-    if (strcmp(unit, "rlh") == 0) return CSS_UNIT_RLH;
+    // parse decimal part
+    if (pos < length && input[pos] == '.') {
+        pos++;
+        while (pos < length && isdigit(input[pos])) {
+            pos++;
+        }
+    }
 
-    // Viewport units
-    if (strcmp(unit, "vw") == 0) return CSS_UNIT_VW;
-    if (strcmp(unit, "vh") == 0) return CSS_UNIT_VH;
-    if (strcmp(unit, "vi") == 0) return CSS_UNIT_VI;
-    if (strcmp(unit, "vb") == 0) return CSS_UNIT_VB;
-    if (strcmp(unit, "vmin") == 0) return CSS_UNIT_VMIN;
-    if (strcmp(unit, "vmax") == 0) return CSS_UNIT_VMAX;
+    // CSS Values Level 4: scientific notation exponent (e.g., 3.68e+19)
+    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
+        size_t exp_start = pos;
+        pos++;
+        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
+        if (pos < length && isdigit(input[pos])) {
+            while (pos < length && isdigit(input[pos])) pos++;
+        } else {
+            pos = exp_start;  // not a valid exponent, rollback
+        }
+    }
 
-    // Grid fractional units
-    if (strcmp(unit, "fr") == 0) return CSS_UNIT_FR;
+    // determine token type: percentage, dimension, or plain number
+    size_t number_end = pos;
+    if (pos < length && input[pos] == '%') {
+        pos++;
+        token->type = CSS_TOKEN_PERCENTAGE;
+    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
+        size_t unit_start = pos;
+        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
+            pos++;
+        }
+        token->type = CSS_TOKEN_DIMENSION;
+        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
+        token->data.dimension.unit = parsed_unit;
+    } else {
+        token->type = CSS_TOKEN_NUMBER;
+    }
 
-    // Angle units
-    if (strcmp(unit, "deg") == 0) return CSS_UNIT_DEG;
-    if (strcmp(unit, "rad") == 0) return CSS_UNIT_RAD;
-    if (strcmp(unit, "grad") == 0) return CSS_UNIT_GRAD;
-    if (strcmp(unit, "turn") == 0) return CSS_UNIT_TURN;
+    token->length = pos - start;
 
-    // Time units
-    if (strcmp(unit, "s") == 0) return CSS_UNIT_S;
-    if (strcmp(unit, "ms") == 0) return CSS_UNIT_MS;
+    // parse the numeric value
+    char* num_str = static_cast<char*>(pool_alloc(pool, number_end - start + 1));
+    if (num_str) {
+        strncpy(num_str, token->start, number_end - start);
+        num_str[number_end - start] = '\0';
+        if (token->type == CSS_TOKEN_DIMENSION) {
+            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
+        } else {
+            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
+        }
+    }
 
-    // Frequency units
-    if (strcmp(unit, "hz") == 0) return CSS_UNIT_HZ;
-    if (strcmp(unit, "khz") == 0) return CSS_UNIT_KHZ;
-
-    // Resolution units
-    if (strcmp(unit, "dpi") == 0) return CSS_UNIT_DPI;
-    if (strcmp(unit, "dpcm") == 0) return CSS_UNIT_DPCM;
-    if (strcmp(unit, "dppx") == 0) return CSS_UNIT_DPPX;
-
-    return CSS_UNIT_NONE;
+    *pos_ptr = pos;
 }
 
 // Enhanced Unicode character classification
@@ -173,20 +185,10 @@ char* css_decode_unicode_escapes(const char* input, Pool* pool) {
             if (*p && css_is_whitespace_unicode(*p)) p++;
 
             // Convert codepoint to UTF-8
-            if (codepoint < 0x80) {
-                result[result_pos++] = (char)codepoint;
-            } else if (codepoint < 0x800) {
-                result[result_pos++] = (char)(0xC0 | (codepoint >> 6));
-                result[result_pos++] = (char)(0x80 | (codepoint & 0x3F));
-            } else if (codepoint < 0x10000) {
-                result[result_pos++] = (char)(0xE0 | (codepoint >> 12));
-                result[result_pos++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-                result[result_pos++] = (char)(0x80 | (codepoint & 0x3F));
-            } else if (codepoint < 0x110000) {
-                result[result_pos++] = (char)(0xF0 | (codepoint >> 18));
-                result[result_pos++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-                result[result_pos++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-                result[result_pos++] = (char)(0x80 | (codepoint & 0x3F));
+            char utf8_buf[5];
+            int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
+            for (int j = 0; j < utf8_len; j++) {
+                result[result_pos++] = utf8_buf[j];
             }
         } else {
             result[result_pos++] = *p++;
@@ -425,51 +427,6 @@ const char* css_token_type_to_str(CssTokenType type) {
     }
 }
 
-const char* css_unit_type_to_str(CssUnit unit) {
-    switch (unit) {
-        case CSS_UNIT_PX: return "px";
-        case CSS_UNIT_EM: return "em";
-        case CSS_UNIT_REM: return "rem";
-        case CSS_UNIT_EX: return "ex";
-        case CSS_UNIT_CH: return "ch";
-        case CSS_UNIT_VW: return "vw";
-        case CSS_UNIT_VH: return "vh";
-        case CSS_UNIT_VMIN: return "vmin";
-        case CSS_UNIT_VMAX: return "vmax";
-        case CSS_UNIT_CM: return "cm";
-        case CSS_UNIT_MM: return "mm";
-        case CSS_UNIT_IN: return "in";
-        case CSS_UNIT_PT: return "pt";
-        case CSS_UNIT_PC: return "pc";
-        case CSS_UNIT_Q: return "q";
-        case CSS_UNIT_LH: return "lh";
-        case CSS_UNIT_RLH: return "rlh";
-        case CSS_UNIT_VI: return "vi";
-        case CSS_UNIT_VB: return "vb";
-        case CSS_UNIT_SVW: return "svw";
-        case CSS_UNIT_SVH: return "svh";
-        case CSS_UNIT_LVW: return "lvw";
-        case CSS_UNIT_LVH: return "lvh";
-        case CSS_UNIT_DVW: return "dvw";
-        case CSS_UNIT_DVH: return "dvh";
-        case CSS_UNIT_DEG: return "deg";
-        case CSS_UNIT_GRAD: return "grad";
-        case CSS_UNIT_RAD: return "rad";
-        case CSS_UNIT_TURN: return "turn";
-        case CSS_UNIT_S: return "s";
-        case CSS_UNIT_MS: return "ms";
-        case CSS_UNIT_HZ: return "hz";
-        case CSS_UNIT_KHZ: return "khz";
-        case CSS_UNIT_DPI: return "dpi";
-        case CSS_UNIT_DPCM: return "dpcm";
-        case CSS_UNIT_DPPX: return "dppx";
-        case CSS_UNIT_FR: return "fr";
-        case CSS_UNIT_PERCENT: return "%";
-        case CSS_UNIT_NONE: return "";
-        default: return "unknown";
-    }
-}
-
 const char* css_color_type_to_str(CssColorType type) {
     switch (type) {
         case CSS_COLOR_HEX: return "hex";
@@ -688,20 +645,10 @@ static char* css_unescape_string(const char* str, size_t len, Pool* pool) {
                 }
 
                 // convert codepoint to UTF-8
-                if (codepoint <= 0x7F) {
-                    result[out_pos++] = (char)codepoint;
-                } else if (codepoint <= 0x7FF) {
-                    result[out_pos++] = (char)(0xC0 | (codepoint >> 6));
-                    result[out_pos++] = (char)(0x80 | (codepoint & 0x3F));
-                } else if (codepoint <= 0xFFFF) {
-                    result[out_pos++] = (char)(0xE0 | (codepoint >> 12));
-                    result[out_pos++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-                    result[out_pos++] = (char)(0x80 | (codepoint & 0x3F));
-                } else if (codepoint <= 0x10FFFF) {
-                    result[out_pos++] = (char)(0xF0 | (codepoint >> 18));
-                    result[out_pos++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-                    result[out_pos++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-                    result[out_pos++] = (char)(0x80 | (codepoint & 0x3F));
+                char utf8_buf[5];
+                int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
+                for (int j = 0; j < utf8_len; j++) {
+                    result[out_pos++] = utf8_buf[j];
                 }
             } else {
                 // single character escape (e.g., \", \\, \n)
@@ -970,67 +917,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
             case '+':
                 // Check if this is a signed number
                 if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
-                    // Number parsing (same as digit case)
                     size_t start = pos;
                     pos++; // Skip sign
-
-                    // Parse integer part
-                    while (pos < length && isdigit(input[pos])) {
-                        pos++;
-                    }
-
-                    // Parse decimal part
-                    if (pos < length && input[pos] == '.') {
-                        pos++;
-                        while (pos < length && isdigit(input[pos])) {
-                            pos++;
-                        }
-                    }
-
-                    // CSS Values Level 4: parse scientific notation exponent (e.g., 3.68e+19)
-                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
-                        size_t exp_start = pos;
-                        pos++;
-                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
-                        if (pos < length && isdigit(input[pos])) {
-                            while (pos < length && isdigit(input[pos])) pos++;
-                        } else {
-                            pos = exp_start;  // not a valid exponent, rollback
-                        }
-                    }
-
-                    // Check for dimension unit or percentage
-                    size_t number_end = pos;
-                    if (pos < length && input[pos] == '%') {
-                        pos++;
-                        token->type = CSS_TOKEN_PERCENTAGE;
-                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
-                        // Parse unit
-                        size_t unit_start = pos;
-                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
-                            pos++;
-                        }
-                        token->type = CSS_TOKEN_DIMENSION;
-                        // Parse the unit string and convert to CssUnit enum
-                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
-                        token->data.dimension.unit = parsed_unit;
-                    } else {
-                        token->type = CSS_TOKEN_NUMBER;
-                    }
-
-                    token->length = pos - start;
-
-                    // Parse number value
-                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
-                    if (num_str) {
-                        strncpy(num_str, token->start, number_end - start);
-                        num_str[number_end - start] = '\0';
-                        if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
-                        } else {
-                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
-                        }
-                    }
+                    tokenize_number(input, length, start, &pos, token, tokenizer->pool);
                 } else {
                     token->type = CSS_TOKEN_DELIM;
                     token->data.delimiter = ch;
@@ -1057,67 +946,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 }
                 // Check if this is a signed number
                 else if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
-                    // Number parsing (same as digit case)
                     size_t start = pos;
                     pos++; // Skip sign
-
-                    // Parse integer part
-                    while (pos < length && isdigit(input[pos])) {
-                        pos++;
-                    }
-
-                    // Parse decimal part
-                    if (pos < length && input[pos] == '.') {
-                        pos++;
-                        while (pos < length && isdigit(input[pos])) {
-                            pos++;
-                        }
-                    }
-
-                    // CSS Values Level 4: parse scientific notation exponent (e.g., 3.68e+19)
-                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
-                        size_t exp_start = pos;
-                        pos++;
-                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
-                        if (pos < length && isdigit(input[pos])) {
-                            while (pos < length && isdigit(input[pos])) pos++;
-                        } else {
-                            pos = exp_start;  // not a valid exponent, rollback
-                        }
-                    }
-
-                    // Check for dimension unit or percentage
-                    size_t number_end = pos;
-                    if (pos < length && input[pos] == '%') {
-                        pos++;
-                        token->type = CSS_TOKEN_PERCENTAGE;
-                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
-                        // Parse unit
-                        size_t unit_start = pos;
-                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
-                            pos++;
-                        }
-                        token->type = CSS_TOKEN_DIMENSION;
-                        // Parse the unit string and convert to CssUnit enum
-                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
-                        token->data.dimension.unit = parsed_unit;
-                    } else {
-                        token->type = CSS_TOKEN_NUMBER;
-                    }
-
-                    token->length = pos - start;
-
-                    // Parse number value
-                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
-                    if (num_str) {
-                        strncpy(num_str, token->start, number_end - start);
-                        num_str[number_end - start] = '\0';
-                        if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
-                        } else {
-                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
-                        }
-                    }
+                    tokenize_number(input, length, start, &pos, token, tokenizer->pool);
                 }
                 // Check for custom property (--foo) or identifier starting with - (e.g., -webkit-transform)
                 else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_' || input[pos + 1] == '-')) {
@@ -1145,118 +976,12 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 if (isdigit(ch)) {
                     // Number or dimension starting with digit
                     size_t start = pos;
-
-                    // Parse integer part
-                    while (pos < length && isdigit(input[pos])) {
-                        pos++;
-                    }
-
-                    // Parse decimal part
-                    if (pos < length && input[pos] == '.') {
-                        pos++;
-                        while (pos < length && isdigit(input[pos])) {
-                            pos++;
-                        }
-                    }
-
-                    // CSS Values Level 4: parse scientific notation exponent (e.g., 3.68e+19)
-                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
-                        size_t exp_start = pos;
-                        pos++;
-                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
-                        if (pos < length && isdigit(input[pos])) {
-                            while (pos < length && isdigit(input[pos])) pos++;
-                        } else {
-                            pos = exp_start;  // not a valid exponent, rollback
-                        }
-                    }
-
-                    // Check for dimension unit or percentage
-                    size_t number_end = pos;
-                    if (pos < length && input[pos] == '%') {
-                        pos++;
-                        token->type = CSS_TOKEN_PERCENTAGE;
-                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
-                        // Parse unit
-                        size_t unit_start = pos;
-                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
-                            pos++;
-                        }
-                        token->type = CSS_TOKEN_DIMENSION;
-                        // Parse the unit string and convert to CssUnit enum
-                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
-                        token->data.dimension.unit = parsed_unit;
-                    } else {
-                        token->type = CSS_TOKEN_NUMBER;
-                    }
-
-                    token->length = pos - start;
-
-                    // Parse number value
-                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
-                    if (num_str) {
-                        strncpy(num_str, token->start, number_end - start);
-                        num_str[number_end - start] = '\0';
-                        if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
-                        } else {
-                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
-                        }
-                    }
+                    tokenize_number(input, length, start, &pos, token, tokenizer->pool);
                 } else if (ch == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
                     // Decimal number starting with . (e.g., .5)
                     size_t start = pos;
                     pos++; // Skip the '.'
-
-                    // Parse decimal digits
-                    while (pos < length && isdigit(input[pos])) {
-                        pos++;
-                    }
-
-                    // CSS Values Level 4: parse scientific notation exponent (e.g., .5e+3)
-                    if (pos < length && (input[pos] == 'e' || input[pos] == 'E')) {
-                        size_t exp_start = pos;
-                        pos++;
-                        if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
-                        if (pos < length && isdigit(input[pos])) {
-                            while (pos < length && isdigit(input[pos])) pos++;
-                        } else {
-                            pos = exp_start;  // not a valid exponent, rollback
-                        }
-                    }
-
-                    // Check for dimension unit or percentage
-                    size_t number_end = pos;
-                    if (pos < length && input[pos] == '%') {
-                        pos++;
-                        token->type = CSS_TOKEN_PERCENTAGE;
-                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
-                        // Parse unit
-                        size_t unit_start = pos;
-                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
-                            pos++;
-                        }
-                        token->type = CSS_TOKEN_DIMENSION;
-                        // Parse the unit string and convert to CssUnit enum
-                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
-                        token->data.dimension.unit = parsed_unit;
-                    } else {
-                        token->type = CSS_TOKEN_NUMBER;
-                    }
-
-                    token->length = pos - start;
-
-                    // Parse number value
-                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
-                    if (num_str) {
-                        strncpy(num_str, token->start, number_end - start);
-                        num_str[number_end - start] = '\0';
-                        if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
-                        } else {
-                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
-                        }
-                    }
+                    tokenize_number(input, length, start, &pos, token, tokenizer->pool);
                 } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))) {
                     // Identifier or function - check for ASCII start
                     size_t start = pos;

@@ -375,7 +375,6 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OBJECT_FIT, "object-fit", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "fill", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OBJECT_POSITION, "object-position", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50%", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_POINTER_EVENTS, "pointer-events", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_USER_SELECT, "user-select", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // Remaining Additional Properties
     {CSS_PROPERTY_FLOAT_DEFER, "float-defer", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
@@ -401,7 +400,6 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TRANSITION_DURATION, "transition-duration", PROP_TYPE_TIME, PROP_INHERIT_NO, "0s", false, false, NULL, 0, validate_time, NULL},
     {CSS_PROPERTY_TRANSITION_PROPERTY, "transition-property", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "all", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, "transition-timing-function", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "ease", false, false, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_APPEARANCE, "appearance", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRAP_FLOW, "wrap-flow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRAP_THROUGH, "wrap-through", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "wrap", false, false, NULL, 0, validate_keyword, NULL}
 };
@@ -409,23 +407,13 @@ static CssProperty property_definitions[] = {
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))
 
 CSSPropertyID css_property_id_from_name(const char* name) {
-    if (!name) return CSS_PROP_UNKNOWN;
-
-    for (int i = 0; i < PROPERTY_DEFINITION_COUNT; i++) {
-        if (strcmp(name, property_definitions[i].name) == 0) {
-            return property_definitions[i].id;
-        }
-    }
-    return CSS_PROP_UNKNOWN;
+    // delegate to hash-based lookup
+    return css_property_get_id_by_name(name);
 }
 
 const char* css_property_name_from_id(CSSPropertyID id) {
-    for (int i = 0; i < PROPERTY_DEFINITION_COUNT; i++) {
-        if (property_definitions[i].id == id) {
-            return property_definitions[i].name;
-        }
-    }
-    return NULL;
+    // delegate to hash-based lookup
+    return css_get_property_name(id);
 }
 
 CSSPropertyType css_property_get_expected_type(CSSPropertyID id) {
@@ -1149,60 +1137,48 @@ bool css_parse_length(const char* value_str, CssLength* length) {
     return true;
 }
 
+bool css_parse_hex_to_rgba(const char* hex_str, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a) {
+    if (!hex_str || hex_str[0] != '#') return false;
+    size_t len = strlen(hex_str);
+    unsigned int hex_val = 0;
+
+    if (len == 7) { // #rrggbb
+        if (sscanf(hex_str + 1, "%6x", &hex_val) != 1) return false;
+        *r = (hex_val >> 16) & 0xFF;
+        *g = (hex_val >> 8)  & 0xFF;
+        *b = hex_val & 0xFF;
+        *a = 255;
+    } else if (len == 4) { // #rgb → expand
+        if (sscanf(hex_str + 1, "%3x", &hex_val) != 1) return false;
+        unsigned int rv = (hex_val >> 8) & 0xF, gv = (hex_val >> 4) & 0xF, bv = hex_val & 0xF;
+        *r = (rv << 4) | rv; *g = (gv << 4) | gv; *b = (bv << 4) | bv; *a = 255;
+    } else if (len == 9) { // #rrggbbaa
+        if (sscanf(hex_str + 1, "%8x", &hex_val) != 1) return false;
+        *r = (hex_val >> 24) & 0xFF;
+        *g = (hex_val >> 16) & 0xFF;
+        *b = (hex_val >> 8)  & 0xFF;
+        *a = hex_val & 0xFF;
+    } else if (len == 5) { // #rgba → expand
+        if (sscanf(hex_str + 1, "%4x", &hex_val) != 1) return false;
+        unsigned int rv = (hex_val >> 12) & 0xF, gv = (hex_val >> 8) & 0xF;
+        unsigned int bv = (hex_val >> 4) & 0xF, av = hex_val & 0xF;
+        *r = (rv << 4) | rv; *g = (gv << 4) | gv; *b = (bv << 4) | bv; *a = (av << 4) | av;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 bool css_parse_color(const char* value_str, CssColor* color) {
     if (!value_str || !color) return false;
 
     // Handle hex colors
     if (value_str[0] == '#') {
-        size_t len = strlen(value_str);
-        if (len == 7) { // #rrggbb
-            unsigned int rgb;
-            if (sscanf(value_str + 1, "%6x", &rgb) == 1) {
-                color->r = (rgb >> 16) & 0xFF;
-                color->g = (rgb >> 8) & 0xFF;
-                color->b = rgb & 0xFF;
-                color->a = 255;
-                color->type = CSS_COLOR_RGB;
-                return true;
-            }
-        } else if (len == 4) { // #rgb - expand to #rrggbb
-            unsigned int rgb;
-            if (sscanf(value_str + 1, "%3x", &rgb) == 1) {
-                // Expand: #348 -> #334488
-                unsigned int r = (rgb >> 8) & 0xF;
-                unsigned int g = (rgb >> 4) & 0xF;
-                unsigned int b = rgb & 0xF;
-                color->r = (r << 4) | r;  // 3 -> 33
-                color->g = (g << 4) | g;  // 4 -> 44
-                color->b = (b << 4) | b;  // 8 -> 88
-                color->a = 255;
-                color->type = CSS_COLOR_RGB;
-                return true;
-            }
-        } else if (len == 9) { // #rrggbbaa
-            unsigned int rgba;
-            if (sscanf(value_str + 1, "%8x", &rgba) == 1) {
-                color->r = (rgba >> 24) & 0xFF;
-                color->g = (rgba >> 16) & 0xFF;
-                color->b = (rgba >> 8) & 0xFF;
-                color->a = rgba & 0xFF;
-                color->type = CSS_COLOR_RGB;
-                return true;
-            }
-        } else if (len == 5) { // #rgba - expand to #rrggbbaa
-            unsigned int rgba;
-            if (sscanf(value_str + 1, "%4x", &rgba) == 1) {
-                unsigned int r = (rgba >> 12) & 0xF;
-                unsigned int g = (rgba >> 8) & 0xF;
-                unsigned int b = (rgba >> 4) & 0xF;
-                unsigned int a = rgba & 0xF;
-                color->r = (r << 4) | r;
-                color->g = (g << 4) | g;
-                color->b = (b << 4) | b;
-                color->a = (a << 4) | a;
-                color->type = CSS_COLOR_RGB;
-                return true;
-            }
+        uint8_t r, g, b, a;
+        if (css_parse_hex_to_rgba(value_str, &r, &g, &b, &a)) {
+            color->r = r; color->g = g; color->b = b; color->a = a;
+            color->type = CSS_COLOR_RGB;
+            return true;
         }
         return false;
     }
