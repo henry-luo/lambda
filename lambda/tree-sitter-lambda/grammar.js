@@ -252,9 +252,7 @@ module.exports = grammar({
       "'",
     )),
 
-    index: $ => {
-      return token(integer_literal);
-    },
+
 
     // Note: 'null' is now part of $.base_type, no separate rule needed
     // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
@@ -468,14 +466,14 @@ module.exports = grammar({
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
       $._path_prefix,
-      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.base_type)))
+      optional(field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type)))
     )),
 
     // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
     // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
     member_expr: $ => prec.dynamic(1, seq(
       field('object', $.primary_expr), ".",
-      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.base_type))
+      field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),
 
     // Parent access: expr.. for .parent, expr.._.. for .parent.parent

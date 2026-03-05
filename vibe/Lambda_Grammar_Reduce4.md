@@ -885,6 +885,31 @@ Removed `spread_expr` from `_expr` and the grammar rules.
 
 ---
 
+## Proposal 20: Remove `index` rule — use `integer` directly
+
+**Rationale:** The `index` rule is defined as `index: $ => token(integer_literal)` — identical to the existing `integer: _ => token(integer_literal)`. Both produce the same token pattern. The `index` rule is only used in `path_expr` and `member_expr` field choices to allow integer-based field access (e.g., `data.0`). Replacing `$.index` with `$.integer` eliminates a redundant symbol.
+
+**Changes:**
+
+- **grammar.js**: Removed `index` rule entirely. Replaced `$.index` with `$.integer` in `path_expr` and `member_expr` field choices.
+- **ast.hpp**: Removed `SYM_INDEX` macro.
+- **build_ast.cpp**: Removed `SYM_INDEX` case (standalone error handler) from `build_expr` switch — integer tokens in that position now route through the existing `SYM_INTEGER` → `build_lit_node` path, which is the correct behavior.
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 7,162,013 B | 7,001,274 B | **−160,739 B (−2.24%)** |
+| STATE_COUNT | 5,672 | 5,643 | **−29** |
+| LARGE_STATE_COUNT | 520 | 516 | **−4** |
+| SYMBOL_COUNT | 217 | 215 | **−2** |
+| TOKEN_COUNT | 96 | 96 | No change |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Excellent reduction (−2.24%) for a trivial change. Removes a completely redundant rule that was an exact duplicate of `integer`.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -908,6 +933,7 @@ Removed `spread_expr` from `_expr` and the grammar rules.
 | 17th | #17 — Remove import rule | Low | Low | ✅ Applied (−0.55%, −1 SYM) |
 | 18th | #18 — Merge path wildcards | Low | Low | ✅ Applied (−0.31%, −1 SYM) |
 | 19th | #19 — Merge spread into unary | Low | Low-Medium | ✅ Applied (−1.21%, −1 SYM) |
+| 20th | #20 — Remove index rule | Low | Medium | ✅ Applied (−2.24%, −2 SYM) |
 
 ### Cumulative Results
 
@@ -928,6 +954,7 @@ Removed `spread_expr` from `_expr` and the grammar rules.
 | + Proposal 17 (remove import rule) | 7,272,412 | 5,719 | 528 | 219 | 95 |
 | + Proposal 18 (path wildcard merge) | 7,250,003 | 5,701 | 524 | 218 | 96 |
 | + Proposal 19 (spread into unary) | 7,162,013 | 5,672 | 520 | 217 | 96 |
-| **Total reduction** | **−3,469,696 (−32.6%)** | **−593** | **−1,612** | **−45** | **−28** |
+| + Proposal 20 (remove index rule) | 7,001,274 | 5,643 | 516 | 215 | 96 |
+| **Total reduction** | **−3,630,435 (−34.1%)** | **−622** | **−1,616** | **−47** | **−28** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

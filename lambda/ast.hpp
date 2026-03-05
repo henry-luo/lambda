@@ -29,7 +29,6 @@ extern "C" {
 #define SYM_ATTR sym_attr
 
 #define SYM_IDENT sym_identifier
-#define SYM_INDEX sym_index
 #define SYM_MEMBER_EXPR sym_member_expr
 #define SYM_INDEX_EXPR sym_index_expr
 #define SYM_CALL_EXPR sym_call_expr
