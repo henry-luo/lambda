@@ -813,6 +813,8 @@ typedef struct Context {
 
     Bool fn_eq(Item a, Item b);
     Bool fn_ne(Item a, Item b);
+    Bool fn_str_eq_ptr(String* a, String* b);
+    Bool fn_sym_eq_ptr(Symbol* a, Symbol* b);
     Bool fn_lt(Item a, Item b);
     Bool fn_gt(Item a, Item b);
     Bool fn_le(Item a, Item b);

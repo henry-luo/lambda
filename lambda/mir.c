@@ -319,6 +319,8 @@ func_obj_t func_list[] = {
     {"fn_find3", (fn_ptr) fn_find3},
     {"fn_eq", (fn_ptr) fn_eq},
     {"fn_ne", (fn_ptr) fn_ne},
+    {"fn_str_eq_ptr", (fn_ptr) fn_str_eq_ptr},
+    {"fn_sym_eq_ptr", (fn_ptr) fn_sym_eq_ptr},
     {"fn_lt", (fn_ptr) fn_lt},
     {"fn_gt", (fn_ptr) fn_gt},
     {"fn_le", (fn_ptr) fn_le},
