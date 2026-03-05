@@ -444,6 +444,108 @@ Removed `string_pattern` and `symbol_pattern` rules and their references in `_ex
 
 ---
 
+## Proposal 11: Merge `true`/`false`/`inf`/`nan` into `named_value` Token — APPLIED ✓
+
+**Impact: Low-Medium (−1.71%)**
+
+Four simple keyword rules existed as separate grammar rules:
+
+```js
+// Before: 4 separate rules
+true:  _ => 'true',
+false: _ => 'false',
+inf:   _ => 'inf',
+nan:   _ => 'nan',
+```
+
+Each created its own symbol ID. They were used in `_non_null_literal` (`true`, `false`) and `primary_expr` (all four).
+
+### Applied Change
+
+Merged all four into a single `named_value` token rule:
+
+```js
+named_value: _ => token(choice('true', 'false', 'inf', 'nan')),
+```
+
+Replaced `$.true`, `$.false`, `$.inf`, `$.nan` with `$.named_value` in `_non_null_literal` and `primary_expr`.
+
+**AST builder changes:**
+- Replaced `SYM_TRUE`/`SYM_FALSE`/`sym_inf`/`sym_nan` with single `SYM_NAMED_VALUE` macro.
+- Both `build_primary_expr` and `build_expr` check the source text via `strview_equal()` to distinguish `"true"`/`"false"` (bool) from `"inf"`/`"nan"` (float).
+
+**Design note:** Initially implemented as a 2-rule pattern (`_named_value` hidden token + `named_value` visible wrapper), but merging into a single visible token rule eliminated one symbol and produced a much larger reduction (−143 KB vs −35 KB).
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,375,586 B | 8,232,241 B | **−143,345 B (−1.71%)** |
+| STATE_COUNT | 6,226 | 6,226 | No change |
+| LARGE_STATE_COUNT | 1,480 | 1,479 | **−1** |
+| SYMBOL_COUNT | 232 | 229 | **−3** |
+| TOKEN_COUNT | 104 | 101 | **−3** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** Applying the same token consolidation pattern as `_base_type_kw` (Proposal 9) to value keywords. The larger-than-expected reduction comes from eliminating 3 symbol columns from large state rows.
+
+---
+
+## Proposal 12: Merge `time`/`datetime`/`_datetime` into Single `datetime` Token — APPLIED ✓
+
+**Impact: Medium (−3.11%)**
+
+Datetime literals used 3 grammar rules with a complex token structure:
+
+```js
+// Before: 3 rules with complex regex patterns
+time: _ => token.immediate(time()),  // hh:mm:ss.sss with timezone
+datetime: _ => token.immediate(      // yyyy-mm-dd + optional time
+  seq(optional('-'), digit, digit, digit, digit, ...)),
+_datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
+```
+
+The `time()` helper function was a complex multi-part regex (hours, minutes, seconds, milliseconds, timezone) inlined into both `time` and `datetime` rules, expanding parse tables significantly. The `_datetime` hidden rule was inlined, making `datetime` and `time` visible child nodes inside `primary_expr`.
+
+### Applied Change
+
+Replaced all three rules with a single simple `datetime` token that captures the entire `t'...'` literal:
+
+```js
+datetime: _ => token(seq(
+  "t'",
+  repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)),
+  "'",
+)),
+```
+
+Actual datetime parsing is deferred to the AST builder's existing `datetime_parse()` function, which already handled all date/time formats.
+
+**Grammar changes:**
+- Removed `time` and `_datetime` rules.
+- Removed `$._datetime` from the `inline` list.
+- Changed `$._datetime` references to `$.datetime` in `_non_null_literal` and `primary_expr`.
+
+**AST builder changes:**
+- Removed `SYM_TIME` macro from `ast.hpp`; merged `case SYM_TIME` into `case SYM_DATETIME`.
+- Updated `build_lit_datetime` to skip the `t'` prefix (2 chars) and trailing `'` (1 char), plus trim inner whitespace, before calling `datetime_parse()`.
+- Fixed `build_expr` switch to call `build_lit_datetime` directly instead of routing through `build_lit_node` → `build_lit_string` (which was a pre-existing bug for datetime).
+
+### Results
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| File size | 8,232,241 B | 7,976,424 B | **−255,817 B (−3.11%)** |
+| STATE_COUNT | 6,226 | 5,841 | **−385** |
+| LARGE_STATE_COUNT | 1,479 | 1,469 | **−10** |
+| SYMBOL_COUNT | 229 | 227 | **−2** |
+| TOKEN_COUNT | 101 | 99 | **−2** |
+| Tests | 605/605 | 605/605 | All pass |
+
+**Verdict: Kept.** The second-largest single improvement after Proposal 9. The large STATE_COUNT drop (−385) comes from eliminating the complex `time()` regex expansion from parse tables. Moving datetime validation from grammar to AST builder is a clean separation — the grammar just captures the `t'...'` envelope, the builder does semantic parsing.
+
+---
+
 ## Recommended Implementation Order
 
 | Priority | Proposal | Risk | Impact | Status |
@@ -458,6 +560,8 @@ Removed `string_pattern` and `symbol_pattern` rules and their references in `_ex
 | 8th | #7 — Consolidate access exprs | Medium | Low-Medium | ✅ Partial (−0.96%, −1 SYM) |
 | 9th | #9 — Reduce base_type keywords | Medium | Low | ✅ Applied (−20.2%, −19 SYM) |
 | 10th | #10 — Merge patterns into type_stam | Low | Low | ✅ Applied (−0.28%, −2 SYM) |
+| 11th | #11 — Merge named values token | Low | Low-Medium | ✅ Applied (−1.71%, −3 SYM) |
+| 12th | #12 — Merge datetime token | Low | Medium | ✅ Applied (−3.11%, −2 SYM) |
 
 ### Cumulative Results
 
@@ -469,6 +573,8 @@ Removed `string_pattern` and `symbol_pattern` rules and their references in `_ex
 | + Proposal 8 (match arms) | 8,480,465 | 6,264 | 1,482 | 235 | 104 |
 | + Proposal 7 (query merge) | 8,399,363 | 6,241 | 1,480 | 234 | 104 |
 | + Proposal 10 (pattern merge) | 8,375,586 | 6,226 | 1,480 | 232 | 104 |
-| **Total reduction** | **−2,256,123 (−21.2%)** | **−39** | **−652** | **−30** | **−20** |
+| + Proposal 11 (named_value token) | 8,232,241 | 6,226 | 1,479 | 229 | 101 |
+| + Proposal 12 (datetime token) | 7,976,424 | 5,841 | 1,469 | 227 | 99 |
+| **Total reduction** | **−2,655,285 (−25.0%)** | **−424** | **−663** | **−35** | **−25** |
 
 After each change: run `make generate-grammar && make test-lambda-baseline` to verify correctness.

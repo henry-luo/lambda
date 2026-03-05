@@ -132,7 +132,6 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._number,
-    $._datetime,
   ],
 
   conflicts: $ => [
@@ -262,15 +261,13 @@ module.exports = grammar({
       return token( seq(choice(decimal_literal, integer_literal), choice('n','N')) );
     },
 
-    // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
-    time: _ => token.immediate(time()),
-    // date-time
-    datetime: _ => token.immediate(
-      seq(optional('-'), digit, digit, digit, digit, optional(seq('-', digit, digit)), optional(seq('-', digit, digit)),
-        optional(seq(/\s+|T|t/, time()))
-      )),
-
-    _datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
+    // datetime token: t'...' containing date/time text
+    // Actual parsing done by AST builder via datetime_parse()
+    datetime: _ => token(seq(
+      "t'",
+      repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)),
+      "'",
+    )),
 
     index: $ => {
       return token(integer_literal);
@@ -331,7 +328,7 @@ module.exports = grammar({
       $._number,
       $.string,
       $.symbol,
-      $._datetime,
+      $.datetime,
       $.binary,
       $.named_value,
     ),
@@ -429,7 +426,7 @@ module.exports = grammar({
     primary_expr: $ => prec(50, choice(
       $.named_value,
       $._number,
-      $._datetime,
+      $.datetime,
       $.string,
       $.symbol,
       $.binary,

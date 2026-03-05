@@ -3584,10 +3584,6 @@
           "named": true
         },
         {
-          "type": "time",
-          "named": true
-        },
-        {
           "type": "unary_expr",
           "named": true
         },
@@ -3680,10 +3676,6 @@
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "time",
           "named": true
         }
       ]
@@ -3850,13 +3842,9 @@
     "named": true,
     "fields": {
       "end": {
-        "multiple": true,
+        "multiple": false,
         "required": true,
         "types": [
-          {
-            "type": "'",
-            "named": false
-          },
           {
             "type": "binary",
             "named": true
@@ -3887,26 +3875,14 @@
           },
           {
             "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "t'",
-            "named": false
-          },
-          {
-            "type": "time",
             "named": true
           }
         ]
       },
       "start": {
-        "multiple": true,
+        "multiple": false,
         "required": true,
         "types": [
-          {
-            "type": "'",
-            "named": false
-          },
           {
             "type": "binary",
             "named": true
@@ -3937,14 +3913,6 @@
           },
           {
             "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "t'",
-            "named": false
-          },
-          {
-            "type": "time",
             "named": true
           }
         ]
@@ -4669,31 +4637,23 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
-    "named": true
-  },
-  {
-    "type": "symbol",
     "named": false
   },
   {
-    "type": "t'",
+    "type": "symbol",
+    "named": true
+  },
+  {
+    "type": "symbol",
     "named": false
   },
   {
     "type": "that",
     "named": false
-  },
-  {
-    "type": "time",
-    "named": true
   },
   {
     "type": "to",

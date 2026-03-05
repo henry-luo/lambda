@@ -1995,14 +1995,21 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int datetime_len = end - start;
 
     TypeDateTime* dt_type = (TypeDateTime*)alloc_type(tp->pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
     dt_type->is_const = 1;  dt_type->is_literal = 1;
 
-    // Use tp->source string directly
-    const char* datetime_start = tp->source + start;
-    // Parse the DateTime string directly using ast_pool without allocating datetime_str
+    // Token is t'...' — skip the t' prefix and trailing '
+    const char* raw = tp->source + start;
+    int raw_len = end - start;
+    const char* datetime_start = raw + 2;  // skip t'
+    int datetime_len = raw_len - 3;        // exclude t' and trailing '
+
+    // Skip leading/trailing whitespace inside the quotes
+    while (datetime_len > 0 && *datetime_start == ' ') { datetime_start++; datetime_len--; }
+    while (datetime_len > 0 && datetime_start[datetime_len - 1] == ' ') { datetime_len--; }
+
+    // Parse the DateTime string directly using ast_pool
     char* parse_end = NULL;
     DateTime* dt = datetime_parse(tp->pool, datetime_start, DATETIME_PARSE_LAMBDA, &parse_end);
 
@@ -2251,7 +2258,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
         ast_node->type = build_lit_string(tp, child, symbol);
     }
-    else if (symbol == SYM_DATETIME || symbol == SYM_TIME) {
+    else if (symbol == SYM_DATETIME) {
         ast_node->type = build_lit_datetime(tp, child, symbol);
     }
     else if (symbol == SYM_IDENT) {
@@ -6567,9 +6574,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_func(tp, expr_node, false, false);
     case SYM_STRING:  case SYM_SYMBOL:  case SYM_BINARY:
         return build_lit_node(tp, expr_node, true, symbol);
-    case SYM_DATETIME:  case SYM_TIME:
-        return build_lit_node(tp, expr_node, false, symbol);
-        break;
+    case SYM_DATETIME: {
+        AstPrimaryNode* dt_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        dt_node->type = build_lit_datetime(tp, expr_node, symbol);
+        return (AstNode*)dt_node;
+    }
     case SYM_NAMED_VALUE: {
         AstPrimaryNode* nv_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         StrView text = ts_node_source(tp, expr_node);

@@ -18,7 +18,6 @@ extern "C" {
 // Note: string_content, symbol_content, escape_sequence no longer exist
 // as strings and symbols are now single tokens that include escapes
 #define SYM_DATETIME sym_datetime
-#define SYM_TIME sym_time
 #define SYM_BINARY sym_binary
 
 #define SYM_CONTENT sym_content
