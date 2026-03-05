@@ -563,6 +563,62 @@ The C compiler may evaluate `(char*)(m)->data` into a register **before** evalua
 
 **Baseline tests**: 605/605 pass (155/155 MIR tests). No regressions.
 
+### Phase 4 — Implementation Details
+
+#### TCO Setup (`transpile_func_def`)
+
+In `transpile_func_def()`, after parameter binding and before body transpilation:
+
+1. Call `should_use_tco(fn_node)` from `safety_analyzer.cpp`
+2. Save/restore `tco_func`, `tco_label`, `tco_count_reg`, `in_tail_position` (supports nested function defs)
+3. If TCO-eligible: create `tco_count` register (init to 0), emit `tco_label`, increment counter, guard with `BLE` against `LAMBDA_TCO_MAX_ITERATIONS` (1M), call `lambda_stack_overflow_error` on overflow
+4. Set `in_tail_position = true` for function body
+
+#### Tail Position Propagation
+
+- **`transpile_if`**: condition → `false`; then/else branches → restore to parent `saved_tail` before each branch
+- **`transpile_match`**: scrutinee → `false`; arm bodies → restore to parent before each arm
+- **`transpile_return`**: return value → `true` (when `tco_func` set); early exit if `block_returned` set by TCO conversion
+- **`transpile_content`**: all items → `false` (return statements handle their own tail position)
+- **`transpile_binary`**: all operands → `false` (prevents `1 + f(n)` from being treated as tail call)
+
+#### Tail Call Transformation (`transpile_call`)
+
+When `tco_func && in_tail_position && is_recursive_call(call_node, tco_func)`:
+
+1. **Phase 1** — Evaluate all arguments into temporary registers (prevents aliasing when `f(b, a)` swaps params)
+2. **Phase 2** — Assign temps to parameter registers via `find_var()`, handling native ↔ boxed conversions
+3. Emit `MIR_JMP` to `tco_label`
+4. Set `block_returned = true` (subsequent code is dead)
+
+#### Key Design Decision: Two-Phase Temp Swap
+
+Critical for cases like `factorial(n-1, n*acc)` where new arg values depend on current param values. Sequential assignment `n = n-1; acc = n*acc` would corrupt `n` before computing `n*acc`. The two-phase approach evaluates ALL args first, then assigns ALL.
+
+**Baseline tests**: 605/605 pass (155/155 MIR tests). No regressions.
+
+### Phase 4 — Benchmark Results (Release Build)
+
+**AWFY2 struct-heavy benchmarks** (internal `__TIMING__` in ms, release build 8.3MB, macOS arm64, median of 3 runs):
+
+| Benchmark | MIR Direct (ms) | Notes |
+|-----------|-----------------|-------|
+| **permute2** | 0.171 | Stable vs Phase 3 (0.08 was C2MIR path) |
+| **towers2** | 0.386 | No regression |
+| **storage2** | 5.13 | No regression |
+| **cd2** | 555 | No regression |
+| **sieve2** | 0.235 | No regression |
+| **bounce2** | 0.287 | No regression |
+
+**Larceny deriv2** (MIR direct vs C2MIR, release build, median of 3 runs):
+
+| Path | Time (ms) | Notes |
+|------|-----------|-------|
+| C2MIR | 53.4 | Baseline |
+| MIR direct | 54.8 | 97% of C2MIR speed |
+
+TCO adds no measurable overhead to non-TCO benchmarks. The guard branch (`tco_count++; if > 1M`) is never taken for non-recursive functions since `should_use_tco()` only enables TCO on eligible functions.
+
 ---
 
 ## 5. Phase 4 — Tail Call Optimization (TCO)
@@ -727,16 +783,16 @@ mt->in_tail_position = false;
 
 **Validation**: 605/605 baseline, 155/155 MIR. AWFY struct benchmarks (release): permute2 5.0x, towers2 4.6x, deltablue2 1.4x. GC stale-pointer bug with typed map construction identified and fixed (see §3.6). gcbench2 typed allocation stress test: 22% faster than untyped.
 
-### Phase 4: Tail Call Optimization (Estimated: 2–3 days)
+### Phase 4: Tail Call Optimization ✅
 
-| Task | File | Description |
-|------|------|-------------|
-| 4a | transpile-mir.cpp | Add `in_tail_position` flag and propagation logic |
-| 4b | transpile-mir.cpp | Integrate `should_use_tco()` into `transpile_user_func()` |
-| 4c | transpile-mir.cpp | Implement tail call transformation with temp-based parameter swap |
-| 4d | transpile-mir.cpp | Add iteration counter guard (`LAMBDA_TCO_MAX_ITERATIONS`) |
+| Task | File | Description | Status |
+|------|------|-------------|--------|
+| 4a | transpile-mir.cpp | Add `in_tail_position` flag and propagation logic | ✅ |
+| 4b | transpile-mir.cpp | Integrate `should_use_tco()` into `transpile_func_def()` | ✅ |
+| 4c | transpile-mir.cpp | Implement tail call transformation with temp-based parameter swap | ✅ |
+| 4d | transpile-mir.cpp | Add iteration counter guard (`LAMBDA_TCO_MAX_ITERATIONS`) | ✅ |
 
-**Validation**: Tail-recursive factorial(1000000) completes without stack overflow. TCO-specific unit tests pass.
+**Validation**: Tail-recursive `sum_to(500000, 0)` completes without stack overflow (was stack overflow before). Both functional (`tail_call.ls`) and procedural (`tail_call_proc.ls`) TCO tests pass. 605/605 baseline tests pass, 155/155 MIR tests pass. Non-tail calls (e.g., `1 + count_evens(n-1)`) correctly remain as real calls.
 
 ---
 
@@ -745,7 +801,7 @@ mt->in_tail_position = false;
 | Area | File | Lines | Function/Struct |
 |------|------|-------|-----------------|
 | MIR transpiler struct | transpile-mir.cpp | 100–160 | `MirTranspiler` |
-| TCO fields (unused) | transpile-mir.cpp | 140–142 | `tco_func`, `tco_label` |
+| TCO fields | transpile-mir.cpp | 140–145 | `tco_func`, `tco_label`, `tco_count_reg`, `in_tail_position` |
 | Binary expression dispatch | transpile-mir.cpp | 1650–2035 | `transpile_binary()` |
 | Effective type inference | transpile-mir.cpp | 1530–1610 | `get_effective_type()` |
 | Phase 3 shape helpers | transpile-mir.cpp | ~950 | `mir_has_fixed_shape()`, `mir_find_shape_field()`, `mir_resolve_field_type()`, `mir_is_direct_access_type()`, `mir_is_container_field_type()` |

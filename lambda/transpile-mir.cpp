@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include "re2_wrapper.hpp"
 #include "mark_builder.hpp"
+#include "safety_analyzer.hpp"
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
@@ -140,6 +141,8 @@ struct MirTranspiler {
     // TCO
     AstFuncNode* tco_func;
     MIR_label_t tco_label;
+    MIR_reg_t tco_count_reg;   // iteration counter for TCO guard
+    bool in_tail_position;     // current expression is in tail position
 
     // Closure
     AstFuncNode* current_closure;
@@ -1732,6 +1735,11 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
 }
 
 static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
+    // TCO: binary expression operands are NEVER in tail position.
+    // e.g., `1 + f(n-1)` — the call is NOT tail because addition follows.
+    bool saved_tail = mt->in_tail_position;
+    mt->in_tail_position = false;
+
     TypeId left_tid = get_effective_type(mt, bi->left);
     TypeId right_tid = get_effective_type(mt, bi->right);
     TypeId result_tid = ((AstNode*)bi)->type ? ((AstNode*)bi)->type->type_id : LMD_TYPE_ANY;
@@ -2329,7 +2337,14 @@ static MIR_reg_t transpile_spread(MirTranspiler* mt, AstUnaryNode* spread) {
 static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     TypeId cond_tid = get_effective_type(mt, if_node->cond);
 
+    // TCO: condition is NOT in tail position
+    bool saved_tail = mt->in_tail_position;
+    mt->in_tail_position = false;
+
     MIR_reg_t cond = transpile_expr(mt, if_node->cond);
+
+    // Restore tail position for branches
+    mt->in_tail_position = saved_tail;
 
     // For non-bool condition, check truthiness via runtime
     // Lambda semantics: only null, error, and false are falsy.
@@ -2372,6 +2387,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 
     // Then branch
     if (if_node->then) {
+        mt->in_tail_position = saved_tail;  // ensure correct before then branch
         push_scope(mt);  // isolate branch variables
         MIR_reg_t then_val = transpile_expr(mt, if_node->then);
         if (mt->block_returned) {
@@ -2418,6 +2434,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 
     // Else branch
     emit_label(mt, l_else);
+    mt->in_tail_position = saved_tail;  // restore for else branch
     if (if_node->otherwise) {
         push_scope(mt);  // isolate branch variables
         MIR_reg_t else_val = transpile_expr(mt, if_node->otherwise);
@@ -2553,7 +2570,14 @@ static void emit_match_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_reg
 }
 
 static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
+    // TCO: scrutinee is NOT in tail position
+    bool saved_tail = mt->in_tail_position;
+    mt->in_tail_position = false;
+
     MIR_reg_t scrutinee = transpile_expr(mt, match_node->scrutinee);
+
+    // Restore tail position for arm bodies
+    mt->in_tail_position = saved_tail;
     TypeId scrut_tid = get_effective_type(mt, match_node->scrutinee);
     MIR_reg_t boxed_scrut = emit_box(mt, scrutinee, scrut_tid);
 
@@ -2576,7 +2600,8 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
             // Emit pattern test (handles union/or-patterns recursively)
             emit_match_pattern_test(mt, match_arm->pattern, boxed_scrut, l_next);
 
-            // Body
+            // Body (restore tail position before each arm body)
+            mt->in_tail_position = saved_tail;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
@@ -2584,7 +2609,8 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
             emit_label(mt, l_next);
         } else {
-            // Default arm
+            // Default arm (restore tail position)
+            mt->in_tail_position = saved_tail;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
@@ -3442,6 +3468,11 @@ static bool is_side_effect_stam(int node_type) {
 }
 
 static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
+    // TCO: content block items are NOT in tail position. Only return statements
+    // (which set in_tail_position=true for their value) should be considered tail.
+    bool saved_tail = mt->in_tail_position;
+    mt->in_tail_position = false;
+
     // Detect proc context: either we're inside a pn function (mt->in_proc),
     // or the content block contains proc-only nodes like VAR_STAM.
     // In proc context, IF_EXPR/WHILE_STAM/FOR_STAM are side-effect statements,
@@ -3793,45 +3824,78 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
     // strip tag from boxed Item → raw Map*/Object*
     MIR_reg_t map_ptr = emit_unbox_container(mt, obj_boxed);
 
-    // load data pointer from Map* + 16
-    MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+    // Null guard: if map_ptr == 0 (object is null), return default value.
+    // This handles cases where a typed variable (e.g. var x: MyType = expr)
+    // holds null at runtime — without this check, loading data_ptr from
+    // *(NULL + 16) would crash with SIGSEGV at address 0x10.
+    MIR_label_t l_not_null = new_label(mt);
+    MIR_label_t l_done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_not_null),
+        MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
 
+    // null path: produce default value
     if (type_id == LMD_TYPE_FLOAT) {
-        // double stored at data + offset → load as MIR_T_D
         MIR_reg_t result = new_reg(mt, "dfld", MIR_T_D);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+        // null → 0.0
+        MIR_reg_t zero_i = new_reg(mt, "zi", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, zero_i),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, zero_i)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+
+        // non-null path
+        emit_label(mt, l_not_null);
+        MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+        MIR_reg_t nn_result = new_reg(mt, "dfld", MIR_T_D);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, nn_result),
             MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, nn_result)));
+        emit_label(mt, l_done);
         return result;
     }
 
     if (mir_is_container_field_type(type_id)) {
-        // Runtime stores raw Container* pointer (NULL/0 for null values).
-        // MIR uses tagged Items for containers, so re-tag the loaded pointer:
-        //   raw == 0 → ItemNull;  raw != 0 → (type_tag << 56) | raw_ptr
-        MIR_reg_t raw = new_reg(mt, "cfraw", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
-
-        MIR_reg_t result = new_reg(mt, "cftag", MIR_T_I64);
-        MIR_insn_t null_lbl = MIR_new_label(mt->ctx);
-        MIR_insn_t done_lbl = MIR_new_label(mt->ctx);
-
-        // if raw == 0, field is null
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, null_lbl),
-            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 0)));
-        // non-null: tag raw pointer with field type
-        uint64_t tag = (uint64_t)type_id << 56;
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, (int64_t)tag)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done_lbl)));
-        // null: produce ItemNull
-        MIR_append_insn(mt->ctx, mt->current_func_item, null_lbl);
+        // Container fields store raw Container* pointers (no type tag in high bits).
+        // The Lambda runtime identifies container types by reading the first byte of
+        // the struct (Container.type_id), NOT from Item tag bits. So we must return
+        // the raw pointer as-is. For null fields (ptr==0), return ItemNull.
+        MIR_reg_t result = new_reg(mt, "cfraw", MIR_T_I64);
+        // null object → ItemNull
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        MIR_append_insn(mt->ctx, mt->current_func_item, done_lbl);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+
+        // non-null path: load raw Container* from data buffer
+        emit_label(mt, l_not_null);
+        MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+
+        MIR_reg_t raw = new_reg(mt, "cfptr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
+
+        // if raw == 0, field is null → keep ItemNull in result
+        MIR_label_t null_field_lbl = new_label(mt);
+        MIR_label_t done_field_lbl = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, null_field_lbl),
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 0)));
+        // non-null: return raw pointer as-is (Container* is a valid Item with _type_id=0;
+        // get_type_id() reads Container.type_id from the struct's first byte)
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, raw)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done_field_lbl)));
+        // null field: produce ItemNull
+        emit_label(mt, null_field_lbl);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        emit_label(mt, done_field_lbl);
+        emit_label(mt, l_done);
         return result;
     }
 
@@ -3840,8 +3904,22 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
     // BOOL: bool (1 byte) in 8-byte zero-padded slot → safe to read 8 bytes
     // STRING/SYMBOL/BINARY: raw pointer (String*/Symbol*)
     MIR_reg_t result = new_reg(mt, "mfld", MIR_T_I64);
+    // null → 0 (default for scalars)
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, 0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+
+    // non-null path
+    emit_label(mt, l_not_null);
+    MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+    MIR_reg_t nn_val = new_reg(mt, "mfld", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nn_val),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, nn_val)));
+    emit_label(mt, l_done);
     return result;
 }
 
@@ -3856,6 +3934,11 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     // get tagged Item for the object, strip tag → raw Map*/Object*
     MIR_reg_t obj_item = transpile_expr(mt, object);
     MIR_reg_t map_ptr = emit_unbox_container(mt, obj_item);
+
+    // Null guard: if map_ptr == 0 (object is null), skip the write entirely.
+    MIR_label_t l_skip_write = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, l_skip_write),
+        MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
 
     // load data pointer from Map* + 16
     MIR_reg_t data_ptr = new_reg(mt, "dwptr", MIR_T_I64);
@@ -3882,6 +3965,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
             MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
+        emit_label(mt, l_skip_write);
         return;
     }
 
@@ -3899,6 +3983,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
+        emit_label(mt, l_skip_write);
         return;
     }
 
@@ -3916,6 +4001,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
+        emit_label(mt, l_skip_write);
         return;
     }
 
@@ -3926,6 +4012,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
         MIR_new_reg_op(mt->ctx, raw)));
+    emit_label(mt, l_skip_write);
 }
 
 static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
@@ -4644,6 +4731,91 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
         if (fn_mangled && (local_func || entry_node)) {
 
+            // ======== TCO interception ========
+            // If this is a tail-recursive call to the current TCO function,
+            // transform into: evaluate args → assign to params → goto tco_label
+            if (mt->tco_func && mt->in_tail_position && is_recursive_call(call_node, mt->tco_func)) {
+                log_debug("mir: TCO tail call to '%.*s' — converting to goto",
+                    (int)mt->tco_func->name->len, mt->tco_func->name->chars);
+
+                // Arguments are NOT in tail position
+                bool saved_tail = mt->in_tail_position;
+                mt->in_tail_position = false;
+
+                // Phase 1: Evaluate all arguments into temporaries
+                // This prevents aliasing when args reference parameters being overwritten (e.g., f(b, a))
+                AstNode* arg = call_node->argument;
+                AstNamedNode* param = mt->tco_func->param;
+                MIR_reg_t temps[16];
+                int arg_idx = 0;
+                while (arg && param && arg_idx < 16) {
+                    MIR_reg_t val = transpile_expr(mt, arg);
+                    TypeId val_tid = get_effective_type(mt, arg);
+
+                    // Determine the parameter's expected type (matching transpile_func_def logic)
+                    TypeId param_tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
+                    if (param_tid == LMD_TYPE_ANY) {
+                        char pname[64];
+                        snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
+                        MirVarEntry* pvar = find_var(mt, pname);
+                        if (pvar) param_tid = pvar->type_id;
+                    }
+
+                    // Convert to match parameter's representation
+                    if (param_tid == LMD_TYPE_INT || param_tid == LMD_TYPE_FLOAT || param_tid == LMD_TYPE_BOOL) {
+                        if (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL) {
+                            val = emit_unbox(mt, val, param_tid);
+                        } else if (val_tid != param_tid) {
+                            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+                            val = emit_unbox(mt, boxed, param_tid);
+                        }
+                    } else {
+                        val = emit_box(mt, val, val_tid);
+                    }
+
+                    temps[arg_idx] = val;
+                    arg_idx++;
+                    arg = arg->next;
+                    param = (AstNamedNode*)((AstNode*)param)->next;
+                }
+
+                // Phase 2: Assign temporaries to parameter registers
+                param = mt->tco_func->param;
+                for (int i = 0; i < arg_idx; i++) {
+                    if (!param) break;
+                    char pname[64];
+                    snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
+                    MirVarEntry* pvar = find_var(mt, pname);
+                    if (pvar) {
+                        if (pvar->mir_type == MIR_T_D) {
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                MIR_new_reg_op(mt->ctx, pvar->reg),
+                                MIR_new_reg_op(mt->ctx, temps[i])));
+                        } else {
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, pvar->reg),
+                                MIR_new_reg_op(mt->ctx, temps[i])));
+                        }
+                    }
+                    param = (AstNamedNode*)((AstNode*)param)->next;
+                }
+
+                mt->in_tail_position = saved_tail;
+
+                // Jump back to function start
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, mt->tco_label)));
+                mt->block_returned = true;
+
+                // Return a dummy register (unreachable code, but MIR needs a value)
+                MIR_reg_t dummy = new_reg(mt, "tco_dummy", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, dummy),
+                    MIR_new_int_op(mt->ctx, 0)));
+                if (name_buf) strbuf_free(name_buf);
+                return dummy;
+            }
+
             // Get function definition for param info (defaults, named args)
             AstFuncNode* fn_def = NULL;
             if (entry_node && (entry_node->node_type == AST_NODE_FUNC ||
@@ -5109,8 +5281,23 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
 // ============================================================================
 
 static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
+    // TCO: return value is in tail position — if this is a recursive call,
+    // it can be converted to a goto jump instead of a function call.
+    bool saved_tail = mt->in_tail_position;
+    if (mt->tco_func) {
+        mt->in_tail_position = true;
+    }
+
     if (ret_node->value) {
         MIR_reg_t val = transpile_expr(mt, ret_node->value);
+
+        // If TCO converted the inner call to a goto, block_returned is already set.
+        // Skip the boxing/ret — it's dead code and would emit after a JMP.
+        if (mt->block_returned) {
+            mt->in_tail_position = saved_tail;
+            return val;
+        }
+
         // Use get_effective_type instead of AST type to match the actual
         // register type returned by transpile_expr. AST may say FLOAT but
         // the variable is stored as ANY (boxed Item / I64) when params are
@@ -5123,6 +5310,9 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
     }
+
+    mt->in_tail_position = saved_tail;
+
     MIR_reg_t r = new_reg(mt, "ret_dummy", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, 0)));
@@ -6944,10 +7134,65 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
 
+    // ===== TCO Setup =====
+    // Check if this function is eligible for tail call optimization.
+    // If so, wrap the body in a loop: tco_label -> body -> (tail calls jump back)
+    // with an iteration counter to prevent infinite loops.
+    bool use_tco = should_use_tco(fn_node);
+    AstFuncNode* saved_tco_func = mt->tco_func;
+    MIR_label_t saved_tco_label = mt->tco_label;
+    MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
+    bool saved_tail_position = mt->in_tail_position;
+
+    if (use_tco) {
+        log_debug("mir: TCO enabled for '%s'", name_buf->str);
+        mt->tco_func = fn_node;
+
+        // Create iteration counter register, init to 0
+        mt->tco_count_reg = new_reg(mt, "tco_count", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+
+        // Create the TCO loop label
+        mt->tco_label = MIR_new_label(mt->ctx);
+        emit_insn(mt, mt->tco_label);
+
+        // Increment counter: tco_count = tco_count + 1
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, 1)));
+
+        // Guard: if tco_count > LAMBDA_TCO_MAX_ITERATIONS, call overflow error
+        MIR_label_t ok_label = MIR_new_label(mt->ctx);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BLE, MIR_new_label_op(mt->ctx, ok_label),
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, LAMBDA_TCO_MAX_ITERATIONS)));
+
+        // Overflow path: call lambda_stack_overflow_error(func_name)
+        MIR_reg_t fn_name_ptr = emit_load_string_literal(mt, name_buf->str);
+        emit_call_void_1(mt, "lambda_stack_overflow_error",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_name_ptr));
+
+        // Emit a ret after overflow call (unreachable but needed for MIR validation)
+        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+
+        // Continue label for normal execution
+        emit_insn(mt, ok_label);
+
+        // Body is in tail position for TCO
+        mt->in_tail_position = true;
+    }
+
     // Transpile body - use transpile_box_item to ensure result is boxed Item
     MIR_reg_t body_result = transpile_box_item(mt, fn_node->body);
 
     // Return boxed result
+    // Always emit the trailing ret — MIR needs a ret on every code path.
+    // For TCO functions, this serves as the non-tail-call exit path.
+    // For functions where body already returned, it's dead code (MIR removes it).
     emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, body_result)));
 
     pop_scope(mt);
@@ -6965,6 +7210,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->block_returned = saved_block_returned;
     mt->method_owner = saved_method_owner;
     mt->self_reg = saved_self_reg;
+    mt->tco_func = saved_tco_func;
+    mt->tco_label = saved_tco_label;
+    mt->tco_count_reg = saved_tco_count_reg;
+    mt->in_tail_position = saved_tail_position;
 
     strbuf_free(name_buf);
 }
