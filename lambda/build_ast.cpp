@@ -6646,13 +6646,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return NULL;
     case SYM_COMMENT:
         return NULL;
-    case SYM_INDEX:
-        // This is likely a parsing error - index tokens should not appear as standalone expressions
-        // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
-        // or case like "12.34.56"
-        record_semantic_error(tp, expr_node, ERR_INVALID_LITERAL,
-            "Unexpected token - possible malformed number or range (use 'to' instead of '..')");
-        return NULL;
     default:
         log_debug("unknown syntax node: %s", ts_node_type(expr_node));
         return NULL;
