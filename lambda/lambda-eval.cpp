@@ -1262,6 +1262,26 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     return BOOL_ERROR;
 }
 
+// Raw-pointer string equality for MIR inline fast path.
+// Called when pointer identity check fails — compare content directly.
+// Avoids boxing overhead and type dispatch of fn_eq.
+Bool fn_str_eq_ptr(String* a, String* b) {
+    if (a == b) return BOOL_TRUE;
+    if (!a || !b) return BOOL_FALSE;
+    if (a->len != b->len) return BOOL_FALSE;
+    if (a->len == 0) return BOOL_TRUE;
+    return memcmp(a->chars, b->chars, a->len) == 0 ? BOOL_TRUE : BOOL_FALSE;
+}
+
+// Raw-pointer symbol equality for MIR inline fast path.
+Bool fn_sym_eq_ptr(Symbol* a, Symbol* b) {
+    if (a == b) return BOOL_TRUE;
+    if (!a || !b) return BOOL_FALSE;
+    if (a->len != b->len) return BOOL_FALSE;
+    if (a->len > 0 && strncmp(a->chars, b->chars, a->len) != 0) return BOOL_FALSE;
+    return target_equal(a->ns, b->ns) ? BOOL_TRUE : BOOL_FALSE;
+}
+
 // 3-states comparison (public entry point)
 Bool fn_eq(Item a_item, Item b_item) {
     return fn_eq_depth(a_item, b_item, 0);

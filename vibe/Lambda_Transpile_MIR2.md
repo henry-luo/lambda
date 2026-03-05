@@ -244,11 +244,25 @@ This requires:
 
 **Key struct** (`lambda-data.hpp`): `Container { TypeId type; int count; Item* data; }`
 
-### 2.4 Inline String/Symbol Comparison
+### 2.4 Inline String/Symbol Comparison ✅
 
-**Current state**: String equality uses `fn_eq(boxed_str1, boxed_str2)` — boxes both operands, dispatches through runtime.
+**Problem**: String/symbol equality uses `fn_eq(boxed_str1, boxed_str2)` — boxes both operands, dispatches through the full runtime type-switch in `fn_eq_depth`.
 
-**Optimization**: For symbol comparisons (common in pattern matching and map key checks), compare String* pointers directly since the name pool guarantees unique pointers for each symbol.
+**Optimization**: Two-tier inline comparison in `transpile_binary()` when both operands have compile-time STRING or SYMBOL type:
+
+1. **Fast path (inline pointer identity)**: Single `MIR_EQ` comparing raw `String*`/`Symbol*` pointers. For name-pool–interned strings (literals, parsed identifiers), same-content values share the same pointer. If pointers match → return 1 (equal), no function call.
+
+2. **Slow path (lightweight helper)**: When pointers differ, call `fn_str_eq_ptr(String*, String*)` or `fn_sym_eq_ptr(Symbol*, Symbol*)`. These take raw pointers (no boxing), skip type dispatch, and go directly to content comparison:
+   - **String**: len check → `memcmp(a->chars, b->chars, len)`
+   - **Symbol**: len check → `strncmp` → `target_equal(ns_a, ns_b)` for namespace
+
+Both EQ and NE are handled (NE inverts the result). Non-STRING/SYMBOL types and comparison operators other than EQ/NE fall through to the existing boxed path.
+
+**Changes**:
+- `lambda-eval.cpp`: Added `fn_str_eq_ptr()` and `fn_sym_eq_ptr()` helpers
+- `lambda.h`: Declared the new helpers
+- `mir.c`: Registered in the import function table
+- `transpile-mir.cpp`: Added inline fast path block in `transpile_binary()` before boxed fallback
 
 ### Phase 2 — Implementation Status (COMPLETED)
 
@@ -321,40 +335,44 @@ MIR_reg_t boxed = emit_box(mt, val, tid);
 
 When a `pn` function's body is a content block (declarations + statements + trailing expression), the transpiler now avoids constructing a temporary list. Instead, it evaluates declarations and statements for side effects, and only boxes the final value expression as the block result. This eliminates unnecessary `list()`/`list_end()` runtime calls in procedural code.
 
-#### Benchmark Results After Phase 2 + 2.3
+#### Benchmark Results After Phase 2 (2.1–2.4) — Release Build
 
-Full comparison of MIR Direct vs C2MIR execution time (debug build, macOS arm64, 60s timeout):
+All measurements use internal `__TIMING__` (pure execution time, excludes JIT overhead). Release build with LTO, `-O2`, dead code elimination, macOS arm64.
 
-| Benchmark | MIR Direct (s) | C2MIR (s) | Speedup | Status |
-|-----------|----------------|-----------|---------|--------|
-| **sum** | 0.02 | 4.09 | **205x** | MIR dramatically faster |
-| **ack** | 0.05 | 5.77 | **115x** | MIR dramatically faster |
-| **diviter** | 0.31 | 26.14 | **84x** | MIR dramatically faster |
-| **sumfp** | 0.02 | 1.05 | **53x** | MIR dramatically faster |
-| **divrec** | 0.04 | 2.03 | **51x** | MIR dramatically faster |
-| **collatz** | 0.57 | T/O | **>100x** | C2MIR times out |
-| **brainfuck** | 3.27 | 42.0 | **12.8x** | MIR dramatically faster (was T/O before Phase 2.3) |
-| **quicksort** | 1.33 | 3.11 | **2.3x** | MIR faster |
-| **fibfp** | 3.89 | 5.09 | **1.3x** | MIR faster |
-| fib | 1.35 | 1.29 | ~1.0x | Comparable |
-| tak | 0.02 | 0.02 | ~1.0x | Comparable |
-| cpstak2 | 0.03 | 0.02 | ~1.0x | Comparable |
-| nqueens | 1.06 | 1.01 | ~1.0x | Comparable |
-| mbrot | 7.66 | 7.38 | ~1.0x | Comparable |
-| array1 | 6.18 | 5.97 | ~1.0x | Comparable |
-| pnpoly | 31.60 | 31.48 | ~1.0x | Comparable |
-| larceny/primes | 0.68 | 0.64 | ~1.0x | Comparable |
-| kostya/primes | 8.91 | 9.46 | ~1.0x | Comparable |
-| deriv | 3.55 | 2.88 | 0.8x | MIR slightly slower |
-| triangl | T/O | T/O | — | Both timeout |
-| matmul | T/O | T/O | — | Both timeout (debug build) |
+**Kostya Benchmarks** (internal timing in ms):
 
-**Summary:**
-- **9 benchmarks with significant MIR speedups** (1.3x–205x)
-- **9 benchmarks at parity** (~1.0x)
-- **1 slight regression** (deriv at 0.8x — symbolic expression manipulation, overhead from boxing in polymorphic paths)
-- **0 meaningful regressions** (brainfuck fixed by Phase 2.3)
-- **2 timeouts in both modes** (triangl, matmul — debug build overhead)
+| Benchmark | MIR Direct (ms) | C2MIR (ms) | Speedup | Notes |
+|-----------|-----------------|------------|---------|-------|
+| **collatz** | 350 | 2,453 | **7.0x** | MIR dramatically faster |
+| **levenshtein** | 10 | 24 | **2.4x** | MIR faster |
+| **primes** | 12 | 21 | **1.8x** | MIR faster |
+| matmul | 334 | 324 | ~1.0x | Comparable |
+| json_gen | 68 | 68 | ~1.0x | String-bound (OK) |
+| brainfuck | 430 | 338 | 0.79x | MIR slower (inline array overhead) |
+| base64 | 1,173 | 962 | 0.82x | I/O-bound, MIR slightly slower |
+
+**Larceny Benchmarks** (internal timing in ms):
+
+| Benchmark | MIR Direct (ms) | C2MIR (ms) | Speedup | Notes |
+|-----------|-----------------|------------|---------|-------|
+| **diviter** | 279 | 5,684 | **20.4x** | MIR dramatically faster |
+| **array1** | 0.6 | 11 | **19.8x** | Inline array access (Phase 2.3) |
+| **puzzle** | 5 | 13 | **2.6x** | MIR faster |
+| **triangl** | 695 | 1,678 | **2.4x** | MIR faster (was T/O in debug) |
+| **primes** | 0.8 | 1.5 | **1.8x** | MIR faster |
+| **quicksort** | 5 | 7 | **1.2x** | MIR slightly faster |
+| **divrec** | 8 | 10 | **1.2x** | MIR slightly faster |
+| deriv | 56 | 56 | ~1.0x | Comparable (was 0.8x in debug) |
+| ray | 7 | 7 | ~1.0x | Comparable |
+| pnpoly | 72 | 57 | 0.79x | MIR slower |
+
+**Summary (release build):**
+- **9 benchmarks with meaningful MIR speedups** (1.2x–20.4x)
+- **4 benchmarks at parity** (~1.0x)
+- **3 minor regressions** (brainfuck 0.79x, pnpoly 0.79x, base64 0.82x)
+- **0 timeouts** — all benchmarks complete in release (matmul, triangl were T/O only in debug)
+
+**Note on debug vs release:** Debug mode showed extreme speedups (50–200x on sum/ack/diviter) because unoptimized boxed runtime functions (`fn_add`, `fn_sub`) are very slow (~50ns per call). MIR's native arithmetic bypass was 50–200x faster per operation. In release mode, the C compiler optimizes boxed functions to ~2–5ns, narrowing the gap. The remaining MIR wins come from eliminating boxing/unboxing overhead and enabling register allocation across operations.
 
 **Baseline tests**: 605/605 pass (155/155 MIR tests).
 
@@ -649,7 +667,7 @@ mt->in_tail_position = false;
 
 **Validation**: All 4 failing benchmarks (collatz, diviter, pnpoly, ray) pass. 605/605 baseline tests pass.
 
-### Phase 2: Type Narrowing + Inline Array Access ✅
+### Phase 2: Type Narrowing + Inline Array Access + Inline Comparison ✅
 
 | Task | File | Description | Status |
 |------|------|-------------|--------|
@@ -658,6 +676,7 @@ mt->in_tail_position = false;
 | 2c | transpile-mir.cpp | Propagate narrowed types through `get_effective_type()` | ✅ |
 | 2d | transpile-mir.cpp | Inline array read/write for ArrayInt (fill() narrowing + runtime check) | ✅ |
 | 2e | transpile-mir.cpp | Native INT64 vs INT comparisons for cross-type operators | ✅ |
+| 2f | transpile-mir.cpp, lambda-eval.cpp, mir.c | Inline string/symbol pointer comparison + lightweight helpers | ✅ |
 
 **Validation**: All benchmarks equal or faster than C2MIR. brainfuck: 3.27s (was T/O). 605/605 baseline tests pass.
 

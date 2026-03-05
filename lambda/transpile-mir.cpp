@@ -2071,6 +2071,55 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
     }
 
+    // ======================================================================
+    // Inline string/symbol comparison: avoid boxing + type dispatch
+    // Fast path: pointer identity (single MIR_EQ, no function call)
+    // Slow path: lightweight helper (no boxing, no type dispatch)
+    // ======================================================================
+    {
+        bool both_string = (left_tid == LMD_TYPE_STRING && right_tid == LMD_TYPE_STRING);
+        bool both_symbol = (left_tid == LMD_TYPE_SYMBOL && right_tid == LMD_TYPE_SYMBOL);
+        if ((both_string || both_symbol) &&
+            (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE)) {
+            MIR_reg_t left = transpile_expr(mt, bi->left);
+            MIR_reg_t right = transpile_expr(mt, bi->right);
+            MIR_reg_t result = new_reg(mt, "seq", MIR_T_I64);
+            MIR_label_t l_end = new_label(mt);
+
+            // Fast path: pointer identity
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, left),
+                MIR_new_reg_op(mt->ctx, right)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_end),
+                MIR_new_reg_op(mt->ctx, result)));
+
+            // Slow path: content comparison via lightweight helper
+            const char* helper = both_string ? "fn_str_eq_ptr" : "fn_sym_eq_ptr";
+            MIR_reg_t cmp = emit_call_2(mt, helper, MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, cmp),
+                MIR_new_int_op(mt->ctx, 0xFF)));
+
+            emit_label(mt, l_end);
+
+            // For NE: invert the result
+            if (bi->op == OPERATOR_NE) {
+                MIR_reg_t inv = new_reg(mt, "sne", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                    MIR_new_reg_op(mt->ctx, inv),
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, 0)));
+                return inv;
+            }
+            return result;
+        }
+    }
+
     // Fallback: box both sides and call runtime function
     // Use transpile_box_item to correctly box sub-expressions that may return native values
     MIR_reg_t boxl = transpile_box_item(mt, bi->left);
