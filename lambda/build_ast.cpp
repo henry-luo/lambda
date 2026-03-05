@@ -2359,14 +2359,17 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == SYM_QUERY_EXPR || symbol == SYM_DIRECT_QUERY_EXPR) {
+    else if (symbol == SYM_QUERY_EXPR) {
         // query expression: expr?T (recursive) or expr.?T (direct)
         AstQueryNode* query_node = (AstQueryNode*)alloc_ast_node(tp, AST_NODE_QUERY_EXPR, child, sizeof(AstQueryNode));
         TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
         query_node->object = build_expr(tp, object_node);
         TSNode query_type_node = ts_node_child_by_field_id(child, FIELD_QUERY);
         query_node->query = build_primary_type(tp, query_type_node);
-        query_node->direct = (symbol == SYM_DIRECT_QUERY_EXPR);
+        // determine direct vs recursive from the operator field
+        TSNode op_node = ts_node_child_by_field_id(child, FIELD_OP);
+        StrView op = ts_node_source(tp, op_node);
+        query_node->direct = (op.length == 2);  // ".?" is direct, "?" is recursive
         // query always returns a list of matches
         query_node->type = alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
         log_debug("build query_expr: direct=%d", query_node->direct);
