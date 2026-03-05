@@ -156,79 +156,11 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     return value;
 }
 
-// Helper function to convert unit string to CssUnit enum
-static CssUnit css_unit_from_string(const char* unit) {
+// Helper function to convert unit string to CssUnit enum.
+// Delegates to the canonical css_unit_from_string() in css_value.cpp.
+static CssUnit css_value_parser_unit_from_string(const char* unit) {
     if (!unit) return CSS_UNIT_NONE;
-
-    // Length units (absolute)
-    if (strcmp(unit, "px") == 0) return CSS_UNIT_PX;
-    if (strcmp(unit, "cm") == 0) return CSS_UNIT_CM;
-    if (strcmp(unit, "mm") == 0) return CSS_UNIT_MM;
-    if (strcmp(unit, "in") == 0) return CSS_UNIT_IN;
-    if (strcmp(unit, "pt") == 0) return CSS_UNIT_PT;
-    if (strcmp(unit, "pc") == 0) return CSS_UNIT_PC;
-    if (strcmp(unit, "Q") == 0) return CSS_UNIT_Q;
-
-    // Length units (relative)
-    if (strcmp(unit, "em") == 0) return CSS_UNIT_EM;
-    if (strcmp(unit, "ex") == 0) return CSS_UNIT_EX;
-    if (strcmp(unit, "cap") == 0) return CSS_UNIT_CAP;
-    if (strcmp(unit, "ch") == 0) return CSS_UNIT_CH;
-    if (strcmp(unit, "ic") == 0) return CSS_UNIT_IC;
-    if (strcmp(unit, "rem") == 0) return CSS_UNIT_REM;
-    if (strcmp(unit, "lh") == 0) return CSS_UNIT_LH;
-    if (strcmp(unit, "rlh") == 0) return CSS_UNIT_RLH;
-
-    // Viewport units
-    if (strcmp(unit, "vw") == 0) return CSS_UNIT_VW;
-    if (strcmp(unit, "vh") == 0) return CSS_UNIT_VH;
-    if (strcmp(unit, "vi") == 0) return CSS_UNIT_VI;
-    if (strcmp(unit, "vb") == 0) return CSS_UNIT_VB;
-    if (strcmp(unit, "vmin") == 0) return CSS_UNIT_VMIN;
-    if (strcmp(unit, "vmax") == 0) return CSS_UNIT_VMAX;
-
-    // Small, large, and dynamic viewport units
-    if (strcmp(unit, "svw") == 0) return CSS_UNIT_SVW;
-    if (strcmp(unit, "svh") == 0) return CSS_UNIT_SVH;
-    if (strcmp(unit, "lvw") == 0) return CSS_UNIT_LVW;
-    if (strcmp(unit, "lvh") == 0) return CSS_UNIT_LVH;
-    if (strcmp(unit, "dvw") == 0) return CSS_UNIT_DVW;
-    if (strcmp(unit, "dvh") == 0) return CSS_UNIT_DVH;
-
-    // Container query units
-    if (strcmp(unit, "cqw") == 0) return CSS_UNIT_CQW;
-    if (strcmp(unit, "cqh") == 0) return CSS_UNIT_CQH;
-    if (strcmp(unit, "cqi") == 0) return CSS_UNIT_CQI;
-    if (strcmp(unit, "cqb") == 0) return CSS_UNIT_CQB;
-    if (strcmp(unit, "cqmin") == 0) return CSS_UNIT_CQMIN;
-    if (strcmp(unit, "cqmax") == 0) return CSS_UNIT_CQMAX;
-
-    // Angle units
-    if (strcmp(unit, "deg") == 0) return CSS_UNIT_DEG;
-    if (strcmp(unit, "grad") == 0) return CSS_UNIT_GRAD;
-    if (strcmp(unit, "rad") == 0) return CSS_UNIT_RAD;
-    if (strcmp(unit, "turn") == 0) return CSS_UNIT_TURN;
-
-    // Time units
-    if (strcmp(unit, "s") == 0) return CSS_UNIT_S;
-    if (strcmp(unit, "ms") == 0) return CSS_UNIT_MS;
-
-    // Frequency units
-    if (strcmp(unit, "Hz") == 0) return CSS_UNIT_HZ;
-    if (strcmp(unit, "kHz") == 0) return CSS_UNIT_KHZ;
-
-    // Resolution units
-    if (strcmp(unit, "dpi") == 0) return CSS_UNIT_DPI;
-    if (strcmp(unit, "dpcm") == 0) return CSS_UNIT_DPCM;
-    if (strcmp(unit, "dppx") == 0) return CSS_UNIT_DPPX;
-
-    // Flex units
-    if (strcmp(unit, "fr") == 0) return CSS_UNIT_FR;
-
-    // Percentage
-    if (strcmp(unit, "%") == 0) return CSS_UNIT_PERCENT;
-
-    return CSS_UNIT_UNKNOWN; // Unknown unit
+    return css_unit_from_string(unit, strlen(unit));
 }
 
 CssValue* css_value_create_length_from_string(Pool* pool, double number, const char* unit) {
@@ -239,7 +171,7 @@ CssValue* css_value_create_length_from_string(Pool* pool, double number, const c
 
     value->type = CSS_VALUE_TYPE_LENGTH;
     value->data.length.value = number;
-    value->data.length.unit = css_unit_from_string(unit);
+    value->data.length.unit = css_value_parser_unit_from_string(unit);
 
     return value;
 }
