@@ -13,11 +13,38 @@
 #include <string.h>
 #include <errno.h>
 #include <alloca.h>
+#include <time.h>
 
 extern Type TYPE_ANY, TYPE_INT;
 extern void* heap_alloc(int size, TypeId type_id);
 extern void heap_init();
 extern void heap_destroy();
+
+// Profiling infrastructure (defined in runner.cpp)
+#define PROFILE_MAX_SCRIPTS 64
+typedef struct PhaseProfile {
+    const char* script_path;
+    double parse_ms;
+    double ast_ms;
+    double transpile_ms;
+    double jit_init_ms;
+    double file_write_ms;
+    double c2mir_ms;
+    double mir_gen_ms;
+    int code_len;
+} PhaseProfile;
+extern bool is_profile_enabled();
+extern PhaseProfile profile_data[];
+extern int profile_count;
+#ifdef _WIN32
+#include <windows.h>
+typedef LARGE_INTEGER profile_time_t;
+#else
+typedef struct timespec profile_time_t;
+#endif
+extern void profile_get_time(profile_time_t* t);
+extern double elapsed_ms_val(profile_time_t t0, profile_time_t t1);
+extern void profile_dump_to_file();
 extern Url* get_current_dir();
 
 // Forward declare Runner helper functions from runner.cpp
@@ -6609,14 +6636,48 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
 
     // Initialize MIR context
     unsigned int opt_level = runtime ? runtime->optimize_level : 2;
+
+    // MIR path profiling probes
+    bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS;
+    profile_time_t m0, m1, m2, m3;
+
+    if (profiling) profile_get_time(&m0);
+
     MIR_context_t ctx = jit_init(opt_level);
+
+    if (profiling) profile_get_time(&m1);
 
     // Transpile AST to MIR directly
     transpile_mir_ast(ctx, (AstScript*)runner.script->ast_root, runner.script->source,
                       runner.script->type_list, runner.script->pool);
 
+    if (profiling) profile_get_time(&m2);
+
     // Link and generate
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    if (profiling) profile_get_time(&m3);
+
+    // Record MIR path profiling data
+    // Fields reused: jit_init_ms = MIR ctx init, transpile_ms = AST->MIR transpile,
+    //                c2mir_ms = MIR_link (link+gen), script_path prefixed with "[MIR]"
+    if (profiling) {
+        PhaseProfile* prof = &profile_data[profile_count++];
+        char* mir_path_buf = (char*)malloc(512);
+        snprintf(mir_path_buf, 512, "[MIR] %s",
+                 runner.script->reference ? runner.script->reference : "unknown");
+        prof->script_path = mir_path_buf;
+        prof->parse_ms = 0;    // already captured in C2MIR entry
+        prof->ast_ms = 0;      // already captured in C2MIR entry
+        prof->transpile_ms = elapsed_ms_val(m1, m2);  // AST->MIR direct transpile
+        prof->jit_init_ms = elapsed_ms_val(m0, m1);   // MIR context init
+        prof->file_write_ms = 0;
+        prof->c2mir_ms = elapsed_ms_val(m2, m3);      // MIR_link (link + codegen)
+        prof->mir_gen_ms = 0;
+        prof->code_len = 0;
+        // Dump immediately — --mir path may crash during execution/cleanup
+        profile_dump_to_file();
+    }
 
     // Find the main function
     runner.script->main_func = (main_func_t)find_func(ctx, "main");
