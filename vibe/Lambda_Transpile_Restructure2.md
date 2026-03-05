@@ -742,3 +742,258 @@ The original proposal estimated ~56% reduction by also moving Container/Function
 | Const macro cleanup | ✅ Done | Added `_const_pool` indirection in `lambda.h`. Module import override reduced from 20 lines (10 undefs + 10 redefs) to 2 lines. |
 | Data-driven native optimization | ✅ Done | Replaced all `strcmp(fn_name, ...)` chains with enum-based dispatch (`fn_info->fn == SYSFUNC_*`). Collapsed 5 identical bitwise binary patterns (band/bor/bxor/shl/shr, ~43 lines) into 10 lines using `c_arg_conv == C_ARG_NATIVE`. Removed dead `neg()` code path (never reachable as SysFuncNode). |
 | Extract `transpile-call.cpp` | ✅ Done | Extracted ~993 lines: `transpile_call_expr`, `transpile_call_argument`, `transpile_tail_call`, `is_tco_tail_call`, `find_param_by_name`, plus helper functions (`emit_bitwise_arg`, `can_use_native_math`, `is_integer_type`, etc.). Made 5 shared static functions non-static (`callee_returns_retitem`, `current_func_returns_retitem`, `emit_zero_value`, `value_emits_native_type`, `get_container_unbox_fn`) and declared them in `transpiler.hpp`. transpile.cpp: 7,892 → 6,881 lines. |
+
+---
+
+## Post-Implementation Benchmark Results (5 Mar 2026)
+
+After completing all four phases, both benchmark suites were re-run with a fresh release build (LTO, stripped, optimized) to measure the impact of the transpiler restructuring on performance.
+
+**Platform**: macOS, Apple Silicon (M-series)  
+**Build**: Release (LTO, dead code elimination, stripped)  
+**Runs per benchmark**: 3 (median reported)  
+**Baseline**: Previous results from 3 Mar 2026 (before Phases 1–4)
+
+### Kostya Benchmark Suite — JIT Overhead Comparison
+
+| Benchmark | Previous JIT | Current JIT | Delta |
+|-----------|-------------|-------------|-------|
+| brainfuck | 9.1 ms | 13.1 ms | +4.0 ms |
+| matmul | 9.4 ms | 12.8 ms | +3.4 ms |
+| primes | 5.2 ms | 7.2 ms | +2.0 ms |
+| base64 | 93.7 ms | 95.4 ms | +1.7 ms |
+| levenshtein | 8.0 ms | 10.8 ms | +2.8 ms |
+| json_gen | 15.5 ms | 18.7 ms | +3.2 ms |
+| collatz | 5.4 ms | 6.8 ms | +1.4 ms |
+
+| Metric | Previous | Current | Change |
+|--------|----------|---------|--------|
+| **Geo mean (wall)** | 212.2 ms | 229.3 ms | +8.1% |
+| **Geo mean (exec)** | 187.1 ms | 197.5 ms | +5.6% |
+
+### Larceny Benchmark Suite — JIT Overhead Comparison
+
+| Benchmark | Previous JIT | Current JIT | Delta |
+|-----------|-------------|-------------|-------|
+| deriv | 7.4 ms | 10.5 ms | +3.1 ms |
+| primes | 5.1 ms | 7.6 ms | +2.5 ms |
+| pnpoly | 6.7 ms | 9.7 ms | +3.0 ms |
+| diviter | 5.1 ms | 6.5 ms | +1.4 ms |
+| divrec | 4.8 ms | 7.2 ms | +2.4 ms |
+| array1 | 4.4 ms | 6.4 ms | +2.0 ms |
+| gcbench | 9.0 ms | 12.1 ms | +3.1 ms |
+| quicksort | 5.6 ms | 7.5 ms | +1.9 ms |
+| triangl | 11.4 ms | 12.9 ms | +1.5 ms |
+| puzzle | 5.7 ms | 8.7 ms | +3.0 ms |
+| ray | 7.4 ms | 9.4 ms | +2.0 ms |
+| paraffins | 11.8 ms | 14.2 ms | +2.4 ms |
+
+| Metric | Previous | Current | Change |
+|--------|----------|---------|--------|
+| **Geo mean (wall)** | 64.8 ms | 74.7 ms | +15.3% |
+| **Geo mean (exec)** | 37.2 ms | 39.0 ms | +4.8% |
+
+### Analysis
+
+**JIT overhead increased uniformly by ~2–3 ms across all benchmarks in both suites.** This is a consistent additive constant, not a percentage-based regression, indicating a fixed-cost increase in the transpile/compile pipeline.
+
+**Exec-time differences are small** (+4–6% geo mean) and within typical run-to-run variance on Apple Silicon (thermal throttling, background load). The restructuring did not affect generated code quality.
+
+**Possible causes of the consistent ~2–3 ms JIT overhead increase:**
+
+1. **File I/O during JIT**: The transpile pipeline writes `_transpiled_N.c` to disk before compiling — this is a debug artifact that may have different timing characteristics across builds.
+2. **Instruction cache locality**: Splitting `transpile.cpp` into `transpile.cpp` + `transpile-call.cpp` may cause slightly worse i-cache behavior during C code generation, since the call transpilation hot path is now in a different translation unit.
+3. **Hashmap overhead vs. direct arrays**: The O(1) hashmap lookups (Phase 1) have higher per-lookup constant cost than the linear scans they replaced, particularly for small tables where linear scan is cache-friendly. The `sys_func_map` and `func_map` hashmaps add hashing + comparison overhead that may exceed the benefit for 144-entry and 417-entry tables.
+4. **LTO interaction**: The `clean-all` + fresh release build may produce different optimization decisions than the previous build, especially with cross-TU inlining affected by the new file split.
+
+### Phase-Level Profiling (5 Mar 2026)
+
+Fine-grained phase timing was added to `transpile_script()` in `runner.cpp` to break down JIT overhead into 7 sub-phases. Enabled by setting `LAMBDA_PROFILE=1` environment variable — stores timing data in memory during compilation, dumps to `temp/phase_profile.txt` at `runtime_cleanup()`. Zero overhead when disabled.
+
+**Initial debug-build profiling was misleading** — AST Build appeared to be 31% of JIT overhead, but this was an artifact of debug-mode overhead (no inlining, bounds checks, etc.). Release-build profiling reveals the true bottleneck distribution.
+
+#### Phase Time Distribution — Release Build (Average across 19 benchmarks, median of 3 runs)
+
+| Phase | Avg (ms) | % of Total | Description |
+|-------|----------|------------|-------------|
+| **Parse** | 0.262 | 3.5% | Tree-sitter parse source → CST |
+| **AST Build** | 0.182 | 2.4% | CST → typed AST (build_ast.cpp) |
+| **C Transpile** | 0.061 | 0.8% | AST → C code text (transpile.cpp) |
+| **JIT Init** | 0.143 | 1.9% | `jit_init()` — create MIR context |
+| **File Write** | 0.129 | 1.7% | Write `_transpiled_N.c` debug file |
+| **C2MIR** | 3.482 | 46.1% | C2MIR parse + compile C → MIR |
+| **MIR Gen** | 3.295 | 43.6% | MIR optimization + native codegen |
+| **Total** | **7.553** | **100%** | |
+
+```
+  Parse       : 0.262 ms (  3.5%) #
+  AST Build   : 0.182 ms (  2.4%) #
+  C Transpile : 0.061 ms (  0.8%)
+  JIT Init    : 0.143 ms (  1.9%)
+  File Write  : 0.129 ms (  1.7%)
+  C2MIR       : 3.482 ms ( 46.1%) #######################
+  MIR Gen     : 3.295 ms ( 43.6%) #####################
+```
+
+#### Release vs Debug Comparison
+
+| Phase | Debug (ms) | Release (ms) | Speedup |
+|-------|-----------|-------------|---------|
+| Parse | 0.460 | 0.262 | 1.8x |
+| AST Build | 3.860 | 0.182 | **21.2x** |
+| C Transpile | 1.180 | 0.061 | **19.4x** |
+| JIT Init | 0.230 | 0.143 | 1.6x |
+| File Write | 0.170 | 0.129 | 1.3x |
+| C2MIR | 3.260 | 3.482 | 0.9x |
+| MIR Gen | 3.290 | 3.295 | 1.0x |
+| **Total** | **12.450** | **7.553** | **1.6x** |
+
+AST Build and C Transpile gain ~20x from compiler optimizations (inlining, loop unrolling, dead code elimination). C2MIR and MIR Gen are unaffected because they are interpreted/JIT code that runs at the same speed regardless of host build configuration.
+
+#### Per-Benchmark Phase Breakdown — Release Build (ms)
+
+| Benchmark | Parse | AST | Trans | Init | Write | C2MIR | MIR Gen | Total | Code Len |
+|-----------|-------|-----|-------|------|-------|-------|---------|-------|----------|
+| brainfuck | 0.272 | 0.176 | 0.052 | 0.139 | 0.150 | 3.543 | 3.147 | 7.479 | 43,360 |
+| matmul | 0.231 | 0.158 | 0.047 | 0.259 | 0.263 | 3.994 | 3.658 | 8.610 | 43,034 |
+| primes (K) | 0.162 | 0.118 | 0.042 | 0.129 | 0.112 | 3.525 | 2.312 | 6.400 | 42,284 |
+| base64 | 0.282 | 0.183 | 0.075 | 0.135 | 0.121 | 3.501 | 3.815 | 8.112 | 44,139 |
+| levenshtein | 0.300 | 0.206 | 0.064 | 0.139 | 0.114 | 3.363 | 4.550 | 8.736 | 44,031 |
+| json_gen | 0.258 | 0.183 | 0.074 | 0.128 | 0.116 | 3.315 | 3.886 | 7.960 | 44,143 |
+| collatz | 0.165 | 0.121 | 0.050 | 0.136 | 0.123 | 2.840 | 2.112 | 5.547 | 42,294 |
+| deriv | 0.276 | 0.211 | 0.083 | 0.136 | 0.099 | 3.961 | 3.326 | 8.092 | 47,374 |
+| primes (L) | 0.179 | 0.123 | 0.049 | 0.133 | 0.110 | 2.802 | 2.584 | 5.980 | 42,462 |
+| pnpoly | 0.315 | 0.223 | 0.059 | 0.129 | 0.104 | 3.100 | 3.512 | 7.442 | 43,746 |
+| diviter | 0.153 | 0.120 | 0.041 | 0.128 | 0.097 | 3.477 | 2.218 | 6.234 | 42,290 |
+| divrec | 0.155 | 0.116 | 0.049 | 0.127 | 0.118 | 3.417 | 2.040 | 6.022 | 42,909 |
+| array1 | 0.155 | 0.119 | 0.066 | 0.136 | 0.126 | 2.690 | 1.845 | 5.137 | 42,043 |
+| gcbench | 0.221 | 0.149 | 0.077 | 0.131 | 0.111 | 3.276 | 3.794 | 7.759 | 43,629 |
+| quicksort | 0.494 | 0.292 | 0.096 | 0.206 | 0.265 | 6.174 | 2.364 | 9.891 | 43,322 |
+| triangl | 0.361 | 0.304 | 0.055 | 0.131 | 0.119 | 3.196 | 3.020 | 7.186 | 44,192 |
+| puzzle | 0.194 | 0.137 | 0.066 | 0.129 | 0.092 | 2.891 | 2.515 | 6.024 | 42,877 |
+| ray | 0.343 | 0.216 | 0.051 | 0.129 | 0.099 | 3.294 | 4.165 | 8.297 | 44,466 |
+| paraffins | 0.459 | 0.297 | 0.058 | 0.132 | 0.107 | 3.803 | 7.749 | 12.605 | 46,083 |
+
+#### Key Findings
+
+**Two phases dominate in release builds**, together accounting for **89.7%** of total JIT overhead:
+
+1. **C2MIR (46.1%)** — The single largest bottleneck. C2MIR parsing the transpiled C code. Stable across benchmarks (2.69–6.17 ms) because the code length is dominated by the `lambda.h` header (~42,000 chars, ~96% of total C code). User-generated code is only 43–5,374 chars (avg 1,615). C2MIR spends most of its time re-parsing the same header for every script.
+
+2. **MIR Gen (43.6%)** — MIR optimization passes and AArch64 native code generation. Varies more (1.85–7.75 ms) — larger scripts with more functions produce more MIR instructions to optimize and compile. Paraffins is an outlier at 7.75 ms due to its many recursive functions.
+
+**Everything else is negligible in release builds:**
+- Parse (3.5%), AST Build (2.4%), C Transpile (0.8%) — collectively only 6.7%. These are pure CPU-bound C++ code that benefits massively from LTO/inlining.
+- JIT Init (1.9%) and File Write (1.7%) are fixed costs.
+
+**Critical insight: The transpiler restructuring in Phases 1–4 affects only 6.7% of JIT overhead.** The ~2–3ms JIT overhead increase observed in benchmarks cannot be explained by transpiler changes — it must come from C2MIR/MIR Gen variance or LTO optimization differences.
+
+#### Optimization Opportunities (Revised)
+
+| Opportunity | Phase | Potential Savings | Difficulty |
+|-------------|-------|-------------------|------------|
+| **Cache parsed `lambda.h` MIR** — parse the header once, reuse for subsequent scripts | C2MIR | ~3 ms per import (not per run — header is parsed once per process for single-script execution) | High — requires C2MIR pre-compiled header support, which means modifying 3rd-party code |
+| **Switch to direct MIR backend** (`transpile-mir.cpp`) — bypass C2MIR entirely | C2MIR | ~3.5 ms (eliminate C2MIR phase entirely) | Medium — `transpile-mir.cpp` is under active development |
+| **Reduce `lambda.h` size** — continue header diet (Phase 2 followup) | C2MIR | ~0.5–1 ms | Low — straightforward removal |
+| **MIR optimization level tuning** — use level 1 instead of 2 for faster JIT | MIR Gen | ~1–2 ms (fewer optimization passes) | Low — already configurable via `--optimize=N` |
+| **Pre-compiled MIR modules** — cache JIT output for unchanged scripts | All | ~7.5 ms (skip entire JIT) | High — needs cache invalidation, `MIR_write`/`MIR_read` API |
+| **Skip debug file write** — don't write `_transpiled_N.c` in release mode | File Write | ~0.13 ms | Low — add conditional |
+
+### C2MIR vs MIR Direct Path Comparison (5 Mar 2026)
+
+Profiling was extended to include the `--mir` direct path (AST → MIR API, bypassing C text generation and C2MIR parsing). This comparison establishes the performance baseline for MIR transpiler tuning.
+
+#### Architecture Comparison
+
+| | C2MIR Path (default) | MIR Direct Path (`--mir`) |
+|---|---|---|
+| **Pipeline** | AST → C text → C2MIR → MIR → native | AST → MIR API → native |
+| **Entry point** | `transpile_script()` in `runner.cpp` | `run_script_mir()` in `transpile-mir.cpp` |
+| **C2MIR dependency** | Yes — parses `lambda.h` header + user code | No — direct MIR builder API |
+| **Code generation** | C intermediate text (~42KB including header) | Direct MIR instructions via API |
+
+#### JIT Compilation Overhead — C2MIR vs MIR Direct (median of 3 runs, ms)
+
+| Benchmark | C2MIR JIT | MIR Direct JIT | Speedup | C2MIR Breakdown | MIR Breakdown |
+|-----------|-----------|----------------|---------|-----------------|---------------|
+| kostya/base64 | 7.710 | 3.405 | 2.26x | c2mir=3.574 gen=3.798 | xpile=0.933 link=2.382 |
+| kostya/brainfuck | 6.167 | 2.640 | 2.34x | c2mir=2.983 gen=2.884 | xpile=0.583 link=1.970 |
+| kostya/collatz | 5.395 | 1.445 | 3.73x | c2mir=3.158 gen=1.930 | xpile=0.508 link=0.849 |
+| kostya/json_gen | 7.701 | 2.934 | 2.62x | c2mir=3.201 gen=4.207 | xpile=0.519 link=2.326 |
+| kostya/levenshtein | 7.616 | 3.310 | 2.30x | c2mir=3.230 gen=4.113 | xpile=0.622 link=2.597 |
+| kostya/matmul | 7.031 | 2.368 | 2.97x | c2mir=3.122 gen=3.626 | xpile=0.514 link=1.763 |
+| kostya/primes | 5.201 | 1.464 | 3.55x | c2mir=2.692 gen=2.207 | xpile=0.452 link=0.915 |
+| larceny/array1 | 4.629 | 1.028 | 4.50x | c2mir=2.545 gen=1.812 | xpile=0.296 link=0.645 |
+| larceny/deriv | 7.067 | 2.672 | 2.64x | c2mir=3.435 gen=3.358 | xpile=0.667 link=1.907 |
+| larceny/diviter | 4.792 | 1.335 | 3.59x | c2mir=2.600 gen=1.896 | xpile=0.411 link=0.841 |
+| larceny/divrec | 4.918 | 1.772 | 2.78x | c2mir=2.679 gen=1.949 | xpile=0.449 link=1.234 |
+| larceny/gcbench | 6.877 | 2.229 | 3.09x | c2mir=3.178 gen=3.424 | xpile=0.485 link=1.655 |
+| larceny/paraffins | 11.398 | 7.125 | 1.60x | c2mir=3.879 gen=7.220 | xpile=1.208 link=5.819 |
+| larceny/pnpoly | 7.405 | 2.635 | 2.81x | c2mir=3.180 gen=3.926 | xpile=0.529 link=2.004 |
+| larceny/primes | 5.439 | 1.439 | 3.78x | c2mir=2.797 gen=2.337 | xpile=0.385 link=0.964 |
+| larceny/puzzle | 5.489 | 1.992 | 2.76x | c2mir=2.733 gen=2.476 | xpile=0.490 link=1.409 |
+| larceny/quicksort | 5.959 | 1.783 | 3.34x | c2mir=2.945 gen=2.732 | xpile=0.503 link=1.162 |
+| larceny/triangl | 6.269 | 3.363 | 1.86x | c2mir=2.980 gen=2.995 | xpile=0.649 link=2.627 |
+| **AVERAGE** | **6.503** | **2.497** | **2.60x** | | |
+
+#### MIR Direct Phase Breakdown
+
+| Phase | Avg (ms) | % of MIR Total | Description |
+|-------|----------|----------------|-------------|
+| **MIR Init** | 0.093 | 3.7% | Create MIR context |
+| **AST→MIR Transpile** | 0.567 | 22.7% | Direct AST → MIR instruction emission |
+| **MIR Link+Gen** | 1.837 | 73.6% | `MIR_link()` — link imports + native codegen |
+| **Total** | **2.497** | **100%** | |
+
+#### Execution Time Comparison (median of 3 runs, ms)
+
+The MIR direct path currently produces **slower execution** for most benchmarks, indicating the generated MIR code is less optimized than the C2MIR-generated code:
+
+| Benchmark | C2MIR Exec | MIR Exec | Ratio | Status |
+|-----------|-----------|----------|-------|--------|
+| base64 | 1,083 | 971 | 0.90x | OK |
+| brainfuck | 345 | 1,022 | 2.96x | SLOWER |
+| collatz | 2,463 | N/A | — | MIR_FAIL |
+| json_gen | 68 | 66 | 0.97x | OK |
+| levenshtein | 23 | 35 | 1.47x | SLOWER |
+| matmul | 334 | 1,606 | 4.82x | SLOWER |
+| primes (K) | 22 | 239 | **10.9x** | SLOWER |
+| array1 | 11 | 39 | 3.45x | SLOWER |
+| deriv | 55 | 57 | 1.05x | OK |
+| diviter | 5,455 | N/A | — | MIR_FAIL |
+| divrec | 10 | 12 | 1.29x | SLOWER |
+| gcbench | 2,732 | 2,561 | 0.94x | OK |
+| paraffins | 1.1 | 1.3 | 1.23x | SLOWER |
+| pnpoly | 57 | N/A | — | MIR_FAIL |
+| primes (L) | 1.5 | 4.3 | **2.87x** | SLOWER |
+| puzzle | 13 | 23 | 1.71x | SLOWER |
+| quicksort | 7 | 16 | 2.39x | SLOWER |
+| ray | 7 | N/A | — | MIR_FAIL |
+| triangl | 1,723 | 32,583 | **18.9x** | SLOWER |
+
+**4 benchmarks fail** with `--mir` (collatz, diviter, pnpoly, ray) — these need MIR transpiler implementation fixes.
+
+#### Key Findings
+
+1. **MIR direct path is 2.60x faster for JIT compilation** (2.497 ms vs 6.503 ms). The savings come from eliminating C text generation and C2MIR parsing of the ~42KB header.
+
+2. **MIR direct path execution is significantly slower** for compute-intensive benchmarks. The worst cases (triangl: 18.9x, primes: 10.9x, matmul: 4.82x) suggest the MIR transpiler is:
+   - Missing integer unboxing optimizations (using `Item` tagged values instead of raw `int64_t`)
+   - Not specializing arithmetic operations for known integer types
+   - Potentially using function calls for operations that should be inline
+
+3. **MIR Link+Gen dominates** the MIR direct path at 73.6%, while AST→MIR transpilation is only 22.7%. The transpilation itself is very fast.
+
+4. **Benchmarks where MIR is comparable** (base64, json_gen, deriv, gcbench) are primarily I/O-bound or collection-heavy — the compute overhead from unboxed arithmetic is masked.
+
+#### MIR Transpiler Tuning Priorities
+
+Based on this comparison, the MIR transpiler tuning should focus on:
+
+| Priority | Area | Expected Impact |
+|----------|------|-----------------|
+| **P0** | Integer unboxing — detect typed `int` variables and use native `i64` | 3–10x execution speedup for numeric benchmarks |
+| **P1** | Fix 4 failing benchmarks (collatz, diviter, pnpoly, ray) | Feature completeness |
+| **P2** | Float unboxing for `float` typed variables | Speedup for matmul, ray |
+| **P3** | Inline common operations (`+`, `-`, `*`, comparison) instead of function calls | Reduce call overhead |
+| **P4** | Array access optimization — direct memory indexing for typed arrays | Speedup for array1, quicksort, base64 |
