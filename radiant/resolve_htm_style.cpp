@@ -40,6 +40,32 @@ static Color parse_html_color(const char* color_str) {
     return result;
 }
 
+// Get the border attribute value from the parent TABLE element
+// Returns -1 if no border attribute is found, otherwise returns the pixel value
+// Per WHATWG 15.3.10: table[border] td, table[border] th { border-width: 1px; border-style: inset; border-color: grey; }
+static float get_parent_table_border(DomNode* elmt) {
+    // Traverse up to find the TABLE element (TD -> TR -> TBODY/THEAD/TFOOT -> TABLE, or TD -> TR -> TABLE)
+    DomNode* node = elmt->parent;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->tag_id == HTM_TAG_TABLE) {
+                const char* border_attr = elem->get_attribute("border");
+                if (border_attr) {
+                    StrView b_view = strview_init(border_attr, strlen(border_attr));
+                    float border_val = strview_to_int(&b_view);
+                    if (border_val >= 0) {
+                        return border_val;
+                    }
+                }
+                return -1;
+            }
+        }
+        node = node->parent;
+    }
+    return -1;
+}
+
 // Get the cellpadding attribute value from the parent TABLE element
 // Returns -1 if no cellpadding attribute is found, otherwise returns the pixel value (CSS logical pixels)
 // The HTML spec says: cellpadding on TABLE maps to padding on TD/TH cells
@@ -621,6 +647,34 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->background->color = bg_color;
             log_debug("[HTML] TABLE bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
+        // Handle HTML border attribute (e.g., border="5")
+        // Per WHATWG 15.3.10: table[border] { border-style: outset; border-color: grey; }
+        // border-width is the attribute value in pixels
+        const char* border_attr = elmt->get_attribute("border");
+        if (border_attr) {
+            StrView bv = strview_init(border_attr, strlen(border_attr));
+            float border_width = strview_to_int(&bv);
+            if (border_width >= 0) {
+                if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+                if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+                block->bound->border->width.top = block->bound->border->width.right =
+                    block->bound->border->width.bottom = block->bound->border->width.left = border_width;
+                block->bound->border->width.top_specificity = block->bound->border->width.right_specificity =
+                    block->bound->border->width.bottom_specificity = block->bound->border->width.left_specificity = -1;
+                block->bound->border->top_style = block->bound->border->right_style =
+                    block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_OUTSET;
+                // border-color: grey (128, 128, 128)
+                block->bound->border->top_color.r = block->bound->border->right_color.r =
+                    block->bound->border->bottom_color.r = block->bound->border->left_color.r = 128;
+                block->bound->border->top_color.g = block->bound->border->right_color.g =
+                    block->bound->border->bottom_color.g = block->bound->border->left_color.g = 128;
+                block->bound->border->top_color.b = block->bound->border->right_color.b =
+                    block->bound->border->bottom_color.b = block->bound->border->left_color.b = 128;
+                block->bound->border->top_color.a = block->bound->border->right_color.a =
+                    block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
+                log_debug("[HTML] TABLE border attribute: %.0fpx outset grey", border_width);
+            }
+        }
         break;
     }
     case HTM_TAG_TR: {
@@ -699,6 +753,29 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->background->color = bg_color;
             log_debug("[HTML] TH bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
+        // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
+        {
+            float parent_border = get_parent_table_border(elmt);
+            if (parent_border > 0) {
+                if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+                if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+                block->bound->border->width.top = block->bound->border->width.right =
+                    block->bound->border->width.bottom = block->bound->border->width.left = 1;
+                block->bound->border->width.top_specificity = block->bound->border->width.right_specificity =
+                    block->bound->border->width.bottom_specificity = block->bound->border->width.left_specificity = -1;
+                block->bound->border->top_style = block->bound->border->right_style =
+                    block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_INSET;
+                block->bound->border->top_color.r = block->bound->border->right_color.r =
+                    block->bound->border->bottom_color.r = block->bound->border->left_color.r = 128;
+                block->bound->border->top_color.g = block->bound->border->right_color.g =
+                    block->bound->border->bottom_color.g = block->bound->border->left_color.g = 128;
+                block->bound->border->top_color.b = block->bound->border->right_color.b =
+                    block->bound->border->bottom_color.b = block->bound->border->left_color.b = 128;
+                block->bound->border->top_color.a = block->bound->border->right_color.a =
+                    block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
+                log_debug("[HTML] TH border from parent TABLE: 1px inset grey");
+            }
+        }
         break;
     }
     case HTM_TAG_TD: {
@@ -764,6 +841,29 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
             block->bound->background->color = bg_color;
             log_debug("[HTML] TD bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
+        }
+        // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
+        {
+            float parent_border = get_parent_table_border(elmt);
+            if (parent_border > 0) {
+                if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+                if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+                block->bound->border->width.top = block->bound->border->width.right =
+                    block->bound->border->width.bottom = block->bound->border->width.left = 1;
+                block->bound->border->width.top_specificity = block->bound->border->width.right_specificity =
+                    block->bound->border->width.bottom_specificity = block->bound->border->width.left_specificity = -1;
+                block->bound->border->top_style = block->bound->border->right_style =
+                    block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_INSET;
+                block->bound->border->top_color.r = block->bound->border->right_color.r =
+                    block->bound->border->bottom_color.r = block->bound->border->left_color.r = 128;
+                block->bound->border->top_color.g = block->bound->border->right_color.g =
+                    block->bound->border->bottom_color.g = block->bound->border->left_color.g = 128;
+                block->bound->border->top_color.b = block->bound->border->right_color.b =
+                    block->bound->border->bottom_color.b = block->bound->border->left_color.b = 128;
+                block->bound->border->top_color.a = block->bound->border->right_color.a =
+                    block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
+                log_debug("[HTML] TD border from parent TABLE: 1px inset grey");
+            }
         }
         break;
     }
