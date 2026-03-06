@@ -517,7 +517,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 
 // ViewSpan bounding box computation
-void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false);
+void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 
 // ============================================================================
 // CSS text-transform
