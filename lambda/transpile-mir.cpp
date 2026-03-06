@@ -1723,6 +1723,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
             return LMD_TYPE_INT;
         }
+        // ARRAY with nested=INT + INT index: return type is ANY (not INT)
+        // because the array may have been converted from ArrayInt to generic
+        // Array by fn_array_set (e.g., arr[1] = 3.14 on an int array).
+        // The transpile_index runtime check handles this correctly.
     }
     // For if nodes: use effective type of branches
     if (node->node_type == AST_NODE_IF_EXPR) {
@@ -4170,6 +4174,305 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     }
 
     // ======================================================================
+    // FAST PATH 1b: ARRAY type + INT index — compile-time typed inline read
+    // The compile-time type is generic ARRAY, but when the AST records a
+    // nested element type (e.g., nested=INT for [0,4,2,...]), we know the
+    // runtime object is a typed array created by transpile_array.
+    // Runtime type check needed because fn_array_set may convert ArrayInt
+    // to generic Array in-place (e.g., arr[1] = 3.14 on an int array).
+    // Returns BOXED Item (consistent with get_effective_type returning ANY).
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY &&
+        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
+        // Check if AST nested type suggests this was originally an int array
+        Type* obj_type = field_node->object ? field_node->object->type : nullptr;
+        bool nested_int = false;
+        if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
+            TypeArray* arr_type = (TypeArray*)obj_type;
+            nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
+        }
+
+        if (nested_int) {
+            // Likely ArrayInt — runtime type check + inline read / item_at fallback
+            MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+
+            // Read Container.type_id (uint8_t at offset 0) for runtime check
+            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+
+            MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
+                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+
+            MIR_label_t l_fast = new_label(mt);
+            MIR_label_t l_slow = new_label(mt);
+            MIR_label_t l_end = new_label(mt);
+            MIR_label_t l_oob = new_label(mt);
+            MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
+                MIR_new_reg_op(mt->ctx, is_aint)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
+
+            // == ArrayInt at runtime: inline items[idx] ==
+            emit_label(mt, l_fast);
+            {
+                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, neg_check)));
+
+                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, ge_check)));
+
+                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
+
+                // Tag as INT Item for boxed result
+                MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                    MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
+                uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // OOB → null Item
+            emit_label(mt, l_oob);
+            {
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // Not ArrayInt at runtime → item_at fallback
+            emit_label(mt, l_slow);
+            {
+                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+                MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, slow_result)));
+            }
+
+            emit_label(mt, l_end);
+            return result;  // BOXED Item
+        } else {
+            // Generic ARRAY — use item_at(boxed_obj, native_idx) to skip index dispatch
+            MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+            return emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+        }
+    }
+
+    // ======================================================================
+    // FAST PATH 1c: ARRAY_INT + ANY index — unbox index then inline read
+    // Object is known ArrayInt (from fill() narrowing), index type unknown.
+    // Unbox the field with it2i() to get native int, then inline items[idx].
+    // Returns NATIVE INT (AST type for ARRAY_INT[*] is always INT).
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY_INT && idx_tid == LMD_TYPE_ANY) {
+        MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
+        MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
+        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+
+        MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+        MIR_label_t l_ok = new_label(mt);
+        MIR_label_t l_oob = new_label(mt);
+        MIR_label_t l_end = new_label(mt);
+        MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
+
+        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, neg_check)));
+
+        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, ge_check)));
+
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+        emit_label(mt, l_oob);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        emit_label(mt, l_ok);
+        MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+        MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+        MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
+
+        emit_label(mt, l_end);
+        return result;  // NATIVE INT
+    }
+
+    // ======================================================================
+    // FAST PATH 1d: ARRAY + ANY index — unbox index, typed dispatch
+    // Object is generic ARRAY, index type unknown. Unbox field with it2i().
+    // For nested=INT: inline items[idx], tag as INT Item (boxed).
+    // Otherwise: item_at(boxed_obj, idx). Returns BOXED Item.
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY && idx_tid == LMD_TYPE_ANY) {
+        Type* obj_type = field_node->object ? field_node->object->type : nullptr;
+        bool nested_int = false;
+        if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
+            TypeArray* arr_type = (TypeArray*)obj_type;
+            nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
+        }
+
+        MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
+        MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
+
+        if (nested_int) {
+            // Likely ArrayInt — runtime type check + inline read / item_at fallback
+            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+
+            // Read Container.type_id for runtime check
+            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+
+            MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
+                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+
+            MIR_label_t l_fast = new_label(mt);
+            MIR_label_t l_slow = new_label(mt);
+            MIR_label_t l_end = new_label(mt);
+            MIR_label_t l_oob = new_label(mt);
+            MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
+                MIR_new_reg_op(mt->ctx, is_aint)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
+
+            // ArrayInt at runtime: inline items[idx], tag as INT Item
+            emit_label(mt, l_fast);
+            {
+                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, neg_check)));
+
+                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, ge_check)));
+
+                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
+
+                MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                    MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
+                uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // OOB → null Item
+            emit_label(mt, l_oob);
+            {
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // Not ArrayInt → item_at fallback
+            emit_label(mt, l_slow);
+            {
+                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+                MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, slow_result)));
+            }
+
+            emit_label(mt, l_end);
+            return result;  // BOXED Item
+        } else {
+            // Generic ARRAY, ANY index — item_at(boxed_obj, it2i(field))
+            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+            return emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+        }
+    }
+
+    // ======================================================================
     // FAST PATH 2: Runtime type check for unknown containers with INT index
     // Object might be ArrayInt at runtime — check type tag.
     // Returns BOXED Item (type is unknown at compile time).
@@ -4252,19 +4555,62 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-        // Slow path: fn_index
+        // Slow path: item_at (saves index-type dispatch vs fn_index)
         emit_label(mt, l_slow);
         {
-            MIR_reg_t boxed_idx = emit_box_int(mt, idx_native);
-            MIR_reg_t slow_result = emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, slow_result)));
         }
 
         emit_label(mt, l_end);
         return result;
+    }
+
+    // ======================================================================
+    // FAST PATH 3: ANY + ANY with inner INDEX_EXPR detection (Level 3)
+    // When object is ANY and field is also ANY, check if the field expression
+    // is an INDEX_EXPR into a typed int array. If so, the field produces an
+    // integer Item and we can use item_at(obj, it2i(field)) instead of the
+    // expensive fn_index double dispatch. Mirrors C2MIR D1 Level 3.
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ANY && idx_tid == LMD_TYPE_ANY) {
+        bool field_known_int = false;
+        AstNode* field_expr = field_node->field;
+        // Unwrap PRIMARY wrapper
+        if (field_expr && field_expr->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)field_expr;
+            if (pri->expr) field_expr = pri->expr;
+        }
+        if (field_expr && field_expr->node_type == AST_NODE_INDEX_EXPR) {
+            AstFieldNode* inner_idx = (AstFieldNode*)field_expr;
+            // Check inner object's effective type (handles fill() narrowing)
+            TypeId inner_obj_eff = get_effective_type(mt, inner_idx->object);
+            if (inner_obj_eff == LMD_TYPE_ARRAY_INT || inner_obj_eff == LMD_TYPE_ARRAY_INT64) {
+                field_known_int = true;
+            } else if (inner_obj_eff == LMD_TYPE_ARRAY) {
+                // Check AST nested type
+                Type* inner_type = inner_idx->object ? inner_idx->object->type : nullptr;
+                if (inner_type && inner_type->type_id == LMD_TYPE_ARRAY) {
+                    TypeArray* arr_type = (TypeArray*)inner_type;
+                    if (arr_type->nested && (arr_type->nested->type_id == LMD_TYPE_INT
+                        || arr_type->nested->type_id == LMD_TYPE_INT64)) {
+                        field_known_int = true;
+                    }
+                }
+            }
+        }
+        if (field_known_int) {
+            // Field produces an integer Item — use item_at(obj, it2i(field))
+            MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
+            MIR_reg_t field_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);
+            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+            return emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, field_native));
+        }
     }
 
     // ======================================================================
@@ -4358,16 +4704,16 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Fallback: use generic fn_len(Item) for unknown types (handled below)
         }
 
-        // ==== Bitwise functions: operate on native int64_t, NOT boxed Items ====
-        // These C functions take raw int64_t arguments and return raw int64_t.
-        // Must use transpile_expr (native) instead of transpile_box_item (boxed).
+        // ==== Bitwise functions: inline as native MIR instructions ====
+        // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
+        // shl/shr → guarded: if (b >= 0 && b < 64) then MIR_LSH/MIR_RSH else 0
+        // bnot → MIR_XOR with -1 (equivalent to ~a)
         if (info->fn == SYSFUNC_BAND || info->fn == SYSFUNC_BOR ||
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
             info->fn == SYSFUNC_SHR) {
             arg = call_node->argument;
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
-            // Unbox if argument is boxed (ANY type from variable)
             if (a1_tid != LMD_TYPE_INT) {
                 a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
             }
@@ -4377,11 +4723,63 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             if (a2_tid != LMD_TYPE_INT) {
                 a2 = emit_unbox(mt, a2, LMD_TYPE_INT);
             }
-            char fn_name[64];
-            snprintf(fn_name, sizeof(fn_name), "fn_%s", info->name);
-            return emit_call_2(mt, fn_name, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, a2));
+
+            // band/bor/bxor: single MIR instruction, always safe
+            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
+            switch (info->fn) {
+                case SYSFUNC_BAND: mir_op = MIR_AND; break;
+                case SYSFUNC_BOR:  mir_op = MIR_OR;  break;
+                case SYSFUNC_BXOR: mir_op = MIR_XOR; break;
+                default: break;
+            }
+            if (mir_op) {
+                MIR_reg_t result = new_reg(mt, "bw", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, mir_op,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, a1),
+                    MIR_new_reg_op(mt->ctx, a2)));
+                return result;
+            }
+
+            // shl/shr: guarded shift — if (b >= 0 && b < 64) then (a op b) else 0
+            {
+                MIR_insn_code_t shift_op = (info->fn == SYSFUNC_SHL) ? MIR_LSH : MIR_RSH;
+                MIR_reg_t result = new_reg(mt, "shft", MIR_T_I64);
+                MIR_label_t l_ok = new_label(mt);
+                MIR_label_t l_zero = new_label(mt);
+                MIR_label_t l_end = new_label(mt);
+
+                // check b >= 0
+                MIR_reg_t neg_chk = new_reg(mt, "sneg", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_chk),
+                    MIR_new_reg_op(mt->ctx, a2), MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_zero),
+                    MIR_new_reg_op(mt->ctx, neg_chk)));
+
+                // check b < 64
+                MIR_reg_t ge_chk = new_reg(mt, "sge", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_chk),
+                    MIR_new_reg_op(mt->ctx, a2), MIR_new_int_op(mt->ctx, 64)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_zero),
+                    MIR_new_reg_op(mt->ctx, ge_chk)));
+
+                // in range: do the shift
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+                emit_label(mt, l_zero);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+                emit_label(mt, l_ok);
+                emit_insn(mt, MIR_new_insn(mt->ctx, shift_op,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, a1),
+                    MIR_new_reg_op(mt->ctx, a2)));
+
+                emit_label(mt, l_end);
+                return result;
+            }
         }
         if (info->fn == SYSFUNC_BNOT) {
             arg = call_node->argument;
@@ -4390,8 +4788,13 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             if (a1_tid != LMD_TYPE_INT) {
                 a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
             }
-            return emit_call_1(mt, "fn_bnot", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, a1));
+            // ~a == a XOR -1
+            MIR_reg_t result = new_reg(mt, "bnot", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_XOR,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, a1),
+                MIR_new_int_op(mt->ctx, (int64_t)-1)));
+            return result;
         }
 
         // Build runtime function name: "fn_" or "pn_" + name + optional arg count for overloaded
