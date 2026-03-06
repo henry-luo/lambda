@@ -262,6 +262,8 @@ Key characteristics:
 - **Cross-module calls** for imported functions (resolves wrappers when needed)
 - Runtime functions imported via proto/import declarations resolved by the same `import_resolver`
 - Used with the `--mir` flag: `./lambda.exe --mir script.ls`
+- This is now the **default** JIT path (no flag needed): `./lambda.exe script.ls`
+- Use `--c2mir` flag to use the legacy C2MIR path: `./lambda.exe --c2mir script.ls`
 
 ### Comparison of Transpiler Approaches
 

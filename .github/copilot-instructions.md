@@ -77,9 +77,10 @@ CSS layout and rendering engine for HTML/CSS document presentation.
 
 ```bash
 ./lambda.exe                          # Start interactive REPL (default)
-./lambda.exe script.ls                # Run a functional Lambda script (JIT with C2MIR)
+./lambda.exe script.ls                # Run a functional Lambda script (JIT with MIR Direct)
 ./lambda.exe --help                   # Show help message for Lambda CLI
 ./lambda.exe run script.ls            # Run a procedural Lambda script with main() procedure
+./lambda.exe --c2mir script.ls        # Run with legacy C2MIR JIT compilation
 ./lambda.exe validate data.json -s schema.ls     # Validate against custom schema
 ./lambda.exe convert input.json -t yaml -o output.yaml      # Format conversion
 ./lambda.exe layout page.html                    # Run CSS layout, output view tree

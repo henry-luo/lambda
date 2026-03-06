@@ -25,7 +25,7 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 | Flag | Long Form | Description | Default |
 |------|-----------|-------------|---------|
 | `-h` | `--help` | Show help message | |
-| | `--mir` | Use MIR JIT compilation instead of C2MIR | `false` |
+| | `--c2mir` | Use C2MIR JIT compilation instead of MIR Direct | `false` |
 | | `--transpile-only` | Transpile to C code only (no execution) | `false` |
 | | `--transpile-dir DIR` | Directory for transpiled C output files | `temp` |
 | | `--max-errors N` | Max type errors before stopping (0 = unlimited) | `10` |
@@ -62,14 +62,14 @@ lambda run [options] <script.ls>
 | Flag | Long Form | Description |
 |------|-----------|-------------|
 | `-h` | `--help` | Show help |
-| | `--mir` | Use MIR JIT compilation |
+| | `--c2mir` | Use C2MIR JIT compilation |
 | | `--transpile-dir DIR` | Directory for transpiled C output |
 
 **Example:**
 
 ```bash
 lambda run script.ls
-lambda run --mir script.ls
+lambda run --c2mir script.ls
 ```
 
 ---
