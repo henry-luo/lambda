@@ -410,6 +410,18 @@ TEST(JavaScriptTests, test_spread_element) {
     test_js_script_against_file("test/js/spread_element.js", "test/js/spread_element.txt");
 }
 
+TEST(JavaScriptTests, test_destructuring) {
+    test_js_script_against_file("test/js/destructuring.js", "test/js/destructuring.txt");
+}
+
+TEST(JavaScriptTests, test_closures) {
+    test_js_script_against_file("test/js/closures.js", "test/js/closures.txt");
+}
+
+TEST(JavaScriptTests, test_sort_destr_methods) {
+    test_js_script_against_file("test/js/sort_destr_methods.js", "test/js/sort_destr_methods.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
