@@ -49,8 +49,15 @@ std::vector<LambdaTestInfo> discover_all_tests() {
         std::vector<LambdaTestInfo> dir_tests = discover_tests_in_directory(PROCEDURAL_TEST_DIRECTORIES[i], true);
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
-    
-    return all_tests;
+
+    // Filter out slow benchmark tests
+    std::vector<LambdaTestInfo> filtered;
+    for (const auto& test : all_tests) {
+        if (!is_slow_benchmark(test.test_name)) {
+            filtered.push_back(test);
+        }
+    }
+    return filtered;
 }
 
 // Global test list (populated before main)

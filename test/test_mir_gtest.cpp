@@ -61,10 +61,10 @@ std::vector<LambdaTestInfo> discover_all_mir_tests() {
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
 
-    // filter out tests not supported in MIR path
+    // filter out tests not supported in MIR path, and slow benchmarks
     std::vector<LambdaTestInfo> filtered;
     for (const auto& test : all_tests) {
-        if (!should_skip_mir_test(test.test_name)) {
+        if (!should_skip_mir_test(test.test_name) && !is_slow_benchmark(test.test_name)) {
             filtered.push_back(test);
         }
     }
