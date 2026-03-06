@@ -619,6 +619,10 @@ JsAstNode* build_js_while_statement(JsTranspiler* tp, TSNode while_node) {
 JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
     JsForNode* for_stmt = (JsForNode*)alloc_js_ast_node(tp, JS_AST_NODE_FOR_STATEMENT, for_node, sizeof(JsForNode));
 
+    // Push a block scope for the for-loop header (let/const in init are scoped to this loop)
+    JsScope* for_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, for_scope);
+
     // Get init (optional) - field name is "initializer" in tree-sitter-javascript
     TSNode init_node = ts_node_child_by_field_name(for_node, "initializer", strlen("initializer"));
     if (!ts_node_is_null(init_node)) {
@@ -642,6 +646,9 @@ JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
     if (!ts_node_is_null(body_node)) {
         for_stmt->body = build_js_statement(tp, body_node);
     }
+
+    // Pop for-loop scope
+    js_scope_pop(tp);
 
     for_stmt->base.type = &TYPE_NULL;
 

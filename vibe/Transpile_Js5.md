@@ -1006,11 +1006,54 @@ A comprehensive bug-fix pass was performed after the initial 24-test milestone. 
 
 **for-of/for-in AST discrimination**: Tree-sitter uses a single `"for_in_statement"` grammar rule for both `for...in` and `for...of`. The correct way to distinguish them is to read the `"operator"` named field from the tree-sitter node (`ts_node_child_by_field_name(node, "operator")`), which yields `"in"` or `"of"`.
 
-### 10.3 Test Results
+### 10.3 Phase 5e–5f: Closures + Destructuring + Methods (Completed)
 
-**JS GTest suite: 30/30 pass** (up from 24 → 30 via 6 new feature tests)
+#### Phase 5e: Closure Direct-Call Fix
 
-All 30 tests (29 file-based + 1 command interface) pass:
+Closures were mostly implemented during prior work (capture analysis, environment allocation, env passing via `js_invoke_fn`). The remaining gap was the **direct-call optimization path** — when the transpiler knows a function at compile time, it bypasses `js_call_function` and calls the MIR function directly. This optimization didn't pass the closure environment, causing closures called directly to lose their captured variables.
+
+**Fix**: Added `fc->capture_count == 0` guard before the direct-call optimization in two places:
+1. Regular call expressions (~line 1840 in `transpile_js_mir.cpp`)
+2. Object method calls (~line 2685 in `transpile_js_mir.cpp`)
+
+Closures with captures now always go through the `js_invoke_fn` dispatch path, which correctly prepends env items as arguments.
+
+#### Phase 5f: Destructuring Implementation
+
+**AST Builder** (`build_js_ast.cpp`):
+- Added `array_pattern` handler in `build_js_expression` — creates `JsArrayPatternNode` with elements linked list
+- Elements can be: identifiers, `JsSpreadElementNode` (rest `...x`), or `JsAssignmentPatternNode` (defaults `x = val`)
+- Variable declarator detection: identifies `array_pattern`/`object_pattern` id nodes and routes to `build_js_expression` instead of `build_js_identifier`
+- Scope registration: only registers simple `JS_AST_NODE_IDENTIFIER` ids, skips pattern nodes
+
+**Transpiler** (`transpile_js_mir.cpp`):
+- `jm_transpile_var_decl` — added `JS_AST_NODE_ARRAY_PATTERN` case:
+  - Evaluates init expression into a source register
+  - Iterates pattern elements: `IDENTIFIER` → `js_property_access(src, index)`, `SPREAD_ELEMENT` → `js_array_slice_from(src, index)`, `ASSIGNMENT_PATTERN` → access + compare against `ITEM_NULL_VAL` + conditional default
+- `jm_transpile_for_of` — completely rewritten to handle destructuring:
+  - Detects `array_pattern` both directly as `left` and inside `variable_declaration`
+  - Creates temp `_destr_elem` loop variable, pre-creates all pattern variable registers
+  - After fetching each element, destructures it via `js_property_access` / `js_array_slice_from`
+
+**Runtime** (`js_runtime.cpp`):
+- `js_array_slice_from(arr, start_item)` — new helper for rest destructuring, creates new array from index to end
+- Sort rewrite: with comparator → insertion sort via `js_invoke_fn`; without comparator → JS-spec lexicographic sort using `js_to_string` + `strncmp`
+- Variadic `Math.min`/`Math.max` — loop over all args with `fn_min2`/`fn_max2`; 0 args returns `Infinity`/`-Infinity`
+- `.fill()` method dispatch — wired `fill` case in `js_array_method` to existing `js_array_fill`
+
+#### New Test Files (Phase 5e–5f)
+
+| Test File | Coverage |
+|-----------|----------|
+| `destructuring.js` | Basic array destructuring, rest element, partial (out-of-bounds → null), for-of destructuring, for-of with rest, sort with comparator (asc/desc), default sort (lexicographic), variadic Math.min/max, Array.fill |
+| `closures.js` | Basic closure capture, multiple captures, mutable accumulator, closure as callback, arrow function closures, function composition, closure over loop variable, closures in map/filter, running sum, immediate invocation |
+| `sort_destr_methods.js` | Arrow comparator sort, closure-created comparator, lexicographic default sort, string sort, Math.min/max 0–4 args, Array.fill, rest destructuring with computation, for-of dot product, multiple sequential destructurings, destructuring from function return, for-of with rest, sort stability |
+
+### 10.4 Test Results
+
+**JS GTest suite: 33/33 pass** (up from 24 → 30 → 33)
+
+All 33 tests (32 file-based + 1 command interface) pass:
 
 | Test | Status | Category |
 |------|--------|----------|
@@ -1037,23 +1080,28 @@ All 30 tests (29 file-based + 1 command interface) pass:
 | operators_extra | ✅ | Operators |
 | global_functions | ✅ | Global functions |
 | template_literals | ✅ | ES6 |
-| for_of_loop | ✅ | **New** — for-of fix |
-| bitwise_ops | ✅ | **New** — comment crash + bitwise fix |
-| typed_arrays | ✅ | **New** — typed array access + length fix |
-| number_methods | ✅ | **New** — toFixed dispatch fix |
-| object_static | ✅ | **New** — Object.keys fix |
-| spread_element | ✅ | **New** — spread element fix |
+| for_of_loop | ✅ | Phase 5c–5d — for-of fix |
+| bitwise_ops | ✅ | Phase 5c–5d — comment crash + bitwise fix |
+| typed_arrays | ✅ | Phase 5c–5d — typed array access + length fix |
+| number_methods | ✅ | Phase 5c–5d — toFixed dispatch fix |
+| object_static | ✅ | Phase 5c–5d — Object.keys fix |
+| spread_element | ✅ | Phase 5c–5d — spread element fix |
+| destructuring | ✅ | **Phase 5f** — array destructuring, sort, Math variadic, fill |
+| closures | ✅ | **Phase 5e** — closure capture, composition, loop closures |
+| sort_destr_methods | ✅ | **Phase 5f** — sort comparators, rest patterns, for-of destructuring |
 
-**Lambda baseline: 606/606 pass** (all suites green)
+**Lambda baseline: 609/609 pass** (all suites green)
 
-### 10.4 Remaining Work
+### 10.5 Remaining Work
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
+| 5a | Re-enable disabled tests + fix immediate gaps | ✅ Done |
+| 5b | I/O, timing, global functions | ✅ Done |
 | 5c | `new` expressions + typed array wiring in transpiler | ✅ Done (via 5c–5d bug fix pass) |
 | 5d | Control flow: switch, do-while, for-of, for-in | ✅ Done |
-| 5e | Closures (capture analysis, environment passing) | Not started |
-| 5f | Destructuring + .charCodeAt, .toFixed, .sort | Partially done (`.toFixed` ✅) |
+| 5e | Closures (capture analysis, environment passing) | ✅ Done |
+| 5f | Destructuring + .charCodeAt, .toFixed, .sort, Math variadic, .fill | ✅ Done |
 | 5g | Benchmark harness + integration testing | Not started |
 
 ---

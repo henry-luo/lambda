@@ -1677,12 +1677,17 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_number),
                 MIR_new_reg_op(mt->ctx, is_float)));
 
-            // if type == MAP && is_dom_node
+            // if type == MAP: check typed array -> array path, dom -> dom path, else fallback
             MIR_reg_t is_map = jm_new_reg(mt, "ismap", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_map),
                 MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fallback),
                 MIR_new_reg_op(mt->ctx, is_map)));
+            // Check if this is a typed array (Map with sentinel marker) -> use array method dispatch
+            MIR_reg_t is_ta = jm_call_1(mt, "js_is_typed_array", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_array),
+                MIR_new_reg_op(mt->ctx, is_ta)));
             MIR_reg_t is_dom = jm_call_1(mt, "js_is_dom_node", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_dom),
@@ -3568,11 +3573,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Analyze each collected function for captures
         for (int i = 0; i < mt->func_count; i++) {
             JsFuncCollected* fc = &mt->func_entries[i];
-            // Only analyze function expressions and arrows (not top-level declarations)
-            if (fc->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                fc->node->base.node_type == JS_AST_NODE_ARROW_FUNCTION) {
-                jm_analyze_captures(fc, all_names);
-            }
+            // Analyze all functions (declarations, expressions, and arrows) for captures
+            jm_analyze_captures(fc, all_names);
         }
 
         hashmap_free(all_names);
@@ -3599,14 +3601,18 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
 
     // Emit variable bindings for named function declarations (so they can be
-    // used as first-class values, e.g., passed as callbacks)
+    // used as first-class values, e.g., passed as callbacks).
+    // Non-capturing function declarations are hoisted (bound before any statements).
+    // Capturing function declarations are deferred to their source position
+    // (bound inline with statements, after preceding const/let are in scope).
     JsAstNode* stmt = program->body;
     while (stmt) {
         if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
             JsFunctionNode* fn = (JsFunctionNode*)stmt;
             if (fn->name && fn->name->chars) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
-                if (fc && fc->func_item) {
+                if (fc && fc->func_item && fc->capture_count == 0) {
+                    // Non-capturing: hoist normally
                     int pc = jm_count_params(fn);
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
@@ -3624,12 +3630,68 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         stmt = stmt->next;
     }
 
-    // Transpile top-level statements
+    // Transpile top-level statements in source order.
+    // Function declarations with captures are bound at their source position.
     stmt = program->body;
     while (stmt) {
-        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
-            // Already handled above (variable binding / class collection)
+        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* fn = (JsFunctionNode*)stmt;
+            if (fn->name && fn->name->chars) {
+                JsFuncCollected* fc = jm_find_collected_func(mt, fn);
+                if (fc && fc->func_item && fc->capture_count > 0) {
+                    // Capturing function declaration: bind as closure at this position
+                    int pc = jm_count_params(fn);
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                    MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                    MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+
+                    // Track which env slot is the self-reference (for recursive fn decls)
+                    int self_ref_slot = -1;
+
+                    for (int ci = 0; ci < fc->capture_count; ci++) {
+                        // Check if this capture is the function's own name (self-reference)
+                        if (strcmp(fc->captures[ci].name, vname) == 0) {
+                            self_ref_slot = ci;
+                            // Will be filled after closure creation below
+                            continue;
+                        }
+                        JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
+                        if (var) {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                                MIR_new_reg_op(mt->ctx, var->reg)));
+                        } else {
+                            log_error("js-mir: captured var '%s' not found for fn decl '%.*s'",
+                                fc->captures[ci].name, (int)fn->name->len, fn->name->chars);
+                        }
+                    }
+                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure", MIR_T_I64,
+                        MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, var_reg),
+                        MIR_new_reg_op(mt->ctx, fn_item)));
+                    jm_set_var(mt, vname, var_reg);
+
+                    // Patch self-reference: update env slot to point to the closure itself
+                    if (self_ref_slot >= 0) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, self_ref_slot * (int)sizeof(uint64_t), env, 0, 1),
+                            MIR_new_reg_op(mt->ctx, var_reg)));
+                    }
+                }
+            }
+            // Non-capturing function declarations already handled above
+            stmt = stmt->next;
+            continue;
+        }
+
+        if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+            // Already handled in class collection phase
             stmt = stmt->next;
             continue;
         }
