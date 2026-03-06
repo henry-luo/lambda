@@ -2,71 +2,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>  // for va_list
-#include <math.h>    // for sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh, sqrt, cbrt, log, log2, log10, exp, exp2, expm1, fabs, floor, ceil, round
+#include <math.h>
 #include "../lib/log.h"
-#include "../lib/stringbuf.h"  // for StringBuf functions
 #include "../lib/hashmap.h"    // for O(1) import resolution
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
 #include "lambda.h"
 #include "lambda-error.h"
-#include "js/js_runtime.h"
-#include "js/js_dom.h"
-#include "js/js_typed_array.h"
-
-// Stack overflow protection functions
-extern void lambda_stack_overflow_error(const char* func_name);
-
-// Path resolution functions (implemented in path.c)
-extern Item path_resolve_for_iteration(Path* path);
-extern Bool fn_exists(Item path);
-
-// Target equality (implemented in target.cpp, used in func_list)
-extern bool target_equal(Target* a, Target* b);
-
-// Symbol creation functions (implemented in lambda-eval-num.cpp)
-extern Symbol* fn_symbol(Item item);
-extern Item fn_symbol2(Item name, Item url);
-
-// Name function (implemented in lambda-eval.cpp)
-extern Symbol* fn_name(Item item);
-
-// find/split overloads (implemented in lambda-eval.cpp)
-extern Item fn_find2(Item source, Item pattern);
-extern Item fn_find3(Item source, Item pattern, Item options);
-extern Item fn_split3(Item str, Item sep, Item keep_delim);
-extern Item fn_reduce(Item collection, Item func);
-extern RetItem fn_parse1(Item str);
-extern RetItem fn_parse2(Item str, Item options);
+#include "sys_func_registry.h"
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
-
-// Helper to access runtime pool from JIT code
-static Pool* get_runtime_pool() {
-    return _lambda_rt ? _lambda_rt->pool : NULL;
-}
-
-// Helper functions for map pipe iteration in JIT
-// item_keys allocates per call, so we call it once and pass the ArrayList*
-static int64_t pipe_map_len(void* keys_ptr) {
-    ArrayList* keys = (ArrayList*)keys_ptr;
-    return keys ? (int64_t)keys->length : 0;
-}
-static Item pipe_map_val(Item data, void* keys_ptr, int64_t index) {
-    ArrayList* keys = (ArrayList*)keys_ptr;
-    if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
-    String* key_str = (String*)keys->data[index];
-    return item_attr(data, key_str->chars);
-}
-static Item pipe_map_key(void* keys_ptr, int64_t index) {
-    ArrayList* keys = (ArrayList*)keys_ptr;
-    if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
-    String* key_str = (String*)keys->data[index];
-    return s2it(key_str);
-}
 
 typedef struct jit_item {
     const char *code;
@@ -80,556 +28,62 @@ int getc_func(void *data) {
     return item->curr >= item->code_size ? EOF : item->code[item->curr++];
 }
 
-typedef struct {
-    char *name;
-    fn_ptr func;
-} func_obj_t;
-
-func_obj_t func_list[] = {
-    // C library functions
-    {"memset", (fn_ptr) memset},
-    {"memcpy", (fn_ptr) memcpy},
-    // C math functions (for native math optimization)
-    {"sin", (fn_ptr) sin},
-    {"cos", (fn_ptr) cos},
-    {"tan", (fn_ptr) tan},
-    {"sqrt", (fn_ptr) sqrt},
-    {"log", (fn_ptr) log},
-    {"log10", (fn_ptr) log10},
-    {"exp", (fn_ptr) exp},
-    {"fabs", (fn_ptr) fabs},
-    {"floor", (fn_ptr) floor},
-    {"ceil", (fn_ptr) ceil},
-    {"round", (fn_ptr) round},
-    // inverse trigonometric
-    {"asin", (fn_ptr) asin},
-    {"acos", (fn_ptr) acos},
-    {"atan", (fn_ptr) atan},
-    {"atan2", (fn_ptr) atan2},
-    // hyperbolic
-    {"sinh", (fn_ptr) sinh},
-    {"cosh", (fn_ptr) cosh},
-    {"tanh", (fn_ptr) tanh},
-    // inverse hyperbolic
-    {"asinh", (fn_ptr) asinh},
-    {"acosh", (fn_ptr) acosh},
-    {"atanh", (fn_ptr) atanh},
-    // exponential/logarithmic variants
-    {"exp2", (fn_ptr) exp2},
-    {"expm1", (fn_ptr) expm1},
-    {"log2", (fn_ptr) log2},
-    // root
-    {"cbrt", (fn_ptr) cbrt},
-    // truncation
-    {"trunc", (fn_ptr) trunc},
-    {"hypot", (fn_ptr) hypot},
-    {"log1p", (fn_ptr) log1p},
-    // Stack overflow protection
-    {"lambda_stack_overflow_error", (fn_ptr) lambda_stack_overflow_error},
-    // {"printf", (fn_ptr) printf}, // printf does not work
-    {"array", (fn_ptr) array},
-    {"array_int", (fn_ptr) array_int},
-    {"array_int64", (fn_ptr) array_int64},
-    {"array_float", (fn_ptr) array_float},
-    {"array_fill", (fn_ptr) array_fill},
-    {"array_int_fill", (fn_ptr) array_int_fill},
-    {"array_int64_fill", (fn_ptr) array_int64_fill},
-    {"array_float_fill", (fn_ptr) array_float_fill},
-    {"array_get", (fn_ptr) array_get},
-    {"array_int_get", (fn_ptr) array_int_get},
-    {"array_int64_get", (fn_ptr) array_int64_get},
-    {"array_float_get", (fn_ptr) array_float_get},
-    {"array_int_get_raw", (fn_ptr) array_int_get_raw},
-    {"array_int64_get_raw", (fn_ptr) array_int64_get_raw},
-    {"array_float_get_value", (fn_ptr) array_float_get_value},
-    {"list", (fn_ptr) list},
-    {"list_fill", (fn_ptr) list_fill},
-    {"list_push", (fn_ptr) list_push},
-    {"list_push_spread", (fn_ptr) list_push_spread},
-    {"list_get", (fn_ptr) list_get},
-    {"list_end", (fn_ptr) list_end},
-    {"array_spreadable", (fn_ptr) array_spreadable},
-    {"array_plain", (fn_ptr) array_plain},
-    {"array_drop_inplace", (fn_ptr) array_drop_inplace},
-    {"array_limit_inplace", (fn_ptr) array_limit_inplace},
-    {"array_push", (fn_ptr) array_push},
-    {"array_push_spread", (fn_ptr) array_push_spread},
-    {"array_end", (fn_ptr) array_end},
-    {"item_spread", (fn_ptr) item_spread},
-    {"map", (fn_ptr) map},
-    {"map_with_data", (fn_ptr) map_with_data},
-    {"map_fill", (fn_ptr) map_fill},
-    {"map_get", (fn_ptr) map_get},
-    {"elmt", (fn_ptr) elmt},
-    {"elmt_fill", (fn_ptr) elmt_fill},
-    {"elmt_get", (fn_ptr) elmt_get},
-    {"object", (fn_ptr) object},
-    {"object_with_data", (fn_ptr) object_with_data},
-    {"object_fill", (fn_ptr) object_fill},
-    {"object_get", (fn_ptr) object_get},
-    {"object_type_set_method", (fn_ptr) object_type_set_method},
-    {"object_type_set_constraint", (fn_ptr) object_type_set_constraint},
-    {"is_truthy", (fn_ptr) is_truthy},
-    {"v2it", (fn_ptr) v2it},
-    {"push_d", (fn_ptr) push_d},
-    {"push_l", (fn_ptr) push_l},
-    {"push_l_safe", (fn_ptr) push_l_safe},
-    {"push_d_safe", (fn_ptr) push_d_safe},
-    {"push_k", (fn_ptr) push_k},
-    {"push_k_safe", (fn_ptr) push_k_safe},
-    {"push_c", (fn_ptr) push_c},
-    {"item_keys", (fn_ptr) item_keys},
-    {"item_attr", (fn_ptr) item_attr},
-    {"item_type_id", (fn_ptr) item_type_id},
-    {"item_at", (fn_ptr) item_at},
-    {"pipe_map_len", (fn_ptr) pipe_map_len},
-    {"pipe_map_val", (fn_ptr) pipe_map_val},
-    {"pipe_map_key", (fn_ptr) pipe_map_key},
-
-    {"fn_int", (fn_ptr) fn_int},
-    {"fn_int64", (fn_ptr) fn_int64},
-    {"fn_float", (fn_ptr) fn_float},
-    {"fn_decimal", (fn_ptr) fn_decimal},
-    {"fn_binary", (fn_ptr) fn_binary},
-    {"fn_add", (fn_ptr) fn_add},
-    {"fn_sub", (fn_ptr) fn_sub},
-    {"fn_mul", (fn_ptr) fn_mul},
-    {"fn_div", (fn_ptr) fn_div},
-    {"fn_idiv", (fn_ptr) fn_idiv},
-    {"fn_mod", (fn_ptr) fn_mod},
-    {"fn_pow", (fn_ptr) fn_pow},
-    {"fn_abs", (fn_ptr) fn_abs},
-    // pipe functions
-    {"fn_pipe_map", (fn_ptr) fn_pipe_map},
-    {"fn_pipe_where", (fn_ptr) fn_pipe_where},
-    {"fn_pipe_call", (fn_ptr) fn_pipe_call},
-    // common math functions
-    {"fn_round", (fn_ptr) fn_round},
-    {"fn_floor", (fn_ptr) fn_floor},
-    {"fn_ceil", (fn_ptr) fn_ceil},
-    {"fn_min1", (fn_ptr) fn_min1},
-    {"fn_min2", (fn_ptr) fn_min2},
-    {"fn_max1", (fn_ptr) fn_max1},
-    {"fn_max2", (fn_ptr) fn_max2},
-    {"fn_sum", (fn_ptr) fn_sum},
-    {"fn_avg", (fn_ptr) fn_avg},
-    {"fn_pos", (fn_ptr) fn_pos},
-    {"fn_neg", (fn_ptr) fn_neg},
-    {"fn_argmin", (fn_ptr) fn_argmin},
-    {"fn_argmax", (fn_ptr) fn_argmax},
-    {"fn_sign", (fn_ptr) fn_sign},
-    // vector functions (math module)
-    {"fn_math_prod", (fn_ptr) fn_math_prod},
-    {"fn_math_cumsum", (fn_ptr) fn_math_cumsum},
-    {"fn_math_cumprod", (fn_ptr) fn_math_cumprod},
-    {"fn_math_dot", (fn_ptr) fn_math_dot},
-    {"fn_math_norm", (fn_ptr) fn_math_norm},
-    // statistical functions (math module)
-    {"fn_math_mean", (fn_ptr) fn_math_mean},
-    {"fn_math_median", (fn_ptr) fn_math_median},
-    {"fn_math_variance", (fn_ptr) fn_math_variance},
-    {"fn_math_deviation", (fn_ptr) fn_math_deviation},
-    {"fn_math_quantile", (fn_ptr) fn_math_quantile},
-    // element-wise math functions (math module)
-    {"fn_math_sqrt", (fn_ptr) fn_math_sqrt},
-    {"fn_math_log", (fn_ptr) fn_math_log},
-    {"fn_math_log10", (fn_ptr) fn_math_log10},
-    {"fn_math_exp", (fn_ptr) fn_math_exp},
-    {"fn_math_sin", (fn_ptr) fn_math_sin},
-    {"fn_math_cos", (fn_ptr) fn_math_cos},
-    {"fn_math_tan", (fn_ptr) fn_math_tan},
-    // inverse trigonometric (math module)
-    {"fn_math_asin", (fn_ptr) fn_math_asin},
-    {"fn_math_acos", (fn_ptr) fn_math_acos},
-    {"fn_math_atan", (fn_ptr) fn_math_atan},
-    {"fn_math_atan2", (fn_ptr) fn_math_atan2},
-    // hyperbolic (math module)
-    {"fn_math_sinh", (fn_ptr) fn_math_sinh},
-    {"fn_math_cosh", (fn_ptr) fn_math_cosh},
-    {"fn_math_tanh", (fn_ptr) fn_math_tanh},
-    // inverse hyperbolic (math module)
-    {"fn_math_asinh", (fn_ptr) fn_math_asinh},
-    {"fn_math_acosh", (fn_ptr) fn_math_acosh},
-    {"fn_math_atanh", (fn_ptr) fn_math_atanh},
-    // exponential/logarithmic variants (math module)
-    {"fn_math_exp2", (fn_ptr) fn_math_exp2},
-    {"fn_math_expm1", (fn_ptr) fn_math_expm1},
-    {"fn_math_log2", (fn_ptr) fn_math_log2},
-    // power/root (math module)
-    {"fn_math_pow", (fn_ptr) fn_math_pow},
-    {"fn_math_cbrt", (fn_ptr) fn_math_cbrt},
-    {"fn_math_trunc", (fn_ptr) fn_math_trunc},
-    {"fn_math_hypot", (fn_ptr) fn_math_hypot},
-    {"fn_math_log1p", (fn_ptr) fn_math_log1p},
-    // unboxed system functions (native types, no Item boxing overhead)
-    {"fn_pow_u", (fn_ptr) fn_pow_u},
-    {"fn_min2_u", (fn_ptr) fn_min2_u},
-    {"fn_max2_u", (fn_ptr) fn_max2_u},
-    {"fn_abs_i", (fn_ptr) fn_abs_i},
-    {"fn_abs_f", (fn_ptr) fn_abs_f},
-    {"fn_neg_i", (fn_ptr) fn_neg_i},
-    {"fn_neg_f", (fn_ptr) fn_neg_f},
-    {"fn_mod_i", (fn_ptr) fn_mod_i},
-    {"fn_idiv_i", (fn_ptr) fn_idiv_i},
-    {"fn_not_u", (fn_ptr) fn_not_u},
-    {"fn_sign_i", (fn_ptr) fn_sign_i},
-    {"fn_sign_f", (fn_ptr) fn_sign_f},
-    {"fn_floor_i", (fn_ptr) fn_floor_i},
-    {"fn_ceil_i", (fn_ptr) fn_ceil_i},
-    {"fn_round_i", (fn_ptr) fn_round_i},
-    // collection length — type-specialized native variants
-    {"fn_len_l", (fn_ptr) fn_len_l},
-    {"fn_len_a", (fn_ptr) fn_len_a},
-    {"fn_len_s", (fn_ptr) fn_len_s},
-    {"fn_len_e", (fn_ptr) fn_len_e},
-    {"fmod", (fn_ptr) fmod},
-    // vector manipulation functions
-    {"fn_fill", (fn_ptr) fn_fill},
-    {"fn_reverse", (fn_ptr) fn_reverse},
-    {"fn_sort1", (fn_ptr) fn_sort1},
-    {"fn_sort2", (fn_ptr) fn_sort2},
-    {"fn_sort_by_keys", (fn_ptr) fn_sort_by_keys},
-    {"fn_unique", (fn_ptr) fn_unique},
-    {"fn_concat", (fn_ptr) fn_concat},
-    {"fn_take", (fn_ptr) fn_take},
-    {"fn_drop", (fn_ptr) fn_drop},
-    {"fn_slice", (fn_ptr) fn_slice},
-    {"fn_zip", (fn_ptr) fn_zip},
-    {"fn_range3", (fn_ptr) fn_range3},
-    {"fn_reduce", (fn_ptr) fn_reduce},
-    {"fn_strcat", (fn_ptr) fn_strcat},
-    {"fn_normalize", (fn_ptr) fn_normalize},
-    {"fn_normalize1", (fn_ptr) fn_normalize1},
-    {"fn_normalize2", (fn_ptr) fn_normalize},  // 2-arg version
-    {"fn_substring", (fn_ptr) fn_substring},
-    {"fn_contains", (fn_ptr) fn_contains},
-    // string functions
-    {"fn_starts_with", (fn_ptr) fn_starts_with},
-    {"fn_ends_with", (fn_ptr) fn_ends_with},
-    {"fn_index_of", (fn_ptr) fn_index_of},
-    {"fn_last_index_of", (fn_ptr) fn_last_index_of},
-    {"fn_trim", (fn_ptr) fn_trim},
-    {"fn_trim_start", (fn_ptr) fn_trim_start},
-    {"fn_trim_end", (fn_ptr) fn_trim_end},
-    {"fn_lower", (fn_ptr) fn_lower},
-    {"fn_upper", (fn_ptr) fn_upper},
-    {"fn_url_resolve", (fn_ptr) fn_url_resolve},
-    {"fn_split2", (fn_ptr) fn_split},
-    {"fn_split3", (fn_ptr) fn_split3},
-    {"fn_chars", (fn_ptr) fn_chars},
-    {"fn_ord", (fn_ptr) fn_ord},
-    {"fn_chr", (fn_ptr) fn_chr},
-    {"fn_join2", (fn_ptr) fn_join2},
-    {"fn_replace3", (fn_ptr) fn_replace},
-    {"fn_find2", (fn_ptr) fn_find2},
-    {"fn_find3", (fn_ptr) fn_find3},
-    {"fn_eq", (fn_ptr) fn_eq},
-    {"fn_ne", (fn_ptr) fn_ne},
-    {"fn_str_eq_ptr", (fn_ptr) fn_str_eq_ptr},
-    {"fn_sym_eq_ptr", (fn_ptr) fn_sym_eq_ptr},
-    {"fn_lt", (fn_ptr) fn_lt},
-    {"fn_gt", (fn_ptr) fn_gt},
-    {"fn_le", (fn_ptr) fn_le},
-    {"fn_ge", (fn_ptr) fn_ge},
-    {"fn_not", (fn_ptr) fn_not},
-    {"fn_and", (fn_ptr) fn_and},
-    {"fn_or", (fn_ptr) fn_or},
-    {"op_and", (fn_ptr) op_and},
-    {"op_or", (fn_ptr) op_or},
-    {"it2l", (fn_ptr) it2l},
-    {"it2d", (fn_ptr) it2d},
-    {"it2i", (fn_ptr) it2i},
-    {"it2b", (fn_ptr) it2b},
-    {"it2s", (fn_ptr) it2s},
-    {"it2b", (fn_ptr) it2b},
-    {"fn_to_cstr", (fn_ptr) fn_to_cstr},
-    {"ensure_typed_array", (fn_ptr) ensure_typed_array},
-    // MIR swap-safe store functions (external call prevents SSA reordering)
-    {"_store_i64", (fn_ptr) _store_i64},
-    {"_store_f64", (fn_ptr) _store_f64},
-    {"to_fn", (fn_ptr) to_fn},
-    {"to_fn_n", (fn_ptr) to_fn_n},
-    {"to_fn_named", (fn_ptr) to_fn_named},
-    {"to_closure", (fn_ptr) to_closure},
-    {"to_closure_named", (fn_ptr) to_closure_named},
-    {"heap_calloc", (fn_ptr) heap_calloc},
-    {"heap_data_calloc", (fn_ptr) heap_data_calloc},
-    {"heap_create_name", (fn_ptr) heap_create_name},
-    {"heap_create_symbol", (fn_ptr) heap_create_symbol},
-    {"heap_strcpy", (fn_ptr) heap_strcpy},  // for creating runtime strings
-    {"target_equal", (fn_ptr) target_equal},
-    {"fn_call", (fn_ptr) fn_call},
-    {"fn_call0", (fn_ptr) fn_call0},
-    {"fn_call1", (fn_ptr) fn_call1},
-    {"fn_call2", (fn_ptr) fn_call2},
-    {"fn_call3", (fn_ptr) fn_call3},
-    {"fn_is", (fn_ptr) fn_is},
-    {"fn_is_nan", (fn_ptr) fn_is_nan},
-    {"fn_in", (fn_ptr) fn_in},
-    {"fn_query", (fn_ptr) fn_query},
-    {"fn_to", (fn_ptr) fn_to},
-    {"base_type", (fn_ptr) base_type},
-    {"const_type", (fn_ptr) const_type},
-    {"const_pattern", (fn_ptr) const_pattern},
-    {"fn_string", (fn_ptr) fn_string},
-    {"fn_symbol1", (fn_ptr) fn_symbol},
-    {"fn_symbol2", (fn_ptr) fn_symbol2},
-    {"fn_type", (fn_ptr) fn_type},    {"fn_name", (fn_ptr) fn_name},    {"fn_input1", (fn_ptr) fn_input1},
-    {"fn_input2", (fn_ptr) fn_input2},
-    {"fn_parse1", (fn_ptr) fn_parse1},
-    {"fn_parse2", (fn_ptr) fn_parse2},
-    {"fn_format1", (fn_ptr) fn_format1},
-    {"fn_format2", (fn_ptr) fn_format2},
-    {"fn_error", (fn_ptr) fn_error},
-    // datetime constructors
-    {"fn_datetime0", (fn_ptr) fn_datetime0},
-    {"fn_datetime1", (fn_ptr) fn_datetime1},
-    {"fn_date0", (fn_ptr) fn_date0},
-    {"fn_date1", (fn_ptr) fn_date1},
-    {"fn_date3", (fn_ptr) fn_date3},
-    {"fn_time0", (fn_ptr) fn_time0},
-    {"fn_time1", (fn_ptr) fn_time1},
-    {"fn_time3", (fn_ptr) fn_time3},
-    {"fn_justnow", (fn_ptr) fn_justnow},
-    {"fn_index", (fn_ptr) fn_index},
-    {"fn_member", (fn_ptr) fn_member},
-    {"fn_len", (fn_ptr) fn_len},
-    {"fn_join", (fn_ptr) fn_join},
-    {"path_resolve_for_iteration", (fn_ptr) path_resolve_for_iteration},
-    // variadic parameter access
-    {"set_vargs", (fn_ptr) set_vargs},
-    {"fn_varg0", (fn_ptr) fn_varg0},
-    {"fn_varg1", (fn_ptr) fn_varg1},
-    // procedures
-    {"pn_print", (fn_ptr) pn_print},
-    {"pn_clock", (fn_ptr) pn_clock},
-    {"pn_cmd1", (fn_ptr) pn_cmd1},
-    {"pn_cmd2", (fn_ptr) pn_cmd2},
-    {"pn_fetch", (fn_ptr) pn_fetch},
-    {"pn_output2", (fn_ptr) pn_output2},
-    {"pn_output3", (fn_ptr) pn_output3},
-    {"pn_output_append", (fn_ptr) pn_output_append},
-    // io module procedures (unified I/O - local and remote)
-    {"pn_io_copy", (fn_ptr) pn_io_copy},
-    {"pn_io_move", (fn_ptr) pn_io_move},
-    {"pn_io_delete", (fn_ptr) pn_io_delete},
-    {"pn_io_mkdir", (fn_ptr) pn_io_mkdir},
-    {"pn_io_touch", (fn_ptr) pn_io_touch},
-    {"pn_io_symlink", (fn_ptr) pn_io_symlink},
-    {"pn_io_chmod", (fn_ptr) pn_io_chmod},
-    {"pn_io_rename", (fn_ptr) pn_io_rename},
-    {"pn_io_fetch1", (fn_ptr) pn_io_fetch1},
-    {"pn_io_fetch2", (fn_ptr) pn_io_fetch2},
-    // exists() is a global pure function (no side effects)
-    {"fn_exists", (fn_ptr) fn_exists},
-    // shared runtime context pointer
-    {"_lambda_rt", (fn_ptr) &_lambda_rt},
-
-    // JavaScript runtime functions
-    {"js_to_number", (fn_ptr) js_to_number},
-    {"js_to_string", (fn_ptr) js_to_string},
-    {"js_to_boolean", (fn_ptr) js_to_boolean},
-    {"js_is_truthy", (fn_ptr) js_is_truthy},
-    {"js_add", (fn_ptr) js_add},
-    {"js_subtract", (fn_ptr) js_subtract},
-    {"js_multiply", (fn_ptr) js_multiply},
-    {"js_divide", (fn_ptr) js_divide},
-    {"js_modulo", (fn_ptr) js_modulo},
-    {"js_power", (fn_ptr) js_power},
-    {"js_equal", (fn_ptr) js_equal},
-    {"js_not_equal", (fn_ptr) js_not_equal},
-    {"js_strict_equal", (fn_ptr) js_strict_equal},
-    {"js_strict_not_equal", (fn_ptr) js_strict_not_equal},
-    {"js_less_than", (fn_ptr) js_less_than},
-    {"js_less_equal", (fn_ptr) js_less_equal},
-    {"js_greater_than", (fn_ptr) js_greater_than},
-    {"js_greater_equal", (fn_ptr) js_greater_equal},
-    {"js_logical_and", (fn_ptr) js_logical_and},
-    {"js_logical_or", (fn_ptr) js_logical_or},
-    {"js_logical_not", (fn_ptr) js_logical_not},
-    {"js_bitwise_and", (fn_ptr) js_bitwise_and},
-    {"js_bitwise_or", (fn_ptr) js_bitwise_or},
-    {"js_bitwise_xor", (fn_ptr) js_bitwise_xor},
-    {"js_bitwise_not", (fn_ptr) js_bitwise_not},
-    {"js_left_shift", (fn_ptr) js_left_shift},
-    {"js_right_shift", (fn_ptr) js_right_shift},
-    {"js_unsigned_right_shift", (fn_ptr) js_unsigned_right_shift},
-    {"js_unary_plus", (fn_ptr) js_unary_plus},
-    {"js_unary_minus", (fn_ptr) js_unary_minus},
-    {"js_typeof", (fn_ptr) js_typeof},
-    {"js_new_object", (fn_ptr) js_new_object},
-    {"js_property_get", (fn_ptr) js_property_get},
-    {"js_property_set", (fn_ptr) js_property_set},
-    {"js_property_access", (fn_ptr) js_property_access},
-    {"js_array_new", (fn_ptr) js_array_new},
-    {"js_array_get", (fn_ptr) js_array_get},
-    {"js_array_set", (fn_ptr) js_array_set},
-    {"js_array_length", (fn_ptr) js_array_length},
-    {"js_array_push", (fn_ptr) js_array_push},
-    {"js_new_function", (fn_ptr) js_new_function},
-    {"js_new_closure", (fn_ptr) js_new_closure},
-    {"js_alloc_env", (fn_ptr) js_alloc_env},
-    {"js_call_function", (fn_ptr) js_call_function},
-    {"js_get_this", (fn_ptr) js_get_this},
-    {"js_console_log", (fn_ptr) js_console_log},
-    // v5: Exception handling
-    {"js_throw_value", (fn_ptr) js_throw_value},
-    {"js_check_exception", (fn_ptr) js_check_exception},
-    {"js_clear_exception", (fn_ptr) js_clear_exception},
-    {"js_new_error", (fn_ptr) js_new_error},
-    // v3: String, Array, Math method dispatchers
-    {"js_string_method", (fn_ptr) js_string_method},
-    {"js_array_method", (fn_ptr) js_array_method},
-    {"js_math_method", (fn_ptr) js_math_method},
-    {"js_math_property", (fn_ptr) js_math_property},
-    {"js_number_method", (fn_ptr) js_number_method},
-    {"js_get_length", (fn_ptr) js_get_length},
-    // v3: DOM API dispatchers
-    {"js_document_method", (fn_ptr) js_document_method},
-    {"js_document_get_property", (fn_ptr) js_document_get_property},
-    {"js_dom_element_method", (fn_ptr) js_dom_element_method},
-    {"js_dom_get_property", (fn_ptr) js_dom_get_property},
-    {"js_dom_wrap_element", (fn_ptr) js_dom_wrap_element},
-    {"js_dom_unwrap_element", (fn_ptr) js_dom_unwrap_element},
-    {"js_is_dom_node", (fn_ptr) js_is_dom_node},
-    {"js_dom_set_property", (fn_ptr) js_dom_set_property},
-    {"js_dom_set_style_property", (fn_ptr) js_dom_set_style_property},
-    {"js_dom_get_style_property", (fn_ptr) js_dom_get_style_property},
-    // Computed style
-    {"js_get_computed_style", (fn_ptr) js_get_computed_style},
-    // v5: Process I/O
-    {"js_process_stdout_write", (fn_ptr) js_process_stdout_write},
-    {"js_process_hrtime_bigint", (fn_ptr) js_process_hrtime_bigint},
-    {"js_get_process_argv", (fn_ptr) js_get_process_argv},
-    // v5: Global functions
-    {"js_parseInt", (fn_ptr) js_parseInt},
-    {"js_parseFloat", (fn_ptr) js_parseFloat},
-    {"js_isNaN", (fn_ptr) js_isNaN},
-    {"js_isFinite", (fn_ptr) js_isFinite},
-    {"js_toFixed", (fn_ptr) js_toFixed},
-    {"js_string_charCodeAt", (fn_ptr) js_string_charCodeAt},
-    {"js_string_fromCharCode", (fn_ptr) js_string_fromCharCode},
-    {"js_array_fill", (fn_ptr) js_array_fill},
-    {"js_console_log_multi", (fn_ptr) js_console_log_multi},
-    // v5: Additional operators
-    {"js_instanceof", (fn_ptr) js_instanceof},
-    {"js_in", (fn_ptr) js_in},
-    {"js_nullish_coalesce", (fn_ptr) js_nullish_coalesce},
-    // v5: Object utilities
-    {"js_object_keys", (fn_ptr) js_object_keys},
-    {"js_to_string_val", (fn_ptr) js_to_string_val},
-    {"js_number_property", (fn_ptr) js_number_property},
-    // v5: Typed arrays
-    {"js_typed_array_new", (fn_ptr) js_typed_array_new},
-    {"js_typed_array_get", (fn_ptr) js_typed_array_get},
-    {"js_typed_array_set", (fn_ptr) js_typed_array_set},
-    {"js_typed_array_length", (fn_ptr) js_typed_array_length},
-    {"js_typed_array_fill", (fn_ptr) js_typed_array_fill},
-    {"js_is_typed_array", (fn_ptr) js_is_typed_array},
-    // StringBuf functions for template literals
-    {"stringbuf_new", (fn_ptr) stringbuf_new},
-    {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},
-    {"stringbuf_append_str_n", (fn_ptr) stringbuf_append_str_n},
-    {"stringbuf_to_string", (fn_ptr) stringbuf_to_string},
-    // Path functions - new API
-    {"path_new", (fn_ptr) path_new},
-    {"path_extend", (fn_ptr) path_extend},
-    {"path_concat", (fn_ptr) path_concat},
-    {"path_wildcard", (fn_ptr) path_wildcard},
-    {"path_wildcard_recursive", (fn_ptr) path_wildcard_recursive},
-    // array/map mutation (procedural)
-    {"fn_array_set", (fn_ptr) fn_array_set},
-    {"fn_map_set", (fn_ptr) fn_map_set},
-    // bitwise operations
-    {"_barg", (fn_ptr) _barg},
-    {"fn_band", (fn_ptr) fn_band},
-    {"fn_bor", (fn_ptr) fn_bor},
-    {"fn_bxor", (fn_ptr) fn_bxor},
-    {"fn_bnot", (fn_ptr) fn_bnot},
-    {"fn_shl", (fn_ptr) fn_shl},
-    {"fn_shr", (fn_ptr) fn_shr},
-    // vmap functions
-    {"vmap_new", (fn_ptr) vmap_new},
-    {"vmap_from_array", (fn_ptr) vmap_from_array},
-    {"vmap_set", (fn_ptr) vmap_set},
-    // typed array functions
-    {"array_float_new", (fn_ptr) array_float_new},
-    {"array_float_set", (fn_ptr) array_float_set},
-    {"array_int_new", (fn_ptr) array_int_new},
-    {"array_int_set", (fn_ptr) array_int_set},
-    {"get_runtime_pool", (fn_ptr) get_runtime_pool},
-    // container boxing
-    {"p2it",     (fn_ptr) p2it},
-    // error conversion
-    {"err2it",   (fn_ptr) err2it},
-    {"it2err",   (fn_ptr) it2err},
-    // Ret* constructor helpers
-    {"ri_ok",    (fn_ptr) ri_ok},
-    {"ri_err",   (fn_ptr) ri_err},
-    {"rb_ok",    (fn_ptr) rb_ok},
-    {"rb_err",   (fn_ptr) rb_err},
-    {"ri56_ok",  (fn_ptr) ri56_ok},
-    {"ri56_err", (fn_ptr) ri56_err},
-    {"ri64_ok",  (fn_ptr) ri64_ok},
-    {"ri64_err", (fn_ptr) ri64_err},
-    {"rf_ok",    (fn_ptr) rf_ok},
-    {"rf_err",   (fn_ptr) rf_err},
-    {"rs_ok",    (fn_ptr) rs_ok},
-    {"rs_err",   (fn_ptr) rs_err},
-    {"rsy_ok",   (fn_ptr) rsy_ok},
-    {"rsy_err",  (fn_ptr) rsy_err},
-    {"rm_ok",    (fn_ptr) rm_ok},
-    {"rm_err",   (fn_ptr) rm_err},
-    {"rl_ok",    (fn_ptr) rl_ok},
-    {"rl_err",   (fn_ptr) rl_err},
-    {"re_ok",    (fn_ptr) re_ok},
-    {"re_err",   (fn_ptr) re_err},
-    {"ro_ok",    (fn_ptr) ro_ok},
-    {"ro_err",   (fn_ptr) ro_err},
-    {"ra_ok",    (fn_ptr) ra_ok},
-    {"ra_err",   (fn_ptr) ra_err},
-    {"rr_ok",    (fn_ptr) rr_ok},
-    {"rr_err",   (fn_ptr) rr_err},
-    {"rp_ok",    (fn_ptr) rp_ok},
-    {"rp_err",   (fn_ptr) rp_err},
-    // Ret* compatibility shims
-    {"item_to_ri", (fn_ptr) item_to_ri},
-    {"ri_to_item", (fn_ptr) ri_to_item},
-};
-
 // ============================================================================
 // O(1) Import Resolution via Hashmap
 // ============================================================================
-// Builds a hashmap from func_list[] at init time for O(1) symbol resolution
-// instead of O(n) linear scan on every import.
+// Builds a hashmap from sys_func_defs[] + jit_runtime_imports[] at init time
+// for O(1) symbol resolution instead of O(n) linear scan on every import.
 
 static struct hashmap* func_map = NULL;
 
 static uint64_t func_obj_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const func_obj_t* e = (const func_obj_t*)item;
+    const JitImport* e = (const JitImport*)item;
     return hashmap_xxhash3(e->name, strlen(e->name), seed0, seed1);
 }
 
 static int func_obj_compare(const void* a, const void* b, void* udata) {
-    const func_obj_t* fa = (const func_obj_t*)a;
-    const func_obj_t* fb = (const func_obj_t*)b;
+    const JitImport* fa = (const JitImport*)a;
+    const JitImport* fb = (const JitImport*)b;
     return strcmp(fa->name, fb->name);
 }
 
 static void init_func_map(void) {
     if (func_map) return;  // already initialized
-    const size_t len = sizeof(func_list) / sizeof(func_obj_t);
-    func_map = hashmap_new(sizeof(func_obj_t), len * 2,
-        0, 0, func_obj_hash, func_obj_compare, NULL, NULL);
-    for (size_t i = 0; i < len; i++) {
-        hashmap_set(func_map, &func_list[i]);
+
+    // Count total entries: sys_func_defs (with func_ptr) + jit_runtime_imports
+    size_t total = 0;
+    for (int i = 0; i < sys_func_def_count; i++) {
+        if (sys_func_defs[i].func_ptr) total++;
+        if (sys_func_defs[i].native_func_ptr) total++;
     }
-    log_info("func_map initialized: %zu runtime functions", len);
+    total += (size_t)jit_runtime_import_count;
+
+    func_map = hashmap_new(sizeof(JitImport), total * 2,
+        0, 0, func_obj_hash, func_obj_compare, NULL, NULL);
+
+    // Insert sys_func_defs entries (c_func_name → func_ptr)
+    for (int i = 0; i < sys_func_def_count; i++) {
+        if (sys_func_defs[i].func_ptr) {
+            JitImport entry = {sys_func_defs[i].c_func_name, sys_func_defs[i].func_ptr};
+            hashmap_set(func_map, &entry);
+        }
+        if (sys_func_defs[i].native_func_ptr) {
+            JitImport entry = {sys_func_defs[i].native_c_name, sys_func_defs[i].native_func_ptr};
+            hashmap_set(func_map, &entry);
+        }
+    }
+
+    // Insert jit_runtime_imports entries
+    for (int i = 0; i < jit_runtime_import_count; i++) {
+        hashmap_set(func_map, &jit_runtime_imports[i]);
+    }
+
+    log_info("func_map initialized: %zu runtime functions", total);
 }
 
 // Dynamic import table for cross-module function/variable resolution
 #define MAX_DYNAMIC_IMPORTS 256
-static func_obj_t dynamic_import_table[MAX_DYNAMIC_IMPORTS];
+static JitImport dynamic_import_table[MAX_DYNAMIC_IMPORTS];
 static int dynamic_import_count = 0;
 
 void register_dynamic_import(const char *name, void *addr) {
@@ -657,8 +111,8 @@ void *import_resolver(const char *name) {
         }
     }
     // Check static runtime function hashmap (O(1) lookup)
-    func_obj_t key = {.name = (char*)name, .func = NULL};
-    const func_obj_t* found = (const func_obj_t*)hashmap_get(func_map, &key);
+    JitImport key = {.name = (char*)name, .func = NULL};
+    const JitImport* found = (const JitImport*)hashmap_get(func_map, &key);
     if (found) {
         log_debug("found function: %s at %p", name, found->func);
         return (void*)found->func;
