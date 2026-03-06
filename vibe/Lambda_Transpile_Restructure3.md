@@ -4,13 +4,13 @@
 
 This proposal targets **structural enhancements to the Lambda runtime and transpiler** to close the performance gap on compute-intensive benchmarks. Five benchmarks expose the key bottlenecks:
 
-| Benchmark | Lambda (release) | Node.js | Ratio | Primary Bottleneck |
-|-----------|----------------:|--------:|------:|-------------------|
-| diviter | 5,579ms → **~285ms** | 488ms | ~~11.4x~~ **0.58x** | ~~`_store_i64` in tight loop~~ ✅ Solved (P1+CSI) |
-| triangl | 1,416ms → **~441ms** (MIR) | 93ms | ~~20.2x~~ **~4.7x** (MIR) | Array indexing overhead (D1+D3-MIR) |
-| collatz | 2,185ms → **~439ms** | 1,459ms | ~~1.5x~~ **0.30x** | ~~`_store_i64` + `shr`~~ ✅ Solved (P1+CSI+B2) |
-| gcbench | 2,560ms → **~436ms** | 27ms | ~~94.8x~~ **16.1x** | ~~2 GC allocs per map~~ Reduced (P5) |
-| gcbench2 | 2,079ms → **~266ms** | 27ms | ~~77.0x~~ **9.9x** | ~~Same as gcbench~~ Reduced (P5) |
+| Benchmark |           Lambda (release) | Node.js |                     Ratio | Primary Bottleneck                               |
+| --------- | -------------------------: | ------: | ------------------------: | ------------------------------------------------ |
+| diviter   |       5,579ms → **~285ms** |   488ms |       ~~11.4x~~ **0.58x** | ~~`_store_i64` in tight loop~~ ✅ Solved (P1+CSI) |
+| triangl   | 1,416ms → **~441ms** (MIR) |    93ms | ~~20.2x~~ **~4.7x** (MIR) | Array indexing overhead (D1+D3-MIR)              |
+| collatz   |       2,185ms → **~439ms** | 1,459ms |        ~~1.5x~~ **0.30x** | ~~`_store_i64` + `shr`~~ ✅ Solved (P1+CSI+B2)    |
+| gcbench   |       2,560ms → **~436ms** |    27ms |       ~~94.8x~~ **16.1x** | ~~2 GC allocs per map~~ Reduced (P5)             |
+| gcbench2  |       2,079ms → **~266ms** |    27ms |        ~~77.0x~~ **9.9x** | ~~Same as gcbench~~ Reduced (P5)                 |
 
 The original geometric mean slowdown vs Node.js across these five benchmarks was **~17x**. Through six structural optimizations, it has been reduced to **~3.1x** (see Updated Benchmark Results).
 
