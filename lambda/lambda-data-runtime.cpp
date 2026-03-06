@@ -135,6 +135,13 @@ Item array_int_get(ArrayInt *array, int index) {
     return item;
 }
 
+// Fast path: return raw int64_t without boxing — for use when result type is known int
+// Only used for immutable arrays (let) where type widening cannot occur.
+int64_t array_int_get_raw(ArrayInt *array, int index) {
+    if (!array || (unsigned)index >= (unsigned)array->length) return 0;
+    return array->items[index];
+}
+
 ArrayInt64* array_int64() {
     ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
     arr->type_id = LMD_TYPE_ARRAY_INT64;
@@ -175,6 +182,13 @@ Item array_int64_get(ArrayInt64* array, int index) {
         return ItemNull;
     }
     return push_l(array->items[index]);
+}
+
+// Fast path: return raw int64_t without boxing
+// Only used for immutable arrays (let) where type widening cannot occur.
+int64_t array_int64_get_raw(ArrayInt64 *array, int index) {
+    if (!array || (unsigned)index >= (unsigned)array->length) return 0;
+    return array->items[index];
 }
 
 ArrayFloat* array_float() {
@@ -222,9 +236,9 @@ Item array_float_get(ArrayFloat* array, int index) {
     return push_d(array->items[index]);
 }
 
-// fast path
+// fast path — only used for immutable arrays where type widening cannot occur
 double array_float_get_value(ArrayFloat *arr, int index) {
-    if (index < 0 || index >= arr->length) {
+    if (!arr || index < 0 || index >= arr->length) {
         return NAN;  // Return NaN for invalid access
     }
     return arr->items[index];

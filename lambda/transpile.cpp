@@ -4,7 +4,7 @@
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 
-extern Type TYPE_ANY, TYPE_INT;
+extern Type TYPE_ANY, TYPE_INT, TYPE_FLOAT, TYPE_BOOL;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void transpile_expr_tco(Transpiler* tp, AstNode *expr_node, bool in_tail_position);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
@@ -26,6 +26,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
 void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
+void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script);
 
 // forward declarations for direct map/object field access optimization
 static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
@@ -1065,7 +1066,28 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
         if (item->type->is_literal) {
-            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            // Check if this is actually a variable reference (not a literal null value).
+            // Variables initialized with null share the LIT_NULL type (is_literal=1),
+            // but at runtime they may hold a different value after reassignment.
+            // Variable references must emit the variable name, not the literal.
+            bool is_var_ref = false;
+            if (item->node_type == AST_NODE_PRIMARY) {
+                AstPrimaryNode* pri_check = (AstPrimaryNode*)item;
+                if (pri_check->expr && pri_check->expr->node_type == AST_NODE_IDENT) {
+                    AstIdentNode* id_check = (AstIdentNode*)pri_check->expr;
+                    if (id_check->entry && id_check->entry->node &&
+                        (id_check->entry->node->node_type == AST_NODE_ASSIGN ||
+                         id_check->entry->node->node_type == AST_NODE_PARAM)) {
+                        is_var_ref = true;
+                    }
+                }
+            }
+            if (is_var_ref) {
+                // Variable reference: emit the variable expression (already stores Item at runtime)
+                transpile_expr(tp, item);
+            } else {
+                strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            }
         } else {
             // Non-literal NULL type means a variable initialized to null but may hold any value
             // It's stored as Item type, so just emit the expression directly
@@ -2130,6 +2152,16 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
             else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
             else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
         }
+        // Case 3: Variable is ANY (Item) but RHS has concrete scalar type
+        // (from type re-inference after param type change). Must box native → Item.
+        if (!unbox_fn && var_tid == LMD_TYPE_ANY &&
+            (rhs_tid == LMD_TYPE_INT || rhs_tid == LMD_TYPE_INT64 ||
+             rhs_tid == LMD_TYPE_FLOAT || rhs_tid == LMD_TYPE_BOOL)) {
+            transpile_box_item(tp, asn_node->as);
+            tp->current_assign_name = prev_assign_name;
+            strbuf_append_char(tp->code_buf, ';');
+            return;
+        }
         if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
         transpile_expr(tp, asn_node->as);
         if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
@@ -2874,6 +2906,775 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "})");
 }
 
+// ========================================================================
+// While-loop cross-dependency analysis for selective _store_i64 elimination
+// ========================================================================
+//
+// The MIR JIT SSA destruction pass has a lost-copy bug that manifests when
+// multiple variables in a while-loop body have circular read dependencies
+// across iterations (e.g., a = b; b = temp swap patterns). For self-updating
+// variables (q = q + 1; r = r - y), the SSA phi chain is simple and MIR
+// handles it correctly, so direct assignment is safe.
+//
+// This analysis determines which variables NEED _store_i64 (unsafe) and
+// which can use direct assignment (safe).
+//
+// A variable V assigned in a while-loop is UNSAFE iff:
+//   Some other assignment (target != V) reads V in its RHS expression.
+// This detects circular dependencies that trigger the lost-copy bug.
+
+#define MAX_LOOP_ASSIGN 64
+
+struct LoopAssignInfo {
+    String* target;     // variable being assigned
+    AstNode* rhs;       // RHS expression node
+};
+
+// Check if an expression tree contains a reference to a specific variable name.
+// Uses pointer comparison on interned String* from the name pool.
+static bool expr_contains_ident(AstNode* node, String* var_name) {
+    if (!node) return false;
+
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        // PRIMARY wraps another expression — unwrap and recurse
+        AstPrimaryNode* prim = (AstPrimaryNode*)node;
+        return expr_contains_ident(prim->expr, var_name);
+    }
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        return ident->name == var_name;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bin = (AstBinaryNode*)node;
+        return expr_contains_ident(bin->left, var_name) ||
+               expr_contains_ident(bin->right, var_name);
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD: {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        return expr_contains_ident(un->operand, var_name);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        if (expr_contains_ident(call->function, var_name)) return true;
+        AstNode* arg = call->argument;
+        while (arg) {
+            if (expr_contains_ident(arg, var_name)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case AST_NODE_SYS_FUNC: {
+        // sys func node itself doesn't reference vars, but its args do
+        // (args are passed via call_node->argument, not here)
+        return false;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_n = (AstIfNode*)node;
+        return expr_contains_ident(if_n->cond, var_name) ||
+               expr_contains_ident(if_n->then, var_name) ||
+               expr_contains_ident(if_n->otherwise, var_name);
+    }
+    case AST_NODE_INDEX_EXPR: {
+        AstBinaryNode* idx = (AstBinaryNode*)node;
+        return expr_contains_ident(idx->left, var_name) ||
+               expr_contains_ident(idx->right, var_name);
+    }
+    case AST_NODE_MEMBER_EXPR: {
+        AstBinaryNode* mem = (AstBinaryNode*)node;
+        return expr_contains_ident(mem->left, var_name);
+    }
+    default:
+        // conservative: for unhandled node types, assume might reference
+        return false;
+    }
+}
+
+// Collect all ASSIGN_STAM nodes from a while-loop body (including nested if/else).
+// Does NOT recurse into nested while loops (those get their own analysis).
+static int collect_loop_assigns(AstNode* node, LoopAssignInfo* assigns, int count, int max_count) {
+    if (!node || count >= max_count) return count;
+
+    switch (node->node_type) {
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* a = (AstAssignStamNode*)node;
+        if (a->target && a->value) {
+            assigns[count].target = a->target;
+            assigns[count].rhs = a->value;
+            count++;
+        }
+        break;
+    }
+    case AST_NODE_CONTENT: {
+        // block of statements — walk the linked list
+        AstListNode* list = (AstListNode*)node;
+        AstNode* item = list->item;
+        while (item) {
+            count = collect_loop_assigns(item, assigns, count, max_count);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_IF_EXPR: {
+        // if/else statement in proc context — recurse into both branches
+        AstIfNode* if_n = (AstIfNode*)node;
+        count = collect_loop_assigns(if_n->then, assigns, count, max_count);
+        count = collect_loop_assigns(if_n->otherwise, assigns, count, max_count);
+        break;
+    }
+    case AST_NODE_VAR_STAM: {
+        // var declarations — check initializers
+        AstNode* decl = ((AstLetNode*)node)->declare;
+        while (decl) {
+            if (decl->node_type == AST_NODE_ASSIGN) {
+                AstNamedNode* named = (AstNamedNode*)decl;
+                // var declarations inside loops are re-initialized each iteration
+                // They don't participate in cross-iteration dependencies
+            }
+            decl = decl->next;
+        }
+        break;
+    }
+    // Do NOT recurse into nested while loops — they get their own analysis
+    case AST_NODE_WHILE_STAM:
+        break;
+    default:
+        break;
+    }
+    return count;
+}
+
+// Analyze a while-loop body to determine which assigned variables are unsafe
+// (need _store_i64 due to cross-variable read dependencies).
+// Returns count of unsafe variables stored in unsafe_vars array.
+static int analyze_loop_var_safety(AstNode* body, String** unsafe_vars, int max_vars) {
+    LoopAssignInfo assigns[MAX_LOOP_ASSIGN];
+    int assign_count = collect_loop_assigns(body, assigns, 0, MAX_LOOP_ASSIGN);
+
+    if (assign_count == 0) return 0;
+
+    int unsafe_count = 0;
+
+    // For each assigned variable V, check if any OTHER assignment's RHS reads V
+    for (int i = 0; i < assign_count && unsafe_count < max_vars; i++) {
+        String* var = assigns[i].target;
+
+        // Skip if already marked unsafe
+        bool already_unsafe = false;
+        for (int u = 0; u < unsafe_count; u++) {
+            if (unsafe_vars[u] == var) { already_unsafe = true; break; }
+        }
+        if (already_unsafe) continue;
+
+        // Check if any OTHER assignment reads this variable
+        for (int j = 0; j < assign_count; j++) {
+            if (assigns[j].target == var) continue;  // skip self-assignments
+            if (expr_contains_ident(assigns[j].rhs, var)) {
+                // Variable V is read by assignment J (where J targets a different variable)
+                // V needs _store_i64 protection
+                unsafe_vars[unsafe_count++] = var;
+                log_debug("loop safety: var '%.*s' is UNSAFE (cross-read by '%.*s')",
+                    (int)var->len, var->chars,
+                    (int)assigns[j].target->len, assigns[j].target->chars);
+                break;
+            }
+        }
+    }
+
+    log_debug("loop safety analysis: %d assigns, %d unsafe vars", assign_count, unsafe_count);
+    return unsafe_count;
+}
+
+// ============= Call-Site Type Inference for Untyped Proc Parameters =============
+//
+// When a proc has ALL untyped parameters but is called with consistently-typed
+// arguments at every call site, we can infer the parameter types and enable
+// native arithmetic in the function body. This turns boxed fn_add/fn_sub/fn_ge
+// calls into native +/-/>= operators, yielding ~20x speedup for numeric code.
+//
+// Algorithm:
+// 1. Find procs with all-untyped params (no type annotations)
+// 2. Walk the AST to find all call sites and verify no non-call references
+// 3. For each param position, intersect argument types across all call sites
+// 4. If all agree on a concrete scalar type (int, float, bool), update TypeParam
+// 5. Re-infer expression types in the function body bottom-up
+//
+
+#define MAX_INFER_PROCS 32
+#define MAX_INFER_CALL_SITES 64
+
+struct InferCallSite {
+    AstCallNode* call;
+};
+
+// Re-infer the result type of a binary operation given updated operand types.
+// Returns a pointer to a global Type constant (no allocation needed).
+static Type* infer_binary_result_type(Operator op, TypeId left_tid, TypeId right_tid) {
+    if (left_tid == LMD_TYPE_ANY || right_tid == LMD_TYPE_ANY) return &TYPE_ANY;
+    if (left_tid == LMD_TYPE_ERROR || right_tid == LMD_TYPE_ERROR) return &TYPE_ANY;
+
+    bool left_int  = (left_tid == LMD_TYPE_INT || left_tid == LMD_TYPE_INT64);
+    bool right_int = (right_tid == LMD_TYPE_INT || right_tid == LMD_TYPE_INT64);
+    bool left_num  = left_int || (left_tid == LMD_TYPE_FLOAT);
+    bool right_num = right_int || (right_tid == LMD_TYPE_FLOAT);
+
+    switch (op) {
+    case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        if (left_int && right_int) return &TYPE_INT;
+        if (left_num && right_num) return &TYPE_FLOAT;
+        return &TYPE_ANY;
+    case OPERATOR_MOD: case OPERATOR_IDIV:
+        if (left_int && right_int) return &TYPE_INT;
+        if (left_num && right_num) return &TYPE_FLOAT;
+        return &TYPE_ANY;
+    case OPERATOR_DIV: case OPERATOR_POW:
+        if (left_num && right_num) return &TYPE_FLOAT;
+        return &TYPE_ANY;
+    case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+    case OPERATOR_GT: case OPERATOR_GE:
+        if (left_num && right_num) return &TYPE_BOOL;
+        if (left_tid == LMD_TYPE_BOOL && right_tid == LMD_TYPE_BOOL) return &TYPE_BOOL;
+        return &TYPE_ANY;
+    case OPERATOR_AND: case OPERATOR_OR:
+        return &TYPE_BOOL;
+    default:
+        return &TYPE_ANY;
+    }
+}
+
+// Recursively re-infer types in an expression tree after param type changes.
+// Uses global Type constants (&TYPE_INT, &TYPE_FLOAT, &TYPE_BOOL, &TYPE_ANY)
+// so no allocation is needed. Only updates stale ANY types that can now be
+// resolved to concrete types based on the updated param types.
+static void reinfer_body_types(AstNode* node) {
+    if (!node) return;
+
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        reinfer_body_types(pri->expr);
+        if (pri->expr && pri->expr->type) {
+            node->type = pri->expr->type;
+        }
+        break;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bi = (AstBinaryNode*)node;
+        reinfer_body_types(bi->left);
+        reinfer_body_types(bi->right);
+        if (bi->left->type && bi->right->type) {
+            Type* new_type = infer_binary_result_type(bi->op,
+                bi->left->type->type_id, bi->right->type->type_id);
+            node->type = new_type;
+        }
+        break;
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD: {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        reinfer_body_types(un->operand);
+        if (un->operand && un->operand->type) {
+            TypeId tid = un->operand->type->type_id;
+            if (un->op == OPERATOR_NEG) {
+                if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) node->type = &TYPE_INT;
+                else if (tid == LMD_TYPE_FLOAT) node->type = &TYPE_FLOAT;
+            } else if (un->op == OPERATOR_NOT) {
+                node->type = &TYPE_BOOL;
+            }
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        // Don't reinfer call->function (it's a func reference, type shouldn't change)
+        AstNode* arg = call->argument;
+        while (arg) { reinfer_body_types(arg); arg = arg->next; }
+        // Don't change call return type — too complex to re-infer safely
+        break;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        reinfer_body_types(if_node->cond);
+        reinfer_body_types(if_node->then);
+        reinfer_body_types(if_node->otherwise);
+        // Unify then/else types
+        if (if_node->then && if_node->otherwise &&
+            if_node->then->type && if_node->otherwise->type) {
+            TypeId then_tid = if_node->then->type->type_id;
+            TypeId else_tid = if_node->otherwise->type->type_id;
+            if (then_tid == else_tid) {
+                node->type = if_node->then->type;
+            }
+        }
+        break;
+    }
+    case AST_NODE_CONTENT: {
+        AstListNode* list = (AstListNode*)node;
+        AstNode* item = list->item;
+        while (item) { reinfer_body_types(item); item = item->next; }
+        break;
+    }
+    case AST_NODE_LIST: case AST_NODE_ARRAY: {
+        AstNode* item = ((AstListNode*)node)->item;
+        while (item) { reinfer_body_types(item); item = item->next; }
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        reinfer_body_types(assign->value);
+        if (assign->value && assign->value->type) {
+            assign->type = assign->value->type;
+        }
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* while_node = (AstWhileNode*)node;
+        reinfer_body_types(while_node->cond);
+        reinfer_body_types(while_node->body);
+        break;
+    }
+    case AST_NODE_RETURN_STAM: {
+        AstReturnNode* ret = (AstReturnNode*)node;
+        reinfer_body_types(ret->value);
+        break;
+    }
+    case AST_NODE_RAISE_STAM: {
+        AstRaiseNode* raise = (AstRaiseNode*)node;
+        reinfer_body_types(raise->value);
+        break;
+    }
+    case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM: {
+        AstLetNode* let = (AstLetNode*)node;
+        AstNode* decl = let->declare;
+        while (decl) {
+            if (decl->node_type == AST_NODE_ASSIGN) {
+                AstNamedNode* named = (AstNamedNode*)decl;
+                reinfer_body_types(named->as);
+                // DO NOT update named->type here. The named node's type pointer is shared
+                // with ident references (ident->type = entry->node->type in build_ast).
+                // Changing named->type to a new pointer would desync: the named node
+                // would have the new type but all ident references would still have the old one.
+                // This causes the variable to be declared with one C type (e.g., int64_t)
+                // but used with another (e.g., Item) → type mismatch / undefined behavior.
+                // For params, in-place mutation of TypeParam.type_id works because the same
+                // TypeParam object is shared. For vars, we leave the type as-is.
+            }
+            decl = decl->next;
+        }
+        break;
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        reinfer_body_types(match->scrutinee);
+        AstMatchArm* arm = match->first_arm;
+        while (arm) {
+            reinfer_body_types(arm->body);
+            arm = (AstMatchArm*)arm->next;
+        }
+        break;
+    }
+    case AST_NODE_INDEX_EXPR: {
+        AstBinaryNode* idx = (AstBinaryNode*)node;
+        reinfer_body_types(idx->left);
+        reinfer_body_types(idx->right);
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        reinfer_body_types(ca->object);
+        reinfer_body_types(ca->key);
+        reinfer_body_types(ca->value);
+        break;
+    }
+    case AST_NODE_FOR_STAM: {
+        AstForNode* for_node = (AstForNode*)node;
+        reinfer_body_types(for_node->then);
+        break;
+    }
+    case AST_NODE_PIPE: {
+        AstPipeNode* pipe = (AstPipeNode*)node;
+        reinfer_body_types(pipe->left);
+        reinfer_body_types(pipe->right);
+        break;
+    }
+    case AST_NODE_MAP: {
+        AstMapNode* map = (AstMapNode*)node;
+        AstNode* item = map->item;
+        while (item) { reinfer_body_types(item); item = item->next; }
+        break;
+    }
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* key = (AstNamedNode*)node;
+        reinfer_body_types(key->as);
+        if (key->as && key->as->type) {
+            node->type = key->as->type;
+        }
+        break;
+    }
+    case AST_NODE_NAMED_ARG: {
+        AstNamedNode* named_arg = (AstNamedNode*)node;
+        reinfer_body_types(named_arg->as);
+        if (named_arg->as && named_arg->as->type) {
+            node->type = named_arg->as->type;
+        }
+        break;
+    }
+    default:
+        // Leaf nodes (IDENT, NUMBER, STRING, etc.) — types already correct
+        // via shared TypeParam pointer or original type assignment
+        break;
+    }
+}
+
+// Walk AST to find all call sites for a given proc, and detect non-call references.
+// A non-call reference means the proc is used as a first-class value (unsafe to re-type).
+static void walk_ast_for_proc_refs(AstNode* node, AstFuncNode* target,
+                                   InferCallSite* sites, int* call_count, int max_sites,
+                                   int* total_refs) {
+    if (!node || *call_count >= max_sites) return;
+
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        // Check if this call targets our proc
+        AstNode* fn_expr = call->function;
+        if (fn_expr->node_type == AST_NODE_PRIMARY)
+            fn_expr = ((AstPrimaryNode*)fn_expr)->expr;
+        if (fn_expr && fn_expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)fn_expr;
+            if (ident->entry && ident->entry->node == (AstNode*)target) {
+                (*total_refs)++;
+                if (*call_count < max_sites) {
+                    sites[*call_count].call = call;
+                    (*call_count)++;
+                }
+            }
+        }
+        // Walk arguments (but NOT function expr — already checked above)
+        AstNode* arg = call->argument;
+        while (arg) {
+            walk_ast_for_proc_refs(arg, target, sites, call_count, max_sites, total_refs);
+            arg = arg->next;
+        }
+        return;
+    }
+
+    // Check for non-call ident reference to the proc (used as value)
+    if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (ident->entry && ident->entry->node == (AstNode*)target) {
+            (*total_refs)++;
+        }
+        return;
+    }
+
+    // Recurse into children (follow pre_define_closure_envs pattern)
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY:
+        walk_ast_for_proc_refs(((AstPrimaryNode*)node)->expr, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_BINARY:
+        walk_ast_for_proc_refs(((AstBinaryNode*)node)->left, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(((AstBinaryNode*)node)->right, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_UNARY: case AST_NODE_SPREAD:
+        walk_ast_for_proc_refs(((AstUnaryNode*)node)->operand, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_PIPE:
+        walk_ast_for_proc_refs(((AstPipeNode*)node)->left, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(((AstPipeNode*)node)->right, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        walk_ast_for_proc_refs(if_node->cond, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(if_node->then, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(if_node->otherwise, target, sites, call_count, max_sites, total_refs);
+        break;
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        walk_ast_for_proc_refs(match->scrutinee, target, sites, call_count, max_sites, total_refs);
+        AstMatchArm* arm = match->first_arm;
+        while (arm) {
+            if (arm->pattern) walk_ast_for_proc_refs(arm->pattern, target, sites, call_count, max_sites, total_refs);
+            walk_ast_for_proc_refs(arm->body, target, sites, call_count, max_sites, total_refs);
+            arm = (AstMatchArm*)arm->next;
+        }
+        break;
+    }
+    case AST_NODE_CONTENT: case AST_NODE_LIST: case AST_NODE_ARRAY: {
+        AstNode* item = ((AstListNode*)node)->item;
+        while (item) {
+            walk_ast_for_proc_refs(item, target, sites, call_count, max_sites, total_refs);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC: {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        // Skip the target function's own body to exclude self-recursive calls.
+        // Recursive calls have argument types based on internal computations
+        // which are all ANY before inference — including them would block inference.
+        if (fn != target) {
+            walk_ast_for_proc_refs(fn->body, target, sites, call_count, max_sites, total_refs);
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN:
+        walk_ast_for_proc_refs(((AstNamedNode*)node)->as, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        walk_ast_for_proc_refs(((AstAssignStamNode*)node)->value, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        walk_ast_for_proc_refs(ca->object, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(ca->key, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(ca->value, target, sites, call_count, max_sites, total_refs);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* w = (AstWhileNode*)node;
+        walk_ast_for_proc_refs(w->cond, target, sites, call_count, max_sites, total_refs);
+        walk_ast_for_proc_refs(w->body, target, sites, call_count, max_sites, total_refs);
+        break;
+    }
+    case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM: {
+        AstForNode* fn = (AstForNode*)node;
+        walk_ast_for_proc_refs(fn->then, target, sites, call_count, max_sites, total_refs);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        walk_ast_for_proc_refs(((AstReturnNode*)node)->value, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_RAISE_STAM:
+        walk_ast_for_proc_refs(((AstRaiseNode*)node)->value, target, sites, call_count, max_sites, total_refs);
+        break;
+    case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM: case AST_NODE_PUB_STAM: {
+        AstNode* decl = ((AstLetNode*)node)->declare;
+        while (decl) {
+            walk_ast_for_proc_refs(decl, target, sites, call_count, max_sites, total_refs);
+            decl = decl->next;
+        }
+        break;
+    }
+    case AST_NODE_MAP: case AST_NODE_ELEMENT: {
+        AstNode* item = ((AstListNode*)node)->item;
+        while (item) {
+            walk_ast_for_proc_refs(item, target, sites, call_count, max_sites, total_refs);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        walk_ast_for_proc_refs(named->as, target, sites, call_count, max_sites, total_refs);
+        break;
+    }
+    case AST_NODE_NAMED_ARG: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        walk_ast_for_proc_refs(named->as, target, sites, call_count, max_sites, total_refs);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+// Check if a type is a concrete scalar suitable for inference
+static bool is_inferable_type(TypeId tid) {
+    return tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
+           tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
+}
+
+// Main entry point: infer parameter types for procs with untyped params
+// based on consistent argument types at all call sites.
+void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script) {
+    // Step 1: Collect candidate procs (all-untyped params, not closures)
+    AstFuncNode* candidates[MAX_INFER_PROCS];
+    int cand_count = 0;
+
+    AstNode* child = script->child;
+    while (child && cand_count < MAX_INFER_PROCS) {
+        AstNode* scan = child;
+        if (child->node_type == AST_NODE_CONTENT) {
+            scan = ((AstListNode*)child)->item;
+        }
+        while (scan && cand_count < MAX_INFER_PROCS) {
+            if (scan->node_type == AST_NODE_PROC) {
+                AstFuncNode* fn = (AstFuncNode*)scan;
+                // Only consider procs with params, all untyped, no captures
+                if (fn->param && !has_typed_params(fn) && !fn->captures) {
+                    TypeFunc* ft = (TypeFunc*)fn->type;
+                    // Skip variadic, can_raise, and method procs
+                    if (ft && !ft->is_variadic && !ft->can_raise) {
+                        candidates[cand_count++] = fn;
+                        log_debug("type inference candidate: proc '%.*s' with %d params",
+                            (int)fn->name->len, fn->name->chars, ft->param_count);
+                    }
+                }
+            }
+            scan = (child->node_type == AST_NODE_CONTENT) ? scan->next : NULL;
+        }
+        child = child->next;
+    }
+
+    if (cand_count == 0) return;
+
+    // Step 2: For each candidate, find all call sites and check for non-call references
+    for (int ci = 0; ci < cand_count; ci++) {
+        AstFuncNode* proc = candidates[ci];
+        TypeFunc* fn_type = (TypeFunc*)proc->type;
+        int param_count = fn_type->param_count;
+
+        InferCallSite sites[MAX_INFER_CALL_SITES];
+        int call_count = 0;
+        int total_refs = 0;
+
+        // Walk entire AST to find references
+        AstNode* root_child = script->child;
+        while (root_child) {
+            walk_ast_for_proc_refs(root_child, proc, sites, &call_count, MAX_INFER_CALL_SITES, &total_refs);
+            root_child = root_child->next;
+        }
+
+        // Skip if proc is used as a value (non-call reference)
+        if (total_refs > call_count) {
+            log_debug("type inference: skip '%.*s' — used as value (%d refs, %d calls)",
+                (int)proc->name->len, proc->name->chars, total_refs, call_count);
+            continue;
+        }
+
+        // Skip if no call sites found
+        if (call_count == 0) {
+            log_debug("type inference: skip '%.*s' — no call sites found",
+                (int)proc->name->len, proc->name->chars);
+            continue;
+        }
+
+        // Step 3: For each param position, collect argument types across all call sites
+        // inferred_types[i] = inferred type for param i (LMD_TYPE_ANY if can't infer)
+        TypeId inferred_types[16];  // max 16 params
+        bool param_poisoned[16];    // true if param seen with non-inferable type
+        if (param_count > 16) continue;
+
+        for (int p = 0; p < param_count; p++) {
+            inferred_types[p] = LMD_TYPE_ANY;  // start unknown
+            param_poisoned[p] = false;
+        }
+
+        bool inference_valid = true;
+        for (int si = 0; si < call_count && inference_valid; si++) {
+            AstCallNode* call = sites[si].call;
+            AstNode* arg = call->argument;
+            int pi = 0;
+            while (arg && pi < param_count) {
+                // Get actual value node (unwrap named arg if present)
+                AstNode* value = arg;
+                if (arg->node_type == AST_NODE_NAMED_ARG) {
+                    value = ((AstNamedNode*)arg)->as;
+                }
+
+                TypeId arg_tid = (value && value->type) ? value->type->type_id : LMD_TYPE_ANY;
+
+                if (param_poisoned[pi]) {
+                    // Already seen non-inferable type — skip
+                } else if (!is_inferable_type(arg_tid)) {
+                    // Non-scalar or unknown arg type — permanently can't infer this param
+                    inferred_types[pi] = LMD_TYPE_ANY;
+                    param_poisoned[pi] = true;
+                } else if (inferred_types[pi] == LMD_TYPE_ANY) {
+                    // First concrete type seen
+                    inferred_types[pi] = arg_tid;
+                } else if (inferred_types[pi] != arg_tid) {
+                    // Type mismatch across call sites — can't infer
+                    // Exception: INT and INT64 are compatible → use INT
+                    bool both_int = (inferred_types[pi] == LMD_TYPE_INT || inferred_types[pi] == LMD_TYPE_INT64) &&
+                                    (arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64);
+                    if (both_int) {
+                        inferred_types[pi] = LMD_TYPE_INT;
+                    } else {
+                        inferred_types[pi] = LMD_TYPE_ANY;
+                    }
+                }
+
+                arg = arg->next;
+                pi++;
+            }
+        }
+
+        // Step 4: Check if we inferred anything useful
+        bool any_inferred = false;
+        for (int p = 0; p < param_count; p++) {
+            if (inferred_types[p] != LMD_TYPE_ANY) {
+                any_inferred = true;
+                break;
+            }
+        }
+
+        if (!any_inferred) {
+            log_debug("type inference: skip '%.*s' — no concrete types inferred",
+                (int)proc->name->len, proc->name->chars);
+            continue;
+        }
+
+        // SAFETY: Skip inference for procs that use params in non-scalar contexts.
+        // If a param is used as a map/object argument (field access, method call, etc.)
+        // inside the function body, changing it from ANY to INT would break the code.
+        // For now, only apply inference when ALL params are being inferred (no mixed ANY+typed).
+        {
+            bool all_params_inferred = true;
+            for (int p = 0; p < param_count; p++) {
+                if (inferred_types[p] == LMD_TYPE_ANY) {
+                    all_params_inferred = false;
+                    break;
+                }
+            }
+            if (!all_params_inferred) {
+                log_debug("type inference: skip '%.*s' — not all params could be inferred (partial inference unsafe)",
+                    (int)proc->name->len, proc->name->chars);
+                continue;
+            }
+        }
+
+        // Step 5: Apply inferred types to TypeParam nodes
+        AstNamedNode* param = proc->param;
+        int pi = 0;
+        while (param && pi < param_count) {
+            if (inferred_types[pi] != LMD_TYPE_ANY) {
+                TypeParam* pt = (TypeParam*)param->type;
+                log_debug("type inference: '%.*s' param '%.*s' → %s (was ANY)",
+                    (int)proc->name->len, proc->name->chars,
+                    (int)param->name->len, param->name->chars,
+                    inferred_types[pi] == LMD_TYPE_INT ? "int" :
+                    inferred_types[pi] == LMD_TYPE_FLOAT ? "float" :
+                    inferred_types[pi] == LMD_TYPE_BOOL ? "bool" : "?");
+                pt->type_id = inferred_types[pi];
+            }
+            param = (AstNamedNode*)param->next;
+            pi++;
+        }
+
+        // Also update the TypeFunc param chain (used for type checking and call argument handling)
+        TypeParam* ftp = fn_type->param;
+        pi = 0;
+        while (ftp && pi < param_count) {
+            if (inferred_types[pi] != LMD_TYPE_ANY) {
+                ftp->type_id = inferred_types[pi];
+            }
+            ftp = ftp->next;
+            pi++;
+        }
+
+        // Step 6: Re-infer expression types in the function body
+        reinfer_body_types(proc->body);
+
+        log_info("type inference: applied to proc '%.*s' (%d params, %d call sites)",
+            (int)proc->name->len, proc->name->chars, param_count, call_count);
+    }
+}
+
 // while statement (procedural only)
 void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
     log_debug("transpile while stam");
@@ -2896,8 +3697,20 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
     }
     strbuf_append_str(tp->code_buf, ") {");
     // MIR JIT workaround: track while loop depth so that native variable
-    // assignments inside while loops use *(&x)=v pattern, preventing MIR's
-    // optimizer from mishandling SSA destruction of swap patterns (see Mir_Bug.md)
+    // assignments inside while loops use _store_i64 for UNSAFE variables
+    // (those with cross-variable read dependencies that trigger the lost-copy SSA bug).
+    // Safe self-updating variables (q = q + 1, r = r - y) use direct assignment.
+
+    // Analyze which variables need _store_i64 protection in this loop
+    String* unsafe_vars[MAX_LOOP_ASSIGN];
+    int unsafe_count = analyze_loop_var_safety(while_node->body, unsafe_vars, MAX_LOOP_ASSIGN);
+
+    // Save previous loop state (for nested while loops)
+    String** prev_unsafe = tp->loop_unsafe_vars;
+    int prev_unsafe_count = tp->loop_unsafe_count;
+    tp->loop_unsafe_vars = unsafe_vars;
+    tp->loop_unsafe_count = unsafe_count;
+
     tp->while_depth++;
     // use procedural statements (no wrapper) for while body
     if (while_node->body->node_type == AST_NODE_CONTENT) {
@@ -2908,6 +3721,9 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
         strbuf_append_char(tp->code_buf, ';');
     }
     tp->while_depth--;
+    // Restore previous loop state
+    tp->loop_unsafe_vars = prev_unsafe;
+    tp->loop_unsafe_count = prev_unsafe_count;
     strbuf_append_str(tp->code_buf, "\n}");
 }
 
@@ -3367,19 +4183,32 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     }
 
     // MIR JIT workaround: inside while loops, use _store_i64(&_var, value) or
-    // _store_f64(&_var, value) for native scalar types. These are external runtime
-    // functions that MIR can't inline or reorder, preventing the lost-copy SSA bug.
-    // Only applies to non-widened scalar vars.
+    // _store_f64(&_var, value) for variables with cross-variable read dependencies.
+    // These external runtime functions prevent MIR's SSA destruction from causing
+    // the lost-copy bug in swap patterns (e.g., a=b; b=temp).
+    //
+    // Variables that only self-update (q = q + 1, r = r - y) are safe for direct
+    // assignment because their SSA phi chains have no cross-dependencies.
     bool use_store_func = false;
     const char* store_fn = NULL;
     if (!is_widened && tp->while_depth > 0 && assign_node->target_node && assign_node->target_node->type) {
-        TypeId tid = assign_node->target_node->type->type_id;
-        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) {
-            use_store_func = true;
-            store_fn = "_store_i64";
-        } else if (tid == LMD_TYPE_FLOAT) {
-            use_store_func = true;
-            store_fn = "_store_f64";
+        // Check if this variable is in the unsafe set (cross-referenced by other assignments)
+        bool is_unsafe = false;
+        for (int i = 0; i < tp->loop_unsafe_count; i++) {
+            if (tp->loop_unsafe_vars[i] == assign_node->target) {
+                is_unsafe = true;
+                break;
+            }
+        }
+        if (is_unsafe) {
+            TypeId tid = assign_node->target_node->type->type_id;
+            if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) {
+                use_store_func = true;
+                store_fn = "_store_i64";
+            } else if (tid == LMD_TYPE_FLOAT) {
+                use_store_func = true;
+                store_fn = "_store_f64";
+            }
         }
     }
 
@@ -3388,7 +4217,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
         strbuf_append_str(tp->code_buf, ",");
     } else {
-        strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
+        strbuf_append_str(tp->code_buf, "\n _");
         strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
         strbuf_append_char(tp->code_buf, '=');
     }
@@ -3422,7 +4251,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         transpile_expr(tp, assign_node->value);
         if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
     }
-    // close with ) for store function call, or ; for regular assignment
+    // close with ) for store macro call, or ; for regular assignment
     strbuf_append_str(tp->code_buf, use_store_func ? ");" : ";");
 
     // pn method: write field back to object
@@ -4514,14 +5343,15 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         return;
     }
 
+    // Determine if the expression result type allows using raw (unboxed) access.
+    // When the result is used in a scalar context, we can skip boxing overhead.
+    TypeId result_type = field_node->type ? field_node->type->type_id : LMD_TYPE_ANY;
+    bool use_raw_int = (result_type == LMD_TYPE_INT || result_type == LMD_TYPE_INT64);
+    bool use_raw_float = (result_type == LMD_TYPE_FLOAT);
+
     // Fast path optimizations for specific type combinations
     if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
-        // transpile_expr(tp, field_node->object);
-        // strbuf_append_str(tp->code_buf, "->items[");
-        // transpile_expr(tp, field_node->field);
-        // strbuf_append_str(tp->code_buf, "]");
-        // for safety, we have to call array_int_get
-        strbuf_append_str(tp->code_buf, "array_int_get(");
+        strbuf_append_str(tp->code_buf, use_raw_int ? "array_int_get_raw(" : "array_int_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_expr(tp, field_node->field);
@@ -4529,8 +5359,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         return;
     }
     else if (object_type == LMD_TYPE_ARRAY_INT64 && field_type == LMD_TYPE_INT) {
-        // for safety, we have to call array_int64_get
-        strbuf_append_str(tp->code_buf, "array_int64_get(");
+        strbuf_append_str(tp->code_buf, use_raw_int ? "array_int64_get_raw(" : "array_int64_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_expr(tp, field_node->field);
@@ -4538,8 +5367,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         return;
     }
     else if (object_type == LMD_TYPE_ARRAY_FLOAT && field_type == LMD_TYPE_INT) {
-        // for safety, we have to call array_float_get
-        strbuf_append_str(tp->code_buf, "array_float_get(");
+        strbuf_append_str(tp->code_buf, use_raw_float ? "array_float_get_value(" : "array_float_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_expr(tp, field_node->field);
@@ -4551,11 +5379,11 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         if (arr_type->nested) {
             switch (arr_type->nested->type_id) {
                 case LMD_TYPE_INT:
-                    strbuf_append_str(tp->code_buf, "array_int_get(");  break;
+                    strbuf_append_str(tp->code_buf, use_raw_int ? "array_int_get_raw(" : "array_int_get(");  break;
                 case LMD_TYPE_INT64:
-                    strbuf_append_str(tp->code_buf, "array_int64_get(");  break;
+                    strbuf_append_str(tp->code_buf, use_raw_int ? "array_int64_get_raw(" : "array_int64_get(");  break;
                 case LMD_TYPE_FLOAT:
-                    strbuf_append_str(tp->code_buf, "array_float_get(");  break;
+                    strbuf_append_str(tp->code_buf, use_raw_float ? "array_float_get_value(" : "array_float_get(");  break;
                 default:
                     strbuf_append_str(tp->code_buf, "array_get(");
             }
@@ -6681,6 +7509,11 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
 
     // Emit C struct typedefs for named map/object types (Phase 1: direct field access)
     emit_struct_typedefs(tp);
+
+    // Call-site type inference: infer parameter types for procs with untyped params
+    // based on consistent argument types at all call sites. Must run BEFORE forward
+    // declarations since those emit the C function signatures with parameter types.
+    infer_proc_param_types_from_callsites(tp, script);
 
     // Forward declare all top-level functions to support out-of-order definitions
     child = script->child;

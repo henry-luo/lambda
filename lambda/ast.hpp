@@ -691,6 +691,13 @@ typedef struct Transpiler : Script {
     // Object method transpilation context
     AstObjectTypeNode* method_owner;  // non-null when transpiling a method body
     struct TypeObject* pn_method_obj_type;  // non-null inside pn method body (for field write-back)
+
+    // While-loop cross-dependency analysis: tracks which variables need _store_i64
+    // due to cross-variable read dependencies (lost-copy SSA bug workaround).
+    // Variables only reading themselves (self-update like q = q + 1) are safe for
+    // direct assignment; variables read by other assignments (swap patterns) are unsafe.
+    String** loop_unsafe_vars;  // array of variable names that need _store_i64
+    int loop_unsafe_count;      // number of unsafe variables
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

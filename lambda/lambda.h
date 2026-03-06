@@ -720,6 +720,10 @@ typedef struct Context {
     Item array_int_get(ArrayInt *array, int index);
     Item array_int64_get(ArrayInt64* array, int index);
     Item array_float_get(ArrayFloat* array, int index);
+    // fast-path getters: return native types, skip boxing
+    int64_t array_int_get_raw(ArrayInt *array, int index);
+    int64_t array_int64_get_raw(ArrayInt64 *array, int index);
+    double array_float_get_value(ArrayFloat *arr, int index);
     Item list_get(List *list, int index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
