@@ -79,6 +79,8 @@ static const char* SLOW_BENCHMARK_TESTS[] = {
     "beng_mandelbrot",      // ~15s+ (timeout)
     "beng_nbody",           // ~2.4s
     "beng_spectralnorm",    // ~15s+ (timeout)
+    // beng — slow in MIR Direct debug build
+    "beng_knucleotide",     // ~60s+ (timeout in MIR Direct)
     // kostya
     "kostya_base64",        // ~15s+ (timeout)
     "kostya_brainfuck",     // ~15s+ (timeout)
