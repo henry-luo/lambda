@@ -4,23 +4,7 @@
 // Expected: count at (0,0) = 5
 
 pn make_array(n: int, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz: int = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain: int = n - sz
-        var extra = [val]
-        var esz: int = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
+    return fill(n, val)
 }
 
 pn count(r: float, i: float, step: float, x: float, y: float) {

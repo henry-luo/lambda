@@ -13,7 +13,7 @@ pn format9(x) {
     var neg = ""
     if (v < 0.0) {
         neg = "-"
-        v = 0.0 - v
+        v = -v
     }
     var int_part = int(floor(v))
     var frac = v - float(int_part)
@@ -69,7 +69,7 @@ pn advance(bx, by, bz, bvx, bvy, bvz, bmass, dt) {
 }
 
 pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
-    var e = bx[0] - bx[0]
+    var e = 0.0
     var i = 0
     while (i < 5) {
         var ke = bvx[i] * bvx[i] + bvy[i] * bvy[i] + bvz[i] * bvz[i]
@@ -89,9 +89,9 @@ pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
 }
 
 pn offset_momentum(bvx, bvy, bvz, bmass) {
-    var px = bvx[0] - bvx[0]
-    var py = bvy[0] - bvy[0]
-    var pz = bvz[0] - bvz[0]
+    var px = 0.0
+    var py = 0.0
+    var pz = 0.0
     var i = 0
     while (i < 5) {
         px = px + bvx[i] * bmass[i]
@@ -99,12 +99,13 @@ pn offset_momentum(bvx, bvy, bvz, bmass) {
         pz = pz + bvz[i] * bmass[i]
         i = i + 1
     }
-    bvx[0] = 0.0 - (px / SOLAR_MASS)
-    bvy[0] = 0.0 - (py / SOLAR_MASS)
-    bvz[0] = 0.0 - (pz / SOLAR_MASS)
+    bvx[0] = -(px / SOLAR_MASS)
+    bvy[0] = -(py / SOLAR_MASS)
+    bvz[0] = -(pz / SOLAR_MASS)
 }
 
 pn main() {
+    var __t0 = clock()
     var bx = [0.0,
         4.84143144246472090e+00,
         8.34336671824457987e+00,
@@ -150,4 +151,6 @@ pn main() {
         i = i + 1
     }
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

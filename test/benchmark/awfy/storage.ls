@@ -11,23 +11,7 @@ pn random_next(seed_arr) {
 }
 
 pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain = n - sz
-        var extra = [val]
-        var esz = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
+    return fill(n, val)
 }
 
 pn build_tree_depth(state, depth, seed_arr) {

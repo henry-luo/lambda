@@ -3060,10 +3060,13 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     name_buf, declare->type ? (int)declare->type->type_id : -1, expr_tid, var_tid);
 
                 // Runtime typed array coercion for occurrence annotations (int[], float[], etc.)
-                // When declared type is TypeUnary and RHS is dynamic, call ensure_typed_array
+                // When declared type is TypeUnary and RHS is dynamic or a mismatched typed array,
+                // call ensure_typed_array to convert at runtime.
                 if (declare->type && declare->type->kind == TYPE_KIND_UNARY) {
                     bool needs_coerce = (expr_tid == LMD_TYPE_ANY || expr_tid == LMD_TYPE_NULL ||
-                                         expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_LIST);
+                                         expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_LIST ||
+                                         expr_tid == LMD_TYPE_ARRAY_INT || expr_tid == LMD_TYPE_ARRAY_INT64 ||
+                                         expr_tid == LMD_TYPE_ARRAY_FLOAT);
                     if (needs_coerce) {
                         // extract element type from TypeUnary operand
                         TypeUnary* unary = (TypeUnary*)declare->type;
