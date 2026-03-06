@@ -484,10 +484,32 @@ Map* map(int type_index) {
     return map;
 }
 
+// Allocate map struct + data buffer in a single GC allocation.
+// The data buffer is placed immediately after the Map struct,
+// eliminating the separate heap_data_calloc call.
+// This is used for all static maps where byte_size is known at transpile time.
+Map* map_with_data(int type_index) {
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
+    int64_t byte_size = map_type->byte_size;
+    size_t total_size = sizeof(Map) + (byte_size > 0 ? (size_t)byte_size : 0);
+    Map *m = (Map *)heap_calloc(total_size, LMD_TYPE_MAP);
+    m->type_id = LMD_TYPE_MAP;
+    m->type = map_type;
+    if (byte_size > 0) {
+        m->data = (char*)m + sizeof(Map);
+        m->data_cap = (int)byte_size;
+    }
+    return m;
+}
+
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
-    map->data = heap_data_calloc(map_type->byte_size);
+    // skip data allocation if already set (combined allocation via map_with_data)
+    if (!map->data) {
+        map->data = heap_data_calloc(map_type->byte_size);
+    }
     // set map fields
     va_list args;
     va_start(args, map_type->length);
@@ -628,9 +650,32 @@ Object* object(int type_index) {
     return obj;
 }
 
+// Allocate object struct + data buffer in a single GC allocation.
+// Same approach as map_with_data — data placed immediately after the struct.
+Object* object_with_data(int type_index) {
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    Type* stored = (Type*)(type_list->data[type_index]);
+    TypeObject *obj_type = (stored->type_id == LMD_TYPE_TYPE)
+        ? (TypeObject*)((TypeType*)stored)->type
+        : (TypeObject*)stored;
+    int64_t byte_size = obj_type->byte_size;
+    size_t total_size = sizeof(Object) + (byte_size > 0 ? (size_t)byte_size : 0);
+    Object *obj = (Object *)heap_calloc(total_size, LMD_TYPE_OBJECT);
+    obj->type_id = LMD_TYPE_OBJECT;
+    obj->type = obj_type;
+    if (byte_size > 0) {
+        obj->data = (char*)obj + sizeof(Object);
+        obj->data_cap = (int)byte_size;
+    }
+    return obj;
+}
+
 Object* object_fill(Object* obj, ...) {
     TypeObject *obj_type = (TypeObject*)obj->type;
-    obj->data = heap_data_calloc(obj_type->byte_size);
+    // skip data allocation if already set (combined allocation via object_with_data)
+    if (!obj->data) {
+        obj->data = heap_data_calloc(obj_type->byte_size);
+    }
     log_debug("object byte_size: %ld", obj_type->byte_size);
     // set object fields (same layout as map)
     va_list args;
@@ -700,7 +745,10 @@ void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func) {
 
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
-    elmt->data = heap_data_calloc(elmt_type->byte_size);
+    // skip data allocation if already set (combined allocation via elmt_with_data)
+    if (!elmt->data) {
+        elmt->data = heap_data_calloc(elmt_type->byte_size);
+    }
     log_debug("elmt byte_size: %ld", elmt_type->byte_size);
     // set attributes
     long count = elmt_type->length;

@@ -301,6 +301,8 @@ static inline bool should_break_line(LayoutContext* lycon, float current_x, floa
     // effective_right is adjusted per-line based on floats at current Y
     float line_right = lycon->line.has_float_intrusion ?
                        lycon->line.effective_right : lycon->line.right;
+    // CSS 2.1 §16.1: RTL text-indent narrows the wrap boundary from the right
+    line_right -= lycon->line.text_indent_offset;
     if (is_min_content_mode(lycon)) {
         // In min-content mode, we break at every opportunity
         return current_x + width > line_right;
@@ -435,23 +437,36 @@ void line_reset(LayoutContext* lycon) {
     // line because that's where the span's first line fragment actually starts.
     lycon->line.advance_x += lycon->line.inline_start_edge_pending;
 
-    // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
-    // Apply text-indent offset to advance_x for the first line only
-    if (lycon->block.is_first_line && lycon->block.text_indent != 0) {
-        lycon->line.advance_x += lycon->block.text_indent;
-        lycon->line.effective_left += lycon->block.text_indent;
-        log_debug("Applied text-indent: %.1fpx, advance_x=%.1f",
-                  lycon->block.text_indent, lycon->line.advance_x);
-        // After applying text-indent for the first line, mark it as done
-        lycon->block.is_first_line = false;
-    }
-
     // Adjust effective bounds for floats at current Y position using BlockContext
+    // This must happen BEFORE text-indent, because CSS 2.1 §16.1 says indent is
+    // "with respect to the left (or right) edge of the line box" — which is the
+    // float-adjusted edge, not the container edge.
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
         // Use unified line adjustment via BlockContext
         adjust_line_for_floats(lycon);
         log_debug("DEBUG: Used BlockContext %p for line adjustment", (void*)bfc);
+    }
+
+    // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
+    // Apply text-indent AFTER float adjustment so indent is additive with float offsets
+    lycon->line.text_indent_offset = 0;
+    if (lycon->block.is_first_line && lycon->block.text_indent != 0) {
+        if (lycon->block.direction == CSS_VALUE_RTL) {
+            // CSS 2.1 §16.1: In RTL, text-indent indents from the right (starting) edge
+            // Store the offset to narrow wrap boundary and alignment width from the right
+            lycon->line.text_indent_offset = lycon->block.text_indent;
+            log_debug("Applied RTL text-indent: %.1fpx (narrows right edge)",
+                      lycon->block.text_indent);
+        } else {
+            // LTR: indent from the left (starting) edge
+            lycon->line.advance_x += lycon->block.text_indent;
+            lycon->line.effective_left += lycon->block.text_indent;
+            log_debug("Applied text-indent: %.1fpx, advance_x=%.1f",
+                      lycon->block.text_indent, lycon->line.advance_x);
+        }
+        // After applying text-indent for the first line, mark it as done
+        lycon->block.is_first_line = false;
     }
 }
 

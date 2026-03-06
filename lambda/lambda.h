@@ -709,8 +709,10 @@ typedef struct Context {
     void array_int_set(ArrayInt *arr, int index, int64_t value);
 
     Map* map(int type_index);
+    Map* map_with_data(int type_index);
     Element* elmt(int type_index);
     Object* object(int type_index);
+    Object* object_with_data(int type_index);
     Object* object_fill(Object* obj, ...);
 
     // these getters use runtime num_stack

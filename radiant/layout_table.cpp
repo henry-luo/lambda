@@ -7375,6 +7375,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
     }
 
+    // Save the row area height before padding/spacing/caption additions.
+    // CSS 2.1 §17.2.1: Column/column-group elements span only the table row area,
+    // not including captions, padding, or border-spacing at the table edges.
+    int row_area_height = final_table_height - content_area_top_y;
+
     // Add table padding bottom
     // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     int table_padding_bottom = 0;
@@ -7683,10 +7688,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table layout complete: %dx%d", table_width, current_y);
 
     // CSS 2.1 §17.5.1: Set dimensions for column and column group elements
-    // Column elements span the full table content height (excluding caption)
+    // Column elements span the table row area only (not including captions)
     // Their width is determined by the computed column widths
     layout_column_elements(table, col_widths, col_x_positions, columns,
-                           (float)table->content_height, (float)content_area_top_y);
+                           (float)row_area_height, (float)content_area_top_y);
 
     // Cleanup ArrayLists
     arraylist_free(thead_groups);
