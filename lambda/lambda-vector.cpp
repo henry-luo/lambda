@@ -677,11 +677,11 @@ Item fn_fill(Item n_item, Item value) {
 
     if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
         int64_t val = (val_type == LMD_TYPE_INT) ? value.get_int56() : value.get_int64();
-        ArrayInt64* result = array_int64_new(n);
+        ArrayInt* result = array_int_new(n);
         for (int64_t i = 0; i < n; i++) {
             result->items[i] = val;
         }
-        return { .array_int64 = result };
+        return { .array_int = result };
     }
     else if (val_type == LMD_TYPE_FLOAT) {
         double val = value.get_double();

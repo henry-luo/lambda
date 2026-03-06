@@ -149,6 +149,7 @@ typedef struct Linebox {
     bool has_float_intrusion;       // true if floats affect this line
     bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
+    bool has_inline_spans;          // true if line contains inline span elements (for bbox correction)
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     // CSS 2.1 §10.8.1: parent font metrics for vertical-align keywords (text-top, text-bottom, etc.)
     // Set by span_vertical_align before recursing into children; defaults to block init values.

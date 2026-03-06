@@ -51,6 +51,7 @@ _transpiled.c
 _transpiled_*.c
 lambda.wasm
 test/lambda.wasm
+.lambda_release_build
 
 # Node.js
 node_modules/
@@ -371,7 +372,6 @@ test/layout/reference/text-transform-bicameral-004.json
 test/layout/data/css2.1/html4/text-transform-bicameral-004.htm
 test/layout/data/css2.1/xhtml1/text-transform-bicameral-004.xht
 test/layout/data/css2.1/xhtml1print/text-transform-bicameral-004.xht
-# Large reference files (>1MB) and their HTML counterparts
 test/layout/reference/abspos-non-replaced-width-margin-000.json
 test/layout/data/css2.1/html4/abspos-non-replaced-width-margin-000.htm
 test/layout/data/css2.1/xhtml1/abspos-non-replaced-width-margin-000.xht

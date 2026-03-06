@@ -12,6 +12,7 @@ These rules MUST be followed. Violations are considered errors.
 6. **NEVER manually edit `.lua` build files**. Edit `build_lambda_config.json`, then run `make`.
 7. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
 8. C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
+9. **NEVER use debug build for performance testing**. Use release build (`make release`).
 
 | DON'T | DO |
 |-------|-----|
@@ -92,7 +93,8 @@ make layout test=file_name                       # Compare specific html file la
 
 ### Build Commands
 ```bash
-make build              # Incremental build (Premake5-based, fastest)
+make build              # Debug build (Premake5-based, fastest)
+make release            # Release build (~8MB lambda.exe with optimizations)
 make clean-all          # Clean all build artifacts
 ```
 

@@ -2,34 +2,8 @@
 // Expected result: 669
 // Ported from JavaScript AWFY suite
 
-// Create a mutable boolean array of size n, all set to val
 pn make_array(n, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var extra = [val]
-        var esz = 1
-        var need = n - sz
-        while (esz * 2 <= need) {
-            extra = extra ++ extra
-            esz = esz * 2
-        }
-        if (esz < need) {
-            var rest = [val]
-            var rsz = 1
-            while (rsz < need - esz) {
-                rest = rest ++ [val]
-                rsz = rsz + 1
-            }
-            extra = extra ++ rest
-        }
-        arr = arr ++ extra
-    }
-    return arr
+    return fill(n, val)
 }
 
 pn sieve(flags, sz) {

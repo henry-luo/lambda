@@ -176,13 +176,7 @@ pn rbt_nd(tree, id) {
 
 pn rbt_mk_node(tree, key, val) {
     var c = (tree.cnt)
-    var n = [null, null, null, null, null, null]
-    n[0] = key
-    n[1] = val
-    n[2] = NIL
-    n[3] = NIL
-    n[4] = NIL
-    n[5] = RED
+    var n = [key, val, NIL, NIL, NIL, RED]
     var nd = (tree.nd)
     arr_set(nd, c, n)
     var nc = c + 1
@@ -723,11 +717,7 @@ pn v2d_key(x, y) {
 // Vector3D operations
 // =====================================================
 pn v3d_new(x, y, z) {
-    var v = [null, null, null]
-    v[0] = x
-    v[1] = y
-    v[2] = z
-    return v
+    return [x, y, z]
 }
 
 // =====================================================
@@ -888,8 +878,8 @@ pn find_intersection(m1, m2) {
 
         var sq = math.sqrt(discr)
         var a2 = 2 * a
-        var t1 = (0 - b - sq) / a2
-        var t2 = (0 - b + sq) / a2
+        var t1 = (-b - sq) / a2
+        var t2 = (-b + sq) / a2
 
         if (t1 <= t2) {
             var collision = 0
@@ -951,15 +941,7 @@ pn find_intersection(m1, m2) {
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
 pn motion_new(cs, p1x, p1y, p1z, p2x, p2y, p2z) {
-    var m = [null, null, null, null, null, null, null]
-    m[0] = cs
-    m[1] = p1x
-    m[2] = p1y
-    m[3] = p1z
-    m[4] = p2x
-    m[5] = p2y
-    m[6] = p2z
-    return m
+    return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 
 // =====================================================
@@ -974,19 +956,11 @@ pn simulate_frame(numAircraft, tval) {
         var px1 = tval
         var py1 = math.cos(tval) * 2 + i * 3
         var pz1 = 10
-        var a1 = [null, null, null, null]
-        a1[0] = cs1
-        a1[1] = px1
-        a1[2] = py1
-        a1[3] = pz1
+        var a1 = [cs1, px1, py1, pz1]
         vec_add(frame, a1)
         var cs2 = i + 1
         var py2 = math.sin(tval) * 2 + i * 3
-        var a2 = [null, null, null, null]
-        a2[0] = cs2
-        a2[1] = px1
-        a2[2] = py2
-        a2[3] = pz1
+        var a2 = [cs2, px1, py2, pz1]
         vec_add(frame, a2)
         i = i + 2
     }

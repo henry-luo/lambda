@@ -11,6 +11,7 @@ pn idiv(a, b) {
 }
 
 pn main() {
+    var __t0 = clock()
     // LFT state: (q, r, s, t) as arbitrary-precision decimals
     var q = 1N
     var r = 0N
@@ -63,4 +64,6 @@ pn main() {
         }
         print(digits ++ "\t:" ++ string(i) ++ "\n")
     }
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

@@ -8,6 +8,7 @@
 let N = 200
 
 pn main() {
+    var __t0 = clock()
     var sz = N
     var checksum = 0
     var byte_acc = 0
@@ -64,4 +65,6 @@ pn main() {
         y = y + 1
     }
     print(string(checksum) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }
