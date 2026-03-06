@@ -595,6 +595,28 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_char(strbuf, '}');
         break;
     }
+    case LMD_TYPE_VMAP: {
+        VMap *vm = item.vmap;
+        int64_t count = vm->vtable->count(vm->data);
+        strbuf_append_char(strbuf, '{');
+        for (int64_t i = 0; i < count; i++) {
+            if (i > 0) strbuf_append_str(strbuf, ", ");
+            Item key = vm->vtable->key_at(vm->data, i);
+            Item value = vm->vtable->value_at(vm->data, i);
+            // print key
+            TypeId kt = get_type_id(key);
+            if (kt == LMD_TYPE_STRING) {
+                String* s = key.get_string();
+                if (s) strbuf_append_str_n(strbuf, s->chars, s->len);
+            } else {
+                print_item(strbuf, key, depth + 1, indent);
+            }
+            strbuf_append_str(strbuf, ": ");
+            print_item(strbuf, value, depth + 1, indent);
+        }
+        strbuf_append_char(strbuf, '}');
+        break;
+    }
     case LMD_TYPE_OBJECT: {
         Object *obj = item.object;
         TypeObject *obj_type = (TypeObject*)obj->type;

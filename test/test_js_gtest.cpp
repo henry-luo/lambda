@@ -315,7 +315,7 @@ TEST(JavaScriptTests, test_functions_basic) {
     test_js_script_against_file("test/js/functions_basic.js", "test/js/functions_basic.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_basic_expressions) {
+TEST(JavaScriptTests, test_basic_expressions) {
     test_js_script_against_file("test/js/basic_expressions.js", "test/js/basic_expressions.txt");
 }
 
@@ -323,7 +323,7 @@ TEST(JavaScriptTests, DISABLED_test_functions) {
     test_js_script_against_file("test/js/functions.js", "test/js/functions.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_control_flow) {
+TEST(JavaScriptTests, test_control_flow) {
     test_js_script_against_file("test/js/control_flow.js", "test/js/control_flow.txt");
 }
 
