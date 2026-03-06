@@ -1,7 +1,7 @@
 ## CLI Commands
 ```bash
 lambda                    # Start REPL
-// REPL Commands: .quit, .help, .clear
+// REPL Commands: quit, help, clear
 lambda script.ls          # Eval functional script
 lambda run script.ls      # Run procedual script
 lambda --transpile-only script.ls # Transpile only
@@ -509,7 +509,7 @@ find("hello world", "lo")            // [{value: "lo", index: 3}]
 
 **Collection:**
 
-`slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `concat(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
+`slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
 
 **Vector:**
 

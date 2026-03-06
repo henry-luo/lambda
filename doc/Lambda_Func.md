@@ -483,7 +483,7 @@ Lambda provides extensive built-in functions. See [Lambda_Sys_Func.md](Lambda_Sy
 | **Type** | `type`, `len`, `int`, `float`, `string` | Type conversion and inspection |
 | **Math** | `abs`, `round`, `floor`, `ceil`, `sqrt`, `log` | Mathematical operations |
 | **Statistical** | `sum`, `avg`, `median`, `variance` | Statistical analysis |
-| **Collection** | `slice`, `reverse`, `sort`, `unique`, `concat` | Collection manipulation |
+| **Collection** | `slice`, `reverse`, `sort`, `unique` | Collection manipulation |
 | **String** | `upper`, `lower`, `trim`, `split`, `join` | String operations |
 | **I/O** | `input`, `format`, `print`, `output`, `exists` | Input/output |
 | **Date/Time** | `datetime`, `date`, `time`, `today`, `now` | Date and time |

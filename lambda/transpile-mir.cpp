@@ -161,6 +161,11 @@ struct MirTranspiler {
     // Set when a return/break/continue emits a terminal instruction.
     // Used to skip dead-code boxing that causes MIR type mismatches.
     bool block_returned;
+
+    // Phase 4: Native function info map — tracks which functions have native
+    // (unboxed) versions and their parameter/return types.
+    // name -> NativeFuncInfo
+    struct hashmap* native_func_info;
 };
 
 // ============================================================================
@@ -206,6 +211,27 @@ static int local_func_cmp(const void *a, const void *b, void *udata) {
 }
 static uint64_t local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const LocalFuncEntry* e = (const LocalFuncEntry*)item;
+    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
+}
+
+// Native function info: tracks parameter types and return type for functions
+// that have a dual native+boxed version (Phase 4 optimization).
+struct NativeFuncInfo {
+    char name[128];           // mangled function name (native version)
+    TypeId param_types[16];   // resolved (declared or inferred) TypeId per param
+    MIR_type_t param_mir[16]; // MIR type per param
+    int param_count;          // number of user params (excluding _env_ptr, _self, _vargs)
+    TypeId return_type;       // resolved return TypeId (LMD_TYPE_ANY if unknown)
+    MIR_type_t return_mir;    // MIR return type
+    bool has_native;          // true if a native version was generated
+};
+
+static int native_func_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(((NativeFuncInfo*)a)->name, ((NativeFuncInfo*)b)->name);
+}
+static uint64_t native_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const NativeFuncInfo* e = (const NativeFuncInfo*)item;
     return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
 }
 
@@ -344,6 +370,39 @@ static void register_local_func(MirTranspiler* mt, const char* name, MIR_item_t 
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.func_item = func_item;
     hashmap_set(mt->local_funcs, &entry);
+}
+
+// Look up native function info for dual-version functions
+static NativeFuncInfo* find_native_func_info(MirTranspiler* mt, const char* name) {
+    if (!mt->native_func_info) return NULL;
+    NativeFuncInfo key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    return (NativeFuncInfo*)hashmap_get(mt->native_func_info, &key);
+}
+
+static void register_native_func_info(MirTranspiler* mt, const char* name, NativeFuncInfo* info) {
+    if (!mt->native_func_info) {
+        mt->native_func_info = hashmap_new(sizeof(NativeFuncInfo), 16, 0, 0,
+            native_func_hash, native_func_cmp, NULL, NULL);
+    }
+    snprintf(info->name, sizeof(info->name), "%s", name);
+    hashmap_set(mt->native_func_info, info);
+}
+
+// Check if a parameter type qualifies for native (unboxed) representation.
+// Only types that map to a different native type than boxed Item are worth unboxing.
+static bool mir_is_native_param_type(TypeId tid) {
+    switch (tid) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_INT64:
+        return true;
+    default:
+        return false;
+    }
 }
 
 // Get or create import + proto for a runtime function
@@ -1486,6 +1545,21 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             MIR_item_t func_item = find_local_func(mt, nm_buf->str);
             if (!func_item) func_item = find_local_func(mt, name_buf);
 
+            // Phase 4: For native functions used as first-class values, use the
+            // boxed wrapper (_b) since dynamic dispatch uses the Item ABI.
+            NativeFuncInfo* nfi_ref = find_native_func_info(mt, nm_buf->str);
+            if (nfi_ref && nfi_ref->has_native) {
+                StrBuf* wrapper_buf = strbuf_new_cap(64);
+                write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
+                MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
+                if (wrapper_item) {
+                    log_debug("mir: fn ref '%s' → using boxed wrapper '%s'",
+                        nm_buf->str, wrapper_buf->str);
+                    func_item = wrapper_item;
+                }
+                strbuf_free(wrapper_buf);
+            }
+
             if (func_item) {
                 // Get function address via MIR ref
                 MIR_reg_t fn_addr = new_reg(mt, "fnaddr", MIR_T_I64);
@@ -1723,6 +1797,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
             return LMD_TYPE_INT;
         }
+        // ARRAY with nested=INT + INT index: return type is ANY (not INT)
+        // because the array may have been converted from ArrayInt to generic
+        // Array by fn_array_set (e.g., arr[1] = 3.14 on an int array).
+        // The transpile_index runtime check handles this correctly.
     }
     // For if nodes: use effective type of branches
     if (node->node_type == AST_NODE_IF_EXPR) {
@@ -4170,6 +4248,305 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     }
 
     // ======================================================================
+    // FAST PATH 1b: ARRAY type + INT index — compile-time typed inline read
+    // The compile-time type is generic ARRAY, but when the AST records a
+    // nested element type (e.g., nested=INT for [0,4,2,...]), we know the
+    // runtime object is a typed array created by transpile_array.
+    // Runtime type check needed because fn_array_set may convert ArrayInt
+    // to generic Array in-place (e.g., arr[1] = 3.14 on an int array).
+    // Returns BOXED Item (consistent with get_effective_type returning ANY).
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY &&
+        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
+        // Check if AST nested type suggests this was originally an int array
+        Type* obj_type = field_node->object ? field_node->object->type : nullptr;
+        bool nested_int = false;
+        if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
+            TypeArray* arr_type = (TypeArray*)obj_type;
+            nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
+        }
+
+        if (nested_int) {
+            // Likely ArrayInt — runtime type check + inline read / item_at fallback
+            MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+
+            // Read Container.type_id (uint8_t at offset 0) for runtime check
+            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+
+            MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
+                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+
+            MIR_label_t l_fast = new_label(mt);
+            MIR_label_t l_slow = new_label(mt);
+            MIR_label_t l_end = new_label(mt);
+            MIR_label_t l_oob = new_label(mt);
+            MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
+                MIR_new_reg_op(mt->ctx, is_aint)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
+
+            // == ArrayInt at runtime: inline items[idx] ==
+            emit_label(mt, l_fast);
+            {
+                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, neg_check)));
+
+                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, ge_check)));
+
+                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
+
+                // Tag as INT Item for boxed result
+                MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                    MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
+                uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // OOB → null Item
+            emit_label(mt, l_oob);
+            {
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // Not ArrayInt at runtime → item_at fallback
+            emit_label(mt, l_slow);
+            {
+                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+                MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, slow_result)));
+            }
+
+            emit_label(mt, l_end);
+            return result;  // BOXED Item
+        } else {
+            // Generic ARRAY — use item_at(boxed_obj, native_idx) to skip index dispatch
+            MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+            return emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+        }
+    }
+
+    // ======================================================================
+    // FAST PATH 1c: ARRAY_INT + ANY index — unbox index then inline read
+    // Object is known ArrayInt (from fill() narrowing), index type unknown.
+    // Unbox the field with it2i() to get native int, then inline items[idx].
+    // Returns NATIVE INT (AST type for ARRAY_INT[*] is always INT).
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY_INT && idx_tid == LMD_TYPE_ANY) {
+        MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
+        MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
+        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+
+        MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+        MIR_label_t l_ok = new_label(mt);
+        MIR_label_t l_oob = new_label(mt);
+        MIR_label_t l_end = new_label(mt);
+        MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
+
+        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, neg_check)));
+
+        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, ge_check)));
+
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+        emit_label(mt, l_oob);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        emit_label(mt, l_ok);
+        MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+        MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+        MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
+
+        emit_label(mt, l_end);
+        return result;  // NATIVE INT
+    }
+
+    // ======================================================================
+    // FAST PATH 1d: ARRAY + ANY index — unbox index, typed dispatch
+    // Object is generic ARRAY, index type unknown. Unbox field with it2i().
+    // For nested=INT: inline items[idx], tag as INT Item (boxed).
+    // Otherwise: item_at(boxed_obj, idx). Returns BOXED Item.
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY && idx_tid == LMD_TYPE_ANY) {
+        Type* obj_type = field_node->object ? field_node->object->type : nullptr;
+        bool nested_int = false;
+        if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
+            TypeArray* arr_type = (TypeArray*)obj_type;
+            nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
+        }
+
+        MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
+        MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
+
+        if (nested_int) {
+            // Likely ArrayInt — runtime type check + inline read / item_at fallback
+            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+
+            // Read Container.type_id for runtime check
+            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+
+            MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
+                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+
+            MIR_label_t l_fast = new_label(mt);
+            MIR_label_t l_slow = new_label(mt);
+            MIR_label_t l_end = new_label(mt);
+            MIR_label_t l_oob = new_label(mt);
+            MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
+                MIR_new_reg_op(mt->ctx, is_aint)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
+
+            // ArrayInt at runtime: inline items[idx], tag as INT Item
+            emit_label(mt, l_fast);
+            {
+                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, neg_check)));
+
+                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                    MIR_new_reg_op(mt->ctx, ge_check)));
+
+                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
+
+                MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                    MIR_new_reg_op(mt->ctx, raw_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
+                uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // OOB → null Item
+            emit_label(mt, l_oob);
+            {
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // Not ArrayInt → item_at fallback
+            emit_label(mt, l_slow);
+            {
+                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+                MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, slow_result)));
+            }
+
+            emit_label(mt, l_end);
+            return result;  // BOXED Item
+        } else {
+            // Generic ARRAY, ANY index — item_at(boxed_obj, it2i(field))
+            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+            return emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+        }
+    }
+
+    // ======================================================================
     // FAST PATH 2: Runtime type check for unknown containers with INT index
     // Object might be ArrayInt at runtime — check type tag.
     // Returns BOXED Item (type is unknown at compile time).
@@ -4252,19 +4629,62 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-        // Slow path: fn_index
+        // Slow path: item_at (saves index-type dispatch vs fn_index)
         emit_label(mt, l_slow);
         {
-            MIR_reg_t boxed_idx = emit_box_int(mt, idx_native);
-            MIR_reg_t slow_result = emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, slow_result)));
         }
 
         emit_label(mt, l_end);
         return result;
+    }
+
+    // ======================================================================
+    // FAST PATH 3: ANY + ANY with inner INDEX_EXPR detection (Level 3)
+    // When object is ANY and field is also ANY, check if the field expression
+    // is an INDEX_EXPR into a typed int array. If so, the field produces an
+    // integer Item and we can use item_at(obj, it2i(field)) instead of the
+    // expensive fn_index double dispatch. Mirrors C2MIR D1 Level 3.
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ANY && idx_tid == LMD_TYPE_ANY) {
+        bool field_known_int = false;
+        AstNode* field_expr = field_node->field;
+        // Unwrap PRIMARY wrapper
+        if (field_expr && field_expr->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)field_expr;
+            if (pri->expr) field_expr = pri->expr;
+        }
+        if (field_expr && field_expr->node_type == AST_NODE_INDEX_EXPR) {
+            AstFieldNode* inner_idx = (AstFieldNode*)field_expr;
+            // Check inner object's effective type (handles fill() narrowing)
+            TypeId inner_obj_eff = get_effective_type(mt, inner_idx->object);
+            if (inner_obj_eff == LMD_TYPE_ARRAY_INT || inner_obj_eff == LMD_TYPE_ARRAY_INT64) {
+                field_known_int = true;
+            } else if (inner_obj_eff == LMD_TYPE_ARRAY) {
+                // Check AST nested type
+                Type* inner_type = inner_idx->object ? inner_idx->object->type : nullptr;
+                if (inner_type && inner_type->type_id == LMD_TYPE_ARRAY) {
+                    TypeArray* arr_type = (TypeArray*)inner_type;
+                    if (arr_type->nested && (arr_type->nested->type_id == LMD_TYPE_INT
+                        || arr_type->nested->type_id == LMD_TYPE_INT64)) {
+                        field_known_int = true;
+                    }
+                }
+            }
+        }
+        if (field_known_int) {
+            // Field produces an integer Item — use item_at(obj, it2i(field))
+            MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
+            MIR_reg_t field_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);
+            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+            return emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, field_native));
+        }
     }
 
     // ======================================================================
@@ -4358,16 +4778,16 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Fallback: use generic fn_len(Item) for unknown types (handled below)
         }
 
-        // ==== Bitwise functions: operate on native int64_t, NOT boxed Items ====
-        // These C functions take raw int64_t arguments and return raw int64_t.
-        // Must use transpile_expr (native) instead of transpile_box_item (boxed).
+        // ==== Bitwise functions: inline as native MIR instructions ====
+        // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
+        // shl/shr → guarded: if (b >= 0 && b < 64) then MIR_LSH/MIR_RSH else 0
+        // bnot → MIR_XOR with -1 (equivalent to ~a)
         if (info->fn == SYSFUNC_BAND || info->fn == SYSFUNC_BOR ||
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
             info->fn == SYSFUNC_SHR) {
             arg = call_node->argument;
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
-            // Unbox if argument is boxed (ANY type from variable)
             if (a1_tid != LMD_TYPE_INT) {
                 a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
             }
@@ -4377,11 +4797,63 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             if (a2_tid != LMD_TYPE_INT) {
                 a2 = emit_unbox(mt, a2, LMD_TYPE_INT);
             }
-            char fn_name[64];
-            snprintf(fn_name, sizeof(fn_name), "fn_%s", info->name);
-            return emit_call_2(mt, fn_name, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, a2));
+
+            // band/bor/bxor: single MIR instruction, always safe
+            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
+            switch (info->fn) {
+                case SYSFUNC_BAND: mir_op = MIR_AND; break;
+                case SYSFUNC_BOR:  mir_op = MIR_OR;  break;
+                case SYSFUNC_BXOR: mir_op = MIR_XOR; break;
+                default: break;
+            }
+            if (mir_op) {
+                MIR_reg_t result = new_reg(mt, "bw", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, mir_op,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, a1),
+                    MIR_new_reg_op(mt->ctx, a2)));
+                return result;
+            }
+
+            // shl/shr: guarded shift — if (b >= 0 && b < 64) then (a op b) else 0
+            {
+                MIR_insn_code_t shift_op = (info->fn == SYSFUNC_SHL) ? MIR_LSH : MIR_RSH;
+                MIR_reg_t result = new_reg(mt, "shft", MIR_T_I64);
+                MIR_label_t l_ok = new_label(mt);
+                MIR_label_t l_zero = new_label(mt);
+                MIR_label_t l_end = new_label(mt);
+
+                // check b >= 0
+                MIR_reg_t neg_chk = new_reg(mt, "sneg", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_chk),
+                    MIR_new_reg_op(mt->ctx, a2), MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_zero),
+                    MIR_new_reg_op(mt->ctx, neg_chk)));
+
+                // check b < 64
+                MIR_reg_t ge_chk = new_reg(mt, "sge", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_chk),
+                    MIR_new_reg_op(mt->ctx, a2), MIR_new_int_op(mt->ctx, 64)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_zero),
+                    MIR_new_reg_op(mt->ctx, ge_chk)));
+
+                // in range: do the shift
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+                emit_label(mt, l_zero);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, 0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+                emit_label(mt, l_ok);
+                emit_insn(mt, MIR_new_insn(mt->ctx, shift_op,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, a1),
+                    MIR_new_reg_op(mt->ctx, a2)));
+
+                emit_label(mt, l_end);
+                return result;
+            }
         }
         if (info->fn == SYSFUNC_BNOT) {
             arg = call_node->argument;
@@ -4390,8 +4862,13 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             if (a1_tid != LMD_TYPE_INT) {
                 a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
             }
-            return emit_call_1(mt, "fn_bnot", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, a1));
+            // ~a == a XOR -1
+            MIR_reg_t result = new_reg(mt, "bnot", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_XOR,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, a1),
+                MIR_new_int_op(mt->ctx, (int64_t)-1)));
+            return result;
         }
 
         // Build runtime function name: "fn_" or "pn_" + name + optional arg count for overloaded
@@ -4888,6 +5365,10 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 }
             }
 
+            // Phase 4: Check if target function has a native version for optimized calling
+            NativeFuncInfo* call_nfi = fn_mangled ? find_native_func_info(mt, fn_mangled) : nullptr;
+            bool native_call = (call_nfi && call_nfi->has_native && local_func);
+
             // Emit args in parameter order, filling defaults for missing slots
             MIR_op_t arg_ops[16];
             MIR_var_t arg_vars[16];
@@ -4895,24 +5376,70 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             AstNamedNode* param_iter = fn_def ? fn_def->param : NULL;
             uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
             for (int i = 0; i < expected_params && i < 16; i++) {
-                if (resolved_args[i]) {
-                    MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
-                    arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                if (native_call && i < call_nfi->param_count &&
+                    mir_is_native_param_type(call_nfi->param_types[i])) {
+                    // Phase 4: Native param — pass native value directly (skip boxing)
+                    TypeId param_tid = call_nfi->param_types[i];
+                    if (resolved_args[i]) {
+                        MIR_reg_t val = transpile_expr(mt, resolved_args[i]);
+                        TypeId val_tid = get_effective_type(mt, resolved_args[i]);
+                        if (val_tid == param_tid) {
+                            // Direct native match — pass through
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                        } else if (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL) {
+                            // Boxed Item → unbox to expected native type
+                            MIR_reg_t unboxed = emit_unbox(mt, val, param_tid);
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, unboxed);
+                        } else {
+                            // Type mismatch: box → unbox (handles int→float etc.)
+                            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+                            MIR_reg_t unboxed = emit_unbox(mt, boxed, param_tid);
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, unboxed);
+                        }
+                    } else {
+                        // Default value for native param
+                        TypeParam* tp = param_iter ? (TypeParam*)((AstNode*)param_iter)->type : NULL;
+                        if (tp && tp->default_value) {
+                            MIR_reg_t val = transpile_expr(mt, tp->default_value);
+                            TypeId val_tid = get_effective_type(mt, tp->default_value);
+                            if (val_tid == param_tid) {
+                                arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                            } else {
+                                MIR_reg_t boxed = emit_box(mt, val, val_tid);
+                                MIR_reg_t unboxed = emit_unbox(mt, boxed, param_tid);
+                                arg_ops[i] = MIR_new_reg_op(mt->ctx, unboxed);
+                            }
+                        } else {
+                            // No value: pass 0 as native default
+                            MIR_reg_t zero = new_reg(mt, "npad", MIR_T_I64);
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, zero),
+                                MIR_new_int_op(mt->ctx, 0)));
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, zero);
+                        }
+                    }
+                    arg_vars[i] = {call_nfi->param_mir[i], "p", 0};
                 } else {
-                    // Check for default value in TypeParam
-                    TypeParam* tp = param_iter ? (TypeParam*)((AstNode*)param_iter)->type : NULL;
-                    if (tp && tp->default_value) {
-                        MIR_reg_t val = transpile_box_item(mt, tp->default_value);
+                    // Non-native param: standard boxed Item ABI
+                    if (resolved_args[i]) {
+                        MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
                         arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
                     } else {
-                        MIR_reg_t null_reg = new_reg(mt, "pad", MIR_T_I64);
-                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, null_reg),
-                            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                        arg_ops[i] = MIR_new_reg_op(mt->ctx, null_reg);
+                        // Check for default value in TypeParam
+                        TypeParam* tp = param_iter ? (TypeParam*)((AstNode*)param_iter)->type : NULL;
+                        if (tp && tp->default_value) {
+                            MIR_reg_t val = transpile_box_item(mt, tp->default_value);
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                        } else {
+                            MIR_reg_t null_reg = new_reg(mt, "pad", MIR_T_I64);
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, null_reg),
+                                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, null_reg);
+                        }
                     }
+                    arg_vars[i] = {MIR_T_I64, "p", 0};
                 }
-                arg_vars[i] = {MIR_T_I64, "p", 0};
                 if (param_iter) param_iter = (AstNamedNode*)((AstNode*)param_iter)->next;
             }
             ai = expected_params;
@@ -4946,8 +5473,9 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 ai++;
             }
 
-            // Return type is always Item (MIR_T_I64) for user functions
-            MIR_type_t ret_type = MIR_T_I64;
+            // P4-3.3: Return type — use native type when calling native version
+            bool call_native_return = (native_call && call_nfi->return_type != LMD_TYPE_ANY);
+            MIR_type_t ret_type = call_native_return ? call_nfi->return_mir : MIR_T_I64;
 
             // Create proto for the call (unique name per call site)
             char proto_name[160];
@@ -4976,10 +5504,25 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
 
-            // Unbox return value if the call expression has a native type
+            // P4-3.3: Post-call type handling for return values
             TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
-            if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
-                result = emit_unbox(mt, result, call_tid);
+            if (call_native_return) {
+                // Native function returns native value directly
+                if (call_tid == call_nfi->return_type) {
+                    // Perfect match — no conversion needed
+                } else if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
+                    // Caller expects different native type — box then unbox
+                    MIR_reg_t boxed = emit_box(mt, result, call_nfi->return_type);
+                    result = emit_unbox(mt, boxed, call_tid);
+                } else {
+                    // Caller expects boxed Item — box the native return
+                    result = emit_box(mt, result, call_nfi->return_type);
+                }
+            } else {
+                // Standard boxed return — unbox if caller expects native type
+                if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
+                    result = emit_unbox(mt, result, call_tid);
+                }
             }
 
             if (name_buf) strbuf_free(name_buf);
@@ -6435,6 +6978,22 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         write_fn_name(name_buf, fn_node, NULL);
 
         MIR_item_t func_item = find_local_func(mt, name_buf->str);
+
+        // Phase 4: For native dual-version functions used as first-class values,
+        // use the boxed wrapper (_b) since dynamic dispatch uses the Item ABI.
+        NativeFuncInfo* nfi_expr = find_native_func_info(mt, name_buf->str);
+        if (nfi_expr && nfi_expr->has_native) {
+            StrBuf* wrapper_buf = strbuf_new_cap(64);
+            write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
+            MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
+            if (wrapper_item) {
+                log_debug("mir: fn expr '%s' → using boxed wrapper '%s'",
+                    name_buf->str, wrapper_buf->str);
+                func_item = wrapper_item;
+            }
+            strbuf_free(wrapper_buf);
+        }
+
         if (func_item) {
             // Count arity from AST param list
             int arity = 0;
@@ -6879,6 +7438,163 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
     return LMD_TYPE_ANY;
 }
 
+// ============================================================================
+// Phase 4 (P4-3.3): Infer function return type from declaration and body.
+// Returns a native TypeId (INT, FLOAT, BOOL) or LMD_TYPE_ANY if unknown.
+// Only returns native types for simple cases where the return path is singular.
+// ============================================================================
+static TypeId infer_return_type(AstFuncNode* fn_node) {
+    AstNode* fn_as_node = (AstNode*)fn_node;
+
+    // Skip procedural functions — they have multiple return paths (explicit
+    // `return` statements) that would all need to emit native-typed values.
+    // TODO: handle proc native returns in a future phase.
+    if (fn_as_node->node_type == AST_NODE_PROC) return LMD_TYPE_ANY;
+
+    // 1. Check declared return type from TypeFunc::returned
+    if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* ft = (TypeFunc*)fn_as_node->type;
+        // Skip functions that can raise errors (T^ or T^E) — error branch
+        // produces a non-native value, so we can't use native return.
+        if (ft->can_raise) return LMD_TYPE_ANY;
+        if (ft->returned) {
+            TypeId ret_tid = ft->returned->type_id;
+            // Only accept simple native types for now
+            if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
+                ret_tid == LMD_TYPE_BOOL) {
+                log_debug("mir: infer_return_type - declared type_id=%d", ret_tid);
+                return ret_tid;
+            }
+        }
+    }
+
+    // 2. Check the body expression's type (fn body IS the return value)
+
+    if (fn_node->body && fn_node->body->type) {
+        TypeId body_tid = fn_node->body->type->type_id;
+        // Only accept simple native scalar types
+        if (body_tid == LMD_TYPE_INT || body_tid == LMD_TYPE_FLOAT ||
+            body_tid == LMD_TYPE_BOOL) {
+            log_debug("mir: infer_return_type - body type_id=%d", body_tid);
+            return body_tid;
+        }
+    }
+
+    return LMD_TYPE_ANY;
+}
+
+// ============================================================================
+// Phase 4: Boxed wrapper for dual-version functions
+// Generates a thin "_b" suffixed function with all-Item ABI that unboxes params,
+// calls the native version, and returns the (already boxed) result.
+// Used for dynamic dispatch (Function*) and cross-module calls.
+// ============================================================================
+static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name,
+    AstFuncNode* fn_node, NativeFuncInfo* nfi)
+{
+    // Generate _b wrapper name
+    StrBuf* wrapper_name = strbuf_new_cap(64);
+    write_fn_name_ex(wrapper_name, fn_node, NULL, "_b");
+    log_debug("mir: generating boxed wrapper '%s' for native '%s'", wrapper_name->str, native_name);
+
+    // All wrapper params are MIR_T_I64 (boxed Item ABI)
+    MIR_var_t params[16];
+    int param_count = 0;
+    AstNamedNode* param = fn_node->param;
+    char* param_name_copies[16];
+    while (param && param_count < 16) {
+        char pname[64];
+        snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
+        params[param_count] = {MIR_T_I64, strdup(pname), 0};
+        param_name_copies[param_count] = (char*)params[param_count].name;
+        param_count++;
+        param = (AstNamedNode*)param->next;
+    }
+
+    // Save outer function context
+    MIR_item_t saved_func_item = mt->current_func_item;
+    MIR_func_t saved_func = mt->current_func;
+    MIR_reg_t saved_consts = mt->consts_reg;
+
+    // Create wrapper function
+    MIR_type_t ret_type = MIR_T_I64;
+    MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, wrapper_name->str, 1, &ret_type, param_count, params);
+    MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
+    mt->current_func_item = wrapper_item;
+    mt->current_func = wrapper_func;
+
+    // Free strdup copies
+    for (int i = 0; i < param_count; i++) free(param_name_copies[i]);
+
+    // Unbox each param to match native function's expected types
+    MIR_op_t call_args[16];
+    MIR_var_t call_vars[16];
+    param = fn_node->param;
+    for (int i = 0; i < nfi->param_count && i < 16; i++) {
+        char prefixed[68];
+        snprintf(prefixed, sizeof(prefixed), "_%.*s", (int)param->name->len, param->name->chars);
+        MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
+
+        if (mir_is_native_param_type(nfi->param_types[i])) {
+            // Unbox: Item → native type
+            MIR_reg_t unboxed = emit_unbox(mt, preg, nfi->param_types[i]);
+            call_args[i] = MIR_new_reg_op(mt->ctx, unboxed);
+        } else {
+            // Already boxed Item, pass through
+            call_args[i] = MIR_new_reg_op(mt->ctx, preg);
+        }
+        call_vars[i] = {nfi->param_mir[i], "p", 0};
+        param = (AstNamedNode*)param->next;
+    }
+
+    // Call the native version
+    MIR_item_t native_func = find_local_func(mt, native_name);
+    if (!native_func) {
+        log_error("mir: boxed wrapper - native func '%s' not found", native_name);
+    }
+
+    // P4-3.3: Proto return type matches native function's return type
+    char proto_name[160];
+    snprintf(proto_name, sizeof(proto_name), "%s_wp%d", native_name, mt->label_counter++);
+    MIR_type_t native_ret = nfi->return_mir;
+    MIR_type_t res_types[1] = {native_ret};
+    MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types,
+        nfi->param_count, call_vars);
+
+    int nops = 3 + nfi->param_count;
+    MIR_op_t ops[19];
+    ops[0] = MIR_new_ref_op(mt->ctx, proto);
+    ops[1] = MIR_new_ref_op(mt->ctx, native_func);
+    MIR_reg_t result = new_reg(mt, "wres", native_ret);
+    ops[2] = MIR_new_reg_op(mt->ctx, result);
+    for (int i = 0; i < nfi->param_count; i++) ops[3 + i] = call_args[i];
+
+    emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+
+    // P4-3.3: Box native return to Item for the boxed wrapper ABI
+    if (nfi->return_type != LMD_TYPE_ANY) {
+        MIR_reg_t boxed = emit_box(mt, result, nfi->return_type);
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
+    } else {
+        // Return is already boxed Item
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
+    }
+
+    MIR_finish_func(mt->ctx);
+
+    // Register wrapper as local function with _b name
+    register_local_func(mt, wrapper_name->str, wrapper_item);
+
+    log_debug("mir: boxed wrapper '%s' generated successfully", wrapper_name->str);
+
+    // Restore outer function context
+    mt->current_func_item = saved_func_item;
+    mt->current_func = saved_func;
+    mt->consts_reg = saved_consts;
+
+    strbuf_free(wrapper_name);
+}
+
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Build function name
     StrBuf* name_buf = strbuf_new_cap(64);
@@ -6886,49 +7602,132 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     log_debug("mir: transpile_func_def '%s'", name_buf->str);
 
-    // Determine return type (always Item for safety)
-    MIR_type_t ret_type = MIR_T_I64;
-
     // Check if this function is a closure (has captured variables)
     bool is_closure = (fn_node->captures != nullptr);
 
     // Check if this is a method inside an object type definition
     bool is_method = (mt->method_owner != nullptr);
 
-    // Build parameter list (all params as Item/boxed for consistency with C transpiler)
+    AstNode* fn_as_node = (AstNode*)fn_node;
+    TypeFunc* fn_type = (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC)
+        ? (TypeFunc*)fn_as_node->type : NULL;
+    bool is_variadic = fn_type && fn_type->is_variadic;
+    bool is_proc_fn = (fn_as_node->node_type == AST_NODE_PROC);
+
+    // ===== Phase 4: Pre-resolve all parameter types (declared + inferred) =====
+    // We resolve types BEFORE creating the MIR function so we can decide whether
+    // to generate a native-typed version or the traditional all-Item version.
+    TypeId resolved_param_types[16];
+    int user_param_count = 0;
+    {
+        TypeParam* tp_iter = fn_type ? fn_type->param : NULL;
+        AstNamedNode* p = fn_node->param;
+        while (p && user_param_count < 16) {
+            TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
+            bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
+
+            // Infer type from body usage for untyped params
+            if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
+                TypeId inferred = infer_param_type(fn_node->body,
+                    p->name->chars, (int)p->name->len, is_proc_fn);
+                if (inferred != LMD_TYPE_ANY) {
+                    log_debug("mir: param '%.*s' pre-resolved inferred type_id=%d",
+                        (int)p->name->len, p->name->chars, inferred);
+                    tid = inferred;
+                }
+            }
+
+            // Optional params without defaults must remain boxed (could be null)
+            if (may_be_null) tid = LMD_TYPE_ANY;
+
+            resolved_param_types[user_param_count] = tid;
+            user_param_count++;
+            tp_iter = tp_iter ? tp_iter->next : NULL;
+            p = (AstNamedNode*)p->next;
+        }
+    }
+
+    // Determine if this function qualifies for native (unboxed) dual version.
+    // Eligible: not a closure, not a method, not variadic, has at least one
+    // param with a native type (INT, FLOAT, BOOL, STRING, INT64).
+    bool generate_native = false;
+    if (!is_closure && !is_method && !is_variadic) {
+        for (int i = 0; i < user_param_count; i++) {
+            if (mir_is_native_param_type(resolved_param_types[i])) {
+                generate_native = true;
+                break;
+            }
+        }
+    }
+
+    // Register NativeFuncInfo so call sites know to use the native version
+    if (generate_native) {
+        NativeFuncInfo nfi;
+        memset(&nfi, 0, sizeof(nfi));
+        nfi.param_count = user_param_count;
+        nfi.has_native = true;
+        for (int i = 0; i < user_param_count; i++) {
+            nfi.param_types[i] = resolved_param_types[i];
+            nfi.param_mir[i] = type_to_mir(resolved_param_types[i]);
+        }
+        // P4-3.3: Infer return type for native version
+        TypeId ret_tid = infer_return_type(fn_node);
+        nfi.return_type = ret_tid;
+        nfi.return_mir = (ret_tid != LMD_TYPE_ANY) ? type_to_mir(ret_tid) : MIR_T_I64;
+        register_native_func_info(mt, name_buf->str, &nfi);
+        log_debug("mir: dual version - native '%s' with %d params, return=%d",
+            name_buf->str, user_param_count, ret_tid);
+    }
+
+    // ===== Build MIR parameter list =====
+    // For native version: use resolved native MIR types for params
+    // For boxed version (non-native): all params are MIR_T_I64 (Item)
     MIR_var_t params[32];
     int param_count = 0;
 
-    // For closures, add hidden _env_ptr as first parameter
+    // Hidden leading params (_env_ptr for closures, _self for methods)
     if (is_closure) {
         params[param_count] = {MIR_T_P, strdup("_env_ptr"), 0};
         param_count++;
     }
-
-    // For methods, add hidden _self as first parameter (boxed Item containing Object*)
     if (is_method && !is_closure) {
         params[param_count] = {MIR_T_P, strdup("_self"), 0};
         param_count++;
     }
 
+    // User params: use native types for native version, MIR_T_I64 for boxed
     AstNamedNode* param = fn_node->param;
+    int pi_build = 0;
     while (param && param_count < 31) {
         char pname[64];
         snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
 
-        params[param_count] = {MIR_T_I64, strdup(pname), 0};
+        MIR_type_t mir_ptype = MIR_T_I64;  // default: boxed Item
+        if (generate_native && pi_build < user_param_count) {
+            mir_ptype = type_to_mir(resolved_param_types[pi_build]);
+        }
+        params[param_count] = {mir_ptype, strdup(pname), 0};
         param_count++;
+        pi_build++;
         param = (AstNamedNode*)param->next;
     }
 
-    // Add hidden _vargs parameter for variadic functions
-    AstNode* fn_as_node = (AstNode*)fn_node;
-    TypeFunc* fn_type = (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC)
-        ? (TypeFunc*)fn_as_node->type : NULL;
-    bool is_variadic = fn_type && fn_type->is_variadic;
+    // Hidden trailing params (_vargs)
     if (is_variadic && param_count < 32) {
         params[param_count] = {MIR_T_P, strdup("_vargs"), 0};
         param_count++;
+    }
+
+    // Determine return type
+    // P4-3.3: Use native return type when inferred (INT/BOOL → I64, FLOAT → D)
+    MIR_type_t ret_type = MIR_T_I64;
+    bool native_return = false;
+    if (generate_native) {
+        NativeFuncInfo* nfi_ret = find_native_func_info(mt, name_buf->str);
+        if (nfi_ret && nfi_ret->return_type != LMD_TYPE_ANY) {
+            ret_type = nfi_ret->return_mir;
+            native_return = true;
+        }
     }
 
     // Save current function context
@@ -7028,12 +7827,12 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Bind parameters as local variables
-    log_debug("mir: binding params for '%s', fn_type=%p", name_buf->str, (void*)fn_type);
-    // Walk TypeFunc's TypeParam chain in parallel to detect optional params
-    TypeParam* tp_iter = fn_type ? fn_type->param : NULL;
+    // Uses pre-resolved types from the Phase 4 pre-resolve step above.
+    log_debug("mir: binding params for '%s', fn_type=%p, native=%d",
+        name_buf->str, (void*)fn_type, generate_native);
     param = fn_node->param;
     int pi = 0;
-    while (param) {
+    while (param && pi < user_param_count) {
         char pname[64];
         snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
 
@@ -7042,28 +7841,19 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         snprintf(prefixed, sizeof(prefixed), "_%s", pname);
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, func);
 
-        // Parameters arrive as boxed Items (MIR_T_I64).
-        // For typed params, unbox to native type so binary handler can use native ops.
-        // But optional params without defaults (b?: int) may hold null at runtime,
-        // so keep them boxed. Params with defaults (b: int = 5) always have a value.
-        TypeId tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
-        bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
+        TypeId tid = resolved_param_types[pi];
 
-        // Phase 2: For untyped params, infer type from usage context in function body
-        if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
-            AstNode* fn_as_node = (AstNode*)fn_node;
-            bool is_proc_fn = (fn_as_node->node_type == AST_NODE_PROC);
-            TypeId inferred = infer_param_type(fn_node->body, pname, (int)param->name->len, is_proc_fn);
-            if (inferred != LMD_TYPE_ANY) {
-                log_debug("mir: param '%s' inferred type_id=%d from body usage", pname, inferred);
-                tid = inferred;
-            }
-        }
+        log_debug("mir: param '%s' type_id=%d has_annotation=%d native=%d", pname, tid,
+            param->type ? param->type->type_id : -1, generate_native);
 
-        log_debug("mir: param '%s' type_id=%d has_annotation=%d", pname, tid,
-            param->type ? param->type->type_id : -1);
-        if (!may_be_null && (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
-            tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT64)) {
+        if (generate_native && mir_is_native_param_type(tid)) {
+            // Phase 4 native version: param arrives as native type, no unboxing needed.
+            // Register directly with the native MIR type.
+            MIR_type_t mtype = type_to_mir(tid);
+            set_var(mt, pname, preg, mtype, tid);
+            log_debug("mir: native param '%s' registered directly, mir_type=%d", pname, mtype);
+        } else if (!generate_native && mir_is_native_param_type(tid)) {
+            // Boxed version: params arrive as boxed Items, unbox to native type
             MIR_reg_t unboxed = emit_unbox(mt, preg, tid);
             MIR_type_t mtype = type_to_mir(tid);
             set_var(mt, pname, unboxed, mtype, tid);
@@ -7073,7 +7863,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
 
         pi++;
-        tp_iter = tp_iter ? tp_iter->next : NULL;
         param = (AstNamedNode*)param->next;
     }
 
@@ -7179,8 +7968,12 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_name_ptr));
 
         // Emit a ret after overflow call (unreachable but needed for MIR validation)
-        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        if (ret_type == MIR_T_D) {
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
+        } else {
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        }
 
         // Continue label for normal execution
         emit_insn(mt, ok_label);
@@ -7189,10 +7982,29 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         mt->in_tail_position = true;
     }
 
-    // Transpile body - use transpile_box_item to ensure result is boxed Item
-    MIR_reg_t body_result = transpile_box_item(mt, fn_node->body);
+    // Transpile body
+    MIR_reg_t body_result;
+    if (native_return) {
+        // P4-3.3: Native return — produce unboxed native value
+        NativeFuncInfo* nfi_body = find_native_func_info(mt, name_buf->str);
+        body_result = transpile_expr(mt, fn_node->body);
+        TypeId body_tid = get_effective_type(mt, fn_node->body);
+        if (body_tid != nfi_body->return_type) {
+            if (body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL) {
+                // Body returned boxed Item, unbox to native
+                body_result = emit_unbox(mt, body_result, nfi_body->return_type);
+            } else {
+                // Different native type — box then unbox
+                MIR_reg_t boxed = emit_box(mt, body_result, body_tid);
+                body_result = emit_unbox(mt, boxed, nfi_body->return_type);
+            }
+        }
+    } else {
+        // Standard: box result to Item
+        body_result = transpile_box_item(mt, fn_node->body);
+    }
 
-    // Return boxed result
+    // Return result
     // Always emit the trailing ret — MIR needs a ret on every code path.
     // For TCO functions, this serves as the non-tail-call exit path.
     // For functions where body already returned, it's dead code (MIR removes it).
@@ -7201,6 +8013,16 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     pop_scope(mt);
 
     MIR_finish_func(mt->ctx);
+
+    // Phase 4: Generate boxed wrapper (_b) for native functions
+    // This must happen after MIR_finish_func but before restoring outer context,
+    // because emit_native_boxed_wrapper creates a new MIR function.
+    if (generate_native) {
+        NativeFuncInfo* nfi = find_native_func_info(mt, name_buf->str);
+        if (nfi) {
+            emit_native_boxed_wrapper(mt, name_buf->str, fn_node, nfi);
+        }
+    }
 
     // Restore function context
     mt->current_func_item = saved_func_item;
@@ -7248,6 +8070,71 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     (int)fn_node->name->len, fn_node->name->chars);
                 if (!find_local_func(mt, raw_name)) {
                     register_local_func(mt, raw_name, fwd);
+                }
+            }
+
+            // Phase 4: Forward-declare the boxed wrapper (_b) for functions that
+            // will generate dual versions. Also pre-register NativeFuncInfo so that
+            // call sites in other functions can use the native calling convention
+            // even when the target function hasn't been transpiled yet.
+            {
+                bool is_closure = (fn_node->captures != nullptr);
+                bool is_method = false; // in prepass, method_owner is not set
+                AstNode* fn_as = (AstNode*)fn_node;
+                TypeFunc* ft = (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC)
+                    ? (TypeFunc*)fn_as->type : NULL;
+                bool is_variadic = ft && ft->is_variadic;
+                if (!is_closure && !is_variadic && !is_method) {
+                    // Resolve all param types (matching transpile_func_def logic)
+                    TypeId fwd_param_types[16];
+                    int fwd_param_count = 0;
+                    bool has_native = false;
+                    bool is_proc = (fn_as->node_type == AST_NODE_PROC);
+                    {
+                        TypeParam* tp = ft ? ft->param : NULL;
+                        AstNamedNode* p = fn_node->param;
+                        while (p && fwd_param_count < 16) {
+                            TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
+                            bool may_be_null = tp && tp->is_optional && !tp->default_value;
+                            if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
+                                TypeId inferred = infer_param_type(fn_node->body,
+                                    p->name->chars, (int)p->name->len, is_proc);
+                                if (inferred != LMD_TYPE_ANY) tid = inferred;
+                            }
+                            if (may_be_null) tid = LMD_TYPE_ANY;
+                            fwd_param_types[fwd_param_count] = tid;
+                            if (mir_is_native_param_type(tid)) has_native = true;
+                            fwd_param_count++;
+                            tp = tp ? tp->next : NULL;
+                            p = (AstNamedNode*)p->next;
+                        }
+                    }
+                    if (has_native) {
+                        // Forward-declare the _b wrapper
+                        StrBuf* wrapper_buf = strbuf_new_cap(64);
+                        write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
+                        MIR_item_t fwd_b = MIR_new_forward(mt->ctx, wrapper_buf->str);
+                        register_local_func(mt, wrapper_buf->str, fwd_b);
+                        log_debug("mir: forward-declared boxed wrapper '%s'", wrapper_buf->str);
+                        strbuf_free(wrapper_buf);
+
+                        // Pre-register NativeFuncInfo so call sites can use native ABI
+                        NativeFuncInfo nfi;
+                        memset(&nfi, 0, sizeof(nfi));
+                        nfi.param_count = fwd_param_count;
+                        nfi.has_native = true;
+                        for (int i = 0; i < fwd_param_count; i++) {
+                            nfi.param_types[i] = fwd_param_types[i];
+                            nfi.param_mir[i] = type_to_mir(fwd_param_types[i]);
+                        }
+                        // P4-3.3: Infer return type
+                        TypeId fwd_ret_tid = infer_return_type(fn_node);
+                        nfi.return_type = fwd_ret_tid;
+                        nfi.return_mir = (fwd_ret_tid != LMD_TYPE_ANY) ? type_to_mir(fwd_ret_tid) : MIR_T_I64;
+                        register_native_func_info(mt, name_buf->str, &nfi);
+                        log_debug("mir: pre-registered NativeFuncInfo for '%s', return=%d",
+                            name_buf->str, fwd_ret_tid);
+                    }
                 }
             }
 
