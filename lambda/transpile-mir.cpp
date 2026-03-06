@@ -3656,8 +3656,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     int type_index = ((TypeMap*)map_node->type)->type_index;
 
-    // Create map: Map* m = map(type_index)
-    MIR_reg_t m = emit_call_1(mt, "map", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
+    // Create map with inline data: Map* m = map_with_data(type_index)
+    MIR_reg_t m = emit_call_1(mt, "map_with_data", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
 
     // Count value items
     AstNode* item = map_node->item;
@@ -6090,8 +6090,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         TypeObject* obj_type = (TypeObject*)obj_lit->type;
         int type_index = obj_type->type_index;
 
-        // create object: Object* o = object(type_index)
-        MIR_reg_t o = emit_call_1(mt, "object", MIR_T_P, MIR_T_I64,
+        // create object with inline data: Object* o = object_with_data(type_index)
+        MIR_reg_t o = emit_call_1(mt, "object_with_data", MIR_T_P, MIR_T_I64,
             MIR_new_int_op(mt->ctx, type_index));
 
         // count and evaluate field values
