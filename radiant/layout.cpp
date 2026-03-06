@@ -941,9 +941,14 @@ void line_align(LayoutContext* lycon) {
     }
 
     if (text_align != CSS_VALUE_LEFT) {
+        // Compute line metrics early — needed for shrink-to-fit overflow check
+        float line_width = lycon->line.advance_x - lycon->line.left;
+        // CSS 2.1 §16.1: RTL text-indent narrows the available width for alignment
+        float available_width = lycon->block.content_width - lycon->line.text_indent_offset;
+
         // Skip centering/right alignment only when laying out content INSIDE an inline-block
-        // with shrink-to-fit width. In that case, the inline-block's width will shrink to fit
-        // its content, so centering/right alignment would have no effect.
+        // with shrink-to-fit width AND content fits. When content overflows (e.g., due to
+        // max-width constraint), alignment still matters for overflow direction.
         //
         // Important: Check the CONTAINER (establishing_element), not the current view.
         // We want to center inline-blocks ON a line, just not content INSIDE a shrink-to-fit inline-block.
@@ -951,7 +956,7 @@ void line_align(LayoutContext* lycon) {
         bool container_is_shrink_inline_block = container &&
             container->view_type == RDT_VIEW_INLINE_BLOCK &&
             lycon->block.given_width < 0;
-        if (container_is_shrink_inline_block &&
+        if (container_is_shrink_inline_block && line_width <= available_width &&
             (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT)) {
             log_debug("line_align: skipping center/right align for content inside shrink-to-fit inline-block");
             return;
@@ -988,18 +993,22 @@ void line_align(LayoutContext* lycon) {
             return;
         }
 
-        float line_width = lycon->line.advance_x - lycon->line.left;
         float offset = 0;
 
         if (text_align == CSS_VALUE_CENTER) {
-            offset = (lycon->block.content_width - line_width) / 2;
+            offset = (available_width - line_width) / 2;
         }
         else if (text_align == CSS_VALUE_RIGHT) {
-            offset = lycon->block.content_width - line_width;
+            offset = available_width - line_width;
         }
 
         // For center/right alignment
-        if (offset > 0 && (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT)) {
+        // CSS 2.1 §16.2 + CSS3 Text §7.1 overflow alignment:
+        // When content overflows (offset < 0), fall back to start alignment.
+        // For RTL: start = right, so negative offset correctly right-aligns text (overflows left).
+        // For LTR: start = left, so negative offset is clamped to 0 (text stays at left edge).
+        if ((text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) &&
+            (offset > 0 || (is_rtl && offset < 0))) {
             // For wrapped text continuation lines, only align the current line's TextRect
             if (is_wrapped_continuation) {
                 ViewText* text = (ViewText*)view;
@@ -1028,7 +1037,7 @@ void line_align(LayoutContext* lycon) {
                 if (lycon->line.is_last_line) {
                     // Last line: fall back to start alignment (left for LTR, right for RTL)
                     if (is_rtl) {
-                        float offset = lycon->block.content_width - line_width;
+                        float offset = available_width - line_width;
                         if (offset > 0) {
                             view_line_align(lycon, offset, view);
                         }
@@ -1058,7 +1067,7 @@ void line_align(LayoutContext* lycon) {
                             }
                         }
 
-                        float extra_width = lycon->block.content_width - line_width;
+                        float extra_width = available_width - line_width;
 
                         if (num_spaces > 0 && extra_width > 0) {
                             // Expand the width of this specific TextRect to fill the line
@@ -1070,7 +1079,7 @@ void line_align(LayoutContext* lycon) {
                 else {
                     // Multi-view line: distribute space across all text views
                     int num_spaces = count_spaces_in_view(view);
-                    float extra_width = lycon->block.content_width - line_width;
+                    float extra_width = available_width - line_width;
                     if (num_spaces > 0 && extra_width > 0) {
                         float space_per_gap = extra_width / num_spaces;
                         view_line_justify(lycon, space_per_gap, view);

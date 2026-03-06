@@ -4116,7 +4116,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 
     TypeMap* map_type = (TypeMap*)map_node->type;
 
-    strbuf_append_str(tp->code_buf, "({Map* m = map(");
+    strbuf_append_str(tp->code_buf, "({Map* m = map_with_data(");
     strbuf_append_int(tp->code_buf, map_type->type_index);
     strbuf_append_str(tp->code_buf, ");");
     AstNode *item = map_node->item;
@@ -4138,12 +4138,10 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
         if (can_direct) {
             // Two-phase construction to avoid GC stale-pointer bug:
             // Phase 1: Evaluate ALL field value expressions into temp variables.
-            //   During evaluation, GC may fire and compact m->data from nursery
-            //   to tenured. If we read m->data BEFORE evaluating, we'd get a stale
-            //   pointer to freed nursery memory.
-            // Phase 2: Read m->data (now stable) and write all temps at byte offsets.
-            strbuf_append_format(tp->code_buf,
-                "\n m->data=heap_data_calloc(%lld);", (long long)map_type->byte_size);
+            //   During evaluation, GC may fire and move other objects.
+            //   With map_with_data, m->data is inline (part of the same object-zone
+            //   allocation), so it is stable and never compacted separately.
+            // Phase 2: Read m->data and write all temps at byte offsets.
 
             // Phase 1: evaluate each field value into a temp variable _tf0, _tf1, ...
             ShapeEntry* se = map_type->shape;
@@ -4255,8 +4253,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                 se = se->next;
                 item = item->next;
             }
-            strbuf_append_format(tp->code_buf,
-                "\n m->data_cap=%lld;", (long long)map_type->byte_size);
+            // data_cap already set by map_with_data
             strbuf_append_str(tp->code_buf, " m;");
         } else {
             // fall back to map_fill for untyped/anonymous maps
@@ -4299,7 +4296,7 @@ void transpile_object_expr(Transpiler* tp, AstObjectLiteralNode *obj_node) {
     }
 
     TypeObject* obj_type = (TypeObject*)obj_node->type;
-    strbuf_append_str(tp->code_buf, "({Object* obj = object(");
+    strbuf_append_str(tp->code_buf, "({Object* obj = object_with_data(");
     strbuf_append_int(tp->code_buf, obj_type->type_index);
     strbuf_append_str(tp->code_buf, ");");
 
@@ -6647,17 +6644,21 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         strbuf_append_str(tp->code_buf, "void _init_mod_types(void* tl) { _mod_type_list = tl; }\n");
         // Define wrapper functions that swap rt->type_list to module's before calling real functions
         strbuf_append_str(tp->code_buf, "static Map* _mod_map(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Map* r=map(ti); rt->type_list=sv; return r; }\n");
+        strbuf_append_str(tp->code_buf, "static Map* _mod_map_with_data(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Map* r=map_with_data(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static Element* _mod_elmt(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Element* r=elmt(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static Type* _mod_const_type(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Type* r=const_type(ti); rt->type_list=sv; return r; }\n");
         strbuf_append_str(tp->code_buf, "static TypePattern* _mod_const_pattern(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; TypePattern* r=const_pattern(ti); rt->type_list=sv; return r; }\n");
         // Wrappers for object type method/constraint registration (must use module's type_list)
         strbuf_append_str(tp->code_buf, "static void _mod_object_type_set_method(int64_t ti,const char* n,fn_ptr fp,int64_t a,int64_t p) { void* sv=rt->type_list; rt->type_list=_mod_type_list; object_type_set_method(ti,n,fp,a,p); rt->type_list=sv; }\n");
         strbuf_append_str(tp->code_buf, "static void _mod_object_type_set_constraint(int64_t ti,fn_ptr fp) { void* sv=rt->type_list; rt->type_list=_mod_type_list; object_type_set_constraint(ti,fp); rt->type_list=sv; }\n");
+        strbuf_append_str(tp->code_buf, "static Object* _mod_object_with_data(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Object* r=object_with_data(ti); rt->type_list=sv; return r; }\n");
         // Redirect calls to use module-local wrappers
         strbuf_append_str(tp->code_buf, "#define map(idx) _mod_map(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define map_with_data(idx) _mod_map_with_data(idx)\n");
         strbuf_append_str(tp->code_buf, "#define elmt(idx) _mod_elmt(idx)\n");
         strbuf_append_str(tp->code_buf, "#define const_type(idx) _mod_const_type(idx)\n");
         strbuf_append_str(tp->code_buf, "#define const_pattern(idx) _mod_const_pattern(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define object_with_data(idx) _mod_object_with_data(idx)\n");
         strbuf_append_str(tp->code_buf, "#define object_type_set_method(ti,n,fp,a,p) _mod_object_type_set_method(ti,n,fp,a,p)\n");
         strbuf_append_str(tp->code_buf, "#define object_type_set_constraint(ti,fp) _mod_object_type_set_constraint(ti,fp)\n");
     }
