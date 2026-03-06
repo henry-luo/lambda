@@ -426,6 +426,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.parent_font_handle = lycon->font.font_handle;
     lycon->line.last_text_rect = NULL;
     lycon->line.trailing_space_width = 0;
+    lycon->line.committed_trailing_rect = NULL;
+    lycon->line.committed_trailing_space = 0;
     lycon->line.hanging_space_width = 0;
     lycon->line.last_space_hanging_width = 0;
     lycon->line.is_last_line = false;
@@ -489,6 +491,19 @@ void line_break(LayoutContext* lycon) {
         lycon->line.last_text_rect->width -= lycon->line.trailing_space_width;
         lycon->line.advance_x -= lycon->line.trailing_space_width;
         lycon->line.trailing_space_width = 0;
+        lycon->line.committed_trailing_rect = NULL;
+        lycon->line.committed_trailing_space = 0;
+    }
+    // CSS 2.1 §16.6.1: Cross-node trailing space trimming. When a text rect
+    // with trailing space was output, then subsequent inline content was processed
+    // (clearing the live trailing_space_width), and finally a line break occurs
+    // with the trailing-space rect still being the last text on the line,
+    // trim it using the committed trailing space info.
+    else if (lycon->line.committed_trailing_space > 0 && lycon->line.committed_trailing_rect) {
+        lycon->line.committed_trailing_rect->width -= lycon->line.committed_trailing_space;
+        lycon->line.advance_x -= lycon->line.committed_trailing_space;
+        lycon->line.committed_trailing_rect = NULL;
+        lycon->line.committed_trailing_space = 0;
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
 
@@ -764,6 +779,17 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     lycon->line.advance_x += text_width;
+    // CSS 2.1 §16.6.1: Commit trailing space info for cross-node line break trimming.
+    // When new text content is output, the previous trailing space is no longer at
+    // the end of the line — clear it. Then save any trailing space from this rect.
+    if (lycon->line.trailing_space_width > 0) {
+        lycon->line.committed_trailing_rect = rect;
+        lycon->line.committed_trailing_space = lycon->line.trailing_space_width;
+    } else if (lycon->line.committed_trailing_rect != rect) {
+        // New text content with no trailing space clears the committed info
+        lycon->line.committed_trailing_rect = NULL;
+        lycon->line.committed_trailing_space = 0;
+    }
     lycon->line.last_text_rect = rect;  // track for trailing whitespace trimming
     // CSS 2.1 §8.3: Inline content has been placed on this line, so any pending
     // inline left edges (margin+border+padding) have been consumed.
