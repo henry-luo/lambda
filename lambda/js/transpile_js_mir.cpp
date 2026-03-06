@@ -1837,8 +1837,10 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
         if (resolved_fn) {
             JsFuncCollected* fc = jm_find_collected_func(mt, resolved_fn);
-            if (fc && fc->func_item) {
-                // Direct call to local function
+            if (fc && fc->func_item && fc->capture_count == 0) {
+                // Direct call to local function (only for non-closures;
+                // closures need env from the JsFunction wrapper, so they
+                // go through js_call_function which handles env passing)
                 int param_count = jm_count_params(resolved_fn);
 
                 // Build proto for this call site
@@ -2419,6 +2421,81 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
                 }
                 jm_set_var(mt, vname, reg);
+            } else if (d->id && d->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                // array destructuring: const [a, b, ...rest] = expr
+                JsArrayPatternNode* pattern = (JsArrayPatternNode*)d->id;
+                MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
+                int idx = 0;
+                JsAstNode* elem = pattern->elements;
+                while (elem) {
+                    if (elem->node_type == JS_AST_NODE_IDENTIFIER) {
+                        // simple: a = src[idx]
+                        JsIdentifierNode* id = (JsIdentifierNode*)elem;
+                        char vname[128];
+                        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
+                        MIR_reg_t key = jm_box_int_const(mt, idx);
+                        MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, reg),
+                            MIR_new_reg_op(mt->ctx, val)));
+                        jm_set_var(mt, vname, reg);
+                    } else if (elem->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                        // rest: ...rest = src.slice(idx)
+                        JsSpreadElementNode* spread = (JsSpreadElementNode*)elem;
+                        if (spread->argument && spread->argument->node_type == JS_AST_NODE_IDENTIFIER) {
+                            JsIdentifierNode* id = (JsIdentifierNode*)spread->argument;
+                            char vname[128];
+                            snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                            MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
+                            MIR_reg_t start = jm_box_int_const(mt, idx);
+                            MIR_reg_t val = jm_call_2(mt, "js_array_slice_from", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, start));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, reg),
+                                MIR_new_reg_op(mt->ctx, val)));
+                            jm_set_var(mt, vname, reg);
+                        }
+                    } else if (elem->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                        // default: a = defaultVal -> a = src[idx], if null/undef use default
+                        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)elem;
+                        if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                            JsIdentifierNode* id = (JsIdentifierNode*)ap->left;
+                            char vname[128];
+                            snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                            MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
+                            MIR_reg_t key = jm_box_int_const(mt, idx);
+                            MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                            // check if null/undefined, use default
+                            MIR_label_t l_has_val = jm_new_label(mt);
+                            MIR_reg_t cmp = jm_new_reg(mt, "destr_cmp", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, reg),
+                                MIR_new_reg_op(mt->ctx, val)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NES,
+                                MIR_new_reg_op(mt->ctx, cmp),
+                                MIR_new_reg_op(mt->ctx, val),
+                                MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, l_has_val),
+                                MIR_new_reg_op(mt->ctx, cmp)));
+                            // null/undefined -> use default
+                            MIR_reg_t def_val = jm_transpile_box_item(mt, ap->right);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, reg),
+                                MIR_new_reg_op(mt->ctx, def_val)));
+                            jm_emit_label(mt, l_has_val);
+                            jm_set_var(mt, vname, reg);
+                        }
+                    }
+                    elem = elem->next;
+                    idx++;
+                }
             }
         }
         decl = decl->next;
@@ -2679,7 +2756,7 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     MIR_reg_t callee;
     if (resolved_fn) {
         JsFuncCollected* fc = jm_find_collected_func(mt, resolved_fn);
-        if (fc && fc->func_item) {
+        if (fc && fc->func_item && fc->capture_count == 0) {
             int pc = jm_count_params(resolved_fn);
             callee = jm_call_2(mt, "js_new_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
@@ -2815,9 +2892,11 @@ static void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_push_scope(mt);
 
-    // Get loop variable name
+    // Check if the loop variable is a destructuring pattern
+    JsArrayPatternNode* destr_pattern = NULL;
     const char* var_name = NULL;
     int var_len = 0;
+
     if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
         JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
         if (decl->declarations && decl->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
@@ -2826,27 +2905,65 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 JsIdentifierNode* id = (JsIdentifierNode*)d->id;
                 var_name = id->name->chars;
                 var_len = (int)id->name->len;
+            } else if (d->id && d->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                destr_pattern = (JsArrayPatternNode*)d->id;
             }
         }
     } else if (fo->left && fo->left->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)fo->left;
         var_name = id->name->chars;
         var_len = (int)id->name->len;
+    } else if (fo->left && fo->left->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+        // for (const [a, b] of arr) — left is array_pattern directly
+        destr_pattern = (JsArrayPatternNode*)fo->left;
     }
 
-    if (!var_name) {
+    if (!var_name && !destr_pattern) {
         log_error("js-mir: for-of/for-in missing loop variable");
         jm_pop_scope(mt);
         return;
     }
 
-    // Create loop variable
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
-    MIR_reg_t loop_var = jm_new_reg(mt, vname, MIR_T_I64);
-    jm_set_var(mt, vname, loop_var);
+    // Create loop variable (for simple case) or temp var (for destructuring)
+    MIR_reg_t loop_var;
+    if (var_name) {
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
+        loop_var = jm_new_reg(mt, vname, MIR_T_I64);
+        jm_set_var(mt, vname, loop_var);
+    } else {
+        loop_var = jm_new_reg(mt, "_destr_elem", MIR_T_I64);
+    }
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, loop_var),
         MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
+
+    // Pre-create destructuring variable registers
+    if (destr_pattern) {
+        JsAstNode* pe = destr_pattern->elements;
+        while (pe) {
+            if (pe->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* pid = (JsIdentifierNode*)pe;
+                char pvname[128];
+                snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
+                jm_set_var(mt, pvname, preg);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
+                    MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
+            } else if (pe->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                JsSpreadElementNode* sp = (JsSpreadElementNode*)pe;
+                if (sp->argument && sp->argument->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* pid = (JsIdentifierNode*)sp->argument;
+                    char pvname[128];
+                    snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                    MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
+                    jm_set_var(mt, pvname, preg);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
+                        MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
+                }
+            }
+            pe = pe->next;
+        }
+    }
 
     // Evaluate right-hand side (the iterable)
     MIR_reg_t iterable = jm_transpile_box_item(mt, fo->right);
@@ -2893,6 +3010,48 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, elem)));
+
+    // Destructure element into individual variables if array pattern
+    if (destr_pattern) {
+        int di = 0;
+        JsAstNode* pe = destr_pattern->elements;
+        while (pe) {
+            if (pe->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* pid = (JsIdentifierNode*)pe;
+                char pvname[128];
+                snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                JsMirVarEntry* pvar = jm_find_var(mt, pvname);
+                if (pvar) {
+                    MIR_reg_t dkey = jm_box_int_const(mt, di);
+                    MIR_reg_t dval = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, dkey));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, pvar->reg),
+                        MIR_new_reg_op(mt->ctx, dval)));
+                }
+            } else if (pe->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                JsSpreadElementNode* sp = (JsSpreadElementNode*)pe;
+                if (sp->argument && sp->argument->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* pid = (JsIdentifierNode*)sp->argument;
+                    char pvname[128];
+                    snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                    JsMirVarEntry* pvar = jm_find_var(mt, pvname);
+                    if (pvar) {
+                        MIR_reg_t dstart = jm_box_int_const(mt, di);
+                        MIR_reg_t dval = jm_call_2(mt, "js_array_slice_from", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, dstart));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, pvar->reg),
+                            MIR_new_reg_op(mt->ctx, dval)));
+                    }
+                }
+            }
+            pe = pe->next;
+            di++;
+        }
+    }
 
     // Body
     if (fo->body) {
