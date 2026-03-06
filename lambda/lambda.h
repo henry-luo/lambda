@@ -140,6 +140,172 @@ typedef uint8_t Bool;
 
 #define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
 
+// System function identifiers (moved from lambda-data.hpp for C compatibility)
+typedef enum SysFunc {
+    SYSFUNC_LEN,
+    SYSFUNC_TYPE,
+    SYSFUNC_NAME,       // name(item) - get local name of element, function, or type
+    SYSFUNC_INT,
+    SYSFUNC_INT64,
+    SYSFUNC_FLOAT,
+    SYSFUNC_DECIMAL,
+    SYSFUNC_NUMBER,
+    SYSFUNC_STRING,
+    //SYSFUNC_CHAR,
+    SYSFUNC_SYMBOL,
+    SYSFUNC_SYMBOL2,    // symbol(name, url) - 2 args, create namespaced symbol
+    SYSFUNC_BINARY,
+    SYSFUNC_DATETIME,
+    SYSFUNC_DATETIME0,  // datetime() - 0 args, current datetime
+    SYSFUNC_DATE,
+    SYSFUNC_DATE0,      // date() - 0 args, current date
+    SYSFUNC_DATE3,      // date(y,m,d) - 3 args, construct from components
+    SYSFUNC_TIME,
+    SYSFUNC_TIME0,      // time() - 0 args, current time
+    SYSFUNC_TIME3,      // time(h,m,s) - 3 args, construct from components
+    SYSFUNC_JUSTNOW,
+    SYSFUNC_SET,
+    SYSFUNC_SLICE,
+    SYSFUNC_ALL,
+    SYSFUNC_ANY,
+    SYSFUNC_MIN1,
+    SYSFUNC_MIN2,
+    SYSFUNC_MAX1,
+    SYSFUNC_MAX2,
+    SYSFUNC_SUM,
+    SYSFUNC_AVG,
+    SYSFUNC_ABS,
+    SYSFUNC_ROUND,
+    SYSFUNC_FLOOR,
+    SYSFUNC_CEIL,
+    SYSFUNC_INPUT1,
+    SYSFUNC_INPUT2,
+    SYSFUNC_FORMAT1,
+    SYSFUNC_FORMAT2,
+    SYSFUNC_ERROR,
+    SYSFUNC_EXISTS,         // exists(path) - check if file/dir exists
+    SYSFUNC_NORMALIZE,
+    SYSFUNC_NORMALIZE2,     // normalize(str, form) with 2 args
+    // string functions
+    SYSFUNC_CONTAINS,
+    SYSFUNC_STARTS_WITH,
+    SYSFUNC_ENDS_WITH,
+    SYSFUNC_INDEX_OF,
+    SYSFUNC_LAST_INDEX_OF,
+    SYSFUNC_TRIM,
+    SYSFUNC_TRIM_START,
+    SYSFUNC_TRIM_END,
+    SYSFUNC_LOWER,
+    SYSFUNC_UPPER,
+    SYSFUNC_URL_RESOLVE,
+    SYSFUNC_SPLIT,
+    SYSFUNC_SPLIT3,         // split(str, sep, keep_delim) with 3 args
+    SYSFUNC_JOIN,           // join(strs, sep) for strings
+    SYSFUNC_REPLACE,
+    SYSFUNC_FIND,           // find(str, pattern) - find all matches
+    SYSFUNC_FIND3,          // find(str, pattern, options) - with options
+    SYSFUNC_CHARS,          // chars(str) - decompose string into array of characters
+    SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
+    SYSFUNC_CHR,            // chr(int) - character from Unicode code point
+    // vector functions
+    SYSFUNC_PROD,
+    SYSFUNC_CUMSUM,
+    SYSFUNC_CUMPROD,
+    SYSFUNC_ARGMIN,
+    SYSFUNC_ARGMAX,
+    SYSFUNC_FILL,
+    SYSFUNC_DOT,
+    SYSFUNC_NORM,
+    // statistical functions
+    SYSFUNC_MEAN,
+    SYSFUNC_MEDIAN,
+    SYSFUNC_VARIANCE,
+    SYSFUNC_DEVIATION,
+    // element-wise math functions
+    SYSFUNC_SQRT,
+    SYSFUNC_LOG,
+    SYSFUNC_LOG10,
+    SYSFUNC_EXP,
+    SYSFUNC_SIN,
+    SYSFUNC_COS,
+    SYSFUNC_TAN,
+    // inverse trigonometric
+    SYSFUNC_ASIN,
+    SYSFUNC_ACOS,
+    SYSFUNC_ATAN,
+    SYSFUNC_ATAN2,
+    // hyperbolic
+    SYSFUNC_SINH,
+    SYSFUNC_COSH,
+    SYSFUNC_TANH,
+    // inverse hyperbolic
+    SYSFUNC_ASINH,
+    SYSFUNC_ACOSH,
+    SYSFUNC_ATANH,
+    // exponential/logarithmic variants
+    SYSFUNC_EXP2,
+    SYSFUNC_EXPM1,
+    SYSFUNC_LOG2,
+    // power/root
+    SYSFUNC_POW_MATH,
+    SYSFUNC_CBRT,
+    SYSFUNC_TRUNC,
+    SYSFUNC_HYPOT,
+    SYSFUNC_LOG1P,
+    SYSFUNC_SIGN,
+    // vector manipulation functions
+    SYSFUNC_REVERSE,
+    SYSFUNC_SORT,
+    SYSFUNC_SORT2,
+    SYSFUNC_UNIQUE,
+    SYSFUNC_CONCAT,
+    SYSFUNC_TAKE,
+    SYSFUNC_DROP,
+    SYSFUNC_ZIP,
+    SYSFUNC_RANGE3,
+    SYSFUNC_QUANTILE,
+    SYSFUNC_REDUCE,         // reduce(collection, fn) - fold/accumulate
+    // parse string functions
+    SYSFUNC_PARSE1,         // parse(str) - parse string, auto-detect format
+    SYSFUNC_PARSE2,         // parse(str, format) - parse string with format
+    // variadic parameter access
+    SYSFUNC_VARG0,          // varg() - get all variadic args as list
+    SYSFUNC_VARG1,          // varg(n) - get nth variadic arg
+    // bitwise functions
+    SYSFUNC_BAND,
+    SYSFUNC_BOR,
+    SYSFUNC_BXOR,
+    SYSFUNC_BNOT,
+    SYSFUNC_SHL,
+    SYSFUNC_SHR,
+    // procedural functions
+    SYSPROC_NOW,
+    SYSPROC_TODAY,
+    SYSPROC_PRINT,
+    SYSPROC_FETCH,
+    SYSPROC_OUTPUT2,         // output(source, target) - writes data to target, returns bytes
+    SYSPROC_OUTPUT3,         // output(source, target, options) - with options map
+    SYSPROC_CMD,
+    SYSPROC_CMD1,            // cmd(command) - no args version
+    // io module functions (unified I/O - supports local and remote targets)
+    SYSPROC_IO_COPY,
+    SYSPROC_IO_MOVE,
+    SYSPROC_IO_DELETE,
+    SYSPROC_IO_MKDIR,
+    SYSPROC_IO_TOUCH,
+    SYSPROC_IO_SYMLINK,
+    SYSPROC_IO_CHMOD,
+    SYSPROC_IO_RENAME,
+    SYSPROC_IO_FETCH,        // io.fetch(target, options) - fetch data from URL or file
+    // vmap functions
+    SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
+    SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
+    SYSPROC_CLOCK,           // clock() - high-resolution monotonic time in seconds (float)
+    // file-based find/replace (procedural)
+    SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
+    SYSPROC_REPLACE_FILE4,   // pn replace(path, pattern, repl, options)
+} SysFunc;
+
 typedef struct Type {
     TypeId type_id;
     uint8_t kind:4;      // TypeKind: sub-classification (SIMPLE, UNARY, BINARY, PATTERN)
