@@ -166,6 +166,8 @@ typedef struct Linebox {
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied
                                       // after line break so the span's first content is indented
+    float text_indent_offset;         // CSS 2.1 §16.1: RTL first-line text-indent amount that
+                                      // narrows the wrap boundary and alignment width from the right
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
 
