@@ -121,4 +121,4 @@ void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 
 // JavaScript transpiler integration
-Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* filename);
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
