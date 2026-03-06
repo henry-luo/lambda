@@ -109,19 +109,20 @@ static bool is_procedural_mode(const char* script_path) {
 }
 
 // Execute a lambda script, capture stdout only (stderr discarded)
+// Uses --c2mir to ensure C2MIR path (these structured tests target C2MIR features)
 static char* execute_script(const char* script_path) {
     char command[512];
     bool procedural = is_procedural_mode(script_path);
 #ifdef _WIN32
     if (procedural)
-        snprintf(command, sizeof(command), "lambda.exe run \"%s\" 2>NUL", script_path);
+        snprintf(command, sizeof(command), "lambda.exe run --c2mir \"%s\" 2>NUL", script_path);
     else
-        snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>NUL", script_path);
+        snprintf(command, sizeof(command), "lambda.exe --c2mir \"%s\" 2>NUL", script_path);
 #else
     if (procedural)
-        snprintf(command, sizeof(command), "./lambda.exe run \"%s\" 2>/dev/null", script_path);
+        snprintf(command, sizeof(command), "./lambda.exe run --c2mir \"%s\" 2>/dev/null", script_path);
     else
-        snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>/dev/null", script_path);
+        snprintf(command, sizeof(command), "./lambda.exe --c2mir \"%s\" 2>/dev/null", script_path);
 #endif
 
     FILE* pipe = popen(command, "r");

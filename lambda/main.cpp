@@ -181,7 +181,7 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 #endif
 
 void run_repl(Runtime *runtime, bool use_mir) {
-    printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
+    printf("Lambda Script REPL v1.0%s\n", use_mir ? "" : " (C2MIR)");
     printf("Type help for commands, quit to exit\n");
     printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
 
@@ -1935,28 +1935,30 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Script Runner v1.0\n\n");
-            printf("Usage: %s run [--mir] <script>\n", argv[0]);
+            printf("Usage: %s run [--c2mir] <script>\n", argv[0]);
             printf("\nOptions:\n");
-            printf("  --mir          Use MIR JIT compilation (default: tree-walking interpreter)\n");
+            printf("  --c2mir        Use C2MIR JIT compilation (default: MIR Direct)\n");
             printf("  -h, --help     Show this help message\n");
             printf("\nDescription:\n");
             printf("  The 'run' command executes a Lambda script with run_main context enabled.\n");
             printf("  This means that if the script defines a main function, it will be\n");
             printf("  automatically executed during script execution.\n");
             printf("\nExamples:\n");
-            printf("  %s run script.ls                 # Run script with tree-walking interpreter\n", argv[0]);
-            printf("  %s run --mir script.ls           # Run script with MIR JIT compilation\n", argv[0]);
+            printf("  %s run script.ls                 # Run script with MIR Direct JIT (default)\n", argv[0]);
+            printf("  %s run --c2mir script.ls         # Run script with C2MIR JIT compilation\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
         }
 
         // Parse run command arguments
-        bool use_mir = false;
+        bool use_mir = true;  // MIR Direct is default
         char* script_file = NULL;
 
         for (int i = 2; i < argc; i++) {
-            if (strcmp(argv[i], "--mir") == 0) {
-                use_mir = true;
+            if (strcmp(argv[i], "--c2mir") == 0) {
+                use_mir = false;
+            } else if (strcmp(argv[i], "--mir") == 0) {
+                use_mir = true;  // backward compat (already default)
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (strcmp(argv[i], "--transpile-dir") == 0) {
@@ -1984,7 +1986,7 @@ int main(int argc, char *argv[]) {
 
         if (!script_file) {
             printf("Error: run command requires a script file\n");
-            printf("Usage: %s run [--mir] <script>\n", argv[0]);
+            printf("Usage: %s run [--c2mir] <script>\n", argv[0]);
             log_finish();
             return 1;
         }
@@ -2006,7 +2008,7 @@ int main(int argc, char *argv[]) {
         return result;
     }
 
-    bool use_mir = false;
+    bool use_mir = true;  // MIR Direct is default
     bool transpile_only = false;
     bool help_only = false;
     char* script_file = NULL;
@@ -2016,8 +2018,11 @@ int main(int argc, char *argv[]) {
     // Parse arguments
     int ret_code = 0;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--mir") == 0) {
-            use_mir = true;
+        if (strcmp(argv[i], "--c2mir") == 0) {
+            use_mir = false;
+        }
+        else if (strcmp(argv[i], "--mir") == 0) {
+            use_mir = true;  // backward compat (already default)
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;

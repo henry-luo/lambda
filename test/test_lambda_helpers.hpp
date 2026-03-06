@@ -112,22 +112,22 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 
 // Helper function to execute a lambda script and capture output
 // is_procedural: if true, uses "./lambda.exe run <script>" for procedural scripts
-// use_mir: if true, adds "--mir" flag for direct MIR transpilation path
+// use_mir: if true, uses MIR Direct (default JIT path); if false, uses C2MIR (--c2mir flag)
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
     char command[512];
-    const char* mir_flag = use_mir ? " --mir" : "";
+    const char* c2mir_flag = use_mir ? "" : " --c2mir";
     const char* no_log_flag = getenv("LAMBDA_NO_LOG") ? " --no-log" : "";
 #ifdef _WIN32
     if (is_procedural) {
-        snprintf(command, sizeof(command), "lambda.exe run%s%s \"%s\"", no_log_flag, mir_flag, script_path);
+        snprintf(command, sizeof(command), "lambda.exe run%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "lambda.exe%s%s \"%s\"", no_log_flag, mir_flag, script_path);
+        snprintf(command, sizeof(command), "lambda.exe%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
     }
 #else
     if (is_procedural) {
-        snprintf(command, sizeof(command), "./lambda.exe run%s%s \"%s\"", no_log_flag, mir_flag, script_path);
+        snprintf(command, sizeof(command), "./lambda.exe run%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "./lambda.exe%s%s \"%s\"", no_log_flag, mir_flag, script_path);
+        snprintf(command, sizeof(command), "./lambda.exe%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
     }
 #endif
 
@@ -369,7 +369,7 @@ inline void strip_timing_lines(char* output) {
 
 // Helper function to test lambda script against expected output file
 inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural, bool use_mir = false) {
-    // Get script name for better error messages
+    // use_mir=false: runs C2MIR path (--c2mir flag), use_mir=true: runs MIR Direct (default)
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
 
