@@ -6544,18 +6544,28 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             int current_row_index = 0;
 
-            // CSS 2.1 §17.5.3: Check if row group has percentage height (computes to auto)
-            // If so, all rows in this group should be treated as having percentage height
+            // CSS 2.1 §17.5.3: Check row group height properties
+            // Percentage heights compute to auto; non-percentage heights act as minimum height
+            // Note: CSS 2.1 says min-height/max-height on row groups is undefined.
+            // Browsers apply 'height' as minimum but ignore min-height/max-height.
             bool group_has_percent_height = false;
+            float explicit_group_height = 0.0f;
             if (child->is_element()) {
                 DomElement* group_elem = child->as_element();
                 if (group_elem->specified_style) {
                     CssDeclaration* height_decl = style_tree_get_declaration(
                         group_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                    if (height_decl && height_decl->value &&
-                        height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        group_has_percent_height = true;
-                        log_debug("Row group has percentage height - all rows compute to auto");
+                    if (height_decl && height_decl->value) {
+                        if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            group_has_percent_height = true;
+                            log_debug("Row group has percentage height - all rows compute to auto");
+                        } else {
+                            float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                            if (resolved > 0) {
+                                explicit_group_height = resolved;
+                                log_debug("Row group has explicit CSS height: %.1fpx", explicit_group_height);
+                            }
+                        }
                     }
                 }
             }
@@ -6710,6 +6720,59 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Don't override x and y - they were set earlier with proper calculations
             // Width already set above based on border-collapse mode
             child->height = (float)(current_y - group_start_y);
+
+            // CSS 2.1 §17.5.3: height on row groups specifies minimum height
+            float content_group_height = child->height;
+            if (explicit_group_height > child->height) {
+                child->height = explicit_group_height;
+                log_debug("Row group expanded to explicit height: %.1fpx (content was %.1fpx)", child->height, content_group_height);
+            }
+
+            // Distribute extra height to rows within the group
+            if (child->height > content_group_height) {
+                float extra = child->height - content_group_height;
+                current_y += (int)extra;
+                log_debug("Advanced current_y by %d for expanded row group", (int)extra);
+
+                // Count eligible rows for distribution
+                int eligible_rows = 0;
+                for (ViewBlock* r = (ViewBlock*)child->first_child; r; r = (ViewBlock*)r->next_sibling) {
+                    if (r->view_type == RDT_VIEW_TABLE_ROW && r->height > 0) eligible_rows++;
+                }
+                if (eligible_rows > 0) {
+                    float extra_per_row = extra / eligible_rows;
+                    float y_accum = 0;
+                    for (ViewBlock* r = (ViewBlock*)child->first_child; r; r = (ViewBlock*)r->next_sibling) {
+                        if (r->view_type == RDT_VIEW_TABLE_ROW && r->height > 0) {
+                            r->y = y_accum;
+                            r->height += extra_per_row;
+                            log_debug("Row expanded to %.1fpx (added %.1fpx)", r->height, extra_per_row);
+
+                            // Update row height in meta
+                            ViewTableRow* trow = (ViewTableRow*)r;
+                            ViewTableCell* first = trow->first_cell();
+                            if (first && first->td->row_index >= 0 && first->td->row_index < meta->row_count) {
+                                meta->row_heights[first->td->row_index] = (int)r->height;
+                            }
+
+                            // Update cells to match new row height
+                            for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                                if (tcell->height < r->height) {
+                                    tcell->height = r->height;
+                                    float cell_content_h = measure_cell_content_height(lycon, tcell);
+                                    apply_cell_vertical_align(tcell, tcell->height, cell_content_h);
+                                }
+                            }
+
+                            y_accum += r->height;
+                            // Add border-spacing between rows
+                            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                                y_accum += table->tb->border_spacing_v;
+                            }
+                        }
+                    }
+                }
+            }
             // printf("DEBUG: Final row group dimensions - x=%.1f, y=%.1f, width=%.1f, height=%.1f\n",
             //        child->x, child->y, child->width, child->height);
         }

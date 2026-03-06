@@ -461,6 +461,10 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
     for (uint32_t i = 0; i < property_count; i++) {
         TSNode property_node = ts_node_named_child(object_node, i);
 
+        // Skip comment nodes inside object literals
+        const char* child_type = ts_node_type(property_node);
+        if (strcmp(child_type, "comment") == 0) continue;
+
         // Build property node
         JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
 
@@ -887,6 +891,15 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return (JsAstNode*)cond;
     } else if (strcmp(node_type, "template_string") == 0 || strcmp(node_type, "template_literal") == 0) {
         return build_js_template_literal(tp, expr_node);
+    } else if (strcmp(node_type, "spread_element") == 0) {
+        JsSpreadElementNode* spread = (JsSpreadElementNode*)alloc_js_ast_node(
+            tp, JS_AST_NODE_SPREAD_ELEMENT, expr_node, sizeof(JsSpreadElementNode));
+        TSNode arg_node = ts_node_named_child(expr_node, 0);
+        if (!ts_node_is_null(arg_node)) {
+            spread->argument = build_js_expression(tp, arg_node);
+        }
+        spread->base.type = &TYPE_ARRAY;
+        return (JsAstNode*)spread;
     } else {
         // Handle nodes that return numeric symbol IDs instead of type names
         TSSymbol symbol = ts_node_symbol(expr_node);
@@ -1228,8 +1241,14 @@ JsAstNode* build_js_do_while_statement(JsTranspiler* tp, TSNode do_node) {
 
 // v5: Build JavaScript for...in statement node (also handles for...of)
 JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
-    const char* node_type = ts_node_type(for_node);
-    bool is_for_of = (strcmp(node_type, "for_in_statement") != 0);
+    // Tree-sitter uses "for_in_statement" for both for-in and for-of.
+    // The "operator" field distinguishes them: "in" vs "of"
+    bool is_for_of = false;
+    TSNode op_node = ts_node_child_by_field_name(for_node, "operator", strlen("operator"));
+    if (!ts_node_is_null(op_node)) {
+        const char* op_text = ts_node_type(op_node);
+        is_for_of = (strcmp(op_text, "of") == 0);
+    }
 
     JsForOfNode* for_of = (JsForOfNode*)alloc_js_ast_node(
         tp, is_for_of ? JS_AST_NODE_FOR_OF_STATEMENT : JS_AST_NODE_FOR_IN_STATEMENT,
@@ -1404,11 +1423,9 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
         method->key = build_js_expression(tp, key_node);
     }
 
-    // Get method value (function)
-    TSNode value_node = ts_node_child_by_field_name(method_node, "value", strlen("value"));
-    if (!ts_node_is_null(value_node)) {
-        method->value = build_js_function(tp, value_node);
-    }
+    // Get method value (function) - method_definition has parameters and body directly
+    // so we pass the method node itself to build_js_function
+    method->value = build_js_function(tp, method_node);
 
     // TODO: Parse method modifiers (constructor, getter, setter, static)
 

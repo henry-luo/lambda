@@ -1,0 +1,5 @@
+{
+  "keys": "x,y,z,",
+  "total": 10,
+  "keyCount": 3
+}

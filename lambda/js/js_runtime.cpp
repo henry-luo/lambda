@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_dom.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -19,8 +20,53 @@
 // Initialized in transpile_js_to_mir() before JIT execution.
 static Input* js_input = NULL;
 
+// Global 'this' binding for the current method call
+static Item js_current_this = {0};
+
+// =============================================================================
+// Exception Handling State
+// =============================================================================
+
+static bool js_exception_pending = false;
+static Item js_exception_value = {0};
+
+extern "C" void js_throw_value(Item value) {
+    js_exception_pending = true;
+    js_exception_value = value;
+    log_debug("js: throw_value called, exception pending");
+}
+
+extern "C" int js_check_exception(void) {
+    return js_exception_pending ? 1 : 0;
+}
+
+extern "C" Item js_clear_exception(void) {
+    js_exception_pending = false;
+    Item val = js_exception_value;
+    js_exception_value = ItemNull;
+    return val;
+}
+
+extern "C" Item js_new_error(Item message) {
+    Item obj = js_new_object();
+    Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+    Item name_val = (Item){.item = s2it(heap_create_name("Error"))};
+    js_property_set(obj, name_key, name_val);
+    Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
+    js_property_set(obj, msg_key, message);
+    return obj;
+}
+
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
+}
+
+extern "C" Item js_get_this() {
+    return js_current_this;
+}
+
+extern "C" void js_set_this(Item this_val) {
+    js_current_this = this_val;
 }
 
 extern TypeMap EmptyMap;
@@ -465,9 +511,10 @@ extern "C" Item js_right_shift(Item left, Item right) {
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
-    uint32_t l = (uint32_t)js_get_number(left);
-    uint32_t r = (uint32_t)js_get_number(right) & 0x1F;
-    return (Item){.item = i2it((int32_t)(l >> r))};
+    // Cast via int32_t first to avoid UB when converting negative double to uint32_t
+    uint32_t l = (uint32_t)(int32_t)js_get_number(left);
+    uint32_t r = (uint32_t)(int32_t)js_get_number(right) & 0x1F;
+    return (Item){.item = i2it((int64_t)(l >> r))};
 }
 
 // =============================================================================
@@ -534,6 +581,17 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // Check if this is a typed array
+        if (js_is_typed_array(object)) {
+            // Handle .length property
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* str_key = it2s(key);
+                if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                    return (Item){.item = i2it(js_typed_array_length(object))};
+                }
+            }
+            return js_typed_array_get(object, key);
+        }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
             return js_dom_get_property(object, key);
@@ -561,6 +619,21 @@ extern "C" Item js_property_get(Item object, Item key) {
             return object.array->items[idx];
         }
         return ItemNull;
+    } else if (type == LMD_TYPE_STRING) {
+        // String character access: str[index]
+        String* str = it2s(object);
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                return (Item){.item = i2it(str->len)};
+            }
+        }
+        int idx = (int)js_get_number(key);
+        if (idx >= 0 && idx < (int)str->len) {
+            char ch[2] = { str->chars[idx], '\0' };
+            return (Item){.item = s2it(heap_create_name(ch))};
+        }
+        return ItemNull;
     }
 
     return ItemNull;
@@ -568,6 +641,16 @@ extern "C" Item js_property_get(Item object, Item key) {
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     TypeId type = get_type_id(object);
+
+    // Array: result[i] = val
+    if (type == LMD_TYPE_ARRAY) {
+        return js_array_set(object, key, value);
+    }
+
+    // Typed array: ta[i] = val
+    if (type == LMD_TYPE_MAP && js_is_typed_array(object)) {
+        return js_typed_array_set(object, key, value);
+    }
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
@@ -618,6 +701,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 extern "C" Item js_property_access(Item object, Item key) {
     // Same as js_property_get but used for member expressions
     return js_property_get(object, key);
+}
+
+// Get the length of any JS value. Handles typed arrays specially (Map-based),
+// and delegates to fn_len for all standard Lambda types (array, list, string, etc.)
+extern "C" int64_t js_get_length(Item object) {
+    if (get_type_id(object) == LMD_TYPE_MAP && js_is_typed_array(object)) {
+        return (int64_t)js_typed_array_length(object);
+    }
+    return fn_len(object);
 }
 
 // =============================================================================
@@ -672,17 +764,26 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
 
     if (idx >= 0 && idx < arr->length) {
         arr->items[idx] = value;
+    } else if (idx >= 0) {
+        // Expand array: fill gaps with null, then set the value
+        while (arr->length < idx) {
+            list_push(arr, ItemNull);
+        }
+        if (idx == arr->length) {
+            list_push(arr, value);
+        } else {
+            arr->items[idx] = value;
+        }
     }
-    // TODO: Expand array if idx >= length
 
     return value;
 }
 
-extern "C" int js_array_length(Item array) {
+extern "C" int64_t js_array_length(Item array) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return 0;
     }
-    return array.array->length;
+    return (int64_t)array.array->length;
 }
 
 extern "C" Item js_array_push(Item array, Item value) {
@@ -715,7 +816,9 @@ extern "C" void js_console_log(Item value) {
 struct JsFunction {
     TypeId type_id;  // Always LMD_TYPE_FUNC
     void* func_ptr;  // Pointer to the compiled function
-    int param_count; // Number of parameters
+    int param_count; // Number of parameters (user-visible, not including env)
+    Item* env;       // Closure environment (NULL for non-closures)
+    int env_size;    // Number of captured variables in env
 };
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
@@ -723,7 +826,62 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
+    fn->env = NULL;
+    fn->env_size = 0;
     return (Item){.function = (Function*)fn};
+}
+
+// Create a closure (function with captured environment)
+extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
+    JsFunction* fn = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = func_ptr;
+    fn->param_count = param_count;
+    fn->env = env;
+    fn->env_size = env_size;
+    return (Item){.function = (Function*)fn};
+}
+
+// Allocate closure environment (array of Item on the pool)
+extern "C" Item* js_alloc_env(int count) {
+    return (Item*)pool_calloc(js_input->pool, count * sizeof(Item));
+}
+
+// Invoke a JsFunction with args, handling env if it's a closure
+static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
+    typedef Item (*P0)();
+    typedef Item (*P1)(Item);
+    typedef Item (*P2)(Item, Item);
+    typedef Item (*P3)(Item, Item, Item);
+    typedef Item (*P4)(Item, Item, Item, Item);
+    typedef Item (*P5)(Item, Item, Item, Item, Item);
+
+    if (fn->env) {
+        // Closure: prepend env pointer as first argument
+        Item env_item;
+        env_item.item = (uint64_t)fn->env;
+        switch (arg_count) {
+            case 0: return ((P1)fn->func_ptr)(env_item);
+            case 1: return ((P2)fn->func_ptr)(env_item, args[0]);
+            case 2: return ((P3)fn->func_ptr)(env_item, args[0], args[1]);
+            case 3: return ((P4)fn->func_ptr)(env_item, args[0], args[1], args[2]);
+            case 4: return ((P5)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3]);
+            default:
+                log_error("js_invoke_fn: too many args for closure (%d)", arg_count);
+                return ItemNull;
+        }
+    } else {
+        switch (arg_count) {
+            case 0: return ((P0)fn->func_ptr)();
+            case 1: return ((P1)fn->func_ptr)(args[0]);
+            case 2: return ((P2)fn->func_ptr)(args[0], args[1]);
+            case 3: return ((P3)fn->func_ptr)(args[0], args[1], args[2]);
+            case 4: return ((P4)fn->func_ptr)(args[0], args[1], args[2], args[3]);
+            default:
+                log_error("js_invoke_fn: too many args (%d)", arg_count);
+                return ItemNull;
+        }
+    }
 }
 
 // Call a JavaScript function stored as an Item
@@ -739,41 +897,12 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return ItemNull;
     }
 
-    // Cast function pointer and call based on argument count
-    // Note: This is a simplified version that handles common cases
-    typedef Item (*FnPtr0)();
-    typedef Item (*FnPtr1)(Item);
-    typedef Item (*FnPtr2)(Item, Item);
-    typedef Item (*FnPtr3)(Item, Item, Item);
-    typedef Item (*FnPtr4)(Item, Item, Item, Item);
-
-    switch (arg_count) {
-        case 0:
-            return ((FnPtr0)fn->func_ptr)();
-        case 1:
-            return ((FnPtr1)fn->func_ptr)(args ? args[0] : ItemNull);
-        case 2:
-            return ((FnPtr2)fn->func_ptr)(
-                args ? args[0] : ItemNull,
-                args && arg_count > 1 ? args[1] : ItemNull
-            );
-        case 3:
-            return ((FnPtr3)fn->func_ptr)(
-                args ? args[0] : ItemNull,
-                args && arg_count > 1 ? args[1] : ItemNull,
-                args && arg_count > 2 ? args[2] : ItemNull
-            );
-        case 4:
-            return ((FnPtr4)fn->func_ptr)(
-                args ? args[0] : ItemNull,
-                args && arg_count > 1 ? args[1] : ItemNull,
-                args && arg_count > 2 ? args[2] : ItemNull,
-                args && arg_count > 3 ? args[3] : ItemNull
-            );
-        default:
-            log_error("js_call_function: too many arguments (%d)", arg_count);
-            return ItemNull;
-    }
+    // Bind 'this' for the duration of this call
+    Item prev_this = js_current_this;
+    js_current_this = this_val;
+    Item result = js_invoke_fn(fn, args, arg_count);
+    js_current_this = prev_this;
+    return result;
 }
 
 // =============================================================================
@@ -1059,15 +1188,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         Item result = js_array_new(0);
         Array* dst = result.array;
+        JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            Item mapped;
-            JsFunction* fn = (JsFunction*)callback.function;
-            if (fn->param_count >= 2) {
-                mapped = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
-            } else {
-                mapped = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
             list_push(dst, mapped);
         }
         return result;
@@ -1080,15 +1204,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         Item result = js_array_new(0);
         Array* dst = result.array;
+        JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            Item pred;
-            JsFunction* fn = (JsFunction*)callback.function;
-            if (fn->param_count >= 2) {
-                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
-            } else {
-                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
             if (js_is_truthy(pred)) {
                 list_push(dst, src->items[i]);
             }
@@ -1113,12 +1232,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             start_idx = 1;
         }
         for (int i = start_idx; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            if (fn->param_count >= 3) {
-                accumulator = ((Item (*)(Item, Item, Item))fn->func_ptr)(accumulator, src->items[i], idx);
-            } else {
-                accumulator = ((Item (*)(Item, Item))fn->func_ptr)(accumulator, src->items[i]);
-            }
+            Item cb_args[3] = { accumulator, src->items[i], (Item){.item = i2it(i)} };
+            accumulator = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : 2);
         }
         return accumulator;
     }
@@ -1130,12 +1245,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            if (fn->param_count >= 2) {
-                ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
-            } else {
-                ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
         }
         return ItemNull;
     }
@@ -1147,13 +1258,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            Item pred;
-            if (fn->param_count >= 2) {
-                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
-            } else {
-                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
             if (js_is_truthy(pred)) return src->items[i];
         }
         return ItemNull;
@@ -1166,13 +1272,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            Item pred;
-            if (fn->param_count >= 2) {
-                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], idx);
-            } else {
-                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
             if (js_is_truthy(pred)) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
@@ -1185,12 +1286,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item pred;
-            if (fn->param_count >= 2) {
-                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], (Item){.item = i2it(i)});
-            } else {
-                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
             if (js_is_truthy(pred)) return (Item){.item = b2it(true)};
         }
         return (Item){.item = b2it(false)};
@@ -1203,12 +1300,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item pred;
-            if (fn->param_count >= 2) {
-                pred = ((Item (*)(Item, Item))fn->func_ptr)(src->items[i], (Item){.item = i2it(i)});
-            } else {
-                pred = ((Item (*)(Item))fn->func_ptr)(src->items[i]);
-            }
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
             if (!js_is_truthy(pred)) return (Item){.item = b2it(false)};
         }
         return (Item){.item = b2it(true)};

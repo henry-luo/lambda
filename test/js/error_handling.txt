@@ -1,2 +1,11 @@
 Data processed successfully
 Data processing failed
+{
+  "safeDivideSuccess": 5,
+  "safeDivideError": "Error: Division by zero",
+  "processDataSuccess": 10,
+  "processDataError": "Error: No data provided",
+  "nestedError": "Outer error: Inner error",
+  "propagatedError": "Caught: Something went wrong",
+  "customError": "Custom error handled: This is a custom error"
+}
