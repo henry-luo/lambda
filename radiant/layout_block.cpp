@@ -1895,6 +1895,32 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     // This ensures floats are positioned and affect line bounds correctly
                     prescan_and_layout_floats(lycon, child, block);
 
+                    // CSS 2.1 §16.1: text-indent is "with respect to the left (or right)
+                    // edge of the line box". The line box edge may have been moved by
+                    // float pre-scan AFTER text-indent was applied in line_reset().
+                    // Query the actual float-adjusted left edge and re-apply text-indent
+                    // on top of it (making them additive, not overlapping).
+                    if (!lycon->block.is_first_line && lycon->block.text_indent != 0 &&
+                        lycon->block.direction != CSS_VALUE_RTL) {
+                        BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                        if (bfc && (bfc->left_float_count > 0 || bfc->right_float_count > 0)) {
+                            float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
+                            float line_h = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
+                            FloatAvailableSpace space = block_context_space_at_y(bfc, bfc_y, line_h);
+                            if (space.has_left_float) {
+                                float float_left = space.left - lycon->block.bfc_offset_x;
+                                float target = float_left + lycon->block.text_indent;
+                                if (target > lycon->line.advance_x) {
+                                    lycon->line.advance_x = target;
+                                    lycon->line.effective_left = target;
+                                    lycon->line.has_float_intrusion = true;
+                                    log_debug("text-indent + float: advance_x=%.1f (float_left=%.1f + indent=%.1f)",
+                                              target, float_left, lycon->block.text_indent);
+                                }
+                            }
+                        }
+                    }
+
                     // inline content flow
                     do {
                         layout_flow_node(lycon, child);
@@ -2187,6 +2213,11 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.effective_right = inner_right;
     lycon->line.has_float_intrusion = false;
     lycon->line.advance_x = inner_left;
+    if (block->blk) lycon->block.text_align = block->blk->text_align;
+    // CSS 2.1 §9.2.1: Propagate direction to block context
+    // Must be set BEFORE line_reset() so text-indent RTL handling works correctly
+    if (block->blk) lycon->block.direction = block->blk->direction;
+
     lycon->line.vertical_align = CSS_VALUE_BASELINE;
 
     // Now call line_reset to adjust for floats at current Y position
@@ -2195,10 +2226,6 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
 
     log_debug("setup_inline: line.left=%.1f, line.right=%.1f, effective_left=%.1f, effective_right=%.1f, advance_x=%.1f",
               lycon->line.left, lycon->line.right, lycon->line.effective_left, lycon->line.effective_right, lycon->line.advance_x);
-
-    if (block->blk) lycon->block.text_align = block->blk->text_align;
-    // CSS 2.1 §9.2.1: Propagate direction to block context
-    if (block->blk) lycon->block.direction = block->blk->direction;
     // setup font
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
