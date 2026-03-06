@@ -207,8 +207,26 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         // margin: 1em 0; padding: 0 0 0 40px;
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
-        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        // UA stylesheet: nested lists (ul ul, ol ol, ul ol, ol ul) have margin: 0
+        {
+            bool is_nested = false;
+            DomNode* ancestor = elmt->parent;
+            while (ancestor) {
+                if (ancestor->is_element()) {
+                    uintptr_t atag = ancestor->tag();
+                    if (atag == HTM_TAG_UL || atag == HTM_TAG_OL ||
+                        atag == HTM_TAG_MENU || atag == HTM_TAG_DIR) {
+                        is_nested = true;
+                        break;
+                    }
+                }
+                ancestor = ancestor->parent;
+            }
+            if (!is_nested) {
+                block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
+                block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+            }
+        }
         block->bound->padding.left = 40;  // CSS logical pixels
         block->bound->padding.left_specificity = -1;
         break;

@@ -79,7 +79,6 @@ static Item vector_get(Item item, int64_t index) {
 Item fn_add(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-    log_debug("fn_add called with types: %d and %d", type_a, type_b);
 
     // null propagation: null + x = null
     if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
@@ -94,7 +93,6 @@ Item fn_add(Item item_a, Item item_b) {
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
-        log_debug("add int + int: %lld + %lld", a, b);
         // use __builtin_add_overflow for efficient overflow detection
 #if defined(__GNUC__) || defined(__clang__)
         int64_t result;
@@ -121,11 +119,9 @@ Item fn_add(Item item_a, Item item_b) {
         return push_l(item_a.get_int64() + item_b.get_int56());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("add float: %g + %g", item_a.get_double(), item_b.get_double());
         return push_d(item_a.get_double() + item_b.get_double());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("add int + float: %lld + %g", item_a.get_int56(), item_b.get_double());
         return push_d((double)item_a.get_int56() + item_b.get_double());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
@@ -139,7 +135,6 @@ Item fn_add(Item item_a, Item item_b) {
     }
     // decimal support - delegate to centralized decimal handling
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        log_debug("fn_add: decimal addition");
         return decimal_add(item_a, item_b, context);
     }
 
@@ -161,7 +156,6 @@ Item fn_add(Item item_a, Item item_b) {
     }
     // ArrayInt64 support
     else if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
-        log_debug("fn_add: ArrayInt64 addition");
         ArrayInt64* arr_a = item_a.array_int64;
         ArrayInt64* arr_b = item_b.array_int64;
         if (arr_a->length != arr_b->length) {
@@ -172,7 +166,6 @@ Item fn_add(Item item_a, Item item_b) {
         for (int64_t i = 0; i < arr_a->length; i++) {
             result->items[i] = arr_a->items[i] + arr_b->items[i];
         }
-        log_debug("fn_add: returning ArrayInt64 result %p, length: %ld, type: %d", result, result->length, result->type_id);
         return { .array_int64 = result };
     }
     // ArrayFloat support
@@ -235,7 +228,6 @@ Item fn_mul(Item item_a, Item item_b) {
         return push_l(item_a.get_int64() * item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("mul float: %g * %g\n", item_a.get_double(), item_b.get_double());
         return push_d(item_a.get_double() * item_b.get_double());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
@@ -352,7 +344,6 @@ Item fn_sub(Item item_a, Item item_b) {
         return push_l(item_a.get_int64() - item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("sub float: %g - %g", item_a.get_double(), item_b.get_double());
         return push_d(item_a.get_double() - item_b.get_double());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
@@ -457,7 +448,6 @@ Item fn_div(Item item_a, Item item_b) {
             log_error("division by zero error");
             return ItemError;
         }
-        log_debug("div float: %g / %g\n", item_a.get_double(), item_b.get_double());
         return push_d(item_a.get_double() / item_b.get_double());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
@@ -629,7 +619,6 @@ Item fn_pow(Item item_a, Item item_b) {
     }
 
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-    log_debug("fn_pow called with types: %d and %d", type_a, type_b);
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -674,7 +663,6 @@ Item fn_pow(Item item_a, Item item_b) {
         log_error("unknown pow exponent type: %d", item_b._type_id);
         return ItemError;
     }
-    log_debug("calculating pow base=%g, exponent=%g", base, exponent);
     return push_d(pow(base, exponent));
 }
 
@@ -950,7 +938,6 @@ Item fn_ceil(Item item) {
 
 Item fn_min2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
-    log_debug("fn_min called with types: %d, %d", item_a._type_id, item_b._type_id);
     // two argument scalar min case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
@@ -1036,7 +1023,6 @@ Item fn_min1(Item item_a) {
                 min_val = arr->items[i];
             }
         }
-        log_debug("min value (int64): %ld", min_val);
         return push_l(min_val);
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
@@ -1230,7 +1216,6 @@ Item fn_max1(Item item_a) {
                 max_val = arr->items[i];
             }
         }
-        log_debug("max value (int64): %ld", max_val);
         return push_l(max_val);
     }
     else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
@@ -1315,13 +1300,9 @@ Item fn_sum(Item item) {
     GUARD_ERROR1(item);
     // sum() - sum of all elements in an array or list
     TypeId type_id = get_type_id(item);
-    log_debug("DEBUG fn_sum: called with type_id: %d", type_id);
     if (type_id == LMD_TYPE_ARRAY) {
-        log_debug("DEBUG fn_sum: Processing LMD_TYPE_ARRAY");
         Array* arr = item.array;  // Use item.array, not item.pointer
-        log_debug("DEBUG fn_sum: Array pointer: %p, length: %ld", arr, arr ? arr->length : -1);
         if (!arr || arr->length == 0) {
-            log_debug("DEBUG fn_sum: Empty array, returning 0");
             return (Item) { .item = i2it(0) };  // Empty array sums to 0
         }
         double sum = 0.0;
@@ -1330,17 +1311,14 @@ Item fn_sum(Item item) {
             Item elem_item = array_get(arr, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();
-                log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item._type_id == LMD_TYPE_INT64) {
                 int64_t val = elem_item.get_int64();
-                log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 double val = elem_item.get_double();
-                log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
@@ -1372,7 +1350,6 @@ Item fn_sum(Item item) {
         return push_l(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        log_debug("fn_sum of LMD_TYPE_ARRAY_INT64");
         ArrayInt64* arr = item.array_int64;
         if (arr->length == 0) {
             return (Item) { .item = i2it(0) };  // Empty array sums to 0
@@ -1381,11 +1358,9 @@ Item fn_sum(Item item) {
         for (size_t i = 0; i < arr->length; i++) {
             sum += arr->items[i];
         }
-        log_debug("fn_sum of LMD_TYPE_ARRAY_INT64: %ld", sum);
         return push_l(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        log_debug("fn_sum of LMD_TYPE_ARRAY_FLOAT");
         ArrayFloat* arr = item.array_float;  // Use the correct field
         if (arr->length == 0) {
             return push_d(0.0);  // Empty array sums to 0.0
@@ -1394,15 +1369,11 @@ Item fn_sum(Item item) {
         for (size_t i = 0; i < arr->length; i++) {
             sum += arr->items[i];
         }
-        log_debug("fn_sum result: %f", sum);
         return push_d(sum);
     }
     else if (type_id == LMD_TYPE_LIST) {
-        log_debug("DEBUG fn_sum: Processing LMD_TYPE_LIST");
         List* list = item.list;
-        log_debug("DEBUG fn_sum: List pointer: %p, length: %ld", list, list ? list->length : -1);
         if (!list || list->length == 0) {
-            log_debug("DEBUG fn_sum: Empty list, returning 0");
             return (Item) { .item = i2it(0) };  // Empty list sums to 0
         }
         double sum = 0.0;
@@ -1411,17 +1382,14 @@ Item fn_sum(Item item) {
             Item elem_item = list_get(list, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();
-                log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item._type_id == LMD_TYPE_INT64) {
                 int64_t val = elem_item.get_int64();
-                log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 double val = elem_item.get_double();
-                log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
@@ -1431,15 +1399,12 @@ Item fn_sum(Item item) {
             }
         }
         if (has_float) {
-            log_debug("DEBUG fn_sum: Returning sum as double: %f", sum);
             return push_d(sum);
         }
         else {
             if (sum > INT_MAX || sum < INT_MIN) {
-                log_debug("DEBUG fn_sum: Returning sum as long: %" PRId64, (int64_t)sum);
                 return push_l(sum);
             } else{
-                log_debug("DEBUG fn_sum: Returning sum as int: %d", (int32_t)sum);
                 return {.item = i2it((int32_t)sum)};
             }
         }
@@ -1721,7 +1686,6 @@ Item fn_int(Item item) {
         // check for overflow - if errno is set or we couldn't parse the full string
         if (errno == ERANGE || (*endptr != '\0')) {
             // try to parse as decimal
-            log_debug("promote string to decimal: %s", chars);
             return decimal_from_string(chars, context);
         }
         return (Item) { .item = i2it(val) };
@@ -1736,7 +1700,6 @@ int64_t fn_int64(Item item) {
     // convert item to int64
     int64_t val;
     if (item._type_id == LMD_TYPE_INT) {
-        log_debug("convert int to int64: %lld", item.get_int56());
         return item.get_int56();
     }
     else if (item._type_id == LMD_TYPE_INT64) {
@@ -1762,7 +1725,6 @@ int64_t fn_int64(Item item) {
             return 0;
         }
         char* endptr;
-        log_debug("convert string/symbol to int64: %s", chars);
         errno = 0;  // clear errno before calling strtoll
         int64_t val = strtoll(chars, &endptr, 10);
         if (endptr == chars) {
@@ -1773,7 +1735,6 @@ int64_t fn_int64(Item item) {
             log_debug("String value '%s' out of int64 range", chars);
             return INT64_ERROR;
         }
-        log_debug("converted string to int64: %" PRId64, val);
         return val;
     }
     log_debug("Cannot convert type %d to int64", item._type_id);
@@ -2014,7 +1975,6 @@ extern "C" Symbol* fn_symbol(Item item) {
 // fn_symbol2 - create namespaced symbol from name and URL
 // Note: Must be declared in lambda.h for MIR C2MIR to know the signature
 extern "C" Item fn_symbol2(Item name_item, Item url_item) {
-    log_debug("fn_symbol2: name_type=%d, url_type=%d", name_item._type_id, url_item._type_id);
     GUARD_ERROR2(name_item, url_item);
 
     // extract name string
@@ -2064,7 +2024,6 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     memcpy(sym->chars, name_str, name_len);
     sym->chars[name_len] = '\0';
 
-    log_debug("fn_symbol2: created namespaced symbol '%.*s' with namespace", (int)name_len, name_str);
 
     return (Item) { .item = y2it(sym) };
 }
