@@ -29,9 +29,9 @@ Lambda Script provides an interactive **Read-Eval-Print Loop (REPL)** for explor
 #### 2. REPL Commands
 | Command | Description |
 |---------|-------------|
-| `.quit`, `.q`, `.exit` | Exit the REPL |
-| `.help`, `.h` | Show help message |
-| `.clear` | Clear REPL history buffer |
+| `quit`, `q`, `exit` | Exit the REPL |
+| `help`, `h` | Show help message |
+| `clear` | Clear REPL history buffer |
 
 #### 3. Multi-line Input Support
 - **Continuation prompt (`.. `)** when statement is incomplete
@@ -137,21 +137,21 @@ StatementStatus check_statement_completeness(TSParser* parser, const char* sourc
     if (has_unclosed_brackets(source)) {
         return STMT_INCOMPLETE;
     }
-    
+
     // Step 2: Use Tree-sitter for more sophisticated checking
     TSTree* tree = lambda_parse_source(parser, source);
     TSNode root = ts_tree_root_node(tree);
-    
+
     // If no errors, statement is complete
     if (!ts_node_has_error(root)) {
         return STMT_COMPLETE;
     }
-    
+
     // Check for MISSING nodes (incomplete)
     if (has_missing_nodes(root)) {
         return STMT_INCOMPLETE;
     }
-    
+
     // ERROR nodes without MISSING = syntax error
     return STMT_ERROR;
 }
@@ -171,24 +171,24 @@ StatementStatus check_statement_completeness(TSParser* parser, const char* sourc
 while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
     // Append to pending input
     strbuf_append_str(pending_input, line);
-    
+
     // Check completeness
     StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
-    
+
     if (status == STMT_INCOMPLETE) {
         continue;  // show ".. " prompt and keep reading
     }
-    
+
     if (status == STMT_ERROR) {
         printf("Syntax error. Input discarded.\n");
         strbuf_reset(pending_input);
         continue;
     }
-    
+
     // STMT_COMPLETE: add to history and execute
     strbuf_append_str(repl_history, pending_input->str);
     strbuf_reset(pending_input);
-    
+
     // Execute and print incremental output...
 }
 ```
@@ -269,7 +269,7 @@ When implementing incremental compilation:
    ```cpp
    struct CompiledCache {
        HashMap<uint64_t, void*> func_cache;  // hash → compiled function
-       
+
        void* get_or_compile(const char* source, size_t len) {
            uint64_t hash = hash_fnv64(source, len);
            if (func_cache.contains(hash)) {
@@ -327,11 +327,11 @@ Syntax error. Input discarded.
 42
 
 # REPL commands
-λ> .clear
+λ> clear
 REPL history cleared
-λ> .help
+λ> help
 [shows help]
-λ> .quit
+λ> quit
 ```
 
 ---

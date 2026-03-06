@@ -367,9 +367,9 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 
 | Command | Description |
 |---------|-------------|
-| `.quit`, `.q`, `.exit` | Exit the REPL |
-| `.help`, `.h` | Show help |
-| `.clear` | Clear REPL history |
+| `quit`, `q`, `exit` | Exit the REPL |
+| `help`, `h` | Show help |
+| `clear` | Clear REPL history |
 
 ---
 
