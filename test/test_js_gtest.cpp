@@ -319,7 +319,7 @@ TEST(JavaScriptTests, test_basic_expressions) {
     test_js_script_against_file("test/js/basic_expressions.js", "test/js/basic_expressions.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_functions) {
+TEST(JavaScriptTests, test_functions) {
     test_js_script_against_file("test/js/functions.js", "test/js/functions.txt");
 }
 
@@ -327,19 +327,19 @@ TEST(JavaScriptTests, test_control_flow) {
     test_js_script_against_file("test/js/control_flow.js", "test/js/control_flow.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_advanced_features) {
+TEST(JavaScriptTests, test_advanced_features) {
     test_js_script_against_file("test/js/advanced_features.js", "test/js/advanced_features.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_es6_features) {
+TEST(JavaScriptTests, test_es6_features) {
     test_js_script_against_file("test/js/es6_features.js", "test/js/es6_features.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_error_handling) {
+TEST(JavaScriptTests, test_error_handling) {
     test_js_script_against_file("test/js/error_handling.js", "test/js/error_handling.txt");
 }
 
-TEST(JavaScriptTests, DISABLED_test_array_methods) {
+TEST(JavaScriptTests, test_array_methods) {
     test_js_script_against_file("test/js/array_methods.js", "test/js/array_methods.txt");
 }
 
@@ -359,6 +359,55 @@ TEST(JavaScriptTests, test_array_methods_v3) {
 // v3 Phase 3d tests: DOM API
 TEST(JavaScriptTests, test_dom_basic) {
     test_js_dom_script_against_file("test/js/dom_basic.js", "test/js/dom_basic.html", "test/js/dom_basic.txt");
+}
+
+// v5 coverage tests: implemented but previously untested features
+TEST(JavaScriptTests, test_switch_statement) {
+    test_js_script_against_file("test/js/switch_statement.js", "test/js/switch_statement.txt");
+}
+
+TEST(JavaScriptTests, test_do_while) {
+    test_js_script_against_file("test/js/do_while.js", "test/js/do_while.txt");
+}
+
+TEST(JavaScriptTests, test_for_in_loop) {
+    test_js_script_against_file("test/js/for_in_loop.js", "test/js/for_in_loop.txt");
+}
+
+TEST(JavaScriptTests, test_operators_extra) {
+    test_js_script_against_file("test/js/operators_extra.js", "test/js/operators_extra.txt");
+}
+
+TEST(JavaScriptTests, test_global_functions) {
+    test_js_script_against_file("test/js/global_functions.js", "test/js/global_functions.txt");
+}
+
+TEST(JavaScriptTests, test_template_literals) {
+    test_js_script_against_file("test/js/template_literals.js", "test/js/template_literals.txt");
+}
+
+TEST(JavaScriptTests, test_for_of_loop) {
+    test_js_script_against_file("test/js/for_of_loop.js", "test/js/for_of_loop.txt");
+}
+
+TEST(JavaScriptTests, test_bitwise_ops) {
+    test_js_script_against_file("test/js/bitwise_ops.js", "test/js/bitwise_ops.txt");
+}
+
+TEST(JavaScriptTests, test_typed_arrays) {
+    test_js_script_against_file("test/js/typed_arrays.js", "test/js/typed_arrays.txt");
+}
+
+TEST(JavaScriptTests, test_number_methods) {
+    test_js_script_against_file("test/js/number_methods.js", "test/js/number_methods.txt");
+}
+
+TEST(JavaScriptTests, test_object_static) {
+    test_js_script_against_file("test/js/object_static.js", "test/js/object_static.txt");
+}
+
+TEST(JavaScriptTests, test_spread_element) {
+    test_js_script_against_file("test/js/spread_element.js", "test/js/spread_element.txt");
 }
 
 int main(int argc, char **argv) {

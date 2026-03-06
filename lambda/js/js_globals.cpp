@@ -212,6 +212,23 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
     return (Item){.item = s2it(heap_create_name(buf))};
 }
 
+extern "C" Item js_number_method(Item num, Item method_name, Item* args, int argc) {
+    if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
+    String* method = it2s(method_name);
+    if (!method) return ItemNull;
+
+    if (method->len == 7 && strncmp(method->chars, "toFixed", 7) == 0) {
+        Item digits = (argc > 0) ? args[0] : (Item){.item = i2it(0)};
+        return js_toFixed(num, digits);
+    }
+    if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+        return js_to_string(num);
+    }
+
+    log_debug("js_number_method: unknown method '%.*s'", (int)method->len, method->chars);
+    return ItemNull;
+}
+
 // =============================================================================
 // String Methods (v5 additions)
 // =============================================================================

@@ -27,6 +27,9 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
     ItemReader value;
 
     while (iter.next(&key, &value)) {
+        // Skip function-valued properties (like JSON.stringify)
+        if (value.getType() == LMD_TYPE_FUNC) continue;
+
         if (!first) {
             ctx.write_text(",\n");
         } else {

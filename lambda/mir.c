@@ -464,13 +464,23 @@ func_obj_t func_list[] = {
     {"js_array_length", (fn_ptr) js_array_length},
     {"js_array_push", (fn_ptr) js_array_push},
     {"js_new_function", (fn_ptr) js_new_function},
+    {"js_new_closure", (fn_ptr) js_new_closure},
+    {"js_alloc_env", (fn_ptr) js_alloc_env},
     {"js_call_function", (fn_ptr) js_call_function},
+    {"js_get_this", (fn_ptr) js_get_this},
     {"js_console_log", (fn_ptr) js_console_log},
+    // v5: Exception handling
+    {"js_throw_value", (fn_ptr) js_throw_value},
+    {"js_check_exception", (fn_ptr) js_check_exception},
+    {"js_clear_exception", (fn_ptr) js_clear_exception},
+    {"js_new_error", (fn_ptr) js_new_error},
     // v3: String, Array, Math method dispatchers
     {"js_string_method", (fn_ptr) js_string_method},
     {"js_array_method", (fn_ptr) js_array_method},
     {"js_math_method", (fn_ptr) js_math_method},
     {"js_math_property", (fn_ptr) js_math_property},
+    {"js_number_method", (fn_ptr) js_number_method},
+    {"js_get_length", (fn_ptr) js_get_length},
     // v3: DOM API dispatchers
     {"js_document_method", (fn_ptr) js_document_method},
     {"js_document_get_property", (fn_ptr) js_document_get_property},
