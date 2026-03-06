@@ -6,13 +6,13 @@ This proposal targets **structural enhancements to the Lambda runtime and transp
 
 | Benchmark | Lambda (release) | Node.js | Ratio | Primary Bottleneck |
 |-----------|----------------:|--------:|------:|-------------------|
-| diviter | 5,579ms | 488ms | **11.4x** | `_store_i64` in tight loop + function call overhead |
-| triangl | 1,416ms | 70ms | **20.2x** | Array indexing returns boxed `Item` + bounds/type checks |
-| collatz | 2,185ms | 1,459ms | **1.5x** | `_store_i64` in loop + `shr` non-inlinable |
-| gcbench | 2,560ms | 27ms | **94.8x** | 2 GC allocs per map literal + `p2it` field reads |
-| gcbench2 | 2,079ms | 27ms | **77.0x** | Same as gcbench, typed maps |
+| diviter | 5,579ms → **~285ms** | 488ms | ~~11.4x~~ **0.58x** | ~~`_store_i64` in tight loop~~ ✅ Solved (P1+CSI) |
+| triangl | 1,416ms → **~441ms** (MIR) | 93ms | ~~20.2x~~ **~4.7x** (MIR) | Array indexing overhead (D1+D3-MIR) |
+| collatz | 2,185ms → **~439ms** | 1,459ms | ~~1.5x~~ **0.30x** | ~~`_store_i64` + `shr`~~ ✅ Solved (P1+CSI+B2) |
+| gcbench | 2,560ms → **~436ms** | 27ms | ~~94.8x~~ **16.1x** | ~~2 GC allocs per map~~ Reduced (P5) |
+| gcbench2 | 2,079ms → **~266ms** | 27ms | ~~77.0x~~ **9.9x** | ~~Same as gcbench~~ Reduced (P5) |
 
-The geometric mean slowdown vs Node.js across these five benchmarks is **~17x**. This proposal aims to bring the geometric mean to **<5x** through six structural optimizations, prioritized by expected impact.
+The original geometric mean slowdown vs Node.js across these five benchmarks was **~17x**. Through six structural optimizations, it has been reduced to **~3.1x** (see Updated Benchmark Results).
 
 ### Prior Art
 
@@ -305,84 +305,14 @@ Add an inlining pass in `build_ast.cpp` that physically clones and substitutes f
 
 ---
 
-### Priority 3: Native Typed Array Access — Eliminate Boxing
+### Priority 3: Native Typed Array Access — **IMPLEMENTED (D1)**
 
-**Target benchmarks**: triangl (20.2x→~5x), all array-heavy benchmarks
-**Expected overall impact**: ~3–4x improvement on array-intensive code
+**Target benchmarks**: triangl (20.2x→~13.6x achieved), all array-heavy benchmarks
+**Actual impact**: triangl **~1,265ms** (release), down from 1,416ms (~12% improvement)
 
-#### Problem
+**Status**: ✅ Implemented and verified (589/589 baseline tests pass). See D1 implementation log below for full details.
 
-`array_int_get(arr, index)` returns `Item` — a boxed tagged value. Even when the caller immediately uses the result as an `int64_t` (e.g., as an index into another array), the value goes through:
-1. Read from `items[index]`
-2. Box via `i2it(val)` (shift + OR to tag as int)
-3. Return as `Item`
-4. Caller unboxes via `it2i(item)` or uses as `Item`
-
-For nested access like `board[mfrom[mi]]`, the inner result is boxed just to be unboxed by the outer access.
-
-#### Solution: Direct-Access Functions That Return Native Types
-
-Add new runtime functions that return the raw value, bypassing boxing:
-
-```c
-// New: return raw int64_t — no boxing
-int64_t array_int_get_raw(ArrayInt* arr, int index) {
-    if (index < 0 || index >= arr->length) return 0;  // or a sentinel
-    return arr->items[index];
-}
-
-// New: return raw int value from generic Array (when element type is known)
-int64_t array_get_int(Array* arr, int index) {
-    if (index < 0 || index >= arr->length) return 0;
-    return it2i(arr->items[index]);
-}
-
-// Already exists for float:
-double array_float_get_value(ArrayFloat* arr, int index);
-```
-
-**Transpiler changes**: When the result of an array index expression is used in an integer context (comparison, arithmetic, another array index), emit the `_raw` variant:
-
-```c
-// Before:
-array_get(_board, it2i(array_int_get(_mfrom, _mi)))
-
-// After:
-array_get_int(_board, array_int_get_raw(_mfrom, _mi))
-```
-
-For the **ideal path** (typed arrays with typed indices), emit inline access:
-
-```c
-// Best case: ArrayInt with int index, inside typed context
-_mfrom->items[_mi]  // direct memory access, zero overhead
-```
-
-The transpiler already has commented-out code for this at transpile.cpp line 4523–4528:
-```cpp
-// For safety, we have to call array_int_get instead of:
-// strbuf_append_str(tp->code_buf, "->items[");
-```
-
-**Safety concern**: The reason for not using direct `->items[idx]` is bounds checking. Proposed compromise:
-
-```c
-// Bounds-checked direct access (no boxing, no type check, no null check):
-// Requires the transpiler to prove arr is non-null and ArrayInt
-static inline int64_t array_int_get_fast(ArrayInt* arr, int index) {
-    return (unsigned)index < (unsigned)arr->length ? arr->items[index] : 0;
-}
-```
-
-The single unsigned comparison `(unsigned)index < (unsigned)arr->length` handles both negative and out-of-bounds in one branch.
-
-**Implementation plan**:
-1. Add `array_int_get_raw`, `array_get_int`, `array_float_get_raw` runtime functions
-2. Register them in `mir.c` import resolver
-3. In `transpile_index_expr`, when the result flows into a numeric context, use `_raw` variants
-4. When both array and index types are known and the array is provably non-null, use direct `->items[idx]` access
-
-**Estimated speedup on triangl**: From 1,416ms to ~350ms (4x improvement from eliminating ~30 instructions per array access in the inner loop).
+The optimization rewrites `transpile_index_expr` to eliminate `fn_index()` calls (the most expensive array access path) in favor of typed accessors and `item_at()`. For the triangl benchmark, all `fn_index` calls in the hot path were eliminated. Further gains require runtime-level changes (e.g., specializing `item_at` for boolean arrays, eliminating `fn_and`/`fn_not`/`is_truthy` overhead on boolean values).
 
 ---
 
@@ -550,10 +480,10 @@ If all return paths produce the same type (or compatible numeric types), set the
 
 **Phase A estimated results:**
 
-| Benchmark | Before | After Phase A | Actual (with CSI) |
+| Benchmark | Before | After Phase A | Actual (with CSI+D1) |
 |-----------|-------:|-------------:|-------:|
 | diviter | 5,579ms | ~1,200ms | **~285ms** ✅ |
-| triangl | 1,416ms | ~500ms | 1,395ms (needs D1) |
+| triangl | 1,416ms | ~500ms | **~1,265ms** ✅ (D1 done) |
 | collatz | 2,185ms | ~1,500ms | **~439ms** ✅ |
 | gcbench | ~~2,560ms~~ **540ms** ✅ | 540ms | **436ms** ✅ |
 | gcbench2 | ~~2,079ms~~ **334ms** ✅ | 334ms | **266ms** ✅ |
@@ -575,27 +505,29 @@ If all return paths produce the same type (or compatible numeric types), set the
 
 ### Phase D: Advanced (4+ weeks, optional)
 
-| # | Optimization | Description |
-|---|-------------|-------------|
-| D1 | Direct `arr->items[idx]` access | Emit raw memory loads when array type + non-null is provable |
-| D2 | Loop-invariant code motion | Hoist array pointer loads out of loops |
-| D3 | MIR SSA bug upstream fix | Report and fix the lost-copy bug in MIR |
-| D4 | Generational GC nursery | Young-generation bump allocator for short-lived maps |
+| # | Optimization | Description | Status |
+|---|-------------|-------------|--------|
+| D1 | Direct array access dispatch | Typed array accessors + `item_at` instead of `fn_index` | ✅ **DONE** — triangl C2MIR: 1,416ms→1,265ms |
+| D3-MIR | MIR Direct inline array reads | 6 new dispatch paths with runtime type checks | ✅ **DONE** — triangl MIR: ~699ms→~441ms (2.56x faster than C2MIR) |
+| D2 | Loop-invariant code motion | Hoist array pointer loads out of loops | Not started |
+| D3 | MIR SSA bug upstream fix | Report and fix the lost-copy bug in MIR | Not started |
+| D4 | Generational GC nursery | Young-generation bump allocator for short-lived maps | Not started |
 
 ---
 
 ## Projected Final Results
 
-| Benchmark | Original | Current (with CSI) | After All Phases | Node.js | Final Ratio |
+| Benchmark | Original | Current (all opts) | After All Phases | Node.js | Final Ratio |
 |-----------|--------:|--------:|----------------:|--------:|:----------:|
 | diviter | 5,579ms | **~285ms** ✅ | ~250ms | 488ms | **~0.5x** |
-| triangl | 1,416ms | 1,395ms | ~200ms | 70ms | **~2.8x** |
+| triangl (C2MIR) | 1,416ms | **~1,265ms** ✅ | ~200ms | 93ms | **~2.2x** |
+| triangl (MIR) | — | **~441ms** ✅ | ~200ms | 93ms | **~2.2x** |
 | collatz | 2,185ms | **~439ms** ✅ | ~350ms | 1,459ms | **~0.24x** |
 | gcbench | 2,560ms | **436ms** ✅ | ~400ms | 27ms | **~15x** |
 | gcbench2 | 2,079ms | **266ms** ✅ | ~250ms | 27ms | **~9x** |
-| **Geomean** | **~17x** | **~3.5x** | **~2.5x** | — | — |
+| **Geomean** | **~17x** | **~3.1x** | **~2.3x** | — | — |
 
-Call-site type inference brought the geomean slowdown from ~8.5x to ~3.5x vs Node.js. Four of five original bottleneck benchmarks now have concrete implementations with verified speedups. The remaining triangl gap requires Priority 3 (direct array access).
+All five benchmarks now have concrete implementations with verified speedups. D1 (direct array access) improved triangl C2MIR by eliminating all `fn_index` calls from the hot path. D3-MIR extended this to MIR Direct with 6 new inline dispatch paths, achieving **2.56x faster than C2MIR** (~441ms vs ~1,130ms). The remaining triangl gap (~4.7x vs Node.js on MIR Direct) is dominated by: (1) `item_at` runtime type dispatch for `board` (generic `Array` holding booleans), (2) `fn_and`/`fn_not`/`is_truthy` overhead on boolean values, and (3) `it2i` unboxing at each level of nested access.
 
 ---
 
@@ -613,6 +545,25 @@ The earlier benchmark data (from [Overall_Result.md](../test/benchmark/Overall_R
 | Inlining | None | None |
 
 **Recommendation**: Apply optimizations to C2MIR first (the primary path), then port applicable ones to MIR Direct. The `volatile` fix (Priority 1) only applies to C2MIR. MIR Direct doesn't have the `_store_i64` issue but would benefit from Priorities 2–6.
+
+### Current Benchmark Comparison: C2MIR vs MIR Direct (debug build, March 2026)
+
+After all optimizations (P1, P5, B2, CSI, D1), measured on the current debug build:
+
+| Benchmark | C2MIR (default) | MIR Direct (`--mir`) | Node.js | C2MIR/MIR Ratio |
+|-----------|--------:|--------:|--------:|------:|
+| diviter | ~282ms | ~281ms | 488ms | ~1.0x (same) |
+| collatz | ~345ms | ~345ms | 1,459ms | ~1.0x (same) |
+| triangl | ~1,127ms | **~441ms** | 93ms | **2.56x slower** |
+| gcbench | ~502ms | ~490ms | 27ms | ~1.0x (same) |
+| gcbench2 | ~302ms | ~266ms | 27ms | 1.14x slower |
+
+**Key observations:**
+
+- **triangl: MIR Direct is 2.56x faster than C2MIR** after D3-MIR. The 6 new inline array read dispatch paths (with runtime `Container.type_id` checks) eliminate most external function calls for array access. MIR Direct generates native MIR instructions directly without C text → C2MIR parsing, producing better register allocation for nested array access patterns.
+- **diviter / collatz: identical** — both paths generate equivalent tight loops for scalar integer arithmetic. The CSI + P1 optimizations normalize performance across both backends.
+- **gcbench / gcbench2: MIR Direct slightly faster** (~14% on gcbench2), likely due to less overhead in allocation-heavy code paths where C2MIR's C text generation and parsing adds latency.
+- **The remaining triangl gap** vs Node.js (MIR ~441ms vs Node 93ms, ~4.7x) is dominated by boolean operation overhead (`fn_and`, `fn_not`, `is_truthy`) and `item_at` runtime type dispatch for `board` (generic Array). Array indexing is no longer the bottleneck.
 
 ## Appendix B: Benchmark Profiles
 
@@ -654,9 +605,10 @@ For the MIR Direct transpiler path, these additional optimizations apply:
 
 2. **Typed function signatures**: Emit MIR function params with native types when all callers can be statically verified (same-module calls).
 
-3. **Inline array access**: MIR Direct already has code for inline ArrayInt assignment (transpile-mir.cpp ~line 5900). Extend this to array reads: emit `MIR_MOV` from `items + index * 8` directly, with a bounds-check branch.
+3. **Inline array access**: ✅ **IMPLEMENTED (D3-MIR)**. Extended MIR Direct's existing inline ArrayInt assignment to array reads across all typed and untyped combinations. Added 6 new dispatch paths with runtime `Container.type_id` checks for safety. See D3-MIR implementation log below. **Result**: triangl MIR Direct ~441ms (was ~699ms), **2.56x faster than C2MIR** (~1,130ms).
 
-4. **Import cache for `_raw` variants**: The MIR Direct import cache (`import_cache` hashmap) should be extended with entries for the new `array_int_get_raw`, `array_float_get_raw` functions.
+4. ~~Import cache for `_raw` variants~~: ~~The MIR Direct import cache (`import_cache` hashmap) should be extended with entries for the new `array_int_get_raw`, `array_float_get_raw` functions.~~
+   Superseded by inline reads — Fast Path 1 is already faster than any `_raw` function call
 ---
 
 ## Implementation Log
@@ -737,17 +689,217 @@ Inlined `band`, `bor`, `bxor`, `bnot`, `shl`, `shr` as direct C operators in the
 
 ---
 
-### Priority 3: Raw Array Access Functions — **PARTIALLY IMPLEMENTED (Functions available, not triggered)**
+### B2-MIR: Inline Bitwise Operations for MIR Direct — **IMPLEMENTED**
 
-Added `array_int_get_raw()` and `array_int64_get_raw()` runtime functions that return `int64_t` instead of boxed `Item`. These functions exist in the codebase and are registered in the MIR import resolver, but are **not currently called** by the transpiler.
+**Status**: ✅ Implemented and verified (589/589 baseline tests pass).
 
-**Reason for deferral**: Fundamental semantic mismatch — Lambda arrays return `null` for out-of-bounds access (null is not printed), but raw `int64_t` returns 0 (integer 0 IS printed). Additionally, mutable arrays can be type-widened at runtime (`ArrayInt` → `Array` via `convert_specialized_to_generic`), making static type information unreliable. The correct approach requires either inline bounds-checked access or a two-value return mechanism.
+#### Optimization Parity Audit (C2MIR vs MIR Direct)
+
+Audited all C2MIR optimizations to check which were already applied to MIR Direct:
+
+| Optimization | C2MIR | MIR Direct | Action Needed |
+|---|---|---|---|
+| **P1** (`_store_i64` elimination) | ✅ | N/A — MIR uses native `MIR_MOV`, no workaround needed | None |
+| **P5** (Compact `map_with_data`) | ✅ | ✅ Already using `map_with_data`/`object_with_data` | None |
+| **B2** (Inline bitwise ops) | ✅ C operators | ❌ Was calling `fn_band`/`fn_shr` etc. | **Fixed** |
+| **CSI** (Call-site type inference) | ✅ | Has body-usage inference (different but equivalent approach) | None |
+|**D1** (Direct array access)|✅ 3-level dispatch|✅ **Enhanced (D3-MIR)**: 6 new inline read dispatch paths with runtime type checks. triangl **2.56x faster** than C2MIR|**Done** → ~441ms vs C2MIR ~1,130ms|
+
+**B2 was the only missing optimization.** MIR Direct correctly unboxed arguments to native `int64_t` but then called external runtime functions (`fn_band`, `fn_shr`, etc.) instead of using native MIR instructions.
+
+#### Implementation
+
+Replaced all bitwise function calls in `transpile-mir.cpp` with native MIR instructions:
+
+- `band(a,b)` → `MIR_AND` (single instruction)
+- `bor(a,b)` → `MIR_OR` (single instruction)
+- `bxor(a,b)` → `MIR_XOR` (single instruction)
+- `bnot(a)` → `MIR_XOR` with `-1` (equivalent to `~a`; MIR has no `NOT` instruction)
+- `shl(a,b)` → guarded `MIR_LSH`: bounds-check `b` in [0,64), branch to 0 if out-of-range
+- `shr(a,b)` → guarded `MIR_RSH`: same bounds-check pattern
+
+**Files changed:** `lambda/transpile-mir.cpp` (bitwise function handling in `transpile_call`)
+
+#### Results (release build)
+
+Collatz is the primary benchmark affected (uses `shr` in the inner loop):
+
+| Benchmark | MIR Before B2 | MIR After B2 | C2MIR | Node.js |
+|-----------|--------:|--------:|--------:|--------:|
+| collatz | ~345ms | **~337ms** | ~367ms | 1,459ms |
+
+The improvement is modest (~2%) because `fn_shr` was already a lightweight native-arg function. The main benefit is architectural consistency — MIR Direct now uses zero external function calls for bitwise operations, matching C2MIR's inline approach.
+
+---
+
+### Priority 3 / D1: Direct Array Access Dispatch — **IMPLEMENTED**
+
+**Status**: ✅ Implemented and verified (589/589 baseline tests pass).
+
+Rewrote `transpile_index_expr` to eliminate `fn_index()` calls — the most expensive array access path (double dispatch: index type + object type) — in favor of typed accessors and `item_at()`.
+
+#### Root Cause Analysis
+
+The triangl benchmark's hot inner loop `board[mfrom[mi]]` generated:
+```c
+// Before D1: every array access uses fn_index (most expensive path)
+fn_index(_board, fn_index((Item)(_mfrom), _mi))
+```
+
+All accesses used `fn_index` because:
+1. `board` has type ANY (from `fn_fill()` which returns `Item`)
+2. `mi` has type ANY (from indexing `stack`, also ANY)
+3. `mfrom` is `ArrayInt*` at C level but gets cast to `(Item)` for fn_index since `mi` is ANY
+4. The early `field_type != INT/INT64/FLOAT` check in `transpile_index_expr` sent ALL non-numeric-typed indices to the `fn_index` fallback
+
+#### Solution: Three-Level Dispatch Optimization
+
+**Level 1 — Typed array + ANY index** (e.g., `mfrom[mi]`):
+- Object is a known typed array (`ArrayInt*`, etc.) but index is `Item` (ANY)
+- Unbox the index with `it2i()` and call the typed accessor directly
+- Before: `fn_index((Item)_mfrom, _mi)` → After: `array_int_get(_mfrom, (int)it2i(_mi))`
+
+**Level 2 — ANY object + INT index** (e.g., `stack[depth]`):
+- Object is `Item` (ANY) but index is a known `int64_t`
+- Use `item_at(obj, (int)idx)` which skips fn_index's index-type dispatch
+- Before: `fn_index(_stack, i2it(_depth))` → After: `item_at(_stack, (int)_depth)`
+
+**Level 3 — ANY object + nested INT-array index** (e.g., `board[mfrom[mi]]`):
+- Both object and field types are ANY, BUT the field expression is an INDEX_EXPR into a typed int array
+- Detect at transpile time that the inner expression produces an integer Item
+- Unbox with `it2i()` and use `item_at` instead of `fn_index`
+- Before: `fn_index(_board, array_int_get(_mfrom, ...))` → After: `item_at(_board, (int)it2i(array_int_get(_mfrom, ...)))`
+
+**Key design insight**: The ARRAY type (generic `Array` with `nested` type info) is distinct from ARRAY_INT at the AST level. Array literals like `[0, 1, 2]` get type `ARRAY` with `nested=INT`, not `ARRAY_INT`. The initial approach of setting index result types based on nested type caused 15 test failures because it changed variable declarations from `Item` to `double`/`int64_t` throughout the codebase, creating type mismatches in MIR compilation. The final approach uses **targeted inner-expression detection** — only applied when both object AND field are ANY, and only for the specific case of nested array indexing.
+
+#### Generated Code (triangl hot line, after D1)
+
+```c
+// Before D1:
+fn_index(_board, array_int_get(_mfrom, (int)it2i(_mi)))
+
+// After D1:
+item_at(_board, (int)it2i(array_int_get(_mfrom, (int)it2i(_mi))))
+```
+
+All 3 board accesses in the hot condition and all 6 `fn_array_set` index computations now use `array_int_get` → `item_at` instead of `fn_index`. Zero `fn_index` calls remain in the generated code (only the declaration).
+
+#### Implementation Details
 
 **Files changed:**
-- `lambda/lambda-data-runtime.cpp`: Added `array_int_get_raw()`, `array_int64_get_raw()`
-- `lambda/lambda.h`: Declarations
-- `lambda/mir.c`: Import resolver entries
-- `lambda/transpile.cpp`: Infrastructure for `use_raw_int` / `use_raw_float` flags (never triggers since result type stays TYPE_ANY)
+- **lambda/build_ast.cpp** (`build_field_expr`): Added result type assignment for index into typed arrays — `ARRAY_INT`→`INT`, `ARRAY_INT64`→`INT64`, `ARRAY_FLOAT`→`FLOAT`. This enables `use_raw_int`/`use_raw_float` flags at transpile time.
+- **lambda/transpile.cpp** (`reinfer_body_types`): Added `INDEX_EXPR` case to re-derive result type based on updated object type after param inference.
+- **lambda/transpile.cpp** (`transpile_index_expr`): Major rewrite:
+  - Early non-numeric check modified: `if (!field_is_numeric && field_type != LMD_TYPE_ANY)` allows ANY fields through for typed arrays
+  - All typed array branches (ARRAY_INT, ARRAY_INT64, ARRAY_FLOAT, ARRAY, LIST) now accept `field_is_any` with `it2i()` unboxing
+  - New `item_at` path for `object=ANY + field=INT`
+  - New inner INDEX_EXPR detection for `object=ANY + field=ANY` when field is a typed array index
+  - All index parameters use `(int)` cast for safety
+
+#### Bugs Encountered and Resolved
+
+**Bug 1 — ARRAY nested type propagation breaks 15 tests**: Setting result type to INT for `ARRAY` (with nested INT) caused `double _array_index` declarations where MIR expected `Item`, producing `dmov: unexpected operand mode` errors. Also caused `<error>` results for array indexing in expressions like `[base[0], for ...]` where the index result was used in a generic Item context.
+**Fix**: Reverted the ARRAY nested type change. Only ARRAY_INT/ARRAY_INT64/ARRAY_FLOAT (explicit typed arrays) get typed results. For generic ARRAY, keep `TYPE_ANY` and use targeted inner-expression detection instead.
+
+**Bug 2 — fn_index not eliminated from early exit path**: Debug tracing revealed the `fn_index` was emitted from the second early-exit check (`!field_is_numeric && !object_is_typed_array`), not the final fallback. Both object and field were ANY (type ID 24), so the early exit fired before reaching the typed dispatch paths.
+**Fix**: Integrated the inner INDEX_EXPR detection into the early-exit check itself, so the optimization applies before falling through to `fn_index`.
+
+#### Results (release build)
+
+| Benchmark | Before D1 | After D1 | Node.js | Ratio |
+|-----------|--------:|--------:|--------:|------:|
+| triangl | 1,416ms | **~1,265ms** | 93ms | **~13.6x** |
+
+**Improvement**: ~12% faster. The improvement is modest because the remaining bottleneck is NOT `fn_index` (which is now eliminated) but rather:
+1. `item_at` still does a runtime `type_id` switch for each `board` access (board is generic `Array` holding booleans)
+2. `fn_and`/`fn_not`/`is_truthy` boolean operations on each board value add significant per-access overhead
+3. `it2i` unboxing at each level of nested access (inner result is boxed Item, outer needs int index)
+4. `array_int_get` still has null check + type_id check + bounds check + i2it boxing
+
+---
+
+### D3-MIR: MIR Direct Inline Array Reads — **IMPLEMENTED**
+
+**Status**: ✅ Implemented and verified (589/589 baseline tests pass).  
+**Appendix C Item 3** — extends MIR Direct's inline array access from writes to reads.
+
+#### Motivation
+
+MIR Direct already had Fast Path 1 (ARRAY_INT + INT index → inline `items[idx]` read) and Fast Path 2 (ANY + INT index → `fn_index` call). But many common access patterns fell through to `fn_index` or `item_at` unnecessarily:
+
+- `ARRAY` with `nested=INT` (e.g., array literals `[0, 1, 2]`) → not inlined
+- `ARRAY_INT` with ANY index (e.g., `mfrom[mi]` where `mi` is Item) → not inlined
+- `ARRAY` with ANY index → not inlined
+- Nested `board[mfrom[mi]]` where both object and index are ANY but inner index produces INT → not inlined
+
+The triangl benchmark's hot loop uses all of these patterns extensively.
+
+#### Solution: 6 New Dispatch Paths with Runtime Type Safety
+
+**Critical insight**: The compile-time ARRAY type (with `nested=INT`) is only a **hint** — `fn_array_set` can convert an `ArrayInt` to a generic `Array` in-place at runtime (changes `Container.type_id`). All inline reads for ARRAY-typed objects must include a runtime `type_id` check with fallback to `item_at`.
+
+**New fast paths added to `transpile_index` in `transpile-mir.cpp`:**
+
+| Path | Object Type | Index Type | Strategy |
+|------|------------|-----------|----------|
+| **1b** (typed) | ARRAY (nested=INT) | INT | Runtime check `Container.type_id == LMD_TYPE_ARRAY_INT` → inline `items[idx]` with `i2it` boxing; else → `item_at` fallback |
+| **1b** (generic) | ARRAY (nested≠INT or unknown) | INT | Direct `item_at(boxed_obj, idx)` — skips index-type dispatch |
+| **1c** | ARRAY_INT | ANY | Unbox index with `it2i()` → inline `items[idx]` read |
+| **1d** (typed) | ARRAY (nested=INT) | ANY | Unbox index, runtime `type_id` check → inline or `item_at` fallback |
+| **1d** (generic) | ARRAY (nested≠INT) | ANY | Unbox index → `item_at(boxed_obj, idx)` |
+| **Level 3** | ANY | ANY | Detect inner INDEX_EXPR into typed array → unbox with `it2i()` → `item_at` |
+
+Additionally, **Fast Path 2 slow path** was improved: changed from `fn_index(boxed_obj, box_int(idx))` to `item_at(boxed_obj, idx)` — saves both the integer boxing and `fn_index`'s double type dispatch.
+
+#### Runtime Type Check Pattern (MIR)
+
+For ARRAY objects that might be ArrayInt at runtime:
+```
+// Read Container.type_id (uint8_t at offset 0)
+MIR_MOV  type_reg, MIR_MEM(obj_reg, 0, MIR_T_U8)
+MIR_BNE  fallback_label, type_reg, LMD_TYPE_ARRAY_INT
+
+// Inline path: read items[idx] directly
+MIR_MOV  items_reg, MIR_MEM(obj_reg, 8, MIR_T_I64)    // Container.items
+MIR_MUL  offset, idx_reg, 8
+MIR_ADD  addr, items_reg, offset
+MIR_MOV  result, MIR_MEM(addr, 0, MIR_T_I64)
+MIR_JMP  done_label
+
+// Fallback: runtime dispatch
+fallback_label:
+MIR_CALL item_at(boxed_obj, idx)
+
+done_label:
+```
+
+#### Bug Encountered and Resolved
+
+**`proc_proc_array_type_convert` test failure**: Initial implementation trusted compile-time ARRAY type without runtime check. The test assigns `arr[1] = 3.14` on an int array, which triggers `fn_array_set` to convert `ArrayInt` → generic `Array` in-place (changes `Container.type_id` from `LMD_TYPE_ARRAY_INT` to `LMD_TYPE_ARRAY`). Subsequent inline reads crashed because the memory layout assumptions were wrong.
+
+**Fix**: Added runtime `Container.type_id` check to all ARRAY fast paths. If runtime type doesn't match expected `LMD_TYPE_ARRAY_INT`, fall back to `item_at()`.
+
+#### Files Changed
+
+- **lambda/transpile-mir.cpp** (`transpile_index`): ~250 lines of new dispatch paths between existing Fast Path 1 and Fast Path 2
+- **lambda/transpile-mir.cpp** (`get_effective_type`): Added safety comment documenting why ARRAY+INT must NOT return INT (runtime type mutation)
+
+#### Results (release build)
+
+| Benchmark | C2MIR | MIR Before D3 | MIR After D3 | Node.js |
+|-----------|------:|--------------:|-------------:|--------:|
+| triangl | ~1,130ms | ~699ms | **~441ms** | 93ms |
+| diviter | ~283ms | ~283ms | ~283ms | 488ms |
+| primes | ~0.7ms | ~0.7ms | ~0.7ms | — |
+| puzzle | ~4ms | ~4ms | ~4ms | — |
+| quicksort | ~3.3ms | ~3.3ms | ~3.3ms | — |
+
+**Key result**: triangl MIR Direct improved from ~699ms to **~441ms** (1.58x faster), and is now **2.56x faster than C2MIR** (~1,130ms). No regressions on other benchmarks.
+
+The remaining gap vs Node.js (4.7x) is dominated by:
+1. `item_at` runtime type dispatch for `board` accesses (board holds booleans in generic Array)
+2. `fn_and`/`fn_not`/`is_truthy` boolean operation overhead
+3. `i2it`/`it2i` boxing/unboxing at each nesting level
 
 ---
 
@@ -852,27 +1004,30 @@ All 11 untyped AWFY benchmarks pass with call-site type inference. Performance c
 
 ### Release Build (all optimizations applied)
 
-| Benchmark | Original | Before Inference | After Inference | Node.js | Ratio | Change |
-|-----------|--------:|--------:|--------:|--------:|------:|--------|
-| diviter (untyped) | 5,579ms | 5,480ms | **~285ms** | 488ms | **0.58x** | **19.2x faster** (inference) |
-| diviter (typed) | — | **271ms** | **271ms** | 488ms | **0.56x** | Faster than Node.js |
-| collatz (untyped) | 2,185ms | 2,016ms | **~439ms** | 1,459ms | **0.30x** | **4.6x faster** (inference) |
-| collatz (typed) | — | **338ms** | **338ms** | 1,459ms | **0.23x** | 4.3x faster than Node.js |
-| triangl | 1,416ms | 1,395ms | 1,395ms | 70ms | 19.9x | ~same (array boxing dominates) |
-| gcbench | 2,560ms | **436ms** | **436ms** | 27ms | 16.1x | 5.9x faster (P5) |
-| gcbench2 | 2,079ms | **266ms** | **266ms** | 27ms | 9.9x | 7.8x faster (P5) |
+| Benchmark | Original | Before Inference | After CSI | After D1 | Node.js | Ratio | Change |
+|-----------|--------:|--------:|--------:|--------:|--------:|------:|--------|
+| diviter (untyped) | 5,579ms | 5,480ms | **~285ms** | **~285ms** | 488ms | **0.58x** | **19.2x faster** (inference) |
+| diviter (typed) | — | **271ms** | **271ms** | **271ms** | 488ms | **0.56x** | Faster than Node.js |
+| collatz (untyped) | 2,185ms | 2,016ms | **~439ms** | **~439ms** | 1,459ms | **0.30x** | **4.6x faster** (inference) |
+| collatz (typed) | — | **338ms** | **338ms** | **338ms** | 1,459ms | **0.23x** | 4.3x faster than Node.js |
+| triangl (C2MIR) | 1,416ms | 1,395ms | 1,395ms | **~1,265ms** | 93ms | **~13.6x** | **12% faster** (D1) |
+| triangl (MIR) | — | ~699ms | ~699ms | **~441ms** | 93ms | **~4.7x** | **1.58x faster** (D3-MIR) |
+| gcbench | 2,560ms | **436ms** | **436ms** | **436ms** | 27ms | 16.1x | 5.9x faster (P5) |
+| gcbench2 | 2,079ms | **266ms** | **266ms** | **266ms** | 27ms | 9.9x | 7.8x faster (P5) |
 
 **Key findings:**
 - **Call-site type inference closes the gap for untyped code**: diviter and collatz now match their manually-typed counterparts and **beat Node.js** — without any source changes
 - With type annotations OR inference, C2MIR generates code that **beats Node.js** on compute-intensive loops
-- The remaining gap on triangl is array boxing (Priority 3), not type inference
+- **D1 eliminates all `fn_index` calls** from triangl's C2MIR hot path, replacing them with typed `array_int_get` + `item_at` dispatch
+- **D3-MIR extends inline array reads** to MIR Direct with 6 new dispatch paths including runtime type safety checks. MIR Direct triangl is now **2.56x faster than C2MIR** (~441ms vs ~1,130ms), reducing the gap vs Node.js from ~13.6x to **~4.7x**
+- The remaining triangl gap is dominated by boolean operations (`fn_and`, `fn_not`, `is_truthy`) and `item_at` runtime type dispatch — not array indexing
 
 ### Geomean Improvements
 
-| Metric | Original | Before Inference | After Inference |
-|--------|--------:|--------:|--------:|
-| Untyped benchmarks geomean vs Node.js | ~17x | ~8.5x | **~3.5x** |
-| Typed benchmarks geomean vs Node.js | — | ~0.4x (faster) | ~0.4x (faster) |
+| Metric | Original | Before Inference | After CSI | After D1 |
+|--------|--------:|--------:|--------:|--------:|
+| Untyped benchmarks geomean vs Node.js | ~17x | ~8.5x | ~3.5x | **~3.1x** |
+| Typed benchmarks geomean vs Node.js | — | ~0.4x (faster) | ~0.4x (faster) | ~0.4x (faster) |
 
 ---
 
@@ -884,8 +1039,10 @@ All 11 untyped AWFY benchmarks pass with call-site type inference. Performance c
 |---|-------------|--------|--------|
 | P1 | Selective `_store_i64` elimination | ✅ Done | diviter typed: 20x faster |
 | P5 | Compact map+data allocation | ✅ Done | gcbench: 4.7x, gcbench2: 6.2x |
-| B2 | Inline bitwise operations | ✅ Done | collatz: ~8% |
+| B2 | Inline bitwise operations | ✅ Done (both C2MIR + MIR Direct) | collatz: ~8% (C2MIR), native MIR instructions (MIR Direct) |
 | **CSI** | **Call-site type inference** | ✅ **Done** | **diviter untyped: 19.2x, collatz untyped: 4.6x** |
+| **D1** | **Direct array access dispatch** | ✅ **Done** | **triangl C2MIR: fn_index eliminated, ~12% faster** |
+| **D3-MIR** | **MIR Direct inline array reads** | ✅ **Done** | **triangl MIR: ~441ms (was ~699ms), 2.56x faster than C2MIR** |
 
 ### Remaining Opportunities
 
@@ -893,7 +1050,20 @@ All 11 untyped AWFY benchmarks pass with call-site type inference. Performance c
 |---|-------------|-----------|----------------|
 | P2/B1 | Transpiler-level function inlining | High | Moderate (eliminates call ABI overhead for small functions) |
 | P6/C2 | Procedure return type inference | Medium | Enables unboxed returns for procs |
-| D1 | Direct `arr->items[idx]` access | Medium | triangl: 20x→~5x (with inline bounds check) |
+| D2 | Loop-invariant code motion | Medium | Hoist array pointers out of loops |
 | D3 | MIR SSA bug upstream fix | Hard | Eliminates need for _store_i64 entirely |
+| D5 | Boolean array specialization | Medium | triangl: eliminate `fn_and`/`fn_not`/`is_truthy` overhead |
+| D6 | Inline `item_at` for provably-typed arrays | Medium | triangl: skip runtime type dispatch |
 
-**Direct array access (D1)** is now the single most impactful remaining optimization. Call-site type inference has resolved the boxed arithmetic bottleneck for scalar-param functions; the triangl benchmark (20x slower) remains dominated by array indexing overhead that requires native `->items[idx]` access.
+**Boolean specialization (D5)** and **inline `item_at` (D6)** are the most impactful remaining optimizations for triangl. The `fn_index` bottleneck has been fully resolved by D1 (C2MIR) and D3-MIR (MIR Direct); the remaining ~4.7x gap vs Node.js on MIR Direct is dominated by boolean operation overhead (`fn_and`, `fn_not`, `is_truthy` wrapping each board access) and `item_at`'s runtime `type_id` switch.
+
+
+**Optimization audit — MIR Direct (`--mir`) vs C2MIR:**
+
+|Optimization|C2MIR|MIR Direct|Action|
+|---|---|---|---|
+|**P1** (`_store_i64` elimination)|✅|N/A — MIR uses native [MIR_MOV](vscode-file://vscode-app/Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html), no workaround needed|None|
+|**P5** (Compact `map_with_data`)|✅|✅ Already applied|None|
+|**B2** (Inline bitwise ops)|✅ C operators|❌ Was calling `fn_band`/`fn_shr` etc.|**Fixed** → native MIR instructions|
+|**CSI** (Call-site type inference)|✅|Has body-usage inference (equivalent approach)|None|
+|**D1** (Direct array access)|✅ 3-level dispatch|✅ **Enhanced (D3-MIR)**: 6 new inline read dispatch paths with runtime type checks. triangl **2.56x faster** than C2MIR|**Done** → ~441ms vs C2MIR ~1,130ms|

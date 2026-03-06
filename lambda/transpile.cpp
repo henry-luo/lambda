@@ -3275,9 +3275,16 @@ static void reinfer_body_types(AstNode* node) {
         break;
     }
     case AST_NODE_INDEX_EXPR: {
-        AstBinaryNode* idx = (AstBinaryNode*)node;
-        reinfer_body_types(idx->left);
-        reinfer_body_types(idx->right);
+        AstFieldNode* idx = (AstFieldNode*)node;
+        reinfer_body_types(idx->object);
+        reinfer_body_types(idx->field);
+        // re-derive result type based on (possibly updated) object type
+        if (idx->object->type) {
+            TypeId obj_tid = idx->object->type->type_id;
+            if (obj_tid == LMD_TYPE_ARRAY_INT)        idx->type = &TYPE_INT;
+            else if (obj_tid == LMD_TYPE_ARRAY_INT64)  idx->type = &TYPE_INT64;
+            else if (obj_tid == LMD_TYPE_ARRAY_FLOAT)  idx->type = &TYPE_FLOAT;
+        }
         break;
     }
     case AST_NODE_INDEX_ASSIGN_STAM:
@@ -5332,9 +5339,55 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
 
     // Check if field type is numeric (addressing the TODO comment)
-    if (field_type != LMD_TYPE_INT && field_type != LMD_TYPE_INT64 && field_type != LMD_TYPE_FLOAT) {
-        // Non-numeric index (e.g. range, string key), must use generic fn_index
-        // Both object and field must be boxed Items for fn_index to work correctly
+    // Allow ANY-typed fields through when object is a known array type —
+    // the fast paths below will unbox the index with it2i()
+    bool field_is_numeric = (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64 || field_type == LMD_TYPE_FLOAT);
+    bool object_is_typed_array = (object_type == LMD_TYPE_ARRAY_INT || object_type == LMD_TYPE_ARRAY_INT64
+        || object_type == LMD_TYPE_ARRAY_FLOAT || object_type == LMD_TYPE_ARRAY || object_type == LMD_TYPE_LIST);
+    if (!field_is_numeric && field_type != LMD_TYPE_ANY) {
+        // Non-numeric, non-ANY index (e.g. range, string key), must use generic fn_index
+        strbuf_append_str(tp->code_buf, "fn_index(");
+        transpile_box_item(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
+    }
+    if (!field_is_numeric && !object_is_typed_array) {
+        // ANY index into an unknown object type.
+        // Before falling back to fn_index, check if the field expression is an INDEX_EXPR
+        // into a typed int array — if so, field is guaranteed to produce an integer Item,
+        // and we can use item_at(obj, (int)it2i(field)) instead of expensive fn_index.
+        if (field_type == LMD_TYPE_ANY && (object_type == LMD_TYPE_ANY || object_type == LMD_TYPE_NULL)) {
+            bool field_known_int = false;
+            AstNode* field_expr = field_node->field;
+            if (field_expr && field_expr->node_type == AST_NODE_PRIMARY) {
+                field_expr = ((AstPrimaryNode*)field_expr)->expr;
+            }
+            if (field_expr && field_expr->node_type == AST_NODE_INDEX_EXPR) {
+                AstFieldNode* inner_idx = (AstFieldNode*)field_expr;
+                TypeId inner_obj_type = inner_idx->object && inner_idx->object->type
+                    ? inner_idx->object->type->type_id : LMD_TYPE_ANY;
+                if (inner_obj_type == LMD_TYPE_ARRAY_INT || inner_obj_type == LMD_TYPE_ARRAY_INT64) {
+                    field_known_int = true;
+                } else if (inner_obj_type == LMD_TYPE_ARRAY) {
+                    TypeArray* arr_type = (TypeArray*)inner_idx->object->type;
+                    if (arr_type->nested && (arr_type->nested->type_id == LMD_TYPE_INT
+                        || arr_type->nested->type_id == LMD_TYPE_INT64)) {
+                        field_known_int = true;
+                    }
+                }
+            }
+            if (field_known_int) {
+                strbuf_append_str(tp->code_buf, "item_at(");
+                transpile_box_item(tp, field_node->object);
+                strbuf_append_str(tp->code_buf, ",(int)it2i(");
+                transpile_expr(tp, field_node->field);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+        }
+        // Fall back to fn_index
         strbuf_append_str(tp->code_buf, "fn_index(");
         transpile_box_item(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
@@ -5349,32 +5402,55 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     bool use_raw_int = (result_type == LMD_TYPE_INT || result_type == LMD_TYPE_INT64);
     bool use_raw_float = (result_type == LMD_TYPE_FLOAT);
 
+    // Helper: is field type a known integer (can be used as raw index)
+    bool field_is_int = (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64);
+    // Also allow ANY-typed fields — unbox at call site with it2i()
+    bool field_is_any = (field_type == LMD_TYPE_ANY);
+
     // Fast path optimizations for specific type combinations
-    if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
+    if (object_type == LMD_TYPE_ARRAY_INT && (field_is_int || field_is_any)) {
         strbuf_append_str(tp->code_buf, use_raw_int ? "array_int_get_raw(" : "array_int_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_expr(tp, field_node->field);
+        strbuf_append_str(tp->code_buf, ",(int)");
+        if (field_is_any) {
+            strbuf_append_str(tp->code_buf, "it2i(");
+            transpile_expr(tp, field_node->field);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            transpile_expr(tp, field_node->field);
+        }
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    else if (object_type == LMD_TYPE_ARRAY_INT64 && field_type == LMD_TYPE_INT) {
+    else if (object_type == LMD_TYPE_ARRAY_INT64 && (field_is_int || field_is_any)) {
         strbuf_append_str(tp->code_buf, use_raw_int ? "array_int64_get_raw(" : "array_int64_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_expr(tp, field_node->field);
+        strbuf_append_str(tp->code_buf, ",(int)");
+        if (field_is_any) {
+            strbuf_append_str(tp->code_buf, "it2i(");
+            transpile_expr(tp, field_node->field);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            transpile_expr(tp, field_node->field);
+        }
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    else if (object_type == LMD_TYPE_ARRAY_FLOAT && field_type == LMD_TYPE_INT) {
+    else if (object_type == LMD_TYPE_ARRAY_FLOAT && (field_is_int || field_is_any)) {
         strbuf_append_str(tp->code_buf, use_raw_float ? "array_float_get_value(" : "array_float_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_expr(tp, field_node->field);
+        strbuf_append_str(tp->code_buf, ",(int)");
+        if (field_is_any) {
+            strbuf_append_str(tp->code_buf, "it2i(");
+            transpile_expr(tp, field_node->field);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            transpile_expr(tp, field_node->field);
+        }
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    else if (object_type == LMD_TYPE_ARRAY && field_type == LMD_TYPE_INT) {
+    else if (object_type == LMD_TYPE_ARRAY && (field_is_int || field_is_any)) {
         TypeArray* arr_type = (TypeArray*)field_node->object->type;
         if (arr_type->nested) {
             switch (arr_type->nested->type_id) {
@@ -5392,15 +5468,37 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
             strbuf_append_str(tp->code_buf, "array_get(");
         }
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_expr(tp, field_node->field);
+        strbuf_append_str(tp->code_buf, ",(int)");
+        if (field_is_any) {
+            strbuf_append_str(tp->code_buf, "it2i(");
+            transpile_expr(tp, field_node->field);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            transpile_expr(tp, field_node->field);
+        }
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    else if (object_type == LMD_TYPE_LIST && field_type == LMD_TYPE_INT) {
+    else if (object_type == LMD_TYPE_LIST && (field_is_int || field_is_any)) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
+        strbuf_append_str(tp->code_buf, ",(int)");
+        if (field_is_any) {
+            strbuf_append_str(tp->code_buf, "it2i(");
+            transpile_expr(tp, field_node->field);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            transpile_expr(tp, field_node->field);
+        }
+        strbuf_append_char(tp->code_buf, ')');
+        return;
+    }
+    else if (field_is_int && (object_type == LMD_TYPE_ANY || object_type == LMD_TYPE_NULL)) {
+        // object is ANY but index is a known int — use item_at directly
+        // (skips fn_index's expensive index-type dispatch)
+        strbuf_append_str(tp->code_buf, "item_at(");
+        transpile_box_item(tp, field_node->object);
+        strbuf_append_str(tp->code_buf, ",(int)");
         transpile_expr(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
         return;
