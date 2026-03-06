@@ -974,7 +974,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            Item result = transpile_js_to_c(&runtime, js_source, js_file);
+            Item result = transpile_js_to_mir(&runtime, js_source, js_file);
 
             // printf("##### Script '%s' executed: #####\n", js_file);
             StrBuf *output = strbuf_new_cap(256);

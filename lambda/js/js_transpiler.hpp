@@ -98,34 +98,9 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
 
-// Code generation functions (transpile_js.cpp)
-void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root);
-void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt);
-void transpile_js_expression(JsTranspiler* tp, JsAstNode* expr);
-void transpile_js_function(JsTranspiler* tp, JsFunctionNode* func_node);
-void transpile_js_variable_declaration(JsTranspiler* tp, JsVariableDeclarationNode* var_node);
-void transpile_js_binary_expression(JsTranspiler* tp, JsBinaryNode* binary_node);
-void transpile_js_unary_expression(JsTranspiler* tp, JsUnaryNode* unary_node);
-void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node);
-void transpile_js_member_expression(JsTranspiler* tp, JsMemberNode* member_node);
-void transpile_js_array_expression(JsTranspiler* tp, JsArrayNode* array_node);
-void transpile_js_object_expression(JsTranspiler* tp, JsObjectNode* object_node);
-void transpile_js_identifier(JsTranspiler* tp, JsIdentifierNode* id_node);
-void transpile_js_literal(JsTranspiler* tp, JsLiteralNode* literal_node);
-
-// Boxing and type conversion functions
-void transpile_js_box_item(JsTranspiler* tp, JsAstNode* item);
-void write_js_type_conversion(JsTranspiler* tp, JsAstNode* expr, TypeId target_type);
-
-// Utility functions
+// AST utility functions (build_js_ast.cpp)
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);
 JsOperator js_operator_from_string(const char* op_str, size_t len);
-const char* js_operator_to_string(JsOperator op);
-void write_js_fn_name(StrBuf* buf, JsFunctionNode* func_node, int counter);
-void write_js_var_name(StrBuf* buf, String* name);
-void write_js_temp_var(StrBuf* buf, int counter);
-String* js_create_temp_var_name(JsTranspiler* tp);
-String* js_create_label_name(JsTranspiler* tp);
 
 // Error handling functions
 void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
@@ -138,14 +113,12 @@ void print_js_ast_node(JsAstNode* node, int indent);
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
-Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime);
-
 #ifdef __cplusplus
 }
 #endif
 
-// Main entry point (C++ linkage)
-Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* filename);
+// Direct MIR transpilation entry point
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus
