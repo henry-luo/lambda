@@ -794,9 +794,19 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // accounted for in the positioned ancestor's coordinates.
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
     ViewElement* parent = block->parent_view();
-    if (parent && parent->is_block()) {
-        ViewBlock* p = (ViewBlock*)parent;
-        // Walk from parent to containing block, accumulating offsets
+
+    // Walk past inline ancestors to find the nearest block ancestor.
+    // Inline spans don't have their own block coordinate space; pa_line->advance_x
+    // and pa_block->advance_y are already relative to the nearest block ancestor's
+    // content area.
+    ViewElement* walk_start = parent;
+    while (walk_start && !walk_start->is_block()) {
+        walk_start = walk_start->parent_view();
+    }
+
+    if (walk_start && walk_start->is_block()) {
+        ViewBlock* p = (ViewBlock*)walk_start;
+        // Walk from nearest block ancestor to containing block, accumulating offsets
         while (p && p != cb) {
             parent_to_cb_offset_x += p->x;
             parent_to_cb_offset_y += p->y;
@@ -835,7 +845,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             }
 
             // Normal flow or relative: coordinates are relative to DOM parent, continue walk
+            // Skip inline ancestors to find the next block ancestor
             ViewElement* gp = p->parent_view();
+            while (gp && !gp->is_block()) {
+                gp = gp->parent_view();
+            }
             if (gp && gp->is_block()) {
                 p = (ViewBlock*)gp;
             } else {
@@ -891,11 +905,23 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
     // Similarly for X when neither left nor right specified
     if (!block->position->has_left && !block->position->has_right) {
+        // CSS 2.1 §10.3.7: Use the static position — where the element would
+        // be in normal flow.
+        // For originally-inline elements (blockified by §9.7), the static X is
+        // the inline cursor (advance_x).
+        // For originally-block elements, the static X is the left edge of the
+        // line (pa_line->left), since block elements start on a new line.
+        bool was_inline = false;
+        if (elmt->is_element()) {
+            DomElement* elem = elmt->as_element();
+            if (elem->display.outer == CSS_VALUE_INLINE) {
+                was_inline = true;
+            }
+        }
+        float line_x = was_inline ? pa_line->advance_x : pa_line->left;
+
         if (static_direction == TD_RTL) {
-            // CSS 2.1 §10.3.7: When direction is RTL, set 'right' to the static position.
-            // The element will be right-aligned after shrink-to-fit width is known.
-            // Use temporary left-aligned position; will be adjusted after width finalization.
-            float static_x = parent_to_cb_offset_x + pa_line->left;
+            float static_x = parent_to_cb_offset_x + line_x;
             if (block->bound && block->bound->margin.left > 0) {
                 static_x += block->bound->margin.left;
             }
@@ -903,12 +929,12 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             log_debug("[STATIC POS] RTL: temporary X position: %.1f (will adjust after width known)", block->x);
         } else {
             // CSS 2.1 §10.3.7: When direction is LTR, set 'left' to the static position.
-            float static_x = parent_to_cb_offset_x + pa_line->left;
+            float static_x = parent_to_cb_offset_x + line_x;
             if (block->bound && block->bound->margin.left > 0) {
                 static_x += block->bound->margin.left;
             }
-            log_debug("[STATIC POS] LTR: Using static X position: %.1f (pa_line->left=%.1f, offset=%.1f)",
-                      static_x, pa_line->left, parent_to_cb_offset_x);
+            log_debug("[STATIC POS] LTR: Using static X position: %.1f (line_x=%.1f, offset=%.1f, was_inline=%d)",
+                      static_x, line_x, parent_to_cb_offset_x, was_inline);
             block->x = static_x;
         }
     }
@@ -1083,26 +1109,23 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // CSS 2.1 §10.3.7: For RTL direction with neither left nor right specified,
-    // set 'right' to the static position. The static position for 'right' is
-    // the distance from the CB's right padding edge to the hypothetical box's
-    // right margin edge. In RTL, the hypothetical block's right edge aligns
-    // with the parent's (static-position CB) right content edge.
+    // set 'right' to the static position, then solve for 'left'.
+    // The hypothetical box's right margin edge is at:
+    //   - Block elements: parent's right content edge (pa_line->right)
+    //   - Inline elements: inline cursor (pa_line->advance_x)
+    // pa_line->right = border_left + padding_left + content_width (from setup_inline),
+    // which gives the right content edge in the parent's local coordinates.
     if (static_direction == TD_RTL && !block->position->has_left && !block->position->has_right) {
-        // Get the parent's (static-position containing block's) content width
-        float parent_content_width = 0;
-        if (parent && parent->is_block()) {
-            parent_content_width = ((ViewBlock*)parent)->content_width;
+        bool was_inline_rtl = false;
+        if (elmt->is_element()) {
+            DomElement* elem = elmt->as_element();
+            if (elem->display.outer == CSS_VALUE_INLINE) was_inline_rtl = true;
         }
-        // Hypothetical box right margin edge (relative to CB border-box):
-        //   parent_to_cb_offset_x + parent_content_width
-        // Solve constraint equation for left:
-        //   left = cb_padding_width - static_right - margin_left - border_box_width - margin_right
-        // block->x = cb_border_left + left + margin_left
-        // Simplifies to:
+        float line_right = was_inline_rtl ? pa_line->advance_x : pa_line->right;
         float margin_right = (block->bound) ? block->bound->margin.right : 0;
-        block->x = parent_to_cb_offset_x + parent_content_width - block->width - margin_right;
-        log_debug("[STATIC POS] RTL adjustment: x=%.1f (parent_offset=%.1f, parent_cw=%.1f, block_w=%.1f, mr=%.1f)",
-                  block->x, parent_to_cb_offset_x, parent_content_width, block->width, margin_right);
+        block->x = parent_to_cb_offset_x + line_right - block->width - margin_right;
+        log_debug("[STATIC POS] RTL adjustment: x=%.1f (parent_offset=%.1f, line_right=%.1f, block_w=%.1f, mr=%.1f)",
+                  block->x, parent_to_cb_offset_x, line_right, block->width, margin_right);
     }
 
     // CSS 2.1 §10.3.7: When width is auto (shrink-to-fit) and 'right' is specified

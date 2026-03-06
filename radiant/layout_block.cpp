@@ -2847,6 +2847,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
             }
             // else both width and height specified (non-zero)
+
+            // CSS 2.1 §10.3.4: Block-level replaced elements use intrinsic width
+            // for 'width: auto'. Clear the AUTO type so the width resolution path
+            // uses the resolved intrinsic value instead of filling the container.
+            if (block->blk && block->blk->given_width_type == CSS_VALUE_AUTO) {
+                block->blk->given_width_type = CSS_VALUE__UNDEF;
+            }
+            if (block->blk && block->blk->given_height_type == CSS_VALUE_AUTO) {
+                block->blk->given_height_type = CSS_VALUE__UNDEF;
+            }
+
             if (img->format == IMAGE_FORMAT_SVG) {
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
@@ -3874,8 +3885,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    // Only cause line break for non-inline-block, non-float blocks
-    if (display.outer != CSS_VALUE_INLINE_BLOCK && !is_float) {
+    // CSS 2.1 §10.3.7: For absolutely positioned elements whose specified display
+    // was inline (blockified by §9.7), the static position is the inline cursor.
+    // Skip line_break to preserve the inline cursor in pa_line->advance_x.
+    // For originally block-level abs-pos elements, line_break is needed so the
+    // static position is at the start of a new line.
+    bool is_blockified_inline_abspos = false;
+    if (elmt->is_element()) {
+        DomElement* elem = elmt->as_element();
+        if (elem->display.outer == CSS_VALUE_INLINE &&
+            elem->position &&
+            (elem->position->position == CSS_VALUE_ABSOLUTE ||
+             elem->position->position == CSS_VALUE_FIXED)) {
+            is_blockified_inline_abspos = true;
+        }
+    }
+
+    // Only cause line break for non-inline-block, non-float, non-blockified-inline-abspos blocks
+    if (display.outer != CSS_VALUE_INLINE_BLOCK && !is_float && !is_blockified_inline_abspos) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
     // save parent context
