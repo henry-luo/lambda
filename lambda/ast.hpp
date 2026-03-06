@@ -182,6 +182,7 @@ extern "C" {
 #endif
 
 #include "lambda-data.hpp"
+#include "sys_func_registry.h"
 
 typedef struct NamePool NamePool;
 typedef struct AstNode AstNode;
@@ -333,45 +334,7 @@ typedef struct AstParentNode : AstNode {
     int depth;                // number of parent levels (1 for .., 2 for .._.., etc.)
 } AstParentNode;
 
-// C-level return type convention for system functions (Phase 4 metadata)
-// Describes what the C function actually returns at the ABI level.
-typedef enum CRetType {
-    C_RET_ITEM = 0,    // returns boxed Item (default, most sys funcs)
-    C_RET_RETITEM,     // returns RetItem {Item value; LambdaError* err} (can_raise functions)
-    C_RET_INT64,       // returns raw int64_t (fn_len, fn_index_of, bitwise, etc.)
-    C_RET_DOUBLE,      // returns raw double (pn_clock)
-    C_RET_BOOL,        // returns Bool/uint8_t (fn_contains, fn_starts_with, etc.)
-    C_RET_STRING,      // returns String* (fn_string, fn_format1/2)
-    C_RET_SYMBOL,      // returns Symbol* (fn_name, fn_symbol1)
-    C_RET_DTIME,       // returns DateTime/uint64_t (datetime funcs)
-    C_RET_TYPE_PTR,    // returns Type* (fn_type)
-    C_RET_CONTAINER,   // returns container pointer: Map*, List*, Array*, etc.
-} CRetType;
-
-// C-level argument convention for system functions
-typedef enum CArgConvention {
-    C_ARG_ITEM = 0,    // all arguments are boxed Items (default)
-    C_ARG_NATIVE,      // arguments are native C types (int64_t for bitwise ops)
-} CArgConvention;
-
-typedef struct SysFuncInfo {
-    SysFunc fn;
-    const char* name;
-    int arg_count;  // -1 for variable args
-    Type* return_type;
-    bool is_proc;   // is procedural
-    bool is_overloaded;
-    bool is_method_eligible;    // can be called as obj.method() style
-    TypeId first_param_type;    // expected type of first param (LMD_TYPE_ANY for any)
-    bool can_raise;             // function may return error (T^ return type)
-    CRetType c_ret_type;        // C-level return type (default: C_RET_ITEM)
-    CArgConvention c_arg_conv;  // C-level argument convention (default: C_ARG_ITEM)
-    // --- Unified registry fields (Phase 3) ---
-    const char* c_func_name;    // C function name emitted by transpiler ("fn_len", "pn_print", etc.)
-    const char* native_c_name;  // Native C math function for optimization ("fabs", "sin", etc.), NULL if none
-    bool native_returns_float;  // True if native function returns double
-    int native_arg_count;       // Number of args for native function (1 or 2), 0 if not applicable
-} SysFuncInfo;
+// CRetType, CArgConvention, and SysFuncInfo are now in sys_func_registry.h
 
 typedef struct AstSysFuncNode : AstNode {
     SysFuncInfo* fn_info;
