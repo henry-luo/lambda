@@ -217,7 +217,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     runtime.dom_doc = (void*)dom_doc;
 
     // execute the combined JS source via JIT transpiler
-    Item result = transpile_js_to_c(&runtime, script_buf->str, "<document-scripts>");
+    Item result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
 
     TypeId result_type = get_type_id(result);
     if (result_type == LMD_TYPE_ERROR) {
