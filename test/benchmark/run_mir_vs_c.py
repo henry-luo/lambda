@@ -125,7 +125,7 @@ r7rs_c_untyped = {}
 for name, cat in R7RS_BENCHMARKS:
     script = f"test/benchmark/r7rs/{name}.ls"
     print(f"  {name:12s}", end="", flush=True)
-    times = run_benchmark(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
+    times = run_benchmark(f"{LAMBDA_EXE} run --c2mir {script}", NUM_RUNS)
     m = med(times)
     r7rs_c_untyped[name] = m
     print(f"  median={format_time(m):>10s}")
@@ -138,7 +138,7 @@ r7rs_mir_untyped = {}
 for name, cat in R7RS_BENCHMARKS:
     script = f"test/benchmark/r7rs/{name}.ls"
     print(f"  {name:12s}", end="", flush=True)
-    times = run_benchmark(f"{LAMBDA_EXE} run --mir {script}", NUM_RUNS)
+    times = run_benchmark(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
     m = med(times)
     r7rs_mir_untyped[name] = m
     print(f"  median={format_time(m):>10s}")
@@ -151,7 +151,7 @@ r7rs_c_typed = {}
 for name, cat in R7RS_BENCHMARKS:
     script = f"test/benchmark/r7rs/{name}2.ls"
     print(f"  {name:12s}", end="", flush=True)
-    times = run_benchmark(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
+    times = run_benchmark(f"{LAMBDA_EXE} run --c2mir {script}", NUM_RUNS)
     m = med(times)
     r7rs_c_typed[name] = m
     print(f"  median={format_time(m):>10s}")
@@ -164,7 +164,7 @@ r7rs_mir_typed = {}
 for name, cat in R7RS_BENCHMARKS:
     script = f"test/benchmark/r7rs/{name}2.ls"
     print(f"  {name:12s}", end="", flush=True)
-    times = run_benchmark(f"{LAMBDA_EXE} run --mir {script}", NUM_RUNS)
+    times = run_benchmark(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
     m = med(times)
     r7rs_mir_typed[name] = m
     print(f"  median={format_time(m):>10s}")
@@ -230,7 +230,7 @@ awfy_c = {}
 for name, cat in AWFY_BENCHMARKS:
     script = f"test/benchmark/awfy/{name}.ls"
     print(f"  {name:14s}", end="", flush=True)
-    times = run_benchmark(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
+    times = run_benchmark(f"{LAMBDA_EXE} run --c2mir {script}", NUM_RUNS)
     m = med(times)
     awfy_c[name] = m
     print(f"  median={format_time(m):>10s}")
@@ -243,7 +243,7 @@ awfy_mir = {}
 for name, cat in AWFY_BENCHMARKS:
     script = f"test/benchmark/awfy/{name}.ls"
     print(f"  {name:14s}", end="", flush=True)
-    times = run_benchmark(f"{LAMBDA_EXE} run --mir {script}", NUM_RUNS)
+    times = run_benchmark(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
     m = med(times)
     awfy_mir[name] = m
     print(f"  median={format_time(m):>10s}")

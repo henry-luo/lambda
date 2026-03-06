@@ -383,8 +383,8 @@ pn factorial(n: int) int {
 A procedural script requires a `pn main()` function as its entry point. Use the `run` command to execute it:
 
 ```bash
-lambda run script.ls           # Execute script.ls via main()
-lambda run --mir script.ls     # Execute with MIR JIT compilation
+lambda run script.ls           # Execute script.ls via main() (MIR Direct JIT, default)
+lambda run --c2mir script.ls   # Execute with C2MIR JIT compilation
 ```
 
 **Example script** (`greet.ls`):

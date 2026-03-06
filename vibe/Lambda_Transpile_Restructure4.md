@@ -590,10 +590,10 @@ P4-1 (dual versions) combined with P4-3.3 (return type inference) eliminates the
 **Key fixes during implementation**:
 - **PRIMARY node unwrapping**: The AST wraps identifiers in PRIMARY nodes. All variable lookups in `get_effective_type` INDEX_EXPR, FAST PATH 1b, and FAST PATH 1d must unwrap PRIMARY to find the IDENT.
 - **Typed array coercion guard**: `var arr:int[] = fill(3, true)` coerces the array to ArrayInt via `ensure_typed_array`, changing `var_tid` to ANY. The `elem_type` assignment must check `var_tid == LMD_TYPE_ARRAY` to avoid applying bool elem_type to a coerced integer array.
-- **`--mir` flag**: The `run` CLI command requires `--mir` flag to use MIR Direct transpiler; without it, C2MIR is used and P4 optimizations don't apply.
+- **`--c2mir` flag**: Use the `--c2mir` CLI flag to use the legacy C2MIR transpiler. MIR Direct is the default JIT path.
 
 **Performance impact** (triangl benchmark, release build):
-- C2MIR (no `--mir`): ~1250-1540ms
+- C2MIR (`--c2mir`): ~1250-1540ms
 - MIR Direct Phase 3 baseline: ~441ms  
 - MIR Direct P4-1 + P4-3.3 + P4-3.1: ~290-380ms (median ~340ms)
 - Improvement: ~17-34% over Phase 3 baseline
@@ -622,7 +622,7 @@ P4-1 (dual versions) combined with P4-3.3 (return type inference) eliminates the
 - **fill() interaction**: Variables initialized via `fill(n, val)` already get `elem_type` set during the fill detection pass. The P4-3.2 array literal check only activates when `fill_elem_type == ANY` (not already narrowed by fill).
 
 **Performance impact** (triangl benchmark, release build):
-- C2MIR (no `--mir`): ~1250-1540ms
+- C2MIR (`--c2mir`): ~1250-1540ms
 - MIR Direct Phase 3 baseline: ~441ms
 - MIR Direct P4-1 + P4-3.3 + P4-3.1: ~290-380ms (median ~340ms)
 - MIR Direct P4-1 + P4-3.3 + P4-3.1 + P4-3.2: ~222-233ms (median ~233ms)
@@ -632,7 +632,7 @@ P4-1 (dual versions) combined with P4-3.3 (return type inference) eliminates the
 
 ## Benchmark Results (Phase 4, Release Build, 2026-03-06)
 
-All timings are best-of-3 runs on Apple Silicon (macOS). C2MIR = `./lambda.exe run <script>`, MIR Direct = `./lambda.exe run --mir <script>`.
+All timings are best-of-3 runs on Apple Silicon (macOS). MIR Direct = `./lambda.exe run <script>` (default), C2MIR = `./lambda.exe run --c2mir <script>`.
 
 ### Core Benchmarks — C2MIR vs MIR Direct
 
