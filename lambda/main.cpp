@@ -790,7 +790,10 @@ int main(int argc, char *argv[]) {
     }
 
 #ifndef NDEBUG
-    log_notice("Running DEBUG build of lambda.exe");
+    log_notice("############################################");
+    log_notice("!!! Running DEBUG build of lambda.exe  !!!");
+    log_notice("!!! Do NOT use it for performance test !!!");
+    log_notice("############################################");
 #endif
 
     // Add trace statement at start of main
