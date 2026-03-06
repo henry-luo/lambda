@@ -61,7 +61,6 @@ Array* array_fill(Array* arr, int count, ...) {
         }
         va_end(args);
     }
-    log_debug("array_filled");
     log_item({.list = arr}, "array_filled");
     return arr;
 }
@@ -116,7 +115,6 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
         }
         va_end(args);
     }
-    log_debug("array_int_filled");
     return arr;
 }
 
@@ -126,13 +124,19 @@ Item array_int_get(ArrayInt *array, int index) {
     if (array->type_id != LMD_TYPE_ARRAY_INT)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
-        log_warn("array_int_get: index out of bounds: %d", index);
+        log_debug("array_int_get: index out of bounds: %d", index);
         return ItemNull;  // return null instead of error
     }
     int64_t val = array->items[index];
     Item item = (Item){.item = i2it(val)};
-    log_debug("array_int_get returning: type: %d, int_val: %lld", item._type_id, (long long)item.get_int56());
     return item;
+}
+
+// Fast path: return raw int64_t without boxing — for use when result type is known int
+// Only used for immutable arrays (let) where type widening cannot occur.
+int64_t array_int_get_raw(ArrayInt *array, int index) {
+    if (!array || (unsigned)index >= (unsigned)array->length) return 0;
+    return array->items[index];
 }
 
 ArrayInt64* array_int64() {
@@ -161,7 +165,6 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
         }
         va_end(args);
     }
-    log_debug("array_int64_filled");
     return arr;
 }
 
@@ -171,16 +174,22 @@ Item array_int64_get(ArrayInt64* array, int index) {
     if (array->type_id != LMD_TYPE_ARRAY_INT64)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
-        log_warn("array_int64_get: index out of bounds: %d", index);
+        log_debug("array_int64_get: index out of bounds: %d", index);
         return ItemNull;
     }
     return push_l(array->items[index]);
 }
 
+// Fast path: return raw int64_t without boxing
+// Only used for immutable arrays (let) where type widening cannot occur.
+int64_t array_int64_get_raw(ArrayInt64 *array, int index) {
+    if (!array || (unsigned)index >= (unsigned)array->length) return 0;
+    return array->items[index];
+}
+
 ArrayFloat* array_float() {
     ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-    log_debug("array_float_start");
     return arr;
 }
 
@@ -205,7 +214,6 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
         }
         va_end(args);
     }
-    log_debug("array_float_filled");
     return arr;
 }
 
@@ -215,16 +223,15 @@ Item array_float_get(ArrayFloat* array, int index) {
     if (array->type_id != LMD_TYPE_ARRAY_FLOAT)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
-        log_warn("array_float_get: index out of bounds: %d", index);
+        log_debug("array_float_get: index out of bounds: %d", index);
         return ItemNull;
     }
-    log_debug("array_float_get: %d, val: %f", index, array->items[index]);
     return push_d(array->items[index]);
 }
 
-// fast path
+// fast path — only used for immutable arrays where type widening cannot occur
 double array_float_get_value(ArrayFloat *arr, int index) {
-    if (index < 0 || index >= arr->length) {
+    if (!arr || index < 0 || index >= arr->length) {
         return NAN;  // Return NaN for invalid access
     }
     return arr->items[index];
@@ -292,12 +299,10 @@ List* list() {
 Item list_end(List *list) {
     log_leave();
     if (list->type_id == LMD_TYPE_ELEMENT) {
-        log_debug("elmt_end!");
         log_item({.list = list}, "elmt_end");
         return {.list = list};
     }
     else {
-        log_debug("list_ended: type %d, length %d", list->type_id, list->length);
         if (list->length == 0) {
             return ItemNull;
         }
@@ -336,7 +341,6 @@ void array_limit_inplace(Array* arr, int64_t n) {
 
 // create a spreadable array for for-expression results
 Array* array_spreadable() {
-    log_debug("array_spreadable: creating spreadable array");
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->is_spreadable = true;  // mark as spreadable
@@ -346,7 +350,6 @@ Array* array_spreadable() {
 // finalize spreadable array - returns array as Item (no flattening)
 // returns spreadable null for empty arrays so they can be skipped when spreading
 Item array_end(Array* arr) {
-    log_debug("array_end: length=%ld, is_spreadable=%d", arr->length, arr->is_spreadable);
     if (arr->length == 0) {
         // return spreadable null - will be skipped when added to collections
         return {.item = ITEM_NULL_SPREADABLE};
@@ -360,13 +363,11 @@ void array_push_spread(Array* arr, Item item) {
     TypeId type_id = get_type_id(item);
     // skip spreadable null (empty for-expression result)
     if (item.item == ITEM_NULL_SPREADABLE) {
-        log_debug("array_push_spread: skipping spreadable null");
         return;
     }
     if (type_id == LMD_TYPE_ARRAY) {
         Array* inner = item.array;
         if (inner && inner->is_spreadable) {
-            log_debug("array_push_spread: spreading array of length %ld", inner->length);
             for (int i = 0; i < inner->length; i++) {
                 array_push(arr, inner->items[i]);
             }
@@ -377,7 +378,6 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_LIST) {
         List* inner = item.list;
         if (inner && inner->is_spreadable) {
-            log_debug("array_push_spread: spreading list of length %ld", inner->length);
             for (int i = 0; i < inner->length; i++) {
                 array_push(arr, inner->items[i]);
             }
@@ -388,7 +388,6 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt* inner = item.array_int;
         if (inner && inner->is_spreadable) {
-            log_debug("array_push_spread: spreading array_int of length %ld", inner->length);
             for (int i = 0; i < inner->length; i++) {
                 array_push(arr, {.item = i2it(inner->items[i])});
             }
@@ -399,7 +398,6 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* inner = item.array_int64;
         if (inner && inner->is_spreadable) {
-            log_debug("array_push_spread: spreading array_int64 of length %ld", inner->length);
             for (int i = 0; i < inner->length; i++) {
                 array_push(arr, {.item = l2it(inner->items[i])});
             }
@@ -410,7 +408,6 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* inner = item.array_float;
         if (inner && inner->is_spreadable) {
-            log_debug("array_push_spread: spreading array_float of length %ld", inner->length);
             for (int i = 0; i < inner->length; i++) {
                 array_push(arr, {.item = d2it(inner->items[i])});
             }
@@ -447,7 +444,6 @@ Item item_spread(Item item) {
 }
 
 Item list_fill(List *list, int count, ...) {
-    log_debug("list_fill cnt: %d", count);
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
@@ -543,7 +539,6 @@ static Item _map_read_field(ShapeEntry* field, void* map_data) {
         DateTime dt = *(DateTime*)field_ptr;
         StrBuf *strbuf = strbuf_new();
         datetime_format_lambda(strbuf, &dt);
-        log_debug("map_get datetime: %s", strbuf->str);
         return push_k(dt);
     }
     case LMD_TYPE_DECIMAL:
@@ -608,7 +603,6 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
         field = field->next;
     }
     if (!*is_found) {
-        log_debug("map_get: key '%s' not found", key);
     }
     return result;
 }
@@ -627,7 +621,6 @@ Item map_get(Map* map, Item key) {
 }
 
 Element* elmt(int type_index) {
-    log_debug("elmt with type index: %d", type_index);
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -637,7 +630,6 @@ Element* elmt(int type_index) {
 }
 
 Object* object(int type_index) {
-    log_debug("object with type index: %d", type_index);
     Object *obj = (Object *)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
     obj->type_id = LMD_TYPE_OBJECT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -676,18 +668,15 @@ Object* object_fill(Object* obj, ...) {
     if (!obj->data) {
         obj->data = heap_data_calloc(obj_type->byte_size);
     }
-    log_debug("object byte_size: %ld", obj_type->byte_size);
     // set object fields (same layout as map)
     va_list args;
     va_start(args, obj_type->length);
     set_fields((TypeMap*)obj_type, obj->data, args);
     va_end(args);
-    log_debug("object filled with type: %d, length: %ld", obj_type->type_id, obj_type->length);
     return obj;
 }
 
 Item object_get(Object* obj, Item key) {
-    log_debug("object_get %p", obj);
     if (!obj || !key.item) { return ItemNull; }
     bool is_found;
     char *key_str = NULL;
@@ -697,7 +686,6 @@ Item object_get(Object* obj, Item key) {
         log_error("object_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;
     }
-    log_debug("object_get key:'%s'", key_str);
     return _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
 }
 
@@ -749,10 +737,8 @@ Element* elmt_fill(Element* elmt, ...) {
     if (!elmt->data) {
         elmt->data = heap_data_calloc(elmt_type->byte_size);
     }
-    log_debug("elmt byte_size: %ld", elmt_type->byte_size);
     // set attributes
     long count = elmt_type->length;
-    log_debug("elmt length: %ld", count);
     va_list args;
     va_start(args, count);
     set_fields((TypeMap*)elmt_type, elmt->data, args);

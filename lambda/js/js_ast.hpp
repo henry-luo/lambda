@@ -114,6 +114,14 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_PARAMETER,
     JS_AST_NODE_REST_ELEMENT,
     JS_AST_NODE_REST_PROPERTY,
+    
+    // v5: New expression and control flow
+    JS_AST_NODE_NEW_EXPRESSION,
+    JS_AST_NODE_SWITCH_STATEMENT,
+    JS_AST_NODE_SWITCH_CASE,
+    JS_AST_NODE_DO_WHILE_STATEMENT,
+    JS_AST_NODE_FOR_OF_STATEMENT,
+    JS_AST_NODE_FOR_IN_STATEMENT,
 } JsAstNodeType;
 
 // JavaScript operators
@@ -166,6 +174,18 @@ typedef enum JsOperator {
     JS_OP_MUL_ASSIGN,       // *=
     JS_OP_DIV_ASSIGN,       // /=
     JS_OP_MOD_ASSIGN,       // %=
+    
+    // v5: Additional operators
+    JS_OP_EXP_ASSIGN,       // **=
+    JS_OP_BIT_AND_ASSIGN,   // &=
+    JS_OP_BIT_OR_ASSIGN,    // |=
+    JS_OP_BIT_XOR_ASSIGN,   // ^=
+    JS_OP_LSHIFT_ASSIGN,    // <<=
+    JS_OP_RSHIFT_ASSIGN,    // >>=
+    JS_OP_URSHIFT_ASSIGN,   // >>>=
+    JS_OP_INSTANCEOF,       // instanceof
+    JS_OP_IN,               // in
+    JS_OP_NULLISH_COALESCE, // ??
 } JsOperator;
 
 // JavaScript literal types
@@ -178,11 +198,13 @@ typedef enum JsLiteralType {
 } JsLiteralType;
 
 // Base JavaScript AST node
+// NOTE: Field order must match AstNode layout (node_type, type, next, node)
+// because NameEntry stores AstNode* but points to JsAstNode memory
 typedef struct JsAstNode {
     JsAstNodeType node_type;
-    TSNode node;                    // Tree-sitter node
     Type* type;                     // Inferred Lambda type
     struct JsAstNode* next;         // Linked list for siblings
+    TSNode node;                    // Tree-sitter node
 } JsAstNode;
 
 // JavaScript identifier node
@@ -428,3 +450,36 @@ typedef struct JsAssignmentPatternNode {
     JsAstNode* left;                // Pattern
     JsAstNode* right;               // Default value
 } JsAssignmentPatternNode;
+
+// v5: JavaScript switch statement node
+typedef struct JsSwitchNode {
+    JsAstNode base;
+    JsAstNode* discriminant;        // Expression to match
+    JsAstNode* cases;               // Linked list of JsSwitchCaseNode
+} JsSwitchNode;
+
+// v5: JavaScript switch case/default node
+typedef struct JsSwitchCaseNode {
+    JsAstNode base;
+    JsAstNode* test;                // Test expression (NULL for default)
+    JsAstNode* consequent;          // Linked list of statements
+} JsSwitchCaseNode;
+
+// v5: JavaScript do...while statement node
+typedef struct JsDoWhileNode {
+    JsAstNode base;
+    JsAstNode* body;                // Loop body
+    JsAstNode* test;                // Condition expression
+} JsDoWhileNode;
+
+// v5: JavaScript for...of / for...in statement node
+typedef struct JsForOfNode {
+    JsAstNode base;
+    JsAstNode* left;                // Variable declaration or pattern
+    JsAstNode* right;               // Iterable expression
+    JsAstNode* body;                // Loop body
+    int kind;                       // Variable kind (var/let/const)
+} JsForOfNode;
+
+// Reuse same struct for for...in
+typedef JsForOfNode JsForInNode;
