@@ -11,7 +11,7 @@ pn format9(x) {
     var neg = ""
     if (v < 0.0) {
         neg = "-"
-        v = 0.0 - v
+        v = -v
     }
     var int_part = int(floor(v))
     var frac = v - float(int_part)
