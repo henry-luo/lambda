@@ -1,0 +1,25 @@
+arrow sort: 1 2 3 5 8 9
+closure sort: 1 2 4 5 7
+closure desc: 7 5 4 2 1
+lex sort: 10 7 80 9
+str sort: apple banana cherry date
+min1: 42
+min2: 3
+min3: 3
+min4: 1
+max1: 42
+max2: 5
+max3: 8
+max4: 8
+min0: Infinity
+max0: -Infinity
+fill: 0 0 0 0
+rest sum: 10 140
+dot: 140
+multi destr: 4 6
+fn destr: 42 99
+row: 1 3
+row: 5 3
+row: 9 3
+stable: 10 10 20 20 30 30
+null
