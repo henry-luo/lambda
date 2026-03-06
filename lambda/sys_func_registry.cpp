@@ -378,8 +378,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_unique",  NULL, false, 0},
 
-    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_concat",  NULL, false, 0},
+    // concat() removed from user API — use ++ operator instead
+    // {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+    //  C_RET_ITEM, C_ARG_ITEM, "fn_concat",  NULL, false, 0},
 
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_take",  NULL, false, 0},

@@ -237,15 +237,15 @@ Item fn_join(Item left, Item right) {
         Symbol* sym = heap_create_symbol(result->chars, result->len);
         return {.item = y2it(sym)};
     }
-    // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat)
-    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_LIST) {
-        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_LIST)) {
+    // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat, Range)
+    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_LIST || left_type == LMD_TYPE_RANGE) {
+        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_LIST || right_type == LMD_TYPE_RANGE)) {
             set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
                 type_info[left_type].name, type_info[right_type].name);
             return ItemError;
         }
-        // same-type optimization: direct memcpy of native items
-        if (left_type == right_type) {
+        // same-type optimization: direct memcpy of native items (not for Range)
+        if (left_type == right_type && left_type != LMD_TYPE_RANGE) {
             if (left_type == LMD_TYPE_ARRAY_INT) {
                 ArrayInt *la = left.array_int, *ra = right.array_int;
                 int64_t total = la->length + ra->length;
@@ -301,6 +301,14 @@ Item fn_join(Item left, Item right) {
         for (int64_t i = 0; i < left_len; i++)  result->items[i] = item_at(left, i);
         for (int64_t i = 0; i < right_len; i++) result->items[left_len + i] = item_at(right, i);
         return {.array = result};
+    }
+    else if (left_type <= LMD_TYPE_BINARY && right_type <= LMD_TYPE_BINARY) {
+        // scalar ++ scalar: convert both to string and concatenate
+        if (left_type == LMD_TYPE_NULL) return right;
+        if (right_type == LMD_TYPE_NULL) return left;
+        String *left_str = fn_string(left), *right_str = fn_string(right);
+        String *result = fn_strcat(left_str, right_str);
+        return {.item = s2it(result)};
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
