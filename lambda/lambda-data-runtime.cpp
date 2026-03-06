@@ -1022,6 +1022,50 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     // null/empty → return NULL (caller checks)
     if (item_tid == LMD_TYPE_NULL) return NULL;
 
+    // -----------------------------------------------------------------------
+    // Cross-convert any typed array (ArrayInt, ArrayInt64, ArrayFloat) to the
+    // target typed array.  Handles every mismatch combination generically:
+    //   e.g.  var arr:int[]   = fill(10, 0.0)   — ArrayFloat  → ArrayInt
+    //         var arr:float[] = fill(10, 0)     — ArrayInt    → ArrayFloat
+    //         var arr:int[]   = some_int64_arr  — ArrayInt64  → ArrayInt
+    // -----------------------------------------------------------------------
+    if (item_tid == LMD_TYPE_ARRAY_INT || item_tid == LMD_TYPE_ARRAY_INT64 ||
+        item_tid == LMD_TYPE_ARRAY_FLOAT) {
+        // extract source length and per-element accessor
+        int64_t length;
+        if (item_tid == LMD_TYPE_ARRAY_INT)        length = item.array_int->length;
+        else if (item_tid == LMD_TYPE_ARRAY_INT64)  length = item.array_int64->length;
+        else                                        length = item.array_float->length;
+
+        if (element_type_id == LMD_TYPE_INT) {
+            ArrayInt* typed = array_int_new((int)length);
+            for (int64_t i = 0; i < length; i++) {
+                if (item_tid == LMD_TYPE_ARRAY_INT)        typed->items[i] = item.array_int->items[i];
+                else if (item_tid == LMD_TYPE_ARRAY_INT64) typed->items[i] = item.array_int64->items[i];
+                else                                       typed->items[i] = (int64_t)item.array_float->items[i];
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_FLOAT) {
+            ArrayFloat* typed = array_float_new((int)length);
+            for (int64_t i = 0; i < length; i++) {
+                if (item_tid == LMD_TYPE_ARRAY_FLOAT)      typed->items[i] = item.array_float->items[i];
+                else if (item_tid == LMD_TYPE_ARRAY_INT)    typed->items[i] = (double)item.array_int->items[i];
+                else                                        typed->items[i] = (double)item.array_int64->items[i];
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_INT64) {
+            ArrayInt64* typed = array_int64_new((int)length);
+            for (int64_t i = 0; i < length; i++) {
+                if (item_tid == LMD_TYPE_ARRAY_INT64)      typed->items[i] = item.array_int64->items[i];
+                else if (item_tid == LMD_TYPE_ARRAY_INT)    typed->items[i] = item.array_int->items[i];
+                else                                        typed->items[i] = (int64_t)item.array_float->items[i];
+            }
+            return typed;
+        }
+    }
+
     // convert generic Array/List to typed array (Array and List are the same struct)
     if (item_tid == LMD_TYPE_ARRAY || item_tid == LMD_TYPE_LIST) {
         Array* arr = item.array;
@@ -1045,11 +1089,15 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
-                    elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_DECIMAL) {
+                    elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_DECIMAL &&
+                    elem_tid != LMD_TYPE_BOOL) {
                     log_error("ensure_typed_array: element %lld has type %s, expected float", i, get_type_name(elem_tid));
                     return NULL;
                 }
-                typed->items[i] = it2d(items[i]);
+                if (elem_tid == LMD_TYPE_BOOL)
+                    typed->items[i] = items[i].bool_val ? 1.0 : 0.0;
+                else
+                    typed->items[i] = it2d(items[i]);
             }
             return typed;
         }

@@ -4,23 +4,7 @@
 type TState = {moves: int}
 
 pn make_array(n: int, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz: int = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var remain: int = n - sz
-        var extra = [val]
-        var esz: int = 1
-        while (esz < remain) {
-            extra = extra ++ [val]
-            esz = esz + 1
-        }
-        arr = arr ++ extra
-    }
-    return arr
+    return fill(n, val)
 }
 
 pn push_disk(piles: int[], tops: int[], disk_size: int, pile: int) {

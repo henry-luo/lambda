@@ -849,8 +849,8 @@ pn fi_collide(sq: float, b: float, a: float,
               v2x: float, v2y: float, v2z: float) {
     // 15 typed float params → ALL arithmetic is native double
     var a2: float = 2.0 * a
-    var t1: float = (0.0 - b - sq) / a2
-    var t2: float = (0.0 - b + sq) / a2
+    var t1: float = (-b - sq) / a2
+    var t2: float = (-b + sq) / a2
 
     if (t1 <= t2) {
         var collision: int = 0

@@ -102,10 +102,13 @@ pn random_fasta(id, desc, chars, probs, count, seed_arr) {
 }
 
 pn main() {
+    var __t0 = clock()
     // seed is shared across calls, stored in mutable array
     var seed_arr = [42]
 
     repeat_fasta("ONE", "Homo sapiens alu", ALU, N_COUNT * 2)
     random_fasta("TWO", "IUB ambiguity codes", IUB_CHARS, IUB_PROBS, N_COUNT * 3, seed_arr)
     random_fasta("THREE", "Homo sapiens frequency", HS_CHARS, HS_PROBS, N_COUNT * 5, seed_arr)
+    var __t1 = clock()
+    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }
