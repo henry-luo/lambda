@@ -42,7 +42,7 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
             JSON_ESCAPE_RULES, JSON_ESCAPE_RULES_COUNT,
             ESCAPE_CTRL_JSON_UNICODE);
         ctx.write_char('"');
-        ctx.write_char(':');
+        ctx.write_text(": ");
 
         // Format the value
         format_item_reader_with_indent(ctx, value, indent + 1);
@@ -102,7 +102,7 @@ static void format_map_reader_with_indent(JsonContext& ctx, const MapReader& mp,
 }
 
 static void format_element_reader_with_indent(JsonContext& ctx, const ElementReader& elem, int indent) {
-    stringbuf_append_format(ctx.output(), "\n{\"$\":\"%s\"", elem.tagName());
+    stringbuf_append_format(ctx.output(), "\n{\"$\": \"%s\"", elem.tagName());
 
     // Add attributes as direct properties
     if (elem.attrCount() > 0) {
@@ -116,7 +116,7 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
 
             ctx.write_text(",\n");
             add_indent(ctx, indent + 1);
-            stringbuf_append_format(ctx.output(), "\"%s\":", key);
+            stringbuf_append_format(ctx.output(), "\"%s\": ", key);
             format_item_reader_with_indent(ctx, value, indent + 1);
 
             field = field->next;
@@ -127,7 +127,7 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
     if (elem.childCount() > 0) {
         ctx.write_text(",\n");
         add_indent(ctx, indent + 1);
-        ctx.write_text("\"_\":");
+        ctx.write_text("\"_\": ");
 
         // Format children as an array
         ctx.write_char('[');
@@ -203,7 +203,7 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         TypeObject* obj_type = (TypeObject*)obj->type;
         ctx.write_text("{\n");
         add_indent(ctx, indent + 1);
-        ctx.write_text("\"@\":\"");
+        ctx.write_text("\"@\": \"");
         if (obj_type->type_name.str) {
             stringbuf_append_str_n(ctx.output(), obj_type->type_name.str, obj_type->type_name.length);
         }
@@ -216,7 +216,7 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         while (iter.next(&key, &value)) {
             ctx.write_text(",\n");
             add_indent(ctx, indent + 1);
-            stringbuf_append_format(ctx.output(), "\"%s\":", key);
+            stringbuf_append_format(ctx.output(), "\"%s\": ", key);
             format_item_reader_with_indent(ctx, value, indent + 1);
         }
         ctx.write_char('\n');

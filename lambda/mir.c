@@ -13,6 +13,7 @@
 #include "lambda-error.h"
 #include "js/js_runtime.h"
 #include "js/js_dom.h"
+#include "js/js_typed_array.h"
 
 // Stack overflow protection functions
 extern void lambda_stack_overflow_error(const char* func_name);
@@ -486,6 +487,35 @@ func_obj_t func_list[] = {
     {"js_dom_get_style_property", (fn_ptr) js_dom_get_style_property},
     // Computed style
     {"js_get_computed_style", (fn_ptr) js_get_computed_style},
+    // v5: Process I/O
+    {"js_process_stdout_write", (fn_ptr) js_process_stdout_write},
+    {"js_process_hrtime_bigint", (fn_ptr) js_process_hrtime_bigint},
+    {"js_get_process_argv", (fn_ptr) js_get_process_argv},
+    // v5: Global functions
+    {"js_parseInt", (fn_ptr) js_parseInt},
+    {"js_parseFloat", (fn_ptr) js_parseFloat},
+    {"js_isNaN", (fn_ptr) js_isNaN},
+    {"js_isFinite", (fn_ptr) js_isFinite},
+    {"js_toFixed", (fn_ptr) js_toFixed},
+    {"js_string_charCodeAt", (fn_ptr) js_string_charCodeAt},
+    {"js_string_fromCharCode", (fn_ptr) js_string_fromCharCode},
+    {"js_array_fill", (fn_ptr) js_array_fill},
+    {"js_console_log_multi", (fn_ptr) js_console_log_multi},
+    // v5: Additional operators
+    {"js_instanceof", (fn_ptr) js_instanceof},
+    {"js_in", (fn_ptr) js_in},
+    {"js_nullish_coalesce", (fn_ptr) js_nullish_coalesce},
+    // v5: Object utilities
+    {"js_object_keys", (fn_ptr) js_object_keys},
+    {"js_to_string_val", (fn_ptr) js_to_string_val},
+    {"js_number_property", (fn_ptr) js_number_property},
+    // v5: Typed arrays
+    {"js_typed_array_new", (fn_ptr) js_typed_array_new},
+    {"js_typed_array_get", (fn_ptr) js_typed_array_get},
+    {"js_typed_array_set", (fn_ptr) js_typed_array_set},
+    {"js_typed_array_length", (fn_ptr) js_typed_array_length},
+    {"js_typed_array_fill", (fn_ptr) js_typed_array_fill},
+    {"js_is_typed_array", (fn_ptr) js_is_typed_array},
     // StringBuf functions for template literals
     {"stringbuf_new", (fn_ptr) stringbuf_new},
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},

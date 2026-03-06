@@ -132,6 +132,75 @@ Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 Item js_math_method(Item method_name, Item* args, int argc);
 Item js_math_property(Item prop_name);
 
+// =============================================================================
+// v5: Process I/O
+// =============================================================================
+
+Item js_process_stdout_write(Item str_item);
+Item js_process_hrtime_bigint(void);
+void js_set_process_argv(int argc, const char** argv);
+Item js_get_process_argv(void);
+
+// =============================================================================
+// v5: Global Functions
+// =============================================================================
+
+Item js_parseInt(Item str_item, Item radix_item);
+Item js_parseFloat(Item str_item);
+Item js_isNaN(Item value);
+Item js_isFinite(Item value);
+
+// =============================================================================
+// v5: Number Methods
+// =============================================================================
+
+Item js_toFixed(Item num_item, Item digits_item);
+
+// =============================================================================
+// v5: String Methods (charCodeAt, fromCharCode)
+// =============================================================================
+
+Item js_string_charCodeAt(Item str_item, Item index_item);
+Item js_string_fromCharCode(Item code_item);
+
+// =============================================================================
+// v5: Array fill (regular + typed)
+// =============================================================================
+
+Item js_array_fill(Item arr_item, Item value);
+
+// =============================================================================
+// v5: Console multi-argument log
+// =============================================================================
+
+void js_console_log_multi(Item* args, int argc);
+
+// =============================================================================
+// v5: Additional binary operators
+// =============================================================================
+
+Item js_instanceof(Item left, Item right);
+Item js_in(Item key, Item object);
+Item js_nullish_coalesce(Item left, Item right);
+
+// =============================================================================
+// v5: Object utilities
+// =============================================================================
+
+Item js_object_keys(Item object);
+Item js_to_string_val(Item value);
+Item js_number_property(Item prop_name);
+
+// =============================================================================
+// Runtime Context
+// =============================================================================
+
+/**
+ * Set the Input context for JS runtime map_put operations.
+ * Called during JS execution setup. Takes void* for C compatibility (actually Input*).
+ */
+void js_runtime_set_input(void* input);
+
 #ifdef __cplusplus
 }
 #endif
