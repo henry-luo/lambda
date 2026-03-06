@@ -17,3 +17,6 @@ chapter-I
 toc
 # Non-test files: reference visual comparison targets
 abspos-replaced-width-margin-000-ref
+# Slow tests: hundreds of inline-block elements with Unicode chars (5-8s each, causes batch timeout)
+# Supports prefix matching with trailing * wildcard
+first-letter-punct-before-*

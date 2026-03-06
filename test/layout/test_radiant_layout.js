@@ -301,18 +301,36 @@ class RadiantLayoutTester {
         const skipListPath = path.join(__dirname, 'skip_list.txt');
         try {
             const content = await fs.readFile(skipListPath, 'utf8');
-            const names = new Set(
-                content.split('\n')
-                    .map(line => line.trim())
-                    .filter(line => line && !line.startsWith('#'))
-            );
-            this._skipListCache['_global'] = names;
-            return names;
+            const lines = content.split('\n')
+                .map(line => line.trim())
+                .filter(line => line && !line.startsWith('#'));
+            const exact = new Set();
+            const prefixes = [];
+            for (const line of lines) {
+                if (line.endsWith('*')) {
+                    prefixes.push(line.slice(0, -1));
+                } else {
+                    exact.add(line);
+                }
+            }
+            this._skipListCache['_global'] = { exact, prefixes };
+            return this._skipListCache['_global'];
         } catch (e) {
             // No skip list file — nothing to skip
-            this._skipListCache['_global'] = new Set();
+            this._skipListCache['_global'] = { exact: new Set(), prefixes: [] };
             return this._skipListCache['_global'];
         }
+    }
+
+    /**
+     * Check if a test name matches the skip list (exact or prefix match).
+     */
+    isSkipped(skipList, testName) {
+        if (skipList.exact.has(testName)) return true;
+        for (const prefix of skipList.prefixes) {
+            if (testName.startsWith(prefix)) return true;
+        }
+        return false;
     }
 
     /**
@@ -332,7 +350,7 @@ class RadiantLayoutTester {
             const skipList = await this.loadSkipList(task.category);
             const ext = task.htmlFile.endsWith('.htm') && !task.htmlFile.endsWith('.html') ? '.htm' : '.html';
             const testName = path.basename(task.htmlFile, ext);
-            if (skipList.has(testName)) {
+            if (this.isSkipped(skipList, testName)) {
                 return { task, skip: 'skip-list' };
             }
 
