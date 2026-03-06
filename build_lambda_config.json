@@ -297,7 +297,7 @@
                 "lambda/lambda-decimal.cpp",
                 "lambda/lambda-error.cpp",
                 "lambda/build_ast.cpp",
-                "lambda/sys_func_registry.cpp",
+                "lambda/sys_func_registry.c",
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",
                 "lambda/mark_editor.cpp",
@@ -359,7 +359,8 @@
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
-                "PATH_NO_ITERATION"
+                "PATH_NO_ITERATION",
+                "LAMBDA_STATIC"
             ],
             "link": "dynamic"
         }
