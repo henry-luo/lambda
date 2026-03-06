@@ -1082,15 +1082,17 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         return (AstNode*)ast_node;
     }
 
-    if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
-        // todo: fast path for array_get
-        // Type* nested = ((TypeArray*)ast_node->object->type)->nested;
-        // if (nested && nested->is_const) {  // need to copy the type to remove is_const flag
-        //     Type* type = alloc_type(tp->pool, nested->type_id, sizeof(Type));
-        //     type->is_const = 0;  // defensive code
-        //     ast_node->type = type;
-        // }
-        // else { ast_node->type = nested ? nested : &TYPE_ANY; }
+    TypeId obj_tid = ast_node->object->type->type_id;
+    if (obj_tid == LMD_TYPE_ARRAY_INT) {
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_INT, sizeof(Type));
+    }
+    else if (obj_tid == LMD_TYPE_ARRAY_INT64) {
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(Type));
+    }
+    else if (obj_tid == LMD_TYPE_ARRAY_FLOAT) {
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(Type));
+    }
+    else if (obj_tid == LMD_TYPE_ARRAY) {
         ast_node->type = &TYPE_ANY;
     }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP
