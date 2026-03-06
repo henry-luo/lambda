@@ -97,15 +97,20 @@ Item js_property_access(Item object, Item key);
 Item js_array_new(int length);
 Item js_array_get(Item array, Item index);
 Item js_array_set(Item array, Item index, Item value);
-int js_array_length(Item array);
+int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
+int64_t js_get_length(Item object);
 
 // =============================================================================
 // Function Functions
 // =============================================================================
 
 Item js_new_function(void* func_ptr, int param_count);
+Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
+Item* js_alloc_env(int count);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+Item js_get_this();
+void js_set_this(Item this_val);
 
 // =============================================================================
 // Console Functions
@@ -155,6 +160,7 @@ Item js_isFinite(Item value);
 // =============================================================================
 
 Item js_toFixed(Item num_item, Item digits_item);
+Item js_number_method(Item num, Item method_name, Item* args, int argc);
 
 // =============================================================================
 // v5: String Methods (charCodeAt, fromCharCode)
@@ -190,6 +196,35 @@ Item js_nullish_coalesce(Item left, Item right);
 Item js_object_keys(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
+
+// =============================================================================
+// Exception Handling (try/catch/throw)
+// =============================================================================
+
+/**
+ * Set the exception flag and store the thrown value.
+ * In the same try block, throw jumps directly to catch.
+ * In a called function, throw sets the flag and returns; the caller checks.
+ */
+void js_throw_value(Item value);
+
+/**
+ * Check if an exception is currently pending.
+ * Returns 1 if pending, 0 otherwise.
+ */
+int js_check_exception(void);
+
+/**
+ * Clear the pending exception and return the thrown value.
+ * Called at the start of a catch block.
+ */
+Item js_clear_exception(void);
+
+/**
+ * Create a new Error object with a message.
+ * Returns a Map with {name: "Error", message: msg}.
+ */
+Item js_new_error(Item message);
 
 // =============================================================================
 // Runtime Context

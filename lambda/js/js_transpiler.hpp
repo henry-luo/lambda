@@ -187,7 +187,7 @@ Item js_new_function(void* func_ptr, int param_count);
 // Array functions
 Item js_array_get(Item array, Item index);
 Item js_array_set(Item array, Item index, Item value);
-int js_array_length(Item array);
+int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 Item js_array_pop(Item array);
 

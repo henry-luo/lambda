@@ -1,0 +1,11 @@
+hello world
+sum 30
+{
+  "greeting": "Hello, World!",
+  "expr": "Sum: 30",
+  "full": "Name: Jane Doe",
+  "withFunc": "Double of 7 is 14",
+  "plain": "just a plain string",
+  "nested": "Result: smaller",
+  "info": "Age: 25, next year: 26"
+}
