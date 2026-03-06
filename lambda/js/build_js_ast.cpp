@@ -67,6 +67,10 @@ JsAstNode* build_js_throw_statement(JsTranspiler* tp, TSNode throw_node);
 JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
 JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
 JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);
+JsAstNode* build_js_new_expression(JsTranspiler* tp, TSNode new_node);
+JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node);
+JsAstNode* build_js_do_while_statement(JsTranspiler* tp, TSNode do_node);
+JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node);
 
 // Allocate JavaScript AST node
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size) {
@@ -112,15 +116,26 @@ JsOperator js_operator_from_string(const char* op_str, size_t len) {
         if (strncmp(op_str, "*=", 2) == 0) return JS_OP_MUL_ASSIGN;
         if (strncmp(op_str, "/=", 2) == 0) return JS_OP_DIV_ASSIGN;
         if (strncmp(op_str, "%=", 2) == 0) return JS_OP_MOD_ASSIGN;
+        if (strncmp(op_str, "&=", 2) == 0) return JS_OP_BIT_AND_ASSIGN;
+        if (strncmp(op_str, "|=", 2) == 0) return JS_OP_BIT_OR_ASSIGN;
+        if (strncmp(op_str, "^=", 2) == 0) return JS_OP_BIT_XOR_ASSIGN;
+        if (strncmp(op_str, "??", 2) == 0) return JS_OP_NULLISH_COALESCE;
+        if (strncmp(op_str, "in", 2) == 0) return JS_OP_IN;
     } else if (len == 3) {
         if (strncmp(op_str, "===", 3) == 0) return JS_OP_STRICT_EQ;
         if (strncmp(op_str, "!==", 3) == 0) return JS_OP_STRICT_NE;
         if (strncmp(op_str, ">>>", 3) == 0) return JS_OP_BIT_URSHIFT;
+        if (strncmp(op_str, "**=", 3) == 0) return JS_OP_EXP_ASSIGN;
+        if (strncmp(op_str, "<<=", 3) == 0) return JS_OP_LSHIFT_ASSIGN;
+        if (strncmp(op_str, ">>=", 3) == 0) return JS_OP_RSHIFT_ASSIGN;
+    } else if (len == 4) {
+        if (strncmp(op_str, "void", 4) == 0) return JS_OP_VOID;
+        if (strncmp(op_str, ">>>=", 4) == 0) return JS_OP_URSHIFT_ASSIGN;
     } else if (len == 6) {
         if (strncmp(op_str, "typeof", 6) == 0) return JS_OP_TYPEOF;
         if (strncmp(op_str, "delete", 6) == 0) return JS_OP_DELETE;
-    } else if (len == 4) {
-        if (strncmp(op_str, "void", 4) == 0) return JS_OP_VOID;
+    } else if (len == 10) {
+        if (strncmp(op_str, "instanceof", 10) == 0) return JS_OP_INSTANCEOF;
     }
 
     log_error("Unknown JavaScript operator: %.*s", (int)len, op_str);
@@ -219,20 +234,14 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     }
 
     // Look up in symbol table
-    // printf("DEBUG: Looking up identifier: %.*s\n", (int)identifier->name->len, identifier->name->chars);
-    fflush(stdout);
     identifier->entry = js_scope_lookup(tp, identifier->name);
 
     if (identifier->entry) {
-        // printf("DEBUG: Found identifier in scope, entry->node: %p\n", identifier->entry->node);
-        // printf("DEBUG: Entry node type: %p\n", identifier->entry->node->type);
-        fflush(stdout);
+        log_debug("id-lookup: '%.*s' found, entry->node=%p, entry->node->type=%p",
+            (int)identifier->name->len, identifier->name->chars,
+            identifier->entry->node, identifier->entry->node->type);
         identifier->base.type = identifier->entry->node->type;
-        // printf("DEBUG: Set identifier type to: %p\n", identifier->base.type);
-        fflush(stdout);
     } else {
-        // printf("DEBUG: Identifier not found in scope, using TYPE_ANY\n");
-        fflush(stdout);
         // Undefined identifier - could be global or error
         identifier->base.type = &TYPE_ANY;
         log_debug("Undefined identifier: %.*s", (int)identifier->name->len, identifier->name->chars);
@@ -687,14 +696,11 @@ JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node) {
 
 // Build JavaScript variable declaration node
 JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
-    // // printf("DEBUG: build_js_variable_declaration called\n");
     JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATION, var_node, sizeof(JsVariableDeclarationNode));
 
     // Determine variable kind (var, let, const)
     TSNode first_child = ts_node_child(var_node, 0);
     StrView kind_source = js_node_source(tp, first_child);
-
-    // // printf("DEBUG: Variable kind: %.*s\n", (int)kind_source.length, kind_source.str);
 
     if (strncmp(kind_source.str, "var", 3) == 0) {
         var_decl->kind = JS_VAR_VAR;
@@ -706,49 +712,25 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
 
     // Build declarators
     uint32_t child_count = ts_node_named_child_count(var_node);
-    // // printf("DEBUG: Variable declaration has %u named children\n", child_count);
     JsAstNode* prev_declarator = NULL;
 
     for (uint32_t i = 0; i < child_count; i++) {
-        // // printf("DEBUG: Processing child %u\n", i);
         TSNode declarator_node = ts_node_named_child(var_node, i);
-        // // printf("DEBUG: Got declarator node\n");
         const char* declarator_type = ts_node_type(declarator_node);
-        // // printf("DEBUG: Declarator type: %s\n", declarator_type);
 
         if (strcmp(declarator_type, "variable_declarator") == 0) {
             log_debug("Found variable_declarator");
 
-            // Debug: Print all children of the variable_declarator
             uint32_t declarator_child_count = ts_node_child_count(declarator_node);
-            // // printf("DEBUG: variable_declarator has %u children:\n", declarator_child_count);
-            for (uint32_t j = 0; j < declarator_child_count; j++) {
-                TSNode child = ts_node_child(declarator_node, j);
-                const char* child_type = ts_node_type(child);
-                // // printf("DEBUG:   Child %u: %s\n", j, child_type);
-            }
 
-            // // printf("DEBUG: About to call alloc_js_ast_node\n");
-            fflush(stdout);
             JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATOR, declarator_node, sizeof(JsVariableDeclaratorNode));
-            // // printf("DEBUG: alloc_js_ast_node returned: %p\n", declarator);
-            fflush(stdout);
 
             // Get identifier (child 0)
-            // // printf("DEBUG: Getting identifier from child 0\n");
-            fflush(stdout);
             TSNode id_node = ts_node_child(declarator_node, 0);
-            // // printf("DEBUG: Got identifier node, is_null: %s\n", ts_node_is_null(id_node) ? "true" : "false");
-            fflush(stdout);
 
             if (!ts_node_is_null(id_node)) {
-                // // printf("DEBUG: Building identifier from node\n");
-                fflush(stdout);
                 declarator->id = build_js_identifier(tp, id_node);
-                // // printf("DEBUG: Built identifier successfully\n");
-                fflush(stdout);
             } else {
-                // // printf("DEBUG: Identifier node is null!\n");
                 declarator->id = NULL;
             }
 
@@ -758,26 +740,21 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
             if (declarator_child_count >= 3) {
                 init_node = ts_node_child(declarator_node, 2);
                 has_initializer = !ts_node_is_null(init_node);
-                // printf("DEBUG: Got initializer node from child 2, has_initializer: %s\n", has_initializer ? "true" : "false");
             } else {
-                // printf("DEBUG: No initializer (child count: %u)\n", declarator_child_count);
                 has_initializer = false;
             }
             if (has_initializer) {
-                // printf("DEBUG: Building initializer expression\n");
-                fflush(stdout);
                 declarator->init = build_js_expression(tp, init_node);
                 declarator->base.type = declarator->init->type;
-                // printf("DEBUG: Built initializer successfully\n");
-                fflush(stdout);
             } else {
-                // printf("DEBUG: No initializer, setting to NULL\n");
                 declarator->init = NULL;
                 declarator->base.type = &TYPE_NULL; // undefined
             }
 
             // Add to scope
             JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
+            log_debug("var-decl-scope: defining '%.*s', declarator=%p, base.type=%p", 
+                (int)id->name->len, id->name->chars, declarator, declarator->base.type);
             js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
 
             if (!prev_declarator) {
@@ -834,8 +811,10 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
 
         unary->base.type = &TYPE_FLOAT;
         return (JsAstNode*)unary;
-    } else if (strcmp(node_type, "call_expression") == 0 || strcmp(node_type, "new_expression") == 0) {
+    } else if (strcmp(node_type, "call_expression") == 0) {
         return build_js_call_expression(tp, expr_node);
+    } else if (strcmp(node_type, "new_expression") == 0) {
+        return build_js_new_expression(tp, expr_node);
     } else if (strcmp(node_type, "member_expression") == 0 || strcmp(node_type, "subscript_expression") == 0) {
         return build_js_member_expression(tp, expr_node);
     } else if (strcmp(node_type, "array") == 0) {
@@ -874,6 +853,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return build_js_expression(tp, inner_node);
     } else if (strcmp(node_type, "ternary_expression") == 0) {
         JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
+        log_debug("ternary: building conditional expression");
 
         // Get test condition
         TSNode test_node = ts_node_child_by_field_name(expr_node, "condition", strlen("condition"));
@@ -978,6 +958,12 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         JsAstNode* continue_stmt = alloc_js_ast_node(tp, JS_AST_NODE_CONTINUE_STATEMENT, stmt_node, sizeof(JsAstNode));
         continue_stmt->type = &TYPE_NULL;
         return continue_stmt;
+    } else if (strcmp(node_type, "switch_statement") == 0) {
+        return build_js_switch_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "do_statement") == 0) {
+        return build_js_do_while_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "for_in_statement") == 0) {
+        return build_js_for_in_statement(tp, stmt_node);
     } else if (strcmp(node_type, "try_statement") == 0) {
         return build_js_try_statement(tp, stmt_node);
     } else if (strcmp(node_type, "throw_statement") == 0) {
@@ -1096,6 +1082,198 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
 
     template_lit->base.type = &TYPE_STRING;
     return (JsAstNode*)template_lit;
+}
+
+// v5: Build JavaScript new expression node
+JsAstNode* build_js_new_expression(JsTranspiler* tp, TSNode new_node) {
+    JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_NEW_EXPRESSION, new_node, sizeof(JsCallNode));
+
+    // Get constructor - tree-sitter uses "constructor" field for new expressions
+    TSNode callee_node = ts_node_child_by_field_name(new_node, "constructor", strlen("constructor"));
+    if (ts_node_is_null(callee_node)) {
+        // Fallback: try first named child
+        callee_node = ts_node_named_child(new_node, 0);
+        if (ts_node_is_null(callee_node)) {
+            log_error("new expression has no constructor node");
+            return NULL;
+        }
+    }
+
+    call->callee = build_js_expression(tp, callee_node);
+    if (!call->callee) {
+        log_error("Failed to build new expression constructor");
+        return NULL;
+    }
+
+    // Get arguments
+    TSNode args_node = ts_node_child_by_field_name(new_node, "arguments", strlen("arguments"));
+    if (!ts_node_is_null(args_node)) {
+        uint32_t arg_count = ts_node_named_child_count(args_node);
+        JsAstNode* prev_arg = NULL;
+
+        for (uint32_t i = 0; i < arg_count; i++) {
+            TSNode arg_node = ts_node_named_child(args_node, i);
+            JsAstNode* arg = build_js_expression(tp, arg_node);
+            if (!arg) continue;
+
+            if (!prev_arg) {
+                call->arguments = arg;
+            } else {
+                prev_arg->next = arg;
+            }
+            prev_arg = arg;
+        }
+    }
+
+    call->base.type = &TYPE_ANY;
+    return (JsAstNode*)call;
+}
+
+// v5: Build JavaScript switch statement node
+JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
+    JsSwitchNode* sw = (JsSwitchNode*)alloc_js_ast_node(tp, JS_AST_NODE_SWITCH_STATEMENT, switch_node, sizeof(JsSwitchNode));
+
+    // Get discriminant (the value being switched on)
+    TSNode value_node = ts_node_child_by_field_name(switch_node, "value", strlen("value"));
+    if (!ts_node_is_null(value_node)) {
+        sw->discriminant = build_js_expression(tp, value_node);
+    }
+
+    // Get switch body - iterate children looking for switch_case and switch_default
+    TSNode body_node = ts_node_child_by_field_name(switch_node, "body", strlen("body"));
+    if (ts_node_is_null(body_node)) {
+        // Fallback: the body might be the second named child
+        body_node = switch_node;
+    }
+
+    JsAstNode* prev_case = NULL;
+    uint32_t child_count = ts_node_named_child_count(body_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(body_node, i);
+        const char* child_type = ts_node_type(child);
+
+        if (strcmp(child_type, "switch_case") == 0 || strcmp(child_type, "switch_default") == 0) {
+            JsSwitchCaseNode* case_node = (JsSwitchCaseNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_SWITCH_CASE, child, sizeof(JsSwitchCaseNode));
+
+            // Get test expression (NULL for default)
+            if (strcmp(child_type, "switch_case") == 0) {
+                TSNode value = ts_node_child_by_field_name(child, "value", strlen("value"));
+                if (!ts_node_is_null(value)) {
+                    case_node->test = build_js_expression(tp, value);
+                }
+            }
+
+            // Get consequent statements
+            JsAstNode* prev_stmt = NULL;
+            uint32_t stmt_count = ts_node_named_child_count(child);
+            for (uint32_t j = 0; j < stmt_count; j++) {
+                TSNode stmt_child = ts_node_named_child(child, j);
+                const char* stmt_type = ts_node_type(stmt_child);
+                // Skip the value node itself
+                if (strcmp(stmt_type, "number") == 0 || strcmp(stmt_type, "string") == 0 ||
+                    strcmp(stmt_type, "identifier") == 0 || strcmp(stmt_type, "true") == 0 ||
+                    strcmp(stmt_type, "false") == 0) {
+                    // Check if this is the case value by position
+                    TSNode value = ts_node_child_by_field_name(child, "value", strlen("value"));
+                    if (!ts_node_is_null(value) && ts_node_start_byte(stmt_child) == ts_node_start_byte(value)) {
+                        continue;
+                    }
+                }
+                JsAstNode* stmt = build_js_statement(tp, stmt_child);
+                if (!stmt) continue;
+                if (!prev_stmt) {
+                    case_node->consequent = stmt;
+                } else {
+                    prev_stmt->next = stmt;
+                }
+                prev_stmt = stmt;
+            }
+
+            case_node->base.type = &TYPE_NULL;
+
+            if (!prev_case) {
+                sw->cases = (JsAstNode*)case_node;
+            } else {
+                prev_case->next = (JsAstNode*)case_node;
+            }
+            prev_case = (JsAstNode*)case_node;
+        }
+    }
+
+    sw->base.type = &TYPE_NULL;
+    return (JsAstNode*)sw;
+}
+
+// v5: Build JavaScript do...while statement node
+JsAstNode* build_js_do_while_statement(JsTranspiler* tp, TSNode do_node) {
+    JsDoWhileNode* do_while = (JsDoWhileNode*)alloc_js_ast_node(
+        tp, JS_AST_NODE_DO_WHILE_STATEMENT, do_node, sizeof(JsDoWhileNode));
+
+    // Get body
+    TSNode body_node = ts_node_child_by_field_name(do_node, "body", strlen("body"));
+    if (!ts_node_is_null(body_node)) {
+        do_while->body = build_js_statement(tp, body_node);
+    }
+
+    // Get condition
+    TSNode condition_node = ts_node_child_by_field_name(do_node, "condition", strlen("condition"));
+    if (!ts_node_is_null(condition_node)) {
+        do_while->test = build_js_expression(tp, condition_node);
+    }
+
+    do_while->base.type = &TYPE_NULL;
+    return (JsAstNode*)do_while;
+}
+
+// v5: Build JavaScript for...in statement node (also handles for...of)
+JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
+    const char* node_type = ts_node_type(for_node);
+    bool is_for_of = (strcmp(node_type, "for_in_statement") != 0);
+
+    JsForOfNode* for_of = (JsForOfNode*)alloc_js_ast_node(
+        tp, is_for_of ? JS_AST_NODE_FOR_OF_STATEMENT : JS_AST_NODE_FOR_IN_STATEMENT,
+        for_node, sizeof(JsForOfNode));
+
+    // Get the variable declaration (left side)
+    // Tree-sitter structure: for (const x of arr) → "left" field contains the variable
+    TSNode left_node = ts_node_child_by_field_name(for_node, "left", strlen("left"));
+    if (!ts_node_is_null(left_node)) {
+        const char* left_type = ts_node_type(left_node);
+        if (strcmp(left_type, "identifier") == 0) {
+            for_of->left = build_js_identifier(tp, left_node);
+        } else {
+            // Could be a variable declaration or pattern
+            for_of->left = build_js_expression(tp, left_node);
+        }
+    }
+
+    // Determine the variable kind from the first child (var/let/const keyword)
+    for_of->kind = 0; // default: var
+    uint32_t child_count = ts_node_child_count(for_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(for_node, i);
+        const char* child_type = ts_node_type(child);
+        if (strcmp(child_type, "var") == 0) { for_of->kind = 0; break; }
+        if (strcmp(child_type, "let") == 0) { for_of->kind = 1; break; }
+        if (strcmp(child_type, "const") == 0) { for_of->kind = 2; break; }
+        if (strcmp(child_type, "of") == 0 || strcmp(child_type, "in") == 0) break;
+    }
+
+    // Get the iterable expression (right side)
+    TSNode right_node = ts_node_child_by_field_name(for_node, "right", strlen("right"));
+    if (!ts_node_is_null(right_node)) {
+        for_of->right = build_js_expression(tp, right_node);
+    }
+
+    // Get the body
+    TSNode body_node = ts_node_child_by_field_name(for_node, "body", strlen("body"));
+    if (!ts_node_is_null(body_node)) {
+        for_of->body = build_js_statement(tp, body_node);
+    }
+
+    for_of->base.type = &TYPE_NULL;
+    return (JsAstNode*)for_of;
 }
 
 // Build JavaScript try statement node

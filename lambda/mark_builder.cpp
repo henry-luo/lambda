@@ -664,7 +664,6 @@ bool MarkBuilder::is_pointer_in_arena_chain(const void* ptr) const {
  */
 bool MarkBuilder::is_in_arena(Item item) const {
     TypeId type_id = get_type_id(item);
-    log_debug("is_in_arena: type_id=%d, item.item=%016lx", type_id, item.item);
     switch (type_id) {
     // Inline types - always safe to reuse
     case LMD_TYPE_NULL:  case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_ERROR:
@@ -778,25 +777,21 @@ bool MarkBuilder::is_in_arena(Item item) const {
 Item MarkBuilder::deep_copy(Item item) {
     // Quick check: if item contains no pointers (null, bool, int), just return it
     TypeId type_id = get_type_id(item);
-    log_debug("deep_copy called: type_id=%d, item.item=%016lx", type_id, item.item);
     if (type_id <= LMD_TYPE_INT) {
         return item;  // Inline types - always safe
     }
 
     // Optimization: if data already in our arena chain, return as-is
     if (is_in_arena(item)) {
-        log_debug("deep_copy: item already in arena, returning as-is");
         return item;
     }
 
-    log_debug("deep_copy: item external, performing deep copy");
     // Data is external - perform deep copy
     return deep_copy_internal(item);
 }
 
 Item MarkBuilder::deep_copy_internal(Item item) {
     TypeId type_id = get_type_id(item);
-    log_debug("deep_copy_internal: type_id=%d, item.item=%016lx", type_id, item.item);
 
     switch (type_id) {
     case LMD_TYPE_NULL:  case LMD_TYPE_BOOL:  case LMD_TYPE_INT:
@@ -828,7 +823,6 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     }
 
     case LMD_TYPE_DTIME: {
-        log_debug("deep copy datetime");
         DateTime* dt = (DateTime*)item.datetime_ptr;
         // DateTime is uint64_t bitfield, allocate from arena
         DateTime* dt_ptr = (DateTime*)arena_alloc(arena_, sizeof(DateTime));
@@ -838,7 +832,6 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     }
 
     case LMD_TYPE_DECIMAL: {
-        log_debug("deep copy decimal");
         // Use centralized decimal_deep_copy function
         return decimal_deep_copy(item, arena_, false);
     }
@@ -897,15 +890,12 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     }
 
     case LMD_TYPE_ARRAY: {
-        log_debug("=== ARRAY CASE ENTRY ==");
         Array* arr = item.array;
         int length = arr->length;
         int capacity = arr->capacity;
-        log_debug("deep_copy ARRAY: arr=%p, length=%d, capacity=%d", (void*)arr, length, capacity);
         ArrayBuilder arr_builder = array();
         ArrayReader reader(arr);
         for (int i = 0; i < length; i++) {
-            log_debug("=== Copying item %d/%d ===", i+1, length);
             Item child = reader.get(i).item();
             Item copied_child = deep_copy_internal(child);
             arr_builder.append(copied_child);
@@ -914,21 +904,17 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     }
 
     case LMD_TYPE_LIST: {
-        log_debug("=== LIST CASE ENTRY ==");
         List* list = item.list;
         ListBuilder list_builder = this->list();
         for (int i = 0; i < list->length; i++) {
             Item item = list->items[i];
-            log_debug("before copy list item: %d", item.type_id());
             Item copied_child = deep_copy_internal(item);
             list_builder.push(copied_child);
         }
-        log_debug("end of list deep copy");
         return list_builder.final();
     }
 
     case LMD_TYPE_MAP: {
-        log_debug("=== MAP CASE ENTRY ==");
         Map* src_map = item.map;
         TypeMap* map_type = (TypeMap*)src_map->type;
         MapBuilder map_builder = map();
@@ -937,14 +923,11 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         const char* key;  ItemReader value;
         while (iter.next(&key, &value)) {
             Item field_item = value.item();
-            log_debug("deep_copy_internal: copying map field key='%s', type_id=%d",
-                key ? key : "(null)", field_item.type_id());
             Item copied_field = deep_copy_internal(field_item);
             if (key) {
                 String* key_name = createName(key, strlen(key));
                 map_builder.put(key_name, copied_field);
             } else {
-                log_debug("deep_copy_internal: null key for nested map, copied type: %d", copied_field.type_id());
                 map_builder.put(key, copied_field);
             }
         }
@@ -952,7 +935,6 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     }
 
     case LMD_TYPE_OBJECT: {
-        log_debug("=== OBJECT CASE ENTRY ==");
         Object* src_obj = item.object;
         TypeObject* obj_type = (TypeObject*)src_obj->type;
 
@@ -1011,7 +993,6 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     }
 
     case LMD_TYPE_ELEMENT: {
-        log_debug("deep copy element");
         log_enter();
         Element* elem = item.element;
         ElementReader reader(elem);
@@ -1023,7 +1004,6 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         // Copy attributes using ElementReader
         // ElementReader.get_attr() handles proper Item reconstruction from stored data
         TypeElmt* elem_type = (TypeElmt*)elem->type;
-        log_debug("deep_copy_internal: element has %d attributes", elem_type->length);
         if (elem_type->length > 0) {
             ShapeEntry* attr = elem_type->shape;
             while (attr) {

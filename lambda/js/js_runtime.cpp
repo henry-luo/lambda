@@ -15,6 +15,16 @@
 #include <cstdlib>
 #include <cstdio>
 
+// Global Input context for JS runtime map_put operations.
+// Initialized in transpile_js_to_mir() before JIT execution.
+static Input* js_input = NULL;
+
+extern "C" void js_runtime_set_input(void* input) {
+    js_input = (Input*)input;
+}
+
+extern TypeMap EmptyMap;
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -511,39 +521,12 @@ extern "C" Item js_typeof(Item value) {
 // Object Functions
 // =============================================================================
 
-// Structure for JS object entries (key-value pairs)
-struct JsObjectEntry {
-    String* key;
-    Item value;
-};
-
-// Hash function for JS object entries
-static uint64_t js_object_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const JsObjectEntry* entry = (const JsObjectEntry*)item;
-    return hashmap_sip(entry->key->chars, entry->key->len, seed0, seed1);
-}
-
-// Compare function for JS object entries
-static int js_object_compare(const void *a, const void *b, void *udata) {
-    const JsObjectEntry* ea = (const JsObjectEntry*)a;
-    const JsObjectEntry* eb = (const JsObjectEntry*)b;
-    if (ea->key->len != eb->key->len) return 1;
-    return strncmp(ea->key->chars, eb->key->chars, ea->key->len);
-}
-
-// Create a new JS object using hashmap
+// Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
 extern "C" Item js_new_object() {
-    // Create a hashmap to store object properties
-    HashMap* obj = hashmap_new(sizeof(JsObjectEntry), 4, 0, 0,
-        js_object_hash, js_object_compare, NULL, NULL);
-    // Store as pointer with LMD_TYPE_MAP type (we'll use type_id to differentiate)
-    // Actually we need a way to store this - let's use a wrapper struct
-    // For now, we'll allocate a Map-like structure and store the hashmap pointer
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->data = (void*)obj;  // Store hashmap in data field
-    wrapper->type = NULL;  // NULL type indicates JS object
-    return (Item){.map = wrapper};
+    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    m->type_id = LMD_TYPE_MAP;
+    m->type = &EmptyMap;
+    return (Item){.map = m};
 }
 
 extern "C" Item js_property_get(Item object, Item key) {
@@ -559,30 +542,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (js_is_computed_style_item(object)) {
             return js_computed_style_get_property(object, key);
         }
-        // Check if this is a JS object (indicated by NULL type)
-        if (m->type == NULL && m->data != NULL) {
-            // This is a JS object using hashmap
-            HashMap* hm = (HashMap*)m->data;
-            String* str_key = NULL;
-
-            TypeId key_type = get_type_id(key);
-            if (key_type == LMD_TYPE_STRING) {
-                str_key = it2s(key);
-            } else if (key_type == LMD_TYPE_SYMBOL) {
-                str_key = it2s(key);
-            } else {
-                // Convert to string for property access
-                return ItemNull;
-            }
-
-            JsObjectEntry lookup = {.key = str_key, .value = ItemNull};
-            const JsObjectEntry* found = (const JsObjectEntry*)hashmap_get(hm, &lookup);
-            if (found) {
-                return found->value;
-            }
-            return ItemNull;
-        }
-        // Regular Lambda map
+        // Regular Lambda map (including JS objects)
         return map_get(object.map, key);
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
@@ -615,28 +575,40 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (js_is_dom_node(object)) {
             return js_dom_set_property(object, key, value);
         }
-        // Check if this is a JS object (indicated by NULL type)
-        if (m->type == NULL && m->data != NULL) {
-            // This is a JS object using hashmap
-            HashMap* hm = (HashMap*)m->data;
+        // JS object / Lambda map: try fn_map_set first (update existing field),
+        // fall back to map_put for new keys
+        TypeMap* map_type = (TypeMap*)m->type;
+        if (map_type && map_type != &EmptyMap && map_type->shape) {
+            // search for existing key
             String* str_key = NULL;
-
             TypeId key_type = get_type_id(key);
-            if (key_type == LMD_TYPE_STRING) {
-                str_key = it2s(key);
-            } else if (key_type == LMD_TYPE_SYMBOL) {
-                str_key = it2s(key);
-            } else {
-                // Can't set non-string key
-                return value;
+            if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
+            else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
+            if (str_key) {
+                ShapeEntry* entry = map_type->shape;
+                while (entry) {
+                    if (entry->name && entry->name->length == (size_t)str_key->len
+                        && strncmp(entry->name->str, str_key->chars, str_key->len) == 0) {
+                        // existing key — use fn_map_set for in-place update
+                        fn_map_set(object, key, value);
+                        return value;
+                    }
+                    entry = entry->next;
+                }
             }
-
-            JsObjectEntry entry = {.key = str_key, .value = value};
-            hashmap_set(hm, &entry);
-            return value;
         }
-        // Regular Lambda map - not supported for set
-        log_debug("js_property_set: Setting property on Lambda map (not supported)");
+        // key not found or empty map — add new key via map_put
+        if (js_input) {
+            String* str_key = NULL;
+            TypeId key_type = get_type_id(key);
+            if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
+            else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
+            if (str_key) {
+                map_put(m, str_key, value, js_input);
+            }
+        } else {
+            log_error("js_property_set: no js_input context for map_put");
+        }
         return value;
     }
 
@@ -1400,3 +1372,5 @@ extern "C" Item js_math_property(Item prop_name) {
 
     return ItemNull;
 }
+
+
