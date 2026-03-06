@@ -518,7 +518,30 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             log_debug("block-in-inline scan: child=%s outer=%d inner=%d",
                      scan->node_name(), child_display.outer, child_display.inner);
             if (child_display.outer == CSS_VALUE_BLOCK) {
-                has_block_children = true;
+                // CSS 2.1 §9.6.1: Absolutely/fixed positioned elements are out of flow
+                // and should not trigger block-in-inline splitting, even though their
+                // display is blockified per §9.7.
+                DomElement* child_elem = scan->as_element();
+                bool child_is_abspos = false;
+                if (child_elem->position &&
+                    (child_elem->position->position == CSS_VALUE_ABSOLUTE ||
+                     child_elem->position->position == CSS_VALUE_FIXED)) {
+                    child_is_abspos = true;
+                } else if (child_elem->specified_style && child_elem->specified_style->tree) {
+                    AvlNode* pos_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_POSITION);
+                    if (pos_node) {
+                        StyleNode* sn = (StyleNode*)pos_node->declaration;
+                        if (sn && sn->winning_decl && sn->winning_decl->value &&
+                            sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                            (sn->winning_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
+                             sn->winning_decl->value->data.keyword == CSS_VALUE_FIXED)) {
+                            child_is_abspos = true;
+                        }
+                    }
+                }
+                if (!child_is_abspos) {
+                    has_block_children = true;
+                }
             }
             if (is_table_internal_display(child_display.inner) ||
                 is_table_internal_display(child_display.outer)) {
