@@ -27,7 +27,7 @@ static inline bool is_out_of_flow_child(View* child) {
 
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
-void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
+void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
     View* child = span->first_child;
     if (!child) {
         // Truly empty inline element (no children at all) — CSS 2.1 §9.4.2:
@@ -51,9 +51,17 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         }
         float inline_sum = border_left + pad_left + pad_right + border_right;
         if (inline_sum > 0) {
-            // Horizontal decorations keep the inline box "present" — include all edges
+            // CSS 2.1 §10.6.1: Horizontal decorations keep the inline box "present".
+            // The inline box height includes the font content area (ascender + descender)
+            // plus vertical borders and padding. Borders/padding extend around the
+            // content area, not just around zero.
+            float font_content_h = 0;
+            struct FontHandle* fh = span->font ? span->font->font_handle : fallback_fh;
+            if (fh) {
+                font_content_h = font_get_cell_height(fh);
+            }
             span->width = (int)inline_sum;
-            span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
+            span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             // No horizontal decorations — the inline box is invisible, collapse to zero
             span->width = 0;
@@ -88,8 +96,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line) {
         }
         float inline_sum = border_left + pad_left + pad_right + border_right;
         if (inline_sum > 0) {
+            float font_content_h = 0;
+            struct FontHandle* fh = span->font ? span->font->font_handle : fallback_fh;
+            if (fh) {
+                font_content_h = font_get_cell_height(fh);
+            }
             span->width = (int)inline_sum;
-            span->height = (int)(border_top + pad_top + pad_bottom + border_bottom);
+            span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             span->width = 0;
             span->height = 0;
@@ -580,7 +593,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // the containing block. The inline element's bounding box should encompass
         // this full extent, so getBoundingClientRect() matches the browser.
         // Compute vertical union from children, horizontal from the parent block.
-        compute_span_bounding_box(span, true);  // get vertical bounds from children
+        compute_span_bounding_box(span, true, lycon->font.font_handle);  // get vertical bounds from children
 
         // CSS 2.1 §9.2.1.1: Extend span bounding box to cover the trailing anonymous
         // block's strut. Only do this when the span has inline-end decorations that
@@ -820,7 +833,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // not the union of children's visual extent.
     span->content_height = lycon->block.line_height;
 
-    compute_span_bounding_box(span, span_is_multi_line);
+    compute_span_bounding_box(span, span_is_multi_line, lycon->font.font_handle);
 
     // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height
     // should reflect the font's content area + border + padding, not the union of
@@ -841,7 +854,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 pb_val = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
             }
             int expected_height = (int)(content_area + bt + pt_val + pb_val + bb);
-            if (span->height > expected_height) {
+            if (!span_is_multi_line && span->height > expected_height) {
                 span->height = expected_height;
                 log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
             }

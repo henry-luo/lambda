@@ -2252,6 +2252,34 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 
+// CSS 2.1 §9.4.2: Check if an inline subtree generates any line boxes.
+// Returns true if the inline tree contains text, replaced content, or
+// inline elements with non-zero margins/padding/borders.
+static bool is_inline_substantial(ViewElement* ve) {
+    if (ve->bound) {
+        float m = ve->bound->margin.left + ve->bound->margin.right +
+                  ve->bound->padding.left + ve->bound->padding.right;
+        if (ve->bound->border) {
+            m += ve->bound->border->width.left + ve->bound->border->width.right;
+        }
+        if (m > 0) return true;
+    }
+    View* c = ve->first_placed_child();
+    while (c) {
+        if (c->view_type == RDT_VIEW_TEXT) return true;
+        if (c->view_type == RDT_VIEW_INLINE) {
+            if (is_inline_substantial((ViewElement*)c)) return true;
+        } else if (c->view_type) {
+            // BR, inline-block, image, etc.
+            return true;
+        }
+        View* next = (View*)c->next_sibling;
+        while (next && !next->view_type) next = (View*)next->next_sibling;
+        c = next;
+    }
+    return false;
+}
+
 // CSS 2.1 §8.3.1: Check if an in-flow block can be considered self-collapsing
 // for margin collapse purposes. A block is self-collapsing when it has:
 // - zero height, no border, no padding
@@ -2293,20 +2321,8 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
             // existing. Such empty inline/text children don't prevent self-collapse.
             bool is_substantial = false;
             if (child->view_type == RDT_VIEW_INLINE) {
-                // Check if inline element has non-zero margins/padding/borders
-                ViewElement* ve = (ViewElement*)child;
-                if (ve->bound) {
-                    float m = ve->bound->margin.left + ve->bound->margin.right +
-                              ve->bound->padding.left + ve->bound->padding.right;
-                    if (ve->bound->border) {
-                        m += ve->bound->border->width.left + ve->bound->border->width.right;
-                    }
-                    if (m > 0) is_substantial = true;
-                }
-                // Check if inline element has any placed children (text output, etc.)
-                if (!is_substantial && ve->first_placed_child()) {
-                    is_substantial = true;
-                }
+                // Recursively check if inline element tree generates line boxes
+                if (is_inline_substantial((ViewElement*)child)) is_substantial = true;
             } else if (child->view_type == RDT_VIEW_TEXT) {
                 // Text view that survived whitespace collapsing — has actual content
                 is_substantial = true;
@@ -3930,7 +3946,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Only cause line break for non-inline-block, non-float, non-blockified-inline-abspos blocks
     if (display.outer != CSS_VALUE_INLINE_BLOCK && !is_float && !is_blockified_inline_abspos) {
-        if (!lycon->line.is_line_start) { line_break(lycon); }
+        if (!lycon->line.is_line_start) {
+            line_break(lycon);
+        } else if (lycon->line.start_view) {
+            // CSS 2.1 §9.4.2: A block starts but the current line had no actual
+            // content (is_line_start still true). Any views allocated for empty
+            // inline elements on this "line" should not carry to the next line.
+            // Clear start_view so the collapsed-inline fixup in line_break()
+            // won't incorrectly assign height to those empty spans.
+            lycon->line.start_view = NULL;
+        }
     }
     // save parent context
     BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;
@@ -4655,6 +4680,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 prev_view = prev_view->prev_placed_view();
                                 continue;
                             }
+                            // CSS 2.1 §8.3.1: Skip zero-height blocks with no bound
+                            // (self-collapsing with zero margins). Margins on either
+                            // side are still adjacent through such elements.
+                            if (vb->height == 0 && !vb->bound) {
+                                prev_view = prev_view->prev_placed_view();
+                                continue;
+                            }
                             break;
                         }
 
@@ -4734,6 +4766,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 if (vb->position && element_has_float(vb)) { pv = pv->prev_placed_view(); continue; }
                                 if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
                                                       vb->position->position == CSS_VALUE_FIXED)) { pv = pv->prev_placed_view(); continue; }
+                                // CSS 2.1 §8.3.1: Skip zero-height no-bound blocks
+                                if (vb->height == 0 && !vb->bound) { pv = pv->prev_placed_view(); continue; }
                                 break;
                             }
                             if (pv && pv->is_block() && pv->view_type != RDT_VIEW_INLINE_BLOCK && ((ViewBlock*)pv)->bound) {
