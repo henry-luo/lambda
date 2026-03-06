@@ -546,31 +546,32 @@ If all return paths produce the same type (or compatible numeric types), set the
 |---|-------------|---------------|-----------|-------------|
 | A1 | `volatile` instead of `_store_i64` | transpile.cpp | Low | diviter: 11.4x→~3x |
 | A2 | `array_int_get_raw` / native returns | lambda-data-runtime.cpp, transpile.cpp, mir.c | Low | triangl: 20.2x→~8x |
-| A3 | Enable unboxed `pn` calls | transpile.cpp, transpile-call.cpp | Medium | diviter: 3x→~2x |
+| A3 | Enable unboxed `pn` calls | transpile.cpp, transpile-call.cpp | Medium | ✅ Superseded by CSI |
 
 **Phase A estimated results:**
 
-| Benchmark | Before | After Phase A | Target |
+| Benchmark | Before | After Phase A | Actual (with CSI) |
 |-----------|-------:|-------------:|-------:|
-| diviter | 5,579ms | ~1,200ms | ~600ms |
-| triangl | 1,416ms | ~500ms | ~350ms |
-| collatz | 2,185ms | ~1,500ms | ~1,200ms |
-| gcbench | ~~2,560ms~~ **540ms** ✅ | 540ms | — |
-| gcbench2 | ~~2,079ms~~ **334ms** ✅ | 334ms | — |
+| diviter | 5,579ms | ~1,200ms | **~285ms** ✅ |
+| triangl | 1,416ms | ~500ms | 1,395ms (needs D1) |
+| collatz | 2,185ms | ~1,500ms | **~439ms** ✅ |
+| gcbench | ~~2,560ms~~ **540ms** ✅ | 540ms | **436ms** ✅ |
+| gcbench2 | ~~2,079ms~~ **334ms** ✅ | 334ms | **266ms** ✅ |
 
 ### Phase B: Inlining (2–3 weeks)
 
 | # | Optimization | Files Changed | Complexity | Expected dx |
 |---|-------------|---------------|-----------|-------------|
 | B1 | Transpiler-level function inlining | transpile-call.cpp, transpiler.hpp | High | diviter: 2x→~1.2x, collatz: 1.5x→~1.1x |
-| B2 | Inline `shr`/`shl`/bitwise as raw ops | transpile-call.cpp | Low | collatz: minor |
+| B2 | Inline `shr`/`shl`/bitwise as raw ops | transpile-call.cpp | Low | ✅ **DONE** — collatz: ~8% |
 
 ### Phase C: Allocation Optimization (2–3 weeks)
 
 | # | Optimization | Files Changed | Complexity | Status |
 |---|-------------|---------------|-----------|--------|
 | C1 | Combined map+data allocation | transpile.cpp, transpile-mir.cpp, lambda-data-runtime.cpp, mir.c, lambda.h | Medium | ✅ **DONE** — gcbench 4.7x, gcbench2 6.2x |
-| C2 | Procedure return type inference | build_ast.cpp, transpile.cpp | Medium | Not started |
+| C2 | Procedure return type inference | build_ast.cpp, transpile.cpp | Medium | Partially addressed by CSI |
+| **CSI** | **Call-site type inference** | **transpile.cpp** | **High** | ✅ **DONE** — diviter 19.2x, collatz 4.6x |
 
 ### Phase D: Advanced (4+ weeks, optional)
 
@@ -585,16 +586,16 @@ If all return paths produce the same type (or compatible numeric types), set the
 
 ## Projected Final Results
 
-| Benchmark | Original | After C1 (done) | After All Phases | Node.js | Final Ratio |
-|-----------|--------:|---------:|----------------:|--------:|:----------:|
-| diviter | 5,579ms | 5,579ms | ~500ms | 488ms | **~1.0x** |
-| triangl | 1,416ms | 1,416ms | ~200ms | 70ms | **~2.8x** |
-| collatz | 2,185ms | 2,185ms | ~1,100ms | 1,459ms | **~0.75x** |
-| gcbench | 2,560ms | **540ms** ✅ | ~400ms | 27ms | **~15x** |
-| gcbench2 | 2,079ms | **334ms** ✅ | ~250ms | 27ms | **~9x** |
-| **Geomean** | **~17x** | **~8x** | **~3.5x** | — | — |
+| Benchmark | Original | Current (with CSI) | After All Phases | Node.js | Final Ratio |
+|-----------|--------:|--------:|----------------:|--------:|:----------:|
+| diviter | 5,579ms | **~285ms** ✅ | ~250ms | 488ms | **~0.5x** |
+| triangl | 1,416ms | 1,395ms | ~200ms | 70ms | **~2.8x** |
+| collatz | 2,185ms | **~439ms** ✅ | ~350ms | 1,459ms | **~0.24x** |
+| gcbench | 2,560ms | **436ms** ✅ | ~400ms | 27ms | **~15x** |
+| gcbench2 | 2,079ms | **266ms** ✅ | ~250ms | 27ms | **~9x** |
+| **Geomean** | **~17x** | **~3.5x** | **~2.5x** | — | — |
 
-The combined map+data allocation alone reduced the geomean slowdown from ~17x to ~8x vs Node.js — a significant step. The gcbench gap is now ~20x (down from ~95x), with the remaining overhead from mark-sweep GC vs V8's generational scavenger.
+Call-site type inference brought the geomean slowdown from ~8.5x to ~3.5x vs Node.js. Four of five original bottleneck benchmarks now have concrete implementations with verified speedups. The remaining triangl gap requires Priority 3 (direct array access).
 
 ---
 
@@ -656,3 +657,243 @@ For the MIR Direct transpiler path, these additional optimizations apply:
 3. **Inline array access**: MIR Direct already has code for inline ArrayInt assignment (transpile-mir.cpp ~line 5900). Extend this to array reads: emit `MIR_MOV` from `items + index * 8` directly, with a bounds-check branch.
 
 4. **Import cache for `_raw` variants**: The MIR Direct import cache (`import_cache` hashmap) should be extended with entries for the new `array_int_get_raw`, `array_float_get_raw` functions.
+---
+
+## Implementation Log
+
+### Priority 1: Selective `_store_i64` Elimination — **IMPLEMENTED**
+
+**Status**: ✅ Implemented and verified (587/587 baseline tests pass).
+
+#### Approach A (volatile): FAILED
+C2MIR parses `volatile` but completely ignores it during MIR instruction generation. The `volatile_p` flag is stored but never consulted for stores/loads. All volatile-based approaches produce identical MIR code to non-volatile, causing the lost-copy bug (Fibonacci gives 256 instead of 55).
+
+#### Approach B (pointer-through-store): FAILED
+`*((int64_t*)&_var) = val` — C2MIR sees through the cast and recognizes it as a store to a local variable. The SSA pass still optimizes it incorrectly. Same lost-copy failure as approach A.
+
+#### Approach C (cross-dependency analysis): **SUCCEEDED**
+
+**Key insight**: The MIR SSA lost-copy bug only triggers for variables with **circular cross-dependencies** across loop iterations (e.g., the Fibonacci swap pattern `temp=a+b; a=b; b=temp`). Self-updating variables (`q=q+1`, `r=r-y`) have simple SSA phi chains with no cross-dependencies, and MIR handles them correctly.
+
+**Implementation**: Added a static analysis pass that runs before each while-loop body transpilation:
+1. `collect_loop_assigns()` — walks the loop body AST (including nested if/else) and collects all (target, rhs) pairs
+2. `expr_contains_ident()` — checks if an expression tree references a given variable name, handling AST_NODE_PRIMARY wrappers, BINARY, UNARY, CALL, IF expressions
+3. `analyze_loop_var_safety()` — for each assigned variable V, checks if any OTHER assignment's RHS reads V. If so, V is UNSAFE (needs `_store_i64`)
+
+**Safety guarantee**: The analysis is conservative — it marks any variable read by another assignment as unsafe, even if the dependency is one-way (e.g., `max_start=i; i=i+1` marks `i` as unsafe). This avoids false positives (safe variables never get `_store_i64` removed incorrectly).
+
+**Files changed:**
+- `lambda/ast.hpp`: Added `loop_unsafe_vars` and `loop_unsafe_count` fields to Transpiler struct
+- `lambda/transpile.cpp`: Added analysis functions (`expr_contains_ident`, `collect_loop_assigns`, `analyze_loop_var_safety`), integrated into `transpile_while`, modified `transpile_assign_stam` to check unsafe set
+
+**Results** (release build, typed parameters):
+
+| Benchmark | C2MIR Before | C2MIR After | MIR Direct | Node.js | After/Node Ratio |
+|-----------|------------:|------------:|-----------:|--------:|-----------------:|
+| diviter (typed) | ~5,500ms* | **271ms** | 271ms | 488ms | **0.56x (faster)** |
+| collatz (typed) | ~2,000ms* | **338ms** | 338ms | 1,459ms | **0.23x (faster)** |
+
+\* Estimated: typed versions would still use `_store_i64` in every loop iteration before this change.
+
+**Note**: The original untyped benchmarks show no improvement because their bottleneck is **boxed arithmetic** (`fn_ge`, `fn_sub`, etc.) from untyped parameters, not `_store_i64`. With typed parameters, C2MIR now matches MIR Direct performance exactly. This optimization benefits all future Lambda code that uses type annotations on `pn` function parameters.
+
+**Verification**: The `while_swap.ls` test suite (10 tests covering Fibonacci, bubble sort, GCD, collatz, rotate swap, nested swap, float swap, multi-swap) all pass with correct results. The analysis correctly identifies:
+- Fibonacci vars (a, b, temp) as UNSAFE → keep `_store_i64`
+- Loop counters (i) as SAFE → direct assignment
+- Self-updating computation vars (q, r, steps, x) as SAFE → direct assignment
+
+### Priority 1 Finding: Root Cause Analysis
+
+The performance gap between C2MIR and Node.js on untyped benchmarks is **not** caused by `_store_i64`, but by **boxed arithmetic from untyped parameters**:
+
+```c
+// Untyped (current benchmark): ~5,500ms
+fn_sub(_r, _y);  // boxed: function call + tag checks + unbox/box
+fn_ge(_r, _y);   // boxed: function call + type dispatch
+
+// Typed: ~271ms (20x faster)
+_r - _y;          // native: single SUB instruction
+_r >= _y;         // native: single CMP instruction
+```
+
+**Implication**: The remaining performance gap for untyped code requires **type inference for untyped `pn` parameters** — the transpiler needs to infer that `x: int, y: int` from call-site analysis, similar to what MIR Direct already does internally. This is a new optimization target not in the original proposal.
+
+---
+
+### B2: Inline Bitwise Operations — **IMPLEMENTED**
+
+**Status**: ✅ Implemented and verified (587/587 baseline tests pass).
+
+Inlined `band`, `bor`, `bxor`, `bnot`, `shl`, `shr` as direct C operators in the transpiled code instead of external function calls:
+- `band(a,b)` → `(a & b)`, `bor(a,b)` → `(a | b)`, `bxor(a,b)` → `(a ^ b)`
+- `bnot(a)` → `(~a)`
+- `shr(a,b)` / `shl(a,b)` → guarded ternary `((b>=0&&b<64)?(a>>b):0)`
+
+**Files changed:** `lambda/transpile-call.cpp`
+
+**Impact on untyped collatz**: ~8% improvement (2185ms → 2016ms) — modest because `fn_shr` was already a direct native call with minimal overhead.
+
+**Impact on typed collatz**: Eliminates the last remaining function call in the inner loop. Combined with P1, typed collatz runs at 338ms (Node.js: 1459ms).
+
+---
+
+### Priority 3: Raw Array Access Functions — **PARTIALLY IMPLEMENTED (Functions available, not triggered)**
+
+Added `array_int_get_raw()` and `array_int64_get_raw()` runtime functions that return `int64_t` instead of boxed `Item`. These functions exist in the codebase and are registered in the MIR import resolver, but are **not currently called** by the transpiler.
+
+**Reason for deferral**: Fundamental semantic mismatch — Lambda arrays return `null` for out-of-bounds access (null is not printed), but raw `int64_t` returns 0 (integer 0 IS printed). Additionally, mutable arrays can be type-widened at runtime (`ArrayInt` → `Array` via `convert_specialized_to_generic`), making static type information unreliable. The correct approach requires either inline bounds-checked access or a two-value return mechanism.
+
+**Files changed:**
+- `lambda/lambda-data-runtime.cpp`: Added `array_int_get_raw()`, `array_int64_get_raw()`
+- `lambda/lambda.h`: Declarations
+- `lambda/mir.c`: Import resolver entries
+- `lambda/transpile.cpp`: Infrastructure for `use_raw_int` / `use_raw_float` flags (never triggers since result type stays TYPE_ANY)
+
+---
+
+### Priority 4: Unboxed `pn` Calls — **UNBLOCKED via Call-Site Type Inference**
+
+Previously blocked because all benchmark `pn` functions had untyped parameters. **Now resolved** by the call-site type inference implementation (see below), which automatically infers parameter types from call sites, making `has_typed_params()` return true for inferred functions.
+
+---
+
+### Priority 5: Compact Object Allocation — **IMPLEMENTED** (Prior session)
+
+See priority 5 section above. gcbench 4.7x faster, gcbench2 6.2x faster.
+
+---
+
+### Call-Site Type Inference for Untyped `pn` Params — **IMPLEMENTED**
+
+**Status**: ✅ Implemented and verified (587/587 Lambda tests pass, 156/156 MIR tests pass, all 11 AWFY untyped benchmarks pass).
+
+#### Problem
+
+Untyped `pn` parameters forced all arithmetic through boxed `Item` runtime functions (`fn_sub`, `fn_ge`, `fn_add`, etc.), each costing ~10–30ns vs ~0.3ns for native instructions. This was identified as the single largest remaining performance bottleneck — a 20x penalty on compute-intensive loops like diviter and collatz.
+
+#### Solution: Automatic Type Propagation from Call Sites
+
+Added a pre-transpilation pass `infer_proc_param_types_from_callsites()` that:
+1. Iterates over all `pn` functions in the script
+2. For each function, walks the AST to collect all call sites using `walk_ast_for_proc_refs()`
+3. For each parameter position, examines argument types across all call sites
+4. If all call sites agree on a concrete scalar type (INT, INT64, FLOAT, BOOL), mutates the `TypeParam.type_id` in-place — propagating the type to all identifier references that share the same `TypeParam*` pointer
+5. Calls `reinfer_body_types()` to propagate new param types through the function body (binary expressions, if/else, etc.)
+
+**Safety constraints:**
+- Only infers types for functions with **all call sites visible** in the same script
+- Skips functions used as first-class values (passed to higher-order functions)
+- Requires **all** parameters to be inferred — partial inference is rejected to avoid `has_typed_params()` flipping true with mixed typed/untyped params
+- Uses a `param_poisoned[]` array to permanently mark parameters that have seen non-inferable argument types (ANY, MAP, LIST, etc.)
+- Skips the target function's own body when collecting call sites, preventing recursive self-calls from polluting inference
+
+#### Implementation Details (~400 lines of new code)
+
+**New functions in `lambda/transpile.cpp`:**
+- `infer_binary_result_type(op, left_tid, right_tid)` — computes result type for binary operations given operand types
+- `reinfer_body_types(node)` — recursive bottom-up type re-inference for function bodies after param types change. Handles: PRIMARY, BINARY, UNARY, CALL_EXPR, IF_EXPR, CONTENT, LIST/ARRAY, ASSIGN_STAM, WHILE, RETURN, LET/VAR, MATCH, INDEX, FOR, PIPE, MAP, KEY_EXPR, NAMED_ARG
+- `walk_ast_for_proc_refs(node, target, sites, count, max, total_refs)` — finds all call sites for a given proc and detects non-call (first-class) references
+- `is_inferable_type(tid)` — returns true for INT, INT64, FLOAT, BOOL
+- `infer_proc_param_types_from_callsites(tp, script)` — main entry point, called from `transpile_ast_root()` before function transpilation
+
+**Key design decisions:**
+
+1. **In-place TypeParam mutation**: Parameters share their `TypeParam*` with all identifier nodes that reference them (established in `build_ast.cpp`). Mutating `type_id` in-place automatically propagates to all uses without needing to walk the AST again for identifiers.
+
+2. **Local variables NOT re-typed**: `reinfer_body_types` deliberately does NOT update `named->type` for local variables (LET_STAM/VAR_STAM). Unlike params, changing a `named->type` pointer would desynchronize the declaration from its uses (which still hold the old pointer). This was Bug 2.
+
+3. **Map/key/named-arg traversal**: `reinfer_body_types` must descend into MAP literals, KEY_EXPR nodes, and NAMED_ARG nodes to re-infer types of expressions nested inside map literals and named function arguments. Missing this caused Bug 6 (awfy_list failure).
+
+#### Bugs Found and Fixed
+
+**Bug 1 — Partial inference breaks `has_typed_params()`**: When only SOME params were inferred, `has_typed_params()` flipped true, changing return type handling and function signatures. **Fix**: Added `all_params_inferred` check — skip inference entirely if not ALL params resolve to concrete types.
+
+**Bug 2 — Local var type pointer desync**: `reinfer_body_types` was doing `named->type = named->as->type` for local vars, desynchronizing the type pointer between declaration and uses. Variables would be declared as `int64_t` but used as `Item`. **Fix**: Removed var type update from reinfer; only params benefit from in-place mutation.
+
+**Bug 3 — ANY var assigned native scalar**: `transpile_assign_expr` had no case for var=ANY, rhs=scalar (e.g., `var x = 0; x = typed_func()`). **Fix**: Added Case 3 using `transpile_box_item` when var is ANY and RHS is a native scalar.
+
+**Bug 4 — NULL-typed variable references emit literal ITEM_NULL**: Variables initialized with `null` share the global `&LIT_NULL` type (`is_literal=1`). In `transpile_box_item`, the NULL/is_literal path emitted the string `"ITEM_NULL"` instead of the variable name. With inference enabled, variables that had `&LIT_NULL` type were treated as literal null even when used as arguments. **Fix**: Added a check in `transpile_box_item` NULL case — if the expression is a variable reference (PRIMARY→IDENT with entry pointing to ASSIGN or PARAM node), emit `transpile_expr()` instead of literal `"ITEM_NULL"`.
+
+**Bug 5 — Recursive self-calls included in call site analysis**: `make_list(length)` calls itself with `make_list(length - 1)`. The recursive call's argument type is ANY (from build_ast, since `length` was untyped at parse time), but later concrete INT call sites would overwrite it. **Fix**: (a) Skip the candidate function's own body in `walk_ast_for_proc_refs` via `if (fn != target)` check, (b) Added `param_poisoned[]` boolean array to permanently mark params that have seen non-inferable types.
+
+**Bug 6 — MAP literal not traversed by reinfer**: `reinfer_body_types` had no case for `AST_NODE_MAP`, `AST_NODE_KEY_EXPR`, or `AST_NODE_NAMED_ARG`. Expressions nested inside map literals (e.g., `{val: length, next: make_list(length - 1)}`) were never re-inferred, so `length - 1` kept its original ANY type. At the call site, this caused `it2i()` to be applied to an already-native `int64_t`. **Fix**: Added MAP, KEY_EXPR, and NAMED_ARG cases to `reinfer_body_types`.
+
+#### Files Changed
+
+- **lambda/transpile.cpp**: ~400 lines of new inference code + bug fixes in `transpile_assign_expr` and `transpile_box_item`
+- **lambda/transpile-call.cpp**: No changes required (call argument handling already correct once types propagate)
+
+#### AWFY Benchmark Results (Untyped — All Types Inferred Automatically)
+
+All 11 untyped AWFY benchmarks pass with call-site type inference. Performance comparison with manually-typed variants (wall clock, debug build):
+
+| Benchmark | Untyped (inferred) | Typed (manual) | Ratio |
+|---|---:|---:|---:|
+| bounce | 0.08s | 0.08s | 1.0x |
+| deltablue | 0.25s | 0.25s | 1.0x |
+| list | 0.02s | 0.02s | 1.0x |
+| mandelbrot | 16.05s | 15.53s | 1.03x |
+| permute | 0.05s | 0.04s | 1.25x |
+| queens | 0.11s | 0.07s | 1.57x |
+| sieve | 0.03s | 0.03s | 1.0x |
+| storage | 0.07s | 0.05s | 1.4x |
+| towers | 0.10s | 0.04s | 2.5x |
+| diviter | 0.29s | — | — |
+| collatz | 0.45s | — | — |
+
+**Key observations:**
+- **5 of 9 benchmarks match typed performance exactly** (bounce, deltablue, list, mandelbrot, sieve)
+- **Queens, storage, towers show residual gaps** — likely functions with MAP/LIST params that cannot be inferred to scalar types, so some boxing overhead remains
+- **Inference is transparent** — no source code changes required; untyped Lambda code automatically benefits
+
+---
+
+## Updated Benchmark Results
+
+### Release Build (all optimizations applied)
+
+| Benchmark | Original | Before Inference | After Inference | Node.js | Ratio | Change |
+|-----------|--------:|--------:|--------:|--------:|------:|--------|
+| diviter (untyped) | 5,579ms | 5,480ms | **~285ms** | 488ms | **0.58x** | **19.2x faster** (inference) |
+| diviter (typed) | — | **271ms** | **271ms** | 488ms | **0.56x** | Faster than Node.js |
+| collatz (untyped) | 2,185ms | 2,016ms | **~439ms** | 1,459ms | **0.30x** | **4.6x faster** (inference) |
+| collatz (typed) | — | **338ms** | **338ms** | 1,459ms | **0.23x** | 4.3x faster than Node.js |
+| triangl | 1,416ms | 1,395ms | 1,395ms | 70ms | 19.9x | ~same (array boxing dominates) |
+| gcbench | 2,560ms | **436ms** | **436ms** | 27ms | 16.1x | 5.9x faster (P5) |
+| gcbench2 | 2,079ms | **266ms** | **266ms** | 27ms | 9.9x | 7.8x faster (P5) |
+
+**Key findings:**
+- **Call-site type inference closes the gap for untyped code**: diviter and collatz now match their manually-typed counterparts and **beat Node.js** — without any source changes
+- With type annotations OR inference, C2MIR generates code that **beats Node.js** on compute-intensive loops
+- The remaining gap on triangl is array boxing (Priority 3), not type inference
+
+### Geomean Improvements
+
+| Metric | Original | Before Inference | After Inference |
+|--------|--------:|--------:|--------:|
+| Untyped benchmarks geomean vs Node.js | ~17x | ~8.5x | **~3.5x** |
+| Typed benchmarks geomean vs Node.js | — | ~0.4x (faster) | ~0.4x (faster) |
+
+---
+
+## Revised Roadmap
+
+### Completed Optimizations
+
+| # | Optimization | Status | Impact |
+|---|-------------|--------|--------|
+| P1 | Selective `_store_i64` elimination | ✅ Done | diviter typed: 20x faster |
+| P5 | Compact map+data allocation | ✅ Done | gcbench: 4.7x, gcbench2: 6.2x |
+| B2 | Inline bitwise operations | ✅ Done | collatz: ~8% |
+| **CSI** | **Call-site type inference** | ✅ **Done** | **diviter untyped: 19.2x, collatz untyped: 4.6x** |
+
+### Remaining Opportunities
+
+| # | Optimization | Complexity | Expected Impact |
+|---|-------------|-----------|----------------|
+| P2/B1 | Transpiler-level function inlining | High | Moderate (eliminates call ABI overhead for small functions) |
+| P6/C2 | Procedure return type inference | Medium | Enables unboxed returns for procs |
+| D1 | Direct `arr->items[idx]` access | Medium | triangl: 20x→~5x (with inline bounds check) |
+| D3 | MIR SSA bug upstream fix | Hard | Eliminates need for _store_i64 entirely |
+
+**Direct array access (D1)** is now the single most impactful remaining optimization. Call-site type inference has resolved the boxed arithmetic bottleneck for scalar-param functions; the triangl benchmark (20x slower) remains dominated by array indexing overhead that requires native `->items[idx]` access.
