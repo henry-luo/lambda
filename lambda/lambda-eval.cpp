@@ -132,14 +132,12 @@ Item fn_error(Item message) {
 }
 
 Bool is_truthy(Item item) {
-    log_debug("is_truthy: item=0x%llx, type=%d, bool_val=%d", (unsigned long long)item.item, item._type_id, (int)item.bool_val);
     switch (item._type_id) {
     case LMD_TYPE_NULL:
         return BOOL_FALSE;
     case LMD_TYPE_ERROR:
         return BOOL_FALSE;  // errors are falsy — use `if (^e)` to check for errors
     case LMD_TYPE_BOOL:
-        log_debug("is_truthy: BOOL case, bool_val=%d, returning %d", (int)item.bool_val, item.bool_val ? BOOL_TRUE : BOOL_FALSE);
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
     default: // all other value considered truthy
         return item.item ? BOOL_TRUE : BOOL_FALSE;  // should null be considered ERROR?
@@ -157,32 +155,27 @@ Item op_or(Bool a, Bool b) {
 // list to item
 Item v2it(List* list) {
     if (!list) { return ItemNull; }
-    log_debug("v2it %p, length: %ld", list, list->length);
     if (list->length == 0) { return ItemNull; }
     if (list->length == 1) { return list->items[0]; }
     return {.list = list};
 }
 
 String *fn_strcat(String *left, String *right) {
-    log_debug("fn_strcat %p, %p", left, right);
     if (!left || !right) {
         log_error("null pointer in fn_strcat: left=%p, right=%p", left, right);
         return &STR_ERROR;
     }
     int left_len = left->len, right_len = right->len;
-    log_debug("left len %d, right len %d", left_len, right_len);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     if (!result) {
         log_error("failed to allocate memory for fn_strcat result");
         return NULL;
     }
-    log_debug("str result %p", result);
     result->len = left_len + right_len;
     result->is_ascii = left->is_ascii && right->is_ascii;
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
-    log_debug("fn_strcat result: %s", result->chars);
     return result;
 }
 
@@ -190,7 +183,6 @@ Item fn_join(Item left, Item right) {
     GUARD_ERROR2(left, right);
     // concat two scalars, or join two lists/arrays/maps, or join scalar with list/array, or join two binaries, else error
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
-    log_debug("fn_join: %d, %d", left_type, right_type);
 
     // Handle path concatenation first (path must be on the left)
     if (left_type == LMD_TYPE_PATH) {
@@ -413,7 +405,6 @@ Range* fn_to(Item item_a, Item item_b) {
         range->type_id = LMD_TYPE_RANGE;
         range->start = start;  range->end = end;
         range->length = end - start + 1;
-        log_debug("create range: %ld to %ld, length: %ld", range->start, range->end, range->length);
         return range;
     }
     else {
@@ -423,7 +414,6 @@ Range* fn_to(Item item_a, Item item_b) {
 }
 
 Function* to_fn(fn_ptr ptr) {
-    log_debug("create fn %p", ptr);
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ptr = ptr;
@@ -433,7 +423,6 @@ Function* to_fn(fn_ptr ptr) {
 
 // Create function with arity info
 Function* to_fn_n(fn_ptr ptr, int arity) {
-    log_debug("create fn %p with arity %d", ptr, arity);
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->arity = (uint8_t)arity;
@@ -445,7 +434,6 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
 
 // Create function with arity and name for stack traces
 Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
-    log_debug("create fn %p with arity %d, name %s", ptr, arity, name ? name : "(null)");
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->arity = (uint8_t)arity;
@@ -457,7 +445,6 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
 
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
-    log_debug("create closure %p with arity %d and env %p", ptr, arity, env);
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->fn_type = NULL;
@@ -471,7 +458,6 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
 
 // Create a closure with captured environment and name for stack traces
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
-    log_debug("create closure %p with arity %d, env %p, name %s", ptr, arity, env, name ? name : "(null)");
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->fn_type = NULL;
@@ -525,7 +511,6 @@ Item fn_call(Function* fn, List* args) {
     }
     int arg_count = args ? (int)args->length : 0;
     void* env = fn->closure_env;
-    log_debug("fn_call: arity=%d, arg_count=%d, env=%p", fn->arity, arg_count, env);
 
     // For closures, env is passed as first argument (closures never have FN_FLAG_BOXED_RET)
     if (env) {
@@ -657,12 +642,10 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
 }
 
 Bool fn_is(Item a, Item b) {
-    log_debug("fn_is");
     TypeId b_type_id = get_type_id(b);
 
     if (b_type_id != LMD_TYPE_TYPE) {
         // RHS is a value, not a type — treat as equality comparison
-        log_debug("fn_is: RHS is value (type %s), using equality", get_type_name(b_type_id));
         return fn_eq(a, b);
     }
 
@@ -678,14 +661,12 @@ Bool fn_is(Item a, Item b) {
         TypePattern* pattern = (TypePattern*)b_type;
         const char* chars = a.get_chars();
         uint32_t len = a.get_len();
-        log_debug("fn_is pattern matching: str=%.*s", (int)len, chars);
         return pattern_full_match_chars(pattern, chars, len) ? BOOL_TRUE : BOOL_FALSE;
     }
 
     // Handle constrained type: base_type where (constraint)
     if (b_type->kind == TYPE_KIND_CONSTRAINED) {
         TypeConstrained* constrained = (TypeConstrained*)b_type;
-        log_debug("fn_is: TypeConstrained, checking base type and constraint");
 
         // First check if value matches the base type
         // Need to check against the inner base type directly
@@ -699,7 +680,6 @@ Bool fn_is(Item a, Item b) {
                 // Allow numeric coercion: int is valid for int64, float is valid for float64, etc.
                 if (!(LMD_TYPE_INT <= a_type_id && a_type_id <= base->type_id &&
                       LMD_TYPE_INT <= base->type_id && base->type_id <= LMD_TYPE_NUMBER)) {
-                    log_debug("fn_is: base type mismatch: got %d, expected %d", a_type_id, base->type_id);
                     return BOOL_FALSE;
                 }
             }
@@ -708,22 +688,17 @@ Bool fn_is(Item a, Item b) {
 
         // For now, return true if base type matches - full constraint eval requires context setup
         // TODO: implement constraint evaluation by setting _pipe_item = a and evaluating constraint
-        log_debug("fn_is: constrained type - base type matched, constraint eval not yet implemented");
         return BOOL_TRUE;
     }
 
     // If b is a TypeUnary directly (kind = TYPE_KIND_UNARY), handle it directly
     if (b_type->kind == TYPE_KIND_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)b_type;
-        log_debug("fn_is: TypeUnary (direct), op=%d, min=%d, max=%d",
-                  type_unary->op, type_unary->min_count, type_unary->max_count);
         // Use full type validation for occurrence types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
         if (result->error_count > 0) {
             print_validation_result(result);
-            log_debug("type validation failed with %d errors", result->error_count);
         } else {
-            log_debug("type validation succeeded");
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -731,14 +706,11 @@ Bool fn_is(Item a, Item b) {
     // If b is a TypeBinary directly (kind = TYPE_KIND_BINARY), handle it via validator
     if (b_type->kind == TYPE_KIND_BINARY) {
         TypeBinary* type_binary = (TypeBinary*)b_type;
-        log_debug("fn_is: TypeBinary (direct), op=%d", type_binary->op);
         // Use full type validation for union/intersection types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
         if (result->error_count > 0) {
             print_validation_result(result);
-            log_debug("type validation failed with %d errors", result->error_count);
         } else {
-            log_debug("type validation succeeded");
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -747,19 +719,13 @@ Bool fn_is(Item a, Item b) {
     TypeId a_type_id = get_type_id(a);
 
     // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
-    log_debug("fn_is: checking inner type, type_b->type->kind=%d", type_b->type->kind);
     if (type_b->type->kind == TYPE_KIND_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)type_b->type;
-        log_debug("fn_is: TypeUnary detected, op=%d (REPEAT=%d, OPTIONAL=%d)",
-                  type_unary->op, OPERATOR_REPEAT, OPERATOR_OPTIONAL);
         // Use full type validation for occurrence types
-        log_debug("fn_is: TypeUnary occurrence operator detected, using validator");
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
         if (result->error_count > 0) {
             print_validation_result(result);
-            log_debug("type validation failed with %d errors", result->error_count);
         } else {
-            log_debug("type validation succeeded");
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -767,19 +733,15 @@ Bool fn_is(Item a, Item b) {
     // Check if inner type is TypeBinary (union/intersection: |, &, \)
     if (type_b->type->kind == TYPE_KIND_BINARY) {
         TypeBinary* type_binary = (TypeBinary*)type_b->type;
-        log_debug("fn_is: TypeBinary detected (wrapped), op=%d", type_binary->op);
         // Use full type validation for union/intersection types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
         if (result->error_count > 0) {
             print_validation_result(result);
-            log_debug("type validation failed with %d errors", result->error_count);
         } else {
-            log_debug("type validation succeeded");
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
         return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
@@ -800,7 +762,6 @@ Bool fn_is(Item a, Item b) {
         return BOOL_TRUE;  // is datetime (any precision matches)
     case LMD_TYPE_ARRAY: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
         if (type_b == &LIT_TYPE_ARRAY) {  // fast path
-            log_debug("fast path array type check");
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
                 a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
         }
@@ -820,10 +781,7 @@ Bool fn_is(Item a, Item b) {
             if (!nominal_match) return BOOL_FALSE;
             // check object constraint (field-level + object-level that constraints)
             if (expected->constraint_fn) {
-                log_debug("fn_is: checking constraint on '%.*s'",
-                    (int)expected->type_name.length, expected->type_name.str);
                 if (!expected->constraint_fn(a.item)) {
-                    log_debug("fn_is: constraint check failed");
                     return BOOL_FALSE;
                 }
             }
@@ -834,13 +792,10 @@ Bool fn_is(Item a, Item b) {
             return a_type_id == LMD_TYPE_OBJECT ? BOOL_TRUE : BOOL_FALSE;
         }
         else {  // full type validation
-            log_debug("full type validation for type: %d", type_b->type->type_id);
             ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
             if (result->error_count > 0) {
                 print_validation_result(result);
-                log_debug("type validation failed with %d errors", result->error_count);
             } else {
-                log_debug("type validation succeeded");
             }
             return result->valid ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -851,7 +806,6 @@ Bool fn_is(Item a, Item b) {
 
 // IEEE NaN check: expr is nan
 Bool fn_is_nan(Item a) {
-    log_debug("fn_is_nan");
     TypeId tid = get_type_id(a);
     if (tid == LMD_TYPE_FLOAT) {
         double val = a.get_double();
@@ -1407,7 +1361,6 @@ Bool fn_ge(Item a_item, Item b_item) {
 
 Bool fn_not(Item item) {
     // invert the truthiness of the item, not just logic NOT
-    log_debug("fn_not expr");
     Bool result = is_truthy(item);
     if (result == BOOL_ERROR) return BOOL_ERROR;
     return !result;
@@ -1415,14 +1368,11 @@ Bool fn_not(Item item) {
 
 // 3-state AND with short-circuiting truthy idiom
 Item fn_and(Item a_item, Item b_item) {
-    log_debug("fn_and called with types: %d, %d", a_item._type_id, b_item._type_id);
     // fast path for boolean types
     if (a_item._type_id == LMD_TYPE_BOOL && b_item._type_id == LMD_TYPE_BOOL) {
-        log_debug("fn_and: bool fast path");
         return {.item = b2it(a_item.bool_val && b_item.bool_val)};
     }
     // fallback to generic truthy idiom
-    log_debug("fn_and: generic truth fallback");
     Bool a_truth = is_truthy(a_item);
     if (a_truth == BOOL_ERROR) return ItemError;
     if (a_truth == BOOL_FALSE) return a_item; // short-circuit return
@@ -1550,7 +1500,6 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
 }
 
 Item fn_query(Item data, Item type_val, int direct) {
-    log_debug("fn_query: direct=%d", direct);
     TypeId type_tid = get_type_id(type_val);
     if (type_tid != LMD_TYPE_TYPE) {
         log_error("query: 2nd argument must be a type, got: %s", get_type_name(type_tid));
@@ -1655,7 +1604,6 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
 
 // child-level query: expr[T] where T is a type
 Item fn_child_query(Item data, Item type_val) {
-    log_debug("fn_child_query");
     Array* result = array_plain();
     result->is_spreadable = true;
     child_query_collect(data, type_val, result);
@@ -1663,7 +1611,6 @@ Item fn_child_query(Item data, Item type_val) {
 }
 
 Bool fn_in(Item a_item, Item b_item) {
-    log_debug("fn_in");
     if (b_item._type_id) { // b is scalar
         if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
             String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
@@ -1906,7 +1853,6 @@ TypePattern* const_pattern(int pattern_index) {
         log_error("const_pattern: index %d is not a pattern, got type: %s (kind=%d)", pattern_index, get_type_name(type->type_id), type->kind);
         return nullptr;
     }
-    log_debug("const_pattern %d -> %p", pattern_index, type);
     return (TypePattern*)type;
 }
 
@@ -2595,8 +2541,6 @@ Item fn_member(Item item, Item key) {
                         method->fn->arity,
                         (void*)(uintptr_t)item.item,  // boxed self as closure_env
                         method->fn->name);
-                    log_debug("fn_member: bound method '%s' on object '%.*s'",
-                        key_str, (int)obj_type->type_name.length, obj_type->type_name.str);
                     return {.item = (uint64_t)(uintptr_t)bound};
                 }
                 method = method->next;
@@ -2650,7 +2594,6 @@ Item fn_member(Item item, Item key) {
 // length of an item's content, relates to indexed access, i.e. item[index]
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
-    log_debug("fn_len item: %d", type_id);
     int64_t size = 0;
     switch (type_id) {
     case LMD_TYPE_LIST:

@@ -491,9 +491,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 return;
             }
 
-            // bnot(a) — unary bitwise NOT (C_ARG_NATIVE, 1-arg)
+            // bnot(a) — unary bitwise NOT: inline as ~a
             if (fn_id == SYSFUNC_BNOT) {
-                strbuf_append_str(tp->code_buf, "fn_bnot(");
+                strbuf_append_str(tp->code_buf, "(~");
                 emit_bitwise_arg(tp, first_arg);
                 strbuf_append_char(tp->code_buf, ')');
                 return;
@@ -530,10 +530,47 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             }
         }
 
-        // ==== Bitwise binary functions (C_ARG_NATIVE, 2-arg): band, bor, bxor, shl, shr ====
+        // ==== Bitwise binary functions — inline as C operators ====
+        // band/bor/bxor: always safe to inline (no UB).
+        // shl/shr: use guarded ternary to handle shift amounts outside [0,63].
         if (sys_fn_node->fn_info->c_arg_conv == C_ARG_NATIVE &&
             sys_fn_node->fn_info->arg_count == 2 &&
             first_arg && second_arg && !second_arg->next) {
+            SysFunc fn_id = sys_fn_node->fn_info->fn;
+            const char* c_op = NULL;
+            bool is_shift = false;
+            switch (fn_id) {
+            case SYSFUNC_BAND: c_op = "&";  break;
+            case SYSFUNC_BOR:  c_op = "|";  break;
+            case SYSFUNC_BXOR: c_op = "^";  break;
+            case SYSFUNC_SHL:  c_op = "<<"; is_shift = true; break;
+            case SYSFUNC_SHR:  c_op = ">>"; is_shift = true; break;
+            default: break;
+            }
+            if (c_op) {
+                if (is_shift) {
+                    // emit: (((b) >= 0 && (b) < 64) ? ((a) OP (b)) : 0)
+                    // b is evaluated twice, but shift amounts are typically literals
+                    strbuf_append_str(tp->code_buf, "((");
+                    emit_bitwise_arg(tp, second_arg);
+                    strbuf_append_str(tp->code_buf, ">=0&&");
+                    emit_bitwise_arg(tp, second_arg);
+                    strbuf_append_str(tp->code_buf, "<64)?(");
+                    emit_bitwise_arg(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, c_op);
+                    emit_bitwise_arg(tp, second_arg);
+                    strbuf_append_str(tp->code_buf, "):0)");
+                } else {
+                    // emit: ((a) OP (b))
+                    strbuf_append_str(tp->code_buf, "(");
+                    emit_bitwise_arg(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, c_op);
+                    emit_bitwise_arg(tp, second_arg);
+                    strbuf_append_str(tp->code_buf, ")");
+                }
+                return;
+            }
+            // fallback for unknown bitwise: use function call
             strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->c_func_name);
             strbuf_append_char(tp->code_buf, '(');
             emit_bitwise_arg(tp, first_arg);

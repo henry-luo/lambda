@@ -346,14 +346,13 @@ const char* fn_to_cstr(Item itm) {
     }
     // For non-string types in path segments, return empty string
     // The calling code should ensure the expression evaluates to a string
-    log_warn("fn_to_cstr: expected string type for path segment, got type %s", get_type_name(type_id));
+    log_debug("fn_to_cstr: expected string type for path segment, got type %s", get_type_name(type_id));
     return "";
 }
 
 } // extern "C"
 
 void expand_list(List *list, Arena* arena = nullptr) {
-    log_debug("expand list:: %p, length: %ld, extra: %ld, capacity: %ld", list, list->length, list->extra, list->capacity);
     log_item({.list = list}, "list to expand");
     list->capacity = list->capacity ? list->capacity * 2 : 8;
 
@@ -379,7 +378,6 @@ void expand_list(List *list, Arena* arena = nullptr) {
                                                (list->capacity/2) * sizeof(Item),
                                                list->capacity * sizeof(Item));
         }
-        log_debug("arena alloc used for list expansion");
     } else {
         // Use data zone allocation for GC-managed runtime containers.
         // Allocate new buffer; old buffer is abandoned in the data zone
@@ -395,7 +393,6 @@ void expand_list(List *list, Arena* arena = nullptr) {
             memcpy(new_items, old_items, old_size);
         }
         list->items = new_items;
-        log_debug("data zone alloc used for list expansion");
     }
 
     // copy extra items to the end of the list
@@ -420,7 +417,6 @@ void expand_list(List *list, Arena* arena = nullptr) {
         }
     }
     log_item({.list = list}, "list_expanded");
-    log_debug("list expanded: %d, capacity: %ld", list->type_id, list->capacity);
 }
 
 Array* array_pooled(Pool *pool) {
@@ -451,14 +447,11 @@ List* list_arena(Arena* arena) {
 void array_set(Array* arr, int index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
-    log_debug("array set item: type: %d, index: %d, length: %ld, extra: %ld",
-        type_id, index, arr->length, arr->extra);
     switch (type_id) {
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
         *dval = itm.get_double();  arr->items[index] = {.item = d2it(dval)};
         arr->extra++;
-        log_debug("array set float: %lf", *dval);
         break;
     }
     case LMD_TYPE_INT64: {
@@ -499,7 +492,6 @@ void array_append(Array* arr, Item itm, Pool *pool, Arena* arena) {
 void array_push(Array* arr, Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_LIST) { // nest list is flattened
-        log_debug("list_push: pushing nested list: %p, type_id: %d", item.list, type_id);
         // copy over the items
         List *nest_list = item.list;
         for (int i = 0; i < nest_list->length; i++) {
@@ -515,13 +507,11 @@ void array_push(Array* arr, Item item) {
 
 void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
-    log_debug("list_push: pushing item: type_id: %d, item.item: %lx", type_id, item.item);
     // 1. skip NULL value
     if (type_id == LMD_TYPE_NULL) { return; }
 
     // 2. nest list is flattened
     if (type_id == LMD_TYPE_LIST) {
-        log_debug("list_push: pushing nested list: %p, type_id: %d, length: %ld", item.list, type_id, item.list->length);
         // copy over the items
         List *nest_list = item.list;
         if (nest_list == NULL || (uintptr_t)nest_list < 0x1000) {
@@ -548,10 +538,8 @@ void list_push(List *list, Item item) {
                            list->items != NULL;
 
         if (should_merge) {
-            log_debug("list_push: checking for string merging, list length: %ld", list->length);
             Item prev_item = list->items[list->length - 1];
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
-                log_debug("list_push: merging strings");
                 String *prev_str = prev_item.get_string();
                 String *new_str = item.get_string();
                 // merge the two strings
@@ -580,7 +568,6 @@ void list_push(List *list, Item item) {
     }
 
     // store the value in the list (and we may need two slots for long/double)
-    log_debug("list pushing item: type: %d, length: %ld", type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     // Safety check: ensure items array was allocated
     if (list->items == NULL) {
@@ -602,7 +589,6 @@ void list_push(List *list, Item item) {
         Decimal *dval = item.get_decimal();
         if (dval) {
         } else {
-            log_debug("list_push: pushed null decimal value");
         }
         break;
     }
@@ -611,14 +597,12 @@ void list_push(List *list, Item item) {
         *dval = item.get_double();
         list->items[list->length-1] = {.item = d2it(dval)};
         list->extra++;
-        log_debug("list_push: float value: %f", *dval);
         break;
     }
     case LMD_TYPE_INT64: {
         int64_t* ival = (int64_t*)(list->items + (list->capacity - list->extra - 1));
         *ival = item.get_int64();  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
-        log_debug("list_push: int64 value: %ld", *ival);
         break;
     }
     case LMD_TYPE_DTIME:  {
@@ -626,7 +610,6 @@ void list_push(List *list, Item item) {
         DateTime dt = *dtval = item.get_datetime();  list->items[list->length-1] = {.item = k2it(dtval)};
         StrBuf *strbuf = strbuf_new();
         datetime_format_lambda(strbuf, &dt);
-        log_debug("list_push: pushed datetime value: %s", strbuf->str);
         strbuf_free(strbuf);
         list->extra++;
         break;
@@ -641,14 +624,12 @@ void list_push_spread(List *list, Item item) {
     TypeId type_id = get_type_id(item);
     // skip spreadable null (empty for-expression result)
     if (item.item == ITEM_NULL_SPREADABLE) {
-        log_debug("list_push_spread: skipping spreadable null");
         return;
     }
     // check if this is a spreadable array
     if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
         if (arr && arr->is_spreadable) {
-            log_debug("list_push_spread: spreading array of length %ld", arr->length);
             for (int i = 0; i < arr->length; i++) {
                 list_push(list, arr->items[i]);
             }
@@ -659,7 +640,6 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_LIST) {
         List* inner = item.list;
         if (inner && inner->is_spreadable) {
-            log_debug("list_push_spread: spreading list of length %ld", inner->length);
             for (int i = 0; i < inner->length; i++) {
                 list_push(list, inner->items[i]);
             }
@@ -670,7 +650,6 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr = item.array_int;
         if (arr && arr->is_spreadable) {
-            log_debug("list_push_spread: spreading array_int of length %ld", arr->length);
             for (int i = 0; i < arr->length; i++) {
                 list_push(list, {.item = i2it(arr->items[i])});
             }
@@ -681,7 +660,6 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         if (arr && arr->is_spreadable) {
-            log_debug("list_push_spread: spreading array_int64 of length %ld", arr->length);
             for (int i = 0; i < arr->length; i++) {
                 list_push(list, {.item = l2it(arr->items[i])});
             }
@@ -692,7 +670,6 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* arr = item.array_float;
         if (arr && arr->is_spreadable) {
-            log_debug("list_push_spread: spreading array_float of length %ld", arr->length);
             for (int i = 0; i < arr->length; i++) {
                 list_push(list, {.item = d2it(arr->items[i])});
             }
@@ -704,7 +681,6 @@ void list_push_spread(List *list, Item item) {
 }
 
 ConstItem List::get(int index) const {
-    log_debug("list_get_const %p, index: %d", this, index);
     if (!this) { return null_result; }
     if (index < 0 || index >= this->length) {
         log_error("list_get_const: index out of bounds: %d", index);
@@ -715,7 +691,6 @@ ConstItem List::get(int index) const {
 
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
-    log_debug("map length: %ld", count);
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
         // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset,
@@ -724,7 +699,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
         // always read an Item (uint64_t) from varargs - transpiler now passes Items via box functions like i2it()
         Item item = {.item = va_arg(args, uint64_t)};
         if (!field->name) { // nested map
-            log_debug("set nested map field of type: %d", field->type->type_id);
             TypeId type_id = get_type_id(item);
             if (type_id == LMD_TYPE_MAP) {
                 Map* nested_map = item.map;
@@ -734,8 +708,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(Map**)field_ptr = nullptr;
             }
         } else {
-            log_debug("map set field: %.*s, type: %d, at offset: %d", (int)field->name->length,
-                field->name->str, field->type->type_id, (int)field->byte_offset);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
                 // item is ITEM_NULL, nothing to store
@@ -748,7 +720,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_INT: {
                 int64_t val = item.get_int56();
                 *(int64_t*)field_ptr = val;  // store full 64-bit to preserve 56-bit value
-                log_debug("set field of int type to val: %lld", (long long)val);
                 break;
             }
             case LMD_TYPE_INT64: {
@@ -814,7 +785,6 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_ANY: { // a special case
                 TypeId type_id = get_type_id(item);
-                log_debug("set field of ANY type to type: %d", type_id);
                 TypedItem titem = {.type_id = type_id, .item = item.item};
                 switch (type_id) {
                 case LMD_TYPE_NULL: ;
@@ -962,7 +932,6 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result.container = *(Container**)field_ptr;
         break;
     case LMD_TYPE_ANY: {
-        log_debug("_map_get_const ANY type, pointer: %p", field_ptr);
         result = typeditem_to_item((TypedItem*)field_ptr);
         break;
     }
@@ -990,8 +959,6 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             field = field->next;
             continue;
         }
-        log_debug("_map_get_const compare field: %.*s (ns:%p vs %p)",
-            (int)field->name->length, field->name->str, field->ns, key_ns);
         // compare both name AND namespace
         if (strncmp(field->name->str, key, field->name->length) == 0 &&
             strlen(key) == field->name->length &&
@@ -999,20 +966,16 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
-            log_debug("_map_get_const found field: %.*s, type: %d, ptr: %p",
-                (int)field->name->length, field->name->str, type_id, field_ptr);
             Item result = _map_field_to_item(field_ptr, type_id);
             return *(ConstItem*)&result;
         }
         field = field->next;
     }
     *is_found = false;
-    log_debug("_map_get_const: key %s (ns:%p) not found", key, key_ns);
     return null_result;
 }
 
 ConstItem Map::get(const Item key) const {
-    log_debug("map_get_const %p", this);
     if (!this || !key.item) { return null_result; }
 
     bool is_found;
@@ -1030,12 +993,10 @@ ConstItem Map::get(const Item key) const {
         log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return null_result;  // only string or symbol keys are supported
     }
-    log_debug("map_get_const key: %s (ns:%p)", key_str, key_ns);
     return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found, key_ns);
 }
 
 ConstItem Map::get(const char* key_str) const {
-    log_debug("map_get_const %p", this);
     if (!this || !key_str) { return null_result; }
     bool is_found;
     // unqualified string lookup - only matches keys with NULL namespace
