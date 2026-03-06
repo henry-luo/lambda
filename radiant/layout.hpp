@@ -159,6 +159,9 @@ typedef struct Linebox {
     struct FontHandle* parent_font_handle; // parent element's font handle (for x-height)
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
+    TextRect* committed_trailing_rect;  // text rect that had trailing space when output_text was called
+    float committed_trailing_space;     // trailing space width saved at output_text time; survives
+                                        // cross-node char processing so line_break can trim correctly
     float hanging_space_width;      // CSS Text 3 §4.1.3: accumulated trailing preserved space width
                                     // for pre-wrap mode; used to compute hanging space at wrap points
     float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
@@ -517,7 +520,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 
 // ViewSpan bounding box computation
-void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false);
+void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 
 // ============================================================================
 // CSS text-transform

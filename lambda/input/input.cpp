@@ -113,6 +113,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+    case LMD_TYPE_FUNC:
         *(Map**)field_ptr = value.map;
         break;
     case LMD_TYPE_TYPE:

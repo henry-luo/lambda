@@ -1,0 +1,6 @@
+{
+  "sum": 60,
+  "words": "hello,world,test,",
+  "single": 42,
+  "empty": 0
+}

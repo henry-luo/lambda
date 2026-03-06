@@ -741,17 +741,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // in layout_inline() before vertical alignment, so child y positions may
         // have shifted (e.g., baseline alignment with half-leading offsets).
         // Always recompute to ensure the span's bounds reflect final child positions.
-        compute_span_bounding_box(span, false);
-
-        // CSS 2.1 §10.6.1: For inline non-replaced elements, getBoundingClientRect()
-        // reports the font's content area + border + padding, NOT the full extent
-        // of children. When children include tall replaced elements that extend
-        // beyond the span's font content area, we need to override both Y and height.
-        // For text-only spans, compute_span_bounding_box already gives correct results.
-        //
-        // When span has no explicit font (span->font == NULL), it inherits the parent
-        // font — which is in lycon->font (restored by span_vertical_align above).
         struct FontHandle* span_fh = span->font ? span->font->font_handle : lycon->font.font_handle;
+        compute_span_bounding_box(span, false, span_fh);
         float span_asc = 0, span_desc = 0;
         if (span->font) {
             span_asc = span->font->ascender;
