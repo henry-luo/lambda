@@ -18,11 +18,11 @@ pn sphere_intersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
     if (disc < 0.0) {
         return -1.0
     }
-    var t = (0.0 - b - math.sqrt(disc)) / (2.0 * a)
+    var t = (-b - math.sqrt(disc)) / (2.0 * a)
     if (t > 0.001) {
         return t
     }
-    t = (0.0 - b + math.sqrt(disc)) / (2.0 * a)
+    t = (-b + math.sqrt(disc)) / (2.0 * a)
     if (t > 0.001) {
         return t
     }
