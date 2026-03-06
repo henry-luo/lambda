@@ -1225,6 +1225,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
 
         if (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED) {
+            // Save pre-blockification display on the element for static position calculation
+            // layout_block uses this to determine if a line break is needed
+            elem->display = display;
             // Absolutely positioned elements become block-level
             if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_RUN_IN) {
                 log_debug("Position absolute/fixed on %s: transforming display from outer=%d to BLOCK",
