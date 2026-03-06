@@ -2,32 +2,7 @@
 // Expected result: 669
 
 pn make_array(n: int, val) {
-    var arr = [val, val, val, val, val, val, val, val, val, val]
-    var sz: int = 10
-    while (sz * 2 <= n) {
-        arr = arr ++ arr
-        sz = sz * 2
-    }
-    if (sz < n) {
-        var extra = [val]
-        var esz: int = 1
-        var need: int = n - sz
-        while (esz * 2 <= need) {
-            extra = extra ++ extra
-            esz = esz * 2
-        }
-        if (esz < need) {
-            var rest = [val]
-            var rsz: int = 1
-            while (rsz < need - esz) {
-                rest = rest ++ [val]
-                rsz = rsz + 1
-            }
-            extra = extra ++ rest
-        }
-        arr = arr ++ extra
-    }
-    return arr
+    return fill(n, val)
 }
 
 pn sieve(flags, sz: int) {

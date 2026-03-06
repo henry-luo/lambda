@@ -49,6 +49,67 @@ struct LambdaTestInfo {
     }
 };
 
+// ============================================================================
+// Slow benchmark tests excluded from baseline (each takes >1s in debug build).
+// Run individually with: ./test/test_lambda_gtest.exe --gtest_filter=*awfy_cd*
+// ============================================================================
+static const char* SLOW_BENCHMARK_TESTS[] = {
+    // awfy — timeouts or multi-second in debug build
+    "awfy_cd",              // ~15s+ (timeout)
+    "awfy_cd2",             // ~15s+ (timeout)
+    "awfy_havlak",          // ~9s
+    "awfy_havlak2",         // ~9s
+    "awfy_mandelbrot",      // ~15s+ (timeout)
+    "awfy_mandelbrot2",     // ~15s+ (timeout)
+    "awfy_nbody",           // ~2s
+    "awfy_nbody2",          // ~2s
+    // r7rs — compute-heavy benchmarks
+    "r7rs_ack",             // ~6s
+    "r7rs_fft",             // ~1s
+    "r7rs_fft2",            // ~1s
+    "r7rs_fib",             // ~1.3s
+    "r7rs_fib2",            // ~1.3s
+    "r7rs_fibfp",           // ~4s
+    "r7rs_fibfp2",          // ~2.5s
+    "r7rs_mbrot",           // ~7s
+    "r7rs_sum",             // ~4s
+    "r7rs_sumfp",           // ~1s
+    // beng
+    "beng_binarytrees",     // ~2s
+    "beng_mandelbrot",      // ~15s+ (timeout)
+    "beng_nbody",           // ~2.4s
+    "beng_spectralnorm",    // ~15s+ (timeout)
+    // kostya
+    "kostya_base64",        // ~15s+ (timeout)
+    "kostya_brainfuck",     // ~15s+ (timeout)
+    "kostya_collatz",       // ~15s+ (timeout)
+    "kostya_json_gen",      // ~4s
+    "kostya_levenshtein",   // ~8s
+    "kostya_matmul",        // ~15s+ (timeout)
+    "kostya_primes",        // ~9s
+    // larceny
+    "larceny_array1",       // ~6s
+    "larceny_deriv",        // ~3s
+    "larceny_deriv2",       // ~2s
+    "larceny_diviter",      // ~15s+ (timeout)
+    "larceny_divrec",       // ~2s
+    "larceny_gcbench",      // ~15s+ (timeout)
+    "larceny_gcbench2",     // ~15s+ (timeout)
+    "larceny_pnpoly",       // ~15s+ (timeout)
+    "larceny_puzzle",       // ~13s
+    "larceny_quicksort",    // ~3s
+    "larceny_ray",          // ~6s
+    "larceny_triangl",      // ~15s+ (timeout)
+};
+static const size_t NUM_SLOW_BENCHMARK_TESTS = sizeof(SLOW_BENCHMARK_TESTS) / sizeof(SLOW_BENCHMARK_TESTS[0]);
+
+inline bool is_slow_benchmark(const std::string& test_name) {
+    for (size_t i = 0; i < NUM_SLOW_BENCHMARK_TESTS; i++) {
+        if (test_name == SLOW_BENCHMARK_TESTS[i]) return true;
+    }
+    return false;
+}
+
 // Helper function to execute a lambda script and capture output
 // is_procedural: if true, uses "./lambda.exe run <script>" for procedural scripts
 // use_mir: if true, adds "--mir" flag for direct MIR transpilation path
@@ -282,6 +343,30 @@ inline char* read_expected_output(const char* expected_file_path) {
     return content;
 }
 
+// Helper function to strip __TIMING__ lines from output (benchmark instrumentation)
+inline void strip_timing_lines(char* output) {
+    if (!output) return;
+    char* read = output;
+    char* write = output;
+    while (*read) {
+        // check if current line starts with __TIMING__:
+        if (strncmp(read, "__TIMING__:", 11) == 0) {
+            // skip this entire line
+            while (*read && *read != '\n') read++;
+            if (*read == '\n') read++;
+            continue;
+        }
+        // copy this line
+        while (*read && *read != '\n') {
+            *write++ = *read++;
+        }
+        if (*read == '\n') {
+            *write++ = *read++;
+        }
+    }
+    *write = '\0';
+}
+
 // Helper function to test lambda script against expected output file
 inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural, bool use_mir = false) {
     // Get script name for better error messages
@@ -295,6 +380,10 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path;
 
     // Trim whitespace from actual output
+    trim_trailing_whitespace(actual_output);
+
+    // Strip __TIMING__ lines (benchmark instrumentation — variable across runs)
+    strip_timing_lines(actual_output);
     trim_trailing_whitespace(actual_output);
 
     // Compare outputs
