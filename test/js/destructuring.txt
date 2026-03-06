@@ -1,0 +1,22 @@
+basic: 1 2 3
+rest: 10 4 20 30
+partial: 100 200 null
+pair: 1 one
+pair: 2 two
+pair: 3 three
+subset: 7 8
+head: 1 tail length: 3
+head: 5 tail length: 3
+sorted asc: 1 2 3 4 5
+sorted desc: 9 8 5 3 1
+sorted words: apple banana cherry
+min2: 3
+min3: 3
+min4: 1
+max2: 5
+max3: 8
+max4: 8
+min1: 42
+max1: 42
+filled: 0 0 0 5
+null

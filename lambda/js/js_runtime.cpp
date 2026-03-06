@@ -822,7 +822,9 @@ struct JsFunction {
 };
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
-    JsFunction* fn = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    // Pool-allocate: JS functions are module-lifetime objects that must not be
+    // GC-collected (they live in pool-allocated env arrays unreachable from GC roots).
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -833,7 +835,9 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
 
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
-    JsFunction* fn = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    // Pool-allocate: closures stored in env arrays are unreachable from GC roots
+    // (env is pool-allocated, stack scan can't trace through pool to find them).
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -855,6 +859,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
     typedef Item (*P3)(Item, Item, Item);
     typedef Item (*P4)(Item, Item, Item, Item);
     typedef Item (*P5)(Item, Item, Item, Item, Item);
+    typedef Item (*P6)(Item, Item, Item, Item, Item, Item);
+    typedef Item (*P7)(Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P8)(Item, Item, Item, Item, Item, Item, Item, Item);
 
     if (fn->env) {
         // Closure: prepend env pointer as first argument
@@ -866,6 +873,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             case 2: return ((P3)fn->func_ptr)(env_item, args[0], args[1]);
             case 3: return ((P4)fn->func_ptr)(env_item, args[0], args[1], args[2]);
             case 4: return ((P5)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3]);
+            case 5: return ((P6)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4]);
+            case 6: return ((P7)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4], args[5]);
+            case 7: return ((P8)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             default:
                 log_error("js_invoke_fn: too many args for closure (%d)", arg_count);
                 return ItemNull;
@@ -877,6 +887,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             case 2: return ((P2)fn->func_ptr)(args[0], args[1]);
             case 3: return ((P3)fn->func_ptr)(args[0], args[1], args[2]);
             case 4: return ((P4)fn->func_ptr)(args[0], args[1], args[2], args[3]);
+            case 5: return ((P5)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4]);
+            case 6: return ((P6)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5]);
+            case 7: return ((P7)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             default:
                 log_error("js_invoke_fn: too many args (%d)", arg_count);
                 return ItemNull;
@@ -887,7 +900,8 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
 // Call a JavaScript function stored as an Item
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        log_error("js_call_function: not a function");
+        log_error("js_call_function: not a function (type=%d, item=0x%llx, argc=%d)",
+            get_type_id(func_item), (unsigned long long)func_item.item, arg_count);
         return ItemNull;
     }
 
@@ -1308,7 +1322,50 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // sort
     if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
-        return fn_sort1(arr);
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* src = arr.array;
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_FUNC) {
+            // sort with comparator callback
+            JsFunction* cmp_fn = (JsFunction*)args[0].function;
+            // insertion sort using comparator
+            for (int i = 1; i < src->length; i++) {
+                Item key_item = src->items[i];
+                int j = i - 1;
+                while (j >= 0) {
+                    Item cmp_args[2] = { src->items[j], key_item };
+                    Item cmp_result = js_invoke_fn(cmp_fn, cmp_args, 2);
+                    double cval = js_get_number(cmp_result);
+                    if (cval <= 0) break;
+                    src->items[j + 1] = src->items[j];
+                    j--;
+                }
+                src->items[j + 1] = key_item;
+            }
+        } else {
+            // default sort: lexicographic string comparison (JS spec)
+            for (int i = 1; i < src->length; i++) {
+                Item key_item = src->items[i];
+                Item key_str = js_to_string(key_item);
+                String* ks = it2s(key_str);
+                int j = i - 1;
+                while (j >= 0) {
+                    Item j_str = js_to_string(src->items[j]);
+                    String* js_s = it2s(j_str);
+                    // compare strings lexicographically
+                    int cmp = 0;
+                    if (js_s && ks) {
+                        int min_len = js_s->len < ks->len ? js_s->len : ks->len;
+                        cmp = strncmp(js_s->chars, ks->chars, min_len);
+                        if (cmp == 0) cmp = (int)js_s->len - (int)ks->len;
+                    }
+                    if (cmp <= 0) break;
+                    src->items[j + 1] = src->items[j];
+                    j--;
+                }
+                src->items[j + 1] = key_item;
+            }
+        }
+        return arr;
     }
     // flat
     if (method->len == 4 && strncmp(method->chars, "flat", 4) == 0) {
@@ -1327,6 +1384,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
         }
         return result;
+    }
+    // fill
+    if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
+        if (argc < 1) return arr;
+        return js_array_fill(arr, args[0]);
     }
 
     log_debug("js_array_method: unknown method '%.*s'", (int)method->len, method->chars);
@@ -1374,13 +1436,21 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     }
     // Math.min
     if (method->len == 3 && strncmp(method->chars, "min", 3) == 0) {
-        if (argc < 2) return ItemNull;
-        return fn_min2(js_to_number(args[0]), js_to_number(args[1]));
+        if (argc < 1) return js_make_number(INFINITY);
+        Item result = js_to_number(args[0]);
+        for (int i = 1; i < argc; i++) {
+            result = fn_min2(result, js_to_number(args[i]));
+        }
+        return result;
     }
     // Math.max
     if (method->len == 3 && strncmp(method->chars, "max", 3) == 0) {
-        if (argc < 2) return ItemNull;
-        return fn_max2(js_to_number(args[0]), js_to_number(args[1]));
+        if (argc < 1) return js_make_number(-INFINITY);
+        Item result = js_to_number(args[0]);
+        for (int i = 1; i < argc; i++) {
+            result = fn_max2(result, js_to_number(args[i]));
+        }
+        return result;
     }
     // Math.log
     if (method->len == 3 && strncmp(method->chars, "log", 3) == 0) {
@@ -1466,4 +1536,20 @@ extern "C" Item js_math_property(Item prop_name) {
     return ItemNull;
 }
 
+// array slice from index to end — used for rest destructuring
+extern "C" Item js_array_slice_from(Item arr, Item start_item) {
+    TypeId tid = get_type_id(arr);
+    if (tid != LMD_TYPE_ARRAY) return js_array_new(0);
+    Array* src = arr.array;
+    int start = (int)js_get_number(start_item);
+    if (start < 0) start = src->length + start;
+    if (start < 0) start = 0;
+    if (start >= src->length) return js_array_new(0);
+    Item result = js_array_new(0);
+    Array* dst = result.array;
+    for (int i = start; i < src->length; i++) {
+        array_push(dst, src->items[i]);
+    }
+    return result;
+}
 
