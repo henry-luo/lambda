@@ -510,6 +510,7 @@ func_obj_t func_list[] = {
     {"js_string_charCodeAt", (fn_ptr) js_string_charCodeAt},
     {"js_string_fromCharCode", (fn_ptr) js_string_fromCharCode},
     {"js_array_fill", (fn_ptr) js_array_fill},
+    {"js_array_slice_from", (fn_ptr) js_array_slice_from},
     {"js_console_log_multi", (fn_ptr) js_console_log_multi},
     // v5: Additional operators
     {"js_instanceof", (fn_ptr) js_instanceof},

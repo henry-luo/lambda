@@ -174,6 +174,7 @@ Item js_string_fromCharCode(Item code_item);
 // =============================================================================
 
 Item js_array_fill(Item arr_item, Item value);
+Item js_array_slice_from(Item arr, Item start_item);
 
 // =============================================================================
 // v5: Console multi-argument log
