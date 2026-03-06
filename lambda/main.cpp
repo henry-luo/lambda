@@ -182,7 +182,7 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
-    printf("Type .help for commands, .quit to exit\n");
+    printf("Type help for commands, quit to exit\n");
     printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
 
     // Initialize command line editor
@@ -214,18 +214,18 @@ void run_repl(Runtime *runtime, bool use_mir) {
 
         // Handle REPL commands (only when not in multi-line mode)
         if (pending_input->length == 0) {
-            if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
+            if (strcmp(line, "quit") == 0 || strcmp(line, "q") == 0 || strcmp(line, "exit") == 0) {
                 free(line);
                 break;
             }
 
-            if (strcmp(line, ".help") == 0 || strcmp(line, ".h") == 0) {
+            if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
                 print_help();
                 free(line);
                 continue;
             }
 
-            if (strcmp(line, ".clear") == 0) {
+            if (strcmp(line, "clear") == 0) {
                 strbuf_reset(repl_history);
                 strbuf_reset(last_output);
                 printf("REPL history cleared\n");
@@ -790,7 +790,10 @@ int main(int argc, char *argv[]) {
     }
 
 #ifndef NDEBUG
-    log_notice("Running DEBUG build of lambda.exe");
+    log_notice("############################################");
+    log_notice("!!! Running DEBUG build of lambda.exe  !!!");
+    log_notice("!!! Do NOT use it for performance test !!!");
+    log_notice("############################################");
 #endif
 
     // Add trace statement at start of main

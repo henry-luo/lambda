@@ -438,7 +438,6 @@ Functions for working with arrays, lists, and other collections.
 | `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
 | `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
-| `concat(v1, v2)`     | Concatenate vectors                 | `concat([1, 2], [3, 4])`               | `[1, 2, 3, 4]`     |
 | `take(vec, n)`       | First n elements                    | `take([1, 2, 3], 2)`                   | `[1, 2]`           |
 | `drop(vec, n)`       | Drop first n elements               | `drop([1, 2, 3], 1)`                   | `[2, 3]`           |
 | `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
@@ -469,7 +468,6 @@ sort(users, ~.name)        // sorted by name ascending
 sort(users, {dir: 'desc, by: ~.age})   // sorted by age descending
 
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
-concat([1, 2], [3, 4])     // [1, 2, 3, 4]
 take([1, 2, 3, 4], 2)      // [1, 2]
 drop([1, 2, 3, 4], 2)      // [3, 4]
 zip([1, 2], ["a", "b"])    // [(1, "a"), (2, "b")]
@@ -1020,7 +1018,6 @@ if (result is error) {
 | `reverse` | 1 | Reverse order |
 | `sort` | 1-2 | Sort (dir, key fn, or options map) |
 | `unique` | 1 | Unique elements |
-| `concat` | 2 | Concatenate |
 | `take` | 2 | Take first n |
 | `drop` | 2 | Drop first n |
 | `zip` | 2 | Zip vectors |

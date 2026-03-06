@@ -45,7 +45,7 @@ static bool has_unclosed_brackets(const char* source) {
     bool in_line_comment = false;
     bool in_block_comment = false;
     char string_char = 0;
-    
+
     for (const char* p = source; *p; p++) {
         // handle comments
         if (!in_string) {
@@ -69,9 +69,9 @@ static bool has_unclosed_brackets(const char* source) {
                 continue;
             }
         }
-        
+
         if (in_line_comment || in_block_comment) continue;
-        
+
         // handle strings
         if (!in_string && (*p == '"' || *p == '\'')) {
             in_string = true;
@@ -88,7 +88,7 @@ static bool has_unclosed_brackets(const char* source) {
             }
             continue;
         }
-        
+
         // count brackets
         switch (*p) {
             case '{': brace_count++; break;
@@ -99,10 +99,10 @@ static bool has_unclosed_brackets(const char* source) {
             case ']': bracket_count--; break;
         }
     }
-    
+
     // if still in string or comment, that's incomplete
     if (in_string || in_block_comment) return true;
-    
+
     // if any bracket count is positive, we have unclosed brackets
     return (brace_count > 0 || paren_count > 0 || bracket_count > 0);
 }
@@ -113,7 +113,7 @@ static bool has_missing_nodes(TSNode node) {
     if (ts_node_is_missing(node)) {
         return true;
     }
-    
+
     // recurse into children
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
@@ -122,7 +122,7 @@ static bool has_missing_nodes(TSNode node) {
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -131,33 +131,33 @@ StatementStatus check_statement_completeness(TSParser* parser, const char* sourc
     if (!source || !*source) {
         return STMT_COMPLETE;  // empty input is "complete"
     }
-    
+
     // First, do a quick lexical check for unclosed brackets
     // This catches incomplete statements that Tree-sitter would report as ERROR
     if (has_unclosed_brackets(source)) {
         return STMT_INCOMPLETE;
     }
-    
+
     // Now use Tree-sitter for more sophisticated checking
     TSTree* tree = lambda_parse_source(parser, source);
     if (!tree) {
         return STMT_ERROR;
     }
-    
+
     TSNode root = ts_tree_root_node(tree);
-    
+
     // If no errors at all, statement is complete
     if (!ts_node_has_error(root)) {
         ts_tree_delete(tree);
         return STMT_COMPLETE;
     }
-    
+
     // Tree has errors - check if there are MISSING nodes (incomplete)
     if (has_missing_nodes(root)) {
         ts_tree_delete(tree);
         return STMT_INCOMPLETE;
     }
-    
+
     // ERROR nodes without MISSING nodes = syntax error
     ts_tree_delete(tree);
     return STMT_ERROR;
@@ -208,9 +208,9 @@ void print_help() {
     printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
     printf("                               - This automatically runs the main function if defined\n");
     printf("\nREPL Commands:\n");
-    printf("  .quit, .q, .exit     - Exit REPL\n");
-    printf("  .help, .h            - Show help\n");
-    printf("  .clear               - Clear REPL history\n");
+    printf("  quit, q, exit        - Exit REPL\n");
+    printf("  help, h              - Show help\n");
+    printf("  clear                - Clear REPL history\n");
     printf("\nValidation Commands:\n");
     printf("  validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  validate <file>                 - Validate using doc_schema.ls (default)\n");

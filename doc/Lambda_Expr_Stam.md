@@ -471,7 +471,7 @@ data | ~.name that (len(~) > 3) | ~.upper()
 
 > **Note:** The relational operators `<`, `>`, `<=`, `>=` conflict with element-tag
 > syntax in the parser. When a `that` (or `|`) condition uses any of these
-> operators, wrap the condition in parentheses: `items that (~ > 0)`.  
+> operators, wrap the condition in parentheses: `items that (~ > 0)`.
 > The operators `==`, `!=`, `and`, `or`, `+`, `-`, `*`, `/` work without parens.
 
 #### Implicit Field Access in `that` Clause
@@ -1211,7 +1211,8 @@ Available only in procedural (`pn`) functions. See [Lambda Procedural Programmin
 
 | Operator | Description   | Example       | Result         |
 | -------- | ------------- | ------------- | -------------- |
-| `++`     | Concatenation | `"a" ++ "b"`  | `"ab"`         |
+| `++`     | String concat | `"a" ++ "b"`  | `"ab"`         |
+| `++`     | Scalar concat | `42 ++ 10`    | `"4210"`       |
 | `++`     | Array concat  | `[1] ++ [2]`  | `[1, 2]`       |
 
 ---

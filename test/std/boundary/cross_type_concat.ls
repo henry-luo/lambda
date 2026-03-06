@@ -37,15 +37,22 @@ type(true ++ "yes")
 type(false ++ "no")
 0
 
+// ===== Scalar ++ Scalar (auto-converts to string) =====
+(42 ++ 10)
+0
+(3.14 ++ 2.71)
+0
+(true ++ false)
+0
+(null ++ null)
+0
+(42 ++ true)
+0
+(42 ++ null)
+0
 // ===== Invalid ++ combinations =====
-42 ++ 10
-3.14 ++ 2.71
-true ++ false
-null ++ null
-42 ++ true
-42 ++ null
 42 ++ [1]
-true ++ null
+(true ++ null)
 true ++ [1]
 [1, 2] ++ 3
 [1, 2] ++ true

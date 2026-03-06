@@ -167,9 +167,9 @@ unique(("a", "b", "a"))
 {r: unique([1, 2, 1, 3, 2])}
 
 'concat'
-{r: concat([1, 2, 3], [4, 5, 6])}
-concat([1.0, 2.0], [3.0, 4.0])
-{r: concat(1 to 3, 4 to 6)}
+{r: [1, 2, 3] ++ [4, 5, 6]}
+[1.0, 2.0] ++ [3.0, 4.0]
+{r: (1 to 3) ++ (4 to 6)}
 
 'slice'
 {r: slice([1, 2, 3, 4, 5], 1, 4)}
@@ -272,7 +272,7 @@ sort([42])
 
 'chained operations'
 sum([1, 2, 3, 4, 5] * 2)
-{r: sort(concat([5, 3, 1], [6, 4, 2]))}
+{r: sort([5, 3, 1] ++ [6, 4, 2])}
 math.mean(take([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5))
 
 'ALL TESTS COMPLETE'
