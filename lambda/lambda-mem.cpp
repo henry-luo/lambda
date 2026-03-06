@@ -200,7 +200,6 @@ Symbol* heap_create_symbol(const char* symbol) {
 }
 
 Item push_d(double dval) {
-    log_debug("push_d: %g", dval);
     if (!context->nursery) {
         log_error("push_d called with invalid context");
         return ItemError;
@@ -210,7 +209,6 @@ Item push_d(double dval) {
 }
 
 Item push_l(int64_t lval) {
-    log_debug("push_l: %" PRId64, lval);
     if (!context->nursery) {
         log_error("push_l called with invalid context");
         return ItemError;
@@ -228,14 +226,12 @@ Item push_l_safe(int64_t val) {
     uint8_t tag = (uint64_t)val >> 56;
     if (tag == LMD_TYPE_INT64) {
         // Already a boxed INT64 Item — return as-is
-        log_debug("push_l_safe: already boxed INT64");
         Item result;
         result.item = (uint64_t)val;
         return result;
     }
     if (tag == LMD_TYPE_INT) {
         // This is a boxed INT Item — extract the int value and re-box as INT64
-        log_debug("push_l_safe: converting boxed INT to INT64");
         Item itm;
         itm.item = (uint64_t)val;
         int64_t real_val = (int64_t)itm.get_int56();
@@ -255,7 +251,6 @@ Item push_d_safe(double val) {
 
     if (tag == LMD_TYPE_FLOAT) {
         // Already a boxed FLOAT Item — return as-is
-        log_debug("push_d_safe: already boxed FLOAT");
         Item result;
         result.item = bits;
         return result;
@@ -288,7 +283,6 @@ Item push_k_safe(DateTime val) {
 
     if (tag == LMD_TYPE_DTIME) {
         // Already a boxed DTIME Item — return as-is
-        log_debug("push_k_safe: already boxed DTIME");
         Item result;
         result.item = bits;
         return result;

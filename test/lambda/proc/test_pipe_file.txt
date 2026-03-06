@@ -17,11 +17,11 @@ Test 7 - output append bytes: 27
 Output after append:
 { mode: "write", test: 6}
 { mode: "append", test: 7}
-Test 8 - output json bytes: 34
+Test 8 - output json bytes: 36
 Output json content:
 {
-  "name":"test",
-  "value":123
+  "name": "test",
+  "value": 123
 }
 Test 9 - atomic write bytes: 25
 Atomic write content:
