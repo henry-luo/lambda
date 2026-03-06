@@ -988,6 +988,7 @@ JitImport jit_runtime_imports[] = {
     {"js_string_charCodeAt", FPTR(js_string_charCodeAt)},
     {"js_string_fromCharCode", FPTR(js_string_fromCharCode)},
     {"js_array_fill", FPTR(js_array_fill)},
+    {"js_array_slice_from", FPTR(js_array_slice_from)},
     {"js_console_log_multi", FPTR(js_console_log_multi)},
     // additional operators
     {"js_instanceof", FPTR(js_instanceof)},
