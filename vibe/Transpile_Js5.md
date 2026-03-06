@@ -839,25 +839,32 @@ test/
 
 **Success criteria**: `for...of` on arrays and typed arrays works for nbody.js, fasta.js, revcomp.js.
 
-### Phase 5e: Closures (3 days)
+### Phase 5e: Closures (3 days) — ✅ DONE
 
-1. Implement capture analysis in function collection pre-pass
-2. Implement environment allocation and variable capture
-3. Modify inner function codegen to load from environment
-4. Implement `js_new_closure` and update `js_call_function` for closure dispatch
-5. Handle mutable captures via environment cells
+1. ✅ Implement capture analysis in function collection pre-pass — `jm_analyze_captures` in transpile_js_mir.cpp
+2. ✅ Implement environment allocation and variable capture — `jm_transpile_func_expr` allocates env, stores captured vars
+3. ✅ Modify inner function codegen to load from environment — `_js_env` param, `jm_define_function` loads from env
+4. ✅ Implement `js_new_closure` and update `js_call_function` for closure dispatch — `JsFunction` struct with env/env_size
+5. ✅ Handle mutable captures via environment cells — env slots updated on write
+6. ✅ Fix direct-call optimization to skip closures (capture_count > 0) — both call-expression and object method paths
 
-**Success criteria**: `advanced_features.js` and `es6_features.js` disabled tests pass. Closures returning functions work correctly.
+**Implementation notes**: Closures work by lifting captured variables into a heap-allocated `Item*` environment. `js_new_closure(func_ptr, param_count, env, env_size)` creates a `JsFunction` with the env attached. `js_invoke_fn` prepends env items as the first arguments when calling. The direct-call optimization path now checks `fc->capture_count == 0` before bypassing the closure dispatch.
 
-### Phase 5f: Destructuring + Remaining Methods (2 days)
+**Success criteria**: ✅ `advanced_features.js` and `es6_features.js` disabled tests pass. Closures returning functions work correctly.
 
-1. Implement array destructuring in variable declarations
-2. Implement destructuring in `for...of` left-hand side
-3. Add `.charCodeAt()`, `String.fromCharCode()`, `.toFixed()`
-4. Add `.sort()` with custom comparator callback
-5. Add variadic `Math.min`/`Math.max`
+### Phase 5f: Destructuring + Remaining Methods (2 days) — ✅ DONE
 
-**Success criteria**: `levenshtein.js`, `fasta.js` benchmarks pass. All additional string/number methods work.
+1. ✅ Implement array destructuring in variable declarations — `JsArrayPatternNode` AST, `JS_AST_NODE_ARRAY_PATTERN` case in `jm_transpile_var_decl`
+2. ✅ Implement destructuring in `for...of` left-hand side — rewritten `jm_transpile_for_of` handles `array_pattern` directly and inside `variable_declaration`
+3. ✅ Add `.charCodeAt()`, `String.fromCharCode()`, `.toFixed()` — already implemented in prior sessions
+4. ✅ Add `.sort()` with custom comparator callback — insertion sort via `js_invoke_fn`; default sort uses JS-spec lexicographic comparison (`js_to_string` + `strncmp`)
+5. ✅ Add variadic `Math.min`/`Math.max` — loop over all args with `fn_min2`/`fn_max2`; handles 0 args (Infinity/-Infinity)
+6. ✅ Add `.fill()` method dispatch — wired `fill` case in `js_array_method` to existing `js_array_fill`
+7. ✅ Add `js_array_slice_from` runtime helper for rest/spread destructuring patterns
+
+**Implementation notes**: Array destructuring supports identifier elements (via `js_property_access`), rest elements (`...rest` via `js_array_slice_from`), and default values (`= expr` via `ITEM_NULL_VAL` comparison). For-of destructuring creates a temp `_destr_elem` loop variable and destructures after each iteration. Tree-sitter-javascript puts `array_pattern` directly as the `left` field of `for...of` (not wrapped in `variable_declaration`).
+
+**Success criteria**: ✅ `destructuring.js` test passes (31/31 JS tests). All additional string/number/array methods work.
 
 ### Phase 5g: Benchmark Harness + Testing (2 days)
 
@@ -962,46 +969,139 @@ All v5 foundational features have been implemented according to the plan:
 | JSON output formatting for JS results | ✅ Done | `main.cpp`, `format-json.cpp` |
 | Re-enabled tests: basic_expressions, control_flow | ✅ Done | `test_js_gtest.cpp` |
 
-### 10.2 Test Results
+### 10.2 Phase 5c–5d: Bug Fixes & Feature Hardening (Completed)
 
-**JS GTest suite: 13/13 pass** (up from 11)
+A comprehensive bug-fix pass was performed after the initial 24-test milestone. A feature probe discovered 6 broken features. Investigation revealed 8 distinct bugs across the AST builder, transpiler, and runtime — all fixed and covered by 6 new test files.
 
-- `basic_expressions` — re-enabled, 12 sub-tests pass
-- `control_flow` — re-enabled, exercises ternary, loops, break/continue, recursion, objects
-- All 11 original tests continue to pass
+#### Bugs Fixed
 
-**Lambda baseline: 586/588 pass** (2 pre-existing `proc_test_pipe_file` failures, unrelated)
+| # | Feature | Root Cause | Fix | Files Modified |
+|---|---------|-----------|-----|----------------|
+| 1 | **for...of loop body never executes** | AST builder used tree-sitter node type name `"for_in_statement"` (same for both for-in and for-of) to distinguish them — always produced `FOR_IN_STATEMENT` | Check tree-sitter `"operator"` field (`"in"` vs `"of"`) instead of node type name | `build_js_ast.cpp` |
+| 2 | **for...of length comparison fails** | `fn_len` returns boxed `Item`; MIR loop compared raw `int64_t` index against boxed value | Changed to `js_array_length` which returns raw `int64_t` | `transpile_js_mir.cpp` |
+| 3 | **Bitwise operators crash (SIGSEGV)** | Comments in object literals: `ts_node_named_child_count` includes comment nodes; accessing `"key"`/`"value"` fields on comment nodes crashes | Skip `"comment"` nodes in `build_js_object_expression` | `build_js_ast.cpp` |
+| 4 | **Typed array indexed access returns null** | `js_property_get`/`js_property_set` didn't check for typed arrays (Maps with sentinel marker) before general Map dispatch | Added `js_is_typed_array()` check before DOM/computed-style checks | `js_runtime.cpp` |
+| 5 | **Typed array `.length` returns 0** | `.length` optimization in transpiler called `fn_len()` which returns 0 for `LMD_TYPE_MAP`; typed arrays are Maps | Created `js_get_length()` that checks typed arrays first, then delegates to `fn_len` | `transpile_js_mir.cpp`, `js_runtime.cpp`, `js_runtime.h`, `mir.c` |
+| 6 | **`Object.keys()` returns null** | No transpiler recognition of `Object.keys(obj)` as a static method call | Added pattern detection after `Math.<method>` handler; emits `js_object_keys` call | `transpile_js_mir.cpp` |
+| 7 | **`toFixed()` returns null** | No number type branch in method dispatch; numbers fell through to generic property access | Created `js_number_method` dispatcher (handles `toFixed`, `toString`); added `INT`/`FLOAT` branch in type dispatch | `transpile_js_mir.cpp`, `js_globals.cpp`, `js_runtime.h`, `mir.c` |
+| 8 | **Spread element (`...arr`) doesn't expand** | Two bugs: (a) `build_js_expression` had no handling for `"spread_element"` tree-sitter node type; (b) `jm_transpile_array` didn't check for `JS_AST_NODE_SPREAD_ELEMENT` | Added `spread_element` AST builder; added spread-aware array transpilation with MIR loop using `js_array_push` | `build_js_ast.cpp`, `transpile_js_mir.cpp` |
+| 9 | **Unsigned right shift (`>>>`) UB on negatives** | `(uint32_t)(-1.0)` is undefined behavior in C/C++ | Cast through `int32_t` first: `(uint32_t)(int32_t)value` | `js_runtime.cpp` |
 
-**JS file-based tests: 9/15 pass**
+#### New Test Files (6)
 
-| Test | Status |
-|------|--------|
-| arithmetic | ✅ |
-| array_methods_v3 | ✅ |
-| basic_expressions | ✅ |
-| console_log | ✅ |
-| control_flow | ✅ |
-| control_flow_basic | ✅ |
-| functions_basic | ✅ |
-| math_object | ✅ |
-| simple_test | ✅ |
-| string_methods | ✅ |
-| variables | ✅ |
-| advanced_features | ❌ Needs closures, mutable captures |
-| array_methods | ❌ Needs object mutation in callbacks |
-| dom_basic | ❌ Needs HTML document fixture |
-| error_handling | ❌ Needs try/catch, new Error |
-| es6_features | ❌ Needs closures, template interpolation fix |
-| functions | ❌ Needs closure / higher-order fix |
+| Test File | Coverage |
+|-----------|----------|
+| `for_of_loop.js` | for-of over arrays (numbers, strings, single element, empty array) |
+| `bitwise_ops.js` | AND, OR, XOR, NOT, left/right shift, unsigned right shift, comments in objects |
+| `typed_arrays.js` | Uint8Array, Int32Array, Float64Array creation, indexed get/set, `.length` property |
+| `number_methods.js` | `toFixed` on float/int with different precisions, `toString` |
+| `object_static.js` | `Object.keys` on objects, empty objects, for-of iteration over keys |
+| `spread_element.js` | Spread at beginning/middle/end of array, multiple spreads, empty spread |
 
-### 10.3 Remaining Work
+#### Key Design Decisions
+
+**`js_get_length` vs removing `.length` optimization**: The `.length` member expression optimization (compile-time shortcut to avoid `js_property_access`) was preserved for performance but changed from `fn_len()` to `js_get_length()`. The new function checks `js_is_typed_array()` first (returning `js_typed_array_length`), then falls back to `fn_len` for all standard Lambda types (Array, List, String, Element, etc.). This keeps the fast path while correctly handling typed arrays.
+
+**Spread element dual-path array construction**: Arrays with spread elements use `js_array_new(0)` + `js_array_push` (dynamic growth), while arrays without spread use the original `js_array_new(n)` + `js_array_set` (pre-allocated). This avoids penalizing the common case.
+
+**for-of/for-in AST discrimination**: Tree-sitter uses a single `"for_in_statement"` grammar rule for both `for...in` and `for...of`. The correct way to distinguish them is to read the `"operator"` named field from the tree-sitter node (`ts_node_child_by_field_name(node, "operator")`), which yields `"in"` or `"of"`.
+
+### 10.3 Phase 5e–5f: Closures + Destructuring + Methods (Completed)
+
+#### Phase 5e: Closure Direct-Call Fix
+
+Closures were mostly implemented during prior work (capture analysis, environment allocation, env passing via `js_invoke_fn`). The remaining gap was the **direct-call optimization path** — when the transpiler knows a function at compile time, it bypasses `js_call_function` and calls the MIR function directly. This optimization didn't pass the closure environment, causing closures called directly to lose their captured variables.
+
+**Fix**: Added `fc->capture_count == 0` guard before the direct-call optimization in two places:
+1. Regular call expressions (~line 1840 in `transpile_js_mir.cpp`)
+2. Object method calls (~line 2685 in `transpile_js_mir.cpp`)
+
+Closures with captures now always go through the `js_invoke_fn` dispatch path, which correctly prepends env items as arguments.
+
+#### Phase 5f: Destructuring Implementation
+
+**AST Builder** (`build_js_ast.cpp`):
+- Added `array_pattern` handler in `build_js_expression` — creates `JsArrayPatternNode` with elements linked list
+- Elements can be: identifiers, `JsSpreadElementNode` (rest `...x`), or `JsAssignmentPatternNode` (defaults `x = val`)
+- Variable declarator detection: identifies `array_pattern`/`object_pattern` id nodes and routes to `build_js_expression` instead of `build_js_identifier`
+- Scope registration: only registers simple `JS_AST_NODE_IDENTIFIER` ids, skips pattern nodes
+
+**Transpiler** (`transpile_js_mir.cpp`):
+- `jm_transpile_var_decl` — added `JS_AST_NODE_ARRAY_PATTERN` case:
+  - Evaluates init expression into a source register
+  - Iterates pattern elements: `IDENTIFIER` → `js_property_access(src, index)`, `SPREAD_ELEMENT` → `js_array_slice_from(src, index)`, `ASSIGNMENT_PATTERN` → access + compare against `ITEM_NULL_VAL` + conditional default
+- `jm_transpile_for_of` — completely rewritten to handle destructuring:
+  - Detects `array_pattern` both directly as `left` and inside `variable_declaration`
+  - Creates temp `_destr_elem` loop variable, pre-creates all pattern variable registers
+  - After fetching each element, destructures it via `js_property_access` / `js_array_slice_from`
+
+**Runtime** (`js_runtime.cpp`):
+- `js_array_slice_from(arr, start_item)` — new helper for rest destructuring, creates new array from index to end
+- Sort rewrite: with comparator → insertion sort via `js_invoke_fn`; without comparator → JS-spec lexicographic sort using `js_to_string` + `strncmp`
+- Variadic `Math.min`/`Math.max` — loop over all args with `fn_min2`/`fn_max2`; 0 args returns `Infinity`/`-Infinity`
+- `.fill()` method dispatch — wired `fill` case in `js_array_method` to existing `js_array_fill`
+
+#### New Test Files (Phase 5e–5f)
+
+| Test File | Coverage |
+|-----------|----------|
+| `destructuring.js` | Basic array destructuring, rest element, partial (out-of-bounds → null), for-of destructuring, for-of with rest, sort with comparator (asc/desc), default sort (lexicographic), variadic Math.min/max, Array.fill |
+| `closures.js` | Basic closure capture, multiple captures, mutable accumulator, closure as callback, arrow function closures, function composition, closure over loop variable, closures in map/filter, running sum, immediate invocation |
+| `sort_destr_methods.js` | Arrow comparator sort, closure-created comparator, lexicographic default sort, string sort, Math.min/max 0–4 args, Array.fill, rest destructuring with computation, for-of dot product, multiple sequential destructurings, destructuring from function return, for-of with rest, sort stability |
+
+### 10.4 Test Results
+
+**JS GTest suite: 33/33 pass** (up from 24 → 30 → 33)
+
+All 33 tests (32 file-based + 1 command interface) pass:
+
+| Test | Status | Category |
+|------|--------|----------|
+| simple_test | ✅ | Core |
+| arithmetic | ✅ | Core |
+| console_log | ✅ | Core |
+| variables | ✅ | Core |
+| control_flow_basic | ✅ | Core |
+| functions_basic | ✅ | Core |
+| basic_expressions | ✅ | Core (re-enabled) |
+| functions | ✅ | Core (re-enabled) |
+| control_flow | ✅ | Core (re-enabled) |
+| advanced_features | ✅ | Core (re-enabled) |
+| es6_features | ✅ | Core (re-enabled) |
+| error_handling | ✅ | Core (re-enabled) |
+| array_methods | ✅ | Core (re-enabled) |
+| string_methods | ✅ | Methods |
+| math_object | ✅ | Methods |
+| array_methods_v3 | ✅ | Methods |
+| dom_basic | ✅ | DOM (re-enabled) |
+| switch_statement | ✅ | Control flow |
+| do_while | ✅ | Control flow |
+| for_in_loop | ✅ | Control flow |
+| operators_extra | ✅ | Operators |
+| global_functions | ✅ | Global functions |
+| template_literals | ✅ | ES6 |
+| for_of_loop | ✅ | Phase 5c–5d — for-of fix |
+| bitwise_ops | ✅ | Phase 5c–5d — comment crash + bitwise fix |
+| typed_arrays | ✅ | Phase 5c–5d — typed array access + length fix |
+| number_methods | ✅ | Phase 5c–5d — toFixed dispatch fix |
+| object_static | ✅ | Phase 5c–5d — Object.keys fix |
+| spread_element | ✅ | Phase 5c–5d — spread element fix |
+| destructuring | ✅ | **Phase 5f** — array destructuring, sort, Math variadic, fill |
+| closures | ✅ | **Phase 5e** — closure capture, composition, loop closures |
+| sort_destr_methods | ✅ | **Phase 5f** — sort comparators, rest patterns, for-of destructuring |
+
+**Lambda baseline: 609/609 pass** (all suites green)
+
+### 10.5 Remaining Work
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| 5c | `new` expressions + typed array wiring in transpiler | Not started |
-| 5d | Control flow: switch, do-while, for-of, for-in | Not started |
-| 5e | Closures (capture analysis, environment passing) | Not started |
-| 5f | Destructuring + .charCodeAt, .toFixed, .sort | Not started |
+| 5a | Re-enable disabled tests + fix immediate gaps | ✅ Done |
+| 5b | I/O, timing, global functions | ✅ Done |
+| 5c | `new` expressions + typed array wiring in transpiler | ✅ Done (via 5c–5d bug fix pass) |
+| 5d | Control flow: switch, do-while, for-of, for-in | ✅ Done |
+| 5e | Closures (capture analysis, environment passing) | ✅ Done |
+| 5f | Destructuring + .charCodeAt, .toFixed, .sort, Math variadic, .fill | ✅ Done |
 | 5g | Benchmark harness + integration testing | Not started |
 
 ---

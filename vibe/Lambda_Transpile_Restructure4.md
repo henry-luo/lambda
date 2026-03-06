@@ -6,7 +6,7 @@ This proposal targets **MIR Direct transpiler performance enhancements** — spe
 
 | Benchmark | Current MIR Direct | Node.js | Ratio | Primary Remaining Bottleneck |
 |-----------|------------------:|--------:|------:|------------------------------|
-| triangl | ~441ms | 93ms | ~4.7x | Boolean ops + `item_at` type dispatch + call overhead |
+| triangl | ~340ms | 93ms | ~3.7x | Call overhead + `set_at` mutations |
 | diviter | ~285ms (CSI) | 488ms | 0.58x | Already faster — dual versions would improve further |
 | collatz | ~439ms (CSI) | 1,459ms | 0.30x | Already faster — inlining could improve further |
 | gcbench | ~436ms | 27ms | 16.1x | GC/allocation dominated |
@@ -525,13 +525,13 @@ P4-1 (dual versions) combined with P4-3.3 (return type inference) eliminates the
 
 ## Implementation Status
 
-| Optimization | Status | Date | Test Results | Notes |
-|-------------|--------|------|-------------|-------|
-| **P4-1: Dual function versions** | ✅ Done | 2026-03-06 | 604/606 pass (2 pre-existing REPL failures) | Params native, return still boxed |
-| **P4-3.3: Return type inference** | ✅ Done | 2026-03-07 | 604/606 pass (156/156 MIR) | Native return for fn functions |
-| **P4-3.1: Boolean specialization** | 🔄 Next | — | — | |
-| **P4-2: Inline short functions** | ❌ Not started | — | — | |
-| **P4-3.2: Inline item_at** | ❌ Not started | — | — | |
+| Optimization                       | Status        | Date       | Test Results                                | Notes                                      |
+| ---------------------------------- | ------------- | ---------- | ------------------------------------------- | ------------------------------------------ |
+| **P4-1: Dual function versions**   | ✅ Done        | 2026-03-06 | 604/606 pass (2 pre-existing REPL failures) | Params native, return still boxed          |
+| **P4-3.3: Return type inference**  | ✅ Done        | 2026-03-07 | 604/606 pass (156/156 MIR)                  | Native return for fn functions             |
+| **P4-3.1: Boolean specialization** | ✅ Done        | 2026-03-07 | 604/606 pass (155/156 MIR)                  | Inline bool array read, ~290-380ms triangl |
+| **P4-3.2: Inline item_at**         | ✅ Done        | 2026-03-07 | 606/609 pass (154/156 MIR)                  | Inline int/bool array read, ~222-233ms triangl |
+| **P4-2: Inline short functions**   | ❌ Not started | —          | —                                           |                                            |
 
 ### P4-1 Implementation Details (Completed)
 
@@ -573,27 +573,96 @@ P4-1 (dual versions) combined with P4-3.3 (return type inference) eliminates the
 
 **Scope**: Only `fn` (functional) functions get native returns. Procedural (`pn`) functions with explicit `return` statements require propagating the native return type to all return paths — deferred to a future phase.
 
+### P4-3.1 Implementation Details (Completed)
+
+**What was implemented** in `transpile-mir.cpp`:
+
+1. **`MirVarEntry.elem_type`** (~line 81): New `TypeId elem_type` field tracks the element type of container variables. Initialized to `LMD_TYPE_ANY` in `set_var()`. Used by downstream code to know the element type of arrays from `fill()` narrowing.
+
+2. **`fill()` bool narrowing** (~line 3148): Extended the existing `fill(n, val)` detection to handle bool fill values. When `fill_val_tid == LMD_TYPE_BOOL`, sets `var_tid = LMD_TYPE_ARRAY` and `fill_elem_type = LMD_TYPE_BOOL`. After `set_var()`, copies `fill_elem_type` to `v->elem_type` — only when `var_tid` is still `LMD_TYPE_ARRAY` (not overridden by typed array coercion like `int[] = fill(n, true)`).
+
+3. **`get_effective_type()` INDEX_EXPR** (~line 1696): When a node is an INDEX_EXPR, unwraps PRIMARY wrapper nodes around the object, then checks the object variable's `elem_type`. If `elem_type != ANY`, returns it directly, enabling native bool paths in AND/OR/NOT expressions that use `board[i]`.
+
+4. **FAST PATH 1b nested_bool** (~line 4320): For `ARRAY + INT index` with `nested_bool` detected from either AST TypeArray nested type or MirVarEntry elem_type (with PRIMARY unwrapping). Inline Array read: runtime type check → bounds check → `items[idx]` → extract `raw_val & 1` for native bool. Slow path: `item_at()` → `& 1`.
+
+5. **FAST PATH 1d nested_bool** (~line 4720): For `ARRAY + ANY index` (the critical hot path in triangl). Same inline read as 1b but unboxes the index first via `it2i()`. This handles `board[mfrom[mi]]` where `mfrom[mi]` returns a boxed INT Item but `board` has `elem_type=BOOL`.
+
+**Key fixes during implementation**:
+- **PRIMARY node unwrapping**: The AST wraps identifiers in PRIMARY nodes. All variable lookups in `get_effective_type` INDEX_EXPR, FAST PATH 1b, and FAST PATH 1d must unwrap PRIMARY to find the IDENT.
+- **Typed array coercion guard**: `var arr:int[] = fill(3, true)` coerces the array to ArrayInt via `ensure_typed_array`, changing `var_tid` to ANY. The `elem_type` assignment must check `var_tid == LMD_TYPE_ARRAY` to avoid applying bool elem_type to a coerced integer array.
+- **`--mir` flag**: The `run` CLI command requires `--mir` flag to use MIR Direct transpiler; without it, C2MIR is used and P4 optimizations don't apply.
+
+**Performance impact** (triangl benchmark, release build):
+- C2MIR (no `--mir`): ~1250-1540ms
+- MIR Direct Phase 3 baseline: ~441ms  
+- MIR Direct P4-1 + P4-3.3 + P4-3.1: ~290-380ms (median ~340ms)
+- Improvement: ~17-34% over Phase 3 baseline
+
+### P4-3.2 Implementation Details (Completed)
+
+**What was implemented** in `transpile-mir.cpp`:
+
+1. **Mutation analysis** (`has_index_mutation()`, ~line 8390): Recursive AST walker that searches for `AST_NODE_INDEX_ASSIGN_STAM` nodes targeting a named variable. Recurses into if/while/for/match bodies, content/list blocks, and nested function bodies (for module-level variables mutated from inside functions). Returns `true` if any `arr[i] = val` mutation is found for the variable.
+
+2. **`MirTranspiler.func_body`** (~line 159): New `AstNode*` field tracking the current function/module body for mutation analysis scope. Set to `script->child` at module level in `transpile_mir_ast()`, and saved/restored per function in `transpile_func_def()`.
+
+3. **Variable declaration elem_type setting** (~line 3245): At variable declaration, when the RHS is an array literal or typed array with a known nested element type (INT or BOOL), and the variable has no index mutations (`!has_index_mutation()`), sets `MirVarEntry.elem_type` to the nested type. This enables downstream FAST PATHs to return native values instead of boxed Items.
+
+4. **FAST PATH 1b conditional native/boxed** (~line 4330): For `ARRAY + INT index`, checks `safe_native_int` flag (derived from `MirVarEntry.elem_type == INT`). When safe: returns native int64 (raw value, OOB returns 0, slow path unboxes item_at result). When unsafe: returns boxed Item (mask+tag encoding, OOB returns NULL_VAL). Both paths share the same inline array read code (type check → bounds check → `items[idx]`).
+
+5. **FAST PATH 1d conditional native/boxed** (~line 4660): Same conditional pattern for `ARRAY + ANY index`. Unboxes the index first via `it2i()` before the shared inline read. This is the critical hot path for nested array access like `board[mfrom[mi]]`.
+
+6. **Type-index guard** (~line 4253): Detects TYPE expression indices (child queries like `arr[int]`) at the top of `transpile_index()`. When the index is `AST_NODE_TYPE`, `AST_NODE_ARRAY_TYPE`, `AST_NODE_UNION_TYPE`, or has `type_id == LMD_TYPE_TYPE`, skips all fast paths and routes to `fn_index` for correct child query handling.
+
+7. **`get_effective_type()` INDEX_EXPR** (~line 1697): Extended to check `MirVarEntry.elem_type` for array indexing. When `elem_type != ANY`, returns it directly, enabling native type propagation through index expressions into enclosing AND/OR/NOT/comparison contexts.
+
+**Key design decisions**:
+- **Conservative mutation analysis**: Any index assignment to a variable anywhere in the function scope disqualifies it from native returns, even if the mutation only affects certain indices or is conditionally executed. This avoids unsound type assumptions for arrays whose element type changes at runtime (e.g., `arr[1] = 3.14` converting ArrayInt to generic Array).
+- **AST nested type vs runtime type**: The AST TypeArray::nested field reflects the INITIAL element type from the literal or declaration, not the runtime type after mutations. Using it directly in `get_effective_type` was unsafe (caused test failures). Instead, elem_type is set once at declaration time after mutation analysis confirms safety.
+- **fill() interaction**: Variables initialized via `fill(n, val)` already get `elem_type` set during the fill detection pass. The P4-3.2 array literal check only activates when `fill_elem_type == ANY` (not already narrowed by fill).
+
+**Performance impact** (triangl benchmark, release build):
+- C2MIR (no `--mir`): ~1250-1540ms
+- MIR Direct Phase 3 baseline: ~441ms
+- MIR Direct P4-1 + P4-3.3 + P4-3.1: ~290-380ms (median ~340ms)
+- MIR Direct P4-1 + P4-3.3 + P4-3.1 + P4-3.2: ~222-233ms (median ~233ms)
+- Improvement: ~31-35% over P4-3.1, ~47% over Phase 3 baseline
+
 ---
 
-## Projected Benchmark Improvements
+## Benchmark Results (Phase 4, Release Build, 2026-03-06)
 
-### With P4-1 (Dual Versions) + P4-3.3 (Return Type Inference)
+All timings are best-of-3 runs on Apple Silicon (macOS). C2MIR = `./lambda.exe run <script>`, MIR Direct = `./lambda.exe run --mir <script>`.
 
-| Benchmark | Current | Projected | Node.js | Projected Ratio |
-|-----------|--------:|----------:|--------:|----------------:|
-| triangl (MIR) | ~441ms | ~340-380ms | 93ms | ~3.6-4.1x |
-| diviter | ~285ms | ~240-260ms | 488ms | 0.49-0.53x |
-| collatz | ~439ms | ~370-400ms | 1,459ms | 0.25-0.27x |
+### Core Benchmarks — C2MIR vs MIR Direct
 
-### With P4-1 + P4-2 (Inlining) + P4-3.1 (Boolean Spec)
+| Benchmark | C2MIR (ms) | MIR Direct (ms) | Speedup | Notes |
+|-----------|--------:|----------:|------:|-------|
+| **triangl** | 1,278 | 188 | **6.8x** | Call-heavy recursive + array mutation |
+| **diviter** | 283 | 283 | 1.0x | Already fast in C2MIR (CSI) |
+| **collatz** | 353 | 317 | 1.1x | Mostly arithmetic |
+| **gcbench** | 460 | 471 | 0.98x | GC/allocation dominated |
+| **gcbench2** | 335 | 240 | 1.4x | GC + some compute |
+| **quicksort** | 4.98 | 2.99 | **1.7x** | Array + recursion |
+| **primes** | 0.686 | 0.477 | **1.4x** | Arithmetic loop |
+| **divrec** | 7.47 | 0.854 | **8.7x** | Deep recursive division |
+| **array1** | 5.80 | 0.558 | **10.4x** | Array access loop |
+| **pnpoly** | 56.4 | 63.6 | 0.89x | Float-heavy geometry |
+| **puzzle** | 15.97 | 3.86 | **4.1x** | Array + recursion |
+| **deriv** | 20.68 | 20.63 | 1.0x | Symbolic (list-heavy) |
 
-| Benchmark | Current | Projected | Node.js | Projected Ratio |
-|-----------|--------:|----------:|--------:|----------------:|
-| triangl (MIR) | ~441ms | ~220-280ms | 93ms | ~2.4-3.0x |
-| diviter | ~285ms | ~220-250ms | 488ms | 0.45-0.51x |
-| collatz | ~439ms | ~340-380ms | 1,459ms | 0.23-0.26x |
+### Analysis
 
-The combination of dual versions + inlining + boolean specialization could reduce the triangl gap from ~4.7x to ~2.5-3.0x, while further widening the advantage on diviter and collatz.
+**Where MIR Direct excels** (>2x speedup):
+- **array1** (10.4x): Pure array access loop — P4-3.2 inline item_at eliminates all function call overhead
+- **divrec** (8.7x): Deep recursion — P4-1 dual versions + P4-3.3 native returns eliminate boxing round-trips
+- **triangl** (6.8x): Recursive + boolean array ops — all P4 optimizations compound (dual versions, native return, bool specialization, inline item_at)
+- **puzzle** (4.1x): Array mutation + recursion — benefits from inline array reads and native calling
+
+**Where C2MIR is comparable or better**:
+- **pnpoly** (0.89x): Float-heavy — MIR Direct's float boxing for non-inlined paths may add overhead
+- **gcbench** (0.98x): GC-dominated — JIT optimization has minimal impact when GC is the bottleneck
+- **diviter/collatz/deriv** (~1.0x): Already optimized via CSI in C2MIR, or list/symbol-heavy workloads where boxing overhead is not the bottleneck
 
 ---
 

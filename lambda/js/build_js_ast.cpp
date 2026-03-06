@@ -619,6 +619,10 @@ JsAstNode* build_js_while_statement(JsTranspiler* tp, TSNode while_node) {
 JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
     JsForNode* for_stmt = (JsForNode*)alloc_js_ast_node(tp, JS_AST_NODE_FOR_STATEMENT, for_node, sizeof(JsForNode));
 
+    // Push a block scope for the for-loop header (let/const in init are scoped to this loop)
+    JsScope* for_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, for_scope);
+
     // Get init (optional) - field name is "initializer" in tree-sitter-javascript
     TSNode init_node = ts_node_child_by_field_name(for_node, "initializer", strlen("initializer"));
     if (!ts_node_is_null(init_node)) {
@@ -642,6 +646,9 @@ JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
     if (!ts_node_is_null(body_node)) {
         for_stmt->body = build_js_statement(tp, body_node);
     }
+
+    // Pop for-loop scope
+    js_scope_pop(tp);
 
     for_stmt->base.type = &TYPE_NULL;
 
@@ -729,11 +736,16 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
 
             JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATOR, declarator_node, sizeof(JsVariableDeclaratorNode));
 
-            // Get identifier (child 0)
+            // Get identifier (child 0) — may be an identifier or a destructuring pattern
             TSNode id_node = ts_node_child(declarator_node, 0);
 
             if (!ts_node_is_null(id_node)) {
-                declarator->id = build_js_identifier(tp, id_node);
+                const char* id_type = ts_node_type(id_node);
+                if (strcmp(id_type, "array_pattern") == 0 || strcmp(id_type, "object_pattern") == 0) {
+                    declarator->id = build_js_expression(tp, id_node);
+                } else {
+                    declarator->id = build_js_identifier(tp, id_node);
+                }
             } else {
                 declarator->id = NULL;
             }
@@ -755,11 +767,14 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 declarator->base.type = &TYPE_NULL; // undefined
             }
 
-            // Add to scope
-            JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
-            log_debug("var-decl-scope: defining '%.*s', declarator=%p, base.type=%p", 
-                (int)id->name->len, id->name->chars, declarator, declarator->base.type);
-            js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+            // Add to scope (only for simple identifiers; array/object patterns
+            // have their elements registered individually by the transpiler)
+            if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
+                log_debug("var-decl-scope: defining '%.*s', declarator=%p, base.type=%p", 
+                    (int)id->name->len, id->name->chars, declarator, declarator->base.type);
+                js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+            }
 
             if (!prev_declarator) {
                 var_decl->declarations = (JsAstNode*)declarator;
@@ -900,6 +915,49 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         }
         spread->base.type = &TYPE_ARRAY;
         return (JsAstNode*)spread;
+    } else if (strcmp(node_type, "array_pattern") == 0) {
+        // destructuring pattern: [a, b, ...rest]
+        JsArrayPatternNode* pattern = (JsArrayPatternNode*)alloc_js_ast_node(
+            tp, JS_AST_NODE_ARRAY_PATTERN, expr_node, sizeof(JsArrayPatternNode));
+        uint32_t count = ts_node_named_child_count(expr_node);
+        JsAstNode* prev = NULL;
+        for (uint32_t i = 0; i < count; i++) {
+            TSNode child = ts_node_named_child(expr_node, i);
+            const char* child_type = ts_node_type(child);
+            JsAstNode* elem = NULL;
+            if (strcmp(child_type, "identifier") == 0) {
+                elem = build_js_identifier(tp, child);
+            } else if (strcmp(child_type, "rest_pattern") == 0) {
+                // ...rest — build as spread element with the inner identifier
+                JsSpreadElementNode* rest = (JsSpreadElementNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_SPREAD_ELEMENT, child, sizeof(JsSpreadElementNode));
+                TSNode inner = ts_node_named_child(child, 0);
+                if (!ts_node_is_null(inner)) {
+                    rest->argument = build_js_expression(tp, inner);
+                }
+                rest->base.type = &TYPE_ARRAY;
+                elem = (JsAstNode*)rest;
+            } else if (strcmp(child_type, "assignment_pattern") == 0) {
+                // default value: a = defaultVal
+                JsAssignmentPatternNode* assign_pat = (JsAssignmentPatternNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_ASSIGNMENT_PATTERN, child, sizeof(JsAssignmentPatternNode));
+                TSNode left = ts_node_child_by_field_name(child, "left", 4);
+                TSNode right = ts_node_child_by_field_name(child, "right", 5);
+                if (!ts_node_is_null(left)) assign_pat->left = build_js_expression(tp, left);
+                if (!ts_node_is_null(right)) assign_pat->right = build_js_expression(tp, right);
+                assign_pat->base.type = &TYPE_ANY;
+                elem = (JsAstNode*)assign_pat;
+            } else {
+                elem = build_js_expression(tp, child);
+            }
+            if (elem) {
+                if (!prev) pattern->elements = elem;
+                else prev->next = elem;
+                prev = elem;
+            }
+        }
+        pattern->base.type = &TYPE_ARRAY;
+        return (JsAstNode*)pattern;
     } else {
         // Handle nodes that return numeric symbol IDs instead of type names
         TSSymbol symbol = ts_node_symbol(expr_node);

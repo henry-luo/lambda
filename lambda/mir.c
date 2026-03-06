@@ -28,6 +28,7 @@ int getc_func(void *data) {
     return item->curr >= item->code_size ? EOF : item->code[item->curr++];
 }
 
+
 // ============================================================================
 // O(1) Import Resolution via Hashmap
 // ============================================================================
