@@ -2403,10 +2403,10 @@
                         "icon": "🟨"
                     },
                     {
-                        "source": "test/test_mir_gtest.cpp",
-                        "name": "MIR JIT Execution Tests",
+                        "source": "test/test_c2mir_gtest.cpp",
+                        "name": "C2MIR JIT Execution Tests",
                         "dependencies": [],
-                        "binary": "test_mir_gtest.exe",
+                        "binary": "test_c2mir_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"
