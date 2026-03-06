@@ -822,7 +822,9 @@ struct JsFunction {
 };
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
-    JsFunction* fn = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    // Pool-allocate: JS functions are module-lifetime objects that must not be
+    // GC-collected (they live in pool-allocated env arrays unreachable from GC roots).
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -833,7 +835,9 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
 
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
-    JsFunction* fn = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    // Pool-allocate: closures stored in env arrays are unreachable from GC roots
+    // (env is pool-allocated, stack scan can't trace through pool to find them).
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -855,6 +859,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
     typedef Item (*P3)(Item, Item, Item);
     typedef Item (*P4)(Item, Item, Item, Item);
     typedef Item (*P5)(Item, Item, Item, Item, Item);
+    typedef Item (*P6)(Item, Item, Item, Item, Item, Item);
+    typedef Item (*P7)(Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P8)(Item, Item, Item, Item, Item, Item, Item, Item);
 
     if (fn->env) {
         // Closure: prepend env pointer as first argument
@@ -866,6 +873,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             case 2: return ((P3)fn->func_ptr)(env_item, args[0], args[1]);
             case 3: return ((P4)fn->func_ptr)(env_item, args[0], args[1], args[2]);
             case 4: return ((P5)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3]);
+            case 5: return ((P6)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4]);
+            case 6: return ((P7)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4], args[5]);
+            case 7: return ((P8)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             default:
                 log_error("js_invoke_fn: too many args for closure (%d)", arg_count);
                 return ItemNull;
@@ -877,6 +887,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             case 2: return ((P2)fn->func_ptr)(args[0], args[1]);
             case 3: return ((P3)fn->func_ptr)(args[0], args[1], args[2]);
             case 4: return ((P4)fn->func_ptr)(args[0], args[1], args[2], args[3]);
+            case 5: return ((P5)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4]);
+            case 6: return ((P6)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5]);
+            case 7: return ((P7)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             default:
                 log_error("js_invoke_fn: too many args (%d)", arg_count);
                 return ItemNull;
@@ -887,7 +900,8 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
 // Call a JavaScript function stored as an Item
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        log_error("js_call_function: not a function");
+        log_error("js_call_function: not a function (type=%d, item=0x%llx, argc=%d)",
+            get_type_id(func_item), (unsigned long long)func_item.item, arg_count);
         return ItemNull;
     }
 
