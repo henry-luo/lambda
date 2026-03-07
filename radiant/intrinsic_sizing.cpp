@@ -1307,6 +1307,39 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         child_view->bound->margin.right >= 0) {
                         child_sizes.max_content += (int)child_view->bound->margin.right;
                     }
+                } else if (child_elem->specified_style) {
+                    // Fallback: read margins from specified CSS style when bound isn't allocated
+                    float ml = 0, mr = 0;
+                    CssDeclaration* ml_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+                    if (ml_decl && ml_decl->value && ml_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                        ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_decl->value);
+                    CssDeclaration* mr_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+                    if (mr_decl && mr_decl->value && mr_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                        mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_decl->value);
+                    if (ml == 0 && mr == 0) {
+                        CssDeclaration* m_decl = style_tree_get_declaration(
+                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
+                        if (m_decl && m_decl->value) {
+                            const CssValue* val = m_decl->value;
+                            if (val->type == CSS_VALUE_TYPE_LENGTH) {
+                                ml = mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
+                            } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
+                                int cnt = val->data.list.count;
+                                CssValue** vals = val->data.list.values;
+                                if (cnt <= 3) {
+                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[cnt >= 2 ? 1 : 0]);
+                                    ml = mr = lr;
+                                } else {
+                                    mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                                    ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
+                                }
+                            }
+                        }
+                    }
+                    child_sizes.max_content += ml + mr;
+                    child_sizes.min_content += ml + mr;
                 }
             }
         }
