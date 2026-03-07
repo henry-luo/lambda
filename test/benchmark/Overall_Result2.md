@@ -46,22 +46,22 @@
 
 > Standard cross-language benchmark suite from Stefan Marr. Lambda implementations use procedural style; JS uses official AWFY source.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
-|-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
-| sieve | micro | 0.054 | 0.052 | 0.008 | 0.57 | 0.35 | 0.15x |
-| permute | micro | 0.11 | 0.074 | 0.007 | 1.6 | 0.82 | 0.13x |
-| queens | micro | 0.15 | 0.14 | 0.006 | 1.1 | 0.64 | 0.23x |
-| towers | micro | 0.25 | 0.12 | 0.007 | 2.6 | 1.1 | 0.22x |
-| bounce | micro | 0.20 | 0.15 | --- | 0.89 | 0.56 | 0.35x |
-| list | micro | 0.025 | 0.62 | 0.009 | 0.94 | 0.50 | 0.05x |
-| storage | micro | 0.40 | 0.49 | --- | 2.7 | 0.67 | 0.60x |
-| mandelbrot | compute | 33.6 | 54.3 | 794 | 849 | 31.5 | 1.07x |
-| nbody | compute | 2.8 | 2.3 | 0.11 | 0.023 | 0.24 | 11.84x |
-| richards | macro | 56.4 | 49.5 | 0.009 | 39.2 | 4.5 | 12.59x |
-| json | macro | 0.032 | 3.3 | --- | 11.9 | 2.6 | 0.01x |
-| deltablue | macro | 5.3 | 4.9 | --- | 0.25 | 0.85 | 6.22x |
-| havlak | macro | 331 | 176 | --- | 3.97s | 97.6 | 3.39x |
-| cd | macro | 447 | 617 | --- | 1.04s | 37.1 | 12.03x |
+| Benchmark  | Category |   MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
+| ---------- | -------- | ----: | ----: | -------: | ------: | ------: | -------: |
+| sieve      | micro    | 0.054 | 0.052 |    0.008 |    0.57 |    0.35 |    0.15x |
+| permute    | micro    |  0.11 | 0.074 |    0.007 |     1.6 |    0.82 |    0.13x |
+| queens     | micro    |  0.15 |  0.14 |    0.006 |     1.1 |    0.64 |    0.23x |
+| towers     | micro    |  0.25 |  0.12 |    0.007 |     2.6 |     1.1 |    0.22x |
+| bounce     | micro    |  0.20 |  0.15 |      --- |    0.89 |    0.56 |    0.35x |
+| list       | micro    | 0.025 |  0.62 |    0.009 |    0.94 |    0.50 |    0.05x |
+| storage    | micro    |  0.40 |  0.49 |      --- |     2.7 |    0.67 |    0.60x |
+| mandelbrot | compute  |  33.6 |  54.3 |      794 |     849 |    31.5 |    1.07x |
+| nbody      | compute  |   2.8 |   2.3 |     0.11 |   0.023 |    0.24 |   11.84x |
+| richards   | macro    |  56.4 |  49.5 |    0.009 |    39.2 |     4.5 |   12.59x |
+| json       | macro    | 0.032 |   3.3 |      --- |    11.9 |     2.6 |    0.01x |
+| deltablue  | macro    |   5.3 |   4.9 |      --- |    0.25 |    0.85 |    6.22x |
+| havlak     | macro    |   331 |   176 |      --- |   3.97s |    97.6 |    3.39x |
+| cd         | macro    |   447 |   617 |      --- |   1.04s |    37.1 |   12.03x |
 
 **Geometric mean MIR/Node.js: 0.69x** — Lambda faster on 8/14 benchmarks
 
@@ -75,16 +75,16 @@
 |-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
 | binarytrees | allocation | 7.8 | 8.3 | 21.5 | 28.9 | 4.1 | 1.90x |
 | fannkuch | permutation | 0.75 | 1.1 | --- | 7.1 | 4.0 | 0.19x |
-| fasta | generation | --- | 0.86 | 1.6 | 10.9 | 6.1 | --- |
-| knucleotide | hashing | --- | 3.9 | 0.055 | --- | 5.3 | --- |
+| fasta | generation | 1.5 | 0.86 | 1.6 | 10.9 | 6.1 | 0.24x |
+| knucleotide | hashing | 3.4 | 3.9 | 0.055 | --- | 5.3 | 0.64x |
 | mandelbrot | numeric | 23.0 | 38.1 | 119 | 113 | 4.2 | 5.49x |
-| nbody | numeric | --- | 2.7 | 136 | 4.6 | 4.5 | --- |
+| nbody | numeric | 3.1 | 2.7 | 136 | 4.6 | 4.5 | 0.69x |
 | pidigits | bignum | 0.43 | 0.32 | --- | 0.16 | 2.0 | 0.22x |
 | regexredux | regex | 1.2 | 1.4 | 0.089 | --- | 2.6 | 0.49x |
-| revcomp | string | --- | 1.9 | 0.002 | --- | 3.4 | --- |
-| spectralnorm | numeric | --- | 10.6 | 48.9 | 64.8 | 2.7 | --- |
+| revcomp | string | 2.4 | 1.9 | 0.002 | --- | 3.4 | 0.70x |
+| spectralnorm | numeric | 15.3 | 10.6 | 48.9 | 64.8 | 2.7 | 5.67x |
 
-**Geometric mean MIR/Node.js: 0.73x** — Lambda faster on 3/5 benchmarks
+**Geometric mean MIR/Node.js: 0.78x** — Lambda faster on 7/10 benchmarks
 
 ---
 
@@ -137,10 +137,10 @@
 |-------|----------:|:-----------:|:---------:|:-----:|
 | R7RS | 0.58x | 7 | 3 | 10 |
 | AWFY | 0.69x | 8 | 6 | 14 |
-| BENG | 0.73x | 3 | 2 | 5 |
+| BENG | 0.78x | 7 | 3 | 10 |
 | Kostya | 4.29x | 1 | 6 | 7 |
-| Larceny | 1.27x | 5 | 7 | 12 |
-| **Overall** | **1.02x** | **24** | **24** | **48** |
+| Larceny | 1.28x | 5 | 7 | 12 |
+| **Overall** | **1.00x** | **27** | **25** | **53** |
 
 > Ratio < 1.0 = Lambda MIR is faster. Ratio > 1.0 = Node.js is faster.
 
@@ -148,11 +148,11 @@
 
 | Tier | Count | Benchmarks |
 |------|------:|------------|
-| **Lambda >2x faster** (< 0.5x) | 20 | awfy/json (0.01x), awfy/list (0.05x), r7rs/sumfp (0.08x), larceny/divrec (0.11x), awfy/permute (0.13x), awfy/sieve (0.15x), beng/fannkuch (0.19x), r7rs/tak (0.20x), kostya/collatz (0.21x), awfy/towers (0.22x), beng/pidigits (0.22x), awfy/queens (0.23x), r7rs/sum (0.23x), larceny/primes (0.27x), larceny/array1 (0.30x), larceny/paraffins (0.33x), r7rs/cpstak (0.34x), r7rs/mbrot (0.35x), awfy/bounce (0.35x), beng/regexredux (0.49x) |
-| **Lambda faster** (0.5–1.0x) | 4 | larceny/diviter (0.58x), awfy/storage (0.60x), r7rs/ack (0.83x), r7rs/fft (1.00x) |
+| **Lambda >2x faster** (< 0.5x) | 21 | awfy/json (0.01x), awfy/list (0.05x), r7rs/sumfp (0.08x), larceny/divrec (0.11x), awfy/permute (0.13x), awfy/sieve (0.15x), beng/fannkuch (0.19x), r7rs/tak (0.20x), kostya/collatz (0.21x), awfy/towers (0.22x), beng/pidigits (0.22x), awfy/queens (0.23x), r7rs/sum (0.23x), beng/fasta (0.24x), larceny/primes (0.27x), larceny/array1 (0.30x), larceny/paraffins (0.33x), r7rs/cpstak (0.34x), r7rs/mbrot (0.35x), awfy/bounce (0.35x), beng/regexredux (0.49x) |
+| **Lambda faster** (0.5–1.0x) | 7 | larceny/diviter (0.58x), awfy/storage (0.60x), beng/knucleotide (0.64x), beng/nbody (0.69x), beng/revcomp (0.70x), r7rs/ack (0.83x), r7rs/fft (1.00x) |
 | **Comparable** (1.0–2.0x) | 7 | awfy/mandelbrot (1.07x), larceny/puzzle (1.13x), r7rs/fib (1.20x), kostya/primes (1.68x), larceny/quicksort (1.77x), larceny/ray (1.89x), beng/binarytrees (1.90x) |
 | **Node faster** (2.0–5.0x) | 6 | kostya/levenshtein (2.11x), r7rs/fibfp (2.34x), larceny/triangl (2.67x), awfy/havlak (3.39x), kostya/brainfuck (3.54x), r7rs/nqueens (4.14x) |
-| **Node >5x faster** (> 5.0x) | 11 | beng/mandelbrot (5.49x), larceny/deriv (5.50x), awfy/deltablue (6.22x), kostya/json_gen (9.72x), larceny/pnpoly (9.95x), awfy/nbody (11.84x), awfy/cd (12.03x), awfy/richards (12.59x), larceny/gcbench (19.19x), kostya/matmul (20.79x), kostya/base64 (49.42x) |
+| **Node >5x faster** (> 5.0x) | 12 | beng/mandelbrot (5.49x), larceny/deriv (5.50x), beng/spectralnorm (5.67x), awfy/deltablue (6.22x), kostya/json_gen (9.72x), larceny/pnpoly (9.95x), awfy/nbody (11.84x), awfy/cd (12.03x), awfy/richards (12.59x), larceny/gcbench (19.19x), kostya/matmul (20.79x), kostya/base64 (49.42x) |
 
 ---
 
@@ -160,8 +160,8 @@
 
 ### 1. Overall: Lambda MIR is on par with Node.js V8
 
-Across 48 benchmarks, the geometric mean ratio is **1.02x**, meaning Lambda MIR Direct
-is essentially on par with Node.js V8. Lambda wins 24/48 benchmarks outright.
+Across 53 benchmarks, the geometric mean ratio is **1.00x**, meaning Lambda MIR Direct
+is essentially on par with Node.js V8. Lambda wins 27/53 benchmarks outright.
 
 ### 2. Strengths: Micro-benchmarks and numeric code
 
