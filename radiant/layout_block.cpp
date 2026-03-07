@@ -2453,6 +2453,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Query parent BFC for available space at current y position
     float bfc_float_offset_x = 0;
     float bfc_available_width_reduction = 0;
+    bool bfc_width_was_reduced = false;  // true if auto-width was reduced for float avoidance
     float bfc_shift_down = 0;  // Amount to shift down if element doesn't fit beside floats
     BlockContext* parent_bfc = nullptr;
 
@@ -2988,6 +2989,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // Reduce available width for BFC elements avoiding floats
         if (bfc_available_width_reduction > 0) {
             available_from_parent -= bfc_available_width_reduction;
+            bfc_width_was_reduced = true;
             log_debug("[BFC Float Avoid] Reduced available width by %.1f to %.1f",
                       bfc_available_width_reduction, available_from_parent);
         }
@@ -3413,6 +3415,39 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     }
                 }
             }
+        }
+    }
+
+    // CSS 2.1 §9.5 + §9.5.2: After clearance moves a BFC block below floats,
+    // recalculate width reduction — floats may no longer intrude at the new Y.
+    // Only when the width reduction was actually applied to the block width.
+    if (bfc_width_was_reduced && pa_block->saved_clear_y >= 0 && parent_bfc) {
+        float new_y_in_bfc = block->y;
+        ViewElement* pv = block->parent_view();
+        while (pv && parent_bfc->establishing_element && pv != parent_bfc->establishing_element) {
+            new_y_in_bfc += pv->y;
+            ViewElement* ppv = pv->parent_view();
+            if (!ppv) break;
+            pv = ppv;
+        }
+        float query_height = block->height > 0 ? block->height : 16.0f;
+        FloatAvailableSpace space = block_context_space_at_y(parent_bfc, new_y_in_bfc, query_height);
+        float new_reduction = 0;
+        if (space.has_left_float || space.has_right_float) {
+            float fi_left = space.has_left_float ? space.left : 0;
+            float fi_right = space.has_right_float ? (parent_bfc->establishing_element->width - space.right) : 0;
+            new_reduction = fi_left + fi_right;
+        }
+        if (new_reduction < bfc_available_width_reduction) {
+            float width_increase = bfc_available_width_reduction - new_reduction;
+            bfc_available_width_reduction = new_reduction;
+            content_width += width_increase;
+            if (block->bound) {
+                block->width += width_increase;
+            }
+            lycon->block.content_width = content_width;
+            log_debug("[CLEARANCE] Recalculated BFC width after clear: reduction %.1f->%.1f, width+=%.1f, block->width=%.1f",
+                      new_reduction + width_increase, new_reduction, width_increase, block->width);
         }
     }
 
@@ -4246,16 +4281,42 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.advance_x = effective_left;
             }
 
-            if (lycon->line.advance_x + block->width > effective_right && !lycon->line.is_line_start) {
-                // CSS 2.1 §9.4.2: Only break if there's prior content on this line.
-                // If the inline-block is the first item on the line, it cannot be made
-                // to fit by wrapping, so it stays on this line and overflows.
-                line_break(lycon);
-                // After line break, update effective bounds for new Y
-                update_line_for_bfc_floats(lycon);
-                effective_left = lycon->line.has_float_intrusion ?
-                    lycon->line.effective_left : lycon->line.left;
-                block->x = effective_left;
+            if (lycon->line.advance_x + block->width > effective_right) {
+                if (!lycon->line.is_line_start) {
+                    // CSS 2.1 §9.4.2: Break to next line if there's prior content
+                    line_break(lycon);
+                    // After line break, update effective bounds for new Y
+                    update_line_for_bfc_floats(lycon);
+                    effective_left = lycon->line.has_float_intrusion ?
+                        lycon->line.effective_left : lycon->line.left;
+                    block->x = effective_left;
+                } else if (lycon->line.has_float_intrusion) {
+                    // CSS 2.1 §9.5: First item on line doesn't fit due to float —
+                    // push below the float to find room
+                    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                    if (bfc) {
+                        float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
+                        float new_y = block_context_find_y_for_width(bfc, block->width, bfc_y);
+                        float local_new_y = new_y - lycon->block.bfc_offset_y;
+                        if (local_new_y > lycon->block.advance_y) {
+                            lycon->block.advance_y = local_new_y;
+                            line_reset(lycon);
+                            update_line_for_bfc_floats(lycon);
+                        }
+                        effective_left = lycon->line.has_float_intrusion ?
+                            lycon->line.effective_left : lycon->line.left;
+                    }
+                    block->x = effective_left;
+                } else if (lycon->line.advance_x > effective_left &&
+                           effective_left + block->width <= effective_right) {
+                    // advance_x was pushed by a float that no longer intrudes at this y.
+                    // Reset to effective_left where the content fits.
+                    lycon->line.advance_x = effective_left;
+                    block->x = effective_left;
+                } else {
+                    // Genuine overflow, no float — stays on this line
+                    block->x = lycon->line.advance_x;
+                }
             } else {
                 block->x = lycon->line.advance_x;
             }
