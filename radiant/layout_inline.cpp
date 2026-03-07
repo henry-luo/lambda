@@ -894,7 +894,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (c->view_type) last_child_for_trim = c;
                 c = c->next();
             }
-            if (last_child_for_trim) {
+            if (last_child_for_trim && last_child_for_trim->view_type != RDT_VIEW_INLINE) {
+                // Only trim non-span children (text rects, inline-blocks, etc.).
+                // Inline spans already handled their own trailing space trim
+                // during their own layout pass — trimming again would double-count.
                 saved_trailing = lycon->line.trailing_space_width;
                 last_child_for_trim->width -= saved_trailing;
             }
