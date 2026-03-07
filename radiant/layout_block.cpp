@@ -3496,6 +3496,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // with their in-flow children. This includes: overflow != visible,
     // float, position absolute/fixed, inline-block, table cells, etc.
     bool creates_bfc_for_collapse = block_context_establishes_bfc(block);
+
     // CSS 2.1 §8.3.1: Bottom margins only collapse when parent has auto computed height.
     // Per CSS 2.1 erratum q313, min-height has no influence on bottom margin adjacency.
     bool has_explicit_height = (block->blk && block->blk->given_height >= 0);
