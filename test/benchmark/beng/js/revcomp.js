@@ -33,6 +33,7 @@ function outputReverseComplement(header, seq) {
 const text = fs.readFileSync(INPUT_PATH, 'utf-8');
 const lines = text.split('\n');
 
+const __t0 = process.hrtime.bigint();
 let header = '';
 let seq = '';
 
@@ -51,3 +52,5 @@ for (const line of lines) {
 if (seq.length > 0) {
     outputReverseComplement(header, seq);
 }
+const __t1 = process.hrtime.bigint();
+process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");

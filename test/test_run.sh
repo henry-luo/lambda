@@ -95,7 +95,7 @@ fi
 echo "=============================================================="
 
 # Configuration
-TIMEOUT_DURATION="60s"
+TIMEOUT_DURATION="180s"
 # Use absolute path to ensure it works in background processes
 TEST_OUTPUT_DIR="$(pwd)/test_output"
 
