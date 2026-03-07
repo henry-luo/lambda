@@ -10,7 +10,7 @@ pn next_rand(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-pn matmul(a, b, c, n) {
+pn matmul(a: float[], b: float[], c: float[], n: int) {
     var i = 0
     while (i < n) {
         var j = 0

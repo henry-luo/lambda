@@ -1858,6 +1858,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         if (assign->value) return get_effective_type(mt, assign->value);
     }
     // For INDEX nodes: if object is known ArrayInt and index is INT, element type is INT
+    //                   if object is known ArrayFloat and index is INT, element type is FLOAT
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* fn = (AstFieldNode*)node;
         TypeId obj_eff = get_effective_type(mt, fn->object);
@@ -1865,6 +1866,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         if (obj_eff == LMD_TYPE_ARRAY_INT &&
             (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
             return LMD_TYPE_INT;
+        }
+        if (obj_eff == LMD_TYPE_ARRAY_FLOAT &&
+            (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
+            return LMD_TYPE_FLOAT;
         }
         // ARRAY with nested=INT + INT index: return type is ANY (not INT)
         // because the array may have been converted from ArrayInt to generic
@@ -3223,6 +3228,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                                     TypeId fill_val_tid = get_effective_type(mt, arg2);
                                     if (fill_val_tid == LMD_TYPE_INT || fill_val_tid == LMD_TYPE_INT64) {
                                         var_tid = LMD_TYPE_ARRAY_INT;
+                                    } else if (fill_val_tid == LMD_TYPE_FLOAT) {
+                                        var_tid = LMD_TYPE_ARRAY_FLOAT;
                                     } else if (fill_val_tid == LMD_TYPE_BOOL) {
                                         // P4-3.1: fill(n, bool) → generic Array of bools
                                         var_tid = LMD_TYPE_ARRAY;
@@ -4410,6 +4417,71 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         emit_label(mt, l_end);
         return result;  // NATIVE INT (not boxed)
+    }
+
+    // ======================================================================
+    // FAST PATH 1a: Compile-time known ArrayFloat (from fill() narrowing)
+    // No runtime type check needed — we KNOW it's ArrayFloat.
+    // Returns NATIVE FLOAT (double), enabling native FP arithmetic downstream.
+    // ArrayFloat stores raw doubles in items[], same struct layout as ArrayInt:
+    //   offset 0: type_id (uint8_t), offset 8: double* items, offset 16: int64_t length
+    // ======================================================================
+    if (obj_tid == LMD_TYPE_ARRAY_FLOAT &&
+        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
+        MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayFloat*
+
+        // Bounds check
+        MIR_reg_t arr_len = new_reg(mt, "aflen", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+        MIR_label_t l_ok = new_label(mt);
+        MIR_label_t l_oob = new_label(mt);
+        MIR_label_t l_end = new_label(mt);
+        MIR_reg_t result = new_reg(mt, "afidx", MIR_T_D);
+
+        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, neg_check)));
+
+        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, ge_check)));
+
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+        // OOB: return 0.0 (safe default for float arrays)
+        emit_label(mt, l_oob);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_double_op(mt->ctx, 0.0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        // In bounds: load items[idx] as double
+        emit_label(mt, l_ok);
+        MIR_reg_t items_ptr = new_reg(mt, "fitms", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+        MIR_reg_t byte_off = new_reg(mt, "fboff", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
+
+        MIR_reg_t elem_addr = new_reg(mt, "feadr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+        // Load as double (MIR_T_D) — ArrayFloat stores raw doubles
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1)));
+
+        emit_label(mt, l_end);
+        return result;  // NATIVE FLOAT (double, not boxed)
     }
 
     // ======================================================================
@@ -6805,8 +6877,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t arr_ptr;
         if (obj_tid == LMD_TYPE_ANY || obj_tid == LMD_TYPE_NULL) {
             arr_ptr = emit_unbox_container(mt, obj);
-        } else if (obj_tid == LMD_TYPE_ARRAY_INT || obj_tid == LMD_TYPE_ARRAY ||
-                   obj_tid == LMD_TYPE_LIST) {
+        } else if (obj_tid == LMD_TYPE_ARRAY_INT || obj_tid == LMD_TYPE_ARRAY_FLOAT ||
+                   obj_tid == LMD_TYPE_ARRAY || obj_tid == LMD_TYPE_LIST) {
             // Container variable: stored as tagged Item, strip tag to get pointer
             arr_ptr = emit_unbox_container(mt, obj);
         } else {
@@ -6969,6 +7041,72 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+            }
+
+            emit_label(mt, l_end);
+        }
+        // ==================================================================
+        // FAST PATH: Compile-time known ArrayFloat + INT index + FLOAT value
+        // Direct inline store of native double to items[idx].
+        // ==================================================================
+        else if (obj_tid == LMD_TYPE_ARRAY_FLOAT &&
+                 (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) &&
+                 val_tid == LMD_TYPE_FLOAT) {
+            MIR_reg_t val_native = transpile_expr(mt, ca->value);
+
+            MIR_label_t l_ok = new_label(mt);
+            MIR_label_t l_oob = new_label(mt);
+            MIR_label_t l_end = new_label(mt);
+
+            // Bounds check
+            MIR_reg_t arr_len = new_reg(mt, "aflen", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+
+            MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                MIR_new_reg_op(mt->ctx, neg_check)));
+
+            MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                MIR_new_reg_op(mt->ctx, ge_check)));
+
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+            // OOB: fallback to fn_array_set with boxed float
+            emit_label(mt, l_oob);
+            {
+                MIR_reg_t boxed_val = emit_box_float(mt, val_native);
+                emit_call_void_3(mt, "fn_array_set",
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // In bounds: direct store items[idx] = double_val
+            emit_label(mt, l_ok);
+            {
+                MIR_reg_t items_ptr = new_reg(mt, "fitms", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+
+                MIR_reg_t byte_off = new_reg(mt, "fboff", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
+
+                MIR_reg_t elem_addr = new_reg(mt, "feadr", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+
+                // Store native double directly
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val_native)));
             }
 
             emit_label(mt, l_end);
@@ -8080,6 +8218,34 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
             bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
 
+            // Resolve typed array annotations: float[] → ARRAY_FLOAT, int[] → ARRAY_INT, etc.
+            // Note: p->type is a TypeParam (not TypeUnary), so we must use full_type
+            // to access the actual TypeUnary structure with its operand pointer.
+            if (p->type && p->type->kind == TYPE_KIND_UNARY) {
+                TypeParam* tp_cast = (TypeParam*)p->type;
+                Type* full = tp_cast->full_type;
+                if (full && full->kind == TYPE_KIND_UNARY) {
+                    TypeUnary* unary = (TypeUnary*)full;
+                    Type* operand = unary->operand;
+                    if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+                        operand = ((TypeType*)operand)->type;
+                    }
+                    if (operand) {
+                        switch (operand->type_id) {
+                        case LMD_TYPE_FLOAT: tid = LMD_TYPE_ARRAY_FLOAT; break;
+                        // TODO: Enable ARRAY_INT/ARRAY_INT64 once existing fast paths are validated
+                        // case LMD_TYPE_INT: tid = LMD_TYPE_ARRAY_INT; break;
+                        // case LMD_TYPE_INT64: tid = LMD_TYPE_ARRAY_INT64; break;
+                        default: break;
+                        }
+                    }
+                }
+                if (tid != LMD_TYPE_ANY) {
+                    log_debug("mir: param '%.*s' resolved typed array annotation → type_id=%d",
+                        (int)p->name->len, p->name->chars, tid);
+                }
+            }
+
             // Infer type from body usage for untyped params
             if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
                 TypeId inferred = infer_param_type(fn_node->body,
@@ -8314,8 +8480,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MIR_type_t mtype = type_to_mir(tid);
             set_var(mt, pname, unboxed, mtype, tid);
         } else {
-            // Untyped, nullable optional, or complex type: keep as boxed Item
-            set_var(mt, pname, preg, MIR_T_I64, LMD_TYPE_ANY);
+            // Untyped, nullable optional, or complex type: keep as boxed Item.
+            // Preserve known container type (e.g. ARRAY_FLOAT from annotation) so
+            // the transpiler can generate fast paths for array access.
+            TypeId var_type = (tid == LMD_TYPE_ARRAY_FLOAT) ? tid : LMD_TYPE_ANY;
+            set_var(mt, pname, preg, MIR_T_I64, var_type);
         }
 
         pi++;
