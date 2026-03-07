@@ -1750,6 +1750,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             if (v->type_id == LMD_TYPE_ANY) return LMD_TYPE_ANY;
             // Narrowed: var has concrete type (from param inference or typed init)
             if (tid == LMD_TYPE_ANY && v->type_id != LMD_TYPE_ANY) return v->type_id;
+            // Type annotation meta-type (e.g. `arr: int[]` produces LMD_TYPE_TYPE
+            // on the AST node).  The variable's tracked type_id is the actual
+            // runtime representation type, so prefer it.
+            if (tid == LMD_TYPE_TYPE && v->type_id != LMD_TYPE_ANY) return v->type_id;
         }
     }
     // For binary nodes: if either operand has effective type ANY, the runtime
@@ -8233,9 +8237,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     if (operand) {
                         switch (operand->type_id) {
                         case LMD_TYPE_FLOAT: tid = LMD_TYPE_ARRAY_FLOAT; break;
-                        // TODO: Enable ARRAY_INT/ARRAY_INT64 once existing fast paths are validated
-                        // case LMD_TYPE_INT: tid = LMD_TYPE_ARRAY_INT; break;
-                        // case LMD_TYPE_INT64: tid = LMD_TYPE_ARRAY_INT64; break;
+                        case LMD_TYPE_INT: tid = LMD_TYPE_ARRAY_INT; break;
+                        case LMD_TYPE_INT64: tid = LMD_TYPE_ARRAY_INT64; break;
                         default: break;
                         }
                     }
@@ -8483,8 +8486,26 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // Untyped, nullable optional, or complex type: keep as boxed Item.
             // Preserve known container type (e.g. ARRAY_FLOAT from annotation) so
             // the transpiler can generate fast paths for array access.
-            TypeId var_type = (tid == LMD_TYPE_ARRAY_FLOAT) ? tid : LMD_TYPE_ANY;
-            set_var(mt, pname, preg, MIR_T_I64, var_type);
+            TypeId var_type = (tid == LMD_TYPE_ARRAY_FLOAT || tid == LMD_TYPE_ARRAY_INT ||
+                               tid == LMD_TYPE_ARRAY_INT64) ? tid : LMD_TYPE_ANY;
+
+            MIR_reg_t final_reg = preg;
+            // For typed array params: ensure the incoming array is the correct
+            // typed representation.  The caller may pass a generic Array that
+            // needs to be converted to ArrayInt/ArrayFloat/ArrayInt64 so that
+            // the FAST PATH inline reads operate on the correct memory layout.
+            if (var_type == LMD_TYPE_ARRAY_INT || var_type == LMD_TYPE_ARRAY_FLOAT ||
+                var_type == LMD_TYPE_ARRAY_INT64) {
+                TypeId elem_tid = (var_type == LMD_TYPE_ARRAY_INT)   ? LMD_TYPE_INT   :
+                                  (var_type == LMD_TYPE_ARRAY_FLOAT) ? LMD_TYPE_FLOAT  :
+                                                                       LMD_TYPE_INT64;
+                final_reg = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
+                log_debug("mir: param '%s' — inserted ensure_typed_array (elem=%d)", pname, elem_tid);
+            }
+
+            set_var(mt, pname, final_reg, MIR_T_I64, var_type);
         }
 
         pi++;
