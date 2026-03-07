@@ -798,10 +798,10 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         return item;
 
     case LMD_TYPE_INT64:
-        return createLong(it2l(item));
+        return createLong(item.get_int64());
 
     case LMD_TYPE_FLOAT:
-        return createFloat(it2d(item));
+        return createFloat(item.get_double());
 
     case LMD_TYPE_SYMBOL: {
         Symbol* sym = item.get_symbol();

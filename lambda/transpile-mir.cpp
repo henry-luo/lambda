@@ -1702,18 +1702,40 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
     // Only returns native types when provably safe (explicitly set elem_type).
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* fn = (AstFieldNode*)node;
-        // Unwrap PRIMARY around the object to find the IDENT
-        AstNode* obj_unwrapped = fn->object;
-        while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
-            obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
-        if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
-            AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
-            char oname[128];
-            snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
-            MirVarEntry* ov = find_var(mt, oname);
-            if (ov && ov->elem_type != LMD_TYPE_ANY) return ov->elem_type;
-            // P4-3.2: ARRAY_INT variable → element is INT
-            if (ov && ov->type_id == LMD_TYPE_ARRAY_INT) return LMD_TYPE_INT;
+        // Guard: if the index is a TYPE expression (child query like arr[int]),
+        // the result is a spreadable array, NOT a single element. Skip elem_type opt.
+        AstNode* idx_unwrapped = fn->field;
+        while (idx_unwrapped && idx_unwrapped->node_type == AST_NODE_PRIMARY)
+            idx_unwrapped = ((AstPrimaryNode*)idx_unwrapped)->expr;
+        bool idx_is_type = false;
+        if (idx_unwrapped) {
+            if (idx_unwrapped->node_type == AST_NODE_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_ARRAY_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_LIST_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_MAP_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_ELMT_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_FUNC_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_BINARY_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_UNARY_TYPE ||
+                idx_unwrapped->node_type == AST_NODE_CONTENT_TYPE)
+                idx_is_type = true;
+            if (!idx_is_type && idx_unwrapped->type && idx_unwrapped->type->type_id == LMD_TYPE_TYPE)
+                idx_is_type = true;
+        }
+        if (!idx_is_type) {
+            // Unwrap PRIMARY around the object to find the IDENT
+            AstNode* obj_unwrapped = fn->object;
+            while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
+                obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
+            if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
+                AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
+                char oname[128];
+                snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
+                MirVarEntry* ov = find_var(mt, oname);
+                if (ov && ov->elem_type != LMD_TYPE_ANY) return ov->elem_type;
+                // P4-3.2: ARRAY_INT variable → element is INT
+                if (ov && ov->type_id == LMD_TYPE_ARRAY_INT) return LMD_TYPE_INT;
+            }
         }
     }
     // For identifiers: reconcile AST type with actual variable storage.

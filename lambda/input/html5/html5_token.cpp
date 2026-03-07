@@ -93,7 +93,7 @@ void html5_token_add_attribute(Html5Token* token, String* name, Item value, Inpu
 
     // Add attribute to map - value is already a tagged Item (ITEM_NULL for empty attrs)
     map_put(token->attributes, name, value, input);
-    String* str = (value.item != ITEM_NULL) ? it2s(value) : nullptr;
+    String* str = (value.item != ITEM_NULL) ? value.get_string() : nullptr;
     log_debug("html5_token_add_attribute: %s=%s", name->chars, str ? str->chars : "");
 }
 
