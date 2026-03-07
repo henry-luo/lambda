@@ -5233,13 +5233,13 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             arg = call_node->argument;
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
-            if (a1_tid != LMD_TYPE_INT) {
+            if (a1_tid != LMD_TYPE_INT && a1_tid != LMD_TYPE_INT64) {
                 a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
             }
             arg = arg->next;
             MIR_reg_t a2 = transpile_expr(mt, arg);
             TypeId a2_tid = get_effective_type(mt, arg);
-            if (a2_tid != LMD_TYPE_INT) {
+            if (a2_tid != LMD_TYPE_INT && a2_tid != LMD_TYPE_INT64) {
                 a2 = emit_unbox(mt, a2, LMD_TYPE_INT);
             }
 
@@ -5304,7 +5304,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             arg = call_node->argument;
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
-            if (a1_tid != LMD_TYPE_INT) {
+            if (a1_tid != LMD_TYPE_INT && a1_tid != LMD_TYPE_INT64) {
                 a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
             }
             // ~a == a XOR -1
