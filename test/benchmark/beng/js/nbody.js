@@ -82,6 +82,7 @@ function formatEnergy(e) {
     return e.toFixed(9);
 }
 
+const __t0 = process.hrtime.bigint();
 offsetMomentum();
 console.log(formatEnergy(energy()));
 
@@ -89,3 +90,5 @@ for (let i = 0; i < N; i++) {
     advance(0.01);
 }
 console.log(formatEnergy(energy()));
+const __t1 = process.hrtime.bigint();
+process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");

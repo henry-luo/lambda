@@ -66,6 +66,9 @@ function randomFasta(id, desc, table, n) {
     if (line.length > 0) console.log(line);
 }
 
+const __t0 = process.hrtime.bigint();
 repeatFasta("ONE", "Homo sapiens alu", ALU, N * 2);
 randomFasta("TWO", "IUB ambiguity codes", IUB, N * 3);
 randomFasta("THREE", "Homo sapiens frequency", HOMO, N * 5);
+const __t1 = process.hrtime.bigint();
+process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
