@@ -46,9 +46,11 @@ struct JsMirImportEntry {
 
 struct JsMirVarEntry {
     MIR_reg_t reg;
-    bool from_env;       // true if loaded from closure env
-    int env_slot;        // slot index in env array
-    MIR_reg_t env_reg;   // register holding env pointer (for write-back)
+    MIR_type_t mir_type;     // MIR_T_I64 for int/boxed, MIR_T_D for native double
+    TypeId type_id;          // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_ANY (boxed)
+    bool from_env;           // true if loaded from closure env
+    int env_slot;            // slot index in env array
+    MIR_reg_t env_reg;       // register holding env pointer (for write-back)
 };
 
 // Loop label pair for break/continue
@@ -225,11 +227,14 @@ static void jm_pop_scope(JsMirTranspiler* mt) {
     mt->scope_depth--;
 }
 
-static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg) {
+static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
+                       MIR_type_t mir_type = MIR_T_I64, TypeId type_id = LMD_TYPE_ANY) {
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
+    entry.var.mir_type = mir_type;
+    entry.var.type_id = type_id;
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
@@ -777,6 +782,380 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
 }
 
 // ============================================================================
+// Inline unboxing helpers (MIR instructions, no function calls)
+// ============================================================================
+
+// Unbox Item → native int64_t: sign-extend lower 56 bits
+static MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item) {
+    MIR_reg_t result = jm_new_reg(mt, "ubi", MIR_T_I64);
+    // shift left 8, arithmetic shift right 8 for sign extension
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, item), MIR_new_int_op(mt->ctx, 8)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 8)));
+    return result;
+}
+
+// Unbox Item → native double via it2d runtime function
+static MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
+    return jm_call_1(mt, "it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item));
+}
+
+// Convert native int64_t → native double
+static MIR_reg_t jm_emit_int_to_double(JsMirTranspiler* mt, MIR_reg_t int_reg) {
+    MIR_reg_t result = jm_new_reg(mt, "i2d", MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, int_reg)));
+    return result;
+}
+
+// Convert native double → native int64_t (truncate)
+static MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg) {
+    MIR_reg_t result = jm_new_reg(mt, "d2i", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_D2I, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, d_reg)));
+    return result;
+}
+
+// Ensure a register is native int64_t, converting from boxed if needed
+static MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
+    if (src_type == LMD_TYPE_INT) return reg;  // already native int
+    if (src_type == LMD_TYPE_FLOAT) return jm_emit_double_to_int(mt, reg);
+    // boxed Item → unbox
+    return jm_emit_unbox_int(mt, reg);
+}
+
+// Ensure a register is native double, converting from int or boxed if needed
+static MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
+    if (src_type == LMD_TYPE_FLOAT) return reg;  // already native double
+    if (src_type == LMD_TYPE_INT) return jm_emit_int_to_double(mt, reg);
+    // boxed Item → unbox
+    return jm_emit_unbox_float(mt, reg);
+}
+
+// Box a native value into an Item based on its type
+static MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_INT:   return jm_box_int_reg(mt, reg);
+    case LMD_TYPE_FLOAT: return jm_box_float(mt, reg);
+    case LMD_TYPE_BOOL: {
+        MIR_reg_t result = jm_new_reg(mt, "boxb", MIR_T_I64);
+        uint64_t BOOL_TAG = (uint64_t)LMD_TYPE_BOOL << 56;
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)BOOL_TAG), MIR_new_reg_op(mt->ctx, reg)));
+        return result;
+    }
+    default: return reg;  // already boxed
+    }
+}
+
+// ============================================================================
+// Type inference for expressions (jm_get_effective_type)
+// ============================================================================
+
+// Returns the inferred TypeId for a JS AST expression node.
+// LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
+// LMD_TYPE_ANY → unknown (must use boxed path)
+static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node) return LMD_TYPE_ANY;
+
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        switch (lit->literal_type) {
+        case JS_LITERAL_NUMBER: {
+            double val = lit->value.number_value;
+            if (val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0)
+                return LMD_TYPE_INT;
+            return LMD_TYPE_FLOAT;
+        }
+        case JS_LITERAL_BOOLEAN:  return LMD_TYPE_BOOL;
+        case JS_LITERAL_STRING:   return LMD_TYPE_STRING;
+        case JS_LITERAL_NULL:
+        case JS_LITERAL_UNDEFINED: return LMD_TYPE_NULL;
+        }
+        return LMD_TYPE_ANY;
+    }
+
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (var) return var->type_id;
+        return LMD_TYPE_ANY;
+    }
+
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        // comparison operators always return bool
+        switch (bin->op) {
+        case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+        case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+        case JS_OP_INSTANCEOF: case JS_OP_IN:
+            return LMD_TYPE_BOOL;
+        default: break;
+        }
+        // arithmetic operators: propagate types
+        TypeId left_t  = jm_get_effective_type(mt, bin->left);
+        TypeId right_t = jm_get_effective_type(mt, bin->right);
+        switch (bin->op) {
+        case JS_OP_ADD:
+            // if either is string, result is string (JS concatenation)
+            if (left_t == LMD_TYPE_STRING || right_t == LMD_TYPE_STRING)
+                return LMD_TYPE_STRING;
+            // if either is float, result is float
+            if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
+                return LMD_TYPE_FLOAT;
+            // both int → int
+            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
+                return LMD_TYPE_INT;
+            return LMD_TYPE_ANY;
+        case JS_OP_SUB: case JS_OP_MUL:
+            if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
+                return LMD_TYPE_FLOAT;
+            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
+                return LMD_TYPE_INT;
+            return LMD_TYPE_ANY;
+        case JS_OP_EXP:
+            // pow() always returns double
+            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
+                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
+                return LMD_TYPE_FLOAT;
+            return LMD_TYPE_ANY;
+        case JS_OP_DIV:
+            // JS division always produces float (7/2 == 3.5)
+            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
+                return LMD_TYPE_FLOAT;
+            if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
+                return LMD_TYPE_FLOAT;
+            return LMD_TYPE_ANY;
+        case JS_OP_MOD:
+            // modulo: int%int → int; float mod handled by runtime (no native DMOD)
+            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
+                return LMD_TYPE_INT;
+            return LMD_TYPE_ANY;
+        case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
+        case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
+            return LMD_TYPE_INT;  // bitwise ops always produce int32
+        case JS_OP_AND: case JS_OP_OR:
+            return LMD_TYPE_ANY;  // logical AND/OR return one of the operands
+        default:
+            return LMD_TYPE_ANY;
+        }
+    }
+
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        switch (un->op) {
+        case JS_OP_NOT:    return LMD_TYPE_BOOL;
+        case JS_OP_TYPEOF: return LMD_TYPE_STRING;
+        case JS_OP_BIT_NOT: return LMD_TYPE_INT;
+        case JS_OP_PLUS: case JS_OP_ADD: {
+            TypeId t = jm_get_effective_type(mt, un->operand);
+            return (t == LMD_TYPE_FLOAT) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+        }
+        case JS_OP_MINUS: case JS_OP_SUB: {
+            TypeId t = jm_get_effective_type(mt, un->operand);
+            if (t == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+            if (t == LMD_TYPE_INT)   return LMD_TYPE_INT;
+            return LMD_TYPE_ANY;
+        }
+        case JS_OP_INCREMENT: case JS_OP_DECREMENT: {
+            if (!un->operand) return LMD_TYPE_ANY;
+            TypeId t = jm_get_effective_type(mt, un->operand);
+            if (t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT) return t;
+            return LMD_TYPE_ANY;
+        }
+        default: return LMD_TYPE_ANY;
+        }
+    }
+
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        if (asgn->op == JS_OP_ASSIGN)
+            return jm_get_effective_type(mt, asgn->right);
+        // compound assignment: depends on operator and operand types
+        return LMD_TYPE_ANY;
+    }
+
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        TypeId t1 = jm_get_effective_type(mt, cond->consequent);
+        TypeId t2 = jm_get_effective_type(mt, cond->alternate);
+        if (t1 == t2) return t1;
+        return LMD_TYPE_ANY;
+    }
+
+    default:
+        return LMD_TYPE_ANY;
+    }
+}
+
+// Check if a type is native (not boxed)
+static bool jm_is_native_type(TypeId tid) {
+    return tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
+}
+
+// Forward declarations for native expression transpilation
+static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
+static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
+
+// Transpile an expression returning a native register of the target type.
+// Handles literals inline (no boxing), identifiers from typed vars, and
+// recursive expressions. Falls back to unbox from boxed Item when needed.
+static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
+                                         TypeId expr_type, TypeId target_type) {
+    // Literals: emit native constant directly (bypass boxing)
+    if (expr && expr->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* lit = (JsLiteralNode*)expr;
+        if (lit->literal_type == JS_LITERAL_NUMBER) {
+            if (target_type == LMD_TYPE_FLOAT) {
+                MIR_reg_t r = jm_new_reg(mt, "dlit", MIR_T_D);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_double_op(mt->ctx, lit->value.number_value)));
+                return r;
+            } else {
+                MIR_reg_t r = jm_new_reg(mt, "ilit", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)lit->value.number_value)));
+                return r;
+            }
+        }
+    }
+
+    // Identifiers: use native register directly if variable is typed
+    if (expr && expr->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (var && jm_is_native_type(var->type_id)) {
+            if (target_type == LMD_TYPE_FLOAT)
+                return jm_ensure_native_float(mt, var->reg, var->type_id);
+            else
+                return jm_ensure_native_int(mt, var->reg, var->type_id);
+        }
+        // boxed variable: unbox
+        MIR_reg_t boxed = var ? var->reg : jm_emit_null(mt);
+        if (target_type == LMD_TYPE_FLOAT)
+            return jm_emit_unbox_float(mt, boxed);
+        else
+            return jm_emit_unbox_int(mt, boxed);
+    }
+
+    // Other expressions: determine if jm_transpile_expression returns native.
+    // Must check specifically whether the native path is actually taken.
+    if (expr && expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)expr;
+        TypeId lt = jm_get_effective_type(mt, bin->left);
+        TypeId rt = jm_get_effective_type(mt, bin->right);
+        bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+                            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        // Determine if the native path is actually taken
+        bool native_binary = both_numeric &&
+            bin->op != JS_OP_EXP && bin->op != JS_OP_AND && bin->op != JS_OP_OR;
+        if (native_binary && bin->op == JS_OP_MOD) {
+            native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
+        }
+        MIR_reg_t result = jm_transpile_expression(mt, expr);
+        if (native_binary) {
+            // Native path was taken: result is native int or double
+            if (target_type == LMD_TYPE_FLOAT)
+                return jm_ensure_native_float(mt, result, expr_type);
+            else
+                return jm_ensure_native_int(mt, result, expr_type);
+        }
+        // Boxed path was taken: result is boxed Item, need to unbox
+        if (target_type == LMD_TYPE_FLOAT)
+            return jm_emit_unbox_float(mt, result);
+        else {
+            // Use it2d + D2I for robust int extraction (handles INT, FLOAT, etc.)
+            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
+            return jm_emit_double_to_int(mt, as_dbl);
+        }
+    }
+
+    if (expr && expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+        JsUnaryNode* un = (JsUnaryNode*)expr;
+        // Check if unary op takes the native path
+        bool native_unary = false;
+        if (un->operand) {
+            TypeId op_type = jm_get_effective_type(mt, un->operand);
+            bool op_numeric = (op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT);
+            switch (un->op) {
+            case JS_OP_PLUS: case JS_OP_ADD:
+            case JS_OP_MINUS: case JS_OP_SUB:
+                native_unary = op_numeric;
+                break;
+            case JS_OP_INCREMENT: case JS_OP_DECREMENT:
+                // Only native if operand is a typed identifier
+                if (un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
+                    char uvname[128];
+                    snprintf(uvname, sizeof(uvname), "_js_%.*s", (int)uid->name->len, uid->name->chars);
+                    JsMirVarEntry* uvar = jm_find_var(mt, uvname);
+                    native_unary = uvar && (uvar->type_id == LMD_TYPE_INT || uvar->type_id == LMD_TYPE_FLOAT);
+                }
+                break;
+            default:
+                break;
+            }
+        }
+        MIR_reg_t result = jm_transpile_expression(mt, expr);
+        if (native_unary) {
+            if (target_type == LMD_TYPE_FLOAT)
+                return jm_ensure_native_float(mt, result, expr_type);
+            else
+                return jm_ensure_native_int(mt, result, expr_type);
+        }
+        // Boxed result: unbox
+        if (target_type == LMD_TYPE_FLOAT)
+            return jm_emit_unbox_float(mt, result);
+        else {
+            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
+            return jm_emit_double_to_int(mt, as_dbl);
+        }
+    }
+
+    if (expr && expr->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)expr;
+        bool native_assign = false;
+        if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* aid = (JsIdentifierNode*)asgn->left;
+            char avname[128];
+            snprintf(avname, sizeof(avname), "_js_%.*s", (int)aid->name->len, aid->name->chars);
+            JsMirVarEntry* avar = jm_find_var(mt, avname);
+            native_assign = avar && !avar->from_env &&
+                            (avar->type_id == LMD_TYPE_INT || avar->type_id == LMD_TYPE_FLOAT);
+        }
+        MIR_reg_t result = jm_transpile_expression(mt, expr);
+        if (native_assign) {
+            if (target_type == LMD_TYPE_FLOAT)
+                return jm_ensure_native_float(mt, result, expr_type);
+            else
+                return jm_ensure_native_int(mt, result, expr_type);
+        }
+        // Boxed result: unbox
+        if (target_type == LMD_TYPE_FLOAT)
+            return jm_emit_unbox_float(mt, result);
+        else {
+            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
+            return jm_emit_double_to_int(mt, as_dbl);
+        }
+    }
+
+    // All other expressions: get boxed value and unbox to target type
+    MIR_reg_t boxed = jm_transpile_box_item(mt, expr);
+    if (target_type == LMD_TYPE_FLOAT)
+        return jm_emit_unbox_float(mt, boxed);
+    else
+        return jm_emit_unbox_int(mt, boxed);
+}
+
+// ============================================================================
 // Local function management
 // ============================================================================
 
@@ -826,7 +1205,6 @@ static int jm_count_params(JsFunctionNode* fn) {
 // Forward declarations
 // ============================================================================
 
-static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
 static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt);
 
@@ -1205,8 +1583,211 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     return jm_emit_null(mt);
 }
 
-// Binary expression: emit call to js_<op>(left, right)
+// Binary expression: native arithmetic fast path + boxed fallback
 static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
+    // --- Native arithmetic fast path ---
+    TypeId left_type  = jm_get_effective_type(mt, bin->left);
+    TypeId right_type = jm_get_effective_type(mt, bin->right);
+
+    bool both_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+                        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+
+    if (both_numeric) {
+        bool use_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT);
+        bool both_int  = (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT);
+
+        switch (bin->op) {
+        // Arithmetic operators
+        case JS_OP_ADD: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "add", use_float ? MIR_T_D : MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DADD : MIR_ADD,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_SUB: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "sub", use_float ? MIR_T_D : MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DSUB : MIR_SUB,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_MUL: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "mul", use_float ? MIR_T_D : MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DMUL : MIR_MUL,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_DIV: {
+            // JS division always produces float (7/2 === 3.5)
+            if (both_int) {
+                MIR_reg_t dl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
+                MIR_reg_t dr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_new_reg(mt, "div", MIR_T_D);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, dl), MIR_new_reg_op(mt->ctx, dr)));
+                return r;
+            } else {
+                MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
+                MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_new_reg(mt, "div", MIR_T_D);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return r;
+            }
+        }
+        case JS_OP_MOD: {
+            if (both_int) {
+                MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+                MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+                MIR_reg_t r = jm_new_reg(mt, "mod", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOD,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return r;
+            }
+            break;  // float modulo → fall through to boxed runtime
+        }
+        case JS_OP_EXP:
+            break;  // power → fall through to boxed runtime (no native MIR op)
+
+        // Comparison operators: return native int (0 or 1)
+        case JS_OP_LT: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "lt", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLT : MIR_LTS,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_LE: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "le", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLE : MIR_LES,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_GT: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "gt", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGT : MIR_GTS,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_GE: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "ge", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGE : MIR_GES,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_EQ:
+        case JS_OP_STRICT_EQ: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "eq", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DEQ : MIR_EQ,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+        case JS_OP_NE:
+        case JS_OP_STRICT_NE: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "ne", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DNE : MIR_NE,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
+        }
+
+        // Bitwise operators: always truncate to int, always return int
+        case JS_OP_BIT_AND: {
+            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            MIR_reg_t r = jm_new_reg(mt, "band", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li), MIR_new_reg_op(mt->ctx, ri)));
+            return r;
+        }
+        case JS_OP_BIT_OR: {
+            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            MIR_reg_t r = jm_new_reg(mt, "bor", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li), MIR_new_reg_op(mt->ctx, ri)));
+            return r;
+        }
+        case JS_OP_BIT_XOR: {
+            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            MIR_reg_t r = jm_new_reg(mt, "bxor", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li), MIR_new_reg_op(mt->ctx, ri)));
+            return r;
+        }
+        case JS_OP_BIT_LSHIFT: {
+            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            // JS: ToInt32(li) << (ToUint32(ri) & 0x1F), result is signed 32-bit
+            MIR_reg_t r = jm_new_reg(mt, "lsh", MIR_T_I64);
+            MIR_reg_t r32 = jm_new_reg(mt, "lsh32", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li), MIR_new_reg_op(mt->ctx, ri)));
+            // Sign-extend result to 32-bit: (r << 32) >> 32
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
+                MIR_new_reg_op(mt->ctx, r32), MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, 32)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH,
+                MIR_new_reg_op(mt->ctx, r32), MIR_new_reg_op(mt->ctx, r32), MIR_new_int_op(mt->ctx, 32)));
+            return r32;
+        }
+        case JS_OP_BIT_RSHIFT: {
+            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            // JS: ToInt32(li) >> (ToUint32(ri) & 0x1F) — sign-extend li to 32-bit first
+            MIR_reg_t li32 = jm_new_reg(mt, "rli32", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
+                MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, li), MIR_new_int_op(mt->ctx, 32)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH,
+                MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, li32), MIR_new_int_op(mt->ctx, 32)));
+            MIR_reg_t r = jm_new_reg(mt, "rsh", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, ri)));
+            return r;
+        }
+        case JS_OP_BIT_URSHIFT: {
+            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            // JS: ToUint32(li) >>> (ToUint32(ri) & 0x1F) — mask to 32-bit unsigned first
+            MIR_reg_t li32 = jm_new_reg(mt, "uli32", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, li),
+                MIR_new_int_op(mt->ctx, (int64_t)0xFFFFFFFFLL)));
+            MIR_reg_t r = jm_new_reg(mt, "ursh", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, ri)));
+            return r;
+        }
+        default:
+            break;  // fall through to boxed runtime path
+        }
+    }
+
+    // --- Boxed runtime path (original) ---
     const char* fn_name = NULL;
     switch (bin->op) {
     case JS_OP_ADD:        fn_name = "js_add"; break;
@@ -1258,21 +1839,71 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
         return jm_call_1(mt, "js_typeof", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
     case JS_OP_PLUS:
-    case JS_OP_ADD:
+    case JS_OP_ADD: {
+        TypeId op_type = jm_get_effective_type(mt, un->operand);
+        if (op_type == LMD_TYPE_INT) {
+            return jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_INT);
+        }
+        if (op_type == LMD_TYPE_FLOAT) {
+            return jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_FLOAT);
+        }
         return jm_call_1(mt, "js_unary_plus", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
+    }
     case JS_OP_MINUS:
-    case JS_OP_SUB:
+    case JS_OP_SUB: {
+        TypeId op_type = jm_get_effective_type(mt, un->operand);
+        if (op_type == LMD_TYPE_INT) {
+            MIR_reg_t val = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_INT);
+            MIR_reg_t r = jm_new_reg(mt, "neg", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NEG,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, val)));
+            return r;
+        }
+        if (op_type == LMD_TYPE_FLOAT) {
+            MIR_reg_t val = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_new_reg(mt, "dneg", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DNEG,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, val)));
+            return r;
+        }
         return jm_call_1(mt, "js_unary_minus", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
+    }
     case JS_OP_INCREMENT: {
-        // ++var or var++ -> var = js_add(var, i2it(1))
+        // ++var or var++ — native fast path for typed variables
+        if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+            JsMirVarEntry* var = jm_find_var(mt, vname);
+            if (var && var->type_id == LMD_TYPE_INT) {
+                // native int: var = var + 1
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_int_op(mt->ctx, 1)));
+                return var->reg;
+            }
+            if (var && var->type_id == LMD_TYPE_FLOAT) {
+                // native float: var = var + 1.0
+                MIR_reg_t one = jm_new_reg(mt, "one", MIR_T_D);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, one),
+                    MIR_new_double_op(mt->ctx, 1.0)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DADD,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, one)));
+                return var->reg;
+            }
+        }
+        // boxed fallback
         MIR_reg_t operand = jm_transpile_box_item(mt, un->operand);
         MIR_reg_t one = jm_box_int_const(mt, 1);
         MIR_reg_t result = jm_call_2(mt, "js_add", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, operand),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, one));
-        // Update variable if operand is identifier
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
             char vname[128];
@@ -1292,6 +1923,32 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
         return result;
     }
     case JS_OP_DECREMENT: {
+        // --var or var-- — native fast path for typed variables
+        if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+            JsMirVarEntry* var = jm_find_var(mt, vname);
+            if (var && var->type_id == LMD_TYPE_INT) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_int_op(mt->ctx, 1)));
+                return var->reg;
+            }
+            if (var && var->type_id == LMD_TYPE_FLOAT) {
+                MIR_reg_t one = jm_new_reg(mt, "one", MIR_T_D);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, one),
+                    MIR_new_double_op(mt->ctx, 1.0)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DSUB,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, one)));
+                return var->reg;
+            }
+        }
+        // boxed fallback
         MIR_reg_t operand = jm_transpile_box_item(mt, un->operand);
         MIR_reg_t one = jm_box_int_const(mt, 1);
         MIR_reg_t result = jm_call_2(mt, "js_subtract", MIR_T_I64,
@@ -1343,6 +2000,66 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             return jm_emit_null(mt);
         }
 
+        // --- Native-typed variable fast path ---
+        if (var->type_id == LMD_TYPE_INT && !var->from_env) {
+            if (asgn->op == JS_OP_ASSIGN) {
+                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+                MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, rhs)));
+            } else {
+                // Compound assignment on native int
+                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+                MIR_reg_t rval = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
+                MIR_insn_code_t op = MIR_ADD;
+                switch (asgn->op) {
+                case JS_OP_ADD_ASSIGN: op = MIR_ADD; break;
+                case JS_OP_SUB_ASSIGN: op = MIR_SUB; break;
+                case JS_OP_MUL_ASSIGN: op = MIR_MUL; break;
+                case JS_OP_DIV_ASSIGN: op = MIR_DIV; break;
+                case JS_OP_MOD_ASSIGN: op = MIR_MOD; break;
+                case JS_OP_BIT_AND_ASSIGN: op = MIR_AND; break;
+                case JS_OP_BIT_OR_ASSIGN: op = MIR_OR; break;
+                case JS_OP_BIT_XOR_ASSIGN: op = MIR_XOR; break;
+                case JS_OP_LSHIFT_ASSIGN: op = MIR_LSH; break;
+                case JS_OP_RSHIFT_ASSIGN: op = MIR_RSH; break;
+                case JS_OP_URSHIFT_ASSIGN: op = MIR_URSH; break;
+                default: break;
+                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, op,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, rval)));
+            }
+            return var->reg;
+        }
+
+        if (var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
+            if (asgn->op == JS_OP_ASSIGN) {
+                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+                MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, rhs)));
+            } else {
+                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+                MIR_reg_t rval = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
+                MIR_insn_code_t op = MIR_DADD;
+                switch (asgn->op) {
+                case JS_OP_ADD_ASSIGN: op = MIR_DADD; break;
+                case JS_OP_SUB_ASSIGN: op = MIR_DSUB; break;
+                case JS_OP_MUL_ASSIGN: op = MIR_DMUL; break;
+                case JS_OP_DIV_ASSIGN: op = MIR_DDIV; break;
+                default: break;
+                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, op,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, rval)));
+            }
+            return var->reg;
+        }
+
+        // --- Boxed variable path (original) ---
         MIR_reg_t rhs;
         if (asgn->op == JS_OP_ASSIGN) {
             rhs = jm_transpile_box_item(mt, asgn->right);
@@ -2236,9 +2953,14 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
             JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);
             if (var) {
                 // env[i] = current value of captured variable
+                // Box native-typed variables before storing in env (closures read boxed Items)
+                MIR_reg_t value_to_store = var->reg;
+                if (jm_is_native_type(var->type_id)) {
+                    value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), env, 0, 1),
-                    MIR_new_reg_op(mt->ctx, var->reg)));
+                    MIR_new_reg_op(mt->ctx, value_to_store)));
             } else {
                 log_error("js-mir: captured variable '%s' not found in scope", fc->captures[i].name);
             }
@@ -2266,21 +2988,98 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
 static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
     if (!item) return jm_emit_null(mt);
 
-    // Identifiers are already boxed Items
+    // Identifiers: handle native-typed variables (need boxing)
     if (item->node_type == JS_AST_NODE_IDENTIFIER) {
-        return jm_transpile_identifier(mt, (JsIdentifierNode*)item);
+        JsIdentifierNode* id = (JsIdentifierNode*)item;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (var && jm_is_native_type(var->type_id)) {
+            return jm_box_native(mt, var->reg, var->type_id);
+        }
+        return jm_transpile_identifier(mt, id);
     }
 
-    // Expressions that return Item through runtime functions - transpile directly
+    // Expressions that may return native registers — check type and box if needed
     switch (item->node_type) {
-    case JS_AST_NODE_BINARY_EXPRESSION:
-    case JS_AST_NODE_UNARY_EXPRESSION:
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        // Only treat as native if the binary op actually takes the native path
+        // (both operands must be typed numeric)
+        JsBinaryNode* bin = (JsBinaryNode*)item;
+        TypeId lt = jm_get_effective_type(mt, bin->left);
+        TypeId rt = jm_get_effective_type(mt, bin->right);
+        bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+                            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        // Native path is only taken if both_numeric AND the op is handled natively
+        // (EXP, AND, OR, float MOD fall through to boxed runtime)
+        bool native_binary = both_numeric &&
+            bin->op != JS_OP_EXP && bin->op != JS_OP_AND && bin->op != JS_OP_OR;
+        if (native_binary && bin->op == JS_OP_MOD) {
+            // Float modulo falls through to boxed
+            native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
+        }
+        TypeId etype = jm_get_effective_type(mt, item);
+        MIR_reg_t result = jm_transpile_expression(mt, item);
+        if (native_binary && jm_is_native_type(etype)) {
+            return jm_box_native(mt, result, etype);
+        }
+        return result;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)item;
+        // Check if the native path is actually taken for this unary op
+        bool native_unary = false;
+        if (un->operand) {
+            TypeId op_type = jm_get_effective_type(mt, un->operand);
+            bool op_numeric = (op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT);
+            switch (un->op) {
+            case JS_OP_PLUS: case JS_OP_ADD:
+            case JS_OP_MINUS: case JS_OP_SUB:
+                native_unary = op_numeric;
+                break;
+            case JS_OP_INCREMENT: case JS_OP_DECREMENT:
+                if (un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
+                    char uvname[128];
+                    snprintf(uvname, sizeof(uvname), "_js_%.*s", (int)uid->name->len, uid->name->chars);
+                    JsMirVarEntry* uvar = jm_find_var(mt, uvname);
+                    native_unary = uvar && (uvar->type_id == LMD_TYPE_INT || uvar->type_id == LMD_TYPE_FLOAT);
+                }
+                break;
+            default: break;
+            }
+        }
+        TypeId etype = jm_get_effective_type(mt, item);
+        MIR_reg_t result = jm_transpile_expression(mt, item);
+        if (native_unary && jm_is_native_type(etype)) {
+            return jm_box_native(mt, result, etype);
+        }
+        return result;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)item;
+        bool native_assign = false;
+        if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* aid = (JsIdentifierNode*)asgn->left;
+            char avname[128];
+            snprintf(avname, sizeof(avname), "_js_%.*s", (int)aid->name->len, aid->name->chars);
+            JsMirVarEntry* avar = jm_find_var(mt, avname);
+            native_assign = avar && !avar->from_env &&
+                            (avar->type_id == LMD_TYPE_INT || avar->type_id == LMD_TYPE_FLOAT);
+        }
+        TypeId etype = jm_get_effective_type(mt, item);
+        MIR_reg_t result = jm_transpile_expression(mt, item);
+        if (native_assign && jm_is_native_type(etype)) {
+            return jm_box_native(mt, result, etype);
+        }
+        return result;
+    }
+    // These always return boxed Items — transpile directly
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
     case JS_AST_NODE_CALL_EXPRESSION:
     case JS_AST_NODE_MEMBER_EXPRESSION:
     case JS_AST_NODE_ARRAY_EXPRESSION:
     case JS_AST_NODE_OBJECT_EXPRESSION:
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
     case JS_AST_NODE_TEMPLATE_LITERAL:
@@ -2413,19 +3212,42 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 char vname[128];
                 snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
 
-                MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
                 if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
-                    MIR_reg_t val = jm_transpile_box_item(mt, d->init);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, reg),
-                        MIR_new_reg_op(mt->ctx, val)));
+                    TypeId init_type = jm_get_effective_type(mt, d->init);
+
+                    if (init_type == LMD_TYPE_INT) {
+                        // native int variable
+                        MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
+                        MIR_reg_t native_val = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_INT);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, reg),
+                            MIR_new_reg_op(mt->ctx, native_val)));
+                        jm_set_var(mt, vname, reg, MIR_T_I64, LMD_TYPE_INT);
+                    } else if (init_type == LMD_TYPE_FLOAT) {
+                        // native double variable
+                        MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_D);
+                        MIR_reg_t native_val = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_FLOAT);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                            MIR_new_reg_op(mt->ctx, reg),
+                            MIR_new_reg_op(mt->ctx, native_val)));
+                        jm_set_var(mt, vname, reg, MIR_T_D, LMD_TYPE_FLOAT);
+                    } else {
+                        // boxed (string, object, array, any, etc.)
+                        MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
+                        MIR_reg_t val = jm_transpile_box_item(mt, d->init);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, reg),
+                            MIR_new_reg_op(mt->ctx, val)));
+                        jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
+                    }
                 } else {
+                    MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, reg),
                         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                    jm_set_var(mt, vname, reg);
                 }
-                jm_set_var(mt, vname, reg);
             } else if (d->id && d->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                 // array destructuring: const [a, b, ...rest] = expr
                 JsArrayPatternNode* pattern = (JsArrayPatternNode*)d->id;
@@ -2602,11 +3424,29 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     // Test
     if (for_node->test) {
-        MIR_reg_t test = jm_transpile_box_item(mt, for_node->test);
-        MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-            MIR_new_reg_op(mt->ctx, truthy)));
+        // Only use native branching when the comparison ACTUALLY returns native 0/1.
+        // This means both operands of a binary comparison must be typed numeric.
+        bool native_test = false;
+        if (for_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+            JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
+            TypeId lt = jm_get_effective_type(mt, test_bin->left);
+            TypeId rt = jm_get_effective_type(mt, test_bin->right);
+            native_test = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+                          (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        }
+
+        if (native_test) {
+            // Native comparison: result is 0/1, use directly in branch
+            MIR_reg_t test = jm_transpile_expression(mt, for_node->test);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+                MIR_new_reg_op(mt->ctx, test)));
+        } else {
+            MIR_reg_t test = jm_transpile_box_item(mt, for_node->test);
+            MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+                MIR_new_reg_op(mt->ctx, truthy)));
+        }
     }
 
     // Body
@@ -2620,10 +3460,15 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         }
     }
 
-    // Update
+    // Update — use native path for typed increment/assignment
     jm_emit_label(mt, l_update);
     if (for_node->update) {
-        jm_transpile_box_item(mt, for_node->update);
+        TypeId upd_type = jm_get_effective_type(mt, for_node->update);
+        if (jm_is_native_type(upd_type)) {
+            jm_transpile_expression(mt, for_node->update);
+        } else {
+            jm_transpile_box_item(mt, for_node->update);
+        }
     }
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
@@ -3659,9 +4504,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                         JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
                         if (var) {
+                            // Box native-typed variables before storing in env
+                            MIR_reg_t value_to_store = var->reg;
+                            if (jm_is_native_type(var->type_id)) {
+                                value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                            }
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
-                                MIR_new_reg_op(mt->ctx, var->reg)));
+                                MIR_new_reg_op(mt->ctx, value_to_store)));
                         } else {
                             log_error("js-mir: captured var '%s' not found for fn decl '%.*s'",
                                 fc->captures[ci].name, (int)fn->name->len, fn->name->chars);

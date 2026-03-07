@@ -41,18 +41,3 @@ Run and analyze the CSS 2.1 conformance test suite for the Radiant layout engine
 ## Current Baseline (r8/r9, March 2026)
 
 - **Total: 9888 | Pass: 8811 | Fail: 1077 | Rate: 89.1%**
-
-### Top Failure Categories (r8)
-
-| # | Category | Fail | Total | Pass% | Root Cause |
-|---|----------|------|-------|-------|------------|
-| 1 | c-tests | 113 | 262 | 56.9% | Mixed: inline box model (~31), float (~23), font metrics (~13), vertical-align (5) |
-| 2 | table-anonymous | 73 | 230 | 68.3% | Anonymous box generation edge cases (CSS 2.1 §17.2.1) |
-| 3 | bidi | 56 | 113 | 50.4% | Incomplete bidi reordering implementation |
-| 4 | first-letter-punct | 53 | 411 | 87.1% | Punctuation inclusion in ::first-letter selection |
-| 5 | block-in-inline | 52 | 131 | 60.3% | Inline splitting around block children (CSS 2.1 §9.2.1.1) |
-| 6 | first-letter-punct-before | 33 | 33 | 0.0% | Text nodes empty in output (text emission bug) |
-| 7 | direction-bidi | 28 | 28 | 0.0% | Fundamental: RTL text measurement, line box width, vertical offset |
-| 8 | run-in | 28 | 141 | 80.1% | Run-in box edge cases |
-| 9 | text-transform | 24 | 54 | 55.6% | Bicameral text-transform (locale-aware casing) |
-| 10 | floats | 22 | 86 | 74.4% | Float wrapping, clearance, shrink-to-fit edge cases |
