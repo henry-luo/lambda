@@ -1,0 +1,15 @@
+shr(len,1)=4
+shr(256,len)=64
+shr(len8,len2)=2
+shl(len,2)=32
+shl(1,len)=256
+band(len,3)=0
+band(15,len)=8
+bor(len,3)=11
+bor(5,len)=13
+bxor(len,15)=7
+bxor(255,len)=247
+bnot(len)=-9
+b64_blocks=3
+idx_lo=0
+idx_hi=1
