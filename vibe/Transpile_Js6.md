@@ -26,7 +26,7 @@ v6:    Type inference + native code generation         (this proposal)
 
 Close the performance gap between LambdaJS and Lambda MIR Direct on compute-intensive benchmarks from the current **10–100x** to **2–5x**, making LambdaJS competitive with QuickJS and approaching Node.js performance on numeric-heavy code.
 
-**Status**: Phases 1–4 complete (including TCO). LambdaJS achieves **11–52x speedup** on iterative numeric benchmarks, is **competitive with V8** on recursive Fibonacci (`rfib(40)` ~530ms vs V8 ~660ms), and **faster than V8** on tail-recursive functions (`tak`, `ack`). TCO enables `ack(3,12)` to complete where V8 stack-overflows.
+**Status**: Phases 1–5 complete (including TCO). LambdaJS achieves **11–52x speedup** on iterative numeric benchmarks, is **competitive with V8** on recursive Fibonacci (`rfib(40)` ~530ms vs V8 ~660ms), **faster than V8** on tail-recursive functions (`tak`, `ack`), and **1.6x faster than V8** on Math-heavy workloads (compile-time Math method resolution). TCO enables `ack(3,12)` to complete where V8 stack-overflows.
 
 ---
 
@@ -93,7 +93,7 @@ MIR:       MIR_ADD(a_native, b_native)    // single native instruction
 | **Parameter type inference** | Phase 2: scans body to infer param types from usage | ✅ `jm_infer_param_types()` AST evidence walker (Phase 4) |
 | **Dual native+boxed functions** | Phase 4: `_n` native + `_b` boxed wrapper | ✅ Native `_n` + boxed wrapper generation (Phase 4) |
 | **Native return types** | Phase 4: infers and uses native return type | ✅ `jm_infer_return_type()` (Phase 4) |
-| **Tail-call optimization** | Full TCO with loop transformation | ⬜ Not yet implemented |
+| **Tail-call optimization** | Full TCO with loop transformation | ✅ TCO with loop transformation (Phase 4b) |
 | **Inline array access** | Phase 4: direct memory load for known-type arrays | ⬜ Not yet implemented |
 | **Boolean specialization** | Phase 4: inline bool comparisons, native bool ops | ✅ Semi-native comparisons via `jm_transpile_as_native()` (Phase 3) |
 | **Speculative fast paths** | Phase 4: INT fast path for untyped arithmetic | ⬜ Not yet implemented |
@@ -737,7 +737,7 @@ If the speculative fast path's assumption fails (e.g., a variable that was INT b
 | **P6** | 4 | Dual function versions | 2–3x (recursive) | (incl. in P5) | 5 days | ✅ Done |
 | **P7** | 5 | Compile-time method resolution | 1.5–2x (method-heavy) | 1.6x on Math-heavy | 2 days | ✅ Done |
 | **P8** | 4 | TCO for recursive functions | 2–5x (tail-recursive) | ∞ (ack(3,12) V8 crashes) | 1 day | ✅ Done |
-| **P9** | 5 | TypedArray direct access | 2–3x (array-heavy) | — | 3 days | ⬜ Not started |
+| **P9** | 5 | TypedArray direct access | 2–3x (array-heavy) | 2.2x vs V8 (overhead-heavy) | 3 days | ✅ Done |
 | **P10** | 4 | Speculative INT fast path | 1.5–2x (untyped code) | — | 3 days | ⬜ Not started |
 
 **Total estimated effort**: ~31 days (~16 days completed for P1–P6, P8)
@@ -856,7 +856,7 @@ Each phase should be gated behind a flag during development:
 #define JS_ENABLE_NATIVE_ARITH      1   // Phase 2 ✅
 #define JS_ENABLE_LOOP_SPEC         1   // Phase 3 ✅
 #define JS_ENABLE_FUNC_OPT          1   // Phase 4 ✅
-#define JS_ENABLE_PROP_OPT          1   // Phase 5
+#define JS_ENABLE_PROP_OPT          1   // Phase 5 ✅
 #define JS_ENABLE_SPECULATIVE       1   // Speculative paths
 ```
 
@@ -928,7 +928,7 @@ All benchmarks use `for (let i = 0; i < n; i++)` style loops with native-typed l
 
 ### 9.4 Test Suite
 
-33/33 tests pass. Zero regressions. (`dom_basic` previously failing is now fixed.)
+34/34 tests pass. Zero regressions. (`dom_basic` previously failing is now fixed. `tco` test added for Phase 4b.)
 
 ### 9.5 Phase 3 Detailed Tuning Analysis
 
@@ -1056,7 +1056,7 @@ After Phase 4, the **solved** and **remaining** performance gaps are:
 |-----------|:------:|-------------------|------------|
 | **Function parameters stay boxed** — `fib(n)` receives `n` as a boxed Item; every operation on `n` must unbox it | ✅ Solved | rfib (5.2x speedup) | Phase 4 (P5): parameter type inference, native `_n` functions receive native `MIR_T_I64`/`MIR_T_D` params |
 | **Recursive call overhead** — each `fib(n-1)` boxes the argument, calls the boxed function ABI, unboxes inside | ✅ Solved | rfib | Phase 4 (P6): dual function versions — native `_n` calls native `_n` directly, no boxing round-trip |
-| **No tail-call optimization** — deep recursion uses stack frames instead of loop transformation | ⬜ Remaining | tak, cpstak, ack | P8: TCO |
+| **No tail-call optimization** — deep recursion uses stack frames instead of loop transformation | ✅ Solved | tak, cpstak, ack | P8: TCO (Phase 4b) |
 | **Property access dispatches through runtime** — `arr[i]`, `obj.x` always call `js_property_access()` | ⬜ Remaining | nqueens, brainfuck, nbody | Phase 5 (P9: TypedArray direct access) |
 | **Math methods dispatch through runtime** — `Math.sqrt(x)` does string lookup + property access + invoke | ✅ Resolved | mandelbrot, fft, nbody | Phase 5 (P7: compile-time method resolution) |
 
@@ -1360,6 +1360,115 @@ The Math benchmark performs 10M iterations each of `Math.sqrt`, `Math.abs`, `Mat
 #### 9.9.6 Test Coverage
 
 All 34/34 JavaScript tests pass. No regressions. The `test_math_object` test covers all major Math methods (abs, floor, ceil, round, sqrt, pow, min, max, sign, trunc, PI).
+
+---
+
+### 9.10 Phase 9: TypedArray Direct Memory Access
+
+#### 9.10.1 Overview
+
+P9 eliminates runtime dispatch for TypedArray element access. Instead of calling `js_property_access()` (which must check the object type, extract the typed array, compute bounds, load/store the element, and box the result), the transpiler emits inline MIR instructions that directly compute the element address and perform the memory load/store.
+
+**Supported types**: Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array.
+
+#### 9.10.2 Memory Layout (Verified by Compilation)
+
+```
+Container (Map):
+  offset  0: TypeId type_id
+  offset  8: void*  type
+  offset 16: void*  data → JsTypedArray*
+
+JsTypedArray:
+  offset  0: int element_type (JsTypedArrayType enum)
+  offset  4: int length
+  offset  8: int capacity
+  offset 16: void* data → raw element buffer
+```
+
+Element address: `ta->data + idx * elem_size`
+
+#### 9.10.3 Inline MIR Code Generation
+
+**Element GET** (`arr[i]` → boxed Item):
+```
+ta_ptr = MOV [arr_reg + 16]          // Map.data → JsTypedArray*
+data   = MOV [ta_ptr + 16]           // ta->data → raw buffer
+length = MOV [ta_ptr + 4]            // ta->length (for bounds check)
+BF bounds_fail, (idx >= length)      // bounds check → returns null
+offset = MUL idx, elem_size
+addr   = ADD data, offset
+raw    = MOV/FMOV [addr]             // load with correct width
+result = box_int/box_float(raw)      // box for return
+```
+
+**Element GET native** (`arr[i]` in native arithmetic context):
+Same as above but skips boxing — returns raw `MIR_T_I64` or `MIR_T_D` register directly. Used when the result feeds into a native binary operation (e.g., `sum + arr[i]`).
+
+**Element SET** (`arr[i] = val`):
+```
+ta_ptr = MOV [arr_reg + 16]
+data   = MOV [ta_ptr + 16]
+length = MOV [ta_ptr + 4]
+BF bounds_fail, (idx >= length)
+offset = MUL idx, elem_size
+addr   = ADD data, offset
+raw    = unbox(val)                  // unbox to native int/float
+MOV/FMOV [addr], raw                // store with correct width
+```
+
+**Length** (`arr.length`):
+```
+ta_ptr = MOV [arr_reg + 16]
+length = MOV [ta_ptr + 4]            // direct i32 load → box as int
+```
+
+#### 9.10.4 Variable Type Tracking
+
+TypedArray variables are tracked via `JsMirVarEntry.typed_array_type`:
+- Set to `JS_TYPED_INT32`, `JS_TYPED_FLOAT64`, etc. during `jm_transpile_var_decl` when `new TypedArray(n)` is detected
+- `-1` for non-typed-array variables
+- `jm_get_typed_array_var()` checks if a member expression's object is a known typed array
+
+#### 9.10.5 INT→FLOAT Variable Widening Pre-Scan
+
+**Problem**: `var sum = 0` creates a native INT variable. Accumulating Float64Array elements (`sum = sum + arr[i]`) would truncate to integer without widening.
+
+**Solution**: Before transpiling a function body, `jm_prescan_float_widening()` analyzes the AST:
+1. Identifies all Float32Array/Float64Array variable declarations
+2. Walks assignment expressions to detect INT variables assigned expressions involving float typed array elements
+3. Marks those variables for FLOAT widening in `mt->widen_to_float`
+
+During `jm_transpile_var_decl`, if a variable is in the widening set, its initial type is promoted from INT to FLOAT. The variable uses a `MIR_T_D` register from the start, avoiding loop-scoped type conflicts.
+
+#### 9.10.6 Type Inference Integration
+
+`jm_get_effective_type()` returns:
+- `LMD_TYPE_INT` for integer typed array elements (Int8/Uint8/Int16/Uint16/Int32/Uint32)
+- `LMD_TYPE_FLOAT` for float typed array elements (Float32/Float64)
+- `LMD_TYPE_INT` for `.length` property
+
+`jm_transpile_as_native()` has a MEMBER_EXPRESSION path that calls `jm_transpile_typed_array_get_native()` directly, bypassing boxing for native arithmetic.
+
+#### 9.10.7 Box Item Type Fix
+
+**Bug found**: `jm_transpile_box_item()` for ASSIGNMENT_EXPRESSION used `jm_get_effective_type()` to determine the expression's type for boxing. When assigning `sum + arr[i]` (FLOAT result) to an INT variable `sum`, the effective type was FLOAT but the assignment path returned the variable's INT register. Boxing with FLOAT type on an INT register caused MIR type mismatch: `Got 'int', expected 'double'` for `push_d`.
+
+**Fix**: Use the variable's actual `type_id` (from `avar->type_id`) instead of the expression type for boxing, since `jm_transpile_assignment` returns the variable's register which has the variable's MIR type.
+
+#### 9.10.8 Benchmark Results
+
+| Benchmark | Lambda (release) | Node.js v22 | Ratio |
+|-----------|-----------------|-------------|-------|
+| Int32Sum + Float64Sum (10M, ×3 each) | 0.29s | 0.13s | 2.2× |
+
+Lambda includes MIR JIT compilation overhead (single-shot). For sustained hot loops, the gap narrows since the generated machine code is similar (direct memory loads).
+
+#### 9.10.9 Test Coverage
+
+- **Unit tests**: `test/js/typed_arrays.js` — covers Uint8Array, Int32Array, Float64Array read/write/length
+- **Benchmark tests**: `temp/bench_typed_array.js` — Int32Sum (10M), Float64Sum (10M), Int32SwapSort (10M)
+- **Full suite**: 34/34 tests pass, no regressions
 
 ---
 
