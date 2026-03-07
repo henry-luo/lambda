@@ -1052,13 +1052,24 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         JsBinaryNode* bin = (JsBinaryNode*)expr;
         TypeId lt = jm_get_effective_type(mt, bin->left);
         TypeId rt = jm_get_effective_type(mt, bin->right);
-        bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
-                            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        bool both_numeric = left_num && right_num;
         // Determine if the native path is actually taken
         bool native_binary = both_numeric &&
             bin->op != JS_OP_EXP && bin->op != JS_OP_AND && bin->op != JS_OP_OR;
         if (native_binary && bin->op == JS_OP_MOD) {
             native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
+        }
+        // Semi-native comparisons: at least one side typed numeric
+        if (!native_binary && (left_num || right_num)) {
+            switch (bin->op) {
+            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+                native_binary = true;
+                break;
+            default: break;
+            }
         }
         MIR_reg_t result = jm_transpile_expression(mt, expr);
         if (native_binary) {
@@ -1784,6 +1795,38 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         }
         default:
             break;  // fall through to boxed runtime path
+        }
+    }
+
+    // --- Semi-native comparison path ---
+    // When at least one operand is typed numeric, we can unbox the other side
+    // and emit a native comparison. This avoids boxing the typed side + 2 runtime calls.
+    bool any_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) ||
+                       (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+    if (!both_numeric && any_numeric) {
+        bool use_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT);
+        TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+        MIR_insn_code_t cmp_insn = (MIR_insn_code_t)0;
+
+        switch (bin->op) {
+        case JS_OP_LT:        cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
+        case JS_OP_LE:        cmp_insn = use_float ? MIR_DLE : MIR_LES; break;
+        case JS_OP_GT:        cmp_insn = use_float ? MIR_DGT : MIR_GTS; break;
+        case JS_OP_GE:        cmp_insn = use_float ? MIR_DGE : MIR_GES; break;
+        case JS_OP_EQ:
+        case JS_OP_STRICT_EQ: cmp_insn = use_float ? MIR_DEQ : MIR_EQ;  break;
+        case JS_OP_NE:
+        case JS_OP_STRICT_NE: cmp_insn = use_float ? MIR_DNE : MIR_NE;  break;
+        default: break;
+        }
+
+        if (cmp_insn) {
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            MIR_reg_t r = jm_new_reg(mt, "scmp", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, cmp_insn,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+            return r;
         }
     }
 
@@ -3008,8 +3051,9 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         JsBinaryNode* bin = (JsBinaryNode*)item;
         TypeId lt = jm_get_effective_type(mt, bin->left);
         TypeId rt = jm_get_effective_type(mt, bin->right);
-        bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
-                            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        bool both_numeric = left_num && right_num;
         // Native path is only taken if both_numeric AND the op is handled natively
         // (EXP, AND, OR, float MOD fall through to boxed runtime)
         bool native_binary = both_numeric &&
@@ -3017,6 +3061,16 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         if (native_binary && bin->op == JS_OP_MOD) {
             // Float modulo falls through to boxed
             native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
+        }
+        // Semi-native: comparisons with at least one typed numeric operand
+        if (!native_binary && (left_num || right_num)) {
+            switch (bin->op) {
+            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+                native_binary = true;
+                break;
+            default: break;
+            }
         }
         TypeId etype = jm_get_effective_type(mt, item);
         MIR_reg_t result = jm_transpile_expression(mt, item);
@@ -3330,15 +3384,39 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
 }
 
 static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
-    MIR_reg_t test = jm_transpile_box_item(mt, if_node->test);
-    MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+    // Determine if we can use native comparison for the test
+    bool native_test = false;
+    if (if_node->test && if_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* test_bin = (JsBinaryNode*)if_node->test;
+        TypeId lt = jm_get_effective_type(mt, test_bin->left);
+        TypeId rt = jm_get_effective_type(mt, test_bin->right);
+        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        if (left_num || right_num) {
+            switch (test_bin->op) {
+            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+                native_test = true; break;
+            default: break;
+            }
+        }
+        if (left_num && right_num) native_test = true;
+    }
+
+    MIR_reg_t test_val;
+    if (native_test) {
+        test_val = jm_transpile_expression(mt, if_node->test);
+    } else {
+        MIR_reg_t test = jm_transpile_box_item(mt, if_node->test);
+        test_val = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+    }
 
     MIR_label_t l_else = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_else),
-        MIR_new_reg_op(mt->ctx, truthy)));
+        MIR_new_reg_op(mt->ctx, test_val)));
 
     // Consequent
     if (if_node->consequent) {
@@ -3378,11 +3456,39 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     }
 
     jm_emit_label(mt, l_test);
-    MIR_reg_t test = jm_transpile_box_item(mt, wh->test);
-    MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-        MIR_new_reg_op(mt->ctx, truthy)));
+
+    // Determine if we can use native comparison for the test
+    bool native_test = false;
+    if (wh->test && wh->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* test_bin = (JsBinaryNode*)wh->test;
+        TypeId lt = jm_get_effective_type(mt, test_bin->left);
+        TypeId rt = jm_get_effective_type(mt, test_bin->right);
+        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        // Native test when at least one side is typed numeric (comparisons)
+        if (left_num || right_num) {
+            switch (test_bin->op) {
+            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+                native_test = true; break;
+            default: break;
+            }
+        }
+        // Also native for all operations when both sides typed
+        if (left_num && right_num) native_test = true;
+    }
+
+    if (native_test) {
+        MIR_reg_t test = jm_transpile_expression(mt, wh->test);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+            MIR_new_reg_op(mt->ctx, test)));
+    } else {
+        MIR_reg_t test = jm_transpile_box_item(mt, wh->test);
+        MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+            MIR_new_reg_op(mt->ctx, truthy)));
+    }
 
     // Body
     if (wh->body) {
@@ -3409,6 +3515,81 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         jm_transpile_statement(mt, for_node->init);
     }
 
+    // --- For-loop specialization: detect and cache loop bound ---
+    // Three tiers of test optimization:
+    //   1. full_native:  both sides typed numeric → native compare + branch (existing)
+    //   2. semi_native:  one side typed, other untyped but identifier/literal →
+    //                    cache bound before loop, native compare each iteration (new)
+    //   3. boxed:        no type info → boxed runtime comparison (fallback)
+    bool semi_native_test = false;
+    MIR_reg_t cached_bound = 0;
+    MIR_insn_code_t cached_cmp_insn = MIR_LTS;
+    bool cached_bound_on_right = true;
+    JsAstNode* cached_counter_node = NULL;
+    TypeId cached_cmp_target = LMD_TYPE_INT;
+
+    if (for_node->test && for_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
+        TypeId lt = jm_get_effective_type(mt, test_bin->left);
+        TypeId rt = jm_get_effective_type(mt, test_bin->right);
+        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        bool full_native = left_num && right_num;
+
+        // Only consider semi-native when one side is typed, other isn't
+        if (!full_native && (left_num || right_num)) {
+            bool is_cmp = false;
+            switch (test_bin->op) {
+            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+                is_cmp = true; break;
+            default: break;
+            }
+
+            if (is_cmp) {
+                JsAstNode* bound_expr;
+                TypeId bound_type;
+                bool use_float;
+
+                if (left_num) {
+                    // Pattern: typed_counter CMP untyped_bound  (e.g. i < n)
+                    cached_counter_node = test_bin->left;
+                    bound_expr = test_bin->right;
+                    bound_type = rt;
+                    use_float = (lt == LMD_TYPE_FLOAT);
+                    cached_bound_on_right = true;
+                } else {
+                    // Pattern: untyped_bound CMP typed_counter  (e.g. 0 <= i)
+                    cached_counter_node = test_bin->right;
+                    bound_expr = test_bin->left;
+                    bound_type = lt;
+                    use_float = (rt == LMD_TYPE_FLOAT);
+                    cached_bound_on_right = false;
+                }
+
+                cached_cmp_target = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+
+                switch (test_bin->op) {
+                case JS_OP_LT:        cached_cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
+                case JS_OP_LE:        cached_cmp_insn = use_float ? MIR_DLE : MIR_LES; break;
+                case JS_OP_GT:        cached_cmp_insn = use_float ? MIR_DGT : MIR_GTS; break;
+                case JS_OP_GE:        cached_cmp_insn = use_float ? MIR_DGE : MIR_GES; break;
+                case JS_OP_EQ:
+                case JS_OP_STRICT_EQ: cached_cmp_insn = use_float ? MIR_DEQ : MIR_EQ;  break;
+                case JS_OP_NE:
+                case JS_OP_STRICT_NE: cached_cmp_insn = use_float ? MIR_DNE : MIR_NE;  break;
+                default: break;
+                }
+
+                // Cache the bound ONCE before the loop.
+                // For identifiers: safe assuming bound is loop-invariant (common for function params).
+                // For other expressions: evaluated once, result cached.
+                cached_bound = jm_transpile_as_native(mt, bound_expr, bound_type, cached_cmp_target);
+                semi_native_test = true;
+            }
+        }
+    }
+
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_update = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -3424,28 +3605,43 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     // Test
     if (for_node->test) {
-        // Only use native branching when the comparison ACTUALLY returns native 0/1.
-        // This means both operands of a binary comparison must be typed numeric.
-        bool native_test = false;
-        if (for_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
-            JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
-            TypeId lt = jm_get_effective_type(mt, test_bin->left);
-            TypeId rt = jm_get_effective_type(mt, test_bin->right);
-            native_test = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
-                          (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-        }
+        if (semi_native_test) {
+            // Semi-native: read counter as native, compare with cached bound
+            TypeId ct = jm_get_effective_type(mt, cached_counter_node);
+            MIR_reg_t counter_reg = jm_transpile_as_native(mt, cached_counter_node, ct, cached_cmp_target);
 
-        if (native_test) {
-            // Native comparison: result is 0/1, use directly in branch
-            MIR_reg_t test = jm_transpile_expression(mt, for_node->test);
+            MIR_reg_t left_cmp  = cached_bound_on_right ? counter_reg  : cached_bound;
+            MIR_reg_t right_cmp = cached_bound_on_right ? cached_bound : counter_reg;
+
+            MIR_reg_t test_r = jm_new_reg(mt, "fltest", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, cached_cmp_insn,
+                MIR_new_reg_op(mt->ctx, test_r),
+                MIR_new_reg_op(mt->ctx, left_cmp),
+                MIR_new_reg_op(mt->ctx, right_cmp)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-                MIR_new_reg_op(mt->ctx, test)));
+                MIR_new_reg_op(mt->ctx, test_r)));
         } else {
-            MIR_reg_t test = jm_transpile_box_item(mt, for_node->test);
-            MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-                MIR_new_reg_op(mt->ctx, truthy)));
+            // Full-native or boxed path (existing logic)
+            bool native_test = false;
+            if (for_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+                JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
+                TypeId lt = jm_get_effective_type(mt, test_bin->left);
+                TypeId rt = jm_get_effective_type(mt, test_bin->right);
+                native_test = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+                              (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+            }
+
+            if (native_test) {
+                MIR_reg_t test = jm_transpile_expression(mt, for_node->test);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+                    MIR_new_reg_op(mt->ctx, test)));
+            } else {
+                MIR_reg_t test = jm_transpile_box_item(mt, for_node->test);
+                MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+                    MIR_new_reg_op(mt->ctx, truthy)));
+            }
         }
     }
 
