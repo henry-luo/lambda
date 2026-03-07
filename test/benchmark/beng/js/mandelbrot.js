@@ -3,6 +3,7 @@
 
 const N = parseInt(process.argv[2] || "200");
 
+const __t0 = process.hrtime.bigint();
 let checksum = 0;
 for (let y = 0; y < N; y++) {
     let bits = 0, bitNum = 0;
@@ -29,4 +30,6 @@ for (let y = 0; y < N; y++) {
         checksum ^= bits;
     }
 }
+const __t1 = process.hrtime.bigint();
 console.log(checksum);
+process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");

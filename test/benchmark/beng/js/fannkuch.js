@@ -50,4 +50,7 @@ function fannkuch(n) {
     console.log(`Pfannkuchen(${n}) = ${maxFlips}`);
 }
 
+const __t0 = process.hrtime.bigint();
 fannkuch(N);
+const __t1 = process.hrtime.bigint();
+process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
