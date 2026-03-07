@@ -97,12 +97,12 @@
 | brainfuck | interpreter | 168 | 288 | 713 | 916 | 47.5 | 3.54x |
 | matmul | numeric | 331 | 340 | 1.39s | 554 | 15.9 | 20.79x |
 | primes | numeric | 7.5 | 10.1 | 54.4 | 98.1 | 4.5 | 1.68x |
-| base64 | string | 889 | 853 | 0.000 | 188 | 18.0 | 49.42x |
+| base64 | string | 252 | 853 | 0.000 | 188 | 18.0 | 14.0x¹ |
 | levenshtein | string | 8.6 | 13.4 | 42.6 | 56.9 | 4.1 | 2.11x |
 | json_gen | data | 65.4 | 66.6 | 23.6 | 21.5 | 6.7 | 9.72x |
 | collatz | numeric | 306 | 341 | 7.44s | 6.26s | 1.43s | 0.21x |
 
-**Geometric mean MIR/Node.js: 4.29x** — Lambda faster on 1/7 benchmarks
+**Geometric mean MIR/Node.js: 3.57x** — Lambda faster on 1/7 benchmarks
 
 ---
 
@@ -138,9 +138,9 @@
 | R7RS | 0.58x | 7 | 3 | 10 |
 | AWFY | 0.69x | 8 | 6 | 14 |
 | BENG | 0.78x | 7 | 3 | 10 |
-| Kostya | 4.29x | 1 | 6 | 7 |
+| Kostya | 3.57x | 1 | 6 | 7 |
 | Larceny | 1.28x | 5 | 7 | 12 |
-| **Overall** | **1.00x** | **27** | **25** | **53** |
+| **Overall** | **0.97x** | **27** | **25** | **53** |
 
 > Ratio < 1.0 = Lambda MIR is faster. Ratio > 1.0 = Node.js is faster.
 
@@ -152,7 +152,7 @@
 | **Lambda faster** (0.5–1.0x) | 7 | larceny/diviter (0.58x), awfy/storage (0.60x), beng/knucleotide (0.64x), beng/nbody (0.69x), beng/revcomp (0.70x), r7rs/ack (0.83x), r7rs/fft (1.00x) |
 | **Comparable** (1.0–2.0x) | 7 | awfy/mandelbrot (1.07x), larceny/puzzle (1.13x), r7rs/fib (1.20x), kostya/primes (1.68x), larceny/quicksort (1.77x), larceny/ray (1.89x), beng/binarytrees (1.90x) |
 | **Node faster** (2.0–5.0x) | 6 | kostya/levenshtein (2.11x), r7rs/fibfp (2.34x), larceny/triangl (2.67x), awfy/havlak (3.39x), kostya/brainfuck (3.54x), r7rs/nqueens (4.14x) |
-| **Node >5x faster** (> 5.0x) | 12 | beng/mandelbrot (5.49x), larceny/deriv (5.50x), beng/spectralnorm (5.67x), awfy/deltablue (6.22x), kostya/json_gen (9.72x), larceny/pnpoly (9.95x), awfy/nbody (11.84x), awfy/cd (12.03x), awfy/richards (12.59x), larceny/gcbench (19.19x), kostya/matmul (20.79x), kostya/base64 (49.42x) |
+| **Node >5x faster** (> 5.0x) | 12 | beng/mandelbrot (5.49x), larceny/deriv (5.50x), beng/spectralnorm (5.67x), awfy/deltablue (6.22x), kostya/json_gen (9.72x), larceny/pnpoly (9.95x), awfy/nbody (11.84x), awfy/cd (12.03x), awfy/richards (12.59x), kostya/base64 (14.0x), larceny/gcbench (19.19x), kostya/matmul (20.79x) |
 
 ---
 
@@ -160,7 +160,7 @@
 
 ### 1. Overall: Lambda MIR is on par with Node.js V8
 
-Across 53 benchmarks, the geometric mean ratio is **1.00x**, meaning Lambda MIR Direct
+Across 53 benchmarks, the geometric mean ratio is **0.97x**, meaning Lambda MIR Direct
 is essentially on par with Node.js V8. Lambda wins 27/53 benchmarks outright.
 
 ### 2. Strengths: Micro-benchmarks and numeric code
@@ -176,8 +176,8 @@ Lambda MIR excels on small, tight computational benchmarks:
 Node.js V8's optimizing JIT (TurboFan) significantly outperforms Lambda on:
 - **Class-heavy benchmarks**: richards (12.6x), cd (12.0x), deltablue (6.2x) — V8's hidden
   classes and inline caches optimize property access patterns that Lambda handles generically.
-- **Heavy allocation/GC**: gcbench (19.2x), base64 (49.4x), matmul (20.8x) — V8's
-  generational GC and optimized array handling give it a large advantage.
+- **Heavy allocation/GC**: gcbench (19.2x), matmul (20.8x), base64 (14.0x¹) — V8's
+  generational GC and optimized string/array handling give it a large advantage.
 - **Havlak (3.4x)**: Complex graph algorithm with heavy object allocation.
 
 ### 4. QuickJS comparison
@@ -205,3 +205,6 @@ while MIR Direct has lower startup overhead. Both paths are competitive with Nod
 - **QuickJS** failed on ack (R7RS) due to stack overflow on deep recursion.
 - **BENG** (Benchmarks Game) JS scripts with `fs.readFileSync` (knucleotide, regexredux, revcomp) fail on QuickJS/LambdaJS (no `fs` module). Timing excludes file I/O.
 - All times in **milliseconds** unless noted with 's' suffix (seconds).
+
+**¹ base64 optimization:** Reduced from 889ms (49.4x) to 252ms (14.0x) — a **3.5x speedup** —
+by batching string concatenations. The original code performed 4 separate `result = result ++ TABLE[...]` appends per 3-byte group in the encoding loop, each creating an intermediate copy of the growing result string. The optimized version groups the 4 table lookups into a single expression: `result = result ++ (TABLE[a] ++ TABLE[b] ++ TABLE[c] ++ TABLE[d])`, which first builds a small 4-character string from the lookups, then appends it to `result` in one operation. This reduces the number of intermediate string allocations and copies from O(4n) to O(n), where n is the number of 3-byte groups in the input.
