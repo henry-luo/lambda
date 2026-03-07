@@ -422,6 +422,10 @@ TEST(JavaScriptTests, test_sort_destr_methods) {
     test_js_script_against_file("test/js/sort_destr_methods.js", "test/js/sort_destr_methods.txt");
 }
 
+TEST(JavaScriptTests, test_tco) {
+    test_js_script_against_file("test/js/tco.js", "test/js/tco.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
