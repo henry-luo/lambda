@@ -1292,6 +1292,26 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             continue;
         }
 
+        // ::first-letter pseudo-element: unwrap the wrapper, output its text children directly
+        // Browsers don't expose ::first-letter as a DOM node in the view tree, so we flatten
+        // its children (text nodes) into the parent to match browser reference output.
+        if (tag && strcmp(tag, "::first-letter") == 0) {
+            log_debug("JSON: Unwrapping ::first-letter pseudo-element, outputting children directly");
+            View* fl_child = ((ViewElement*)child)->first_child;
+            while (fl_child) {
+                if (fl_child->view_type == RDT_VIEW_TEXT) {
+                    if (!*first_child) { strbuf_append_str(buf, ",\n"); }
+                    *first_child = false;
+                    View* last_text = print_combined_text_json((ViewText*)fl_child, buf, indent);
+                    fl_child = last_text->next_sibling;
+                } else {
+                    fl_child = fl_child->next_sibling;
+                }
+            }
+            child = child->next();
+            continue;
+        }
+
         // Skip HTML comments - they don't participate in layout
         if (tag && (strcmp(tag, "#comment") == 0 || strcmp(tag, "!--") == 0)) {
             log_debug("JSON: Skipping HTML comment node");
