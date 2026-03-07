@@ -623,7 +623,8 @@ void line_break(LayoutContext* lycon) {
                 if (elem->content_height > 0) {
                     // Marked as collapsed inline — apply its stored line-height
                     v->height = (int)elem->content_height;
-                    elem->content_height = 0;  // clear the marker
+                    // Keep content_height so view_vertical_align can restore after
+                    // compute_span_bounding_box resets height to 0
                     log_debug("fixup collapsed inline span %s height=%d", elem->node_name(), v->height);
                 }
             }
@@ -1054,6 +1055,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             line_break(lycon);
             if (*str) {
+                // CSS 2.1 §16.6.1: When collapsing spaces (pre-line), skip leading
+                // spaces at the start of the new line after a preserved newline.
+                if (collapse_spaces) {
+                    while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'))) {
+                        str++;
+                    }
+                    if (!*str) return;
+                }
                 is_word_start = true;  // Reset word boundary after line break
                 goto LAYOUT_TEXT;
             }
