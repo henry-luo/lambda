@@ -882,6 +882,12 @@ static MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_i
 // Forward declarations
 static JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 static JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
+// Phase 5 forward declarations
+static String* jm_get_math_method(JsCallNode* call);
+static TypeId jm_math_return_type(String* method, JsMirTranspiler* mt, JsAstNode* arg0);
+static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
+                                            String* method, TypeId target_type);
+static MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* method);
 
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
@@ -1023,6 +1029,9 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         JsCallNode* call = (JsCallNode*)node;
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
         if (fc) return fc->return_type;
+        // Phase 5: If callee is Math.xxx(), resolve return type at compile time
+        String* math_method = jm_get_math_method(call);
+        if (math_method) return jm_math_return_type(math_method, mt, call->arguments);
         return LMD_TYPE_ANY;
     }
 
@@ -1200,6 +1209,13 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // Phase 4: Call expressions — if native call, result is already native
     if (expr && expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
         JsCallNode* call = (JsCallNode*)expr;
+
+        // Phase 5: Math.xxx() calls — use native C math when arg types known
+        String* math_method = jm_get_math_method(call);
+        if (math_method) {
+            return jm_transpile_math_native(mt, call, math_method, target_type);
+        }
+
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
         if (fc) {
             // jm_transpile_expression → jm_transpile_call → native call → native result
@@ -2828,6 +2844,482 @@ static bool jm_is_math_call(JsCallNode* call) {
     return obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Math", 4) == 0;
 }
 
+// ============================================================================
+// Phase 5: Compile-time Math method resolution
+// ============================================================================
+// Instead of boxing method name string + building args array + calling js_math_method
+// (which does sequential strncmp), resolve the method at compile time and call the
+// specific Lambda function directly. Eliminates string boxing, args array allocation,
+// and runtime string matching per call.
+
+// Check if name matches a known string (helper macro for readability)
+#define MATH_MATCH(s, slen) (ml == (slen) && strncmp(m, (s), (slen)) == 0)
+
+// Compile-time Math method resolution for boxed path.
+// Returns boxed Item result.
+static MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* method) {
+    int argc = jm_count_args(call->arguments);
+    const char* m = method->chars;
+    int ml = (int)method->len;
+
+    // Transpile first argument and convert to number
+    JsAstNode* arg0 = call->arguments;
+    JsAstNode* arg1 = arg0 ? arg0->next : NULL;
+
+    // --- 1-argument Math functions ---
+    if (argc >= 1) {
+        // Math.abs(x) → fn_abs(js_to_number(x))
+        if (MATH_MATCH("abs", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_abs", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.floor(x) → fn_floor(js_to_number(x))
+        if (MATH_MATCH("floor", 5)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_floor", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.ceil(x) → fn_ceil(js_to_number(x))
+        if (MATH_MATCH("ceil", 4)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_ceil", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.round(x) → fn_round(js_to_number(x))
+        if (MATH_MATCH("round", 5)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_round", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.sqrt(x) → fn_math_sqrt(js_to_number(x))
+        if (MATH_MATCH("sqrt", 4)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_sqrt", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.log(x) → fn_math_log(js_to_number(x))
+        if (MATH_MATCH("log", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_log", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.log10(x) → fn_math_log10(js_to_number(x))
+        if (MATH_MATCH("log10", 5)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_log10", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.exp(x) → fn_math_exp(js_to_number(x))
+        if (MATH_MATCH("exp", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_exp", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.sin(x) → fn_math_sin(js_to_number(x))
+        if (MATH_MATCH("sin", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_sin", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.cos(x) → fn_math_cos(js_to_number(x))
+        if (MATH_MATCH("cos", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_cos", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.tan(x) → fn_math_tan(js_to_number(x))
+        if (MATH_MATCH("tan", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_math_tan", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.sign(x) → fn_sign(js_to_number(x))
+        if (MATH_MATCH("sign", 4)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_sign", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+        // Math.trunc(x) → fn_int(js_to_number(x))
+        if (MATH_MATCH("trunc", 5)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            return jm_call_1(mt, "fn_int", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
+        }
+    }
+
+    // --- 2-argument Math functions ---
+    if (argc >= 2 && arg1) {
+        // Math.pow(x, y) → fn_pow(js_to_number(x), js_to_number(y))
+        if (MATH_MATCH("pow", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t b = jm_transpile_box_item(mt, arg1);
+            MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            MIR_reg_t nb = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, b));
+            return jm_call_2(mt, "fn_pow", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, na),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, nb));
+        }
+        // Math.min(x, y) → fn_min2(js_to_number(x), js_to_number(y))
+        if (MATH_MATCH("min", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            MIR_reg_t result = na;
+            JsAstNode* arg = arg1;
+            while (arg) {
+                MIR_reg_t b = jm_transpile_box_item(mt, arg);
+                MIR_reg_t nb = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, b));
+                result = jm_call_2(mt, "fn_min2", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, nb));
+                arg = arg->next;
+            }
+            return result;
+        }
+        // Math.max(x, y) → fn_max2(js_to_number(x), js_to_number(y))
+        if (MATH_MATCH("max", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            MIR_reg_t result = na;
+            JsAstNode* arg = arg1;
+            while (arg) {
+                MIR_reg_t b = jm_transpile_box_item(mt, arg);
+                MIR_reg_t nb = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, b));
+                result = jm_call_2(mt, "fn_max2", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, nb));
+                arg = arg->next;
+            }
+            return result;
+        }
+        // Math.atan2(y, x) → fn_math_atan2(js_to_number(y), js_to_number(x))
+        if (MATH_MATCH("atan2", 5)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            MIR_reg_t b = jm_transpile_box_item(mt, arg1);
+            MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+            MIR_reg_t nb = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, b));
+            return jm_call_2(mt, "fn_math_atan2", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, na),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, nb));
+        }
+    }
+
+    // --- 0 or 1-arg special cases ---
+    // Math.min() → Infinity, Math.max() → -Infinity (0 args)
+    if (argc == 0) {
+        if (MATH_MATCH("min", 3)) {
+            MIR_reg_t r = jm_new_reg(mt, "inf", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_double_op(mt->ctx, INFINITY)));
+            return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
+        }
+        if (MATH_MATCH("max", 3)) {
+            MIR_reg_t r = jm_new_reg(mt, "ninf", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_double_op(mt->ctx, -INFINITY)));
+            return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
+        }
+    }
+    // Math.min(x) / Math.max(x) with 1 arg → js_to_number(x)
+    if (argc == 1) {
+        if (MATH_MATCH("min", 3) || MATH_MATCH("max", 3)) {
+            MIR_reg_t a = jm_transpile_box_item(mt, arg0);
+            return jm_call_1(mt, "js_to_number", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
+        }
+    }
+
+    // --- Fallback: unknown Math method → dispatch via js_math_method ---
+    log_debug("phase5: unresolved Math.%.*s, using runtime dispatch", ml, m);
+    MIR_reg_t method_str = jm_box_string_literal(mt, method->chars, method->len);
+    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, argc);
+    return jm_call_3(mt, "js_math_method", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
+        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+}
+
+// Phase 5: Resolve Math method return type at compile time
+static TypeId jm_math_return_type(String* method, JsMirTranspiler* mt, JsAstNode* arg0) {
+    if (!method) return LMD_TYPE_ANY;
+    const char* m = method->chars;
+    int ml = (int)method->len;
+
+    // Always-float methods: sqrt, sin, cos, tan, log, log10, exp, pow, random, atan2
+    if (MATH_MATCH("sqrt", 4) || MATH_MATCH("sin", 3) || MATH_MATCH("cos", 3) ||
+        MATH_MATCH("tan", 3) || MATH_MATCH("log", 3) || MATH_MATCH("log10", 5) ||
+        MATH_MATCH("exp", 3) || MATH_MATCH("pow", 3) || MATH_MATCH("random", 6) ||
+        MATH_MATCH("atan2", 5))
+        return LMD_TYPE_FLOAT;
+
+    // Always-int methods: trunc, sign
+    if (MATH_MATCH("trunc", 5) || MATH_MATCH("sign", 4))
+        return LMD_TYPE_INT;
+
+    // Type-preserving: abs, floor, ceil, round, min, max
+    if (MATH_MATCH("abs", 3)) {
+        if (arg0) {
+            TypeId at = jm_get_effective_type(mt, arg0);
+            if (at == LMD_TYPE_INT) return LMD_TYPE_INT;
+            if (at == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+        }
+        return LMD_TYPE_ANY;
+    }
+    // floor/ceil/round: always return int in Lambda (matches JS Math semantics for integers)
+    if (MATH_MATCH("floor", 5) || MATH_MATCH("ceil", 4) || MATH_MATCH("round", 5))
+        return LMD_TYPE_INT;
+
+    // min/max: preserve type if both args same type
+    if (MATH_MATCH("min", 3) || MATH_MATCH("max", 3)) {
+        if (arg0) {
+            TypeId at = jm_get_effective_type(mt, arg0);
+            if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT) return at;
+        }
+        return LMD_TYPE_ANY;
+    }
+
+    return LMD_TYPE_ANY;
+}
+
+// Phase 5: Native Math for known argument types.
+// When called inside jm_transpile_as_native(), emits native C math function calls
+// bypassing all Item boxing. Returns native-typed register (MIR_T_D or MIR_T_I64).
+static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
+                                            String* method, TypeId target_type) {
+    int argc = jm_count_args(call->arguments);
+    if (argc < 1) {
+        // Math.random() → call push_d(rand()/RAND_MAX) then unbox. Not worth native path.
+        MIR_reg_t boxed = jm_transpile_math_call(mt, call, method);
+        return target_type == LMD_TYPE_FLOAT ? jm_emit_unbox_float(mt, boxed) : jm_emit_unbox_int(mt, boxed);
+    }
+
+    const char* m = method->chars;
+    int ml = (int)method->len;
+    JsAstNode* arg0 = call->arguments;
+    TypeId arg_type = jm_get_effective_type(mt, arg0);
+    bool arg_numeric = (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_FLOAT);
+
+    // For numeric arguments, use native C math functions directly
+    if (arg_numeric) {
+        // 1-arg double→double functions: sqrt, sin, cos, tan, log, log10, exp
+        if (MATH_MATCH("sqrt", 4)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "sqrt", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        if (MATH_MATCH("sin", 3)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "sin", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        if (MATH_MATCH("cos", 3)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "cos", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        if (MATH_MATCH("tan", 3)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "tan", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        if (MATH_MATCH("log", 3)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "log", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        if (MATH_MATCH("log10", 5)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "log10", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        if (MATH_MATCH("exp", 3)) {
+            MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+            MIR_reg_t r = jm_call_1(mt, "exp", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+            if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+            return r;
+        }
+        // Math.abs: int→int, float→float
+        if (MATH_MATCH("abs", 3)) {
+            if (arg_type == LMD_TYPE_INT) {
+                MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
+                MIR_reg_t r = jm_call_1(mt, "fn_abs_i", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, i));
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, r);
+                return r;
+            } else {
+                MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_call_1(mt, "fabs", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+                return r;
+            }
+        }
+        // Math.floor: int→int (identity), float→int via C floor()
+        if (MATH_MATCH("floor", 5)) {
+            if (arg_type == LMD_TYPE_INT) {
+                MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
+                return i;
+            } else {
+                MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t fd = jm_call_1(mt, "floor", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_FLOAT) return fd;
+                return jm_emit_double_to_int(mt, fd);
+            }
+        }
+        // Math.ceil: int→int (identity), float→int via C ceil()
+        if (MATH_MATCH("ceil", 4)) {
+            if (arg_type == LMD_TYPE_INT) {
+                MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
+                return i;
+            } else {
+                MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t cd = jm_call_1(mt, "ceil", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_FLOAT) return cd;
+                return jm_emit_double_to_int(mt, cd);
+            }
+        }
+        // Math.round: int→int (identity), float→int via C round()
+        if (MATH_MATCH("round", 5)) {
+            if (arg_type == LMD_TYPE_INT) {
+                MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
+                return i;
+            } else {
+                MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t rd = jm_call_1(mt, "round", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_FLOAT) return rd;
+                return jm_emit_double_to_int(mt, rd);
+            }
+        }
+        // Math.trunc: int→int (identity), float→int via D2I
+        if (MATH_MATCH("trunc", 5)) {
+            if (arg_type == LMD_TYPE_INT) {
+                MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
+                return i;
+            } else {
+                MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t i = jm_emit_double_to_int(mt, d);
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
+                return i;
+            }
+        }
+        // Math.sign: returns i32, but we need target type
+        if (MATH_MATCH("sign", 4)) {
+            if (arg_type == LMD_TYPE_INT) {
+                MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
+                MIR_reg_t r = jm_call_1(mt, "fn_sign_i", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, i));
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, r);
+                return r;
+            } else {
+                MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_call_1(mt, "fn_sign_f", MIR_T_I64,
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, r);
+                return r;
+            }
+        }
+        // Math.pow(x, y): both args → double, call fn_pow_u
+        if (MATH_MATCH("pow", 3) && argc >= 2) {
+            JsAstNode* arg1_n = arg0->next;
+            TypeId a1t = jm_get_effective_type(mt, arg1_n);
+            if (a1t == LMD_TYPE_INT || a1t == LMD_TYPE_FLOAT) {
+                MIR_reg_t da = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t db = jm_transpile_as_native(mt, arg1_n, a1t, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_call_2(mt, "fn_pow_u", MIR_T_D,
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, da),
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, db));
+                if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+                return r;
+            }
+        }
+        // Math.min/max with 2 args: both → double, call fn_min2_u/fn_max2_u
+        if (MATH_MATCH("min", 3) && argc >= 2) {
+            JsAstNode* arg1_n = arg0->next;
+            TypeId a1t = jm_get_effective_type(mt, arg1_n);
+            if (a1t == LMD_TYPE_INT || a1t == LMD_TYPE_FLOAT) {
+                MIR_reg_t da = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t db = jm_transpile_as_native(mt, arg1_n, a1t, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_call_2(mt, "fn_min2_u", MIR_T_D,
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, da),
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, db));
+                if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+                return r;
+            }
+        }
+        if (MATH_MATCH("max", 3) && argc >= 2) {
+            JsAstNode* arg1_n = arg0->next;
+            TypeId a1t = jm_get_effective_type(mt, arg1_n);
+            if (a1t == LMD_TYPE_INT || a1t == LMD_TYPE_FLOAT) {
+                MIR_reg_t da = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
+                MIR_reg_t db = jm_transpile_as_native(mt, arg1_n, a1t, LMD_TYPE_FLOAT);
+                MIR_reg_t r = jm_call_2(mt, "fn_max2_u", MIR_T_D,
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, da),
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, db));
+                if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
+                return r;
+            }
+        }
+    }
+
+    // Non-numeric args or unhandled method: use boxed path, then unbox
+    MIR_reg_t boxed = jm_transpile_math_call(mt, call, method);
+    return target_type == LMD_TYPE_FLOAT ? jm_emit_unbox_float(mt, boxed) : jm_emit_unbox_int(mt, boxed);
+}
+
+#undef MATH_MATCH
+
+// Helper: check if a CALL_EXPRESSION is a Math.xxx() call and extract the method name
+static String* jm_get_math_method(JsCallNode* call) {
+    if (!jm_is_math_call(call)) return NULL;
+    JsMemberNode* m = (JsMemberNode*)call->callee;
+    if (!m->property || m->property->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+    return prop->name;
+}
+
 static bool jm_is_document_call(JsCallNode* call) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
     JsMemberNode* m = (JsMemberNode*)call->callee;
@@ -2916,16 +3408,11 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    // Math.<method>(args...)
+    // Math.<method>(args...) → Phase 5: compile-time resolution
     if (jm_is_math_call(call)) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-        MIR_reg_t method_str = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
-        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-        return jm_call_3(mt, "js_math_method", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
-            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+        return jm_transpile_math_call(mt, call, prop->name);
     }
 
     // Object.keys(obj) -> js_object_keys(obj)
@@ -2981,7 +3468,32 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
 
-            // Get receiver type
+            // Phase 5: Type-aware method dispatch — when receiver type is known
+            // at compile time, skip the runtime type cascade and call directly.
+            TypeId recv_type = jm_get_effective_type(mt, m->object);
+            if (recv_type == LMD_TYPE_STRING) {
+                return jm_call_4(mt, "js_string_method", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            }
+            if (recv_type == LMD_TYPE_ARRAY) {
+                return jm_call_4(mt, "js_array_method", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            }
+            if (recv_type == LMD_TYPE_INT || recv_type == LMD_TYPE_FLOAT) {
+                return jm_call_4(mt, "js_number_method", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            }
+
+            // Runtime type dispatch cascade (when receiver type unknown)
             MIR_reg_t rtype = jm_call_1(mt, "item_type_id", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
 
@@ -3859,13 +4371,16 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
     case JS_AST_NODE_TEMPLATE_LITERAL:
         return jm_transpile_expression(mt, item);
     case JS_AST_NODE_CALL_EXPRESSION: {
-        // Phase 4: Call may return native if native version is used
-        TypeId etype = jm_get_effective_type(mt, item);
-        MIR_reg_t result = jm_transpile_expression(mt, item);
-        if (jm_is_native_type(etype)) {
-            return jm_box_native(mt, result, etype);
+        // Phase 4: Only native user-defined functions return native registers.
+        // Math calls and other built-in calls return boxed Items.
+        JsCallNode* call_item = (JsCallNode*)item;
+        JsFuncCollected* fc = jm_resolve_native_call(mt, call_item);
+        if (fc) {
+            MIR_reg_t result = jm_transpile_expression(mt, item);
+            return jm_box_native(mt, result, fc->return_type);
         }
-        return result;
+        // Non-native call: always returns boxed Item
+        return jm_transpile_expression(mt, item);
     }
     default:
         break;
