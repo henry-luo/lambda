@@ -31,6 +31,7 @@ function multiplyAtAv(n, v, atav) {
     multiplyAtv(n, u, atav);
 }
 
+const __t0 = process.hrtime.bigint();
 const u = new Float64Array(N).fill(1);
 const v = new Float64Array(N);
 
@@ -45,4 +46,6 @@ for (let i = 0; i < N; i++) {
     vv += v[i] * v[i];
 }
 
+const __t1 = process.hrtime.bigint();
 console.log(Math.sqrt(vbv / vv).toFixed(9));
+process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
