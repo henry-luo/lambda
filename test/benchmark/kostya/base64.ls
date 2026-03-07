@@ -19,25 +19,22 @@ pn b64_encode(bytes, num_bytes) {
         var b0 = bytes[i]
         var b1 = bytes[i + 1]
         var b2 = bytes[i + 2]
-        result = result ++ TABLE[shr(b0, 2)]
-        result = result ++ TABLE[(b0 % 4) * 16 + shr(b1, 4)]
-        result = result ++ TABLE[(b1 % 16) * 4 + shr(b2, 6)]
-        result = result ++ TABLE[b2 % 64]
+        result = result ++ (TABLE[shr(b0, 2)]
+            ++ TABLE[(b0 % 4) * 16 + shr(b1, 4)]
+            ++ TABLE[(b1 % 16) * 4 + shr(b2, 6)] ++ TABLE[b2 % 64])
         i = i + 3
     }
     if (i + 1 == num_bytes) {
         var b0 = bytes[i]
-        result = result ++ TABLE[shr(b0, 2)]
-        result = result ++ TABLE[(b0 % 4) * 16]
-        result = result ++ "=="
+        result = result ++ (TABLE[shr(b0, 2)]
+            ++ TABLE[(b0 % 4) * 16] ++ "==")
     }
     if (i + 2 == num_bytes) {
         var b0 = bytes[i]
         var b1 = bytes[i + 1]
-        result = result ++ TABLE[shr(b0, 2)]
-        result = result ++ TABLE[(b0 % 4) * 16 + shr(b1, 4)]
-        result = result ++ TABLE[(b1 % 16) * 4]
-        result = result ++ "="
+        result = result ++ (TABLE[shr(b0, 2)]
+            ++ TABLE[(b0 % 4) * 16 + shr(b1, 4)]
+            ++ TABLE[(b1 % 16) * 4] ++ "=")
     }
     return result
 }
