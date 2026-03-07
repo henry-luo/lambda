@@ -78,6 +78,8 @@ struct JsFuncCollected {
     int param_count;                // cached param count
     MIR_item_t native_func_item;    // native version (NULL if not generated)
     bool has_native_version;        // whether native version was generated
+    // TCO:
+    bool is_tco_eligible;           // has tail-recursive calls → loop transform
 };
 
 // Class method info for transpiler
@@ -148,6 +150,13 @@ struct JsMirTranspiler {
     // Phase 4: Native function generation state
     bool in_native_func;            // currently transpiling native version?
     JsFuncCollected* current_fc;    // current function being transpiled
+
+    // TCO state
+    JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)
+    MIR_label_t tco_label;          // loop-back label for tail calls
+    MIR_reg_t tco_count_reg;        // iteration counter for overflow guard
+    bool in_tail_position;          // current expression is in tail position
+    bool tco_jumped;                // set when a tail call was converted to goto
 };
 
 // ============================================================================
@@ -1263,6 +1272,52 @@ static JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* 
     }
 
     return fc;
+}
+
+// ============================================================================
+// TCO: Tail-call detection
+// ============================================================================
+
+// Check if a JS call expression is a recursive call to the given function
+static bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc) {
+    if (!call || !call->callee || !fc || !fc->node || !fc->node->name) return false;
+    if (call->callee->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    if (!id->name) return false;
+    // Compare callee name against the original function name (before mangling)
+    String* fn_name = fc->node->name;
+    return (id->name->len == fn_name->len &&
+            memcmp(id->name->chars, fn_name->chars, fn_name->len) == 0);
+}
+
+// Walk JS AST to find if there's at least one tail-recursive call.
+// A tail call is: return f(...) where f is the function itself.
+static bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc) {
+    if (!node || !fc) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        if (ret->argument && ret->argument->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+            if (jm_is_recursive_call((JsCallNode*)ret->argument, fc)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) {
+            if (jm_has_tail_call(s, fc)) return true;
+            s = s->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        return jm_has_tail_call(n->consequent, fc) || jm_has_tail_call(n->alternate, fc);
+    }
+    default:
+        return false;
+    }
 }
 
 // ============================================================================
@@ -3153,6 +3208,80 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     if (pi != fc->param_count) all_args_match = false;
 
                     if (all_args_match) {
+                        // TCO: if this is a tail-recursive call, convert to goto
+                        if (mt->tco_func && mt->in_tail_position &&
+                            jm_is_recursive_call(call, mt->tco_func)) {
+                            log_debug("js-mir TCO: tail call to %s — converting to goto", fc->name);
+
+                            // Clear tail position for arg evaluation (inner calls are NOT tail)
+                            bool saved_tail = mt->in_tail_position;
+                            mt->in_tail_position = false;
+
+                            // Phase 1: Evaluate all arguments into temp registers
+                            MIR_reg_t temps[16];
+                            JsAstNode* arg = call->arguments;
+                            for (int i = 0; i < fc->param_count; i++) {
+                                if (arg) {
+                                    temps[i] = jm_transpile_as_native(mt, arg,
+                                        jm_get_effective_type(mt, arg), fc->param_types[i]);
+                                    arg = arg->next;
+                                } else {
+                                    MIR_type_t mt2 = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                                    temps[i] = jm_new_reg(mt, "tz", mt2);
+                                    if (mt2 == MIR_T_D) {
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                            MIR_new_reg_op(mt->ctx, temps[i]),
+                                            MIR_new_double_op(mt->ctx, 0.0)));
+                                    } else {
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, temps[i]),
+                                            MIR_new_int_op(mt->ctx, 0)));
+                                    }
+                                }
+                            }
+
+                            // Phase 2: Assign temps → parameter registers
+                            JsAstNode* pnode = mt->tco_func->node->params;
+                            for (int i = 0; i < fc->param_count; i++) {
+                                char pname[128];
+                                if (pnode && pnode->node_type == JS_AST_NODE_IDENTIFIER) {
+                                    JsIdentifierNode* pid = (JsIdentifierNode*)pnode;
+                                    snprintf(pname, sizeof(pname), "_js_%.*s",
+                                        (int)pid->name->len, pid->name->chars);
+                                } else {
+                                    snprintf(pname, sizeof(pname), "_js_p%d", i);
+                                }
+                                MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->current_func);
+                                MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                                MIR_insn_code_t mov = (mtype == MIR_T_D) ? MIR_DMOV : MIR_MOV;
+                                jm_emit(mt, MIR_new_insn(mt->ctx, mov,
+                                    MIR_new_reg_op(mt->ctx, preg),
+                                    MIR_new_reg_op(mt->ctx, temps[i])));
+                                pnode = pnode ? pnode->next : NULL;
+                            }
+
+                            mt->in_tail_position = saved_tail;
+
+                            // Jump back to function start
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                                MIR_new_label_op(mt->ctx, mt->tco_label)));
+                            mt->tco_jumped = true;
+
+                            // Return dummy register (unreachable code)
+                            MIR_type_t native_ret = (fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                            MIR_reg_t dummy = jm_new_reg(mt, "tco_d", native_ret);
+                            if (native_ret == MIR_T_D) {
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                    MIR_new_reg_op(mt->ctx, dummy),
+                                    MIR_new_double_op(mt->ctx, 0.0)));
+                            } else {
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_reg_op(mt->ctx, dummy),
+                                    MIR_new_int_op(mt->ctx, 0)));
+                            }
+                            return dummy;
+                        }
+
                         // Native direct call
                         char p_name[160];
                         snprintf(p_name, sizeof(p_name), "%s_n_cp%d", fc->name, mt->label_counter++);
@@ -4727,6 +4856,14 @@ static void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     // Phase 4: In native function, return native value directly
     if (mt->in_native_func && mt->current_fc) {
         TypeId ret_type = mt->current_fc->return_type;
+
+        // TCO: set tail position so recursive calls in the argument can be converted to goto
+        bool saved_tail = mt->in_tail_position;
+        if (mt->tco_func) {
+            mt->in_tail_position = true;
+            mt->tco_jumped = false;
+        }
+
         if (ret->argument) {
             TypeId expr_type = jm_get_effective_type(mt, ret->argument);
             if (jm_is_native_type(expr_type)) {
@@ -4753,6 +4890,15 @@ static void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
                     MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, 0)));
             }
         }
+
+        mt->in_tail_position = saved_tail;
+
+        // If TCO converted the call to a goto, skip the ret — it's dead code
+        if (mt->tco_jumped) {
+            mt->tco_jumped = false;
+            return;
+        }
+
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
         return;
     }
@@ -5095,12 +5241,20 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         int saved_loop_depth = mt->loop_depth;
         bool saved_in_native = mt->in_native_func;
         JsFuncCollected* saved_fc = mt->current_fc;
+        // Save TCO state
+        JsFuncCollected* saved_tco_func = mt->tco_func;
+        MIR_label_t saved_tco_label = mt->tco_label;
+        MIR_reg_t saved_tco_count = mt->tco_count_reg;
+        bool saved_tail_pos = mt->in_tail_position;
 
         mt->current_func_item = native_item;
         mt->current_func = native_func;
         mt->loop_depth = 0;
         mt->in_native_func = true;
         mt->current_fc = fc;
+        mt->tco_func = NULL;
+        mt->in_tail_position = false;
+        mt->tco_jumped = false;
 
         jm_push_scope(mt);
 
@@ -5116,6 +5270,43 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_set_var(mt, vname, preg, mtype, fc->param_types[i]);
             }
             param_node = param_node ? param_node->next : NULL;
+        }
+
+        // TCO setup: wrap body in a loop if this function has tail-recursive calls
+        if (fc->is_tco_eligible) {
+            log_debug("js-mir TCO: enabling loop transform for %s", fc->name);
+            mt->tco_func = fc;
+
+            // Create iteration counter, init to 0
+            mt->tco_count_reg = jm_new_reg(mt, "tco_count", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+                MIR_new_int_op(mt->ctx, 0)));
+
+            // TCO loop label
+            mt->tco_label = jm_new_label(mt);
+            jm_emit_label(mt, mt->tco_label);
+
+            // Increment: tco_count += 1
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+                MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+
+            // Guard: if (tco_count <= 1000000) goto ok
+            MIR_label_t ok_label = jm_new_label(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BLE, MIR_new_label_op(mt->ctx, ok_label),
+                MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+                MIR_new_int_op(mt->ctx, 1000000)));
+
+            // Overflow: return 0 (safety net — should never trigger for correct code)
+            if (native_ret_type == MIR_T_D) {
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
+            } else {
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, 0)));
+            }
+
+            jm_emit_label(mt, ok_label);
         }
 
         // Transpile body (same as original, but params are native-typed)
@@ -5157,10 +5348,16 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->loop_depth = saved_loop_depth;
         mt->in_native_func = saved_in_native;
         mt->current_fc = saved_fc;
+        mt->tco_func = saved_tco_func;
+        mt->tco_label = saved_tco_label;
+        mt->tco_count_reg = saved_tco_count;
+        mt->in_tail_position = saved_tail_pos;
+        mt->tco_jumped = false;
 
-        log_debug("js-mir P4: generated native version %s (params: %d, ret: %s)",
+        log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
             native_name, param_count,
-            fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT");
+            fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT",
+            fc->is_tco_eligible ? ", TCO" : "");
     }
 
     // --- Generate boxed version (original or wrapper) ---
@@ -5448,6 +5645,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             log_debug("js-mir P4: %s eligible for native version (params: %d, ret: %s)",
                 fc->name, fc->param_count,
                 fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT");
+        }
+
+        // TCO eligibility: native-eligible function with at least one tail-recursive call
+        fc->is_tco_eligible = false;
+        if (eligible && jm_has_tail_call(fc->node->body, fc)) {
+            fc->is_tco_eligible = true;
+            log_debug("js-mir TCO: %s eligible for tail-call optimization", fc->name);
         }
     }
 
