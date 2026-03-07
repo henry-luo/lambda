@@ -266,6 +266,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
 
     DomNode* child = first_child;
     bool in_inline_sequence = false;
+    bool had_block_child = false;
 
     while (child) {
         DisplayValue child_display = child->is_element() ?
@@ -280,6 +281,29 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
              is_table_internal_display(child_display.outer));
 
         if (is_block_or_table_internal) {
+            // CSS 2.1 §9.2.1.1: Leading anonymous block strut.
+            // When a block appears as the first content inside an inline with
+            // inline-start border/padding, the leading anonymous block box
+            // contains the span's inline-start edge, creating a line box
+            // of one line-height even though there's no other inline content.
+            if (!had_block_child && !in_inline_sequence && span->bound) {
+                bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
+                float start_border = 0, start_padding = 0;
+                if (span->bound->border) {
+                    start_border = is_rtl ? span->bound->border->width.right
+                                          : span->bound->border->width.left;
+                }
+                start_padding = is_rtl ? (span->bound->padding.right > 0 ? span->bound->padding.right : 0)
+                                       : (span->bound->padding.left > 0 ? span->bound->padding.left : 0);
+                if (start_border > 0 || start_padding > 0) {
+                    float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
+                    lycon->block.advance_y += line_height;
+                    log_debug("block-in-inline: leading anonymous block strut: advance_y += %.1f (inline-start decoration)",
+                              line_height);
+                }
+            }
+            had_block_child = true;
+
             // Found block/table-internal child - end current inline sequence if active
             if (in_inline_sequence) {
                 if (!lycon->line.is_line_start) {
@@ -583,6 +607,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // wrap_orphaned_table_children() during their own layout in layout_block.cpp.
 
         // Handle block-in-inline splitting
+        float pre_split_advance_y = lycon->block.advance_y;
         layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
 
         // Advance past the right border+padding
@@ -594,6 +619,42 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // this full extent, so getBoundingClientRect() matches the browser.
         // Compute vertical union from children, horizontal from the parent block.
         compute_span_bounding_box(span, true, lycon->font.font_handle);  // get vertical bounds from children
+
+        // CSS 2.1 §9.2.1.1: Extend span bounding box upward to cover the leading
+        // anonymous block's strut. When the span has inline-start border/padding,
+        // the leading strut creates a line box before the first block child.
+        // The span's bbox should extend up to include this strut area.
+        {
+            bool has_inline_start = false;
+            if (span->bound) {
+                bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
+                float start_border = 0, start_padding = 0;
+                if (span->bound->border) {
+                    start_border = is_rtl ? span->bound->border->width.right
+                                          : span->bound->border->width.left;
+                }
+                start_padding = is_rtl ? (span->bound->padding.right > 0 ? span->bound->padding.right : 0)
+                                       : (span->bound->padding.left > 0 ? span->bound->padding.left : 0);
+                has_inline_start = (start_border > 0 || start_padding > 0);
+            }
+            if (has_inline_start) {
+                float border_top = 0, pad_top = 0;
+                if (span->bound) {
+                    if (span->bound->border)
+                        border_top = span->bound->border->width.top;
+                    if (span->bound->padding.top > 0)
+                        pad_top = span->bound->padding.top;
+                }
+                float strut_top = pre_split_advance_y - border_top - pad_top;
+                if (strut_top < span->y) {
+                    int old_y = span->y;
+                    span->height += (old_y - (int)strut_top);
+                    span->y = (int)strut_top;
+                    log_debug("block-in-inline: extended span y upward from %d to %d (leading strut)",
+                              old_y, span->y);
+                }
+            }
+        }
 
         // CSS 2.1 §9.2.1.1: Extend span bounding box to cover the trailing anonymous
         // block's strut. Only do this when the span has inline-end decorations that

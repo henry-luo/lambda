@@ -899,15 +899,26 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     }
 
     // Check if this empty cell should have its border/background hidden
-    // CSS 2.1 Section 17.6.1: In separated borders model, empty cells can have
-    // their borders and backgrounds hidden based on empty-cells property
-    if (tcell->td->is_empty && !table->tb->border_collapse &&
-        table->tb->empty_cells == TableProp::EMPTY_CELLS_HIDE) {
-        tcell->td->hide_empty = 1;
-        log_debug("Cell at col=%d row=%d: hide_empty=1 (empty + empty-cells:hide)",
-            tcell->td->col_index, tcell->td->row_index);
-    } else {
-        tcell->td->hide_empty = 0;
+    // CSS 2.1 Section 17.6.1.1: In separated borders model, empty cells can have
+    // their borders and backgrounds hidden based on empty-cells property.
+    // empty-cells is inherited, so check cell's own cascade first, then table.
+    {
+        bool empty_cells_hide = (table->tb->empty_cells == TableProp::EMPTY_CELLS_HIDE);
+        DomElement* cell_dom = (DomElement*)tcell;
+        if (cell_dom->specified_style) {
+            CssDeclaration* ec_decl = style_tree_get_declaration(
+                cell_dom->specified_style, CSS_PROPERTY_EMPTY_CELLS);
+            if (ec_decl && ec_decl->value && ec_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                empty_cells_hide = (ec_decl->value->data.keyword == CSS_VALUE_HIDE);
+            }
+        }
+        if (tcell->td->is_empty && !table->tb->border_collapse && empty_cells_hide) {
+            tcell->td->hide_empty = 1;
+            log_debug("Cell at col=%d row=%d: hide_empty=1 (empty + empty-cells:hide)",
+                tcell->td->col_index, tcell->td->row_index);
+        } else {
+            tcell->td->hide_empty = 0;
+        }
     }
 
     // Position cell relative to row
