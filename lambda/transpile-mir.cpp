@@ -1798,6 +1798,24 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
 
         if (lt == LMD_TYPE_ANY || rt == LMD_TYPE_ANY) return LMD_TYPE_ANY;
 
+        // INT64 arithmetic (with INT or INT64) goes through boxed fn_add/fn_sub/fn_mul
+        // runtime path (transpile_binary skips native arithmetic for INT64 due to
+        // inconsistent representation — raw int64 from some paths, tagged Items from
+        // others). The boxed runtime returns tagged Items, so effective type is ANY.
+        // Without this, the AST type (often INT) would be returned, causing
+        // transpile_assign_stam to treat the tagged Item as a raw int → infinite loops.
+        {
+            bool has_int64 = (lt == LMD_TYPE_INT64 || rt == LMD_TYPE_INT64);
+            bool other_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
+                             (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+            if (has_int64 && other_int) {
+                int op64 = bi->op;
+                if (op64 == OPERATOR_ADD || op64 == OPERATOR_SUB || op64 == OPERATOR_MUL ||
+                    op64 == OPERATOR_DIV || op64 == OPERATOR_POW)
+                    return LMD_TYPE_ANY;
+            }
+        }
+
         // Infer result type from operand types when AST type is not set.
         // This ensures transpile_assign_stam correctly identifies native values
         // returned by transpile_binary (e.g. unboxed INT from fn_mod with int ops).
@@ -1859,6 +1877,27 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         TypeId then_eff = if_node->then ? get_effective_type(mt, if_node->then) : LMD_TYPE_ANY;
         TypeId else_eff = if_node->otherwise ? get_effective_type(mt, if_node->otherwise) : LMD_TYPE_ANY;
         if (then_eff == LMD_TYPE_ANY || else_eff == LMD_TYPE_ANY) return LMD_TYPE_ANY;
+    }
+    // For UNARY nodes: infer result type from operand's effective type.
+    // transpile_unary returns native values for NEG(INT) → INT, NEG(FLOAT) → FLOAT,
+    // NOT(BOOL) → BOOL, POS(numeric) → same type. Without this, Phase 4 native
+    // functions whose parameter types are inferred (not in AST) would have wrong
+    // effective types for unary expressions, causing type mismatches in assignments.
+    if (node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        TypeId operand_eff = get_effective_type(mt, un->operand);
+        if (un->op == OPERATOR_NEG) {
+            if (operand_eff == LMD_TYPE_INT) return LMD_TYPE_INT;
+            if (operand_eff == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+        } else if (un->op == OPERATOR_NOT) {
+            return LMD_TYPE_BOOL;
+        } else if (un->op == OPERATOR_POS) {
+            if (operand_eff == LMD_TYPE_INT || operand_eff == LMD_TYPE_INT64 ||
+                operand_eff == LMD_TYPE_FLOAT)
+                return operand_eff;
+        } else if (un->op == OPERATOR_IS_ERROR) {
+            return LMD_TYPE_BOOL;
+        }
     }
     return tid;
 }
@@ -2059,6 +2098,11 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
 
     // Native INT64 vs INT comparisons: both are int64 in MIR registers.
     // Only for comparison operators (safe, no overflow risk).
+    // NOTE: Arithmetic (ADD/SUB/MUL) intentionally NOT handled natively for INT64
+    // because transpile_expr returns inconsistent values for INT64 (raw int64 from
+    // some paths, tagged Items from others). All INT64 arithmetic goes through the
+    // boxed runtime path. The assignment unbox path (INT64 in transpile_assign_stam)
+    // ensures the boxed result is correctly converted back to raw int64.
     if (int_or_int64 && !both_int) {
         int op = bi->op;
         if (op >= OPERATOR_EQ && op <= OPERATOR_GE) {
@@ -6282,9 +6326,15 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
     if (var) {
         TypeId var_tid = var->type_id;
 
-        // Check if the new value type matches the variable's tracked type
-        if (var_tid == val_tid || (var_tid == LMD_TYPE_ANY && val_tid == LMD_TYPE_ANY)) {
-            // Same type: direct move
+        // Check if the new value type matches the variable's tracked type.
+        // INT and INT64 are both raw int64 in MIR registers (MIR_T_I64) —
+        // treat them as compatible for direct move. This prevents re-boxing
+        // when e.g. len() (INT64) result participates in INT arithmetic.
+        bool same_int_family = (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64) &&
+                               (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64);
+        if (var_tid == val_tid || same_int_family ||
+            (var_tid == LMD_TYPE_ANY && val_tid == LMD_TYPE_ANY)) {
+            // Same type (or INT/INT64 compatible): direct move
             if (var->mir_type == MIR_T_D) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, val)));
@@ -6324,10 +6374,13 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
                 var->mir_type = MIR_T_I64;
             }
         } else if (val_tid == LMD_TYPE_ANY &&
-                   (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL)) {
+                   (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64 ||
+                    var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL)) {
             // Value is boxed (e.g., from IDIV/MOD runtime call) but variable
             // is native. Unbox to maintain type consistency — critical for loops
             // where the condition code is emitted once with native types.
+            // INT64 included: len() and similar functions return raw int64 values
+            // stored in INT64 variables; boxed fallback results must be unboxed.
             // Error items (div-by-zero) get silently converted to 0/0.0/false.
             MIR_reg_t unboxed = emit_unbox(mt, val, var_tid);
             if (var->mir_type == MIR_T_D) {
