@@ -195,6 +195,7 @@ typedef struct TypeMap : Type {
     int64_t length;  // no. of items in the map
     int64_t byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
+    bool has_named_shape;  // shape was merged from a named type annotation (safe for direct stores)
     ShapeEntry* shape;  // first shape entry of the map
     ShapeEntry* last;  // last shape entry of the map
     const char* struct_name;  // C struct name for direct access (NULL if anonymous)

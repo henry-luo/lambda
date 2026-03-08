@@ -7,14 +7,15 @@ let TREE_SIZE = 8000
 let TREE_MODIFICATIONS = 80
 
 // Type definitions for direct struct field access
-// Note: key/left/right must come first and in the same order as the map literal
-// value comes last so it doesn't affect typed field offsets
-type SplayNode = {key: float, left: SplayNode, right: SplayNode}
+// Field order must match the map literal order in create_node
+type SplayNode = {key: float, left: SplayNode, right: SplayNode, value: map}
 type SplayTree = {root: SplayNode}
 type RngState = {seed: float}
+type PayloadLeaf = {arr: array, str: float}
+type PayloadBranch = {left_p: map, right_p: map}
 
 // Node: {key, left, right, value}
-// Must use SplayNode type annotation so runtime data layout matches direct access offsets
+// SplayNode type annotation ensures runtime data layout matches direct access offsets
 pn create_node(key: float, value) {
     var node: SplayNode = {key: key, left: null, right: null, value: value}
     return node
@@ -215,10 +216,12 @@ pn traverse_keys(node: SplayNode, keys, idx_in) {
 // Generate payload tree for node values
 pn generate_payload(depth: int, tag: float) {
     if (depth == 0) {
-        return {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
+        var leaf: PayloadLeaf = {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
+        return leaf
     }
-    return {left_p: generate_payload(depth - 1, tag),
+    var branch: PayloadBranch = {left_p: generate_payload(depth - 1, tag),
             right_p: generate_payload(depth - 1, tag)}
+    return branch
 }
 
 pn insert_new_node(tree: SplayTree, rng: RngState) {
