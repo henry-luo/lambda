@@ -5,7 +5,7 @@ let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
-pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt) {
+pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt: float) {
     var i: int = 0
     while (i < 5) {
         var j: int = i + 1
