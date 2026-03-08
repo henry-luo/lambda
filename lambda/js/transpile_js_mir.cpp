@@ -539,8 +539,10 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
     if (fn->body) jm_collect_body_refs(fn->body, refs);
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
-    // Skip self-references (function calling itself is NOT a capture)
+    // Track self-references separately — if the function has other captures (and thus
+    // becomes a closure), it also needs to capture itself for recursive calls.
     char self_name[128] = {0};
+    bool has_self_ref = false;
     if (fn->name && fn->name->chars) {
         snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
@@ -552,12 +554,25 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         if (jm_name_set_has(params, ref->name)) continue;    // local param
         if (jm_name_set_has(locals, ref->name)) continue;    // local var
         if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
-        if (self_name[0] && strcmp(ref->name, self_name) == 0) continue; // self-reference
+        if (self_name[0] && strcmp(ref->name, self_name) == 0) {
+            has_self_ref = true;
+            continue; // handle after we know if there are other captures
+        }
         // This is a capture
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", ref->name);
             fc->capture_count++;
             log_debug("js-mir: capture '%s' in function '%s'", ref->name, fc->name);
+        }
+    }
+
+    // If the function has other captures (becoming a closure) AND references itself,
+    // it must also capture itself so recursive calls can find it at runtime.
+    if (has_self_ref && fc->capture_count > 0 && self_name[0]) {
+        if (fc->capture_count < 32) {
+            snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
+            fc->capture_count++;
+            log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
         }
     }
 
@@ -853,8 +868,9 @@ static MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg) {
 static MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
     if (src_type == LMD_TYPE_INT) return reg;  // already native int
     if (src_type == LMD_TYPE_FLOAT) return jm_emit_double_to_int(mt, reg);
-    // boxed Item → unbox
-    return jm_emit_unbox_int(mt, reg);
+    // boxed Item of unknown type → call it2i for safe conversion
+    // (handles INT, FLOAT, INT64, BOOL items correctly)
+    return jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
 }
 
 // Ensure a register is native double, converting from int or boxed if needed
@@ -919,6 +935,9 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
             double val = lit->value.number_value;
+            // If source text has '.' or 'e'/'E', treat as FLOAT even if integral-valued
+            // (e.g., 999999.0, 1e5 → FLOAT; 999999 → INT)
+            if (lit->has_decimal) return LMD_TYPE_FLOAT;
             if (val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0)
                 return LMD_TYPE_INT;
             return LMD_TYPE_FLOAT;
@@ -1148,16 +1167,9 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         if (native_binary && bin->op == JS_OP_MOD) {
             native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
         }
-        // Semi-native comparisons: at least one side typed numeric
-        if (!native_binary && (left_num || right_num)) {
-            switch (bin->op) {
-            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
-                native_binary = true;
-                break;
-            default: break;
-            }
-        }
+        // Comparisons return native 0/1 only when BOTH sides are typed numeric.
+        // With one untyped side, the comparison falls through to boxed runtime
+        // and returns a boxed boolean Item, not a native value.
         MIR_reg_t result = jm_transpile_expression(mt, expr);
         if (native_binary) {
             // Native path was taken: result is native int or double
@@ -1769,13 +1781,16 @@ static void jm_infer_walk(JsAstNode* node, const char param_names[][128],
         if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
         JsLiteralNode* lit = (JsLiteralNode*)n;
         if (lit->literal_type != JS_LITERAL_NUMBER) return false;
+        if (lit->has_decimal) return false;  // 999999.0 is NOT an int literal
         double val = lit->value.number_value;
         return val == (double)(int64_t)val;
     };
     auto is_float_literal = [](JsAstNode* n) -> bool {
         if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
         JsLiteralNode* lit = (JsLiteralNode*)n;
-        return lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value != (double)(int64_t)lit->value.number_value;
+        if (lit->literal_type != JS_LITERAL_NUMBER) return false;
+        if (lit->has_decimal) return true;  // 999999.0 IS a float literal
+        return lit->value.number_value != (double)(int64_t)lit->value.number_value;
     };
 
     switch (node->node_type) {
@@ -2008,7 +2023,7 @@ static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             switch (lit->literal_type) {
             case JS_LITERAL_NUMBER: {
                 double val = lit->value.number_value;
-                t = (val == (double)(int64_t)val) ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
+                t = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
                 break;
             }
             case JS_LITERAL_BOOLEAN: t = LMD_TYPE_BOOL; break;
@@ -2113,7 +2128,7 @@ static void jm_infer_return_type(JsFuncCollected* fc) {
             JsLiteralNode* lit = (JsLiteralNode*)fn->body;
             if (lit->literal_type == JS_LITERAL_NUMBER) {
                 double val = lit->value.number_value;
-                fc->return_type = (val == (double)(int64_t)val) ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
+                fc->return_type = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             }
         }
         return;
@@ -2167,6 +2182,39 @@ static void jm_infer_return_type(JsFuncCollected* fc) {
 // FLOAT values (e.g., from Float64Array element access). These variables
 // should be created as FLOAT from the start to avoid type mismatch in loops.
 
+// Check if an expression contains evidence that it will evaluate to float
+// (float literals, division operators, or member/property access on non-typed-array objects)
+static bool jm_expression_has_float_hint(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        if (lit->literal_type == JS_LITERAL_NUMBER) {
+            if (lit->has_decimal) return true;  // 999999.0 is a float hint
+            double v = lit->value.number_value;
+            if (v != (double)(long long)v) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        if (bin->op == JS_OP_DIV) return true;
+        return jm_expression_has_float_hint(bin->left) || jm_expression_has_float_hint(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_expression_has_float_hint(un->operand);
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        if (!mem->computed) return true;
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
 // Check if a variable name is a float typed array, given a set of known float-array vars
 static bool jm_prescan_is_float_array(struct hashmap* float_arrays, const char* name) {
     JsNameSetEntry key;
@@ -2214,7 +2262,23 @@ static void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* asgn = (JsAssignmentNode*)node;
         if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            bool should_widen = false;
+            // Widen if RHS accesses a float typed array
             if (jm_prescan_has_float_array_access(asgn->right, float_arrays)) {
+                should_widen = true;
+            }
+            // Widen if /= (always produces float)
+            if (asgn->op == JS_OP_DIV_ASSIGN) {
+                should_widen = true;
+            }
+            // Widen if compound assignment with float evidence in RHS
+            // (float literals, division, or property access that may be float)
+            if ((asgn->op == JS_OP_ADD_ASSIGN || asgn->op == JS_OP_SUB_ASSIGN ||
+                 asgn->op == JS_OP_MUL_ASSIGN) &&
+                jm_expression_has_float_hint(asgn->right)) {
+                should_widen = true;
+            }
+            if (should_widen) {
                 JsIdentifierNode* id = (JsIdentifierNode*)asgn->left;
                 char name[128];
                 snprintf(name, sizeof(name), "%.*s", (int)id->name->len, id->name->chars);
@@ -2369,6 +2433,14 @@ static MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
         double val = lit->value.number_value;
+        // If source had decimal point or scientific notation, always box as float
+        if (lit->has_decimal) {
+            MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                MIR_new_reg_op(mt->ctx, d),
+                MIR_new_double_op(mt->ctx, val)));
+            return jm_box_float(mt, d);
+        }
         // check if value is an integer
         if (val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
             return jm_box_int_const(mt, (int64_t)val);
@@ -2619,36 +2691,14 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     }
 
     // --- Semi-native comparison path ---
-    // When at least one operand is typed numeric, we can unbox the other side
-    // and emit a native comparison. This avoids boxing the typed side + 2 runtime calls.
-    bool any_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) ||
-                       (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
-    if (!both_numeric && any_numeric) {
-        bool use_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT);
-        TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-        MIR_insn_code_t cmp_insn = (MIR_insn_code_t)0;
-
-        switch (bin->op) {
-        case JS_OP_LT:        cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
-        case JS_OP_LE:        cmp_insn = use_float ? MIR_DLE : MIR_LES; break;
-        case JS_OP_GT:        cmp_insn = use_float ? MIR_DGT : MIR_GTS; break;
-        case JS_OP_GE:        cmp_insn = use_float ? MIR_DGE : MIR_GES; break;
-        case JS_OP_EQ:
-        case JS_OP_STRICT_EQ: cmp_insn = use_float ? MIR_DEQ : MIR_EQ;  break;
-        case JS_OP_NE:
-        case JS_OP_STRICT_NE: cmp_insn = use_float ? MIR_DNE : MIR_NE;  break;
-        default: break;
-        }
-
-        if (cmp_insn) {
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "scmp", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, cmp_insn,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-    }
+    // DISABLED: When one side has unknown type, using native comparison is unsafe.
+    // - it2i() on a boxed float gives garbage
+    // - float unboxing can fail for non-numeric Items  
+    // Instead, fall through to the boxed runtime path which handles all type
+    // combinations correctly via js_get_number().
+    // NOTE: The both_numeric case above already handles INT-vs-INT and FLOAT-vs-FLOAT.
+    // Mixed INT-vs-FLOAT is also handled there (use_float flag). So we don't need
+    // a semi-native path at all.
 
     // --- Boxed runtime path (original) ---
     const char* fn_name = NULL;
@@ -2782,6 +2832,40 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_new_reg_op(mt->ctx, var->reg)));
                 }
             }
+        } else if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            // Write back to member expression: arr[i]++ or obj.prop++
+            JsMemberNode* mem = (JsMemberNode*)un->operand;
+            if (mem->computed) {
+                // arr[i]++ — check for typed array fast path
+                JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
+                if (ta_var) {
+                    MIR_reg_t idx_native;
+                    TypeId idx_type = jm_get_effective_type(mt, mem->property);
+                    if (idx_type == LMD_TYPE_INT) {
+                        idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
+                    } else {
+                        MIR_reg_t idx_boxed = jm_transpile_box_item(mt, mem->property);
+                        idx_native = jm_emit_unbox_int(mt, idx_boxed);
+                    }
+                    jm_transpile_typed_array_set(mt, ta_var->reg, idx_native, result, ta_var->typed_array_type);
+                } else {
+                    MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+                    MIR_reg_t key = jm_transpile_box_item(mt, mem->property);
+                    jm_call_3(mt, "js_set_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
+                }
+            } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                // obj.prop++
+                MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+                JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+                MIR_reg_t key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+                jm_call_3(mt, "js_set_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
+            }
         }
         return result;
     }
@@ -2831,6 +2915,40 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, var->reg)));
                 }
+            }
+        } else if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            // Write back to member expression: arr[i]-- or obj.prop--
+            JsMemberNode* mem = (JsMemberNode*)un->operand;
+            if (mem->computed) {
+                // arr[i]-- — check for typed array fast path
+                JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
+                if (ta_var) {
+                    MIR_reg_t idx_native;
+                    TypeId idx_type = jm_get_effective_type(mt, mem->property);
+                    if (idx_type == LMD_TYPE_INT) {
+                        idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
+                    } else {
+                        MIR_reg_t idx_boxed = jm_transpile_box_item(mt, mem->property);
+                        idx_native = jm_emit_unbox_int(mt, idx_boxed);
+                    }
+                    jm_transpile_typed_array_set(mt, ta_var->reg, idx_native, result, ta_var->typed_array_type);
+                } else {
+                    MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+                    MIR_reg_t key = jm_transpile_box_item(mt, mem->property);
+                    jm_call_3(mt, "js_set_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
+                }
+            } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                // obj.prop--
+                MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+                JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+                MIR_reg_t key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+                jm_call_3(mt, "js_set_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
             }
         }
         return result;
@@ -3075,6 +3193,37 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+    }
+
+    // Array destructuring assignment: [a, b] = [expr1, expr2]
+    if (asgn->left->node_type == JS_AST_NODE_ARRAY_PATTERN && asgn->op == JS_OP_ASSIGN) {
+        JsArrayPatternNode* pattern = (JsArrayPatternNode*)asgn->left;
+        // Evaluate RHS FIRST (important for swap patterns like [a,b] = [b,a])
+        MIR_reg_t src = jm_transpile_box_item(mt, asgn->right);
+
+        // Extract each element and assign to variables
+        int idx = 0;
+        JsAstNode* elem = pattern->elements;
+        while (elem) {
+            if (elem->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)elem;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                JsMirVarEntry* var = jm_find_var(mt, vname);
+                if (var) {
+                    MIR_reg_t key = jm_box_int_const(mt, idx);
+                    MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, var->reg),
+                        MIR_new_reg_op(mt->ctx, val)));
+                }
+            }
+            idx++;
+            elem = elem->next;
+        }
+        return src;
     }
 
     log_error("js-mir: unsupported assignment target %d", asgn->left->node_type);
@@ -4934,16 +5083,8 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
             // Float modulo falls through to boxed
             native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
         }
-        // Semi-native: comparisons with at least one typed numeric operand
-        if (!native_binary && (left_num || right_num)) {
-            switch (bin->op) {
-            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
-                native_binary = true;
-                break;
-            default: break;
-            }
-        }
+        // Comparisons return native 0/1 only when BOTH sides are typed numeric.
+        // With one untyped side, comparison falls to boxed runtime (returns Item).
         TypeId etype = jm_get_effective_type(mt, item);
         MIR_reg_t result = jm_transpile_expression(mt, item);
         if (native_binary && jm_is_native_type(etype)) {
@@ -5035,7 +5176,7 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
             double val = lit->value.number_value;
-            if (val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
+            if (!lit->has_decimal && val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
                 return jm_box_int_const(mt, (int64_t)val);
             }
             MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);
@@ -5156,6 +5297,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
                     TypeId init_type = jm_get_effective_type(mt, d->init);
+                    TypeId orig_type = init_type;
 
                     // P9: Widen INT to FLOAT if pre-scan detected float usage
                     if (init_type == LMD_TYPE_INT && jm_should_widen_to_float(mt, vname)) {
@@ -5174,7 +5316,8 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                     } else if (init_type == LMD_TYPE_FLOAT) {
                         // native double variable
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_D);
-                        MIR_reg_t native_val = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_FLOAT);
+                        // Use original type as source so INT→FLOAT conversion happens
+                        MIR_reg_t native_val = jm_transpile_as_native(mt, d->init, orig_type, LMD_TYPE_FLOAT);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, native_val)));
@@ -5301,7 +5444,10 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
 }
 
 static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
-    // Determine if we can use native comparison for the test
+    // Determine if we can use native comparison for the test.
+    // BOTH operands must be typed numeric so the comparison returns a native 0/1
+    // (not a boxed Lambda boolean Item). MIR_BF checks for raw 0, so a boxed
+    // FALSE Item (0x0600000000000000) would be treated as truthy!
     bool native_test = false;
     if (if_node->test && if_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
         JsBinaryNode* test_bin = (JsBinaryNode*)if_node->test;
@@ -5309,7 +5455,7 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         TypeId rt = jm_get_effective_type(mt, test_bin->right);
         bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
         bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-        if (left_num || right_num) {
+        if (left_num && right_num) {
             switch (test_bin->op) {
             case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
             case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
@@ -5317,7 +5463,6 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             default: break;
             }
         }
-        if (left_num && right_num) native_test = true;
     }
 
     MIR_reg_t test_val;
@@ -5374,7 +5519,9 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 
     jm_emit_label(mt, l_test);
 
-    // Determine if we can use native comparison for the test
+    // Determine if we can use native comparison for the test.
+    // BOTH operands must be typed numeric so the comparison returns native 0/1.
+    // See jm_transpile_if for detailed explanation.
     bool native_test = false;
     if (wh->test && wh->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
         JsBinaryNode* test_bin = (JsBinaryNode*)wh->test;
@@ -5382,8 +5529,7 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
         TypeId rt = jm_get_effective_type(mt, test_bin->right);
         bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
         bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-        // Native test when at least one side is typed numeric (comparisons)
-        if (left_num || right_num) {
+        if (left_num && right_num) {
             switch (test_bin->op) {
             case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
             case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
@@ -5391,8 +5537,6 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
             default: break;
             }
         }
-        // Also native for all operations when both sides typed
-        if (left_num && right_num) native_test = true;
     }
 
     if (native_test) {
@@ -6672,6 +6816,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 entry.var.from_env = true;
                 entry.var.env_slot = i;
                 entry.var.env_reg = env_reg;
+                entry.var.typed_array_type = -1;  // not a typed array by default
                 hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
             }
         }
@@ -6901,6 +7046,20 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Transpile top-level statements in source order.
     // Function declarations with captures are bound at their source position.
+
+    // P9: Pre-scan top-level body for float widening (compound assignments like /=, +=)
+    if (program->body) {
+        JsAstNode wrapper;
+        memset(&wrapper, 0, sizeof(wrapper));
+        wrapper.node_type = JS_AST_NODE_BLOCK_STATEMENT;
+        // Temporarily wrap program body as a block for prescan
+        JsBlockNode blk_wrapper;
+        memset(&blk_wrapper, 0, sizeof(blk_wrapper));
+        blk_wrapper.base.node_type = JS_AST_NODE_BLOCK_STATEMENT;
+        blk_wrapper.statements = program->body;
+        jm_prescan_float_widening(mt, (JsAstNode*)&blk_wrapper);
+    }
+
     stmt = program->body;
     while (stmt) {
         if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
@@ -7101,6 +7260,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
+        context->type_list = arraylist_new(64);
     }
 
     _lambda_rt = (Context*)context;
