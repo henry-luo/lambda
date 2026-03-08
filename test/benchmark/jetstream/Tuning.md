@@ -2,7 +2,7 @@
 
 ## Summary
 
-Added `type SplayNode` definition and typed annotations to convert runtime `fn_member()`/`fn_map_set()` calls into direct byte-offset memory loads/stores via the MIR JIT's Phase 3 direct field access optimization. Implemented **direct field store optimization** in the transpiler to eliminate `map_fill()` varargs overhead for typed map construction.
+Added `type SplayNode` definition and typed annotations to convert runtime `fn_member()`/`fn_map_set()` calls into direct byte-offset memory loads/stores via the MIR JIT's Phase 3 direct field access optimization. Implemented **direct field store optimization** in the transpiler to eliminate `map_fill()` varargs overhead for typed map construction. **Inlined `map_with_data()`** in the transpiler to emit `heap_calloc` + direct Map header stores with compile-time constants. Eliminated redundant `memset` in `gc_heap_calloc` for slab-allocated objects. **Fixed catastrophic O(slabs) `gc_object_zone_owns`** with O(log N) binary search over sorted slab ranges — **20x speedup** (~2020ms → ~97ms release).
 
 ## Performance Results
 
@@ -14,9 +14,11 @@ Added `type SplayNode` definition and typed annotations to convert runtime `fn_m
 | **+ Recursive types & RngState** | ~655 | ~480 |
 | **+ value field in type (correct)** | ~5400 | ~4500 |
 | **+ Direct field stores (opt #1)** | ~4019 | ~4000 |
-| **+ Typed payload maps** | — | **~2280** |
+| **+ Typed payload maps** | — | ~2280 |
+| **+ Inline map_with_data + gc_heap fix (opt #3)** | ~2780 | ~2020 |
+| **+ gc_object_zone_owns O(log N) fix** | ~165 | **~83** |
 | Node.js (v22, V8 JIT) | 28.8 | 28.8 |
-| vs Node.js (current) | — | **79x** |
+| vs Node.js (current) | — | **2.9x** |
 | vs Node.js (before opt) | — | 156x |
 
 The direct field store optimization (eliminating `map_fill()` varargs) gives a **~50% reduction** in runtime when combined with typed payload maps. Adding type annotations to `generate_payload` (PayloadLeaf, PayloadBranch types) enables the optimization to cover all ~768K map allocations (not just the ~12K SplayNodes).
@@ -236,21 +238,36 @@ void* ptr = cursor; cursor += size; return ptr;  // ~3 instructions
 
 This is what makes V8 fast at exactly this benchmark. The splay benchmark was literally designed to measure young-generation GC efficiency.
 
-#### 3. Inline `map_with_data` for known types (Medium impact, Low effort)
+#### 3. ~~Inline `map_with_data` for known types~~ — IMPLEMENTED ✅
 
-Since `type_index` is a compile-time constant, the JIT could emit the allocation inline:
+Since `type_index` is a compile-time constant, the JIT now emits the allocation inline instead of calling `map_with_data()`. Combined with the Opt #1 direct field stores, the entire typed map construction becomes: one `heap_calloc` + header stores + direct field stores, with zero runtime function calls.
+
+**Implementation**: `transpile_map()` in `transpile-mir.cpp` emits:
+1. `heap_calloc(sizeof(Map) + byte_size, LMD_TYPE_MAP)` — single GC allocation with compile-time constant size
+2. Direct Map header stores: `type_id` (offset 0), `type` pointer (offset 8), `data` pointer (offset 16), `data_cap` (offset 24)
+3. Data pointer computed as `m + sizeof(Map)` via MIR ADD instruction (no runtime lookup)
+
+Additionally, `gc_heap_calloc()` in `lib/gc_heap.c` was optimized to skip the redundant `memset` for slab-allocated objects (≤256 bytes), since `gc_object_zone_alloc` already returns zeroed memory.
+
+**Files changed**:
+- `lambda/transpile-mir.cpp` — `transpile_map()`: inline allocation path
+- `lib/gc_heap.c` — `gc_heap_calloc()`: skip redundant memset for small objects
+
+**Result**: ~12% further reduction (2280ms → 2020ms release).
 
 ```c
-// Instead of calling map_with_data(type_index):
-Map* m = heap_calloc(64, LMD_TYPE_MAP);  // size known at compile time
-m->type = KNOWN_TYPE_PTR;                 // constant folded
-m->data = (char*)m + 32;                  // constant offset
-m->data_cap = 32;                         // constant
+// Before: Map* m = map_with_data(type_index);     // runtime lookup + alloc
+// After (emitted by JIT):
+Map* m = heap_calloc(64, LMD_TYPE_MAP);             // size = compile-time constant
+*(uint8_t*)m = LMD_TYPE_MAP;                         // type_id at offset 0
+*(TypeMap**)(m + 8) = KNOWN_TYPE_PTR;                // type pointer = constant
+char* data = (char*)m + 32;                           // data = m + sizeof(Map)
+*(char**)(m + 16) = data;                             // store data pointer
+*(int*)(m + 24) = 32;                                 // data_cap = constant
+*(double*)(data + 0) = key;                           // field stores (from opt #1)
 ```
 
-Combined with #1, the entire `create_node` body becomes: one `heap_calloc` + 4 direct stores.
-
-#### 4. Eliminate null guards in hot loops (Medium impact, High effort)
+#### 4. Eliminate null guards in hot loops (Medium impact, High effort) — INFRASTRUCTURE ADDED ⚠️
 
 Every `current.key`, `current.left`, `current.right` emits a null guard:
 ```c
@@ -258,16 +275,82 @@ if (!current) return ITEM_NULL;  // guard
 double key = *(double*)(current->data + 0);
 ```
 
-In the splay loop, `current` has already been null-checked. Flow-sensitive null analysis could eliminate redundant guards.
+**Analysis**: Added `bool skip_null_guard` parameter to both `emit_mir_direct_field_read()` and `emit_mir_direct_field_write()`. When true, the null check branch, default-value path, and associated labels are all skipped — producing tighter code (fewer branches, no wasted default MOV).
+
+**Problem**: Cannot safely enable yet. In Lambda, typed variables CAN hold null values:
+```lambda
+var current: SplayNode = tree.root  // typed SplayNode, but tree.root can be null
+```
+A simple `AST_NODE_IDENT` check was attempted but caused the splay benchmark to crash (null deref in JIT code). Correct null guard elimination requires **flow-sensitive non-null analysis**:
+- After `if (x != null)` true branch → x is non-null
+- After `var x = { ... }` map literal → x is non-null  
+- After function calls → unknown (could return null)
+- After reassignment from field access → unknown
+
+**Profiling** (release, 72 samples): JIT hot loop ~49%, memory allocation ~36%, fn_member ~7%. Null guards account for only a fraction of the JIT code cost — estimated **~5% impact** if fully eliminated. Not worth the complexity of flow analysis at this stage.
+
+**Current status**: Infrastructure in place (`skip_null_guard` parameter wired through), set to `false` at all call sites. Can be enabled per-site when flow analysis is added.
 
 #### 5. Inline small functions (Low impact, High effort)
 
 Hot helpers like `splay_is_empty(tree)` (a single `tree.root == null` check) could be inlined by the JIT to eliminate call overhead.
 
-| # | Optimization | Expected Impact | Effort | Status |
-|---|-------------|----------------|--------|--------|
-| 1 | Direct stores (eliminate `map_fill`) | **~50% reduction** | Medium | **IMPLEMENTED** ✅ |
-| 2 | Bump-pointer nursery | 30-50% | High | Not started |
-| 3 | Inline `map_with_data` | 5-10% | Low | Not started |
-| 4 | Null guard elimination | 5-10% | High | Not started |
-| 5 | Function inlining | 3-5% | High | Not started |
+| #   | Optimization                                | Expected Impact    | Effort | Status            |
+| --- | ------------------------------------------- | ------------------ | ------ | ----------------- |
+| 1   | Direct stores (eliminate `map_fill`)        | **~50% reduction** | Medium | **IMPLEMENTED** ✅ |
+| 2   | Bump-pointer nursery                        | 30-50%             | High   | Not started       |
+| 3   | Inline `map_with_data` + gc_heap_calloc fix | **~12% reduction** | Low    | **IMPLEMENTED** ✅ |
+| 4   | Null guard elimination                      | ~5%                | High   | Infrastructure ⚠️ |
+| 5   | Function inlining                           | 3-5%               | High   | Not started       |
+| 6   | gc_object_zone_owns O(log N) fix            | **~20x reduction** | Low    | **IMPLEMENTED** ✅ |
+
+### GC Bug: O(slabs) Ownership Check — The Hidden Catastrophe
+
+**Problem**: `gc_object_zone_owns()` was called for every pointer during GC mark-sweep tracing (via `is_gc_object()` → `gc_mark_item()` → `gc_trace_object()`). The original implementation iterated ALL slabs across ALL 7 size classes to check if a pointer fell within any slab's address range:
+
+```c
+// BEFORE: O(S×C) per check — S slabs × C=7 classes
+int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
+    for (int cls = 0; cls < 7; cls++) {
+        gc_object_slab_t* slab = oz->slabs[cls];
+        while (slab) {  // iterate ALL slabs in class
+            if (p >= slab->base && p < slab_end) return 1;
+            slab = slab->next;
+        }
+    }
+    return 0;
+}
+```
+
+With ~780K map allocations in the splay benchmark and 128 slots per slab, the 96-byte class alone accumulates ~6000+ slabs. During GC tracing, each of the ~8000 live SplayNodes has 4 fields to trace, and each field check iterates all slabs. This creates O(live_objects × fields × slabs) = millions of slab walks per GC cycle.
+
+**Profiling evidence**: `sample` on macOS showed `gc_object_zone_owns` at 99.5% of total execution time (1522/1529 samples).
+
+**Fix**: Replaced linear slab scan with a sorted array of `(base, end)` ranges + binary search:
+
+1. Added `gc_slab_range_t` sorted array to `gc_object_zone_t`
+2. Each `allocate_slab()` binary-inserts the new slab's range into the sorted array
+3. Added global `min_addr`/`max_addr` for O(1) fast rejection of non-slab pointers
+4. `gc_object_zone_owns()` now does: min/max check → binary search sorted ranges
+
+```c
+// AFTER: O(1) fast rejection + O(log S) binary search
+int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
+    if (p < oz->min_addr || p >= oz->max_addr) return 0;  // O(1) reject
+    // binary search sorted slab_ranges array — O(log S)
+    size_t lo = 0, hi = oz->range_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (ranges[mid].end <= p) lo = mid + 1;
+        else if (ranges[mid].base > p) hi = mid;
+        else return 1;  // found
+    }
+    return 0;
+}
+```
+
+**Files changed**:
+- `lib/gc_object_zone.h` — Added `gc_slab_range_t`, range array fields, min/max bounds
+- `lib/gc_object_zone.c` — Added `register_slab_range()`, replaced `gc_object_zone_owns()`
+
+**Result**: **~20x speedup** (2020ms → ~97ms release, 2780ms → ~165ms debug). Gap to Node.js reduced from 70x to **3.4x**.

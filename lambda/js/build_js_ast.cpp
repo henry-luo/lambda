@@ -151,6 +151,14 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
 
     if (strcmp(node_type, "number") == 0) {
         literal->literal_type = JS_LITERAL_NUMBER;
+        // Check if source text contains '.' or 'e'/'E' (fractional/scientific hint)
+        literal->has_decimal = false;
+        for (size_t i = 0; i < source.length; i++) {
+            if (source.str[i] == '.' || source.str[i] == 'e' || source.str[i] == 'E') {
+                literal->has_decimal = true;
+                break;
+            }
+        }
         // Create null-terminated string for strtod
         char* temp_str = (char*)malloc(source.length + 1);
         if (temp_str) {
@@ -434,9 +442,14 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node) {
     array->length = element_count;
 
     JsAstNode* prev_element = NULL;
+    uint32_t actual_count = 0;
     for (uint32_t i = 0; i < element_count; i++) {
         TSNode element_node = ts_node_named_child(array_node, i);
+        const char* child_type = ts_node_type(element_node);
+        // skip comment nodes inside array literals
+        if (strcmp(child_type, "comment") == 0) continue;
         JsAstNode* element = build_js_expression(tp, element_node);
+        if (!element) continue;
 
         if (!prev_element) {
             array->elements = element;
@@ -444,7 +457,9 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node) {
             prev_element->next = element;
         }
         prev_element = element;
+        actual_count++;
     }
+    array->length = actual_count;
 
     array->base.type = &TYPE_ARRAY;
 
@@ -997,6 +1012,9 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             }
         }
 
+        // skip comments inside expressions
+        if (strcmp(node_type, "comment") == 0) return NULL;
+
         log_error("Unsupported JavaScript expression type: %s (symbol: %d, content: %.*s)",
                   node_type, symbol, (int)source.length, source.str);
         return NULL;
@@ -1095,7 +1113,26 @@ JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node) {
     return (JsAstNode*)program;
 }
 
+// Decode a template literal escape sequence (e.g., \t → tab, \n → newline)
+static char js_decode_escape_char(char c) {
+    switch (c) {
+    case 'n': return '\n';
+    case 't': return '\t';
+    case 'r': return '\r';
+    case '\\': return '\\';
+    case '\'': return '\'';
+    case '"': return '"';
+    case '0': return '\0';
+    case 'b': return '\b';
+    case 'f': return '\f';
+    case 'v': return '\v';
+    default: return c;
+    }
+}
+
 // Build JavaScript template literal node
+// Handles interleaving of quasis (text parts) and expressions (substitutions).
+// Escape sequences (e.g., \t, \n) are merged into adjacent quasi text.
 JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
     JsTemplateLiteralNode* template_lit = (JsTemplateLiteralNode*)alloc_js_ast_node(tp, JS_AST_NODE_TEMPLATE_LITERAL, template_node, sizeof(JsTemplateLiteralNode));
 
@@ -1103,53 +1140,72 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
     JsAstNode* prev_quasi = NULL;
     JsAstNode* prev_expr = NULL;
 
+    // Accumulate text for the current quasi (between substitutions).
+    // Multiple string_fragment and escape_sequence nodes may appear between
+    // two template_substitution nodes; they must be merged into one quasi.
+    char quasi_buf[4096];
+    int quasi_len = 0;
+
+    // Helper: flush accumulated quasi text into a quasi node
+    #define FLUSH_QUASI() do { \
+        JsTemplateElementNode* element = (JsTemplateElementNode*)alloc_js_ast_node( \
+            tp, JS_AST_NODE_TEMPLATE_ELEMENT, template_node, sizeof(JsTemplateElementNode)); \
+        element->cooked = name_pool_create_len(tp->name_pool, quasi_buf, quasi_len); \
+        element->raw = element->cooked; \
+        element->tail = false; \
+        element->base.type = &TYPE_STRING; \
+        if (!prev_quasi) { template_lit->quasis = (JsAstNode*)element; } \
+        else { prev_quasi->next = (JsAstNode*)element; } \
+        prev_quasi = (JsAstNode*)element; \
+        quasi_len = 0; \
+    } while(0)
+
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(template_node, i);
+        const char* child_type = ts_node_type(child);
         TSSymbol symbol = ts_node_symbol(child);
 
-        const char* child_type = ts_node_type(child);
-
         if (strcmp(child_type, "string_fragment") == 0 || symbol == sym_template_chars) {
-            // Template string part
-            JsTemplateElementNode* element = (JsTemplateElementNode*)alloc_js_ast_node(tp, JS_AST_NODE_TEMPLATE_ELEMENT, child, sizeof(JsTemplateElementNode));
-
+            // Append text to current quasi buffer
             StrView source = js_node_source(tp, child);
-            element->raw = name_pool_create_strview(tp->name_pool, source);
-            element->cooked = element->raw; // TODO: Process escape sequences
-            element->tail = (i == child_count - 1);
-            element->base.type = &TYPE_STRING;
-
-            if (!prev_quasi) {
-                template_lit->quasis = (JsAstNode*)element;
-            } else {
-                prev_quasi->next = (JsAstNode*)element;
+            int copy_len = (int)source.length;
+            if (quasi_len + copy_len > (int)sizeof(quasi_buf) - 1)
+                copy_len = (int)sizeof(quasi_buf) - 1 - quasi_len;
+            if (copy_len > 0) {
+                memcpy(quasi_buf + quasi_len, source.str, copy_len);
+                quasi_len += copy_len;
             }
-            prev_quasi = (JsAstNode*)element;
+        } else if (strcmp(child_type, "escape_sequence") == 0) {
+            // Decode escape sequence and append to current quasi buffer
+            StrView source = js_node_source(tp, child);
+            if (source.length >= 2 && source.str[0] == '\\') {
+                char decoded = js_decode_escape_char(source.str[1]);
+                if (quasi_len < (int)sizeof(quasi_buf) - 1) {
+                    quasi_buf[quasi_len++] = decoded;
+                }
+            }
         } else if (strcmp(child_type, "template_substitution") == 0) {
-            // Template substitution - extract the expression inside
+            // Flush accumulated text as a quasi, then add the expression
+            FLUSH_QUASI();
+
             TSNode expr_node = ts_node_named_child(child, 0);
             JsAstNode* expr = build_js_expression(tp, expr_node);
             if (expr) {
-                if (!prev_expr) {
-                    template_lit->expressions = expr;
-                } else {
-                    prev_expr->next = expr;
-                }
-                prev_expr = expr;
-            }
-        } else {
-            // Other template expression
-            JsAstNode* expr = build_js_expression(tp, child);
-            if (expr) {
-                if (!prev_expr) {
-                    template_lit->expressions = expr;
-                } else {
-                    prev_expr->next = expr;
-                }
+                if (!prev_expr) { template_lit->expressions = expr; }
+                else { prev_expr->next = expr; }
                 prev_expr = expr;
             }
         }
+        // Ignore other child types (comments, etc.)
     }
+
+    // Flush remaining quasi text (the tail)
+    FLUSH_QUASI();
+    if (prev_quasi) {
+        ((JsTemplateElementNode*)prev_quasi)->tail = true;
+    }
+
+    #undef FLUSH_QUASI
 
     template_lit->base.type = &TYPE_STRING;
     return (JsAstNode*)template_lit;

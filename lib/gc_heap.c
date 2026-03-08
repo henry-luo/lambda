@@ -189,7 +189,13 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     void* ptr = gc_heap_alloc(gc, size, type_tag);
     if (ptr) {
-        memset(ptr, 0, size);
+        // Object zone allocations (size <= GC_LARGE_OBJECT_THRESHOLD = 256) already
+        // return zeroed memory from either fresh slab slots (zeroed at slab creation)
+        // or free-list pop (memset in gc_object_zone_alloc). Only large objects
+        // allocated via pool_alloc need explicit zeroing.
+        if (size > GC_LARGE_OBJECT_THRESHOLD) {
+            memset(ptr, 0, size);
+        }
     }
     return ptr;
 }
