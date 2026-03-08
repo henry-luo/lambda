@@ -53,6 +53,15 @@ typedef struct gc_object_slab {
     struct gc_object_slab* next;// next slab in chain for this size class
 } gc_object_slab_t;
 
+// Slab range entry for fast ownership lookup via binary search
+typedef struct gc_slab_range {
+    uint8_t* base;          // slab memory start
+    uint8_t* end;           // slab memory end (exclusive)
+} gc_slab_range_t;
+
+// Maximum number of slab ranges (grows dynamically if needed)
+#define GC_INITIAL_RANGE_CAPACITY 64
+
 // Object Zone: manages all non-moving object allocations
 typedef struct gc_object_zone {
     // Per-size-class free lists: each entry is a gc_header_t* whose user data
@@ -69,6 +78,13 @@ typedef struct gc_object_zone {
     size_t total_slots_allocated;   // total slots ever allocated
     size_t total_slots_freed;       // total slots returned to free list
     size_t slab_count;              // total number of slabs allocated
+
+    // Fast ownership lookup: sorted array of slab ranges + min/max bounds
+    gc_slab_range_t* slab_ranges;   // sorted by base address
+    size_t range_count;             // number of entries in slab_ranges
+    size_t range_capacity;          // allocated capacity of slab_ranges
+    uint8_t* min_addr;              // minimum slab base address (fast rejection)
+    uint8_t* max_addr;              // maximum slab end address (fast rejection)
 } gc_object_zone_t;
 
 /**

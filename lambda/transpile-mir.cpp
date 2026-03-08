@@ -3880,30 +3880,25 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     int type_index = map_type->type_index;
 
     // Create map with inline data: Map* m = map_with_data(type_index)
-    MIR_reg_t m = emit_call_1(mt, "map_with_data", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
+    MIR_reg_t m = 0; // allocated below based on path
 
     // Count value items
     AstNode* item = map_node->item;
     int val_count = 0;
     while (item) { val_count++; item = item->next; }
 
-    if (val_count == 0) {
-        // No fields - return empty map
-        return m;
-    }
-
     // =========================================================================
     // Optimization: Direct field stores for typed maps with known shapes.
-    // Instead of calling map_fill() through varargs → set_fields() switch loop,
-    // emit direct MIR stores at compile-time byte offsets. This eliminates:
+    // Additionally, map_with_data() is inlined: we call heap_calloc directly
+    // and set Map header fields with immediate constants, eliminating:
+    //   - map_with_data() function call overhead
+    //   - type_list[type_index] runtime lookup (2 pointer chases)
     //   - C varargs marshaling/unmarshaling overhead
     //   - set_fields() per-field type switch dispatch
     //   - runtime type checking for each field
-    // Applicable when the map has a named type (struct_name) OR its shape was
-    // merged from a named type annotation (has_named_shape flag from build_ast).
     // =========================================================================
     if ((mir_has_fixed_shape(map_type) || map_type->has_named_shape) &&
-        map_type->byte_size > 0 && val_count == (int)map_type->length) {
+        map_type->byte_size > 0 && val_count > 0 && val_count == (int)map_type->length) {
         // Check all fields: named, typed, 8-byte aligned offsets, supported types
         bool all_direct = true;
         ShapeEntry* check = map_type->shape;
@@ -3928,13 +3923,36 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         }
 
         if (all_direct) {
-            log_debug("mir: direct field store for typed map '%s' (%d fields)",
+            log_debug("mir: inline alloc + direct field store for typed map '%s' (%d fields)",
                 map_type->struct_name, val_count);
 
-            // Load data pointer: m->data is at offset 16 in Map struct
+            // Inline map_with_data: call heap_calloc directly with compile-time constants
+            int64_t byte_size = map_type->byte_size;
+            int64_t total_size = (int64_t)sizeof(Map) + byte_size;
+            m = emit_call_2(mt, "heap_calloc", MIR_T_P,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, total_size),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP));
+
+            // Set Map header fields
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, m, 0, 1),
+                MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, m, 0, 1),
+                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)map_type)));
+
+            // Compute and store data pointer = m + sizeof(Map)
             MIR_reg_t data_ptr = new_reg(mt, "mdata", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, m, 0, 1)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                MIR_new_reg_op(mt->ctx, data_ptr),
+                MIR_new_reg_op(mt->ctx, m),
+                MIR_new_int_op(mt->ctx, (int64_t)sizeof(Map))));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, m, 0, 1),
+                MIR_new_reg_op(mt->ctx, data_ptr)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I32, 24, m, 0, 1),
+                MIR_new_int_op(mt->ctx, byte_size)));
 
             // Store each field directly at known byte offset
             item = map_node->item;
@@ -4019,6 +4037,14 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
 
             return m;
         }
+    }
+
+    // Non-direct path: allocate map via map_with_data()
+    m = emit_call_1(mt, "map_with_data", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
+
+    if (val_count == 0) {
+        return m;
     }
 
     // Fallback: evaluate all values as boxed Items and call map_fill() via varargs

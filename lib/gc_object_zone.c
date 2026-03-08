@@ -39,6 +39,46 @@ size_t gc_object_zone_class_size(int cls) {
     return SIZE_CLASSES[cls];
 }
 
+// register a slab's address range for fast binary-search ownership lookup
+static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes) {
+    uint8_t* end = base + bytes;
+
+    // update global min/max bounds
+    if (!oz->min_addr || base < oz->min_addr) oz->min_addr = base;
+    if (!oz->max_addr || end > oz->max_addr) oz->max_addr = end;
+
+    // grow array if needed
+    if (oz->range_count >= oz->range_capacity) {
+        size_t new_cap = oz->range_capacity ? oz->range_capacity * 2 : GC_INITIAL_RANGE_CAPACITY;
+        gc_slab_range_t* new_ranges = (gc_slab_range_t*)realloc(oz->slab_ranges,
+            new_cap * sizeof(gc_slab_range_t));
+        if (!new_ranges) {
+            log_error("gc_object_zone: failed to grow slab_ranges array");
+            return;
+        }
+        oz->slab_ranges = new_ranges;
+        oz->range_capacity = new_cap;
+    }
+
+    // binary search for insertion point to keep array sorted by base
+    size_t lo = 0, hi = oz->range_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (oz->slab_ranges[mid].base < base) lo = mid + 1;
+        else hi = mid;
+    }
+
+    // shift elements right to make room
+    if (lo < oz->range_count) {
+        memmove(&oz->slab_ranges[lo + 1], &oz->slab_ranges[lo],
+                (oz->range_count - lo) * sizeof(gc_slab_range_t));
+    }
+
+    oz->slab_ranges[lo].base = base;
+    oz->slab_ranges[lo].end = end;
+    oz->range_count++;
+}
+
 // allocate a new slab for the given size class from the pool
 static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
     size_t slot_size = sizeof(gc_header_t) + SIZE_CLASSES[cls];
@@ -67,6 +107,7 @@ static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
     slab->next = NULL;
 
     oz->slab_count++;
+    register_slab_range(oz, memory, slab_bytes);
     log_debug("gc_object_zone: allocated slab class=%d slot_size=%zu slots=%zu bytes=%zu",
               cls, slot_size, slot_count, slab_bytes);
     return slab;
@@ -106,6 +147,8 @@ void gc_object_zone_destroy(gc_object_zone_t* oz) {
             slab = next;
         }
     }
+    // free sorted range array
+    free(oz->slab_ranges);
     log_debug("gc_object_zone_destroy: freed %zu slabs, %zu allocs, %zu frees",
               oz->slab_count, oz->total_slots_allocated, oz->total_slots_freed);
     free(oz);
@@ -188,14 +231,20 @@ int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
     if (!oz || !ptr) return 0;
     uint8_t* p = (uint8_t*)ptr;
 
-    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
-        gc_object_slab_t* slab = oz->slabs[cls];
-        while (slab) {
-            uint8_t* slab_end = slab->base + slab->slot_count * slab->slot_size;
-            if (p >= slab->base && p < slab_end) {
-                return 1;
-            }
-            slab = slab->next;
+    // Fast rejection: check against global min/max address bounds
+    if (p < oz->min_addr || p >= oz->max_addr) return 0;
+
+    // Binary search the sorted slab_ranges array for a range containing p
+    size_t lo = 0, hi = oz->range_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (oz->slab_ranges[mid].end <= p) {
+            lo = mid + 1;
+        } else if (oz->slab_ranges[mid].base > p) {
+            hi = mid;
+        } else {
+            // p >= base && p < end — found
+            return 1;
         }
     }
     return 0;
