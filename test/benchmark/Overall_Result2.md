@@ -25,18 +25,18 @@
 
 > Classic Scheme benchmark suite adapted for Lambda with type annotations. Tests recursive functions, numeric computation, and backtracking.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
-|-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
-| fib | recursive | 2.1 | 2.2 | 1.1 | 17.4 | 1.6 | 1.28x |
-| fibfp | recursive | 3.6 | 3.4 | 1.2 | 17.4 | 1.6 | 2.25x |
-| tak | recursive | 0.15 | 0.17 | 0.11 | 2.7 | 0.76 | 0.20x |
-| cpstak | closure | 0.31 | 0.33 | 0.22 | 5.2 | 0.91 | 0.34x |
-| sum | iterative | 0.27 | 2.0 | 16.5 | 29.1 | 1.1 | 0.24x |
-| sumfp | iterative | 0.067 | 0.34 | 1.7 | 3.6 | 0.82 | 0.08x |
-| nqueens | backtrack | 6.5 | 7.2 | 0.013 | 9.1 | 1.7 | 3.90x |
-| fft | numeric | 0.19 | 1.1 | 2.4 | 2.6 | 1.5 | 0.13x |
-| mbrot | numeric | 0.60 | 0.89 | --- | 16.7 | 1.6 | 0.36x |
-| ack | recursive | 10.3 | 9.7 | 8.6 | --- | 12.4 | 0.83x |
+| Benchmark | Category  |   MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
+| --------- | --------- | ----: | ----: | -------: | ------: | ------: | -------: |
+| fib       | recursive |   2.1 |   2.2 |      1.1 |    17.4 |     1.6 |    1.28x |
+| fibfp     | recursive |   3.6 |   3.4 |      1.2 |    17.4 |     1.6 |    2.25x |
+| tak       | recursive |  0.15 |  0.17 |     0.11 |     2.7 |    0.76 |    0.20x |
+| cpstak    | closure   |  0.31 |  0.33 |     0.22 |     5.2 |    0.91 |    0.34x |
+| sum       | iterative |  0.27 |   2.0 |     16.5 |    29.1 |     1.1 |    0.24x |
+| sumfp     | iterative | 0.067 |  0.34 |      1.7 |     3.6 |    0.82 |    0.08x |
+| nqueens   | backtrack |   6.5 |   7.2 |    0.013 |     9.1 |     1.7 |    3.90x |
+| fft       | numeric   |  0.19 |   1.1 |      2.4 |     2.6 |     1.5 |    0.13x |
+| mbrot     | numeric   |  0.60 |  0.89 |      --- |    16.7 |     1.6 |    0.36x |
+| ack       | recursive |  10.3 |   9.7 |      8.6 |     --- |    12.4 |    0.83x |
 
 **Geometric mean MIR/Node.js: 0.47x** -- Lambda faster on 7/10 benchmarks
 
@@ -46,22 +46,22 @@
 
 > Standard cross-language benchmark suite from Stefan Marr. Lambda implementations use procedural style; JS uses official AWFY source.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
-|-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
-| sieve | micro | 0.053 | 0.052 | 0.009 | 0.57 | 0.35 | 0.15x |
-| permute | micro | 0.066 | 0.074 | 0.008 | 1.6 | 0.82 | 0.08x |
-| queens | micro | 0.15 | 0.14 | 0.007 | 1.1 | 0.64 | 0.23x |
-| towers | micro | 0.22 | 0.12 | 0.006 | 2.6 | 1.1 | 0.19x |
-| bounce | micro | 0.20 | 0.15 | --- | 0.89 | 0.56 | 0.36x |
-| list | micro | 0.023 | 0.62 | 0.008 | 0.94 | 0.50 | 0.05x |
-| storage | micro | 0.32 | 0.49 | --- | 2.7 | 0.67 | 0.48x |
-| mandelbrot | compute | 32.0 | 54.3 | --- | 849 | 31.5 | 1.02x |
-| nbody | compute | 1.3 | 2.3 | 0.11 | 0.023 | 0.24 | 5.57x |
-| richards | macro | 56.7 | 49.5 | 0.008 | 39.2 | 4.5 | 12.64x |
-| json | macro | 0.028 | 3.3 | --- | 11.9 | 2.6 | 0.01x |
-| deltablue | macro | 6.1 | 4.9 | --- | 0.25 | 0.85 | 7.12x |
-| havlak | macro | 339 | 176 | --- | 3.97s | 97.6 | 3.47x |
-| cd | macro | 445 | 617 | --- | 1.04s | 37.1 | 11.98x |
+| Benchmark  | Category |   MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
+| ---------- | -------- | ----: | ----: | -------: | ------: | ------: | -------: |
+| sieve      | micro    | 0.053 | 0.052 |    0.009 |    0.57 |    0.35 |    0.15x |
+| permute    | micro    | 0.066 | 0.074 |    0.008 |     1.6 |    0.82 |    0.08x |
+| queens     | micro    |  0.15 |  0.14 |    0.007 |     1.1 |    0.64 |    0.23x |
+| towers     | micro    |  0.22 |  0.12 |    0.006 |     2.6 |     1.1 |    0.19x |
+| bounce     | micro    |  0.20 |  0.15 |      --- |    0.89 |    0.56 |    0.36x |
+| list       | micro    | 0.023 |  0.62 |    0.008 |    0.94 |    0.50 |    0.05x |
+| storage    | micro    |  0.32 |  0.49 |      --- |     2.7 |    0.67 |    0.48x |
+| mandelbrot | compute  |  32.0 |  54.3 |      --- |     849 |    31.5 |    1.02x |
+| nbody      | compute  |   1.3 |   2.3 |     0.11 |   0.023 |    0.24 |    5.57x |
+| richards   | macro    |  56.7 |  49.5 |    0.008 |    39.2 |     4.5 |   12.64x |
+| json       | macro    | 0.028 |   3.3 |      --- |    11.9 |     2.6 |    0.01x |
+| deltablue  | macro    |   6.1 |   4.9 |      --- |    0.25 |    0.85 |    7.12x |
+| havlak     | macro    |   339 |   176 |      --- |   3.97s |    97.6 |    3.47x |
+| cd         | macro    |   445 |   617 |      --- |   1.04s |    37.1 |   11.98x |
 
 **Geometric mean MIR/Node.js: 0.61x** -- Lambda faster on 8/14 benchmarks
 
@@ -71,18 +71,18 @@
 
 > Subset of the Computer Language Benchmarks Game. Tests diverse real-world computation: GC stress, regex, FASTA I/O, numeric precision, permutations.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
-|-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
-| binarytrees | allocation | 8.0 | 8.3 | 18.8 | 28.9 | 4.1 | 1.96x |
-| fannkuch | permutation | 0.74 | 1.1 | --- | 7.1 | 4.0 | 0.19x |
-| fasta | generation | 1.1 | 0.86 | 1.1 | 10.9 | 6.1 | 0.19x |
-| knucleotide | hashing | 2.9 | 3.9 | 0.054 | --- | 5.3 | 0.55x |
-| mandelbrot | numeric | 22.4 | 38.1 | --- | 113 | 4.2 | 5.36x |
-| nbody | numeric | 2.8 | 2.7 | 134 | 4.6 | 4.5 | 0.63x |
-| pidigits | bignum | 0.43 | 0.32 | 0.015 | 0.16 | 2.0 | 0.22x |
-| regexredux | regex | 1.2 | 1.4 | 0.083 | --- | 2.6 | 0.49x |
-| revcomp | string | 1.9 | 1.9 | 0.001 | --- | 3.4 | 0.55x |
-| spectralnorm | numeric | 13.1 | 10.6 | 19.2 | 64.8 | 2.7 | 4.94x |
+| Benchmark    | Category    |  MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
+| ------------ | ----------- | ---: | ----: | -------: | ------: | ------: | -------: |
+| binarytrees  | allocation  |  8.0 |   8.3 |     18.8 |    28.9 |     4.1 |    1.96x |
+| fannkuch     | permutation | 0.74 |   1.1 |      --- |     7.1 |     4.0 |    0.19x |
+| fasta        | generation  |  1.1 |  0.86 |      1.1 |    10.9 |     6.1 |    0.19x |
+| knucleotide  | hashing     |  2.9 |   3.9 |    0.054 |     --- |     5.3 |    0.55x |
+| mandelbrot   | numeric     | 22.4 |  38.1 |      --- |     113 |     4.2 |    5.36x |
+| nbody        | numeric     |  2.8 |   2.7 |      134 |     4.6 |     4.5 |    0.63x |
+| pidigits     | bignum      | 0.43 |  0.32 |    0.015 |    0.16 |     2.0 |    0.22x |
+| regexredux   | regex       |  1.2 |   1.4 |    0.083 |     --- |     2.6 |    0.49x |
+| revcomp      | string      |  1.9 |   1.9 |    0.001 |     --- |     3.4 |    0.55x |
+| spectralnorm | numeric     | 13.1 |  10.6 |     19.2 |    64.8 |     2.7 |    4.94x |
 
 **Geometric mean MIR/Node.js: 0.72x** -- Lambda faster on 7/10 benchmarks
 
@@ -92,15 +92,15 @@
 
 > Community benchmarks from kostya/benchmarks comparing languages on common tasks.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
-|-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
-| brainfuck | interpreter | 164 | 288 | 420 | 916 | 47.5 | 3.46x |
-| matmul | numeric | 8.7 | 340 | 1.18s | 554 | 15.9 | 0.55x |
-| primes | numeric | 7.3 | 10.1 | 19.4 | 98.1 | 4.5 | 1.63x |
-| base64 | string | 222 | 853 | 0.000 | 188 | 18.0 | 12.34x |
-| levenshtein | string | 8.5 | 13.4 | 30.7 | 56.9 | 4.1 | 2.08x |
-| json_gen | data | 64.7 | 66.6 | 20.3 | 21.5 | 6.7 | 9.61x |
-| collatz | numeric | 302 | 341 | --- | 6.26s | 1.43s | 0.21x |
+| Benchmark   | Category    |  MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
+| ----------- | ----------- | ---: | ----: | -------: | ------: | ------: | -------: |
+| brainfuck   | interpreter |  164 |   288 |      420 |     916 |    47.5 |    3.46x |
+| matmul      | numeric     |  8.7 |   340 |    1.18s |     554 |    15.9 |    0.55x |
+| primes      | numeric     |  7.3 |  10.1 |     19.4 |    98.1 |     4.5 |    1.63x |
+| base64      | string      |  222 |   853 |    0.000 |     188 |    18.0 |   12.34x |
+| levenshtein | string      |  8.5 |  13.4 |     30.7 |    56.9 |     4.1 |    2.08x |
+| json_gen    | data        | 64.7 |  66.6 |     20.3 |    21.5 |     6.7 |    9.61x |
+| collatz     | numeric     |  302 |   341 |      --- |   6.26s |   1.43s |    0.21x |
 
 **Geometric mean MIR/Node.js: 2.07x** -- Lambda faster on 2/7 benchmarks
 

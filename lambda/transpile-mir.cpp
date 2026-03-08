@@ -3876,7 +3876,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 // ============================================================================
 
 static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
-    int type_index = ((TypeMap*)map_node->type)->type_index;
+    TypeMap* map_type = (TypeMap*)map_node->type;
+    int type_index = map_type->type_index;
 
     // Create map with inline data: Map* m = map_with_data(type_index)
     MIR_reg_t m = emit_call_1(mt, "map_with_data", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
@@ -3891,7 +3892,136 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         return m;
     }
 
-    // Evaluate all values into boxed Item ops
+    // =========================================================================
+    // Optimization: Direct field stores for typed maps with known shapes.
+    // Instead of calling map_fill() through varargs → set_fields() switch loop,
+    // emit direct MIR stores at compile-time byte offsets. This eliminates:
+    //   - C varargs marshaling/unmarshaling overhead
+    //   - set_fields() per-field type switch dispatch
+    //   - runtime type checking for each field
+    // Applicable when the map has a named type (struct_name) OR its shape was
+    // merged from a named type annotation (has_named_shape flag from build_ast).
+    // =========================================================================
+    if ((mir_has_fixed_shape(map_type) || map_type->has_named_shape) &&
+        map_type->byte_size > 0 && val_count == (int)map_type->length) {
+        // Check all fields: named, typed, 8-byte aligned offsets, supported types
+        bool all_direct = true;
+        ShapeEntry* check = map_type->shape;
+        while (check) {
+            if (!check->name || !check->type ||
+                check->byte_offset % sizeof(void*) != 0) {
+                all_direct = false;
+                break;
+            }
+            TypeId ft = mir_resolve_field_type(check);
+            if (ft == LMD_TYPE_ANY) {
+                all_direct = false;
+                break;
+            }
+            if (ft != LMD_TYPE_FLOAT && ft != LMD_TYPE_INT && ft != LMD_TYPE_INT64 &&
+                ft != LMD_TYPE_BOOL && ft != LMD_TYPE_STRING && ft != LMD_TYPE_NULL &&
+                !mir_is_container_field_type(ft)) {
+                all_direct = false;
+                break;
+            }
+            check = check->next;
+        }
+
+        if (all_direct) {
+            log_debug("mir: direct field store for typed map '%s' (%d fields)",
+                map_type->struct_name, val_count);
+
+            // Load data pointer: m->data is at offset 16 in Map struct
+            MIR_reg_t data_ptr = new_reg(mt, "mdata", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, m, 0, 1)));
+
+            // Store each field directly at known byte offset
+            item = map_node->item;
+            ShapeEntry* field = map_type->shape;
+            while (item && field) {
+                TypeId field_type = mir_resolve_field_type(field);
+                int64_t offset = field->byte_offset;
+
+                // Extract value AST node from key-value pair
+                AstNode* value_node = nullptr;
+                bool is_null_literal = false;
+                if (item->node_type == AST_NODE_KEY_EXPR) {
+                    AstNamedNode* key_expr = (AstNamedNode*)item;
+                    value_node = key_expr->as;
+                    is_null_literal = (value_node == nullptr);
+                } else {
+                    value_node = item;
+                }
+
+                if (is_null_literal || field_type == LMD_TYPE_NULL) {
+                    // Data buffer is zero-initialized by heap_calloc — skip store
+                } else if (field_type == LMD_TYPE_FLOAT) {
+                    // Store native double at data + offset
+                    TypeId val_tid = get_effective_type(mt, value_node);
+                    MIR_reg_t val;
+                    if (val_tid == LMD_TYPE_FLOAT) {
+                        val = transpile_expr(mt, value_node);
+                    } else if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64) {
+                        MIR_reg_t int_val = transpile_expr(mt, value_node);
+                        val = new_reg(mt, "i2d", MIR_T_D);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_reg_op(mt->ctx, int_val)));
+                    } else {
+                        MIR_reg_t boxed = transpile_box_item(mt, value_node);
+                        val = emit_unbox(mt, boxed, LMD_TYPE_FLOAT);
+                    }
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1),
+                        MIR_new_reg_op(mt->ctx, val)));
+                } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64 ||
+                           field_type == LMD_TYPE_BOOL) {
+                    // Store native int/bool at data + offset
+                    TypeId val_tid = get_effective_type(mt, value_node);
+                    MIR_reg_t val;
+                    if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64 ||
+                        val_tid == LMD_TYPE_BOOL) {
+                        val = transpile_expr(mt, value_node);
+                    } else {
+                        MIR_reg_t boxed = transpile_box_item(mt, value_node);
+                        val = emit_unbox(mt, boxed, field_type);
+                    }
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
+                        MIR_new_reg_op(mt->ctx, val)));
+                } else if (field_type == LMD_TYPE_STRING) {
+                    // Store raw String* pointer at data + offset
+                    TypeId val_tid = get_effective_type(mt, value_node);
+                    MIR_reg_t val;
+                    if (val_tid == LMD_TYPE_STRING) {
+                        val = transpile_expr(mt, value_node);
+                    } else {
+                        MIR_reg_t boxed = transpile_box_item(mt, value_node);
+                        val = emit_unbox(mt, boxed, LMD_TYPE_STRING);
+                    }
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
+                        MIR_new_reg_op(mt->ctx, val)));
+                } else if (mir_is_container_field_type(field_type)) {
+                    // Container types: get boxed Item, strip tag → raw Container*
+                    // For null Items: AND mask strips to 0 (matching nullptr)
+                    MIR_reg_t boxed = transpile_box_item(mt, value_node);
+                    MIR_reg_t raw = emit_unbox_container(mt, boxed);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
+                        MIR_new_reg_op(mt->ctx, raw)));
+                }
+
+                item = item->next;
+                field = field->next;
+            }
+
+            return m;
+        }
+    }
+
+    // Fallback: evaluate all values as boxed Items and call map_fill() via varargs
     MIR_op_t* val_ops = (MIR_op_t*)alloca(val_count * sizeof(MIR_op_t));
     item = map_node->item;
     int vi = 0;
@@ -7752,6 +7882,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 #define INFER_STOP        4
 #define INFER_NUMERIC_USE 8
 #define INFER_FLOAT_CONTEXT 16  // function body contains float literals (guards NUMERIC_USE→INT)
+#define INFER_ARITH_USE   32  // param used in arithmetic (+,-,*,/,%,**), not just comparisons
 
 #define MAX_ALIASES 8
 
@@ -7880,6 +8011,7 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
                 // Even without literal evidence, this means the param is numeric.
                 if (left_is_tracked || right_is_tracked) {
                     ctx->evidence |= INFER_NUMERIC_USE;
+                    if (is_arith) ctx->evidence |= INFER_ARITH_USE;
                 }
                 // If both sides are untyped but param is involved, check binary node's type
                 if ((left_is_tracked || right_is_tracked) &&
@@ -8027,7 +8159,10 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
     // are often intentionally polymorphic.
     // Guard: if the function body contains float literals, the untyped param may
     // receive float values — don't force INT. (e.g. mbrot's count() uses 16.0, 2.0)
-    if (is_proc && (ctx.evidence & INFER_NUMERIC_USE)) {
+    // Only infer INT when param is used in actual arithmetic (not just comparisons).
+    // Comparisons (==, <, >) are polymorphic and don't prove the param is int.
+    // e.g. `(tree.root).key == key` should NOT cause key to be inferred as INT.
+    if (is_proc && (ctx.evidence & INFER_ARITH_USE)) {
         if (!(ctx.evidence & INFER_FLOAT_CONTEXT)) return LMD_TYPE_INT;
     }
     // No evidence at all — keep ANY
