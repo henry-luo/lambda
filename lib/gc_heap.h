@@ -88,10 +88,28 @@ typedef void (*gc_vmap_destroy_fn)(void* data);
  *   - data_zone:   bump-pointer allocator for variable-size data buffers
  *   - tenured_data: data zone for long-lived data that survived collection
  *   - pool: rpmalloc pool for large object fallback and bulk cleanup
+ *
+ * Hot-path allocation uses a bump-pointer region (bump_cursor/bump_end)
+ * for fast sequential allocation. Objects are still linked into all_objects
+ * for GC sweep. Dead objects go to the object_zone free lists for reuse.
  */
+
+// Bump block metadata for tracking allocated bump regions
+typedef struct gc_bump_block {
+    uint8_t* base;                  // block memory start
+    size_t size;                    // block size in bytes
+    struct gc_bump_block* next;     // next (older) block in chain
+} gc_bump_block_t;
+
+// Initial and growth sizes for bump-pointer regions
+#define GC_BUMP_BLOCK_INITIAL_SIZE  (4 * 1024 * 1024)   // 4 MB
+#define GC_BUMP_BLOCK_MAX_SIZE      (64 * 1024 * 1024)   // 64 MB cap
+
 typedef struct gc_heap {
     Pool* pool;                     // underlying rpmalloc memory pool
     gc_header_t* all_objects;       // linked list head (most recent allocation first)
+    uint8_t* bump_cursor;           // bump-pointer allocation cursor (hot path)
+    uint8_t* bump_end;              // end of current bump block
     gc_object_zone_t* object_zone;  // non-moving object struct allocator
     gc_data_zone_t* data_zone;      // bump-pointer data buffer allocator (nursery)
     gc_data_zone_t* tenured_data;   // data zone for survivors (promoted on GC)
@@ -121,6 +139,9 @@ typedef struct gc_heap {
     // VMap tracing/finalization callbacks (set by runtime, called from GC)
     gc_vmap_trace_fn vmap_trace;    // traces Item keys/values in VMap's HashMap
     gc_vmap_destroy_fn vmap_destroy; // frees VMap's malloc'd backing data
+
+    // Bump-pointer block chain (for cleanup and ownership registration)
+    gc_bump_block_t* bump_blocks;   // linked list of allocated bump regions
 } gc_heap_t;
 
 /**
@@ -166,6 +187,22 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag);
  * @return pointer to zeroed user data, or NULL on failure
  */
 void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls);
+
+/**
+ * Allocate from the bump-pointer region. Fast path for JIT-compiled code.
+ * Uses the bump cursor for sequential allocation. Falls back to free list
+ * and new block allocation when the current block is exhausted.
+ * Objects are linked into all_objects for GC sweep compatibility.
+ *
+ * @param gc            heap to allocate from
+ * @param slot_size     total slot size (sizeof(gc_header_t) + SIZE_CLASSES[cls])
+ * @param alloc_size    original user data size (stored in header for class lookup)
+ * @param type_tag      TypeId for tracking
+ * @param cls           pre-computed size class index (0-6)
+ * @return pointer to zeroed user data, or NULL on failure
+ */
+void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
+                          uint16_t type_tag, int cls);
 
 /**
  * Free a GC-managed object. Sets GC_FLAG_FREED on the header.

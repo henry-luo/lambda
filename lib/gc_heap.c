@@ -17,6 +17,74 @@
 #define GC_MARK_STACK_INITIAL 4096
 
 // ============================================================================
+// Bump-Pointer Block Management
+// ============================================================================
+
+// Allocate a new bump block from the pool and register its range with the
+// object zone for ownership lookup (gc_object_zone_owns binary search).
+static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
+    uint8_t* memory = (uint8_t*)pool_alloc(gc->pool, block_size);
+    if (!memory) {
+        log_error("gc_alloc_bump_block: failed to allocate %zu bytes", block_size);
+        return NULL;
+    }
+    memset(memory, 0, block_size);
+
+    gc_bump_block_t* block = (gc_bump_block_t*)calloc(1, sizeof(gc_bump_block_t));
+    if (!block) {
+        log_error("gc_alloc_bump_block: failed to allocate block metadata");
+        return NULL;
+    }
+    block->base = memory;
+    block->size = block_size;
+    block->next = NULL;
+
+    // Register with object zone so gc_object_zone_owns() recognizes bump pointers.
+    // This enables GC mark/sweep to find bump-allocated objects.
+    // Use the internal register_slab_range function via the public class_size API
+    // — actually we need direct access. We'll register via a helper.
+    // For now, register the range directly in the object zone's sorted range array.
+    if (gc->object_zone) {
+        // Reuse the same ownership infrastructure: register the bump block as a "slab range"
+        gc_object_zone_t* oz = gc->object_zone;
+        uint8_t* end = memory + block_size;
+
+        // update global min/max bounds
+        if (!oz->min_addr || memory < oz->min_addr) oz->min_addr = memory;
+        if (!oz->max_addr || end > oz->max_addr) oz->max_addr = end;
+
+        // grow array if needed
+        if (oz->range_count >= oz->range_capacity) {
+            size_t new_cap = oz->range_capacity ? oz->range_capacity * 2 : GC_INITIAL_RANGE_CAPACITY;
+            gc_slab_range_t* new_ranges = (gc_slab_range_t*)realloc(oz->slab_ranges,
+                new_cap * sizeof(gc_slab_range_t));
+            if (new_ranges) {
+                oz->slab_ranges = new_ranges;
+                oz->range_capacity = new_cap;
+            }
+        }
+
+        // binary search for insertion point
+        size_t lo = 0, hi = oz->range_count;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+            if (oz->slab_ranges[mid].base < memory) lo = mid + 1;
+            else hi = mid;
+        }
+        if (lo < oz->range_count) {
+            memmove(&oz->slab_ranges[lo + 1], &oz->slab_ranges[lo],
+                    (oz->range_count - lo) * sizeof(gc_slab_range_t));
+        }
+        oz->slab_ranges[lo].base = memory;
+        oz->slab_ranges[lo].end = end;
+        oz->range_count++;
+    }
+
+    log_debug("gc_alloc_bump_block: allocated %zu byte bump block at %p", block_size, memory);
+    return block;
+}
+
+// ============================================================================
 // Type identification helpers (match lambda.h TypeId values)
 // These must match the EnumTypeId enum in lambda.h exactly.
 // We declare the values we need rather than including lambda.h from C.
@@ -120,6 +188,19 @@ gc_heap_t* gc_heap_create(void) {
     gc->vmap_trace = NULL;
     gc->vmap_destroy = NULL;
 
+    // Initialize bump-pointer allocator
+    gc->bump_blocks = NULL;
+    gc->bump_cursor = NULL;
+    gc->bump_end = NULL;
+    gc_bump_block_t* first_block = gc_alloc_bump_block(gc, GC_BUMP_BLOCK_INITIAL_SIZE);
+    if (first_block) {
+        first_block->next = gc->bump_blocks;
+        gc->bump_blocks = first_block;
+        gc->bump_cursor = first_block->base;
+        gc->bump_end = first_block->base + first_block->size;
+        log_debug("gc_heap_create: initial bump block %zu bytes", first_block->size);
+    }
+
     log_debug("gc_heap_create: dual-zone GC heap created (threshold=%zu)", gc->gc_threshold);
     return gc;
 }
@@ -132,6 +213,15 @@ void gc_heap_destroy(gc_heap_t* gc) {
         free(gc->mark_stack);
         gc->mark_stack = NULL;
     }
+
+    // free bump block metadata (block memory is pool-allocated)
+    gc_bump_block_t* block = gc->bump_blocks;
+    while (block) {
+        gc_bump_block_t* next = block->next;
+        free(block);
+        block = next;
+    }
+    gc->bump_blocks = NULL;
 
     // free zone metadata (zone memory is pool-allocated, freed by pool_destroy)
     if (gc->object_zone) gc_object_zone_destroy(gc->object_zone);
@@ -212,6 +302,67 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     // No large-object fallback needed — JIT only uses this for known small sizes.
     // No memset needed — object zone returns zeroed memory.
     return ptr;
+}
+
+void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
+                          uint16_t type_tag, int cls) {
+    // ---- Fast path: try free list first (recycling after GC) ----
+    gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
+    if (free_hdr) {
+        gc->object_zone->free_lists[cls] = free_hdr->next;
+        size_t class_user_size = gc_object_zone_class_size(cls);
+        memset((void*)(free_hdr + 1), 0, class_user_size);
+        // reinitialize header
+        free_hdr->type_tag = type_tag;
+        free_hdr->gc_flags = 0;
+        free_hdr->marked = 0;
+        free_hdr->alloc_size = (uint32_t)alloc_size;
+        // link into all_objects
+        free_hdr->next = gc->all_objects;
+        gc->all_objects = free_hdr;
+        gc->object_zone->total_slots_allocated++;
+        gc->total_allocated += sizeof(gc_header_t) + alloc_size;
+        gc->object_count++;
+        return (void*)(free_hdr + 1);
+    }
+
+    // ---- Bump-pointer path ----
+    uint8_t* cursor = gc->bump_cursor;
+    if (cursor + slot_size > gc->bump_end) {
+        // Current block exhausted — allocate a new one (double size, capped)
+        size_t current_size = gc->bump_blocks ? gc->bump_blocks->size : GC_BUMP_BLOCK_INITIAL_SIZE;
+        size_t new_size = current_size * 2;
+        if (new_size > GC_BUMP_BLOCK_MAX_SIZE) new_size = GC_BUMP_BLOCK_MAX_SIZE;
+        if (new_size < slot_size) new_size = slot_size * 256; // ensure room
+        gc_bump_block_t* new_block = gc_alloc_bump_block(gc, new_size);
+        if (!new_block) {
+            // Fallback to slab allocator
+            return gc_object_zone_alloc_class(gc->object_zone, cls, alloc_size,
+                                               type_tag, &gc->all_objects);
+        }
+        new_block->next = gc->bump_blocks;
+        gc->bump_blocks = new_block;
+        gc->bump_cursor = new_block->base;
+        gc->bump_end = new_block->base + new_block->size;
+        cursor = gc->bump_cursor;
+    }
+
+    gc->bump_cursor = cursor + slot_size;
+
+    // Initialize header in-place (memory is pre-zeroed from block allocation)
+    gc_header_t* header = (gc_header_t*)cursor;
+    header->type_tag = type_tag;
+    // gc_flags = 0, marked = 0 — already zero from memset
+    header->alloc_size = (uint32_t)alloc_size;
+
+    // Link into all_objects list
+    header->next = gc->all_objects;
+    gc->all_objects = header;
+
+    gc->total_allocated += slot_size;
+    gc->object_count++;
+
+    return (void*)(header + 1);
 }
 
 void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
