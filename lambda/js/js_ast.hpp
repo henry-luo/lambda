@@ -218,6 +218,7 @@ typedef struct JsIdentifierNode {
 typedef struct JsLiteralNode {
     JsAstNode base;
     JsLiteralType literal_type;
+    bool has_decimal;        // true if source text contains '.' or 'e'/'E' (fractional hint)
     union {
         double number_value;
         String* string_value;
