@@ -1,6 +1,6 @@
 # Lambda Issues Encountered During JetStream Benchmark Porting
 
-Issues discovered while porting 9 JetStream JavaScript benchmarks to Lambda Script.
+Issues discovered while porting JetStream JavaScript benchmarks to Lambda Script.
 
 ---
 
@@ -311,6 +311,164 @@ pn rol(num: int, cnt: int) {
 
 ---
 
+## 13. `@` Path Literals Do Not Parse
+
+**Severity**: Compilation error (parse error)  
+**Affected benchmarks**: regex_dna
+
+The documentation describes `@` path literals for file I/O operations (e.g., `input(@./data.json)`), but these do not parse at all — neither relative nor absolute paths:
+
+```
+error[E100]: Unexpected syntax near '@./' [ERROR, ., /]
+error[E100]: Unexpected syntax near '@/' [ERROR, /]
+```
+
+Both forms fail:
+
+```lambda
+// FAILS: relative path literal
+let data = input(@./data.json, 'json')
+
+// FAILS: absolute path literal
+let data = input(@/Users/name/data.json, 'json')
+```
+
+**Workaround**: Use plain string paths instead of `@` path literals.
+
+```lambda
+// WORKS
+let data^err = input("./data.json", "json")
+```
+
+**Note**: The `Lambda_Sys_Func.md` documentation extensively shows `@` path literals in examples, but they appear to be unimplemented (or the grammar doesn't support them in the current build).
+
+---
+
+## 14. `slice()` Has No 2-Argument Form (Missing Slice-to-End)
+
+**Severity**: Compilation error (`call to undefined function 'slice'`)  
+**Affected benchmarks**: regex_dna
+
+Calling `slice(str, start)` to get a substring from `start` to the end fails because Lambda only recognizes the 3-argument form `slice(str, start, end)`. The 2-arg call is treated as an entirely different (undefined) function.
+
+```lambda
+// FAILS
+var tail = slice("hello", 2)  // error: call to undefined function 'slice'
+
+// WORKS
+var tail = slice("hello", 2, len("hello"))  // "llo"
+```
+
+**Workaround**: Always provide the third argument, using `len(str)` for slice-to-end.
+
+**Suggestion**: Support the common 2-argument form `slice(str, start)` as shorthand for `slice(str, start, len(str))`. This is standard across JS, Python, and most languages.
+
+---
+
+## 15. No Case-Insensitive Mode for String Patterns
+
+**Severity**: Missing feature (affects correctness)  
+**Affected benchmarks**: regex_dna
+
+Lambda's string patterns (which compile to RE2 regex) are always case-sensitive. There is no way to perform case-insensitive matching — neither via an inline flag like `(?i:...)` nor via a pattern modifier.
+
+JavaScript's regex-dna benchmark uses `/agggtaaa|tttaccct/ig` — the `i` flag for case-insensitive matching is essential because the DNA data contains mixed-case characters.
+
+```lambda
+string Pat = "abc" | "def"
+
+// This pattern only matches lowercase — no way to make it case-insensitive
+find("ABCdefABC", Pat)  // finds only "def", misses "ABC"
+```
+
+**Workaround**: Pre-lowercase the input data and use lowercase patterns.
+
+```lambda
+// Precompute lowercase DNA (outside the benchmark loop)
+var dna_lower = lower(dna)
+
+// Then match with lowercase patterns
+string Pat = "agggtaaa" | "tttaccct"
+find(dna_lower, Pat)
+```
+
+**Suggestion**: Add case-insensitive support, either:
+- A pattern modifier: `string Pat = "abc" | "def" /i`
+- Or an optional flag on `find()`/`replace()`: `find(str, Pat, {case_insensitive: true})`
+
+---
+
+## 16. No Built-in Replace-First Function
+
+**Severity**: Missing feature  
+**Affected benchmarks**: regex_dna
+
+Lambda's `replace()` always replaces **all** occurrences (global replacement), with both plain strings and patterns. There is no way to replace only the first occurrence.
+
+This differs from JavaScript, where `str.replace(string, string)` only replaces the first match (global requires `str.replace(/regex/g, repl)` or `str.replaceAll()`).
+
+```lambda
+replace("aBcBdB", "B", "X")  // "aXcXdX" — all replaced
+
+// No way to get "aXcBdB" (first only) without manual implementation
+```
+
+**Workaround**: Implement `replace_first()` manually using `find()` and `slice()`:
+
+```lambda
+pn replace_first(s, search, repl) {
+    var matches = find(s, search)
+    if (len(matches) == 0) {
+        return s
+    }
+    var pos = matches[0].index
+    var slen = len(search)
+    return slice(s, 0, pos) ++ repl ++ slice(s, pos + slen, len(s))
+}
+```
+
+**Note**: This workaround is inefficient for large strings because `find()` locates *all* matches when we only need the first. A built-in `replace_first()` or an optional `count` parameter on `replace()` would be more efficient.
+
+**Suggestion**: Add either `replace_first(str, pattern, repl)` or extend `replace()` with an optional count: `replace(str, pattern, repl, 1)`.
+
+---
+
+## 17. Decimal Values Become Zero When Passed as Function Arguments
+
+**Severity**: Compilation/runtime bug
+**Affected benchmarks**: bigdenary
+
+When a `decimal` value (with either `n` or `N` suffix) is passed as an argument to a `pn` function, the received value is `0` instead of the original decimal. This happens with both global `let` constants and local variables.
+
+```lambda
+let BD1 = 3.14159N
+
+pn show(d) {
+    print(string(d) ++ "\n")  // prints "0" instead of "3.14159"
+}
+
+pn main() {
+    show(BD1)         // 0
+    show(3.14159N)    // 0
+    let x = 2.71828N
+    show(x)           // 0
+}
+```
+
+**Workaround**: Access global decimal constants directly inside functions instead of passing them as parameters.
+
+```lambda
+let BD1 = 3.14159N
+
+pn show() {
+    print(string(BD1) ++ "\n")  // prints "3.14159" — works correctly
+}
+```
+
+**Suggestion**: Fix the transpiler or calling convention to correctly pass decimal values through function arguments.
+
+---
+
 ## Summary Table
 
 | # | Issue | Type | Impact |
@@ -327,3 +485,8 @@ pn rol(num: int, cnt: int) {
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
 | 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |
 | 12 | `shl` 64-bit overflow | Bitwise ops | 1 benchmark, wrong hash output |
+| 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
+| 14 | `slice()` no 2-argument form | Missing feature | 1 benchmark, minor |
+| 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
+| 16 | No replace-first function | Missing feature | 1 benchmark, manual workaround |
+| 17 | Decimal args become zero | Runtime bug | 1 benchmark, workaround needed |
