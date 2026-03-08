@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
+#include "../lib/gc_heap.h"
 #include "validator/validator.hpp"
 #include "lambda-stack.h"
 #include <mir.h>
@@ -134,6 +135,9 @@ struct MirTranspiler {
 
     // Runtime pointer register (loaded at function entry)
     MIR_reg_t rt_reg;
+
+    // GC heap pointer register (loaded at function entry for inline alloc)
+    MIR_reg_t gc_reg;
 
     // Consts pointer register
     MIR_reg_t consts_reg;
@@ -3937,7 +3941,100 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             // Compute size class at JIT compile time to skip runtime class_index lookup.
             // Size classes: {16, 32, 48, 64, 96, 128, 256} — find smallest that fits.
             int alloc_class = gc_object_zone_class_index((size_t)total_size);
-            if (alloc_class >= 0) {
+            int64_t class_size = (alloc_class >= 0) ? (int64_t)gc_object_zone_class_size(alloc_class) : total_size;
+            int64_t slot_size = (int64_t)sizeof(gc_header_t) + class_size;
+
+            // ================================================================
+            // INLINE BUMP-POINTER ALLOCATION (#10 + #11)
+            // Fast path: bump gc->bump_cursor by slot_size.
+            // Slow path: call heap_calloc_class (handles free list + new block).
+            // gc_reg is loaded at function entry: context->heap->gc
+            // ================================================================
+            if (alloc_class >= 0 && mt->gc_reg != 0) {
+                // gc_heap_t offsets: bump_cursor=16, bump_end=24, all_objects=8
+                MIR_reg_t cursor = new_reg(mt, "bcur", MIR_T_I64);
+                MIR_reg_t new_cursor = new_reg(mt, "bnew", MIR_T_I64);
+                MIR_reg_t bend = new_reg(mt, "bend", MIR_T_I64);
+
+                // Load bump_cursor and bump_end from gc_heap_t
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cursor),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, mt->gc_reg, 0, 1)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, new_cursor),
+                    MIR_new_reg_op(mt->ctx, cursor),
+                    MIR_new_int_op(mt->ctx, slot_size)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, bend),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 24, mt->gc_reg, 0, 1)));
+
+                // Branch: if new_cursor > bump_end → slow path
+                MIR_label_t slow_label = MIR_new_label(mt->ctx);
+                MIR_label_t done_label = MIR_new_label(mt->ctx);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UBGT,
+                    MIR_new_label_op(mt->ctx, slow_label),
+                    MIR_new_reg_op(mt->ctx, new_cursor),
+                    MIR_new_reg_op(mt->ctx, bend)));
+
+                // ---- Fast path: bump succeeded ----
+                // Store updated cursor back to gc->bump_cursor
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, mt->gc_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, new_cursor)));
+
+                // m = cursor + sizeof(gc_header_t) — user pointer past header
+                m = new_reg(mt, "mptr", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, m),
+                    MIR_new_reg_op(mt->ctx, cursor),
+                    MIR_new_int_op(mt->ctx, (int64_t)sizeof(gc_header_t))));
+
+                // Initialize gc_header_t at cursor (memory is pre-zeroed):
+                //   header->next = gc->all_objects  (offset 0 from cursor)
+                //   header->type_tag = LMD_TYPE_MAP (offset 8, uint16)
+                //   header->alloc_size = total_size (offset 12, uint32)
+                //   gc_flags=0 and marked=0 are already zero from block memset
+                MIR_reg_t old_head = new_reg(mt, "oldh", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, old_head),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, mt->gc_reg, 0, 1))); // gc->all_objects
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cursor, 0, 1),          // header->next
+                    MIR_new_reg_op(mt->ctx, old_head)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, mt->gc_reg, 0, 1),    // gc->all_objects = cursor
+                    MIR_new_reg_op(mt->ctx, cursor)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_U16, 8, cursor, 0, 1),          // header->type_tag
+                    MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_U32, 12, cursor, 0, 1),         // header->alloc_size
+                    MIR_new_int_op(mt->ctx, total_size)));
+
+                // Set Container.is_heap = 1 (flags byte at user+1)
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, m, 0, 1),
+                    MIR_new_int_op(mt->ctx, 1)));
+
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, done_label)));
+
+                // ---- Slow path: call heap_calloc_class ----
+                emit_insn(mt, slow_label);
+                MIR_reg_t slow_m = emit_call_3(mt, "heap_calloc_class", MIR_T_P,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, total_size),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)alloc_class));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, m),
+                    MIR_new_reg_op(mt->ctx, slow_m)));
+
+                // Reload gc->bump_cursor after slow path (may have changed block)
+                // Not needed for m, but needed for future allocations in this function.
+                // gc_reg is stable (gc_heap_t* doesn't change).
+
+                emit_insn(mt, done_label);
+            } else if (alloc_class >= 0) {
                 m = emit_call_3(mt, "heap_calloc_class", MIR_T_P,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, total_size),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP),
@@ -8564,6 +8661,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_item_t saved_func_item = mt->current_func_item;
     MIR_func_t saved_func = mt->current_func;
     MIR_reg_t saved_consts_reg = mt->consts_reg;
+    MIR_reg_t saved_gc_reg = mt->gc_reg;
     bool saved_in_user_func = mt->in_user_func;
     AstNode* saved_func_body = mt->func_body;
     mt->in_user_func = true;
@@ -8596,6 +8694,14 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->consts_reg = new_reg(mt, "consts", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->consts_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, consts), runtime_fn, 0, 1)));
+
+    // Load gc_heap_t* for inline bump allocation: context->heap->gc
+    MIR_reg_t heap_reg_fn = new_reg(mt, "heap_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg_fn),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_fn, 0, 1)));  // context->heap
+    mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg_fn, 0, 1)));  // heap->gc
 
     // Register as local function early (before body transpilation for recursion)
     register_local_func(mt, name_buf->str, func_item);
@@ -8881,6 +8987,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_func_item = saved_func_item;
     mt->current_func = saved_func;
     mt->consts_reg = saved_consts_reg;
+    mt->gc_reg = saved_gc_reg;
     mt->in_user_func = saved_in_user_func;
     mt->func_body = saved_func_body;
     mt->current_closure = saved_closure;
@@ -9626,6 +9733,15 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.consts_reg = new_reg(&mt, "consts", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.consts_reg),
         MIR_new_mem_op(ctx, MIR_T_I64, offsetof(Context, consts), runtime_reg, 0, 1)));
+
+    // Load gc_heap_t* for inline bump allocation: context->heap->gc
+    // EvalContext.heap is at offset 64 (sizeof(Context)), Heap.gc is at offset 8
+    MIR_reg_t heap_reg = new_reg(&mt, "heap_ptr", MIR_T_I64);
+    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, heap_reg),
+        MIR_new_mem_op(ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));  // context->heap
+    mt.gc_reg = new_reg(&mt, "gc_ptr", MIR_T_I64);
+    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.gc_reg),
+        MIR_new_mem_op(ctx, MIR_T_I64, 8, heap_reg, 0, 1)));  // heap->gc
 
     // Set up variable scope for main body
     push_scope(&mt);

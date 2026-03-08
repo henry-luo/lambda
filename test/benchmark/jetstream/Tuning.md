@@ -2,7 +2,7 @@
 
 ## Summary
 
-Added `type SplayNode` definition and typed annotations to convert runtime `fn_member()`/`fn_map_set()` calls into direct byte-offset memory loads/stores via the MIR JIT's Phase 3 direct field access optimization. Implemented **direct field store optimization** in the transpiler to eliminate `map_fill()` varargs overhead for typed map construction. **Inlined `map_with_data()`** in the transpiler to emit `heap_calloc` + direct Map header stores with compile-time constants. Eliminated redundant `memset` in `gc_heap_calloc` for slab-allocated objects. **Fixed catastrophic O(slabs) `gc_object_zone_owns`** with O(log N) binary search over sorted slab ranges — **20x speedup** (~2020ms → ~97ms release).
+Added `type SplayNode` definition and typed annotations to convert runtime `fn_member()`/`fn_map_set()` calls into direct byte-offset memory loads/stores via the MIR JIT's Phase 3 direct field access optimization. Implemented **direct field store optimization** in the transpiler to eliminate `map_fill()` varargs overhead for typed map construction. **Inlined `map_with_data()`** in the transpiler to emit `heap_calloc` + direct Map header stores with compile-time constants. Eliminated redundant `memset` in `gc_heap_calloc` for slab-allocated objects. **Fixed catastrophic O(slabs) `gc_object_zone_owns`** with O(log N) binary search over sorted slab ranges — **20x speedup** (~2020ms → ~97ms release). Replaced slab free-list allocator with a **4MB bump-pointer nursery** and **JIT-inlined bump-pointer fast path** — **~31% speedup** (~83ms → ~57ms release).
 
 ## Performance Results
 
@@ -17,8 +17,9 @@ Added `type SplayNode` definition and typed annotations to convert runtime `fn_m
 | **+ Typed payload maps** | — | ~2280 |
 | **+ Inline map_with_data + gc_heap fix (opt #3)** | ~2780 | ~2020 |
 | **+ gc_object_zone_owns O(log N) fix** | ~165 | **~83** |
+| **+ Bump-pointer nursery + JIT inline alloc (#10+#11)** | ~117 | **~57** |
 | Node.js (v22, V8 JIT) | 28.8 | 28.8 |
-| vs Node.js (current) | — | **2.9x** |
+| vs Node.js (current) | — | **2.0x** |
 | vs Node.js (before opt) | — | 156x |
 
 The direct field store optimization (eliminating `map_fill()` varargs) gives a **~50% reduction** in runtime when combined with typed payload maps. Adding type annotations to `generate_payload` (PayloadLeaf, PayloadBranch types) enables the optimization to cover all ~768K map allocations (not just the ~12K SplayNodes).
@@ -298,7 +299,7 @@ Hot helpers like `splay_is_empty(tree)` (a single `tree.root == null` check) cou
 | #   | Optimization                                | Expected Impact    | Effort | Status            |
 | --- | ------------------------------------------- | ------------------ | ------ | ----------------- |
 | 1   | Direct stores (eliminate `map_fill`)        | **~50% reduction** | Medium | **IMPLEMENTED** ✅ |
-| 2   | Bump-pointer nursery                        | 30-50%             | High   | Not started       |
+| 2   | Bump-pointer nursery                        | 30-50%             | High   | **IMPLEMENTED** ✅ (see #10+#11) |
 | 3   | Inline `map_with_data` + gc_heap_calloc fix | **~12% reduction** | Low    | **IMPLEMENTED** ✅ |
 | 4   | Null guard elimination                      | ~5%                | High   | Infrastructure ⚠️ |
 | 5   | Function inlining                           | 3-5%               | High   | Not started       |
@@ -324,8 +325,8 @@ Splay benchmark allocates **~1.14M objects** in the 48-byte class (PayloadLeaf/B
 | 7   | Eliminate `all_objects` linked-list per-alloc     | ~5-10%          | Medium | Not started |
 | 8   | Specialize allocator for known size class in JIT  | ~10-15%         | Low    | ✅ Done (no measurable impact in release — ThinLTO already inlines class_index) |
 | 9   | Skip Container `is_heap` flag for Map types       | ~2%             | Low    | Not started |
-| 10  | Inline slab bump path in JIT (MIR instructions)   | ~15-20%         | Medium | Not started |
-| 11  | Bump-pointer nursery (V8-style)                   | 30-50%          | High   | Not started |
+| 10  | Inline slab bump path in JIT (MIR instructions)   | ~15-20%         | Medium | **IMPLEMENTED** ✅ |
+| 11  | Bump-pointer nursery (V8-style)                   | 30-50%          | High   | **IMPLEMENTED** ✅ |
 
 #### 7. Eliminate `all_objects` linked-list per-alloc
 
@@ -401,3 +402,94 @@ int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
 - `lib/gc_object_zone.c` — Added `register_slab_range()`, replaced `gc_object_zone_owns()`
 
 **Result**: **~20x speedup** (2020ms → ~97ms release, 2780ms → ~165ms debug). Gap to Node.js reduced from 70x to **3.4x**.
+
+### Bump-Pointer Nursery + JIT Inline Allocation (#10 + #11) — IMPLEMENTED ✅
+
+**Problem**: The slab free-list allocator, while O(1), performs per-allocation work: free-list pop, memset zero, gc_header init (4 field writes), all_objects linked-list link, Container.is_heap flag set. Profiling showed 36% of release build execution time in the allocation chain. V8 uses a bump-pointer nursery where allocation is a single pointer addition (~3 instructions).
+
+**Design**: Combined approach — a 4MB bump-pointer nursery as the allocation backend (replacing slab free-list pops) with the bump fast path emitted directly as MIR instructions in the JIT.
+
+#### Part 1: Bump-Pointer Nursery (#11)
+
+Replaced the slab free-list allocation path with a contiguous bump-pointer region:
+
+```c
+// gc_heap_t layout (bump_cursor and bump_end at hot offsets 16 and 24):
+typedef struct gc_heap_t {
+    mem_pool_t* pool;               // offset 0
+    gc_header_t* all_objects;       // offset 8  (same cache line as cursor/end)
+    uint8_t* bump_cursor;           // offset 16 ← new
+    uint8_t* bump_end;              // offset 24 ← new
+    gc_object_zone_t object_zone;   // offset 32
+    ...
+};
+```
+
+Key design decisions:
+- **Block sizing**: 4MB initial, doubling on exhaustion up to 64MB cap. Registered with object zone's slab_ranges for `gc_object_zone_owns()` O(log N) compatibility.
+- **Slot alignment**: Bump slots are sized to `SIZE_CLASSES[cls]` (not just 8-byte aligned) so dead bump objects can be safely added to the slab free list during GC sweep.
+- **all_objects compatibility**: Every bump-allocated object is linked into the all_objects list for GC sweep. A future optimization could eliminate this.
+- **Free list reuse**: `gc_heap_bump_alloc()` checks the slab free list first before bumping. After GC sweep recycles dead objects to the free list, subsequent allocations reuse those recycled slots before consuming new bump space.
+
+```c
+void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
+                         uint16_t type_tag, int cls) {
+    // Fast path: check free list first (GC recycling)
+    gc_object_zone_t* oz = &gc->object_zone;
+    if (oz->free_lists[cls]) {
+        // reuse recycled slot from free list
+        ...
+    }
+    // Bump path: pointer addition
+    uint8_t* ptr = gc->bump_cursor;
+    uint8_t* new_end = ptr + slot_size;
+    if (new_end > gc->bump_end) {
+        // allocate new block (double size, cap at 64MB)
+        ...
+    }
+    gc->bump_cursor = new_end;
+    // init header, link all_objects
+    ...
+}
+```
+
+**C-level result**: ~60ms release (from ~83ms) — **~28% speedup** from the bump nursery alone.
+
+#### Part 2: JIT Inline Bump Path (#10)
+
+The JIT emits the bump-pointer fast path directly as MIR instructions, eliminating all function call overhead for the common case (cursor has space):
+
+```c
+// Emitted MIR pseudo-code for typed map allocation:
+MIR_reg_t gc_reg;    // cached pointer to gc_heap_t, loaded at function prologue
+MIR_reg_t cursor = LOAD [gc_reg + 16];           // bump_cursor
+MIR_reg_t new_cursor = cursor + slot_size;        // compile-time constant
+if (new_cursor UBGT [gc_reg + 24]) goto slow;     // bump_end check
+
+// Fast path: bump succeeded (~8 MIR instructions)
+STORE [gc_reg + 16] = new_cursor;                 // advance cursor
+// Init gc_header_t inline:
+gc_header_t* h = cursor;
+STORE [h + 0] = LOAD [gc_reg + 8];               // h->next = all_objects
+STORE_U16 [h + 8] = type_tag;                     // h->type_tag
+STORE_U32 [h + 12] = total_size;                  // h->alloc_size
+STORE [gc_reg + 8] = h;                           // all_objects = h
+void* user_ptr = h + 16;                          // skip header
+STORE_U8 [user_ptr + 1] = 1;                      // Container.is_heap = 1
+goto done;
+
+slow:
+    user_ptr = call heap_calloc_class(size, type_tag, cls);  // C fallback
+done:
+    // ... set Map header fields (type_id, type ptr, data ptr, data_cap)
+```
+
+The `gc_reg` pointer is loaded once at the function prologue (via `_lambda_rt` → context → heap → gc chain) and cached in a dedicated MIR register, saved/restored across user function transpilation boundaries.
+
+**Files changed**:
+- `lib/gc_heap.h` — Added `gc_bump_block_t`, bump fields in `gc_heap_t`, `gc_heap_bump_alloc()` declaration
+- `lib/gc_heap.c` — Added `gc_alloc_bump_block()`, `gc_heap_bump_alloc()`, modified `gc_heap_create()`/`gc_heap_destroy()`
+- `lambda/lambda-mem.cpp` — `heap_calloc_class()` now routes to `gc_heap_bump_alloc()`
+- `lambda/transpile-mir.cpp` — Added `gc_reg` to `MirTranspiler`, gc_reg loading at function prologues, save/restore across user functions, inline bump MIR emission in `transpile_map()`
+
+**Combined result (#10+#11)**: **~57ms release** (from ~83ms baseline) — **~31% speedup**. Gap to Node.js reduced from 2.9x to **2.0x**.
