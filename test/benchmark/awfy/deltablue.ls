@@ -20,72 +20,48 @@ let K_STAY = 2
 let K_EQUAL = 3
 let K_SCALE = 4
 
-// --- Vector (chunked 16x16=256) ---
+// --- Vector (flat array) ---
 
 pn vec_new() {
-    var v = { chunks: [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null], sz: 0 }
-    return v
+    return { data: fill(256, null), sz: 0 }
 }
 
 pn vec_add(v, item) {
-    var s = (v.sz)
-    var ii = s % 16
-    var ci = shr(s, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) {
-        var _n = 0
-        ck = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
-        cks[ci] = ck
-    }
-    var _d = 0
-    ck[ii] = item
-    var ns = s + 1
-    v.sz = ns
+    var s: int = v.sz
+    var d = v.data
+    d[s] = item
+    v.sz = s + 1
 }
 
-pn vec_at(v, idx) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    var r = ck[ii]
-    return r
+pn vec_at(v, idx: int) {
+    return (v.data)[idx]
 }
 
 pn vec_size(v) {
-    var r = (v.sz)
-    return r
+    return v.sz
 }
 
-pn vec_set(v, idx, item) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    var _d = 0
-    ck[ii] = item
+pn vec_set(v, idx: int, item) {
+    var d = v.data
+    d[idx] = item
 }
 
 pn vec_is_empty(v) {
-    var sz = (v.sz)
-    if (sz == 0) { return 1 }
+    if (v.sz == 0) { return 1 }
     return 0
 }
 
 pn vec_remove_first(v) {
-    var sz = (v.sz)
+    var sz: int = v.sz
     if (sz == 0) { return null }
-    var first = vec_at(v, 0)
-    var i = 1
+    var d = v.data
+    var first = d[0]
+    var i: int = 1
     while (i < sz) {
-        var elem = vec_at(v, i)
-        var pi = i - 1
-        vec_set(v, pi, elem)
+        d[i - 1] = d[i]
         i = i + 1
     }
-    var nsz = sz - 1
-    v.sz = nsz
+    v.sz = sz - 1
     return first
 }
 
@@ -97,29 +73,26 @@ pn vec_with(item) {
 
 // Remove constraint by cid from vector
 pn vec_remove_cid(v, cid) {
-    var sz = (v.sz)
+    var sz: int = v.sz
+    var d = v.data
     var found = -1
-    var i = 0
+    var i: int = 0
     while (i < sz) {
         if (found == -1) {
-            var elem = vec_at(v, i)
-            var ecid = (elem.cid)
-            if (ecid == cid) {
+            var elem = d[i]
+            if (elem.cid == cid) {
                 found = i
             }
         }
         i = i + 1
     }
     if (found == -1) { return 0 }
-    var j = found + 1
+    var j: int = found + 1
     while (j < sz) {
-        var elem2 = vec_at(v, j)
-        var pj = j - 1
-        vec_set(v, pj, elem2)
+        d[j - 1] = d[j]
         j = j + 1
     }
-    var nsz = sz - 1
-    v.sz = nsz
+    v.sz = sz - 1
     return 1
 }
 

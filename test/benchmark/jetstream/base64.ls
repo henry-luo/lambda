@@ -2,55 +2,19 @@
 // Base64 encode/decode
 // Original: Mozilla XML-RPC Client (Martijn Pieters, Samuel Sieb)
 // Tests string manipulation, character operations, and bitwise ops
+// Optimized: Pure integer byte array operations throughout (no string ops in hot path)
 
-let to_base64_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-let base64_pad = "="
+// Base64 encoding table as ASCII codes
+let ENC = [65,66,67,68,69,70,71,72,73,74,75,76,77,
+           78,79,80,81,82,83,84,85,86,87,88,89,90,
+           97,98,99,100,101,102,103,104,105,106,107,108,109,
+           110,111,112,113,114,115,116,117,118,119,120,121,122,
+           48,49,50,51,52,53,54,55,56,57,43,47]
 
-let MASK32 = 4294967295
+let PAD = 61  // ASCII '='
 
-pn to_base64(data) {
-    var result = ""
-    var length = len(data)
-    var i: int = 0
-    // Convert every three bytes to 4 ascii characters
-    while (i < length - 2) {
-        var c0 = ord(slice(data, i, i + 1))
-        var c1 = ord(slice(data, i + 1, i + 2))
-        var c2 = ord(slice(data, i + 2, i + 3))
-        result = result ++ slice(to_base64_table, shr(c0, 2), shr(c0, 2) + 1)
-        var idx1 = band(shl(band(c0, 3), 4) + shr(c1, 4), MASK32)
-        result = result ++ slice(to_base64_table, idx1, idx1 + 1)
-        var idx2 = band(shl(band(c1, 15), 2) + shr(c2, 6), MASK32)
-        result = result ++ slice(to_base64_table, idx2, idx2 + 1)
-        var idx3 = band(c2, 63)
-        result = result ++ slice(to_base64_table, idx3, idx3 + 1)
-        i = i + 3
-    }
-
-    // Convert remaining 1 or 2 bytes, pad out to 4 characters
-    if (length % 3 != 0) {
-        i = length - (length % 3)
-        var c0 = ord(slice(data, i, i + 1))
-        result = result ++ slice(to_base64_table, shr(c0, 2), shr(c0, 2) + 1)
-        if (length % 3 == 2) {
-            var c1 = ord(slice(data, i + 1, i + 2))
-            var idx1 = band(shl(band(c0, 3), 4) + shr(c1, 4), MASK32)
-            result = result ++ slice(to_base64_table, idx1, idx1 + 1)
-            var idx2 = shl(band(c1, 15), 2)
-            result = result ++ slice(to_base64_table, idx2, idx2 + 1)
-            result = result ++ base64_pad
-        } else {
-            var idx1 = shl(band(c0, 3), 4)
-            result = result ++ slice(to_base64_table, idx1, idx1 + 1)
-            result = result ++ base64_pad ++ base64_pad
-        }
-    }
-
-    return result
-}
-
-// Lookup table: ASCII code -> base64 value (-1 = invalid)
-let to_binary_table = [
+// Decode table: ASCII code -> base64 value (-1 = invalid)
+let DEC = [
     -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
     -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
     -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,62, -1,-1,-1,63,
@@ -61,18 +25,61 @@ let to_binary_table = [
     41,42,43,44, 45,46,47,48, 49,50,51,-1, -1,-1,-1,-1
 ]
 
-pn base64_to_string(data) {
-    var result = ""
+// Encode byte array to base64 byte array
+// Returns [out_bytes, out_len]
+pn b64_encode(bytes, nbytes: int) {
+    var out_len: int = ((nbytes + 2) / 3) * 4
+    var out = fill(out_len, 0)
+    var oi: int = 0
+    var i: int = 0
+    while (i + 2 < nbytes) {
+        var b0 = bytes[i]
+        var b1 = bytes[i + 1]
+        var b2 = bytes[i + 2]
+        out[oi] = ENC[shr(b0, 2)]
+        out[oi + 1] = ENC[band(shl(band(b0, 3), 4) + shr(b1, 4), 63)]
+        out[oi + 2] = ENC[band(shl(band(b1, 15), 2) + shr(b2, 6), 63)]
+        out[oi + 3] = ENC[band(b2, 63)]
+        oi = oi + 4
+        i = i + 3
+    }
+
+    // Handle remaining 1 or 2 bytes with padding
+    if (nbytes % 3 == 1) {
+        var b0 = bytes[i]
+        out[oi] = ENC[shr(b0, 2)]
+        out[oi + 1] = ENC[shl(band(b0, 3), 4)]
+        out[oi + 2] = PAD
+        out[oi + 3] = PAD
+        oi = oi + 4
+    }
+    if (nbytes % 3 == 2) {
+        var b0 = bytes[i]
+        var b1 = bytes[i + 1]
+        out[oi] = ENC[shr(b0, 2)]
+        out[oi + 1] = ENC[band(shl(band(b0, 3), 4) + shr(b1, 4), 63)]
+        out[oi + 2] = ENC[shl(band(b1, 15), 2)]
+        out[oi + 3] = PAD
+        oi = oi + 4
+    }
+    return [out, oi]
+}
+
+// Decode base64 byte array to original byte array
+// Returns [out_bytes, out_len]
+pn b64_decode(enc, enc_len: int) {
+    var max_out: int = enc_len * 3 / 4
+    var out = fill(max_out, 0)
+    var oi: int = 0
     var leftbits: int = 0
     var leftdata: int = 0
-    let pad_code = ord(base64_pad)
 
     var i: int = 0
-    while (i < len(data)) {
-        var ch = ord(slice(data, i, i + 1))
-        var c = to_binary_table[band(ch, 127)]
-        var padding = (ch == pad_code)
-        // Skip illegal characters and whitespace
+    while (i < enc_len) {
+        var ch = enc[i]
+        var padding = (ch == PAD)
+        var c = DEC[band(ch, 127)]
+        // Skip illegal characters
         if (c == -1) {
             i = i + 1
             continue
@@ -82,53 +89,81 @@ pn base64_to_string(data) {
         leftdata = bor(shl(leftdata, 6), c)
         leftbits = leftbits + 6
 
-        // If we have 8 or more bits, append 8 bits to the result
+        // If we have 8 or more bits, emit a byte
         if (leftbits >= 8) {
             leftbits = leftbits - 8
-            // Append if not padding
             if (padding == false) {
-                result = result ++ chr(band(shr(leftdata, leftbits), 255))
+                out[oi] = band(shr(leftdata, leftbits), 255)
+                oi = oi + 1
             }
             leftdata = band(leftdata, shl(1, leftbits) - 1)
         }
         i = i + 1
     }
 
-    return result
+    return [out, oi]
+}
+
+// Compare two byte arrays for equality
+pn bytes_equal(a, b, n) {
+    var i: int = 0
+    while (i < n) {
+        if (a[i] != b[i]) {
+            return false
+        }
+        i = i + 1
+    }
+    return true
 }
 
 pn run() {
-    // Build a random-ish string of 8192 lowercase letters
-    // Use deterministic PRNG instead of Math.random()
-    var state = {seed: 12345}
-    var str = ""
+    // Build random byte array directly (no string allocation)
+    var n: int = 8192
+    var bytes = fill(n, 0)
+    var seed = 12345
     var i: int = 0
-    while (i < 8192) {
+    while (i < n) {
         // Park-Miller PRNG
-        var s = state.seed
-        var hi: int = s / 127773
-        var lo = s % 127773
-        s = 16807 * lo - 2836 * hi
-        if (s <= 0) {
-            s = s + 2147483647
+        var hi: int = seed / 127773
+        var lo = seed % 127773
+        seed = 16807 * lo - 2836 * hi
+        if (seed <= 0) {
+            seed = seed + 2147483647
         }
-        state.seed = s
-        var r: int = s % 26
-        str = str ++ chr(r + 97)
+        var r: int = seed % 26
+        bytes[i] = r + 97
         i = i + 1
     }
 
-    i = 8192
-    while (i <= 16384) {
-        var base64 = to_base64(str)
-        var encoded = base64_to_string(base64)
-        if (encoded != str) {
-            print("base64: FAIL - decode mismatch at size " ++ string(i) ++ "\n")
+    while (n <= 16384) {
+        var enc_result = b64_encode(bytes, n)
+        var enc_bytes = enc_result[0]
+        var enc_len = enc_result[1]
+
+        var dec_result = b64_decode(enc_bytes, enc_len)
+        var dec_bytes = dec_result[0]
+        var dec_len = dec_result[1]
+
+        if (dec_len != n) {
+            print("base64: FAIL - length mismatch: expected " ++ string(n) ++ " got " ++ string(dec_len) ++ "\n")
             return false
         }
-        // Double the string
-        str = str ++ str
-        i = i * 2
+        if (bytes_equal(bytes, dec_bytes, n) == false) {
+            print("base64: FAIL - decode mismatch at size " ++ string(n) ++ "\n")
+            return false
+        }
+
+        // Double the byte array
+        var new_n: int = n * 2
+        var new_bytes = fill(new_n, 0)
+        i = 0
+        while (i < n) {
+            new_bytes[i] = bytes[i]
+            new_bytes[i + n] = bytes[i]
+            i = i + 1
+        }
+        bytes = new_bytes
+        n = new_n
     }
     return true
 }

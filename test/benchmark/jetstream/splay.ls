@@ -6,9 +6,17 @@
 let TREE_SIZE = 8000
 let TREE_MODIFICATIONS = 80
 
-// Node: {key, value, left, right}
+// Type definitions for direct struct field access
+// Note: key/left/right must come first and in the same order as the map literal
+// value comes last so it doesn't affect typed field offsets
+type SplayNode = {key: float, left: map, right: map}
+type SplayTree = {root: map}
+
+// Node: {key, left, right, value}
+// Must use SplayNode type annotation so runtime data layout matches direct access offsets
 pn create_node(key: float, value) {
-    return {key: key, value: value, left: null, right: null}
+    var node: SplayNode = {key: key, left: null, right: null, value: value}
+    return node
 }
 
 // Simple LCG pseudo-random number generator (deterministic)
@@ -29,21 +37,22 @@ pn next_random(state) {
 
 // Splay tree using maps for tree state
 pn splay_tree_new() {
-    return {root: null}
+    var tree: SplayTree = {root: null}
+    return tree
 }
 
-pn splay_is_empty(tree) {
+pn splay_is_empty(tree: SplayTree) {
     return tree.root == null
 }
 
-pn splay(tree, key: float) {
+pn splay(tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return 0
     }
-    var dummy = create_node(0.0, null)
-    var left = dummy
-    var right = dummy
-    var current = tree.root
+    var dummy: SplayNode = create_node(0.0, null)
+    var left: SplayNode = dummy
+    var right: SplayNode = dummy
+    var current: SplayNode = tree.root
     var done = false
     while (done == false) {
         if (key < current.key) {
@@ -52,7 +61,7 @@ pn splay(tree, key: float) {
             } else {
                 if (key < (current.left).key) {
                     // rotate right
-                    var tmp = current.left
+                    var tmp: SplayNode = current.left
                     current.left = tmp.right
                     tmp.right = current
                     current = tmp
@@ -74,7 +83,7 @@ pn splay(tree, key: float) {
                 } else {
                     if (key > (current.right).key) {
                         // rotate left
-                        var tmp = current.right
+                        var tmp: SplayNode = current.right
                         current.right = tmp.left
                         tmp.left = current
                         current = tmp
@@ -103,7 +112,7 @@ pn splay(tree, key: float) {
     return 0
 }
 
-pn splay_insert(tree, key: float, value) {
+pn splay_insert(tree: SplayTree, key: float, value) {
     if (splay_is_empty(tree)) {
         tree.root = create_node(key, value)
         return 0
@@ -112,23 +121,23 @@ pn splay_insert(tree, key: float, value) {
     if ((tree.root).key == key) {
         return 0
     }
-    var node = create_node(key, value)
+    var node: SplayNode = create_node(key, value)
     if (key > (tree.root).key) {
         node.left = tree.root
         node.right = (tree.root).right
-        var root_ref = tree.root
+        var root_ref: SplayNode = tree.root
         root_ref.right = null
     } else {
         node.right = tree.root
         node.left = (tree.root).left
-        var root_ref = tree.root
+        var root_ref: SplayNode = tree.root
         root_ref.left = null
     }
     tree.root = node
     return 0
 }
 
-pn splay_remove(tree, key: float) {
+pn splay_remove(tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -136,20 +145,20 @@ pn splay_remove(tree, key: float) {
     if ((tree.root).key != key) {
         return null
     }
-    var removed = tree.root
+    var removed: SplayNode = tree.root
     if ((tree.root).left == null) {
         tree.root = (tree.root).right
     } else {
-        var right_tree = (tree.root).right
+        var right_tree: SplayNode = (tree.root).right
         tree.root = (tree.root).left
         splay(tree, key)
-        var root_ref = tree.root
+        var root_ref: SplayNode = tree.root
         root_ref.right = right_tree
     }
     return removed
 }
 
-pn splay_find(tree, key: float) {
+pn splay_find(tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -160,15 +169,15 @@ pn splay_find(tree, key: float) {
     return null
 }
 
-pn splay_find_max(node) {
-    var current = node
+pn splay_find_max(node: SplayNode) {
+    var current: SplayNode = node
     while (current.right != null) {
         current = current.right
     }
     return current
 }
 
-pn splay_find_greatest_less_than(tree, key: float) {
+pn splay_find_greatest_less_than(tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -183,7 +192,7 @@ pn splay_find_greatest_less_than(tree, key: float) {
 }
 
 // Count nodes for verification
-pn count_nodes(node) {
+pn count_nodes(node: SplayNode) {
     if (node == null) {
         return 0
     }
@@ -191,7 +200,7 @@ pn count_nodes(node) {
 }
 
 // Collect keys in-order for verification
-pn traverse_keys(node, keys, idx_in) {
+pn traverse_keys(node: SplayNode, keys, idx_in) {
     if (node == null) {
         return idx_in
     }
@@ -211,7 +220,7 @@ pn generate_payload(depth: int, tag: float) {
             right_p: generate_payload(depth - 1, tag)}
 }
 
-pn insert_new_node(tree, rng) {
+pn insert_new_node(tree: SplayTree, rng) {
     var key = next_random(rng)
     while (splay_find(tree, key) != null) {
         key = next_random(rng)
@@ -222,7 +231,7 @@ pn insert_new_node(tree, rng) {
 }
 
 pn run_splay() {
-    var tree = splay_tree_new()
+    var tree: SplayTree = splay_tree_new()
     var rng = {seed: 49734321}
 
     // Setup: insert TREE_SIZE nodes
@@ -238,7 +247,7 @@ pn run_splay() {
         var j: int = 0
         while (j < TREE_MODIFICATIONS) {
             var key = insert_new_node(tree, rng)
-            var greatest = splay_find_greatest_less_than(tree, key)
+            var greatest: SplayNode = splay_find_greatest_less_than(tree, key)
             if (greatest == null) {
                 splay_remove(tree, key)
             } else {

@@ -1438,6 +1438,36 @@ All issues are categorized by root cause. Each issue lists the affected files an
 
 ---
 
+### Issue #36: MIR JIT — untyped param evaluates to 0 in nested loops with `float[]` params
+
+**Error**: When a function has multiple `float[]` typed parameters and one untyped parameter (e.g., `dt`), using the untyped parameter in arithmetic expressions inside nested `while` loops causes it to evaluate to 0.
+**Root cause**: MIR JIT code generation bug — untyped parameter value is lost/zeroed when used inside nested loop bodies with typed array parameters.
+**Workaround**: Explicitly type the parameter as `float` (e.g., `dt: float` instead of `dt`).
+**Reproduction**:
+```lambda
+pn advance(bx: float[], bvx: float[], bmass: float[], dt) {
+    var i: int = 0
+    while (i < 3) {
+        var j: int = i + 1
+        while (j < 3) {
+            var dx = bx[i] - bx[j]
+            var d_sq = dx * dx
+            var dist = math.sqrt(d_sq)
+            var mag = dt / (d_sq * dist)  // mag is 0! dt is treated as 0
+            j = j + 1
+        }
+        i = i + 1
+    }
+}
+```
+
+| Affected file | Fix applied |
+|---------------|-------------|
+| `beng/nbody.ls` | Changed `dt` → `dt: float` |
+| `awfy/nbody2.ls` | Changed `dt` → `dt: float` |
+
+---
+
 ## 17. Negative Tests — Expected vs Actual Behavior
 
 Some negative tests fail as **expected** (producing errors is their purpose). Others fail for the **wrong reason** (syntax issues prevent the intended error from being tested).
