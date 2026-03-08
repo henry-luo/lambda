@@ -113,6 +113,20 @@ void* gc_object_zone_alloc(gc_object_zone_t* oz, size_t size, uint16_t type_tag,
                            gc_header_t** all_objects);
 
 /**
+ * Allocate a slot from a known size class (skips class_index lookup).
+ * The caller must pre-compute the class index at compile time.
+ *
+ * @param oz          object zone
+ * @param cls         pre-computed size class index (0-6)
+ * @param size        user data size in bytes (stored in header for sweep)
+ * @param type_tag    TypeId for the allocation
+ * @param all_objects pointer to gc_heap's all_objects list head (for linking)
+ * @return pointer to zeroed user data, or NULL on failure
+ */
+void* gc_object_zone_alloc_class(gc_object_zone_t* oz, int cls, size_t size,
+                                  uint16_t type_tag, gc_header_t** all_objects);
+
+/**
  * Return a slot to the free list for its size class.
  * The slot's gc_header_t is reused as a free-list link node.
  *

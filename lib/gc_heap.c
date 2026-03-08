@@ -200,6 +200,20 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     return ptr;
 }
 
+void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls) {
+    // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
+    // The class index is pre-computed by the JIT at compile time.
+    void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
+                                            &gc->all_objects);
+    if (ptr) {
+        gc->total_allocated += sizeof(gc_header_t) + size;
+        gc->object_count++;
+    }
+    // No large-object fallback needed — JIT only uses this for known small sizes.
+    // No memset needed — object zone returns zeroed memory.
+    return ptr;
+}
+
 void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
     if (!ptr || !gc) return;
     gc_header_t* header = gc_get_header(ptr);

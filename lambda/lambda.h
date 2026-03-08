@@ -551,6 +551,7 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 extern "C" {
 #endif
 void* heap_calloc(size_t size, TypeId type_id);
+void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 // String creation for name pooling
 String* heap_create_name(const char* name);

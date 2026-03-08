@@ -304,6 +304,53 @@ Hot helpers like `splay_is_empty(tree)` (a single `tree.root == null` check) cou
 | 5   | Function inlining                           | 3-5%               | High   | Not started       |
 | 6   | gc_object_zone_owns O(log N) fix            | **~20x reduction** | Low    | **IMPLEMENTED** ✅ |
 
+### Further Memory Allocation Optimizations
+
+Profiling (release, 72 samples) shows **36% of execution time** in the `heap_calloc` chain. The current call path for each object is 4 functions deep:
+
+```
+heap_calloc (lambda-mem.cpp)
+  → gc_heap_calloc (gc_heap.c)
+    → gc_heap_alloc (gc_heap.c)
+      → gc_object_zone_alloc (gc_object_zone.c)
+```
+
+Inside `gc_object_zone_alloc`: class_index lookup (linear scan of 7 classes), free-list pop or slab bump, `memset` on reuse, header init (4 fields), linked-list link into `all_objects`.
+
+Splay benchmark allocates **~1.14M objects** in the 48-byte class (PayloadLeaf/Branch maps) and **~35K** in the 64-byte class (SplayNodes), with only **2 GC cycles**.
+
+| #   | Optimization                                     | Expected Impact | Effort | Status      |
+| --- | ------------------------------------------------ | --------------- | ------ | ----------- |
+| 7   | Eliminate `all_objects` linked-list per-alloc     | ~5-10%          | Medium | Not started |
+| 8   | Specialize allocator for known size class in JIT  | ~10-15%         | Low    | ✅ Done (no measurable impact in release — ThinLTO already inlines class_index) |
+| 9   | Skip Container `is_heap` flag for Map types       | ~2%             | Low    | Not started |
+| 10  | Inline slab bump path in JIT (MIR instructions)   | ~15-20%         | Medium | Not started |
+| 11  | Bump-pointer nursery (V8-style)                   | 30-50%          | High   | Not started |
+
+#### 7. Eliminate `all_objects` linked-list per-alloc
+
+Every allocation writes `header->next = *all_objects; *all_objects = header;` (2 pointer writes + pointer read via `gc_heap_t*`). Sweep could instead iterate slabs sequentially (better cache locality). Saves a pointer chase and write per allocation on the hot path.
+
+#### 8. Specialize allocator for known size class in JIT — ✅ IMPLEMENTED
+
+The JIT knows the exact allocation size at compile time (e.g., `sizeof(Map) + byte_size` = 64 for SplayNode). Currently, every `heap_calloc()` call enters `gc_object_zone_alloc()` which runs `gc_object_zone_class_index()` — a 7-iteration linear scan. A specialized `heap_calloc_class(size, type_tag, class_index)` function with the pre-computed class index skips this scan and enters the slab path directly.
+
+**Implementation**: Added `gc_object_zone_alloc_class()`, `gc_heap_calloc_class()`, and `heap_calloc_class()` (3-function chain vs. 4-function chain). JIT in `transpile_map()` computes class index at compile time via `gc_object_zone_class_index()` and emits `emit_call_3(mt, "heap_calloc_class", ...)`.
+
+**Result**: ~83-87ms release (no measurable improvement over baseline ~83ms). ThinLTO (`-flto=thin`) in release builds already inlines the class index computation, making the compile-time specialization redundant for the release binary. The optimization still helps debug builds.
+
+#### 9. Skip Container `is_heap` flag for Map types
+
+`heap_calloc()` in lambda-mem.cpp sets `((Container*)ptr)->is_heap = 1` for container types. For Map/Object, the data is already zero-initialized and `is_heap` is at a known byte offset. The JIT could set this directly as part of its inline header stores, eliminating the conditional branch in `heap_calloc`.
+
+#### 10. Inline slab bump path directly in JIT
+
+Instead of calling any C function, emit the slab-bump allocation as ~5 MIR instructions directly in the JIT code: load slab→next_fresh, compare with slot_count, compute slot address, bump counter, fall back to slow C path only on slab exhaustion. This eliminates all function call overhead on the fast path.
+
+#### 11. Bump-pointer nursery (V8-style, same as #2)
+
+The nuclear option: replace size-class slabs with a simple bump-pointer region for young objects. `ptr = cursor; cursor += size; return ptr;` (~3 instructions). Best suited for a generational GC design overhaul.
+
 ### GC Bug: O(slabs) Ownership Check — The Hidden Catastrophe
 
 **Problem**: `gc_object_zone_owns()` was called for every pointer during GC mark-sweep tracing (via `is_gc_object()` → `gc_mark_item()` → `gc_trace_object()`). The original implementation iterated ALL slabs across ALL 7 size classes to check if a pointer fell within any slab's address range:

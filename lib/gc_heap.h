@@ -157,6 +157,17 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag);
 void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag);
 
 /**
+ * Allocate zeroed memory from a known size class (skips class_index lookup).
+ * Used by the JIT when the allocation size and class are compile-time constants.
+ * @param gc       heap to allocate from
+ * @param size     user data size in bytes
+ * @param type_tag TypeId for tracking
+ * @param cls      pre-computed size class index (0-6)
+ * @return pointer to zeroed user data, or NULL on failure
+ */
+void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls);
+
+/**
  * Free a GC-managed object. Sets GC_FLAG_FREED on the header.
  * If the object is in the object zone, returns it to the size-class free list.
  * @param gc  heap the object was allocated from

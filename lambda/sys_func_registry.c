@@ -785,6 +785,7 @@ JitImport jit_runtime_imports[] = {
     // Heap allocation
     // ========================================================================
     {"heap_calloc", FPTR(heap_calloc)},
+    {"heap_calloc_class", FPTR(heap_calloc_class)},
     {"heap_data_calloc", FPTR(heap_data_calloc)},
     {"heap_create_name", FPTR(heap_create_name)},
     {"heap_create_symbol", FPTR(heap_create_symbol)},

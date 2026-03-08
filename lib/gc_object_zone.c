@@ -210,6 +210,57 @@ void* gc_object_zone_alloc(gc_object_zone_t* oz, size_t size, uint16_t type_tag,
     return (void*)(header + 1);
 }
 
+void* gc_object_zone_alloc_class(gc_object_zone_t* oz, int cls, size_t size,
+                                  uint16_t type_tag, gc_header_t** all_objects) {
+    size_t actual_user_size = SIZE_CLASSES[cls];
+
+    gc_header_t* header = NULL;
+
+    // 1. Try free list first (O(1) — pop from head)
+    if (oz->free_lists[cls]) {
+        header = oz->free_lists[cls];
+        oz->free_lists[cls] = header->next;
+        // zero the user data area (header will be re-initialized below)
+        memset((void*)(header + 1), 0, actual_user_size);
+    } else {
+        // 2. Try fresh slot from current slab
+        gc_object_slab_t* slab = oz->slabs[cls];
+
+        // find a slab with free sequential slots
+        while (slab && slab->next_fresh >= slab->slot_count) {
+            slab = slab->next;
+        }
+
+        if (!slab) {
+            // 3. All slabs full — allocate a new slab
+            slab = allocate_slab(oz, cls);
+            if (!slab) return NULL;
+            // prepend new slab to chain
+            slab->next = oz->slabs[cls];
+            oz->slabs[cls] = slab;
+        }
+
+        // allocate from sequential slot
+        header = (gc_header_t*)(slab->base + slab->next_fresh * slab->slot_size);
+        slab->next_fresh++;
+        // memory already zeroed from slab allocation
+    }
+
+    // initialize header
+    header->type_tag = type_tag;
+    header->gc_flags = 0;
+    header->marked = 0;
+    header->alloc_size = (uint32_t)size;  // original requested size
+
+    // link into all_objects list
+    header->next = *all_objects;
+    *all_objects = header;
+
+    oz->total_slots_allocated++;
+
+    return (void*)(header + 1);
+}
+
 void gc_object_zone_free(gc_object_zone_t* oz, gc_header_t* header) {
     if (!oz || !header) return;
 
