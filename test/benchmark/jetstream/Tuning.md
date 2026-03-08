@@ -11,21 +11,27 @@ Added `type SplayNode` definition and typed annotations to convert runtime `fn_m
 | **Baseline (untyped)** | 1647.8 | — |
 | **+ Typed SplayNode** | ~735 | ~530 |
 | **+ Typed SplayTree** | ~657 | ~510 |
-| **Total Improvement** | **2.51x faster** | — |
-| Node.js (v22, V8 JIT) | 28.8 | — |
-| vs Node.js | 22.8x | 17.7x |
+| **+ Recursive types & RngState** | ~655 | **~480** |
+| **Total Improvement** | **2.51x faster** | **~1.1x from prev** |
+| Node.js (v22, V8 JIT) | 28.8 | 28.8 |
+| vs Node.js | 22.8x | **16.7x** |
 
-The original ratio was 57.2x slower than Node.js. After both optimizations: **22.8x** (debug) / **17.7x** (release).
+The original ratio was 57.2x slower than Node.js. After all optimizations: **22.8x** (debug) / **16.7x** (release).
+
+The final round (recursive types + RngState) brought the release time from ~510ms to **~480ms** (~6% improvement) by:
+- Fixing Bug 2: `left: SplayNode` recursive types now resolve correctly (pre-registration in AST builder)
+- Fixing Bug 3: `type RngState = {seed: float}` with integer seed values now works (int→float coercion in `set_fields()`)
 
 ## What Was Changed in splay.ls
 
 ### 1. Type Definition
 
 ```lambda
-type SplayNode = {key: float, left: map, right: map}
+type SplayNode = {key: float, left: SplayNode, right: SplayNode}
+type RngState = {seed: float}
 ```
 
-Only the 3 hot fields are typed. `value` is excluded from the type because it's not accessed during splay operations. The field order must match the map literal order.
+Only the 3 hot fields are typed. `value` is excluded from the type because it's not accessed during splay operations. The field order must match the map literal order. `left` and `right` use the recursive `SplayNode` type (enabled by the Bug 2 fix). `RngState` types the RNG seed as float (enabled by the Bug 3 fix).
 
 ### 2. Typed Map Constructor
 
@@ -60,7 +66,7 @@ pn splay_find_max(node: SplayNode) { ... }
 ### 5. SplayTree Type Definition and Annotations
 
 ```lambda
-type SplayTree = {root: map}
+type SplayTree = {root: SplayNode}
 ```
 
 Applied to the tree constructor and all functions taking a `tree` parameter:
@@ -76,10 +82,10 @@ pn splay_insert(tree: SplayTree, key: float, value) { ... }
 pn splay_remove(tree: SplayTree, key: float) { ... }
 pn splay_find(tree: SplayTree, key: float) { ... }
 pn splay_find_greatest_less_than(tree: SplayTree, key: float) { ... }
-pn insert_new_node(tree: SplayTree, rng) { ... }
+pn insert_new_node(tree: SplayTree, rng: RngState) { ... }
 ```
 
-This converts ~24K+ `tree.root` accesses from `fn_member()` lookups to direct byte-offset loads/stores. The `root` field is typed as `map` (not `SplayNode`) since both null and SplayNode values must be stored there.
+This converts ~24K+ `tree.root` accesses from `fn_member()` lookups to direct byte-offset loads/stores. The `root` field is typed as `SplayNode` (enabled by the recursive type fix).
 
 ## Why Only 2.24x (Not the Projected 15-25x)
 
@@ -87,7 +93,6 @@ The initial estimate of 15-25x assumed ALL field accesses would convert to direc
 
 ### Untyped accesses remain on the slow path
 
-- `rng.seed` — `RngState` type couldn't be applied (integer literal in float field crashes the runtime).
 - Untyped `value` parameter in `create_node` — would need generic type support.
 
 ### Payload allocation dominates
@@ -111,17 +116,21 @@ Every direct field read emits a null guard (check if Container* is 0 before load
 
 **Fix**: Use `var node: SplayNode = {key: key, ...}` inside `create_node()` so the map is constructed using the type definition's shape.
 
-### Bug 2: Recursive Type Definitions Cause Stack Overflow
+### Bug 2: Recursive Type Definitions Fail to Resolve (FIXED)
 
-**Problem**: `type SplayNode = {left: SplayNode, right: SplayNode}` causes infinite recursion during type resolution.
+**Problem**: `type SplayNode = {left: SplayNode, right: SplayNode}` — the self-reference `SplayNode` isn't in scope during type body building (`push_name` happens after `build_expr`), so fields resolve to `TYPE_ANY` (16 bytes), breaking direct field access optimization.
 
-**Workaround**: Use `left: map, right: map` instead of self-reference.
+**Fix**: Pre-register the type name with a placeholder `TypeType(TypeMap)` in `build_assign_expr()` BEFORE building the type body. Self-references now resolve to the pre-registered entry. The final `push_name` is skipped for type definitions to avoid duplicates.
 
-### Bug 3: Integer Literal in Float-Typed Field Crashes
+**Files changed**: `lambda/build_ast.cpp` — `build_assign_expr()`
 
-**Problem**: `type RngState = {seed: float}` with `{seed: 49734321}` (integer literal) causes SIGSEGV. The runtime expects a boxed float but receives a boxed int.
+### Bug 3: Integer Literal in Float-Typed Field Crashes (FIXED)
 
-**Status**: Not fixed. `RngState` type annotation was removed.
+**Problem**: `type RngState = {seed: float}` with `{seed: 49734321}` (integer literal) causes SIGSEGV. In `set_fields()`, the `LMD_TYPE_FLOAT` case calls `item.get_double()` which dereferences `double_ptr` — but for int Items, the value is packed inline as int56, so `double_ptr` is garbage.
+
+**Fix**: Added type coercion in `set_fields()`: check `get_type_id(item)` before unpacking. If INT/INT64, convert via `(double)item.get_int56()` / `(double)item.get_int64()`. Similarly for `LMD_TYPE_INT` receiving float/bool values.
+
+**Files changed**: `lambda/lambda-data.cpp` — `set_fields()` LMD_TYPE_FLOAT and LMD_TYPE_INT cases
 
 ### Bug 4: MIR JIT Parameter Type Inference Bug (Pre-existing)
 
@@ -145,10 +154,8 @@ pn splay_insert(tree, key, value) {
 
 ## Remaining Optimization Opportunities
 
-1. **Fix Bug 3 (int→float in typed fields)**: Would allow `type RngState = {seed: float}` with integer seed values, converting `rng.seed` accesses to direct access.
+1. **Reduce payload allocation**: The 756K payload maps dominate allocation time. Consider typed payload maps or reduced depth.
 
-2. **Fix Bug 2 (recursive types)**: Would allow `left: SplayNode` instead of `left: map`, enabling full type propagation through the tree without indirection.
+2. **Eliminate null guards**: In hot loops where a node has been null-checked, subsequent field accesses don't need re-checking. This requires flow-sensitive null analysis in the transpiler.
 
-3. **Reduce payload allocation**: The 756K payload maps dominate allocation time. Consider typed payload maps or reduced depth.
-
-4. **Eliminate null guards**: In hot loops where a node has been null-checked, subsequent field accesses don't need re-checking. This requires flow-sensitive null analysis in the transpiler.
+3. **Inline small functions**: Hot helpers like `splay_is_empty()` could be inlined by the JIT to eliminate call overhead.
