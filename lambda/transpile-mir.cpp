@@ -4198,7 +4198,9 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 // data points to packed struct where each field is 8-byte aligned.
 // Returns native value for scalars (INT/FLOAT/BOOL/STRING) or tagged Item for containers.
 // obj_boxed: pre-computed tagged Item for the object (avoids double-evaluation).
-static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_boxed, ShapeEntry* field) {
+// skip_null_guard: when true, omit the null check branch (caller guarantees non-null).
+static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_boxed,
+    ShapeEntry* field, bool skip_null_guard) {
     TypeId type_id = mir_resolve_field_type(field);
     int64_t offset = field->byte_offset;
 
@@ -4206,36 +4208,46 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
     MIR_reg_t map_ptr = emit_unbox_container(mt, obj_boxed);
 
     // Null guard: if map_ptr == 0 (object is null), return default value.
-    // This handles cases where a typed variable (e.g. var x: MyType = expr)
-    // holds null at runtime — without this check, loading data_ptr from
-    // *(NULL + 16) would crash with SIGSEGV at address 0x10.
-    MIR_label_t l_not_null = new_label(mt);
-    MIR_label_t l_done = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_not_null),
-        MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
+    // Skipped when the caller can prove the object is non-null (e.g. typed
+    // local variable or parameter — the type annotation is a non-null contract).
+    MIR_label_t l_not_null = 0;
+    MIR_label_t l_done = 0;
+    if (!skip_null_guard) {
+        l_not_null = new_label(mt);
+        l_done = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_not_null),
+            MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
+    }
 
     // null path: produce default value
     if (type_id == LMD_TYPE_FLOAT) {
         MIR_reg_t result = new_reg(mt, "dfld", MIR_T_D);
-        // null → 0.0
-        MIR_reg_t zero_i = new_reg(mt, "zi", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, zero_i),
-            MIR_new_int_op(mt->ctx, 0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, zero_i)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+        if (!skip_null_guard) {
+            // null → 0.0
+            MIR_reg_t zero_i = new_reg(mt, "zi", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, zero_i),
+                MIR_new_int_op(mt->ctx, 0)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, zero_i)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+            // non-null path
+            emit_label(mt, l_not_null);
+        }
 
-        // non-null path
-        emit_label(mt, l_not_null);
         MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
             MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
-        MIR_reg_t nn_result = new_reg(mt, "dfld", MIR_T_D);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, nn_result),
-            MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, nn_result)));
-        emit_label(mt, l_done);
+        if (skip_null_guard) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1)));
+        } else {
+            MIR_reg_t nn_result = new_reg(mt, "dfld", MIR_T_D);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, nn_result),
+                MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, nn_result)));
+            emit_label(mt, l_done);
+        }
         return result;
     }
 
@@ -4245,14 +4257,17 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
         // the struct (Container.type_id), NOT from Item tag bits. So we must return
         // the raw pointer as-is. For null fields (ptr==0), return ItemNull.
         MIR_reg_t result = new_reg(mt, "cfraw", MIR_T_I64);
-        // null object → ItemNull
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+        if (!skip_null_guard) {
+            // null object → ItemNull
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+            // non-null path
+            emit_label(mt, l_not_null);
+        }
 
-        // non-null path: load raw Container* from data buffer
-        emit_label(mt, l_not_null);
+        // load raw Container* from data buffer
         MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
             MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
@@ -4261,7 +4276,7 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
             MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
 
-        // if raw == 0, field is null → keep ItemNull in result
+        // if raw == 0, field is null → produce ItemNull; else return raw pointer
         MIR_label_t null_field_lbl = new_label(mt);
         MIR_label_t done_field_lbl = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, null_field_lbl),
@@ -4276,7 +4291,9 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
         emit_label(mt, done_field_lbl);
-        emit_label(mt, l_done);
+        if (!skip_null_guard) {
+            emit_label(mt, l_done);
+        }
         return result;
     }
 
@@ -4285,22 +4302,29 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
     // BOOL: bool (1 byte) in 8-byte zero-padded slot → safe to read 8 bytes
     // STRING/SYMBOL/BINARY: raw pointer (String*/Symbol*)
     MIR_reg_t result = new_reg(mt, "mfld", MIR_T_I64);
-    // null → 0 (default for scalars)
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, 0)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+    if (!skip_null_guard) {
+        // null → 0 (default for scalars)
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+        // non-null path
+        emit_label(mt, l_not_null);
+    }
 
-    // non-null path
-    emit_label(mt, l_not_null);
     MIR_reg_t data_ptr = new_reg(mt, "dptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
-    MIR_reg_t nn_val = new_reg(mt, "mfld", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nn_val),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, nn_val)));
-    emit_label(mt, l_done);
+    if (skip_null_guard) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
+    } else {
+        MIR_reg_t nn_val = new_reg(mt, "mfld", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nn_val),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, nn_val)));
+        emit_label(mt, l_done);
+    }
     return result;
 }
 
@@ -4308,7 +4332,7 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
 // Stores value at data + byte_offset. Value must be native type for scalars,
 // or tagged Item for containers.
 static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
-    ShapeEntry* field, AstNode* value) {
+    ShapeEntry* field, AstNode* value, bool skip_null_guard) {
     TypeId type_id = mir_resolve_field_type(field);
     int64_t offset = field->byte_offset;
 
@@ -4317,9 +4341,13 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     MIR_reg_t map_ptr = emit_unbox_container(mt, obj_item);
 
     // Null guard: if map_ptr == 0 (object is null), skip the write entirely.
-    MIR_label_t l_skip_write = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, l_skip_write),
-        MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
+    // Skipped when caller proves object is non-null (typed IDENT variable/param).
+    MIR_label_t l_skip_write = 0;
+    if (!skip_null_guard) {
+        l_skip_write = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, l_skip_write),
+            MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
+    }
 
     // load data pointer from Map* + 16
     MIR_reg_t data_ptr = new_reg(mt, "dwptr", MIR_T_I64);
@@ -4346,7 +4374,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
             MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
-        emit_label(mt, l_skip_write);
+        if (!skip_null_guard) emit_label(mt, l_skip_write);
         return;
     }
 
@@ -4364,7 +4392,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
-        emit_label(mt, l_skip_write);
+        if (!skip_null_guard) emit_label(mt, l_skip_write);
         return;
     }
 
@@ -4382,7 +4410,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
-        emit_label(mt, l_skip_write);
+        if (!skip_null_guard) emit_label(mt, l_skip_write);
         return;
     }
 
@@ -4393,7 +4421,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1),
         MIR_new_reg_op(mt->ctx, raw)));
-    emit_label(mt, l_skip_write);
+    if (!skip_null_guard) emit_label(mt, l_skip_write);
 }
 
 static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
@@ -4446,7 +4474,8 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
                 log_debug("mir: direct field read: %.*s (type=%d offset=%lld)",
                     (int)ident->name->len, ident->name->chars,
                     mir_resolve_field_type(se), (long long)se->byte_offset);
-                return emit_mir_direct_field_read(mt, boxed_obj, se);
+                bool skip_null_guard = false; // typed variables can still hold null
+                return emit_mir_direct_field_read(mt, boxed_obj, se, skip_null_guard);
             }
         }
     }
@@ -7308,7 +7337,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         log_debug("mir: direct field write: %.*s (type=%d offset=%lld)",
                             (int)ident->name->len, ident->name->chars,
                             mir_resolve_field_type(se), (long long)se->byte_offset);
-                        emit_mir_direct_field_write(mt, ca->object, se, ca->value);
+                        bool skip_null_guard = false; // typed variables can still hold null
+                        emit_mir_direct_field_write(mt, ca->object, se, ca->value, skip_null_guard);
                         // Return null (void statement)
                         MIR_reg_t r = new_reg(mt, "void", MIR_T_I64);
                         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;

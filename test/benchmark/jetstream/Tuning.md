@@ -16,9 +16,9 @@ Added `type SplayNode` definition and typed annotations to convert runtime `fn_m
 | **+ Direct field stores (opt #1)** | ~4019 | ~4000 |
 | **+ Typed payload maps** | — | ~2280 |
 | **+ Inline map_with_data + gc_heap fix (opt #3)** | ~2780 | ~2020 |
-| **+ gc_object_zone_owns O(log N) fix** | ~165 | **~97** |
+| **+ gc_object_zone_owns O(log N) fix** | ~165 | **~83** |
 | Node.js (v22, V8 JIT) | 28.8 | 28.8 |
-| vs Node.js (current) | — | **3.4x** |
+| vs Node.js (current) | — | **2.9x** |
 | vs Node.js (before opt) | — | 156x |
 
 The direct field store optimization (eliminating `map_fill()` varargs) gives a **~50% reduction** in runtime when combined with typed payload maps. Adding type annotations to `generate_payload` (PayloadLeaf, PayloadBranch types) enables the optimization to cover all ~768K map allocations (not just the ~12K SplayNodes).
@@ -267,7 +267,7 @@ char* data = (char*)m + 32;                           // data = m + sizeof(Map)
 *(double*)(data + 0) = key;                           // field stores (from opt #1)
 ```
 
-#### 4. Eliminate null guards in hot loops (Medium impact, High effort)
+#### 4. Eliminate null guards in hot loops (Medium impact, High effort) — INFRASTRUCTURE ADDED ⚠️
 
 Every `current.key`, `current.left`, `current.right` emits a null guard:
 ```c
@@ -275,20 +275,34 @@ if (!current) return ITEM_NULL;  // guard
 double key = *(double*)(current->data + 0);
 ```
 
-In the splay loop, `current` has already been null-checked. Flow-sensitive null analysis could eliminate redundant guards.
+**Analysis**: Added `bool skip_null_guard` parameter to both `emit_mir_direct_field_read()` and `emit_mir_direct_field_write()`. When true, the null check branch, default-value path, and associated labels are all skipped — producing tighter code (fewer branches, no wasted default MOV).
+
+**Problem**: Cannot safely enable yet. In Lambda, typed variables CAN hold null values:
+```lambda
+var current: SplayNode = tree.root  // typed SplayNode, but tree.root can be null
+```
+A simple `AST_NODE_IDENT` check was attempted but caused the splay benchmark to crash (null deref in JIT code). Correct null guard elimination requires **flow-sensitive non-null analysis**:
+- After `if (x != null)` true branch → x is non-null
+- After `var x = { ... }` map literal → x is non-null  
+- After function calls → unknown (could return null)
+- After reassignment from field access → unknown
+
+**Profiling** (release, 72 samples): JIT hot loop ~49%, memory allocation ~36%, fn_member ~7%. Null guards account for only a fraction of the JIT code cost — estimated **~5% impact** if fully eliminated. Not worth the complexity of flow analysis at this stage.
+
+**Current status**: Infrastructure in place (`skip_null_guard` parameter wired through), set to `false` at all call sites. Can be enabled per-site when flow analysis is added.
 
 #### 5. Inline small functions (Low impact, High effort)
 
 Hot helpers like `splay_is_empty(tree)` (a single `tree.root == null` check) could be inlined by the JIT to eliminate call overhead.
 
-| # | Optimization | Expected Impact | Effort | Status |
-|---|-------------|----------------|--------|--------|
-| 1 | Direct stores (eliminate `map_fill`) | **~50% reduction** | Medium | **IMPLEMENTED** ✅ |
-| 2 | Bump-pointer nursery | 30-50% | High | Not started |
-| 3 | Inline `map_with_data` + gc_heap_calloc fix | **~12% reduction** | Low | **IMPLEMENTED** ✅ |
-| 4 | Null guard elimination | 5-10% | High | Not started |
-| 5 | Function inlining | 3-5% | High | Not started |
-| 6 | gc_object_zone_owns O(log N) fix | **~20x reduction** | Low | **IMPLEMENTED** ✅ |
+| #   | Optimization                                | Expected Impact    | Effort | Status            |
+| --- | ------------------------------------------- | ------------------ | ------ | ----------------- |
+| 1   | Direct stores (eliminate `map_fill`)        | **~50% reduction** | Medium | **IMPLEMENTED** ✅ |
+| 2   | Bump-pointer nursery                        | 30-50%             | High   | Not started       |
+| 3   | Inline `map_with_data` + gc_heap_calloc fix | **~12% reduction** | Low    | **IMPLEMENTED** ✅ |
+| 4   | Null guard elimination                      | ~5%                | High   | Infrastructure ⚠️ |
+| 5   | Function inlining                           | 3-5%               | High   | Not started       |
+| 6   | gc_object_zone_owns O(log N) fix            | **~20x reduction** | Low    | **IMPLEMENTED** ✅ |
 
 ### GC Bug: O(slabs) Ownership Check — The Hidden Catastrophe
 
