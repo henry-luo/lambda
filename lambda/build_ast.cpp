@@ -3235,6 +3235,17 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     if (is_type_definition) {
         // for type statements: type Name = TypeExpr
         // build the type expression - the result's type field is a TypeType* wrapper
+
+        // Pre-register the type name before building the body to support self-referencing
+        // types (e.g., type Node = {left: Node, right: Node}). Without this, the self-reference
+        // resolves to TYPE_ANY, breaking direct field access optimization.
+        TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+        TypeMap* pre_map = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        pre_map->struct_name = ast_node->name->chars;
+        pre_type->type = (Type*)pre_map;
+        ast_node->type = (Type*)pre_type;
+        push_name(tp, ast_node, NULL);
+
         if (ts_node_is_null(val_node)) {
             log_error("type definition: missing type expression");
             ast_node->type = &TYPE_ANY;
@@ -3386,8 +3397,11 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
         }
     }
 
-    // push the name to the name stack
-    push_name(tp, ast_node, NULL);
+    // push the name to the name stack (skip for type definitions - already pushed early
+    // to support self-referencing types like `type Node = {left: Node}`)
+    if (!is_type_definition) {
+        push_name(tp, ast_node, NULL);
+    }
 
     // also push the error name if error destructuring is used
     if (ast_node->error_name) {

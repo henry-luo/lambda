@@ -9,8 +9,9 @@ let TREE_MODIFICATIONS = 80
 // Type definitions for direct struct field access
 // Note: key/left/right must come first and in the same order as the map literal
 // value comes last so it doesn't affect typed field offsets
-type SplayNode = {key: float, left: map, right: map}
-type SplayTree = {root: map}
+type SplayNode = {key: float, left: SplayNode, right: SplayNode}
+type SplayTree = {root: SplayNode}
+type RngState = {seed: float}
 
 // Node: {key, left, right, value}
 // Must use SplayNode type annotation so runtime data layout matches direct access offsets
@@ -21,7 +22,7 @@ pn create_node(key: float, value) {
 
 // Simple LCG pseudo-random number generator (deterministic)
 // Use float arithmetic to avoid integer overflow
-pn next_random(state) {
+pn next_random(state: RngState) {
     var s = state.seed
     // Split multiplication to avoid overflow: 1103515245 = 1103515 * 1000 + 245
     // Use modular arithmetic in parts
@@ -220,7 +221,7 @@ pn generate_payload(depth: int, tag: float) {
             right_p: generate_payload(depth - 1, tag)}
 }
 
-pn insert_new_node(tree: SplayTree, rng) {
+pn insert_new_node(tree: SplayTree, rng: RngState) {
     var key = next_random(rng)
     while (splay_find(tree, key) != null) {
         key = next_random(rng)
@@ -232,7 +233,7 @@ pn insert_new_node(tree: SplayTree, rng) {
 
 pn run_splay() {
     var tree: SplayTree = splay_tree_new()
-    var rng = {seed: 49734321}
+    var rng: RngState = {seed: 49734321}
 
     // Setup: insert TREE_SIZE nodes
     var i: int = 0

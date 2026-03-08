@@ -25,18 +25,18 @@
 
 > Classic Scheme benchmark suite adapted for Lambda with type annotations. Tests recursive functions, numeric computation, and backtracking.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
-|-----------|----------|----:|------:|---------:|--------:|--------:|---------:|
-| fib | recursive | 2.1 | 2.2 | 1.1 | 17.4 | 1.6 | 1.28x |
-| fibfp | recursive | 3.6 | 3.4 | 1.2 | 17.4 | 1.6 | 2.25x |
-| tak | recursive | 0.15 | 0.17 | 0.11 | 2.7 | 0.76 | 0.20x |
-| cpstak | closure | 0.31 | 0.33 | 0.22 | 5.2 | 0.91 | 0.34x |
-| sum | iterative | 0.27 | 2.0 | 16.5 | 29.1 | 1.1 | 0.24x |
-| sumfp | iterative | 0.067 | 0.34 | 1.7 | 3.6 | 0.82 | 0.08x |
-| nqueens | backtrack | 6.5 | 7.2 | 0.013 | 9.1 | 1.7 | 3.90x |
-| fft | numeric | 0.19 | 1.1 | 2.4 | 2.6 | 1.5 | 0.13x |
-| mbrot | numeric | 0.60 | 0.89 | --- | 16.7 | 1.6 | 0.36x |
-| ack | recursive | 10.3 | 9.7 | 8.6 | --- | 12.4 | 0.83x |
+| Benchmark | Category  |   MIR | C2MIR | LambdaJS | QuickJS | Node.js | MIR/Node |
+| --------- | --------- | ----: | ----: | -------: | ------: | ------: | -------: |
+| fib       | recursive |   2.1 |   2.2 |      1.1 |    17.4 |     1.6 |    1.28x |
+| fibfp     | recursive |   3.6 |   3.4 |      1.2 |    17.4 |     1.6 |    2.25x |
+| tak       | recursive |  0.15 |  0.17 |     0.11 |     2.7 |    0.76 |    0.20x |
+| cpstak    | closure   |  0.31 |  0.33 |     0.22 |     5.2 |    0.91 |    0.34x |
+| sum       | iterative |  0.27 |   2.0 |     16.5 |    29.1 |     1.1 |    0.24x |
+| sumfp     | iterative | 0.067 |  0.34 |      1.7 |     3.6 |    0.82 |    0.08x |
+| nqueens   | backtrack |   6.5 |   7.2 |    0.013 |     9.1 |     1.7 |    3.90x |
+| fft       | numeric   |  0.19 |   1.1 |      2.4 |     2.6 |     1.5 |    0.13x |
+| mbrot     | numeric   |  0.60 |  0.89 |      --- |    16.7 |     1.6 |    0.36x |
+| ack       | recursive |  10.3 |   9.7 |      8.6 |     --- |    12.4 |    0.83x |
 
 **Geometric mean MIR/Node.js: 0.47x** -- Lambda faster on 7/10 benchmarks
 

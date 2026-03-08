@@ -718,8 +718,17 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_INT: {
-                int64_t val = item.get_int56();
-                *(int64_t*)field_ptr = val;  // store full 64-bit to preserve 56-bit value
+                // handle type coercion: float → int, bool → int
+                TypeId item_type = get_type_id(item);
+                int64_t val;
+                if (item_type == LMD_TYPE_FLOAT) {
+                    val = (int64_t)item.get_double();
+                } else if (item_type == LMD_TYPE_BOOL) {
+                    val = item.bool_val ? 1 : 0;
+                } else {
+                    val = item.get_int56();
+                }
+                *(int64_t*)field_ptr = val;
                 break;
             }
             case LMD_TYPE_INT64: {
@@ -727,7 +736,17 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_FLOAT: {
-                *(double*)field_ptr = item.get_double();
+                // handle type coercion: int → float, int64 → float
+                TypeId item_type = get_type_id(item);
+                double val;
+                if (item_type == LMD_TYPE_INT) {
+                    val = (double)item.get_int56();
+                } else if (item_type == LMD_TYPE_INT64) {
+                    val = (double)item.get_int64();
+                } else {
+                    val = item.get_double();
+                }
+                *(double*)field_ptr = val;
                 break;
             }
             case LMD_TYPE_DTIME:  {

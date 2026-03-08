@@ -7752,6 +7752,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 #define INFER_STOP        4
 #define INFER_NUMERIC_USE 8
 #define INFER_FLOAT_CONTEXT 16  // function body contains float literals (guards NUMERIC_USE→INT)
+#define INFER_ARITH_USE   32  // param used in arithmetic (+,-,*,/,%,**), not just comparisons
 
 #define MAX_ALIASES 8
 
@@ -7880,6 +7881,7 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
                 // Even without literal evidence, this means the param is numeric.
                 if (left_is_tracked || right_is_tracked) {
                     ctx->evidence |= INFER_NUMERIC_USE;
+                    if (is_arith) ctx->evidence |= INFER_ARITH_USE;
                 }
                 // If both sides are untyped but param is involved, check binary node's type
                 if ((left_is_tracked || right_is_tracked) &&
@@ -8027,7 +8029,10 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
     // are often intentionally polymorphic.
     // Guard: if the function body contains float literals, the untyped param may
     // receive float values — don't force INT. (e.g. mbrot's count() uses 16.0, 2.0)
-    if (is_proc && (ctx.evidence & INFER_NUMERIC_USE)) {
+    // Only infer INT when param is used in actual arithmetic (not just comparisons).
+    // Comparisons (==, <, >) are polymorphic and don't prove the param is int.
+    // e.g. `(tree.root).key == key` should NOT cause key to be inferred as INT.
+    if (is_proc && (ctx.evidence & INFER_ARITH_USE)) {
         if (!(ctx.evidence & INFER_FLOAT_CONTEXT)) return LMD_TYPE_INT;
     }
     // No evidence at all — keep ANY
