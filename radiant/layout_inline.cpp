@@ -11,15 +11,20 @@ extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBl
 extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
 extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
 
-// Check if a view child is absolutely or fixed positioned (out of flow)
+// Check if a view child is out of normal flow (absolute, fixed, or float)
 static inline bool is_out_of_flow_child(View* child) {
     DomNode* node = (DomNode*)child;
     if (node->is_element()) {
         DomElement* elem = static_cast<DomElement*>(node);
-        if (elem->position &&
-            (elem->position->position == CSS_VALUE_ABSOLUTE ||
-             elem->position->position == CSS_VALUE_FIXED)) {
-            return true;
+        if (elem->position) {
+            if (elem->position->position == CSS_VALUE_ABSOLUTE ||
+                elem->position->position == CSS_VALUE_FIXED) {
+                return true;
+            }
+            if (elem->position->float_prop == CSS_VALUE_LEFT ||
+                elem->position->float_prop == CSS_VALUE_RIGHT) {
+                return true;
+            }
         }
     }
     return false;
@@ -277,6 +282,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         // block-level tables by wrap_orphaned_table_children() when block children exist.
         bool is_block_or_table_internal = child->is_element() &&
             (child_display.outer == CSS_VALUE_BLOCK ||
+             child_display.outer == CSS_VALUE_LIST_ITEM ||
+             child_display.outer == CSS_VALUE_TABLE ||
              is_table_internal_display(child_display.inner) ||
              is_table_internal_display(child_display.outer));
 
@@ -554,7 +561,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             DisplayValue child_display = resolve_display_value(scan);
             log_debug("block-in-inline scan: child=%s outer=%d inner=%d",
                      scan->node_name(), child_display.outer, child_display.inner);
-            if (child_display.outer == CSS_VALUE_BLOCK) {
+            if (child_display.outer == CSS_VALUE_BLOCK ||
+                child_display.outer == CSS_VALUE_LIST_ITEM ||
+                child_display.outer == CSS_VALUE_TABLE) {
                 // CSS 2.1 §9.6.1: Absolutely/fixed positioned elements are out of flow
                 // and should not trigger block-in-inline splitting, even though their
                 // display is blockified per §9.7.
@@ -790,6 +799,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             log_debug("empty inline strut: ascender=%.1f, descender=%.1f, line_height=%.1f",
                      ascender, descender, lycon->block.line_height);
         }
+        // Mark empty inline span for height fixup in view_vertical_align.
+        // compute_span_bounding_box sets height=0, but the inline box should
+        // report line-height when on a line with visible content.
+        span->content_height = lycon->block.line_height;
         // CSS 2.1 §9.4.2: An inline element with non-zero margins, borders, or
         // padding makes the line box non-empty (not subject to zero-height rule).
         // Mark the line as having content so line_break() is called at finalization.
@@ -881,7 +894,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (c->view_type) last_child_for_trim = c;
                 c = c->next();
             }
-            if (last_child_for_trim) {
+            if (last_child_for_trim && last_child_for_trim->view_type != RDT_VIEW_INLINE) {
+                // Only trim non-span children (text rects, inline-blocks, etc.).
+                // Inline spans already handled their own trailing space trim
+                // during their own layout pass — trimming again would double-count.
                 saved_trailing = lycon->line.trailing_space_width;
                 last_child_for_trim->width -= saved_trailing;
             }

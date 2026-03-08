@@ -610,24 +610,38 @@ void line_break(LayoutContext* lycon) {
     // Inline elements whose content all collapsed (e.g., <em> </em>) get 0×0 from
     // compute_span_bounding_box. However, when the line has visible content, the
     // inline box should still show height = its line-height (the "strut" concept).
-    // Walk siblings from start_view and fix any marked collapsed inline spans.
+    // Walk the view tree from start_view and fix any marked collapsed inline spans,
+    // including nested children of inline spans.
     // CSS 2.1 §9.4.2: Line boxes with no text/content/etc. are zero-height, so
     // only fix when used_line_height > 0 (line has actual visible content).
     if (used_line_height > 0 && lycon->line.start_view) {
         View* v = lycon->line.start_view;
-        // Find the parent to limit sibling walk
         DomNode* line_parent = ((DomNode*)v)->parent;
         while (v) {
-            if (v->view_type == RDT_VIEW_INLINE && v->height == 0) {
-                DomElement* elem = static_cast<DomElement*>((DomNode*)v);
-                if (elem->content_height > 0) {
-                    // Marked as collapsed inline — apply its stored line-height
-                    v->height = (int)elem->content_height;
-                    elem->content_height = 0;  // clear the marker
-                    log_debug("fixup collapsed inline span %s height=%d", elem->node_name(), v->height);
+            if (v->view_type == RDT_VIEW_INLINE) {
+                // Recurse into children of inline spans to fix nested empty spans
+                View* child = ((ViewSpan*)v)->first_child;
+                while (child) {
+                    if (child->view_type == RDT_VIEW_INLINE && child->height == 0) {
+                        DomElement* celem = static_cast<DomElement*>((DomNode*)child);
+                        if (celem->content_height > 0) {
+                            child->height = (int)celem->content_height;
+                            log_debug("fixup nested collapsed inline span %s height=%d",
+                                     celem->node_name(), child->height);
+                        }
+                    }
+                    child = child->next();
+                }
+                // Also fix the span itself if collapsed
+                if (v->height == 0) {
+                    DomElement* elem = static_cast<DomElement*>((DomNode*)v);
+                    if (elem->content_height > 0) {
+                        v->height = (int)elem->content_height;
+                        log_debug("fixup collapsed inline span %s height=%d",
+                                 elem->node_name(), v->height);
+                    }
                 }
             }
-            // Walk siblings at the same parent level
             DomNode* next = ((DomNode*)v)->next_sibling;
             if (!next || ((DomNode*)v)->parent != line_parent) break;
             v = (View*)next;
@@ -1054,6 +1068,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             line_break(lycon);
             if (*str) {
+                // CSS 2.1 §16.6.1: When collapsing spaces (pre-line), skip leading
+                // spaces at the start of the new line after a preserved newline.
+                if (collapse_spaces) {
+                    while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'))) {
+                        str++;
+                    }
+                    if (!*str) return;
+                }
                 is_word_start = true;  // Reset word boundary after line break
                 goto LAYOUT_TEXT;
             }
