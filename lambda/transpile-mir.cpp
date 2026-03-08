@@ -21,6 +21,10 @@ extern void* heap_alloc(int size, TypeId type_id);
 extern void heap_init();
 extern void heap_destroy();
 
+extern "C" {
+    int gc_object_zone_class_index(size_t size);
+}
+
 // Profiling infrastructure (defined in runner.cpp)
 #define PROFILE_MAX_SCRIPTS 64
 typedef struct PhaseProfile {
@@ -3929,9 +3933,21 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             // Inline map_with_data: call heap_calloc directly with compile-time constants
             int64_t byte_size = map_type->byte_size;
             int64_t total_size = (int64_t)sizeof(Map) + byte_size;
-            m = emit_call_2(mt, "heap_calloc", MIR_T_P,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, total_size),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP));
+
+            // Compute size class at JIT compile time to skip runtime class_index lookup.
+            // Size classes: {16, 32, 48, 64, 96, 128, 256} — find smallest that fits.
+            int alloc_class = gc_object_zone_class_index((size_t)total_size);
+            if (alloc_class >= 0) {
+                m = emit_call_3(mt, "heap_calloc_class", MIR_T_P,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, total_size),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)alloc_class));
+            } else {
+                // Fallback for very large maps (unlikely)
+                m = emit_call_2(mt, "heap_calloc", MIR_T_P,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, total_size),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_MAP));
+            }
 
             // Set Map header fields
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,

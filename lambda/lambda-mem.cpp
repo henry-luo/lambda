@@ -131,6 +131,19 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
+// Specialized allocator for JIT: pre-computed size class skips class_index lookup.
+// Also sets Container.is_heap inline. Used for typed map construction where
+// the allocation size (and thus size class) is a compile-time constant.
+extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
+    gc_heap_t *gc = context->heap->gc;
+    void* ptr = gc_heap_calloc_class(gc, size, type_id, cls);
+    if (!ptr) return NULL;
+    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
+        ((Container*)ptr)->is_heap = 1;
+    }
+    return ptr;
+}
+
 // allocate variable-size data (items[], data buffers) from the GC data zone
 // these are bump-allocated, not individually freeable — reclaimed at GC
 extern "C" void* heap_data_alloc(size_t size) {
