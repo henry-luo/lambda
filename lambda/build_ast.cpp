@@ -3306,6 +3306,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                             // copy byte_size and length from named type
                             literal->byte_size = named->byte_size;
                             literal->length = named->length;
+                            literal->has_named_shape = true;  // mark as safe for direct stores
                             // rebuild shape entries with unwrapped types
                             ShapeEntry* src = named->shape;
                             ShapeEntry* prev = nullptr;
