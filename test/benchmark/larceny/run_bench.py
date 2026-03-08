@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Larceny/Gambit Benchmark Runner — Lambda Script
+"""Larceny/Gambit Benchmark Runner — Lambda Script vs Python
 
-Runs extended Larceny/Gambit benchmark suite in Lambda Script.
+Runs extended Larceny/Gambit benchmark suite in Lambda Script and Python.
 These benchmarks complement the R7RS suite with additional classic
 Scheme/Lisp benchmarks.
 
@@ -22,7 +22,9 @@ PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..", "..")
 os.chdir(PROJECT_ROOT)
 
 LAMBDA_EXE = "./lambda.exe"
+PYTHON_EXE = "python3"
 LS_DIR = "test/benchmark/larceny"
+PY_DIR = "test/benchmark/larceny/python"
 
 # Benchmark configs: (name, category, description)
 BENCHMARKS = [
@@ -40,8 +42,9 @@ BENCHMARKS = [
     ("paraffins", "recursive",   "Paraffin isomer counting nb(1..23) x10"),
 ]
 
-# Lambda startup overhead (measured separately)
+# Language startup overheads
 LAMBDA_STARTUP_MS = 10
+PYTHON_STARTUP_MS = 15
 
 TIMING_RE = re.compile(r"^__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 
@@ -67,7 +70,7 @@ def parse_timing(stdout):
     return None
 
 
-def run_external(cmd, num_runs):
+def run_external(cmd, num_runs, startup_ms):
     """Run cmd N times externally, return (wall_times, exec_times) in ms."""
     wall_times = []
     exec_times = []
@@ -82,7 +85,7 @@ def run_external(cmd, num_runs):
             continue
         end = time.perf_counter_ns()
         elapsed_ms = (end - start) / 1_000_000
-        wall_ms = max(0.01, elapsed_ms - LAMBDA_STARTUP_MS)
+        wall_ms = max(0.01, elapsed_ms - startup_ms)
         wall_times.append(wall_ms)
 
         et = parse_timing(r.stdout)
@@ -115,67 +118,108 @@ def geo_mean(values):
 # ============================================================
 # Header
 # ============================================================
-print(f"\033[1mLarceny/Gambit Benchmark Suite — Lambda Script\033[0m")
-print("=" * 70)
+py_ver = subprocess.run(f"{PYTHON_EXE} --version", shell=True, capture_output=True, text=True).stdout.strip()
+print(f"\033[1mLarceny/Gambit Benchmark Suite — Lambda Script vs Python\033[0m")
+print("=" * 78)
 print(f"  Runs per benchmark : {NUM_RUNS}")
-print(f"  Lambda             : Lambda Script v1.0 (C2MIR JIT)")
-print(f"  Timing method      : Wall-clock + in-script clock()")
+print(f"  Lambda             : Lambda Script v1.0 (MIR JIT)")
+print(f"  Python             : {py_ver}")
+print(f"  Timing method      : Wall-clock + in-script __TIMING__")
 print()
 
 # ============================================================
-# Run benchmarks
+# Phase 1: Lambda benchmarks
 # ============================================================
-print(f"\033[1mRunning benchmarks ({NUM_RUNS} runs each)\033[0m")
-print("-" * 70)
+print(f"\033[1mPhase 1: Lambda Script ({NUM_RUNS} runs each)\033[0m")
+print("-" * 78)
 
-results_wall = {}
-results_exec = {}
+lm_wall = {}
+lm_exec = {}
 for name, cat, desc in BENCHMARKS:
     script = f"{LS_DIR}/{name}.ls"
     if not os.path.exists(script):
         print(f"  {name:12s} SKIPPED (file not found)")
         continue
     print(f"  {name:12s}", end="", flush=True)
-    wall_times, exec_times = run_external(f"{LAMBDA_EXE} run {script}", NUM_RUNS)
-    mw = med(wall_times)
-    me = med(exec_times)
-    results_wall[name] = mw
-    results_exec[name] = me
+    wt, et = run_external(f"{LAMBDA_EXE} run {script}", NUM_RUNS, LAMBDA_STARTUP_MS)
+    mw = med(wt)
+    me = med(et)
+    lm_wall[name] = mw
+    lm_exec[name] = me
     jit_ms = max(0, mw - me)
-    print(f"  total={format_time_ms(mw):>10s}  exec={format_time_ms(me):>10s}  jit={format_time_ms(jit_ms):>8s}  ({desc})")
+    print(f"  wall={format_time_ms(mw):>10s}  exec={format_time_ms(me):>10s}  jit={format_time_ms(jit_ms):>8s}  ({desc})")
+
+print()
+
+# ============================================================
+# Phase 2: Python benchmarks
+# ============================================================
+print(f"\033[1mPhase 2: Python ({NUM_RUNS} runs each)\033[0m")
+print("-" * 78)
+
+py_wall = {}
+py_exec = {}
+for name, cat, desc in BENCHMARKS:
+    script = f"{PY_DIR}/{name}.py"
+    if not os.path.exists(script):
+        print(f"  {name:12s} SKIPPED (file not found)")
+        continue
+    print(f"  {name:12s}", end="", flush=True)
+    wt, et = run_external(f"{PYTHON_EXE} {script}", NUM_RUNS, PYTHON_STARTUP_MS)
+    mw = med(wt)
+    me = med(et)
+    py_wall[name] = mw
+    py_exec[name] = me
+    print(f"  wall={format_time_ms(mw):>10s}  exec={format_time_ms(me):>10s}")
 
 print()
 
 # ============================================================
 # Results Summary
 # ============================================================
-SEP = "=" * 70
+SEP = "=" * 86
 print(f"\033[1m{SEP}\033[0m")
-print(f"\033[1m{'RESULTS SUMMARY':^70s}\033[0m")
+print(f"\033[1m{'RESULTS SUMMARY':^86s}\033[0m")
 print(f"\033[1m{SEP}\033[0m")
 print()
 
-hdr = f"{'Benchmark':12s} {'Category':10s} {'Total':>10s} {'Exec':>10s} {'JIT':>10s}"
-print(hdr)
-print(f"{'-'*12} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+print(f"\033[36mExecution time comparison (exec = internal __TIMING__, wall = startup-subtracted)\033[0m")
+print(f"{'Benchmark':12s} {'Lm(exec)':>10s} {'Py(exec)':>10s} {'Lm(wall)':>10s} {'Py(wall)':>10s} {'Lm/Py(exec)':>12s}")
+print(f"{'-'*12} {'-'*10} {'-'*10} {'-'*10} {'-'*10} {'-'*12}")
 
+ratios = []
+lw = pw = 0
 for name, cat, desc in BENCHMARKS:
-    if name in results_wall:
-        tw = results_wall[name]
-        te = results_exec[name]
-        tj = max(0, tw - te)
-        print(f"{name:12s} {cat:10s} {format_time_ms(tw):>10s} {format_time_ms(te):>10s} {format_time_ms(tj):>10s}")
+    le = lm_exec.get(name, 0)
+    pe = py_exec.get(name, 0)
+    lw_t = lm_wall.get(name, 0)
+    pw_t = py_wall.get(name, 0)
+    if le > 0 and pe > 0:
+        r = le / pe
+        rs = f"{r:.2f}x"
+        ratios.append(r)
+        if r <= 1.0: lw += 1
+        else: pw += 1
+    else:
+        rs = "N/A"
+    print(f"{name:12s} {format_time_ms(le):>10s} {format_time_ms(pe):>10s} {format_time_ms(lw_t):>10s} {format_time_ms(pw_t):>10s} {rs:>12s}")
 
-if results_wall:
-    wall_list = [v for v in results_wall.values() if v > 0]
-    exec_list = [v for v in results_exec.values() if v > 0]
-    if wall_list:
-        print()
-        print(f"  Total (wall)     : {format_time_ms(sum(wall_list))}")
-        print(f"  Total (exec)     : {format_time_ms(sum(exec_list))}")
-        print(f"  Geo mean (wall)  : {format_time_ms(geo_mean(wall_list))}")
-        print(f"  Geo mean (exec)  : {format_time_ms(geo_mean(exec_list))}")
+if ratios:
+    gm = geo_mean(ratios)
+    print()
+    print(f"  Geo mean Lambda/Python (exec): {gm:.2f}x")
+    print(f"  Lambda wins: {lw}  |  Python wins: {pw}")
+    le_list = [v for v in lm_exec.values() if v > 0]
+    pe_list = [v for v in py_exec.values() if v > 0]
+    if le_list and pe_list:
+        print(f"  Total Lambda exec : {format_time_ms(sum(le_list))}")
+        print(f"  Total Python exec : {format_time_ms(sum(pe_list))}")
 
+print()
+print("Legend:")
+print("  exec = pure benchmark execution time from __TIMING__ (no startup)")
+print("  wall = total wall-clock minus language startup overhead")
+print("  Ratio < 1.0 = Lambda faster; > 1.0 = Python faster")
 print()
 
 # ============================================================
@@ -184,10 +228,12 @@ print()
 csv_path = f"{LS_DIR}/bench_results.csv"
 with open(csv_path, "w") as f:
     f.write(f"# Larceny/Gambit Benchmark Results {time.strftime('%Y-%m-%d %H:%M:%S')}, runs={NUM_RUNS}\n")
-    f.write("benchmark,category,wall_ms,exec_ms,jit_ms\n")
+    f.write("benchmark,category,lm_wall_ms,lm_exec_ms,py_wall_ms,py_exec_ms,lm_py_ratio\n")
     for name, cat, desc in BENCHMARKS:
-        tw = results_wall.get(name, 0)
-        te = results_exec.get(name, 0)
-        tj = max(0, tw - te)
-        f.write(f"{name},{cat},{tw:.3f},{te:.3f},{tj:.3f}\n")
+        lw_t = lm_wall.get(name, 0)
+        le = lm_exec.get(name, 0)
+        pw_t = py_wall.get(name, 0)
+        pe = py_exec.get(name, 0)
+        ratio = f"{le/pe:.3f}" if le > 0 and pe > 0 else "N/A"
+        f.write(f"{name},{cat},{lw_t:.3f},{le:.3f},{pw_t:.3f},{pe:.3f},{ratio}\n")
 print(f"Raw data saved to {csv_path}")
