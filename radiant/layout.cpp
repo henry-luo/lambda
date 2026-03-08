@@ -743,6 +743,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // Always recompute to ensure the span's bounds reflect final child positions.
         struct FontHandle* span_fh = span->font ? span->font->font_handle : lycon->font.font_handle;
         compute_span_bounding_box(span, false, span_fh);
+        // CSS 2.1 §10.8.1: Empty/collapsed inline spans (no visible children)
+        // get height=0 from compute_span_bounding_box, but should report their
+        // line-height height when on a line with visible content. content_height
+        // was set as a marker during layout_inline()/line_break().
+        if (span->height == 0 && span->content_height > 0) {
+            span->height = (int)span->content_height;
+        }
         float span_asc = 0, span_desc = 0;
         if (span->font) {
             span_asc = span->font->ascender;

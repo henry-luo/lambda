@@ -43,7 +43,7 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 
 - **MIR Direct**: Lambda → MIR IR → native. Default compiler path, lowest startup.
 - **C2MIR**: Lambda → C source → MIR. Legacy path, sometimes better optimized.
-- **LambdaJS**: Lambda's built-in JS interpreter. No `require()` or `fs`.
+- **LambdaJS**: Lambda's built-in JS JIT engine. No `require()` or `fs`.
 - **Node.js**: Google V8 with optimizing JIT. Full Node.js API.
 - **QuickJS**: Lightweight interpreter. Needs a polyfill wrapper (auto-generated).
 
