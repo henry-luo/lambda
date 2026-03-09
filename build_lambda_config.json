@@ -415,6 +415,78 @@
             "build_dir": "build_debug",
             "debug": true
         },
+        "cli": {
+            "description": "Headless CLI-only build: Lambda scripting without Radiant layout engine or GUI support",
+            "output": "lambda-cli.exe",
+            "source_dirs": [
+                "lib",
+                "lambda",
+                "lambda/input",
+                "lambda/input/css",
+                "lambda/input/html5",
+                "lambda/input/markup",
+                "lambda/input/markup/block",
+                "lambda/input/markup/inline",
+                "lambda/input/markup/format",
+                "lambda/format",
+                "lambda/validator",
+                "lambda/js",
+                "lambda/network"
+            ],
+            "exclude_source_files": [
+                "lambda/schema_builder.cpp",
+                "lambda/format/format_latex_html_v2.cpp",
+                "lambda/input/input-adoc.cpp",
+                "lib/font_config.c",
+                "lib/clock_compat.c",
+                "lib/image.c",
+                "lambda/network/resource_loaders.cpp",
+                "lambda/network/network_integration.cpp",
+                "lambda/network/network_resource_manager.cpp"
+            ],
+            "includes": [
+                ".",
+                "include",
+                "build_temp/re2-noabsl",
+                "lambda/tree-sitter/lib/include",
+                "lambda/tree-sitter-lambda/bindings/c",
+                "lambda/tree-sitter-javascript/bindings/c",
+                "mac-deps/rpmalloc-install/include"
+            ],
+            "exclude_libraries": [
+                "glfw",
+                "ThorVG",
+                "freetype",
+                "png",
+                "turbojpeg",
+                "gif",
+                "brotlidec",
+                "brotlicommon",
+                "libevent",
+                "libevent_openssl"
+            ],
+            "exclude_macos_libraries": [
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "GL",
+                "CoreGraphics",
+                "AppKit",
+                "Carbon"
+            ],
+            "defines": [
+                "LAMBDA_HEADLESS"
+            ],
+            "flags": [
+                "std=c++17",
+                "pedantic",
+                "fdiagnostics-color=auto",
+                "fno-omit-frame-pointer"
+            ],
+            "linker_flags": [],
+            "build_dir": "build_cli",
+            "debug": false
+        },
         "windows": {
             "output": "lambda.exe",
             "compiler": "gcc",
