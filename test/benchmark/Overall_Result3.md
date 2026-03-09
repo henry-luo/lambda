@@ -142,17 +142,20 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| nbody | numeric |    47 |    85 |   --- |   --- |   5.5 |   --- | 8.58x | --- |
+| nbody | numeric |    47 |    85 |  125† |   --- |   5.5 |   --- | 8.58x | --- |
 | cube3d | 3d |    49 |   141 |   --- |   --- |    18 |   --- | 2.73x | --- |
-| navier_stokes | numeric |   803 |   801 |   --- |   --- |    14 |   --- | 55.4x | --- |
+| navier_stokes | numeric |   803 |   801 |    28† |   --- |    14 |   --- | 55.4x | --- |
 | richards | macro |   301 |   287 |   --- |   --- |   8.3 |   --- | 36.5x | --- |
-| splay | data |    51 |   --- |   --- |   --- |    20 |   --- | 2.50x | --- |
+| splay | data |    51 |   --- |    41† |   --- |    20 |   --- | 2.50x | --- |
 | deltablue | macro |    19 |    19 |   --- |   --- |    10 |   --- | 1.79x | --- |
 | hashmap | data |    96 |    99 |   --- |   --- |    16 |   --- | 5.88x | --- |
-| crypto_sha1 | crypto |    17 |    20 |   --- |   --- |   9.0 |   --- | 1.89x | --- |
+| crypto_sha1 | crypto |    17 |    20 |    46† |   --- |   9.0 |   --- | 1.89x | --- |
 | raytrace3d | 3d |   370 |   562 |   --- |   --- |    19 |   --- | 19.8x | --- |
 
 **Geometric mean MIR/Node.js: 7.12x** — Lambda slower on 0/9 benchmarks
+
+† LambdaJS times are **wall-clock** (includes startup overhead). LambdaJS internal `Date.now()`/`performance.now()` not supported.
+LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), which were not in the main MIR/Node.js test set.
 
 ---
 
@@ -187,6 +190,22 @@
 | **Overall** | **0.06x** | **42** | **7** | **49** |
 
 > Lambda MIR is overwhelmingly faster than CPython across all suites.
+
+### LambdaJS vs Node.js V8
+
+| Suite | Geo. Mean | LJS Wins | Node Wins | Total Compared | Notes |
+|-------|----------:|:--------:|:---------:|:--------------:|-------|
+| R7RS | 1.36x | 5 | 4 | 9 | Faster on recursion (tak 0.14x, cpstak 0.22x); slower on iterative (sum 17x, nqueens 23x) |
+| AWFY | 0.03x | 7 | 1 | 8 | Dominates micro-benchmarks (permute 0.01x, sieve 0.03x); slow on mandelbrot (4.6x) |
+| BENG | 0.13x | 6 | 4 | 10 | Fast on hashing/regex; slower on allocation-heavy (binarytrees 4.7x, spectralnorm 6.8x) |
+| KOSTYA | 6.41x | 0 | 6 | 6 | Significantly slower — matmul (70x), brainfuck (11x), collatz (4.6x) |
+| LARCENY | 3.27x | 4 | 7 | 11 | Slow on diviter (25x), gcbench (25x); fast on divrec (0.11x), array1 (0.30x) |
+| JetStream | 4.58x | 0 | 4 | 4 | Wall-clock only†; nbody (23x), crypto_sha1 (5.1x), splay (2.0x) |
+| **Overall** | **0.73x** | **22** | **26** | **48** | LambdaJS wins 46% of benchmarks; competitive overall |
+
+> Ratio < 1.0 = LambdaJS is faster. JetStream ratios use wall-clock LambdaJS times vs self-reported Node.js times.
+>
+> **Overall geo mean of 0.73x is dominated by AWFY micro-benchmarks** where LambdaJS's sub-millisecond self-reported times heavily outperform Node.js. Excluding AWFY: geo mean ≈ 2.6x (Node.js faster).
 
 ---
 
@@ -290,14 +309,26 @@ Node.js V8's optimizing JIT (TurboFan) significantly outperforms Lambda on:
 ### 5. JetStream: New frontier for optimization
 
 The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.12× slower** than Node.js.
-Key bottlenecks:
+LambdaJS passes **6 of 13** JetStream benchmarks (nbody, navier_stokes, splay, crypto_sha1, crypto_md5, regex_dna).
+7 benchmarks fail due to: missing ES6 class support (cube3d, richards, deltablue, hashmap), unsupported regex patterns (crypto_aes), timeout (raytrace3d), or unsupported statement types (base64).
+
+Key MIR bottlenecks:
 - **navier_stokes (55×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern
 - **richards (36×)**: OOP task scheduler — class/method dispatch overhead
 - **raytrace3d (20×)**: Object-heavy 3D computation — property access patterns
 - **deltablue (1.79×)**: Closest to parity — constraint solver benefits from Lambda's approach
 These represent clear optimization targets for future MIR engine improvements.
 
-### 6. MIR JIT improvements from Round 2
+### 6. LambdaJS vs Node.js: Competitive on simple benchmarks
+
+LambdaJS (Lambda's built-in JS JIT) achieves an **overall geo mean of 0.73×** against Node.js V8 across 48 benchmarks.
+However, this is heavily influenced by AWFY micro-benchmarks where LambdaJS reports sub-millisecond times.
+Excluding AWFY, LambdaJS is ~2.6× slower than Node.js, with clear weaknesses on:
+- **Heavy computation**: matmul (70×), diviter (25×), gcbench (25×), collatz (4.6×)
+- **JetStream**: Only 4 overlapping benchmarks runnable, all slower than Node.js (4.58× geo mean)
+Strengths include recursive code (tak 0.14×, cpstak 0.22×) and lightweight operations.
+
+### 7. MIR JIT improvements from Round 2
 
 MIR Direct shows measurable improvements across the board:
 - **havlak**: 339 → 177ms (**1.92× faster**) — graph algorithm optimization
@@ -306,7 +337,7 @@ MIR Direct shows measurable improvements across the board:
 - **gcbench**: 472 → 435ms (**1.09× faster**) — GC improvements
 - **Overall**: ~5% faster across 52 comparable benchmarks (excluding json workload change)
 
-### 7. Lambda JS engine growth
+### 8. Lambda JS engine growth
 
 LambdaJS continues expanding benchmark coverage:
 - **New passing benchmarks**: BENG/fannkuch, BENG/mandelbrot, KOSTYA/collatz
@@ -314,12 +345,12 @@ LambdaJS continues expanding benchmark coverage:
 - **KOSTYA/primes**: 19.4 → 8.1ms (2.4× faster)
 - **KOSTYA/levenshtein**: 30.7 → 13.8ms (2.2× faster)
 
-### 8. QuickJS comparison
+### 9. QuickJS comparison
 
 QuickJS (pure interpreter) is generally 2–10× slower than Node.js V8, as expected.
 Lambda MIR is faster than QuickJS on most benchmarks, confirming Lambda's JIT advantage.
 
-### 9. C2MIR vs MIR Direct
+### 10. C2MIR vs MIR Direct
 
 The two Lambda JIT paths produce similar results. Notable differences:
 - C2MIR slightly faster on: havlak (145 vs 177ms), richards (49 vs 56ms)
@@ -336,7 +367,7 @@ The two Lambda JIT paths produce similar results. Notable differences:
 - **AWFY Python mandelbrot** value excluded due to measurement error (harness incompatibility).
 - **LambdaJS** still fails on some AWFY benchmarks (bounce, storage, json, deltablue, havlak, cd) due to missing ES6 class features.
 - **QuickJS** fails on ack (R7RS) due to stack overflow on deep recursion.
-- **JetStream** benchmarks only run on MIR, C2MIR, and Node.js. No LambdaJS/QuickJS/Python ports exist.
+- **JetStream** benchmarks only run on MIR, C2MIR, and Node.js for the main comparison. LambdaJS passes 6 of 13 JetStream benchmarks (wall-clock timing only†). No QuickJS/Python ports exist.
 - **Python** benchmarks not available for: AWFY/nbody, AWFY/deltablue, AWFY/cd, all JetStream benchmarks.
 - All times in **milliseconds** unless noted with 's' suffix (seconds).
 - The `json` AWFY benchmark workload was corrected between R2 and R3 (R2: 0.028ms was a minimal-workload test).
