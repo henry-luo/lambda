@@ -446,6 +446,112 @@ w()
 w("---")
 
 # ============================================================
+# Memory Profiling
+# ============================================================
+import os
+mem_data = None
+mem_path = "test/benchmark/memory_results.json"
+if os.path.exists(mem_path):
+    with open(mem_path) as f:
+        mem_data = json.load(f)
+
+if mem_data:
+    w()
+    w("## Memory Profiling (Peak RSS)")
+    w()
+    w("Peak resident set size measured via `/usr/bin/time -l` (macOS). Values in **MB**.")
+    w("Includes runtime, JIT compiler, and all loaded libraries for each engine.")
+    w()
+
+    MEM_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
+    MEM_LABELS = {"mir": "MIR", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
+                  "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python"}
+
+    def fmt_mb(v):
+        if v is None:
+            return "---"
+        if v < 1:
+            return f"{v:.2f}"
+        if v < 10:
+            return f"{v:.1f}"
+        return f"{v:.0f}"
+
+    # Per-suite memory tables
+    for suite in SUITE_ORDER:
+        if suite not in mem_data:
+            continue
+        w(f"### {SUITE_LABELS[suite]} — Peak RSS (MB)")
+        w()
+        w("| Benchmark | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python |")
+        w("| --------- | ---: | ----: | -------: | ------: | ------: | -----: |")
+
+        for bench_name, bench_mem in mem_data[suite].items():
+            row = f"| {bench_name} |"
+            for eng in MEM_ENGINES:
+                v = bench_mem.get(eng)
+                row += f" {fmt_mb(v)} |"
+            w(row)
+        w()
+
+    # Summary table: average peak RSS per engine per suite
+    w("### Memory Summary — Average Peak RSS per Suite (MB)")
+    w()
+    w("| Suite | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/QJS |")
+    w("|-------|----:|------:|---------:|--------:|--------:|-------:|---------:|--------:|")
+
+    all_mir_mem = []
+    all_node_mem = []
+    all_qjs_mem = []
+
+    for suite in SUITE_ORDER:
+        if suite not in mem_data:
+            continue
+        avgs = {}
+        for eng in MEM_ENGINES:
+            vals = [b.get(eng) for b in mem_data[suite].values() if b.get(eng) is not None]
+            avgs[eng] = sum(vals) / len(vals) if vals else None
+
+        mir_avg = avgs.get("mir")
+        node_avg = avgs.get("nodejs")
+        qjs_avg = avgs.get("quickjs")
+
+        if mir_avg and node_avg:
+            all_mir_mem.append(mir_avg)
+            all_node_mem.append(node_avg)
+        if mir_avg and qjs_avg:
+            all_qjs_mem.append(qjs_avg)
+
+        mn_str = f"{mir_avg/node_avg:.2f}x" if mir_avg and node_avg and node_avg > 0 else "---"
+        mq_str = f"{mir_avg/qjs_avg:.1f}x" if mir_avg and qjs_avg and qjs_avg > 0 else "---"
+
+        row = f"| {SUITE_LABELS[suite]} |"
+        for eng in MEM_ENGINES:
+            row += f" {fmt_mb(avgs.get(eng))} |"
+        row += f" {mn_str} | {mq_str} |"
+        w(row)
+
+    if all_mir_mem and all_node_mem:
+        avg_mir = sum(all_mir_mem) / len(all_mir_mem)
+        avg_node = sum(all_node_mem) / len(all_node_mem)
+        overall_ratio = avg_mir / avg_node if avg_node > 0 else None
+        w()
+        if overall_ratio:
+            if overall_ratio < 1:
+                w(f"**Lambda MIR uses {overall_ratio:.2f}× the memory of Node.js** ({avg_mir:.0f} MB vs {avg_node:.0f} MB average) — Lambda is more memory-efficient.")
+            else:
+                w(f"**Lambda MIR uses {overall_ratio:.2f}× the memory of Node.js** ({avg_mir:.0f} MB vs {avg_node:.0f} MB average).")
+    if all_qjs_mem:
+        avg_qjs = sum(all_qjs_mem) / len(all_qjs_mem)
+        avg_mir2 = sum(all_mir_mem) / len(all_mir_mem)
+        w(f"**QuickJS is the most memory-efficient** at {avg_qjs:.0f} MB average — {avg_mir2/avg_qjs:.0f}× less than Lambda MIR.")
+
+    w()
+    w("> Memory footprint is dominated by engine/runtime overhead; actual benchmark data is small.")
+    w("> QuickJS's tiny interpreter has minimal memory overhead. Node.js includes the full V8 engine.")
+    w()
+    w("---")
+
+# ============================================================
 # Key Findings
 # ============================================================
 w()
@@ -477,29 +583,29 @@ w()
 w("### 4. Weaknesses: OOP-heavy and allocation-intensive code")
 w()
 w("Node.js V8's optimizing JIT (TurboFan) significantly outperforms Lambda on:")
-w("- **Class-heavy benchmarks**: richards (12.1x), cd (11.3x), deltablue (5.8x) — V8's hidden classes and inline caches")
-w("- **Heavy allocation/GC**: gcbench (17.6x), base64 (12.2x) — V8's generational GC advantage")
-w("- **JetStream suite (7.12x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate")
+w("- **Class-heavy benchmarks**: richards (11.3x), cd (14.3x), deltablue (6.2x) — V8's hidden classes and inline caches")
+w("- **Heavy allocation/GC**: gcbench (20.3x), base64 (12.5x) — V8's generational GC advantage")
+w("- **JetStream suite (7.88x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate")
 w()
 
 w("### 5. JetStream: New frontier for optimization")
 w()
-w("The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.12× slower** than Node.js.")
+w("The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.88× slower** than Node.js.")
 w("Key bottlenecks:")
-w("- **navier_stokes (55×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern")
-w("- **richards (36×)**: OOP task scheduler — class/method dispatch overhead")
+w("- **navier_stokes (56×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern")
+w("- **richards (30×)**: OOP task scheduler — class/method dispatch overhead")
 w("- **raytrace3d (20×)**: Object-heavy 3D computation — property access patterns")
-w("- **deltablue (1.79×)**: Closest to parity — constraint solver benefits from Lambda's approach")
+w("- **deltablue (1.77×)**: Closest to parity — constraint solver benefits from Lambda's approach")
 w("These represent clear optimization targets for future MIR engine improvements.")
 w()
 
 w("### 6. MIR JIT improvements from Round 2")
 w()
 w("MIR Direct shows measurable improvements across the board:")
-w("- **havlak**: 339 → 177ms (**1.92× faster**) — graph algorithm optimization")
+w("- **havlak**: 339 → 183ms (**1.85× faster**) — graph algorithm optimization")
 w("- **nbody (BENG)**: 2.8 → 1.3ms (**2.15× faster**) — continued typed-array optimization")
-w("- **deltablue**: 6.1 → 5.0ms (**1.23× faster**) — macro benchmark improvement")
-w("- **gcbench**: 472 → 435ms (**1.09× faster**) — GC improvements")
+w("- **deltablue**: 6.1 → 5.3ms (**1.15× faster**) — macro benchmark improvement")
+w("- **gcbench**: 472 → 500ms — slight regression due to GC tuning trade-offs")
 w(f"- **Overall**: ~{(geo_impr-1)*100:.0f}% faster across {len(valid_impr)} comparable benchmarks")
 w()
 
@@ -507,9 +613,9 @@ w("### 7. Lambda JS engine growth")
 w()
 w("LambdaJS continues expanding benchmark coverage:")
 w("- **New passing benchmarks**: BENG/fannkuch, BENG/mandelbrot, KOSTYA/collatz")
-w("- **BENG/nbody**: 134 → 11.3ms (11.8× faster)")
-w("- **KOSTYA/primes**: 19.4 → 8.1ms (2.4× faster)")
-w("- **KOSTYA/levenshtein**: 30.7 → 13.8ms (2.2× faster)")
+w("- **BENG/nbody**: 134 → 11.8ms (11.4× faster)")
+w("- **KOSTYA/primes**: 19.4 → 8.5ms (2.3× faster)")
+w("- **KOSTYA/levenshtein**: 30.7 → 14.2ms (2.2× faster)")
 w()
 
 w("### 8. QuickJS comparison")
@@ -524,6 +630,16 @@ w("The two Lambda JIT paths produce similar results. Notable differences:")
 w("- C2MIR slightly faster on: havlak (145 vs 177ms), richards (49 vs 56ms)")
 w("- MIR Direct faster on: matmul (8.7 vs 129ms), cube3d (49 vs 141ms)")
 w("- MIR Direct has lower compilation overhead and is the default path")
+w()
+
+w("### 10. Memory footprint")
+w()
+w("Lambda MIR's peak RSS averages ~2.8× Node.js memory, dominated by the MIR JIT compiler and runtime overhead.")
+w("Key observations:")
+w("- **R7RS/micro-benchmarks**: MIR ~37 MB vs Node ~41 MB — Lambda is **lighter** for small programs")
+w("- **KOSTYA/LARCENY/JetStream**: MIR 63–330 MB vs Node 43–60 MB — Lambda's GC and data model use more RAM on heavy workloads")
+w("- **QuickJS** is the most memory-efficient at ~3 MB average (pure interpreter, minimal overhead)")
+w("- **Outliers**: base64 (1,414 MB MIR), navier_stokes (1,310 MB MIR) — indicate optimization opportunities for array-heavy benchmarks")
 w()
 
 w("---")
