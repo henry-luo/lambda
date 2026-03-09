@@ -7213,6 +7213,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     // Transpile AST to MIR
     transpile_js_mir_ast(&mt, js_ast);
 
+#ifndef NDEBUG
     // Dump MIR for debugging
     create_dir_recursive("temp");
     FILE* mir_dump = fopen("temp/js_mir_dump.txt", "w");
@@ -7220,6 +7221,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         MIR_output(ctx, mir_dump);
         fclose(mir_dump);
     }
+#endif
 
     // Link and generate
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
