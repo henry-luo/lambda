@@ -23,6 +23,35 @@ static Input* js_input = NULL;
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
 
+// Module-level variable table for top-level bindings accessible from any function.
+// Populated during js_main execution, read by class method closures.
+#define JS_MAX_MODULE_VARS 256
+static Item js_module_vars[JS_MAX_MODULE_VARS];
+static int js_module_var_count = 0;
+
+// Helper to make JS undefined value
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+extern "C" void js_set_module_var(int index, Item value) {
+    if (index >= 0 && index < JS_MAX_MODULE_VARS) {
+        js_module_vars[index] = value;
+    }
+}
+
+extern "C" Item js_get_module_var(int index) {
+    if (index >= 0 && index < JS_MAX_MODULE_VARS) {
+        return js_module_vars[index];
+    }
+    return ItemNull;
+}
+
+extern "C" void js_reset_module_vars() {
+    memset(js_module_vars, 0, sizeof(js_module_vars));
+    js_module_var_count = 0;
+}
+
 // =============================================================================
 // Exception Handling State
 // =============================================================================
@@ -245,7 +274,8 @@ static double js_get_number(Item value) {
 
 static Item js_make_number(double d) {
     // Check if it can be represented as an integer
-    if (d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX) {
+    // Guard with isfinite to avoid UB from (int64_t)Infinity/NaN
+    if (isfinite(d) && d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX) {
         return (Item){.item = i2it((int64_t)d)};
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -281,7 +311,11 @@ extern "C" Item js_multiply(Item left, Item right) {
 }
 
 extern "C" Item js_divide(Item left, Item right) {
-    return fn_div(js_to_number(left), js_to_number(right));
+    // Use double arithmetic for correct JS semantics:
+    // x/0 → Infinity, -x/0 → -Infinity, 0/0 → NaN (IEEE 754)
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l / r);
 }
 
 extern "C" Item js_modulo(Item left, Item right) {
@@ -475,45 +509,58 @@ extern "C" Item js_logical_not(Item operand) {
 // Bitwise Operators
 // =============================================================================
 
+// JavaScript ToInt32: non-finite values → 0, large values wrap modulo 2^32
+static inline int32_t js_to_int32(double d) {
+    if (!isfinite(d) || d == 0.0) return 0;
+    // Modulo 2^32, then interpret as signed
+    double d2 = fmod(trunc(d), 4294967296.0);
+    if (d2 < 0) d2 += 4294967296.0;
+    return (d2 >= 2147483648.0) ? (int32_t)(d2 - 4294967296.0) : (int32_t)d2;
+}
+
+// JIT-callable version of ToInt32: takes double, returns int64 for MIR compatibility
+extern "C" int64_t js_double_to_int32(double d) {
+    return (int64_t)js_to_int32(d);
+}
+
 extern "C" Item js_bitwise_and(Item left, Item right) {
-    int32_t l = (int32_t)js_get_number(left);
-    int32_t r = (int32_t)js_get_number(right);
+    int32_t l = js_to_int32(js_get_number(left));
+    int32_t r = js_to_int32(js_get_number(right));
     return (Item){.item = i2it(l & r)};
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
-    int32_t l = (int32_t)js_get_number(left);
-    int32_t r = (int32_t)js_get_number(right);
+    int32_t l = js_to_int32(js_get_number(left));
+    int32_t r = js_to_int32(js_get_number(right));
     return (Item){.item = i2it(l | r)};
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
-    int32_t l = (int32_t)js_get_number(left);
-    int32_t r = (int32_t)js_get_number(right);
+    int32_t l = js_to_int32(js_get_number(left));
+    int32_t r = js_to_int32(js_get_number(right));
     return (Item){.item = i2it(l ^ r)};
 }
 
 extern "C" Item js_bitwise_not(Item operand) {
-    int32_t val = (int32_t)js_get_number(operand);
+    int32_t val = js_to_int32(js_get_number(operand));
     return (Item){.item = i2it(~val)};
 }
 
 extern "C" Item js_left_shift(Item left, Item right) {
-    int32_t l = (int32_t)js_get_number(left);
-    uint32_t r = (uint32_t)js_get_number(right) & 0x1F;
+    int32_t l = js_to_int32(js_get_number(left));
+    uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
     return (Item){.item = i2it(l << r)};
 }
 
 extern "C" Item js_right_shift(Item left, Item right) {
-    int32_t l = (int32_t)js_get_number(left);
-    uint32_t r = (uint32_t)js_get_number(right) & 0x1F;
+    int32_t l = js_to_int32(js_get_number(left));
+    uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
     return (Item){.item = i2it(l >> r)};
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
-    // Cast via int32_t first to avoid UB when converting negative double to uint32_t
-    uint32_t l = (uint32_t)(int32_t)js_get_number(left);
-    uint32_t r = (uint32_t)(int32_t)js_get_number(right) & 0x1F;
+    uint32_t l = (uint32_t)js_to_int32(js_get_number(left));
+    uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
     return (Item){.item = i2it((int64_t)(l >> r))};
 }
 
@@ -576,6 +623,9 @@ extern "C" Item js_new_object() {
     return (Item){.map = m};
 }
 
+// Forward declaration for prototype chain support
+extern "C" Item js_prototype_lookup(Item object, Item property);
+
 extern "C" Item js_property_get(Item object, Item key) {
     TypeId type = get_type_id(object);
 
@@ -601,7 +651,12 @@ extern "C" Item js_property_get(Item object, Item key) {
             return js_computed_style_get_property(object, key);
         }
         // Regular Lambda map (including JS objects)
-        return map_get(object.map, key);
+        Item result = map_get(object.map, key);
+        // Prototype chain fallback: if property not found on own object, walk __proto__
+        if (result.item == 0) {
+            result = js_prototype_lookup(object, key);
+        }
+        return result;
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY) {
@@ -642,8 +697,44 @@ extern "C" Item js_property_get(Item object, Item key) {
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     TypeId type = get_type_id(object);
 
-    // Array: result[i] = val
+    // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY) {
+        // Handle arr.length = newLength (resize array)
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                int new_len = (int)js_get_number(value);
+                Array* arr = object.array;
+                if (new_len >= 0) {
+                    if (new_len > arr->length) {
+                        // Extend: ensure capacity and fill with undefined.
+                        // Use direct realloc to avoid GC-triggering array_push loops.
+                        if (new_len + 4 > arr->capacity) {
+                            int new_cap = new_len + 4;
+                            Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
+                            if (arr->items && arr->length > 0) {
+                                memcpy(new_items, arr->items, arr->length * sizeof(Item));
+                            }
+                            // Note: old items may be malloc'd or data-zone allocated.
+                            // If malloc'd, we should free. If data-zone, it's abandoned.
+                            // For simplicity, we don't free (matches expand_list behavior).
+                            arr->items = new_items;
+                            arr->capacity = new_cap;
+                        }
+                        // Fill new slots with undefined
+                        Item undef = make_js_undefined();
+                        for (int i = arr->length; i < new_len; i++) {
+                            arr->items[i] = undef;
+                        }
+                        arr->length = new_len;
+                    } else if (new_len < arr->length) {
+                        // Truncate
+                        arr->length = new_len;
+                    }
+                }
+                return value;
+            }
+        }
         return js_array_set(object, key, value);
     }
 
@@ -716,11 +807,6 @@ extern "C" int64_t js_get_length(Item object) {
 // Array Functions
 // =============================================================================
 
-// Helper to make JS undefined value
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 extern "C" Item js_array_new(int length) {
     Array* arr = array();
     // Pre-allocate the array with space for all elements
@@ -765,12 +851,13 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (idx >= 0 && idx < arr->length) {
         arr->items[idx] = value;
     } else if (idx >= 0) {
-        // Expand array: fill gaps with null, then set the value
+        // Expand array: fill gaps with undefined, then set the value
+        Item undef = make_js_undefined();
         while (arr->length < idx) {
-            list_push(arr, ItemNull);
+            array_push(arr, undef);
         }
         if (idx == arr->length) {
-            list_push(arr, value);
+            array_push(arr, value);
         } else {
             arr->items[idx] = value;
         }
@@ -822,6 +909,10 @@ struct JsFunction {
 };
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
+    if (!func_ptr) {
+        log_error("js_new_function: null func_ptr! param_count=%d", param_count);
+        return ItemNull;
+    }
     // Pool-allocate: JS functions are module-lifetime objects that must not be
     // GC-collected (they live in pool-allocated env arrays unreachable from GC roots).
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
@@ -863,45 +954,74 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
     typedef Item (*P7)(Item, Item, Item, Item, Item, Item, Item);
     typedef Item (*P8)(Item, Item, Item, Item, Item, Item, Item, Item);
 
+    // Pad missing arguments with undefined to match declared param count
+    Item padded_args[8];
+    Item undef = make_js_undefined();
+    int effective_count = arg_count;
+    Item* effective_args = args;
+
+    if (arg_count < fn->param_count) {
+        effective_count = fn->param_count;
+        if (effective_count > 8) effective_count = 8;
+        for (int i = 0; i < effective_count; i++) {
+            padded_args[i] = (i < arg_count && args) ? args[i] : undef;
+        }
+        effective_args = padded_args;
+    }
+
     if (fn->env) {
         // Closure: prepend env pointer as first argument
         Item env_item;
         env_item.item = (uint64_t)fn->env;
-        switch (arg_count) {
+        switch (effective_count) {
             case 0: return ((P1)fn->func_ptr)(env_item);
-            case 1: return ((P2)fn->func_ptr)(env_item, args[0]);
-            case 2: return ((P3)fn->func_ptr)(env_item, args[0], args[1]);
-            case 3: return ((P4)fn->func_ptr)(env_item, args[0], args[1], args[2]);
-            case 4: return ((P5)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3]);
-            case 5: return ((P6)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4]);
-            case 6: return ((P7)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4], args[5]);
-            case 7: return ((P8)fn->func_ptr)(env_item, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+            case 1: return ((P2)fn->func_ptr)(env_item, effective_args[0]);
+            case 2: return ((P3)fn->func_ptr)(env_item, effective_args[0], effective_args[1]);
+            case 3: return ((P4)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2]);
+            case 4: return ((P5)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3]);
+            case 5: return ((P6)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4]);
+            case 6: return ((P7)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5]);
+            case 7: return ((P8)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6]);
             default:
-                log_error("js_invoke_fn: too many args for closure (%d)", arg_count);
+                log_error("js_invoke_fn: too many args for closure (%d)", effective_count);
                 return ItemNull;
         }
     } else {
-        switch (arg_count) {
+        switch (effective_count) {
             case 0: return ((P0)fn->func_ptr)();
-            case 1: return ((P1)fn->func_ptr)(args[0]);
-            case 2: return ((P2)fn->func_ptr)(args[0], args[1]);
-            case 3: return ((P3)fn->func_ptr)(args[0], args[1], args[2]);
-            case 4: return ((P4)fn->func_ptr)(args[0], args[1], args[2], args[3]);
-            case 5: return ((P5)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4]);
-            case 6: return ((P6)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5]);
-            case 7: return ((P7)fn->func_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+            case 1: return ((P1)fn->func_ptr)(effective_args[0]);
+            case 2: return ((P2)fn->func_ptr)(effective_args[0], effective_args[1]);
+            case 3: return ((P3)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2]);
+            case 4: return ((P4)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3]);
+            case 5: return ((P5)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4]);
+            case 6: return ((P6)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5]);
+            case 7: return ((P7)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6]);
             default:
-                log_error("js_invoke_fn: too many args (%d)", arg_count);
+                log_error("js_invoke_fn: too many args (%d)", effective_count);
                 return ItemNull;
         }
     }
 }
 
 // Call a JavaScript function stored as an Item
+static int js_call_count = 0;
+
+// Debug: check callee before calling, print site info if null
+extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC) {
+        log_error("js_debug_check_callee: NULL callee at site_id=%lld (type=%d, call_count=%d)",
+            (long long)site_id, get_type_id(callee), js_call_count);
+    }
+    return ItemNull;
+}
+
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
+    js_call_count++;
+
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        log_error("js_call_function: not a function (type=%d, item=0x%llx, argc=%d)",
-            get_type_id(func_item), (unsigned long long)func_item.item, arg_count);
+        log_error("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
+            js_call_count, get_type_id(func_item), (unsigned long long)func_item.item, arg_count,
+            get_type_id(this_val));
         return ItemNull;
     }
 
@@ -1070,7 +1190,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 4 && strncmp(method->chars, "push", 4) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
         for (int i = 0; i < argc; i++) {
-            list_push(arr.array, args[i]);
+            array_push(arr.array, args[i]);
         }
         return (Item){.item = i2it(arr.array->length)};
     }
@@ -1157,11 +1277,13 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (start < 0) start = 0;
         if (end > src->length) end = src->length;
         if (start >= end) return js_array_new(0);
-        Item result = js_array_new(0);
+        int count = end - start;
+        Item result = js_array_new(count);
         Array* dst = result.array;
-        for (int i = start; i < end; i++) {
-            array_push(dst, src->items[i]);
+        for (int i = 0; i < count; i++) {
+            dst->items[i] = src->items[start + i];
         }
+        dst->length = count;
         return result;
     }
     // concat - returns new array that is the concatenation
@@ -1177,21 +1299,23 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 total++;
             }
         }
-        Item result = js_array_new(0);
+        Item result = js_array_new(total);
         Array* dst = result.array;
+        int pos = 0;
         for (int i = 0; i < src->length; i++) {
-            array_push(dst, src->items[i]);
+            dst->items[pos++] = src->items[i];
         }
         for (int i = 0; i < argc; i++) {
             if (get_type_id(args[i]) == LMD_TYPE_ARRAY) {
                 Array* other = args[i].array;
                 for (int j = 0; j < other->length; j++) {
-                    array_push(dst, other->items[j]);
+                    dst->items[pos++] = other->items[j];
                 }
             } else {
-                array_push(dst, args[i]);
+                dst->items[pos++] = args[i];
             }
         }
+        dst->length = pos;
         return result;
     }
     // map - uses callback as first arg (must be a JsFunction)
@@ -1551,5 +1675,44 @@ extern "C" Item js_array_slice_from(Item arr, Item start_item) {
         array_push(dst, src->items[i]);
     }
     return result;
+}
+
+// =============================================================================
+// Prototype chain support
+// =============================================================================
+
+static const char PROTO_KEY[] = "__proto__";
+static const int PROTO_KEY_LEN = 9;
+
+// Set the prototype of an object (stores as __proto__ property on Map)
+extern "C" void js_set_prototype(Item object, Item prototype) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return;
+    if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != 0) return;
+    Item key = (Item){.item = s2it(heap_create_name(PROTO_KEY, PROTO_KEY_LEN))};
+    js_property_set(object, key, prototype);
+}
+
+// Get the prototype of an object (read __proto__ property)
+extern "C" Item js_get_prototype(Item object) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    Map* m = object.map;
+    // direct map_get to read __proto__ without triggering prototype chain
+    Item key = (Item){.item = s2it(heap_create_name(PROTO_KEY, PROTO_KEY_LEN))};
+    return map_get(m, key);
+}
+
+// Walk the prototype chain to find a property
+extern "C" Item js_prototype_lookup(Item object, Item property) {
+    // first check own properties (skip — caller already checked)
+    // walk up the chain via __proto__
+    Item proto = js_get_prototype(object);
+    int depth = 0;
+    while (proto.item != 0 && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+        Item result = map_get(proto.map, property);
+        if (result.item != 0) return result;
+        proto = js_get_prototype(proto);
+        depth++;
+    }
+    return ItemNull;
 }
 

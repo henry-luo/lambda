@@ -1,12 +1,16 @@
-# JavaScript Transpiler v7: Correctness Completion & Performance Tuning
+# JavaScript Transpiler v7: Full Benchmark Coverage & Regression Fixes
 
 ## 1. Executive Summary
 
-Lambda's JS engine (LambdaJS) passes **21 of 29** benchmark tests (72.4%) with 8 benchmarks fixed in v6. This proposal targets **100% correctness on all feasible benchmarks** (25/25, excluding 4 that require Node.js-specific `require('fs')`) and **closing the median self-time ratio from ~12x to ~5x** versus V8.
+Lambda's JS engine (LambdaJS) currently **fails 12 of 62 benchmark tests** across 6 suites (Round 3). The dominant blocker is **missing ES6 class inheritance** (`extends`/`super()`), which accounts for 10 of the 12 failures. Additionally, 3 benchmarks show **major performance regressions** from Round 2:
 
-The remaining work falls into two categories:
-1. **Correctness fixes** — 4 benchmarks fail due to 3 localized AST builder gaps and 1 performance timeout
-2. **Feature additions** — 4 benchmarks are "out of scope" but 3 can be brought in-scope by reusing existing Lambda infrastructure (decimal for BigInt, RE2 for RegExp, HashMap for Map)
+| Benchmark | R2 → R3 | Regression |
+|-----------|---------|------------|
+| nqueens (R7RS) | 0.013ms → 41ms | 3136× slower |
+| quicksort (LARCENY) | 0.19ms → 9.4ms | 49.6× slower |
+| sumfp (R7RS) | 1.7ms → 4.2ms | 2.5× slower |
+
+This proposal targets **100% benchmark coverage** (all 62 benchmarks runnable on LambdaJS) and **root-cause analysis + fixes for all 3 regressions**.
 
 ### Architecture Position
 
@@ -16,61 +20,307 @@ v3:    Runtime alignment, GC, DOM, selectors              (done)
 v4:    JS AST → direct MIR IR → native                    (done)
 v5:    Language coverage + typed arrays + closures         (done)
 v6:    Type inference + native code generation             (done, 11–52x speedup)
-v7:    Correctness completion + performance tuning         (this proposal)
-         Phase A: AST builder correctness fixes            3 benchmarks
-         Phase B: TypedArray loop performance              1 benchmark (fannkuch)
-         Phase C: BigInt via Lambda decimal                1 benchmark (pidigits)
-         Phase D: Hot-loop deboxing                        systemic perf improvement
-         Phase E: Map built-in + RegExp                    2 benchmarks (knucleotide, regexredux)
+v7:    Full benchmark coverage + regression fixes          (this proposal)
+         Phase A: ES6 class inheritance (extends/super)    10 benchmarks
+         Phase B: AST builder correctness fixes            3 benchmarks
+         Phase C: Performance regression investigation     3 benchmarks
+         Phase D: TypedArray loop performance              1 benchmark (fannkuch)
+         Phase E: BigInt, Map, RegExp, require('fs')       4 benchmarks
+         Phase F: Hot-loop deboxing                        systemic perf improvement
 ```
 
 ### Target Outcome
 
-| Metric | Current (v6) | Target (v7) |
-|--------|-------------|-------------|
-| Correct output | 21/29 (72.4%) | 25/29 (86.2%) |
-| Feasible correct | 21/25 | **25/25 (100%)** |
-| Median self-time ratio vs V8 | ~12x | ~5x |
-| Benchmarks faster than Node.js (wall time) | 8/21 | 12/25 |
-
-The 4 remaining `require('fs')` benchmarks (revcomp, knucleotide, regexredux — after Map/RegExp) stay out of scope unless a `--input` CLI workaround is adopted.
+| Metric | Current (Round 3) | Target (v7) |
+|--------|-------------------|-------------|
+| Benchmarks runnable | 50/62 (80.6%) | **62/62 (100%)** |
+| Failing benchmarks | 12 | **0** |
+| Performance regressions investigated | 0/3 | **3/3** |
+| Median self-time ratio vs V8 | ~5x | ~3x |
 
 ---
 
-## 2. Issue Verification — Status of All JS_Result.md Issues
+## 2. Failure Inventory — All 12 Failing LambdaJS Benchmarks
 
-### Previously Fixed Issues (v6) — All Verified ✅
+### By Root Cause
 
-| # | Issue | Fix | Status |
-|---|-------|-----|--------|
-| 1 | Top-level `const`/`let` not captured in fn declarations | Capture analysis includes function declarations; closures created when captures > 0 | ✅ Resolved — puzzle, base64, fasta, matmul pass |
-| 2 | `let` in `for` loops not block-scoped | `js_scope_push`/`js_scope_pop` around for-statement body | ✅ Resolved — primes×2, matmul, spectralnorm pass |
-| 3 | TypedArray `.fill()` method dispatch | `js_is_typed_array` check in MAP method dispatch branch | ✅ Resolved — primes×2, triangl, spectralnorm pass |
-| 4 | GC collecting JsFunction closures | `heap_alloc` → `pool_calloc` for JsFunction | ✅ Resolved — base64 closure-heavy benchmark passes |
+| Root Cause | Count | Benchmarks | Suites |
+|-----------|------:|------------|--------|
+| **Missing ES6 class inheritance** | 10 | bounce, storage, json, deltablue, havlak, cd (AWFY); cube3d, richards, deltablue, hashmap (JetStream) | AWFY, JetStream |
+| **AST builder gaps** | 3 | binarytrees (BENG), nbody (BENG), levenshtein (KOSTYA) | BENG, KOSTYA |
+| **Performance timeout** | 1 | fannkuch (BENG) | BENG |
+| **Overlap** | -2 | raytrace3d timeout relates to class overhead; puzzle may work in release | |
 
-### Remaining Issues — 4 Failing + 4 Out-of-Scope
+**Note:** The R7RS/mbrot "---" in Round 3 is a separate issue (not class-related).
 
-| # | Issue | Benchmarks | Status | This Proposal |
-|---|-------|-----------|--------|---------------|
-| 5 | Escape sequences in template literals (`\t`, `\n`) | binarytrees | ❌ Failing | Phase A1 |
-| 6 | Comments inside array expressions | nbody | ❌ Failing | Phase A2 |
-| 7 | Destructuring assignment (not declaration) | levenshtein | ❌ Failing | Phase A3 |
-| 8 | TypedArray access performance in tight loops | fannkuch | ❌ Timeout | Phase B |
-| 9 | `BigInt` type | pidigits | ⬜ Out of scope | Phase C |
-| 10 | `Map` built-in | knucleotide | ⬜ Out of scope | Phase E |
-| 11 | `RegExp` literals + methods | regexredux | ⬜ Out of scope | Phase E |
-| 12 | `require('fs')` file I/O | revcomp, knucleotide, regexredux | ⬜ Out of scope | Deferred |
+### Detailed Failure Map
+
+| # | Benchmark | Suite | Status | Blocker | This Proposal |
+|---|-----------|-------|--------|---------|---------------|
+| 1 | bounce | AWFY | ❌ | `class Bounce extends Benchmark`, `super()` | Phase A |
+| 2 | storage | AWFY | ❌ | `class Storage extends Benchmark`, `super()` | Phase A |
+| 3 | json | AWFY | ❌ | `class JsonParser` with class hierarchy | Phase A |
+| 4 | deltablue | AWFY | ❌ | 9 `extends`, `super()`, `static` fields | Phase A |
+| 5 | havlak | AWFY | ❌ | `class HavlakLoopFinder`, 4 `extends` | Phase A |
+| 6 | cd | AWFY | ❌ | `class RedBlackTree extends ...`, 4 `extends` | Phase A |
+| 7 | cube3d | JetStream | ❌ | ES6 class support | Phase A |
+| 8 | richards | JetStream | ❌ | ES6 class support | Phase A |
+| 9 | deltablue | JetStream | ❌ | ES6 class support | Phase A |
+| 10 | hashmap | JetStream | ❌ | ES6 class support | Phase A |
+| 11 | binarytrees | BENG | ❌ | Template literal `\t` escape | Phase B |
+| 12 | nbody | BENG | ❌ | Comments inside array expressions | Phase B |
+| 13 | levenshtein | KOSTYA | ❌ | Destructuring assignment `[a,b]=[b,a]` | Phase B |
+| 14 | fannkuch | BENG | ❌ | TypedArray tight-loop timeout | Phase D |
 
 ---
 
-## 3. Action Items
+## 3. Performance Regression Analysis
 
-### Phase A: AST Builder Correctness Fixes
+### R1. nqueens: 0.013ms → 41ms (3136× slower)
+
+**Diagnosis: Workload correction, NOT a code regression.**
+
+The R2 result of 0.013ms is physically impossible for an N-Queens solver counting 92 solutions — a single function call on Apple Silicon takes ~0.001ms. At 0.013ms, the benchmark executed fewer than ~50 instructions total.
+
+**Evidence:**
+- The R3 JS file (`nqueens2.js`) correctly runs `nqueens(8)` which requires exploring ~2000 recursive `solve()` calls
+- Each `solve()` allocates 3 `new Int32Array()` objects — the benchmark is inherently allocation-heavy
+- Node.js V8 runs nqueens(8) in 1.8ms — LambdaJS at 41ms is 22× slower, consistent with the GC/allocation overhead pattern seen in similar benchmarks (gcbench at 24×, binarytrees at 5×)
+
+**Root cause of slowness (not regression):** Heavy `Int32Array` allocation per recursive call. `solve()` creates 3 new typed arrays on each invocation. LambdaJS's `js_typed_array_new()` does a `pool_calloc` + data array allocation per call, while V8's generational GC handles short-lived allocations with near-zero cost via bump allocation in the young generation.
+
+**Action items:**
+- [ ] **C1a.** Verify: confirm R2 used a different (trivial) workload by checking git history for nqueens2.js changes
+- [ ] **C1b.** Optimize typed array allocation: add a small-array fast path in `js_typed_array_new()` — for `Int32Array(n)` where `n ≤ 64`, use stack allocation or a thread-local free-list to avoid heap pressure
+- [ ] **C1c.** Consider arena-bump allocation for typed arrays created inside recursive calls — allocate from a resettable arena that's freed when the function returns
+
+### R2. quicksort: 0.19ms → 9.4ms (49.6× slower)
+
+**Diagnosis: Workload correction, likely NOT a code regression.**
+
+Sorting 5000 elements with Lomuto quicksort requires ~60,000 comparisons and ~30,000 swaps. At 0.19ms, that's ~3ns per comparison+swap — plausible only if the benchmark ran with a much smaller array or fewer iterations in R2.
+
+**Evidence:**
+- The R3 `quicksort.js` uses `const size = 5000` and sorts once
+- Node.js runs it in 1.6ms — LambdaJS at 9.4ms is 5.9× slower, which is consistent with typed array access overhead
+- The 0.19ms R2 time would require `size ≈ 100` to be realistic
+
+**Root cause of current speed (not regression):** Typed array element access in `partition()` involves:
+1. Extract `JsTypedArray*` from the Map wrapping object
+2. Bounds check
+3. Load `int32_t` from data pointer
+4. Box to `Item` for the comparison
+This 4-step sequence runs ~5000×log₂(5000) ≈ 60,000 times.
+
+**Action items:**
+- [ ] **C2a.** Verify workload change via git history
+- [ ] **C2b.** Apply TypedArray pointer hoisting (Phase D.B1) — hoist the `JsTypedArray*` extraction out of `partition()`'s for-loop
+- [ ] **C2c.** Apply bounds-check elimination (Phase D.B2) — the loop `for (let j = lo; j < hi; j++)` with `hi < arr.length` is provably safe
+
+### R3. sumfp: 1.7ms → 4.2ms (2.5× slower)
+
+**Diagnosis: Possible genuine code regression in float loop compilation.**
+
+Unlike the other two, sumfp is a trivial `while` loop with float arithmetic — no allocation, no recursion, no typed arrays. The 2.5× slowdown is small but significant for such simple code.
+
+**Source code:**
+```javascript
+function run(n) {
+    let i = n;       // n = 100000.0
+    let s = 0.0;
+    while (i >= 0.0) {
+        s = s + i;
+        i = i - 1.0;
+    }
+    return s;
+}
+```
+
+**Hypothesis 1: Float comparison fallback.**
+The while-loop condition `i >= 0.0` should trigger the native float comparison fast path in `jm_transpile_while()`. If a v6 change altered how `0.0` is typed (e.g., treating it as INT instead of FLOAT), the compiler may emit a type mismatch and fall back to `js_is_truthy()` — a boxed runtime call per iteration.
+
+**Hypothesis 2: TCO interference.**
+The `run()` function has a single self-not-calling body (no recursion). But if `jm_has_tail_call()` scanning now traverses `while` bodies and finds `return s` inside (it shouldn't, but verify), it could incorrectly mark the function as TCO-eligible and wrap it in extra loop scaffolding.
+
+**Hypothesis 3: Workload change.**
+If R2 used `run(10000.0)` and R3 uses `run(100000.0)` (10× more iterations), the 2.5× change would actually indicate a 4× per-iteration speedup (10/2.5 = 4× improvement), not a regression.
+
+**Action items:**
+- [ ] **C3a.** Verify workload: check git history for sumfp2.js iteration count changes
+- [ ] **C3b.** Debug float comparison path: add `log_debug` in `jm_transpile_while()` to confirm both operands are recognized as FLOAT, and the native `MIR_DBGE` is emitted (not `js_is_truthy`)
+- [ ] **C3c.** If float comparison falls back to boxed path: trace through `jm_get_effective_type()` for the literal `0.0` — verify it returns `LMD_TYPE_FLOAT`, not `LMD_TYPE_INT`
+- [ ] **C3d.** If confirmed workload change: mark as non-regression, update R2→R3 notes
+
+---
+
+## 4. Action Items
+
+### Phase A: ES6 Class Inheritance (`extends` / `super()`)
+
+**Goal:** Fix 10 failing benchmarks (6 AWFY + 4 JetStream). This is the single highest-impact change.  
+**Estimated effort:** ~600 lines across transpiler and runtime.
+
+#### Current State
+
+The transpiler already supports:
+- Class declaration parsing (AST: `JsClassNode` with `name`, `superclass`, `body`)
+- Method collection into `JsClassEntry` with `JsClassMethodEntry` linked list
+- Constructor detection by name matching `"constructor"`
+- `new ClassName(args)` → create object, attach methods, call constructor
+- `this.field` access via `js_get_this()`/`js_set_this()` runtime functions
+
+**What's missing** (required by all 14 AWFY bundles):
+
+| Feature | Usage Pattern | Implementation Gap |
+|---------|--------------|-------------------|
+| `extends` | `class Bounce extends Benchmark` | Superclass field parsed in AST but no prototype chain setup |
+| `super()` | `super(); super(arg1, arg2)` | No parent constructor invocation |
+| `super.method()` | `super.verifyResult(...)` | No parent method delegation |
+| `static` methods | `Vector.with(elem)`, `Strength.of(n)` | `static_method` flag exists but ignored |
+| `static` fields | `static strengthTable = [...]` | Not supported |
+| Method override (virtual dispatch) | `this.benchmark()` calling subclass method | Methods flat-copied; need prototype chain lookup |
+
+#### A1. Prototype Chain Model
+
+Design: Use Lambda's existing Map (object) structure with a `__proto__` hidden property linking to the parent class's prototype object.
+
+```
+[Bounce instance]           [Bounce.prototype]        [Benchmark.prototype]
+  x: 10                      benchmark: fn             benchmark: fn (default)
+  y: 20                      verifyResult: fn          verifyResult: fn (default)
+  __proto__: ──────→          __proto__: ──────────→    __proto__: null
+```
+
+**Implementation:**
+1. For each class, create a **prototype object** at compile time containing all non-constructor methods
+2. For classes with `extends`, set the prototype's `__proto__` to the parent prototype
+3. On `new ClassName(args)`: create object, set `__proto__` to class prototype, call constructor
+4. On `this.method()`: look up in object first, then walk `__proto__` chain
+
+**Runtime functions:**
+```c
+extern "C" Item js_create_prototype(Item parent_proto); // create proto with __proto__ link
+extern "C" Item js_proto_set(Item proto, Item key, Item val); // add method to prototype
+extern "C" Item js_new_instance(Item proto);            // create {__proto__: proto}
+extern "C" Item js_proto_lookup(Item obj, Item key);    // walk __proto__ chain
+```
+
+**Transpiler changes** in `jm_transpile_new_expression()`:
+- Look up class entry, find its prototype register (created during pre-pass)
+- Call `js_new_instance(proto)` instead of `js_new_object()`
+- Call constructor with `this = instance`
+
+**Files:** `lambda/js/transpile_js_mir.cpp`, `lambda/js/js_runtime.cpp`  
+**Lines changed:** ~200
+
+#### A2. `super()` Constructor Calls
+
+When inside a constructor of a class that `extends` another:
+- Detect `super(args...)` call expression in the AST (already parsed as `JS_AST_NODE_CALL_EXPRESSION` with callee `super`)
+- Look up the parent class's constructor
+- Emit: `js_call_function(parent_ctor, this, args)`
+- The `this` object already has `__proto__` set to the correct prototype chain, so parent constructor field assignments work correctly
+
+**Transpiler changes:**
+- In `jm_transpile_call()`, add a `super` callee case
+- Resolve parent class from current class context (`mt->current_class->node->superclass`)
+- Find parent's constructor from `mt->class_entries`
+
+**Lines changed:** ~50
+
+#### A3. `super.method()` Calls
+
+When `super.method(args)` appears:
+- Resolve the parent class
+- Look up `method` in the parent class's method list (compile-time resolution, not runtime)
+- Emit a direct call to the parent's method MIR function with `this` as first arg
+
+**Lines changed:** ~40
+
+#### A4. Static Methods and Fields
+
+**Static methods:**
+- During class collection, detect `static` keyword on method definitions (the `static_method` flag already exists in `JsMethodDefinitionNode`)
+- Store static methods on the **class object itself** (not on the prototype)
+- Route `ClassName.staticMethod(args)` to a direct call
+
+**Static fields:**
+- During class body processing, detect field definitions (non-method members with initializers)
+- Evaluate initializers at class declaration time
+- Store as properties on the class object
+
+**Lines changed:** ~80
+
+#### A5. `this.method()` Virtual Dispatch
+
+Currently, methods are flat-copied as properties on each instance. With the prototype chain model (A1), method lookup via `this.method()` must:
+1. Check the instance's own properties first
+2. Walk the `__proto__` chain if not found
+3. Call the found function with `this = instance`
+
+The existing `js_property_get` runtime function needs to be extended to walk `__proto__`:
+```c
+Item js_property_get(Item obj, Item key) {
+    Item val = map_get(obj, key);
+    if (val != ItemNull) return val;
+    Item proto = map_get(obj, "__proto__");
+    if (proto != ItemNull) return js_property_get(proto, key);  // recursive lookup
+    return ItemNull;
+}
+```
+
+**Optimization:** Since AWFY benchmarks call `this.method()` in tight loops, cache the `__proto__` chain walk result. If the object's shape hasn't changed, the method reference from the last lookup is still valid.
+
+**Lines changed:** ~30
+
+#### A6. `instanceof` with Prototype Chain
+
+Update `js_instanceof()` to walk the `__proto__` chain:
+```c
+bool js_instanceof(Item obj, Item ctor) {
+    Item proto = js_property_get(ctor, "prototype");
+    Item p = js_property_get(obj, "__proto__");
+    while (p != ItemNull) {
+        if (p == proto) return true;
+        p = js_property_get(p, "__proto__");
+    }
+    return false;
+}
+```
+
+**Lines changed:** ~20
+
+#### AWFY Bundle Compatibility Checklist
+
+All 14 AWFY `*_bundle.js` files share a common base library (`Benchmark`, `Vector`, `Set`, `Dictionary`). Once the class system works for `bounce2_bundle.js`, the others should follow with minimal additional work.
+
+| Bundle | Class Count | Extends Depth | Extra Features Needed |
+|--------|:-----------:|:----:|--------------------------|
+| sieve | 4 | 1 | — |
+| permute | 4 | 1 | — |
+| queens | 4 | 1 | — |
+| towers | 5 | 1 | — |
+| bounce | 13 | 2 | `Vector.with()` static |
+| list | 5 | 1 | — |
+| mandelbrot | 4 | 1 | — |
+| nbody | 6 | 1 | — |
+| storage | 12 | 2 | — |
+| json | 21 | 2 | String methods |
+| richards | 13 | 3 | `TaskState.createRunning()` static |
+| havlak | 19 | 2 | `Set`, `Dictionary` |
+| deltablue | 24 | 5 | 8 `static` fields/methods |
+| cd | 24 | 2 | `RedBlackTree` |
+
+**Recommended testing order:** sieve → permute → queens → towers → bounce → list → nbody → mandelbrot → storage → json → richards → havlak → cd → deltablue (ascending complexity).
+
+---
+
+### Phase B: AST Builder Correctness Fixes
 
 **Goal:** Fix 3 failing benchmarks with localized code changes.  
 **Estimated effort:** ~100 lines total across `build_js_ast.cpp` and `transpile_js_mir.cpp`.
 
-#### A1. Template Literal Escape Sequences (binarytrees)
+#### B1. Template Literal Escape Sequences (binarytrees)
 
 **Problem:** In `build_js_ast.cpp`, template element `cooked` value is set to `raw` without processing escape sequences:
 ```cpp
@@ -79,431 +329,334 @@ element->cooked = element->raw; // TODO: Process escape sequences
 The `\t` in `` `${iterations}\t trees of depth ${depth}\t check: ${sum}` `` is output literally.
 
 **Fix:**
-- Add a `js_cook_template_string()` function in `build_js_ast.cpp` that processes standard escape sequences: `\t` → tab, `\n` → newline, `\\` → backslash, `\r` → CR, `\0` → null, `\'`, `\"`, `` \` ``
-- Use arena allocation (`arena_alloc`) for the cooked string since it may be shorter than raw
-- Call it when setting `element->cooked`
-- This matches what the regular JS string literal parser already does — extract the escape processing into a shared helper
+- Add a `js_cook_template_string()` function that processes `\t` → tab, `\n` → newline, `\\` → backslash, `\r` → CR, `\0` → null, `\'`, `\"`, `` \` ``
+- Use arena allocation for the cooked string
+- Extract the escape processing from the existing string literal parser into a shared helper
 
 **Files:** `lambda/js/build_js_ast.cpp`  
 **Lines changed:** ~30
 
-#### A2. Comments Inside Array Expressions (nbody)
+#### B2. Comments Inside Array Expressions (nbody)
 
-**Problem:** `build_js_array_expression` in `build_js_ast.cpp` iterates named children but does not skip `comment` nodes. `build_js_object_expression` already skips them with:
-```cpp
-if (strcmp(child_type, "comment") == 0) continue;
-```
+**Problem:** `build_js_array_expression` iterates named children but does not skip `comment` nodes. `build_js_object_expression` already handles this.
 
-**Fix:**
-- Add the same `comment` skip guard in `build_js_array_expression`
-- Also skip in any other expression builders that iterate children (audit: `build_js_call_expression`, `build_js_template_literal`)
-- Decrement element count for skipped comments
+**Fix:** Add `if (strcmp(child_type, "comment") == 0) continue;` guard. Audit other expression builders.
 
 **Files:** `lambda/js/build_js_ast.cpp`  
-**Lines changed:** ~5–10
+**Lines changed:** ~10
 
-#### A3. Destructuring Assignment (levenshtein)
+#### B3. Destructuring Assignment (levenshtein)
 
-**Problem:** `[prev, curr] = [curr, prev]` — the transpiler handles destructuring in `const`/`let` declarations and `for-of` loops, but `jm_transpile_assignment` falls through on `JS_AST_NODE_ARRAY_PATTERN` left-hand side.
+**Problem:** `[prev, curr] = [curr, prev]` — the transpiler handles destructuring in declarations but `jm_transpile_assignment` falls through on `JS_AST_NODE_ARRAY_PATTERN` LHS.
 
 **Fix:**
-- In `jm_transpile_assignment` (`transpile_js_mir.cpp`), add an `JS_AST_NODE_ARRAY_PATTERN` case
-- Evaluate the RHS array expression first, store in temp registers (to handle circular swaps correctly)
-- For each element in the array pattern, assign from the corresponding temp:
-  ```
-  // [prev, curr] = [curr, prev]
-  // 1. Evaluate RHS: tmp0 = curr, tmp1 = prev
-  // 2. Assign: prev = tmp0, curr = tmp1
-  ```
-- Reuse the destructuring logic already in `jm_transpile_variable_declaration` — extract the element-assignment loop into a shared helper `jm_destructure_array(mt, pattern, rhs_reg)`
-- Support rest elements (`...rest`) using the existing `js_array_slice_from` runtime function
+- Add `JS_AST_NODE_ARRAY_PATTERN` case in `jm_transpile_assignment`
+- Evaluate RHS first into temp registers (handles circular swaps)
+- Extract element-assignment loop from `jm_transpile_variable_declaration` into shared helper `jm_destructure_array()`
 
 **Files:** `lambda/js/transpile_js_mir.cpp`  
 **Lines changed:** ~60
 
 ---
 
-### Phase B: TypedArray Loop Performance (fannkuch)
+### Phase C: Performance Regression Investigation & Fixes
 
-**Goal:** Make `fannkuch(12)` complete within 30s (currently times out). Target: ~2s (Node.js: ~1s).  
+**Goal:** Investigate all 3 regressions, fix genuine code issues, document workload changes.  
+**Estimated effort:** ~100 lines + investigation time.
+
+See **Section 3** for full analysis. Summary of action items:
+
+#### C1. nqueens (3136× — workload correction)
+- Verify R2 workload via git history
+- Add small-array fast path in `js_typed_array_new()` for `n ≤ 64`
+- Consider arena-bump allocation for recursive typed array creation
+
+#### C2. quicksort (49.6× — workload correction)
+- Verify R2 workload via git history
+- Apply TypedArray pointer hoisting from Phase D
+- Apply bounds-check elimination for `partition()` loop
+
+#### C3. sumfp (2.5× — possible genuine regression)
+- Verify workload (`run(10000.0)` vs `run(100000.0)`)
+- Debug float comparison path in `jm_transpile_while()` — verify native `MIR_DBGE` is emitted
+- Trace `jm_get_effective_type()` for literal `0.0` — must return `LMD_TYPE_FLOAT`
+- If confirmed regression: fix the type inference for float literals in comparison context
+
+**Files:** `lambda/js/transpile_js_mir.cpp`, `lambda/js/js_typed_array.cpp`  
+**Lines changed:** ~100
+
+---
+
+### Phase D: TypedArray Loop Performance (fannkuch)
+
+**Goal:** Make `fannkuch(12)` complete within 30s (currently times out). Target: ~2s.  
 **Estimated effort:** ~150 lines in `transpile_js_mir.cpp`.
 
-**Problem:** The `fannkuch` benchmark has 4 nested loops doing ~10^9 TypedArray bracket accesses. Even with Phase 9 direct memory access, the current path still:
-1. Extracts `JsTypedArray*` from `Map.data` on every access (redundant when the variable is loop-invariant)
-2. Performs bounds checking on every access
-3. Boxes/unboxes integer results between typed array reads and arithmetic
+**Problem:** The `fannkuch` benchmark has 4 nested loops doing ~10^9 TypedArray bracket accesses. Each access involves:
+1. Extract `JsTypedArray*` from `Map.data` (redundant per-iteration)
+2. Bounds check (eliminable in counted loops)
+3. Box/unbox integer results
 
-**Action items:**
+#### D1. TypedArray Pointer Hoisting
 
-#### B1. TypedArray Pointer Hoisting
-
-When a TypedArray variable (`perm`, `perm1`, `count`) is not reassigned within a loop, hoist the `JsTypedArray*` pointer load and `data` pointer load out of the loop:
+Hoist `JsTypedArray*` and `data` pointer loads out of loops when the variable is not reassigned:
 ```mir
 // Before loop:
 ta_ptr = LOAD Map.data        // JsTypedArray*
 data_ptr = LOAD ta_ptr->data  // int32_t*
-ta_len = LOAD ta_ptr->length  // for bounds check
 // Inside loop:
 val = MEM[data_ptr + idx * 4] // direct load, no Map indirection
 ```
 
-This requires a pre-scan of loops to identify TypedArray variables that are loop-invariant.
+#### D2. Bounds Check Elimination in Counted Loops
 
-#### B2. Bounds Check Elimination in Counted Loops
-
-In `for (let i = 0; i < n; i++)` where `n <= arr.length`, the bounds check `if (idx >= ta_len) goto slow_path` is provably safe and can be eliminated. Detect this pattern:
-- Loop variable `i` starts at 0 (or known non-negative constant)
-- Loop bound is `< arr.length` or `< n` where `n` was set from `arr.length`
+For `for (let i = 0; i < n; i++)` where `n ≤ arr.length`, eliminate the per-access bounds check. Detect:
+- Loop variable starts at 0 or known non-negative
+- Loop bound is `< arr.length` or `< n` where `n = arr.length`
 - Loop step is +1
 
-This is a common V8 optimization and critical for inner loops.
+#### D3. Native Register Allocation for TypedArray Temporaries
 
-#### B3. Native Register Allocation for TypedArray Temporaries
+Ensure the swap pattern `const tmp = perm[lo]; perm[lo] = perm[hi]; perm[hi] = tmp;` keeps `tmp` as native `int32_t` — no boxing to `Item`.
 
-In the swap pattern:
-```javascript
-const tmp = perm[lo]; perm[lo] = perm[hi]; perm[hi] = tmp;
-```
-Ensure `tmp` stays as a native `int32_t` register — no boxing to `Item` and back. The type inference already identifies `tmp` as INT from the Int32Array typed-array-type propagation. Verify the codegen path keeps it native through the entire read-swap-write sequence.
+#### D4. Inlined TypedArray Copy Loops
 
-#### B4. Inlined TypedArray Copy Loops
-
-Pattern `for (let i = 0; i < n; i++) perm[i] = perm1[i]` can be recognized and lowered to a `memcpy` call when both arrays are the same typed-array type. This is a secondary optimization.
+Pattern `for (let i = 0; i < n; i++) perm[i] = perm1[i]` → lower to `memcpy()` when both arrays are same type.
 
 **Files:** `lambda/js/transpile_js_mir.cpp`  
 **Lines changed:** ~150
 
 ---
 
-### Phase C: BigInt via Lambda Decimal Library (pidigits)
+### Phase E: BigInt, Map, RegExp, require('fs')
 
-**Goal:** Pass `pidigits.js` by implementing JS `BigInt` backed by Lambda's `mpdecimal` unlimited-precision library.  
-**Estimated effort:** ~300 lines across AST, transpiler, and runtime.
+**Goal:** Bring remaining out-of-scope benchmarks to passing.  
+**Estimated effort:** ~900 lines total.
 
-**Design principle:** Reuse Lambda's existing `lambda-decimal.hpp` infrastructure. Lambda already has:
-- `decimal_add`, `decimal_sub`, `decimal_mul`, `decimal_div`, `decimal_mod`, `decimal_pow` — all arbitrary-precision
-- `decimal_cmp_items` — comparison returning -1/0/1
-- `decimal_from_int64`, `decimal_to_int64` — conversion
-- `decimal_to_string` — BigInt's `.toString()` method
-- Unlimited precision mode (`N` suffix in Lambda) — exactly what BigInt needs
+#### E1. BigInt via Lambda Decimal Library (pidigits) — ~300 LOC
 
-**Action items:**
+Reuse `lambda-decimal.hpp` for arbitrary-precision integers:
+- Parse `1n` BigInt literals → `LMD_TYPE_DECIMAL`
+- Runtime: `js_bigint_add/sub/mul/div/mod/cmp` → wrap `decimal_*` functions
+- Transpiler: route operators to BigInt functions when operands are BigInt-typed
+- `typeof` returns `"bigint"` for decimal items
 
-#### C1. BigInt Literal Parsing
+#### E2. JS `Map` Built-in (knucleotide) — ~250 LOC
 
-In `build_js_ast.cpp`, detect the `n` suffix on numeric literals (`1n`, `0n`, `42n`):
-- Add `JS_LITERAL_BIGINT` to `JsLiteralType` enum
-- Parse `1n` as a decimal unlimited value via `decimal_from_string()`
-- Store as `Item` with decimal type in `JsLiteralNode`
+Reuse `lib/hashmap.h`:
+- `JsMap` struct wrapping `HashMap*`
+- Runtime: `js_map_new/set/get/has/delete/size/entries/keys/values/forEach`
+- Transpiler: detect `new Map()`, route `.set()/.get()` to runtime functions
 
-#### C2. BigInt Runtime Functions
+#### E3. JS `RegExp` via Lambda RE2 (regexredux) — ~250 LOC
 
-Add to `js_runtime.cpp`:
-```c
-extern "C" Item js_bigint_add(Item a, Item b);  // → decimal_add
-extern "C" Item js_bigint_sub(Item a, Item b);  // → decimal_sub
-extern "C" Item js_bigint_mul(Item a, Item b);  // → decimal_mul
-extern "C" Item js_bigint_div(Item a, Item b);  // → decimal_div (floor division)
-extern "C" Item js_bigint_mod(Item a, Item b);  // → decimal_mod
-extern "C" Item js_bigint_cmp(Item a, Item b);  // → decimal_cmp_items
-extern "C" Item js_bigint_to_string(Item a);     // → decimal_to_string
-extern "C" Item js_bigint_from_int(int64_t v);   // → decimal_from_int64
-```
+Reuse `re2_wrapper.hpp`:
+- Parse `/pattern/flags` regex literals
+- Map `test()` → `pattern_partial_match`, `replace()` → `pattern_replace_all`, `split()` → `pattern_split`, `match()` → `pattern_find_all`
 
-Key semantic difference: JS BigInt division truncates toward zero (like C integer division), while Lambda decimal division is exact. Use `decimal_trunc(decimal_div(a, b))` for BigInt `/` operator.
+#### E4. `require('fs')` Shim — ~80 LOC
 
-The `pidigits.js` benchmark implements its own `idiv()` function adjusting for floor-vs-truncate semantics, so the basic truncating division will suffice.
+Minimal shim for benchmarks reading stdin/files:
+- Detect `require('fs')` → return built-in `fs` object
+- Implement `fs.readFileSync(path, encoding)` via `read_text_file()`
+- Alternatively: `--input <file>` CLI flag pre-loading content
 
-#### C3. BigInt Transpiler Support
-
-In `transpile_js_mir.cpp`:
-- Add `LMD_TYPE_BIGINT` (or reuse `LMD_TYPE_DECIMAL`) to type inference for BigInt literals
-- Route `+`, `-`, `*`, `/` operators to `js_bigint_*` functions when either operand is BigInt
-- Handle `===` comparison via `js_bigint_cmp`
-- Handle `.toString()` method via `js_bigint_to_string`
-- Handle mixed BigInt-Number operations as TypeError (JS semantics)
-
-#### C4. Type Tag for BigInt
-
-JS BigInt maps directly to Lambda's decimal type (`LMD_TYPE_DECIMAL`). No new type tag needed — use the existing unlimited-precision decimal representation. The `typeof` operator returns `"bigint"` when `get_type_id(item) == LMD_TYPE_DECIMAL`.
-
-**Files:** `lambda/js/js_ast.hpp`, `lambda/js/build_js_ast.cpp`, `lambda/js/js_runtime.cpp`, `lambda/js/transpile_js_mir.cpp`  
-**Lines changed:** ~300
+**Files:** New files `lambda/js/js_map.cpp`, `lambda/js/js_regexp.cpp` + existing transpiler/runtime files
 
 ---
 
-### Phase D: Hot-Loop Deboxing (Systemic Performance)
+### Phase F: Hot-Loop Deboxing (Systemic Performance)
 
-**Goal:** Reduce median self-time ratio from ~12x to ~5x across all benchmarks.  
+**Goal:** Reduce median self-time ratio from ~5x to ~3x across all benchmarks.  
 **Estimated effort:** ~200 lines in `transpile_js_mir.cpp`.
 
-**Analysis of remaining bottlenecks** (from self-time ratios):
+#### F1. Compound Assignment Type Inference Fix
 
-| Ratio | Benchmarks | Root Cause |
-|-------|-----------|------------|
-| 2–7x | divrec, larceny/primes, collatz, json_gen, ray | Near-native, minor overhead |
-| 10–20x | quicksort, array1, pnpoly, deriv, brainfuck, gcbench | Property access + method dispatch |
-| 25–91x | base64, diviter, triangl, matmul | Inner-loop boxing residue |
-
-#### D1. Compound Assignment Type Inference Fix
-
-The `jm_get_effective_type` function returns `LMD_TYPE_ANY` for compound assignments (`+=`, `-=`, etc.):
+The `jm_get_effective_type` function returns `LMD_TYPE_ANY` for compound assignments (`+=`, `-=`):
 ```cpp
-case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
     if (asgn->op == JS_OP_ASSIGN) return jm_get_effective_type(mt, asgn->right);
-    return LMD_TYPE_ANY;  // ← THIS should infer from both sides
-}
-```
-Fix: For compound assignments where both sides are numeric, return the numeric type. This prevents downstream code from treating the assignment result as ANY-typed, forcing boxing.
-
-#### D2. Top-Level Function Body Native Emission
-
-Currently, only pre-collected named functions get dual native+boxed versions. The top-level `main()` body (or the implicit program-level code) always runs fully boxed because it contains mixed-type operations like `process.hrtime.bigint()`.
-
-Fix: Introduce **selective deboxing** within top-level code — when a local variable is initialized from a numeric literal or numeric function result, track it as native within the scope even if the function overall can't be fully nativized. This is a lightweight version of Phase 4 applied to the program-level scope.
-
-#### D3. Native String Method Inlining
-
-The `charCodeAt` and `String.fromCharCode` methods show up in brainfuck's inner loop (18.5x ratio). Currently dispatched through `js_string_method` with string comparison:
-```cpp
-if (strcmp(method_chars, "charCodeAt") == 0) { ... }
+    return LMD_TYPE_ANY;  // ← should infer numeric type from both sides
 ```
 
-Fix: In the transpiler, detect `str.charCodeAt(i)` at compile time (the method name is a static identifier) and emit a direct call to the underlying character extraction (a byte load from `String.chars + index`), returning a native INT. Similarly, `String.fromCharCode(n)` can be inlined to a single-character string allocation.
+#### F2. Top-Level Function Body Native Emission
 
-#### D4. Property Access Caching for Known Shapes
+Enable selective deboxing within top-level code — track numeric locals as native even when the overall function can't be fully nativized.
 
-For benchmarks like `nbody` where objects have fixed shapes (`{x, y, z, vx, vy, vz, mass}`), the `js_property_get` call does a shape-entry walk on every access. This can be optimized:
-- At the point where `body.x` is accessed, if the object was created with a known literal shape, resolve the field offset at compile time
-- Emit a direct memory load from the Map data at the known offset
-- This is a compile-time specialization, not speculative — only applies when the shape is provably known
+#### F3. Native String Method Inlining
 
-This is a larger optimization mainly beneficial for `nbody` and similar physics simulations.
+Inline `charCodeAt(i)` → direct byte load, `String.fromCharCode(n)` → single-char allocation. Critical for brainfuck's inner loop.
+
+#### F4. Property Access Caching for Known Shapes
+
+For objects with fixed literal shapes (nbody `{x, y, z, vx, vy, vz, mass}`), resolve field offsets at compile time and emit direct memory loads.
 
 **Files:** `lambda/js/transpile_js_mir.cpp`, `lambda/js/js_runtime.cpp`  
 **Lines changed:** ~200
 
 ---
 
-### Phase E: Map Built-in + RegExp (knucleotide, regexredux)
-
-**Goal:** Bring 2 more benchmarks from "out of scope" to passing.  
-**Estimated effort:** ~500 lines total.
-
-#### E1. JS `Map` Built-in (knucleotide)
-
-**Lambda infrastructure:** Lambda's `lib/hashmap.h` provides a generic C hash map with `hashmap_new`, `hashmap_get`, `hashmap_set`, `hashmap_remove`, `hashmap_count`, and iteration. This is the ideal backing store for JS `Map`.
-
-**Implementation:**
-- Create `JsMap` struct wrapping a `HashMap*` with string-keyed entries storing `Item` values
-- Wrap in a Lambda Map object with a `js_map_type_marker` sentinel (same pattern as TypedArray and DOM wrapping)
-- Runtime functions:
-  ```c
-  extern "C" Item js_map_new();                        // HashMap* creation
-  extern "C" Item js_map_set(Item map, Item key, Item val);
-  extern "C" Item js_map_get(Item map, Item key);
-  extern "C" Item js_map_has(Item map, Item key);
-  extern "C" Item js_map_delete(Item map, Item key);
-  extern "C" Item js_map_size(Item map);
-  extern "C" Item js_map_entries(Item map);            // → Lambda Array of [k,v] pairs
-  extern "C" Item js_map_keys(Item map);
-  extern "C" Item js_map_values(Item map);
-  extern "C" Item js_map_for_each(Item map, Item callback);
-  ```
-- In transpiler, detect `new Map()` constructor and route to `js_map_new`
-- Route `.set()`, `.get()`, `.has()`, `.delete()`, `.size` method calls to corresponding runtime functions
-- Support `[...map.entries()]` spread via `js_map_entries` → Array conversion
-
-**Files:** New file `lambda/js/js_map.cpp`, `lambda/js/js_map.h`, + `transpile_js_mir.cpp` dispatch  
-**Lines changed:** ~250
-
-#### E2. JS `RegExp` via Lambda RE2 (regexredux)
-
-**Lambda infrastructure:** Lambda's `re2_wrapper.hpp` provides:
-- `pattern_full_match` / `pattern_partial_match` — matching
-- `pattern_find_all` — global search returning all matches with indices
-- `pattern_replace_all` — global substitution
-- `pattern_split` — split by pattern
-- Built-in caching of compiled RE2 patterns
-
-**Implementation:**
-- In `build_js_ast.cpp`, parse regex literals (`/pattern/flags`) as a new `JS_LITERAL_REGEX` type
-  - `g` flag → global mode, `i` flag → case-insensitive, `m` flag → multiline
-  - Store the pattern string and flags
-- Runtime: Create `JsRegExp` struct storing the compiled RE2 pattern + flags
-- Map key methods to RE2 wrapper calls:
-
-  | JS Method | Lambda RE2 Function |
-  |-----------|-------------------|
-  | `regex.test(str)` | `pattern_partial_match` |
-  | `str.match(regex)` | `pattern_find_all` (with `g` flag) or `pattern_partial_match` |
-  | `str.replace(regex, replacement)` | `pattern_replace_all` |
-  | `str.split(regex)` | `pattern_split` |
-  | `regex.exec(str)` | `pattern_partial_match` + capture groups |
-
-- RE2 supports the regex subset used in `regexredux.js` (alternation, character classes, anchors)
-- RE2 does NOT support backreferences or lookaheads, but the Benchmarks Game regex benchmarks use only basic patterns compatible with RE2
-
-**Files:** New file `lambda/js/js_regexp.cpp`, `lambda/js/js_regexp.h`, + `build_js_ast.cpp`, `transpile_js_mir.cpp`  
-**Lines changed:** ~250
-
----
-
-### Phase F: `require('fs')` Shim (Optional, Deferred)
-
-**Goal:** Enable 3 benchmarks that read input from stdin/files.  
-**Estimated effort:** ~80 lines.
-
-Rather than implementing a full Node.js module system, provide a minimal shim:
-- Detect `require('fs')` in the transpiler and return a built-in `fs` object
-- Implement only `fs.readFileSync(path, encoding)` using Lambda's existing `read_text_file()` from `lib/file_utils.h`
-- Alternatively, support `--input <file>` CLI flag in `lambda.exe js` mode that pre-loads file content into a global variable, allowing benchmarks to be adapted to read from a pre-loaded buffer
-
-**Rationale for deferral:** All 3 `require('fs')` benchmarks also need Map or RegExp (covered in Phase E). Once Phase E is done, only the file I/O shim remains. This phase is low-priority since the benchmarks can also be modified to use process.stdin or hardcoded inputs.
-
-**Files:** `lambda/js/js_globals.cpp`, `lambda/js/transpile_js_mir.cpp`  
-**Lines changed:** ~80
-
----
-
-## 4. Implementation Priority & Dependencies
+## 5. Implementation Priority & Dependencies
 
 ```
-Phase A (AST fixes)         ──→ +3 benchmarks   [LOW effort, HIGH value]
-  ├── A1 template escapes   (independent)
-  ├── A2 comment skipping   (independent)
-  └── A3 destructuring asgn (independent)
+Phase A (ES6 classes)         ──→ +10 benchmarks  [HIGH effort, HIGHEST value]
+  ├── A1 prototype chain      (foundation)
+  ├── A2 super() calls        (depends on A1)
+  ├── A3 super.method()       (depends on A1)
+  ├── A4 static methods       (independent of A2/A3)
+  ├── A5 virtual dispatch     (depends on A1)
+  └── A6 instanceof chain     (depends on A1)
 
-Phase B (TypedArray perf)   ──→ +1 benchmark    [MEDIUM effort, HIGH value]
-  ├── B1 pointer hoisting   (independent)
-  ├── B2 bounds check elim  (depends on B1)
-  └── B3 native registers   (independent)
+Phase B (AST fixes)           ──→ +3 benchmarks   [LOW effort, HIGH value]
+  ├── B1 template escapes     (independent)
+  ├── B2 comment skipping     (independent)
+  └── B3 destructuring asgn   (independent)
 
-Phase C (BigInt)            ──→ +1 benchmark    [MEDIUM effort, MEDIUM value]
-  └── Reuses lambda-decimal.hpp
+Phase C (Regression analysis) ──→ fix 3 regressions [LOW-MED effort, HIGH value]
+  ├── C1 nqueens workload     (investigation)
+  ├── C2 quicksort workload   (investigation)
+  └── C3 sumfp float path     (investigation + possible fix)
 
-Phase D (Hot-loop deboxing) ──→ systemic perf   [MEDIUM effort, HIGH value]
-  ├── D1 compound assign type (independent)
-  ├── D2 top-level native   (independent)
-  ├── D3 string method inline (independent)
-  └── D4 shape caching      (independent, larger)
+Phase D (TypedArray perf)     ──→ +1 benchmark    [MEDIUM effort, HIGH value]
+  ├── D1 pointer hoisting     (independent)
+  ├── D2 bounds check elim    (depends on D1)
+  ├── D3 native registers     (independent)
+  └── D4 memcpy lowering      (independent, secondary)
 
-Phase E (Map + RegExp)      ──→ +2 benchmarks   [HIGH effort, MEDIUM value]
-  ├── E1 Map built-in       (independent)
-  └── E2 RegExp via RE2     (independent)
+Phase E (BigInt/Map/Regex/fs) ──→ +4 benchmarks   [HIGH effort, MEDIUM value]
+  ├── E1 BigInt               (independent)
+  ├── E2 Map                  (independent)
+  ├── E3 RegExp               (independent)
+  └── E4 require('fs')        (enables E2/E3 tests)
 
-Phase F (require fs shim)   ──→ enables E tests  [LOW effort, LOW value]
-  └── Depends on Phase E
+Phase F (Hot-loop deboxing)   ──→ systemic perf   [MEDIUM effort, HIGH value]
+  ├── F1 compound assign type (independent)
+  ├── F2 top-level native     (independent)
+  ├── F3 string method inline (independent)
+  └── F4 shape caching        (independent, larger)
 ```
 
 **Recommended execution order:**
-1. **Phase A** — Quick wins, 3 benchmarks fixed with minimal code changes
-2. **Phase D1** — Compound assignment type fix, unblocks better codegen everywhere
-3. **Phase B** — Makes fannkuch pass, proves TypedArray competitiveness
-4. **Phase C** — BigInt via decimal, adds pidigits
-5. **Phase D2–D4** — Progressive performance tuning
-6. **Phase E** — Map + RegExp for remaining benchmarks
-7. **Phase F** — `require('fs')` shim if needed
+1. **Phase B** — Quick wins, 3 benchmarks fixed with ~100 LOC
+2. **Phase C** — Investigate regressions, fix sumfp if genuine
+3. **Phase A** — ES6 classes: biggest single impact (+10 benchmarks)
+4. **Phase D** — TypedArray performance, makes fannkuch pass
+5. **Phase F** — Systemic performance tuning
+6. **Phase E** — BigInt/Map/RegExp/require for remaining 4
 
 ---
 
-## 5. Performance Projection
+## 6. Performance Projection
 
-### After Phase A + B (Correctness)
+### After Phase A (ES6 Classes)
 
-| Benchmark | Status | Expected |
-|-----------|--------|----------|
-| binarytrees | ❌ → ✅ | Template escape fix, correct output |
-| nbody | ❌ → ✅ | Comment skip fix, correct output |
+| Benchmark | Status | Expected Perf vs Node.js |
+|-----------|--------|--------------------------|
+| sieve | ❌ → ✅ | ~0.03x (micro-benchmark, LambdaJS excels) |
+| permute | ❌ → ✅ | ~0.01x |
+| queens | ❌ → ✅ | ~0.01x |
+| towers | ❌ → ✅ | ~0.01x |
+| bounce | ❌ → ✅ | ~0.5–2x |
+| storage | ❌ → ✅ | ~1–3x |
+| json | ❌ → ✅ | ~2–5x |
+| richards | ❌ → ✅ | ~3–8x (class-heavy, `this.method()` overhead) |
+| havlak | ❌ → ✅ | ~5–10x |
+| deltablue | ❌ → ✅ | ~5–10x (deep hierarchy, static fields) |
+| cd | ❌ → ✅ | ~5–15x |
+| cube3d (JS) | ❌ → ✅ | ~5–10x |
+| hashmap (JS) | ❌ → ✅ | ~3–8x |
+
+The class-heavy benchmarks (richards, deltablue, cd, havlak) will initially be slower than Node.js due to prototype chain walk overhead vs V8's hidden classes and inline caches. This is expected and can be improved in later optimization rounds.
+
+### After Phase B + C (Correctness + Regressions)
+
+| Benchmark | Status | Notes |
+|-----------|--------|-------|
+| binarytrees | ❌ → ✅ | Template escape fix |
+| nbody (BENG) | ❌ → ✅ | Comment skip fix |
 | levenshtein | ❌ → ✅ | Destructuring assignment fix |
-| fannkuch | ❌ → ✅ | TypedArray hoisting, completes in ~2-5s |
+| sumfp | 4.2ms → ~1.5ms | If float comparison regression confirmed and fixed |
 
-### After Phase C + E (Feature Additions)
+### After Phase D (TypedArray Performance)
 
 | Benchmark | Status | Expected |
 |-----------|--------|----------|
-| pidigits | ⬜ → ✅ | BigInt via decimal lib |
-| knucleotide | ⬜ → ✅ | Map built-in (still needs fs shim or adapted input) |
-| regexredux | ⬜ → ✅ | RegExp via RE2 (still needs fs shim or adapted input) |
+| fannkuch | ❌ → ✅ | Timeout → ~2–5s |
 
-### After Phase D (Performance Tuning)
+### After All Phases
 
-Expected self-time ratio improvements on key benchmarks:
-
-| Benchmark | Current Ratio | Expected After D | Technique |
-|-----------|--------------|-------------------|-----------|
-| diviter | 35.6x | ~5x | D1 (compound assign type) + D2 (top-level native) |
-| matmul | 91.3x | ~10x | B1 (pointer hoisting) + D2 |
-| triangl | 36.1x | ~8x | B1 + B2 (bounds check elimination) |
-| base64 | ~25x | ~8x | B1 + D2 |
-| brainfuck | 18.5x | ~8x | D3 (charCodeAt inlining) |
-| deriv | 18.6x | ~10x | D4 (shape caching for cons cells) |
-| gcbench | 21.6x | ~15x | Limited by GC overhead (architectural) |
-
-**Projected median self-time ratio: ~6–8x** (down from ~12x).
+| Metric | Current | Target |
+|--------|---------|--------|
+| Benchmarks runnable | 50/62 | **62/62** |
+| LambdaJS overall geo mean vs Node.js | 0.73x | ~0.6x |
+| LambdaJS geo mean excl. AWFY micros | ~2.6x | ~2.0x |
+| Self-time median ratio vs V8 | ~5x | ~3x |
 
 ---
 
-## 6. Design Principles
+## 7. Design Principles
 
-1. **Reuse Lambda runtime infrastructure** — BigInt → `lambda-decimal.hpp`, RegExp → `re2_wrapper.hpp`, Map → `lib/hashmap.h`, file I/O → `lib/file_utils.h`. No new external dependencies.
+1. **Reuse Lambda runtime infrastructure** — BigInt → `lambda-decimal.hpp`, RegExp → `re2_wrapper.hpp`, Map → `lib/hashmap.h`, file I/O → `lib/file_utils.h`, prototype chains → Lambda Map with hidden `__proto__` key. No new external dependencies.
 
-2. **Same type system** — All JS values remain Lambda `Item` (64-bit tagged values). BigInt uses `LMD_TYPE_DECIMAL`. Map/RegExp use the sentinel-marker-in-Map wrapping pattern (same as TypedArray and DOM).
+2. **Same type system** — All JS values remain Lambda `Item` (64-bit tagged values). Classes use prototype chain via `__proto__` on Lambda Map objects. No new type tags (BigInt → `LMD_TYPE_DECIMAL`, Map → sentinel-marker wrapping, RegExp → sentinel-marker wrapping).
 
-3. **Progressive optimization** — Each phase independently improves correctness or performance. No phase creates regressions in passing benchmarks.
+3. **Progressive optimization** — Each phase independently improves correctness or performance. No phase should create regressions in passing benchmarks. Always run `make test-lambda-baseline` after each phase.
 
-4. **Native path first** — Extend type inference to cover more cases (compound assignments, top-level code, string methods) so the native MIR emission path triggers more often, avoiding boxing overhead.
+4. **Prototype chain simplicity over V8 parity** — V8 uses hidden classes, inline caches, and speculative optimization. Lambda's JS engine uses static type inference and `__proto__` chain walks. This is simpler, deterministic, and sufficient for correctness. Performance optimization (F4: shape caching) can narrow the gap where it matters.
 
-5. **No speculation without fallback** — Unlike V8's speculative optimization with deoptimization bailouts, Lambda's JS engine uses **static type inference** — only emit native code when types are provably known at compile time. This is simpler and avoids deopt complexity, at the cost of not optimizing fully untyped code.
+5. **Investigate before assuming regression** — The nqueens and quicksort "regressions" are most likely workload corrections (R2 had trivially small inputs). Always verify via git history before investing optimization effort. Only sumfp warrants immediate code-level investigation.
 
 ---
 
-## 7. Test Plan
+## 8. Test Plan
 
 ### Correctness Verification
 
-After each phase, run:
+After each phase, run against Node.js for output comparison:
 ```bash
-# Run all 29 benchmarks, compare outputs with Node.js
-cd test/benchmark
-python3 run_js_benchmarks.py
+# All benchmarks across all suites
+cd test/benchmark && python3 run_js_benchmarks.py
 
-# Run individual benchmarks
-./lambda.exe js test/benchmark/beng/js/binarytrees.js 10
-./lambda.exe js test/benchmark/beng/js/nbody.js 1000
-./lambda.exe js test/benchmark/kostya/levenshtein.js
-./lambda.exe js test/benchmark/beng/js/fannkuch.js 7
-./lambda.exe js test/benchmark/beng/js/pidigits.js 30
+# Individual AWFY class benchmarks (Phase A)
+./lambda.exe js test/benchmark/awfy/sieve2_bundle.js
+./lambda.exe js test/benchmark/awfy/bounce2_bundle.js
+./lambda.exe js test/benchmark/awfy/deltablue2_bundle.js
+
+# Regression benchmarks (Phase C)
+./lambda.exe js test/benchmark/r7rs/sumfp2.js
+./lambda.exe js test/benchmark/r7rs/nqueens2.js
+./lambda.exe js test/benchmark/larceny/quicksort.js
 ```
 
 ### Regression Testing
 
 ```bash
-make test-lambda-baseline    # Ensure Lambda core tests still pass
+make test-lambda-baseline    # Lambda core tests — must pass 100%
 ```
 
 ### Performance Benchmarking
 
-Compare median of 3 runs, **release build only** (`make release`):
+**Release build only** (`make release`), median of 3 runs:
 ```bash
-# Wall time comparison
-time ./lambda.exe js test/benchmark/beng/js/fannkuch.js 12
-time node test/benchmark/beng/js/fannkuch.js 12
+# Compare self-reported timing (__TIMING__ output)
+./lambda.exe js test/benchmark/r7rs/sumfp2.js    # verify regression fix
+node test/benchmark/r7rs/sumfp2.js
 
-# Self-reported timing (from __TIMING__ output)
-# Compare Lambda vs Node.js self-time ratios before/after each phase
+# AWFY class benchmarks — baseline perf after Phase A
+./lambda.exe js test/benchmark/awfy/richards2_bundle.js
+node test/benchmark/awfy/richards2_bundle.js
 ```
 
 ---
 
-## 8. Summary
+## 9. Summary
 
-| Phase | Benchmarks Fixed | Effort | Priority |
-|-------|-----------------|--------|----------|
-| **A: AST correctness** | +3 (binarytrees, nbody, levenshtein) | ~100 LOC | **P0 — do first** |
-| **B: TypedArray perf** | +1 (fannkuch) | ~150 LOC | **P0** |
-| **C: BigInt** | +1 (pidigits) | ~300 LOC | **P1** |
-| **D: Deboxing** | systemic perf, ~12x→~6x | ~200 LOC | **P1** |
-| **E: Map + RegExp** | +2 (knucleotide, regexredux) | ~500 LOC | **P2** |
-| **F: require('fs')** | enables E tests | ~80 LOC | **P3** |
-| **Total** | **25/29 correct (100% feasible)** | **~1330 LOC** | |
+| Phase | Benchmarks Fixed | Key Deliverable | Effort | Priority |
+|-------|-----------------|-----------------|--------|----------|
+| **A: ES6 classes** | +10 (6 AWFY + 4 JetStream) | `extends`/`super()`/`static` | ~600 LOC | **P0** |
+| **B: AST fixes** | +3 (binarytrees, nbody, levenshtein) | Template escapes, comments, destructuring | ~100 LOC | **P0** |
+| **C: Regressions** | 3 investigated, sumfp fix | Workload verification + float path fix | ~100 LOC | **P0** |
+| **D: TypedArray perf** | +1 (fannkuch) | Pointer hoisting, bounds elimination | ~150 LOC | **P1** |
+| **E: BigInt/Map/Regex/fs** | +4 (pidigits, knucleotide, regexredux, revcomp) | Reuse Lambda infrastructure | ~900 LOC | **P2** |
+| **F: Deboxing** | systemic perf ~5x→~3x | Compound assign, string inlining, shapes | ~200 LOC | **P2** |
+| **Total** | **62/62 runnable (100%)** | | **~2050 LOC** | |

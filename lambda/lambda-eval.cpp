@@ -4498,6 +4498,7 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
 static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     switch (value_type) {
     case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
+    case LMD_TYPE_UNDEFINED:  *(bool*)field_ptr = false; break;
     case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
     case LMD_TYPE_INT:   *(int64_t*)field_ptr = value.get_int56(); break;
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
@@ -4777,6 +4778,37 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT)) {
                 map_field_store(field_ptr, value, value_type);
                 return;
+            }
+
+            // Container/null type change — fast path (same byte size = sizeof(void*))
+            // NULL↔MAP, NULL↔ARRAY, MAP↔ELEMENT, etc. all store pointers,
+            // and _map_read_field handles null pointers for all container types.
+            // No shape rebuild needed — just update the value in-place.
+            {
+                bool old_is_ptr = (field_type == LMD_TYPE_NULL || field_type == LMD_TYPE_MAP ||
+                    field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
+                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_INT ||
+                    field_type == LMD_TYPE_ARRAY_INT64 || field_type == LMD_TYPE_ARRAY_FLOAT ||
+                    field_type == LMD_TYPE_LIST || field_type == LMD_TYPE_RANGE);
+                bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
+                    value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
+                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_INT ||
+                    value_type == LMD_TYPE_ARRAY_INT64 || value_type == LMD_TYPE_ARRAY_FLOAT ||
+                    value_type == LMD_TYPE_LIST || value_type == LMD_TYPE_RANGE);
+                if (old_is_ptr && new_is_ptr) {
+                    map_field_decrement_ref(field_ptr, field_type);
+                    map_field_store(field_ptr, value, value_type);
+                    // Update the ShapeEntry type so GC can properly trace
+                    // container pointers stored in formerly-NULL fields.
+                    // IMPORTANT: Don't downgrade to NULL when field was a container,
+                    // because the ShapeEntry is SHARED across all instances of the class.
+                    // If we set it to NULL, GC would skip tracing container pointers
+                    // in other instances that still hold live arrays/maps/etc.
+                    if (value_type != LMD_TYPE_NULL) {
+                        entry->type = type_info[value_type].type;
+                    }
+                    return;
+                }
             }
 
             // type change — rebuild shape with new field type

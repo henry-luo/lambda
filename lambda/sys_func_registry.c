@@ -934,6 +934,7 @@ JitImport jit_runtime_imports[] = {
     {"js_bitwise_or", FPTR(js_bitwise_or)},
     {"js_bitwise_xor", FPTR(js_bitwise_xor)},
     {"js_bitwise_not", FPTR(js_bitwise_not)},
+    {"js_double_to_int32", FPTR(js_double_to_int32)},
     {"js_left_shift", FPTR(js_left_shift)},
     {"js_right_shift", FPTR(js_right_shift)},
     {"js_unsigned_right_shift", FPTR(js_unsigned_right_shift)},
@@ -953,6 +954,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_closure", FPTR(js_new_closure)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_call_function", FPTR(js_call_function)},
+    {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
@@ -1009,6 +1011,9 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_length", FPTR(js_typed_array_length)},
     {"js_typed_array_fill", FPTR(js_typed_array_fill)},
     {"js_is_typed_array", FPTR(js_is_typed_array)},
+    // module variable table
+    {"js_set_module_var", FPTR(js_set_module_var)},
+    {"js_get_module_var", FPTR(js_get_module_var)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

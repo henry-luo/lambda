@@ -20,6 +20,7 @@
 
 // Error handling with stack traces
 #include "lambda-error.h"
+#include "lambda-stack.h"
 
 // System info for sys.* paths
 #include "sysinfo.h"
@@ -921,6 +922,9 @@ int main(int argc, char *argv[]) {
 
         Runtime runtime;
         runtime_init(&runtime);
+
+        // Initialize stack bounds for GC conservative scanning
+        lambda_stack_init();
 
         if (argc >= 3) {
             // Parse arguments: js file.js [--document page.html]
