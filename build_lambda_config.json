@@ -965,7 +965,7 @@
                 "lpthread",
                 "lm",
                 "ldl",
-                "lzlib",
+                "lz",
                 "lstdc++fs"
             ],
             "build_dir": "build",

@@ -1891,9 +1891,15 @@ class PremakeGenerator:
                             # Skip libraries with link type "none"
                             if lib_info.get('link') != 'none':
                                 # If it's a static library, it will be handled in linkoptions later
-                                # If it's dynamic, add it to links
+                                # If it's dynamic, add it to links using the actual lib flag
                                 if lib_info.get('link') == 'dynamic':
-                                    self.premake_content.append(f'        "{lib}",')
+                                    lib_path = lib_info.get('lib', '')
+                                    if lib_path.startswith('-l'):
+                                        # Use the actual flag name (strip -l) to avoid -l<name> mismatch
+                                        link_name = lib_path[2:]
+                                        self.premake_content.append(f'        "{link_name}",')
+                                    else:
+                                        self.premake_content.append(f'        "{lib}",')
                                 # Static libraries are handled in the linkoptions section below
                         else:
                             # Library not found in external definitions, assume it's a system library
