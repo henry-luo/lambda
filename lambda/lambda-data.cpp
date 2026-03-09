@@ -6,9 +6,11 @@
 
 // data zone allocation helper (defined in lambda-mem.cpp)
 // weak fallback uses malloc — overridden by real GC implementation when linked
-__attribute__((weak))
-extern "C" void* heap_data_alloc(size_t size) {
-    return malloc(size);
+extern "C" {
+    __attribute__((weak))
+    void* heap_data_alloc(size_t size) {
+        return malloc(size);
+    }
 }
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
