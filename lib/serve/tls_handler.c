@@ -180,7 +180,7 @@ int tls_load_certificates(SSL_CTX *ctx, const char *cert_file,
     }
 
     // load private key
-    ret = mbedtls_pk_parse_keyfile(&ctx->pkey, key_file, NULL);
+    ret = mbedtls_pk_parse_keyfile(&ctx->pkey, key_file, NULL, NULL, NULL);
     if (ret != 0) {
         char error_buf[100];
         mbedtls_strerror(ret, error_buf, sizeof(error_buf));
@@ -479,7 +479,7 @@ int tls_is_valid_private_key(const char *key_file) {
     mbedtls_pk_context key;
     mbedtls_pk_init(&key);
 
-    int ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL);
+    int ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL, NULL, NULL);
     mbedtls_pk_free(&key);
 
     return (ret == 0) ? 1 : 0;
@@ -504,7 +504,7 @@ int tls_certificate_key_match(const char *cert_file, const char *key_file) {
     mbedtls_pk_context key;
     mbedtls_pk_init(&key);
 
-    ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL);
+    ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL, NULL, NULL);
     if (ret != 0) {
         mbedtls_x509_crt_free(&cert);
         mbedtls_pk_free(&key);
@@ -512,7 +512,7 @@ int tls_certificate_key_match(const char *cert_file, const char *key_file) {
     }
 
     // check if certificate and private key match
-    int match = mbedtls_pk_check_pair(&cert.pk, &key) == 0;
+    int match = mbedtls_pk_check_pair(&cert.pk, &key, NULL, NULL) == 0;
 
     mbedtls_x509_crt_free(&cert);
     mbedtls_pk_free(&key);
