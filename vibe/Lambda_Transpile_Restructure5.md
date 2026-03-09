@@ -1,5 +1,11 @@
 # Splay Benchmark Performance Tuning: Results
 
+## Table of Contents
+
+1. [Splay Benchmark Performance Tuning](#summary)
+2. [Vectorized Arithmetic Evaluation](#vectorized-arithmetic-evaluation)
+3. [Return Type Annotations for `pn` Functions](#return-type-annotations-for-pn-functions)
+
 ## Summary
 
 Added `type SplayNode` definition and typed annotations to convert runtime `fn_member()`/`fn_map_set()` calls into direct byte-offset memory loads/stores via the MIR JIT's Phase 3 direct field access optimization. Implemented **direct field store optimization** in the transpiler to eliminate `map_fill()` varargs overhead for typed map construction. **Inlined `map_with_data()`** in the transpiler to emit `heap_calloc` + direct Map header stores with compile-time constants. Eliminated redundant `memset` in `gc_heap_calloc` for slab-allocated objects. **Fixed catastrophic O(slabs) `gc_object_zone_owns`** with O(log N) binary search over sorted slab ranges — **20x speedup** (~2020ms → ~97ms release). Replaced slab free-list allocator with a **4MB bump-pointer nursery** and **JIT-inlined bump-pointer fast path** — **~31% speedup** (~83ms → ~57ms release).
@@ -594,3 +600,92 @@ For 3 elements, the overhead (type checks, function calls, allocation, boxing) v
 2. **Large arrays with in-place mutation**: navier_stokes — vectorized ops create new arrays, incompatible with mutation semantics
 
 For small-vector benchmarks, the optimal path remains manual element-wise indexing combined with typed map annotations for struct field access.
+
+---
+
+## Return Type Annotations for `pn` Functions
+
+### What It Does
+
+Adding return type annotations (e.g., `pn foo(x: int) int { ... }`) to procedural functions allows the MIR JIT to:
+1. **Return native values** — skip boxing the return value into a tagged `Item`
+2. **Enable callers to use native values directly** — no unboxing at call sites
+3. **Enable `generate_native` for return-type-only** — functions with no typed params but a declared return type still get the native dual-version optimization
+
+Supported return types: `int`, `float`, `bool`.
+
+### Syntax
+
+```lambda
+// Before (no return type)
+pn compute_hash(key: int) {
+    return key * 2654435761
+}
+
+// After (with return type annotation)
+pn compute_hash(key: int) int {
+    return key * 2654435761
+}
+```
+
+### How It Works (JIT Implementation)
+
+**Phase P4-3.4** in `transpile-mir.cpp`:
+
+1. `infer_return_type()` now checks declared return types for `pn` functions (previously skipped with TODO)
+2. `generate_native` enabled when return type alone is native (even if no params are typed)
+3. `transpile_return()` emits unboxed native values when `mt->native_return_tid != LMD_TYPE_ANY`
+4. Boxed wrapper (`_b` suffix) boxes the native return for dynamic dispatch callers
+
+### Best Practices
+
+For maximum benefit, **also type the local variables** that receive return values:
+
+```lambda
+// Good: typed var receives native return directly (no boxing/unboxing)
+var hash: int = compute_hash(key)
+
+// Less optimal: untyped var forces boxing at return, unboxing at use
+var hash = compute_hash(key)
+```
+
+### Benchmark Results
+
+| Benchmark | Typed (v2) | + Return Type (v3) | Speedup |
+|-----------|-----------|-------------------|---------|
+| richards  | ~14.8ms   | ~14.3ms           | ~3% (marginal) |
+| deltablue | ~2.25ms   | ~2.25ms           | ~0% (noise) |
+| raytrace3d| ~150.6ms  | ~149.7ms          | ~1% (marginal) |
+| **hashmap**| **~20.4ms** | **~15.2ms**     | **~25% (1.34x)** |
+
+### Why Hashmap Benefits Most
+
+The hashmap benchmark has a tight inner loop calling `hashmap_get()` and `compute_hash()` ~450,000 times each. Each call saves ~10ns from avoiding int boxing/unboxing, accumulating to significant savings.
+
+Functions that benefit most from return type annotations:
+- **Called at high frequency** (100K+ calls in tight loops)
+- **Return simple scalar types** (int, float, bool)
+- **Callers store result in typed variables** (enables full native chain)
+
+Functions where return type annotations help less:
+- Called infrequently (setup/initialization functions)
+- Return complex types (maps, arrays, strings — not native-optimizable)
+- Return bool in branch-only contexts (boxing cost is negligible)
+
+### Cumulative Speedups (Untyped → Typed → Return Type)
+
+| Benchmark | Untyped (v1) | Typed (v2) | + Return Type (v3) | Total Speedup |
+|-----------|-------------|-----------|-------------------|---------------|
+| richards  | ~300ms      | ~15ms     | ~14ms             | **21.4x** |
+| deltablue | ~18ms       | ~2.3ms    | ~2.3ms            | **7.8x** |
+| raytrace3d| ~340ms      | ~150ms    | ~150ms            | **2.3x** |
+| hashmap   | ~100ms      | ~21ms     | ~15ms             | **6.7x** |
+
+### Files
+
+| Benchmark | Typed Only | + Return Type |
+|-----------|-----------|--------------|
+| richards  | `richards2.ls` | `richards3.ls` |
+| deltablue | `deltablue2.ls` | `deltablue3.ls` |
+| raytrace3d| `raytrace3d2.ls`| `raytrace3d3.ls` |
+| hashmap   | `hashmap2.ls`  | `hashmap3.ls` |
