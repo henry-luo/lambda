@@ -5810,7 +5810,14 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
         param_type->full_type = NULL;
     }
 
-    if (!is_type) { push_name(tp, ast_node, NULL); }
+    if (!is_type) {
+        push_name(tp, ast_node, NULL);
+        // In pn (procedural) functions, parameters are mutable
+        if (tp->current_scope && tp->current_scope->is_proc) {
+            NameEntry* entry = lookup_name_in_current_scope(tp, ast_node->name);
+            if (entry) entry->is_mutable = true;
+        }
+    }
     return ast_node;
 }
 
@@ -5907,6 +5914,11 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
                     param_type->full_type = NULL;
                     param->type = (Type*)param_type;
                     push_name(tp, param, NULL);
+                    // In pn (procedural) functions, parameters are mutable
+                    if (is_proc) {
+                        NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
+                        if (entry) entry->is_mutable = true;
+                    }
 
                     if (prev_param == NULL) {
                         ast_node->param = param;
