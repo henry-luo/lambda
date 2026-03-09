@@ -161,11 +161,10 @@ pn splay_find(tree, key) {
 }
 
 pn splay_find_max(node) {
-    var current = node
-    while (current.right != null) {
-        current = current.right
+    while (node.right != null) {
+        node = node.right
     }
-    return current
+    return node
 }
 
 pn splay_find_greatest_less_than(tree, key) {

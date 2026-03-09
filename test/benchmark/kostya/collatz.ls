@@ -6,12 +6,11 @@
 
 pn collatz_len(n) {
     var steps = 1
-    var x = n
-    while (x != 1) {
-        if (x % 2 == 0) {
-            x = shr(x, 1)
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = shr(n, 1)
         } else {
-            x = 3 * x + 1
+            n = 3 * n + 1
         }
         steps = steps + 1
     }

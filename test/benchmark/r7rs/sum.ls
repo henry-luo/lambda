@@ -3,11 +3,10 @@
 // Adapted from r7rs-benchmarks/src/sum.scm (scaled down for Lambda JIT)
 
 pn run(n) {
-    var i = n
     var s = 0
-    while (i >= 0) {
-        s = s + i
-        i = i - 1
+    while (n >= 0) {
+        s = s + n
+        n = n - 1
     }
     return s
 }

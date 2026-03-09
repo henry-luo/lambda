@@ -13,14 +13,13 @@ let EMPTY = -1
 
 pn compute_hash(key: int) {
     // Java-style int hash
-    var h = key
-    h = bxor(h, shr(h, 16))
-    h = h * 73244475  // approximate of multiply-shift hash
-    h = bxor(h, shr(h, 16))
-    if (h < 0) {
-        h = 0 - h
+    key = bxor(key, shr(key, 16))
+    key = key * 73244475  // approximate of multiply-shift hash
+    key = bxor(key, shr(key, 16))
+    if (key < 0) {
+        key = 0 - key
     }
-    return h
+    return key
 }
 
 pn hashmap_new(capacity: int) {

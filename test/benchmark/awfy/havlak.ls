@@ -471,21 +471,20 @@ pn uf_find_set(nodes, nodeId) {
     var pdfn = (node.parentDfn)
     if (pdfn == nodeId) { return nodeId }
     var path = vec_new()
-    var cur = nodeId
     var curNode = node
     var curp = pdfn
-    while (cur != curp) {
+    while (nodeId != curp) {
         var pp = curp
         var gpNode = arr_get(nodes, pp)
         var gpp = (gpNode.parentDfn)
         if (pp != gpp) {
             vec_add(path, curNode)
         }
-        cur = pp
+        nodeId = pp
         curNode = gpNode
         curp = gpp
     }
-    var root = cur
+    var root = nodeId
     var psz = vec_size(path)
     var j = 0
     while (j < psz) {

@@ -9,14 +9,13 @@ let DAYS_PER_YEAR = 365.24
 
 // format a float to exactly 9 decimal places
 pn format9(x) {
-    var v = x
     var neg = ""
-    if (v < 0.0) {
+    if (x < 0.0) {
         neg = "-"
-        v = -v
+        x = -x
     }
-    var int_part = int(floor(v))
-    var frac = v - float(int_part)
+    var int_part = int(floor(x))
+    var frac = x - float(int_part)
     var scaled = frac * 1000000000.0 + 0.5
     var fl = floor(scaled)
     var frac_int = int(fl)

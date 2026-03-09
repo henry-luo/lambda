@@ -18,14 +18,12 @@ pn list_length(node) {
 }
 
 pn is_shorter_than(x, y) {
-    var x_tail = x
-    var y_tail = y
-    while (y_tail != null) {
-        if (x_tail == null) {
+    while (y != null) {
+        if (x == null) {
             return 1
         }
-        x_tail = x_tail.next
-        y_tail = y_tail.next
+        x = x.next
+        y = y.next
     }
     return 0
 }
