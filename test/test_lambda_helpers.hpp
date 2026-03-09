@@ -49,6 +49,19 @@ struct LambdaTestInfo {
     }
 };
 
+// Returns a platform-specific expected output path if one exists, otherwise the
+// generic .txt path. Checks for .linux.txt on Linux and .mac.txt on macOS.
+inline std::string platform_expected_path(const std::string& base_txt_path) {
+#if defined(__linux__)
+    std::string linux_path = base_txt_path.substr(0, base_txt_path.length() - 4) + ".linux.txt";
+    if (access(linux_path.c_str(), F_OK) == 0) return linux_path;
+#elif defined(__APPLE__)
+    std::string mac_path = base_txt_path.substr(0, base_txt_path.length() - 4) + ".mac.txt";
+    if (access(mac_path.c_str(), F_OK) == 0) return mac_path;
+#endif
+    return base_txt_path;
+}
+
 // ============================================================================
 // Slow benchmark tests excluded from baseline (each takes >1s in debug build).
 // Run individually with: ./test/test_lambda_gtest.exe --gtest_filter=*awfy_cd*
@@ -258,12 +271,13 @@ inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_p
             std::string filename = find_data.cFileName;
             std::string script_path = std::string(dir_path) + "/" + filename;
 
-            // Build expected output path (.ls -> .txt)
-            std::string expected_path = script_path;
-            size_t dot_pos = expected_path.find_last_of('.');
+            // Build expected output path (.ls -> .txt), with platform override
+            std::string base_txt = script_path;
+            size_t dot_pos = base_txt.find_last_of('.');
             if (dot_pos != std::string::npos) {
-                expected_path = expected_path.substr(0, dot_pos) + ".txt";
+                base_txt = base_txt.substr(0, dot_pos) + ".txt";
             }
+            std::string expected_path = platform_expected_path(base_txt);
 
             // Only add if matching .txt file exists
             if (file_exists(expected_path)) {
@@ -291,12 +305,13 @@ inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_p
         if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".ls") {
             std::string script_path = std::string(dir_path) + "/" + filename;
 
-            // Build expected output path (.ls -> .txt)
-            std::string expected_path = script_path;
-            size_t dot_pos = expected_path.find_last_of('.');
+            // Build expected output path (.ls -> .txt), with platform override
+            std::string base_txt = script_path;
+            size_t dot_pos = base_txt.find_last_of('.');
             if (dot_pos != std::string::npos) {
-                expected_path = expected_path.substr(0, dot_pos) + ".txt";
+                base_txt = base_txt.substr(0, dot_pos) + ".txt";
             }
+            std::string expected_path = platform_expected_path(base_txt);
 
             // Only add if matching .txt file exists
             if (file_exists(expected_path)) {
