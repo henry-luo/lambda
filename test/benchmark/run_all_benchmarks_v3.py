@@ -151,12 +151,19 @@ if (typeof console === 'undefined') {
 }
 """
 
-# AWFY Python harness config: (name, inner_iterations)
+# AWFY Python harness config: (name, inner_iterations) or (name, (num_iterations, inner_iterations))
 AWFY_PY_CONFIG = {
     "sieve": 3000, "permute": 1500, "queens": 1500, "towers": 600,
     "bounce": 1500, "list": 1500, "storage": 1000,
-    "mandelbrot": 1, "nbody": 1, "richards": 1,
-    "json": 1, "deltablue": 1, "havlak": 1, "cd": 1,
+    "mandelbrot": 500, "nbody": 36000, "richards": 50,
+    "json": 1, "deltablue": (20, 100), "havlak": 1, "cd": 1,
+}
+
+# AWFY Python class names (where capitalize() doesn't produce the right class name)
+AWFY_PY_CLASSNAME = {
+    "nbody": "NBody",
+    "deltablue": "DeltaBlue",
+    "cd": "CD",
 }
 
 
@@ -210,9 +217,14 @@ def run_benchmark(cmd, num_runs):
 
 def run_awfy_python(bench_name, num_runs):
     """Run AWFY Python benchmark via harness. Returns (wall_ms, exec_ms, success)."""
-    inner = AWFY_PY_CONFIG.get(bench_name, 1)
+    cfg = AWFY_PY_CONFIG.get(bench_name, 1)
+    if isinstance(cfg, tuple):
+        num_iter, inner = cfg
+    else:
+        num_iter, inner = 1, cfg
     py_dir = "test/benchmark/awfy/python"
-    cmd = f"cd {py_dir} && {PYTHON_EXE} harness.py {bench_name.capitalize()} 1 {inner}"
+    class_name = AWFY_PY_CLASSNAME.get(bench_name, bench_name.capitalize())
+    cmd = f"cd {py_dir} && {PYTHON_EXE} harness.py {class_name} {num_iter} {inner}"
     # AWFY harness outputs runtime in microseconds, not __TIMING__ ms
     walls = []
     execs = []
@@ -231,11 +243,14 @@ def run_awfy_python(bench_name, num_runs):
             continue
         ok = True
         walls.append(wall_ms)
-        # Parse AWFY harness output: "BenchName: iterations=1 runtime: NNNus"
+        # Parse AWFY harness output: sum all "runtime: NNNus" lines per subprocess call
+        run_total_us = 0
         for line in r.stdout.strip().split("\n"):
             m2 = re.search(r"runtime:\s*(\d+)us", line)
             if m2:
-                execs.append(float(m2.group(1)) / 1000.0)  # us -> ms
+                run_total_us += float(m2.group(1))
+        if run_total_us > 0:
+            execs.append(run_total_us / 1000.0)  # us -> ms
         # Also check for __TIMING__
         t = parse_timing(r.stdout)
         if t is not None and not execs:

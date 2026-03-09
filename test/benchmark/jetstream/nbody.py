@@ -81,6 +81,7 @@ def run_nbody_system(n_steps):
               5.15138902046611451e-05 * SOLAR_MASS]
 
     offset_momentum(bvx, bvy, bvz, bmass)
+    # Original JetStream: accumulate BOTH initial and final energy
     ret = energy(bx, by, bz, bvx, bvy, bvz, bmass)
     for _ in range(n_steps):
         advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
@@ -99,17 +100,18 @@ def run():
 
 def main():
     t0 = time.perf_counter_ns()
-    result = 0.0
-    for _ in range(8):
+    # Original JetStream workload: 8 iterations of run() (4500 steps each = 36000 total)
+    import math
+    pass_all = True
+    for i in range(8):
         result = run()
+        check = math.floor(result * -10000000.0)
+        if check != 13524862:
+            print(f"nbody: FAIL iteration={i} check={check} energy={result}")
+            pass_all = False
     t1 = time.perf_counter_ns()
-
-    expected = -1.3524862408537381
-    diff = abs(result - expected)
-    if diff < 1e-7:
+    if pass_all:
         print("nbody: PASS")
-    else:
-        print(f"nbody: FAIL got={result} expected={expected}")
     print(f"__TIMING__:{(t1 - t0) / 1_000_000:.3f}")
 
 

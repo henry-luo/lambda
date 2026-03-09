@@ -198,7 +198,7 @@ class _Scheduler(_RBObject):
 
         self.schedule()
 
-        return self._queue_count == 23_246 and self._hold_count == 9297
+        return self._queue_count == 2_322 and self._hold_count == 928
 
     def find_task(self, identity):
         t = self._task_table[identity]
@@ -277,7 +277,7 @@ class _HandlerTaskDataRecord(_RBObject):
 class _IdleTaskDataRecord(_RBObject):
     def __init__(self):
         self.control = 1
-        self.count = 10_000
+        self.count = 1_000
 
 
 class _Packet(_RBObject):

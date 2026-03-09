@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Larceny Benchmark: primes (Python)
-# Sieve of Eratosthenes to 8000, repeated 10 times
+# Sieve of Eratosthenes to 1000000
 import time
 import array
 
@@ -26,12 +26,10 @@ def sieve(limit):
 
 def main():
     t0 = time.perf_counter_ns()
-    result = 0
-    for _ in range(10):
-        result = sieve(8000)
+    result = sieve(1000000)
     t1 = time.perf_counter_ns()
 
-    if result == 1007:
+    if result == 78498:
         print("primes: PASS")
     else:
         print(f"primes: FAIL result={result}")

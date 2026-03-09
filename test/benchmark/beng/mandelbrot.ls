@@ -3,9 +3,9 @@
 // Since Lambda cannot output raw binary bytes, we compute a byte-level
 // checksum of what the PBM P4 body would contain (XOR of all packed bytes).
 // The checksum can be verified against the reference PBM file.
-// N=200 expected checksum: see mandelbrot.txt
+// N=500 expected checksum: see mandelbrot.txt
 
-let N = 200
+let N = 500
 
 pn main() {
     var __t0 = clock()
