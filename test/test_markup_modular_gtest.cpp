@@ -105,12 +105,12 @@ TEST_F(BlockParserTest, AtxHeaders) {
     ASSERT_GT(json->len, 0);
 
     // Verify h1-h6 elements are created
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h2\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h3\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h4\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h5\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h6\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h3\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h4\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h5\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h6\""));
 }
 
 // Test Setext-style headers (underline)
@@ -140,8 +140,8 @@ TEST_F(BlockParserTest, UnorderedLists) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ul\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"ul\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"li\""));
 }
 
 // Test ordered lists
@@ -154,8 +154,8 @@ TEST_F(BlockParserTest, OrderedLists) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ol\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"ol\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"li\""));
 }
 
 // Test nested lists
@@ -172,7 +172,7 @@ TEST_F(BlockParserTest, NestedLists) {
     // Should have nested ul elements
     int ul_count = 0;
     const char* p = json->chars;
-    while ((p = strstr(p, "\"$\":\"ul\"")) != NULL) {
+    while ((p = strstr(p, "\"$\": \"ul\"")) != NULL) {
         ul_count++;
         p++;
     }
@@ -190,8 +190,8 @@ TEST_F(BlockParserTest, FencedCodeBlock) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"pre\"") ||
-                json_contains(json->chars, "\"$\":\"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"pre\"") ||
+                json_contains(json->chars, "\"$\": \"code\""));
     EXPECT_TRUE(json_contains(json->chars, "python"));
 }
 
@@ -205,8 +205,8 @@ TEST_F(BlockParserTest, TildeFencedCodeBlock) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"pre\"") ||
-                json_contains(json->chars, "\"$\":\"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"pre\"") ||
+                json_contains(json->chars, "\"$\": \"code\""));
 }
 
 // Test blockquotes
@@ -218,7 +218,7 @@ TEST_F(BlockParserTest, Blockquotes) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"blockquote\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"blockquote\""));
 }
 
 // Test nested blockquotes
@@ -244,10 +244,10 @@ TEST_F(BlockParserTest, GfmTables) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"table\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"tr\"") ||
-                json_contains(json->chars, "\"$\":\"th\"") ||
-                json_contains(json->chars, "\"$\":\"td\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"table\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"tr\"") ||
+                json_contains(json->chars, "\"$\": \"th\"") ||
+                json_contains(json->chars, "\"$\": \"td\""));
 }
 
 // Test horizontal rules
@@ -262,7 +262,7 @@ TEST_F(BlockParserTest, HorizontalRules) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"hr\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"hr\""));
 }
 
 // Test paragraphs
@@ -275,7 +275,7 @@ TEST_F(BlockParserTest, Paragraphs) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"p\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"p\""));
 }
 
 // Test unclosed code fence (error handling)
@@ -303,8 +303,8 @@ TEST_F(InlineParserTest, BoldEmphasis) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\"") ||
-                json_contains(json->chars, "\"$\":\"b\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\"") ||
+                json_contains(json->chars, "\"$\": \"b\""));
 }
 
 // Test italic emphasis
@@ -314,8 +314,8 @@ TEST_F(InlineParserTest, ItalicEmphasis) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"em\"") ||
-                json_contains(json->chars, "\"$\":\"i\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"em\"") ||
+                json_contains(json->chars, "\"$\": \"i\""));
 }
 
 // Test inline code
@@ -325,7 +325,7 @@ TEST_F(InlineParserTest, InlineCode) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"code\""));
 }
 
 // Test double backtick code
@@ -345,7 +345,7 @@ TEST_F(InlineParserTest, Links) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"a\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"a\""));
     // URL may be encoded or stored differently - just verify link element exists
 }
 
@@ -356,7 +356,7 @@ TEST_F(InlineParserTest, LinksWithTitles) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"a\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"a\""));
 }
 
 // Test autolinks
@@ -376,7 +376,7 @@ TEST_F(InlineParserTest, Images) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"img\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"img\""));
 }
 
 // Test inline math
@@ -397,8 +397,8 @@ TEST_F(InlineParserTest, Strikethrough) {
     String* json = parse_to_json(content, "test.md");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"del\"") ||
-                json_contains(json->chars, "\"$\":\"s\"") ||
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"del\"") ||
+                json_contains(json->chars, "\"$\": \"s\"") ||
                 json_contains(json->chars, "deleted"));  // At minimum, text preserved
 }
 
@@ -410,7 +410,7 @@ TEST_F(InlineParserTest, MixedInline) {
     ASSERT_NE(json, nullptr);
 
     EXPECT_TRUE(json_contains(json->chars, "strong") ||
-                json_contains(json->chars, "\"$\":\"b\""));
+                json_contains(json->chars, "\"$\": \"b\""));
 }
 
 // Test unmatched emphasis (graceful handling)
@@ -437,9 +437,9 @@ TEST_F(FormatAdapterTest, MarkdownDetection) {
     ASSERT_NE(json, nullptr);
 
     // Should parse as Markdown
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ul\"") ||
-                json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"ul\"") ||
+                json_contains(json->chars, "\"$\": \"li\""));
 }
 
 // Test RST format detection
@@ -454,8 +454,8 @@ TEST_F(FormatAdapterTest, RstDetection) {
     ASSERT_NE(json, nullptr);
 
     // Should parse headings
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\"") ||
-                json_contains(json->chars, "\"$\":\"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\"") ||
+                json_contains(json->chars, "\"$\": \"h2\""));
 }
 
 // Test Wiki format detection
@@ -528,7 +528,7 @@ TEST_F(FormatAdapterTest, TypstDetection) {
     ASSERT_NE(json, nullptr);
 
     // Should parse as Typst with = headers
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
     EXPECT_TRUE(json_contains(json->chars, "Main Title"));
 }
 
@@ -546,12 +546,12 @@ TEST_F(FormatAdapterTest, TypstHeaders) {
     ASSERT_NE(json, nullptr);
 
     // Verify h1-h6 elements are created
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h2\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h3\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h4\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h5\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h6\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h3\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h4\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h5\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h6\""));
 }
 
 // Test Typst emphasis (* = bold, _ = italic)
@@ -563,8 +563,8 @@ TEST_F(FormatAdapterTest, TypstEmphasis) {
     ASSERT_NE(json, nullptr);
 
     // In Typst: * = bold (strong), _ = italic (em)
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"em\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"em\""));
     EXPECT_TRUE(json_contains(json->chars, "bold text"));
     EXPECT_TRUE(json_contains(json->chars, "italic text"));
 }
@@ -579,8 +579,8 @@ TEST_F(FormatAdapterTest, TypstBulletLists) {
     String* json = parse_to_json(content, "test.typ");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ul\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"ul\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"li\""));
     EXPECT_TRUE(json_contains(json->chars, "First item"));
 }
 
@@ -595,8 +595,8 @@ TEST_F(FormatAdapterTest, TypstNumberedLists) {
     ASSERT_NE(json, nullptr);
 
     // In Typst: + = ordered list (ol)
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ol\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"ol\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"li\""));
     EXPECT_TRUE(json_contains(json->chars, "First numbered"));
 }
 
@@ -608,7 +608,7 @@ TEST_F(FormatAdapterTest, TypstInlineCode) {
     String* json = parse_to_json(content, "test.typ");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"code\""));
     EXPECT_TRUE(json_contains(json->chars, "inline code"));
 }
 
@@ -623,8 +623,8 @@ TEST_F(FormatAdapterTest, TypstCodeBlocks) {
     String* json = parse_to_json(content, "test.typ");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\"") ||
-                json_contains(json->chars, "\"$\":\"pre\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"code\"") ||
+                json_contains(json->chars, "\"$\": \"pre\""));
     EXPECT_TRUE(json_contains(json->chars, "python"));
 }
 
@@ -646,12 +646,12 @@ TEST_F(FormatAdapterTest, TypstMixedContent) {
     ASSERT_NE(json, nullptr);
 
     // Verify various elements
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h2\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"p\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"em\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"p\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"em\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"code\""));
 }
 
 // Test Typst .typst extension (alternative)
@@ -663,8 +663,8 @@ TEST_F(FormatAdapterTest, TypstAlternativeExtension) {
     String* json = parse_to_json(content, "test.typst");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\""));
 }
 
 // =============================================================================
@@ -803,17 +803,17 @@ TEST_F(ComplexDocumentTest, ComprehensiveMarkdown) {
     ASSERT_NE(json, nullptr);
 
     // Verify various elements are parsed
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h2\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"p\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ul\"") ||
-                json_contains(json->chars, "\"$\":\"li\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"table\"") ||
-                json_contains(json->chars, "\"$\":\"tr\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"pre\"") ||
-                json_contains(json->chars, "\"$\":\"code\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"blockquote\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"hr\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"p\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"ul\"") ||
+                json_contains(json->chars, "\"$\": \"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"table\"") ||
+                json_contains(json->chars, "\"$\": \"tr\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"pre\"") ||
+                json_contains(json->chars, "\"$\": \"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"blockquote\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"hr\""));
 }
 
 // Test document with all inline types
@@ -827,7 +827,7 @@ TEST_F(ComplexDocumentTest, AllInlineTypes) {
     EXPECT_GT(json->len, 0);
 
     // All inline elements should be parsed
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"p\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"p\""));
 }
 
 // =============================================================================
@@ -848,8 +848,8 @@ TEST_F(TaskListTest, UncheckedTaskItems) {
     // Should have task-list-item class on li elements
     EXPECT_TRUE(json_contains(json->chars, "task-list-item"));
     // Should have checkbox input elements
-    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"input\""));
-    EXPECT_TRUE(json_contains(json->chars, "\"type\":\"checkbox\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"input\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"type\": \"checkbox\""));
 }
 
 // Test basic task list with checked items
@@ -862,7 +862,7 @@ TEST_F(TaskListTest, CheckedTaskItems) {
     ASSERT_NE(json, nullptr);
 
     // Should have checked attribute
-    EXPECT_TRUE(json_contains(json->chars, "\"checked\":\"checked\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"checked\": \"checked\""));
 }
 
 // Test mixed task list
@@ -891,7 +891,7 @@ TEST_F(TaskListTest, TaskListWithFormattedContent) {
     EXPECT_TRUE(json_contains(json->chars, "task-list-item"));
     // Should preserve formatting within task items
     EXPECT_TRUE(json_contains(json->chars, "bold") ||
-                json_contains(json->chars, "\"$\":\"strong\""));
+                json_contains(json->chars, "\"$\": \"strong\""));
 }
 
 // Test regular list items (not task list)

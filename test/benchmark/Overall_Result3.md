@@ -27,18 +27,18 @@
 
 > Classic Scheme benchmark suite adapted for Lambda with type annotations. Tests recursive functions, numeric computation, and backtracking.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
-| --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| fib | recursive |   1.9 |   2.0 |   1.1 |    18 |   2.0 |    22 | 0.97x | 0.09x |
-| fibfp | recursive |   3.5 |   3.7 |   1.1 |    19 |   1.8 |    23 | 1.99x | 0.15x |
-| tak | recursive |  0.15 |  0.17 |  0.11 |   2.9 |  0.80 |   2.2 | 0.19x | 0.07x |
-| cpstak | closure |  0.30 |  0.33 |  0.22 |   5.7 |  1.00 |   4.5 | 0.30x | 0.07x |
-| sum | iterative |  0.27 |   1.9 |    20 |    32 |   1.2 |    38 | 0.23x | 0.007x |
-| sumfp | iterative | 0.068 |  0.33 |   4.2 |   3.8 |  0.87 |   2.8 | 0.08x | 0.02x |
-| nqueens | backtrack |   6.8 |   6.6 |    41 |   9.7 |   1.8 |   3.5 | 3.81x | 1.95x |
-| fft | numeric |  0.18 |   1.0 |   2.3 |   2.8 |   1.7 |   4.3 | 0.11x | 0.04x |
-| mbrot | numeric |  0.58 |  0.60 |   --- |    18 |   1.8 |    15 | 0.33x | 0.04x |
-| ack | recursive |   9.9 |   9.8 |   8.2 |   --- |    14 |   156 | 0.72x | 0.06x |
+| Benchmark | Category  |   MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
+| --------- | --------- | ----: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
+| fib       | recursive |   1.9 |   2.0 |      1.1 |      18 |     2.0 |     22 |    0.97x |  0.09x |
+| fibfp     | recursive |   3.5 |   3.7 |      1.1 |      19 |     1.8 |     23 |    1.99x |  0.15x |
+| tak       | recursive |  0.15 |  0.17 |     0.11 |     2.9 |    0.80 |    2.2 |    0.19x |  0.07x |
+| cpstak    | closure   |  0.30 |  0.33 |     0.22 |     5.7 |    1.00 |    4.5 |    0.30x |  0.07x |
+| sum       | iterative |  0.27 |   1.9 |       20 |      32 |     1.2 |     38 |    0.23x | 0.007x |
+| sumfp     | iterative | 0.068 |  0.33 |      4.2 |     3.8 |    0.87 |    2.8 |    0.08x |  0.02x |
+| nqueens   | backtrack |   6.8 |   6.6 |       41 |     9.7 |     1.8 |    3.5 |    3.81x |  1.95x |
+| fft       | numeric   |  0.18 |   1.0 |      2.3 |     2.8 |     1.7 |    4.3 |    0.11x |  0.04x |
+| mbrot     | numeric   |  0.58 |  0.60 |      --- |      18 |     1.8 |     15 |    0.33x |  0.04x |
+| ack       | recursive |   9.9 |   9.8 |      8.2 |     --- |      14 |    156 |    0.72x |  0.06x |
 
 **Geometric mean MIR/Node.js: 0.43x** — Lambda faster on 8/10 benchmarks
 **Geometric mean MIR/Python: 0.07x** — Lambda faster on 9/10 benchmarks
@@ -142,17 +142,18 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| nbody | numeric |    47 |    85 |  125† |   --- |   5.5 |   --- | 8.58x | --- |
-| cube3d | 3d |    49 |   141 |   --- |   --- |    18 |   --- | 2.73x | --- |
-| navier_stokes | numeric |   803 |   801 |    28† |   --- |    14 |   --- | 55.4x | --- |
-| richards | macro |   301 |   287 |   --- |   --- |   8.3 |   --- | 36.5x | --- |
-| splay | data |    51 |   --- |    41† |   --- |    20 |   --- | 2.50x | --- |
-| deltablue | macro |    19 |    19 |   --- |   --- |    10 |   --- | 1.79x | --- |
-| hashmap | data |    96 |    99 |   --- |   --- |    16 |   --- | 5.88x | --- |
-| crypto_sha1 | crypto |    17 |    20 |    46† |   --- |   9.0 |   --- | 1.89x | --- |
-| raytrace3d | 3d |   370 |   562 |   --- |   --- |    19 |   --- | 19.8x | --- |
+| nbody | numeric |    47 |    85 |  125† |   125 |   5.5 |   134 | 8.55x | 0.35x |
+| cube3d | 3d |    49 |   141 |   --- |   229 |    18 |    46 | 2.72x | 1.07x |
+| navier_stokes | numeric |   803 |   801 |    28† |    95 |    14 | 1.84s | 57.4x | 0.44x |
+| richards | macro |   301 |   287 |   --- |   158 |   8.3 |   217 | 36.3x | 1.39x |
+| splay | data |    51 |   --- |    41† |   199 |    20 |   326 | 2.55x | 0.16x |
+| deltablue | macro |    19 |    19 |   --- |   119 |    10 |    17 | 1.90x | 1.12x |
+| hashmap | data |    96 |    99 |   --- |   323 |    16 |   184 | 6.00x | 0.52x |
+| crypto_sha1 | crypto |    17 |    20 |    46† |   222 |   9.0 |   321 | 1.89x | 0.05x |
+| raytrace3d | 3d |   370 |   562 |   --- |   171 |    19 |   144 | 19.5x | 2.57x |
 
-**Geometric mean MIR/Node.js: 7.12x** — Lambda slower on 0/9 benchmarks
+**Geometric mean MIR/Node.js: 7.20x** — Node.js faster on all 9 benchmarks
+**Geometric mean MIR/Python: 0.52x** — Lambda faster on 5/9 benchmarks
 
 † LambdaJS times are **wall-clock** (includes startup overhead). LambdaJS internal `Date.now()`/`performance.now()` not supported.
 LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), which were not in the main MIR/Node.js test set.
@@ -170,8 +171,8 @@ LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), whic
 | BENG | 0.66x | 7 | 3 | 10 |
 | KOSTYA | 2.06x | 2 | 5 | 7 |
 | LARCENY | 1.26x | 5 | 7 | 12 |
-| JetStream | 7.12x | 0 | 9 | 9 |
-| **Overall** | **1.17x** | **30** | **32** | **62** |
+| JetStream | 7.20x | 0 | 9 | 9 |
+| **Overall** | **1.18x** | **30** | **32** | **62** |
 
 > Ratio < 1.0 = Lambda MIR is faster. Ratio > 1.0 = Node.js is faster.
 
@@ -186,8 +187,8 @@ LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), whic
 | BENG | 0.70x | 8 | 2 | 10 |
 | KOSTYA | 0.22x | 5 | 2 | 7 |
 | LARCENY | 0.12x | 11 | 1 | 12 |
-| JetStream | --- | 0 | 0 | 0 |
-| **Overall** | **0.06x** | **42** | **7** | **49** |
+| JetStream | 0.52x | 5 | 4 | 9 |
+| **Overall** | **0.07x** | **47** | **11** | **58** |
 
 > Lambda MIR is overwhelmingly faster than CPython across all suites.
 
@@ -215,9 +216,9 @@ LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), whic
 |------|------:|------------|
 | **Lambda >2× faster** (< 0.5×) | 21 | awfy/list (0.04x), awfy/permute (0.08x), r7rs/sumfp (0.08x), larceny/divrec (0.10x), r7rs/fft (0.11x), awfy/sieve (0.14x), beng/fannkuch (0.18x), r7rs/tak (0.19x), beng/fasta (0.19x), awfy/towers (0.19x), kostya/collatz (0.21x), beng/pidigits (0.22x), awfy/queens (0.23x), r7rs/sum (0.23x), larceny/primes (0.28x), beng/nbody (0.29x), larceny/array1 (0.30x), r7rs/cpstak (0.30x), larceny/paraffins (0.32x), r7rs/mbrot (0.33x), awfy/bounce (0.35x) |
 | **Lambda faster** (0.5–1.0×) | 8 | beng/regexredux (0.50x), awfy/storage (0.51x), beng/revcomp (0.55x), kostya/matmul (0.55x), beng/knucleotide (0.57x), larceny/diviter (0.58x), r7rs/ack (0.72x), r7rs/fib (0.97x) |
-| **Comparable** (1.0–2.0×) | 12 | awfy/mandelbrot (1.00x), awfy/json (1.20x), larceny/puzzle (1.20x), kostya/primes (1.57x), beng/binarytrees (1.78x), jetstream/deltablue (1.79x), larceny/quicksort (1.81x), jetstream/crypto_sha1 (1.89x), kostya/levenshtein (1.92x), awfy/havlak (1.92x), r7rs/fibfp (1.99x), larceny/ray (2.00x) |
-| **Node faster** (2.0–5.0×) | 6 | jetstream/splay (2.50x), larceny/triangl (2.65x), jetstream/cube3d (2.73x), kostya/brainfuck (3.69x), r7rs/nqueens (3.81x), beng/spectralnorm (4.66x) |
-| **Node >5× faster** (> 5.0×) | 15 | larceny/deriv (5.18x), beng/mandelbrot (5.54x), awfy/nbody (5.80x), awfy/deltablue (5.82x), jetstream/hashmap (5.88x), jetstream/nbody (8.58x), larceny/pnpoly (9.71x), kostya/json_gen (9.82x), awfy/cd (11.26x), awfy/richards (12.11x), kostya/base64 (12.19x), larceny/gcbench (17.64x), jetstream/raytrace3d (19.78x), jetstream/richards (36.47x), jetstream/navier_stokes (55.41x) |
+| **Comparable** (1.0–2.0×) | 12 | awfy/mandelbrot (1.00x), awfy/json (1.20x), larceny/puzzle (1.20x), kostya/primes (1.57x), beng/binarytrees (1.78x), larceny/quicksort (1.81x), jetstream/crypto_sha1 (1.89x), jetstream/deltablue (1.90x), kostya/levenshtein (1.92x), awfy/havlak (1.92x), r7rs/fibfp (1.99x), larceny/ray (2.00x) |
+| **Node faster** (2.0–5.0×) | 6 | jetstream/splay (2.55x), larceny/triangl (2.65x), jetstream/cube3d (2.72x), kostya/brainfuck (3.69x), r7rs/nqueens (3.81x), beng/spectralnorm (4.66x) |
+| **Node >5× faster** (> 5.0×) | 15 | larceny/deriv (5.18x), beng/mandelbrot (5.54x), awfy/nbody (5.80x), awfy/deltablue (5.82x), jetstream/hashmap (6.00x), jetstream/nbody (8.55x), larceny/pnpoly (9.71x), kostya/json_gen (9.82x), awfy/cd (11.26x), awfy/richards (12.11x), kostya/base64 (12.19x), larceny/gcbench (17.64x), jetstream/raytrace3d (19.47x), jetstream/richards (36.27x), jetstream/navier_stokes (57.36x) |
 
 ---
 
@@ -281,15 +282,16 @@ LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), whic
 
 ### 1. Overall: Lambda MIR competitive with Node.js V8
 
-Across 62 benchmarks with both MIR and Node.js results, the geometric mean ratio is **1.17x**.
+Across 62 benchmarks with both MIR and Node.js results, the geometric mean ratio is **1.18x**.
 Excluding the new JetStream suite (which ports are not yet optimized), Lambda achieves **0.86x**
 on the original 53 benchmarks, winning 30 of 53.
 
 ### 2. Lambda MIR dominates CPython
 
-Across 49 benchmarks with Python comparisons, Lambda MIR is **16× faster** (geo mean 0.06x).
+Across 58 benchmarks with Python comparisons, Lambda MIR is **14× faster** (geo mean 0.07x).
 CPython's interpreted execution cannot match JIT-compiled code on compute-intensive tasks.
 Lambda wins on all suites, with particular dominance on tight loops and numeric code (AWFY micro-benchmarks: 1000–30000× faster).
+On JetStream, Lambda MIR is **1.9× faster** than Python (geo mean 0.52x), winning 5 of 9 benchmarks.
 
 ### 3. Strengths: Micro-benchmarks and numeric code
 
@@ -304,11 +306,11 @@ Lambda MIR excels on small, tight computational benchmarks:
 Node.js V8's optimizing JIT (TurboFan) significantly outperforms Lambda on:
 - **Class-heavy benchmarks**: richards (12.1x), cd (11.3x), deltablue (5.8x) — V8's hidden classes and inline caches
 - **Heavy allocation/GC**: gcbench (17.6x), base64 (12.2x) — V8's generational GC advantage
-- **JetStream suite (7.12x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate
+- **JetStream suite (7.20x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate
 
 ### 5. JetStream: New frontier for optimization
 
-The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.12× slower** than Node.js.
+The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.20× slower** than Node.js.
 LambdaJS passes **6 of 13** JetStream benchmarks (nbody, navier_stokes, splay, crypto_sha1, crypto_md5, regex_dna).
 7 benchmarks fail due to: missing ES6 class support (cube3d, richards, deltablue, hashmap), unsupported regex patterns (crypto_aes), timeout (raytrace3d), or unsupported statement types (base64).
 
@@ -348,7 +350,9 @@ LambdaJS continues expanding benchmark coverage:
 ### 9. QuickJS comparison
 
 QuickJS (pure interpreter) is generally 2–10× slower than Node.js V8, as expected.
+On JetStream, QuickJS geo mean is **13.9× slower** than Node.js — comparable to Lambda MIR's 7.2×.
 Lambda MIR is faster than QuickJS on most benchmarks, confirming Lambda's JIT advantage.
+Notably, QuickJS passes all 9 JetStream benchmarks (full ES6 class support), while LambdaJS only passes 6 of 13.
 
 ### 10. C2MIR vs MIR Direct
 
@@ -367,7 +371,7 @@ The two Lambda JIT paths produce similar results. Notable differences:
 - **AWFY Python mandelbrot** value excluded due to measurement error (harness incompatibility).
 - **LambdaJS** still fails on some AWFY benchmarks (bounce, storage, json, deltablue, havlak, cd) due to missing ES6 class features.
 - **QuickJS** fails on ack (R7RS) due to stack overflow on deep recursion.
-- **JetStream** benchmarks only run on MIR, C2MIR, and Node.js for the main comparison. LambdaJS passes 6 of 13 JetStream benchmarks (wall-clock timing only†). No QuickJS/Python ports exist.
-- **Python** benchmarks not available for: AWFY/nbody, AWFY/deltablue, AWFY/cd, all JetStream benchmarks.
+- **JetStream** benchmarks run on all 6 engines. LambdaJS passes 6 of 13 JetStream JS benchmarks (wall-clock timing only†). QuickJS passes all 9. Python passes all 9.
+- **Python** benchmarks not available for: AWFY/nbody, AWFY/deltablue, AWFY/cd.
 - All times in **milliseconds** unless noted with 's' suffix (seconds).
 - The `json` AWFY benchmark workload was corrected between R2 and R3 (R2: 0.028ms was a minimal-workload test).

@@ -991,7 +991,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     rect->start_index = str - text_start;
     // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-    float font_height = font_get_metrics(lycon->font.font_handle)->hhea_line_height;
+    const FontMetrics* _fm = font_get_metrics(lycon->font.font_handle);
+    float font_height = _fm ? _fm->hhea_line_height : 16.0f;
     rect->x = lycon->line.advance_x;
     // browser text rect height uses font metrics (ascent+descent), NOT CSS line-height
     // CSS line-height affects line spacing/positioning, but text rect height is font-based

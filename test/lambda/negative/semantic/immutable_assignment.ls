@@ -8,13 +8,13 @@ pn test_let() {
     print(x)
 }
 
-// Case 2: parameter reassignment in pn
-pn test_param(y) {
+// Case 2: fn parameter reassignment (fn params are always immutable)
+fn test_fn_param(y) {
     y = 99
-    print(y)
+    y
 }
 
 pn main() {
     test_let()
-    test_param(5)
+    test_fn_param(5)
 }

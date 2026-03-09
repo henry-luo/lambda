@@ -4,7 +4,7 @@
 
 After surveying how strings behave across languages (Python, R, Scala, Haskell, JavaScript, Kotlin, Elixir, Rust), Lambda adopts the following model:
 
-**String is indexable, but not iterable.** String and symbol are singular (scalar) values in iteration, pipe, and predicate contexts. Use `chars(str)` for explicit character decomposition.
+**String is indexable, but not iterable.** String and symbol are singular (scalar) values in iteration, pipe, and predicate contexts. Use `str[i]` for character access or `[for (i in 0 to len(str) - 1) str[i]]` for explicit character decomposition.
 
 ### Rationale
 
@@ -30,8 +30,8 @@ Indexing (`str[i]`, `str[a to b]`) is a **positional access** operation, orthogo
 | `min(str)` | **Singular passthrough** | `str` (unchanged) |
 | `max(str)` | **Singular passthrough** | `str` (unchanged) |
 | `concat(str1, str2)` | String concatenation | `str1 ++ str2` |
-| `chars(str)` | **Explicit decompose** | Array of 1-char strings |
-| `chars('sym')` | **Explicit decompose** | Array of 1-char symbols |
+| `[for (i in 0 to len(str)-1) str[i]]` | **Explicit decompose** | Array of 1-char strings |
+| `[for (i in 0 to len(sym)-1) sym[i]]` | **Explicit decompose** | Array of 1-char symbols |
 
 ### Symbol Parity
 
@@ -42,7 +42,7 @@ Every operation that works on strings works identically on symbols, preserving t
 | `"hello"[1]` → `"e"` | `'hello'[1]` → `'e'` |
 | `take("hello", 3)` → `"hel"` | `take('hello', 3)` → `'hel'` |
 | `drop("hello", 2)` → `"llo"` | `drop('hello', 2)` → `'llo'` |
-| `chars("abc")` → `["a", "b", "c"]` | `chars('abc')` → `['a', 'b', 'c']` |
+| `[for (i in 0 to 2) "abc"[i]]` → `["a", "b", "c"]` | `[for (i in 0 to 2) 'abc'[i]]` → `['a', 'b', 'c']` |
 
 ## Critical Bug Fix: UTF-8 Consistency in `item_at()`
 
@@ -138,13 +138,9 @@ if ((type_a == LMD_TYPE_STRING || type_a == LMD_TYPE_SYMBOL) &&
 }
 ```
 
-### Phase 5: `chars()` Function
+### Phase 5: Character Decomposition via Indexing
 
-Add `chars(str)` → array of 1-char strings; `chars('sym')` → array of 1-char symbols.
-
-Equivalent to `split(str, null)` but more readable and works on symbols too.
-
-File: `lambda/lambda-eval.cpp`
+`chars()` system function has been removed. Use `str[i]` for individual character access, or `[for (i in 0 to len(str) - 1) str[i]]` to decompose into an array of 1-char strings/symbols.
 
 ## Test Cases
 
@@ -166,10 +162,10 @@ drop("hello", 2)       // → "llo"
 take('world', 2)       // → 'wo'
 drop('world', 3)       // → 'ld'
 
-// Explicit decomposition
-chars("abc")           // → ["a", "b", "c"]
-chars('abc')           // → ['a', 'b', 'c']
-chars("café")          // → ["c", "a", "f", "é"]
+// Explicit decomposition via indexing
+[for (i in 0 to len("abc") - 1) "abc"[i]]     // → ["a", "b", "c"]
+[for (i in 0 to len('abc') - 1) 'abc'[i]]     // → ['a', 'b', 'c']
+[for (i in 0 to len("café") - 1) "café"[i]]   // → ["c", "a", "f", "é"]
 
 // Concat
 concat("abc", "def")   // → "abcdef"
@@ -188,7 +184,7 @@ for s in "hello" { s } // → "hello"
 2. **P1 — Singular passthrough**: `unique`, `sort`, `reverse`, `min`, `max` return string unchanged.
 3. **P1 — `take`/`drop` as substring**: Positional access family.
 4. **P2 — `concat` for strings**: Convenience (already have `++`).
-5. **P2 — `chars()` function**: Explicit decomposition for when users need character iteration.
+5. **P2 — Character decomposition**: Use `str[i]` indexing for when users need character iteration (no dedicated `chars()` function needed).
 
 ## Files to Modify
 
@@ -196,5 +192,5 @@ for s in "hello" { s } // → "hello"
 |------|---------|
 | `lambda/lambda-data-runtime.cpp` | Fix `item_at()` for UTF-8 |
 | `lambda/lambda-vector.cpp` | String passthrough in `fn_unique`, `fn_sort1`, `fn_sort2`, `fn_reverse`; `take`/`drop` as substring; `concat` for strings |
-| `lambda/lambda-eval.cpp` | Add `chars()` function; ensure `min`/`max` passthrough |
+| `lambda/lambda-eval.cpp` | Ensure `min`/`max` passthrough (removed `chars()` — use `str[i]` indexing instead) |
 | `test/lambda/string_indexable.ls` + `.txt` | New test file for string-as-indexable tests |

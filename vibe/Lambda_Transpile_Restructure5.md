@@ -1,5 +1,11 @@
 # Splay Benchmark Performance Tuning: Results
 
+## Table of Contents
+
+1. [Splay Benchmark Performance Tuning](#summary)
+2. [Vectorized Arithmetic Evaluation](#vectorized-arithmetic-evaluation)
+3. [Return Type Annotations for `pn` Functions](#return-type-annotations-for-pn-functions)
+
 ## Summary
 
 Added `type SplayNode` definition and typed annotations to convert runtime `fn_member()`/`fn_map_set()` calls into direct byte-offset memory loads/stores via the MIR JIT's Phase 3 direct field access optimization. Implemented **direct field store optimization** in the transpiler to eliminate `map_fill()` varargs overhead for typed map construction. **Inlined `map_with_data()`** in the transpiler to emit `heap_calloc` + direct Map header stores with compile-time constants. Eliminated redundant `memset` in `gc_heap_calloc` for slab-allocated objects. **Fixed catastrophic O(slabs) `gc_object_zone_owns`** with O(log N) binary search over sorted slab ranges — **20x speedup** (~2020ms → ~97ms release). Replaced slab free-list allocator with a **4MB bump-pointer nursery** and **JIT-inlined bump-pointer fast path** — **~31% speedup** (~83ms → ~57ms release).
@@ -493,3 +499,193 @@ The `gc_reg` pointer is loaded once at the function prologue (via `_lambda_rt` �
 - `lambda/transpile-mir.cpp` — Added `gc_reg` to `MirTranspiler`, gc_reg loading at function prologues, save/restore across user functions, inline bump MIR emission in `transpile_map()`
 
 **Combined result (#10+#11)**: **~57ms release** (from ~83ms baseline) — **~31% speedup**. Gap to Node.js reduced from 2.9x to **2.0x**.
+
+---
+
+## Vectorized Arithmetic Evaluation
+
+### Background
+
+Lambda supports **vectorized (element-wise) arithmetic** on arrays: when `+`, `-`, `*`, `/` operators encounter array operands, they automatically perform element-wise operations instead of requiring manual index-by-index code.
+
+```lambda
+[1.0, 2.0, 3.0] + [4.0, 5.0, 6.0]   // → [5, 7, 9]       (vector + vector)
+[1.0, 2.0, 3.0] * 2.0                 // → [2, 4, 6]       (vector × scalar)
+[1.0, 2.0, 3.0] - [4.0, 5.0, 6.0]    // → [-3, -3, -3]    (vector - vector)
+0.0 - [1.0, 2.0, 3.0]                 // → [-1, -2, -3]    (scalar - vector)
+[1.0, 2.0, 3.0] / 2.0                 // → [0.5, 1, 1.5]   (vector ÷ scalar)
+```
+
+Implementation: `lambda/lambda-vector.cpp` — dispatches through `vec_add()`, `vec_sub()`, `vec_mul()`, `vec_div()`, called from `fn_add()`, `fn_sub()`, etc. in `lambda-eval-num.cpp` when vector types are detected. Supports `ArrayInt`, `ArrayInt64`, `ArrayFloat`, `Array`, `List`, and `Range` with fast paths for homogeneous typed arrays.
+
+### Benchmarks Evaluated
+
+All JetStream and AWFY `.ls` benchmarks were analyzed for patterns where manual element-wise array operations could be replaced with vectorized arithmetic.
+
+#### 1. raytrace3d.ls — HIGH potential (3-element vectors, ~150K+ calls)
+
+The entire vector math library uses manually unrolled 3-element operations:
+
+| Function | Current Code | Vectorized Replacement |
+|----------|-------------|----------------------|
+| `vec_add(v1, v2)` | `[v1[0]+v2[0], v1[1]+v2[1], v1[2]+v2[2]]` | `v1 + v2` |
+| `vec_sub(v1, v2)` | `[v1[0]-v2[0], v1[1]-v2[1], v1[2]-v2[2]]` | `v1 - v2` |
+| `vec_scale(v, s)` | `[v[0]*s, v[1]*s, v[2]*s]` | `v * s` |
+| `vec_scalev(v1, v2)` | `[v1[0]*v2[0], v1[1]*v2[1], v1[2]*v2[2]]` | `v1 * v2` |
+| `vec_normalise(v)` | `[v[0]/l, v[1]/l, v[2]/l]` | `v / l` |
+| Negate normal | `[0.0 - n[0], 0.0 - n[1], 0.0 - n[2]]` | `0.0 - n` |
+
+These functions are called ~150K+ times per benchmark run (30×30 pixels × 14 triangles × 3 lights × 8 iterations). `vec_dot` and `vec_cross` are NOT vectorizable (dot product is a reduction; cross product involves swizzled element indices).
+
+#### 2. cube3d.ls — MEDIUM potential (3-4 element vectors, ~10K calls)
+
+| Function | Pattern | Vectorized |
+|----------|---------|-----------|
+| `calc_normal` — edge subtraction | `[v0[0]-v1[0], v0[1]-v1[1], v0[2]-v1[2]]` | `v0 - v1` |
+| `calc_normal` — normalize | `[c[0]/l, c[1]/l, c[2]/l, 1.0]` | Partial — 4th element is `1.0` |
+| `mat4_add` | Loop: `m[i] = m1[i] + m2[i]` | `m1 + m2` (16 elements) |
+
+#### 3. navier_stokes.ls — LIMITED (16900-element arrays, in-place mutation)
+
+`add_fields`: `x[i] = x[i] + dt * s[i]` over 16900 elements — could be `x = x + dt * s` but this **creates a new array** instead of mutating in-place. The caller passes `x` by reference and expects mutation; reassigning the local parameter would lose the reference.
+
+#### 4. nbody.ls — MARGINAL (5-element SoA arrays)
+
+Position update `bx[i] = bx[i] + dt * bvx[i]` could become `bx = bx + dt * bvx`, but only 5 elements. The hot inner loop (pairwise `bx[i] - bx[j]` interactions) is intrinsically serial.
+
+#### 5. Other benchmarks — NONE
+
+richards, deltablue, splay, hashmap, crypto_sha1, crypto_aes, crypto_md5, crypto_rsa, bigdenary, base64, regex_dna, mandelbrot, and all AWFY benchmarks use no array-based numeric patterns.
+
+### Experimental Result: raytrace3d with Vectorized Arithmetic
+
+Created `raytrace3d3.ls` (typed + vectorized) replacing all 5 vector math functions and inline negations with vectorized operators:
+
+```lambda
+// BEFORE (manual)                        // AFTER (vectorized)
+pn vec_add(v1, v2) {                      pn vec_add(v1, v2) {
+    return [v1[0]+v2[0],                      return v1 + v2
+            v1[1]+v2[1],                  }
+            v1[2]+v2[2]]
+}
+```
+
+| Version | Time (ms) | vs Untyped |
+|---------|----------:|-----------|
+| raytrace3d.ls (untyped) | 343 | 1.0x |
+| raytrace3d2.ls (typed) | 132 | 2.6x faster |
+| raytrace3d3.ls (typed + vectorized) | **1661** | **4.8x slower** |
+
+**Vectorized arithmetic is 12x slower than manual element-wise code for 3-element arrays.**
+
+### Root Cause Analysis
+
+The vectorized dispatch path (`lambda-vector.cpp`) for each `v1 + v2` operation on a 3-element array:
+
+1. **Type dispatch**: `fn_add()` checks `IS_VECTOR_TYPE(type_a)` / `IS_SCALAR_NUMERIC(type_b)` — 2 branches
+2. **Call `vec_add()`** → `vec_vec_op()` — function call overhead
+3. **Length extraction**: `vector_length()` — switch on TypeId for both operands
+4. **Result type decision**: `needs_float_result()` check, homogeneous array fast-path check
+5. **Allocate new `ArrayFloat`**: `array_float_new(3)` — GC allocation of a 3-element result array
+6. **Element loop**: 3 iterations of `vector_get()` (switch on TypeId) + `item_to_double()` + arithmetic + store
+7. **Return**: Box the `ArrayFloat*` as an `Item`
+
+For 3 elements, the overhead (type checks, function calls, allocation, boxing) vastly exceeds the actual arithmetic. The manual code `[v1[0]+v2[0], v1[1]+v2[1], v1[2]+v2[2]]` compiles to 3 indexed loads + 3 adds + array literal construction — all inlined by the MIR JIT with known offsets.
+
+### Conclusion
+
+**None of the current benchmarks benefit from vectorized arithmetic.** The feature is designed for data processing workloads with large arrays (hundreds+ elements), not tight computational loops with small fixed-size vectors. The benchmarks' array usage falls into two categories:
+
+1. **Small vectors (3-5 elements)**: raytrace3d, cube3d, nbody — vectorized dispatch overhead dominates
+2. **Large arrays with in-place mutation**: navier_stokes — vectorized ops create new arrays, incompatible with mutation semantics
+
+For small-vector benchmarks, the optimal path remains manual element-wise indexing combined with typed map annotations for struct field access.
+
+---
+
+## Return Type Annotations for `pn` Functions
+
+### What It Does
+
+Adding return type annotations (e.g., `pn foo(x: int) int { ... }`) to procedural functions allows the MIR JIT to:
+1. **Return native values** — skip boxing the return value into a tagged `Item`
+2. **Enable callers to use native values directly** — no unboxing at call sites
+3. **Enable `generate_native` for return-type-only** — functions with no typed params but a declared return type still get the native dual-version optimization
+
+Supported return types: `int`, `float`, `bool`.
+
+### Syntax
+
+```lambda
+// Before (no return type)
+pn compute_hash(key: int) {
+    return key * 2654435761
+}
+
+// After (with return type annotation)
+pn compute_hash(key: int) int {
+    return key * 2654435761
+}
+```
+
+### How It Works (JIT Implementation)
+
+**Phase P4-3.4** in `transpile-mir.cpp`:
+
+1. `infer_return_type()` now checks declared return types for `pn` functions (previously skipped with TODO)
+2. `generate_native` enabled when return type alone is native (even if no params are typed)
+3. `transpile_return()` emits unboxed native values when `mt->native_return_tid != LMD_TYPE_ANY`
+4. Boxed wrapper (`_b` suffix) boxes the native return for dynamic dispatch callers
+
+### Best Practices
+
+For maximum benefit, **also type the local variables** that receive return values:
+
+```lambda
+// Good: typed var receives native return directly (no boxing/unboxing)
+var hash: int = compute_hash(key)
+
+// Less optimal: untyped var forces boxing at return, unboxing at use
+var hash = compute_hash(key)
+```
+
+### Benchmark Results
+
+| Benchmark | Typed (v2) | + Return Type (v3) | Speedup |
+|-----------|-----------|-------------------|---------|
+| richards  | ~14.8ms   | ~14.3ms           | ~3% (marginal) |
+| deltablue | ~2.25ms   | ~2.25ms           | ~0% (noise) |
+| raytrace3d| ~150.6ms  | ~149.7ms          | ~1% (marginal) |
+| **hashmap**| **~20.4ms** | **~15.2ms**     | **~25% (1.34x)** |
+
+### Why Hashmap Benefits Most
+
+The hashmap benchmark has a tight inner loop calling `hashmap_get()` and `compute_hash()` ~450,000 times each. Each call saves ~10ns from avoiding int boxing/unboxing, accumulating to significant savings.
+
+Functions that benefit most from return type annotations:
+- **Called at high frequency** (100K+ calls in tight loops)
+- **Return simple scalar types** (int, float, bool)
+- **Callers store result in typed variables** (enables full native chain)
+
+Functions where return type annotations help less:
+- Called infrequently (setup/initialization functions)
+- Return complex types (maps, arrays, strings — not native-optimizable)
+- Return bool in branch-only contexts (boxing cost is negligible)
+
+### Cumulative Speedups (Untyped → Typed → Return Type)
+
+| Benchmark | Untyped (v1) | Typed (v2) | + Return Type (v3) | Total Speedup |
+|-----------|-------------|-----------|-------------------|---------------|
+| richards  | ~300ms      | ~15ms     | ~14ms             | **21.4x** |
+| deltablue | ~18ms       | ~2.3ms    | ~2.3ms            | **7.8x** |
+| raytrace3d| ~340ms      | ~150ms    | ~150ms            | **2.3x** |
+| hashmap   | ~100ms      | ~21ms     | ~15ms             | **6.7x** |
+
+### Files
+
+| Benchmark | Typed Only | + Return Type |
+|-----------|-----------|--------------|
+| richards  | `richards2.ls` | `richards3.ls` |
+| deltablue | `deltablue2.ls` | `deltablue3.ls` |
+| raytrace3d| `raytrace3d2.ls`| `raytrace3d3.ls` |
+| hashmap   | `hashmap2.ls`  | `hashmap3.ls` |

@@ -204,7 +204,6 @@ typedef enum SysFunc {
     SYSFUNC_REPLACE,
     SYSFUNC_FIND,           // find(str, pattern) - find all matches
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
-    SYSFUNC_CHARS,          // chars(str) - decompose string into array of characters
     SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
     SYSFUNC_CHR,            // chr(int) - character from Unicode code point
     // vector functions
@@ -1136,7 +1135,6 @@ typedef struct Context {
     Item fn_split(Item str, Item sep);
     Item fn_split3(Item str, Item sep, Item keep_delim);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
-    Item fn_chars(Item str);            // chars(str) - decompose into array of characters
     int64_t fn_ord(Item str);           // ord(str) - Unicode code point of first character
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
     Item fn_join2(Item list, Item sep);

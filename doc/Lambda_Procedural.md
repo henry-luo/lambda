@@ -99,17 +99,24 @@ Assignment (`=`) is only available inside `pn` functions. The left-hand side can
 ### Immutability Rules
 
 - **`let` bindings** are immutable — reassignment produces error E211
-- **Function parameters** are immutable — reassignment produces error E211
+- **`pn` parameters** are mutable — reassignment is allowed (useful for counters, accumulators, etc.)
+- **`fn` parameters** are immutable — reassignment produces error E211
 - **`var` variables** are mutable — reassignment is allowed
 
 ```lambda
+pn countdown(n) {
+    while (n > 0) {   // OK: pn parameters are mutable
+        n = n - 1
+    }
+}
+
 pn example() {
     let x = 42
     x = 10           // ERROR E211: cannot reassign immutable binding
 }
 
-pn foo(x) {
-    x = 10           // ERROR E211: cannot reassign parameter
+fn foo(x) {
+    x + 1            // fn parameters are immutable (no assignment in fn)
 }
 ```
 

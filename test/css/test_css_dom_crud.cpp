@@ -6,6 +6,7 @@
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/mark_builder.hpp"
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/format/format.h"
@@ -48,6 +49,12 @@ protected:
         // Create DomDocument for DOM tree
         doc = dom_document_create(input);
         ASSERT_NE(doc, nullptr);
+
+        // Initialize CSS property system via css_engine_create (which lives in the shared
+        // library) so that the dylib's copy of static globals gets initialized.
+        // NOTE: css_property_system_init(pool) only initializes the test binary's copy
+        // of the statics, not the shared library's copy used by css_parser/dom_element.
+        css_engine_create(doc->pool);
 
         matcher = selector_matcher_create(pool);
         ASSERT_NE(matcher, nullptr);
