@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 class PremakeGenerator:
-    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None):
+    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         self.premake_content = []
+        self.variant = variant
 
         # Add platform detection for use throughout the generator
         import platform
@@ -56,6 +57,10 @@ class PremakeGenerator:
                                       'MINGW' in current_platform or
                                       self.config.get('platform') == 'Windows')
 
+        # Apply variant overlay (e.g., 'cli' for headless build) before parsing libraries
+        if self.variant:
+            self._apply_variant_overlay(self.variant)
+
         self.external_libraries = self._parse_external_libraries()
 
     def _parse_external_libraries(self) -> Dict[str, Dict[str, str]]:
@@ -86,6 +91,14 @@ class PremakeGenerator:
                     'lib': lib.get('lib', ''),
                     'link': lib.get('link', 'static')
                 }
+
+        # Step 1b: Remove libraries excluded by variant (e.g., cli headless build)
+        if self.variant:
+            variant_config = self.config.get('platforms', {}).get(self.variant, {})
+            exclude_libs = set(variant_config.get('exclude_libraries', []))
+            exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', []))
+            all_excluded = exclude_libs | exclude_macos_libs
+            libraries = {k: v for k, v in libraries.items() if k not in all_excluded}
 
         # Step 2: Apply platform-specific overrides
         platforms_config = self.config.get('platforms', {})
@@ -321,6 +334,41 @@ class PremakeGenerator:
                     build_opts.append(opt)
 
         return build_opts
+
+    def _apply_variant_overlay(self, variant: str) -> None:
+        """Apply a build variant overlay (e.g., 'cli') onto the main config.
+
+        The variant is read from platforms.<variant> and overrides top-level config
+        keys like output, source_dirs, exclude_source_files, includes, and defines.
+        This is applied before library parsing so exclude_libraries takes effect.
+        """
+        platforms_config = self.config.get('platforms', {})
+        variant_config = platforms_config.get(variant)
+        if not variant_config:
+            print(f"Warning: variant '{variant}' not found in platforms config, ignoring")
+            return
+
+        print(f"DEBUG: Applying variant overlay '{variant}'")
+
+        # Override top-level keys if the variant specifies them
+        overlay_keys = ['output', 'source_dirs', 'exclude_source_files', 'includes']
+        for key in overlay_keys:
+            if key in variant_config:
+                print(f"DEBUG: Variant override: {key} = {variant_config[key]}")
+                self.config[key] = variant_config[key]
+
+        # Merge variant defines into the config (additive)
+        if 'defines' in variant_config:
+            existing_defines = self.config.get('defines', [])
+            for d in variant_config['defines']:
+                if d not in existing_defines:
+                    existing_defines.append(d)
+            self.config['defines'] = existing_defines
+            print(f"DEBUG: Variant defines: {self.config['defines']}")
+
+        # Store variant build_dir for reference
+        if 'build_dir' in variant_config:
+            self.config['build_dir'] = variant_config['build_dir']
 
     def _get_consolidated_includes(self) -> List[str]:
         """Get consolidated include directories from global and platform-specific configurations"""
@@ -2287,6 +2335,16 @@ class PremakeGenerator:
                 if lib_name and lib_name not in dependencies:
                     dependencies.append(lib_name)
 
+        # Filter out libraries excluded by variant (e.g., cli headless build)
+        if self.variant:
+            variant_config = platforms_config.get(self.variant, {})
+            exclude_libs = set(variant_config.get('exclude_libraries', []))
+            exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', []))
+            all_excluded = exclude_libs | exclude_macos_libs
+            if all_excluded:
+                print(f"DEBUG: Variant '{self.variant}' excluding libraries: {all_excluded}")
+                dependencies = [d for d in dependencies if d not in all_excluded]
+
         # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included
         # in the main program - they are only for development and testing
 
@@ -2498,7 +2556,8 @@ class PremakeGenerator:
                                 self.premake_content.append(f'        "{lib_path}",')
 
             # Add OpenGL libraries for Linux (must come after ThorVG static library)
-            if self.use_linux_config:
+            # Skip for headless CLI variant which excludes ThorVG
+            if self.use_linux_config and not self.variant:
                 self.premake_content.append('        -- OpenGL and OpenMP libraries (required by ThorVG)')
                 self.premake_content.append('        "-lGL",')
                 self.premake_content.append('        "-lGLU",')
@@ -2639,6 +2698,11 @@ class PremakeGenerator:
                 '        "UTF8PROC_STATIC",',
             ])
 
+        # Add variant-specific defines (e.g., LAMBDA_HEADLESS for cli build)
+        variant_defines = self.config.get('defines', [])
+        for d in variant_defines:
+            self.premake_content.append(f'        "{d}",')
+
         self.premake_content.extend([
             '    }',
             '    ',
@@ -2728,6 +2792,7 @@ def main():
     config_file = "build_lambda_config.json"
     output_file = None  # Will be determined based on platform
     explicit_platform = None
+    variant = None  # Build variant (e.g., 'cli' for headless build)
 
     # Parse command line arguments
     i = 1
@@ -2741,6 +2806,9 @@ def main():
             i += 2
         elif arg in ['--platform', '-p'] and i + 1 < len(sys.argv):
             explicit_platform = sys.argv[i + 1].lower()
+            i += 2
+        elif arg in ['--variant', '-v'] and i + 1 < len(sys.argv):
+            variant = sys.argv[i + 1].lower()
             i += 2
         elif arg.endswith('.json'):
             config_file = arg
@@ -2780,10 +2848,10 @@ def main():
             print(f"Warning: Unknown platform '{current_platform}', defaulting to premake5.mac.lua")
             output_file = "premake5.mac.lua"
 
-    print(f"DEBUG: Final config_file={config_file}, output_file={output_file}")
+    print(f"DEBUG: Final config_file={config_file}, output_file={output_file}, variant={variant}")
 
     # Generate Premake5 configuration
-    generator = PremakeGenerator(config_file, explicit_platform)
+    generator = PremakeGenerator(config_file, explicit_platform, variant)
     generator.parse_config()
 
     if not generator.validate_config():
