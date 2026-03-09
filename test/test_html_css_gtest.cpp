@@ -13,6 +13,7 @@
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_parser.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_tokenizer.hpp"
 
 extern "C" {
@@ -224,6 +225,11 @@ protected:
         log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
+
+        // Initialize CSS property system via css_engine_create (lives in shared
+        // library, ensures the dylib's static globals are initialized)
+        css_engine_create(pool);
+
         doc = nullptr;  // Will be created per test when needed
     }
 
