@@ -504,8 +504,25 @@ int calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_i
                 span_count = item->gi->computed_grid_column_end - item->gi->computed_grid_column_start;
             }
 
+            // If item spans multiple tracks, compute shortfall contribution for this track.
+            // Only the remaining size that isn't already covered by other spanned tracks
+            // contributes to this track's intrinsic size.
             if (span_count > 1) {
-                item_size = item_size / span_count;
+                int item_start_idx = is_row ? (item->gi->computed_grid_row_start - 1)
+                                            : (item->gi->computed_grid_column_start - 1);
+                int item_end_idx   = is_row ? (item->gi->computed_grid_row_end - 1)
+                                            : (item->gi->computed_grid_column_end - 1);
+                GridTrack* axis_tracks = is_row ? grid_layout->computed_rows : grid_layout->computed_columns;
+                int already_covered = 0;
+                for (int t = item_start_idx; t < item_end_idx; t++) {
+                    if (t != track_index) {
+                        already_covered += axis_tracks[t].base_size;
+                    }
+                }
+                int gap_val = (int)(is_row ? grid_layout->row_gap : grid_layout->column_gap);
+                int gap_total = (span_count - 1) * gap_val;
+                int shortfall = item_size - already_covered - gap_total;
+                item_size = shortfall > 0 ? shortfall : 0;
             }
 
             max_size = fmax(max_size, item_size);
@@ -634,6 +651,17 @@ void expand_flexible_tracks(GridContainerLayout* grid_layout, ViewBlock* contain
     bool expand_row_fr = grid_layout->has_explicit_height;
     if (!expand_row_fr) {
         log_debug(" Skipping row fr expansion - container has auto height\n");
+        // Per CSS Grid spec: fr rows in auto-height containers resolve to min-content
+        for (int i = 0; i < grid_layout->computed_row_count; i++) {
+            GridTrack* track = &grid_layout->computed_rows[i];
+            if (track->is_flexible && track->computed_size == 0) {
+                int min_c = calculate_track_intrinsic_size(grid_layout, i, true, GRID_TRACK_SIZE_MIN_CONTENT);
+                if (min_c > 0) {
+                    track->computed_size = min_c;
+                    log_debug(" FR row %d in auto-height container: set to min-content %d\n", i, min_c);
+                }
+            }
+        }
     }
 
     // Subtract space used by non-flexible tracks and gaps
