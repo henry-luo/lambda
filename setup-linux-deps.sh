@@ -18,6 +18,8 @@ ALL_LIBS=(
     "libnghttp2-dev"         # nghttp2
     "libncurses5-dev"        # ncurses
     "build-essential"        # includes pthread
+    "libevent-dev"           # libevent (HTTP server)
+    "libbrotli-dev"          # brotlidec + brotlicommon (WOFF2 dep)
 )
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
@@ -246,6 +248,15 @@ if timeout 10 npx tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
     echo "✅ Tree-sitter CLI 0.24.7 accessible via npx"
 else
     echo "Warning: tree-sitter CLI may need to be downloaded on first use"
+fi
+
+# Install npm dependencies (jsdom for test comparators, puppeteer for browser tests)
+echo "Installing npm dependencies..."
+if [ -f "$SCRIPT_DIR/package.json" ]; then
+    npm install --prefix "$SCRIPT_DIR"
+    echo "npm dependencies installed"
+else
+    echo "Warning: package.json not found, skipping npm install"
 fi
 
 # Check for cmake (needed for some dependencies)
@@ -515,152 +526,86 @@ cleanup_intermediate_files() {
 
 # Function to build ThorVG v1.0-pre34 for Linux
 build_thorvg_v1_0_pre34_for_linux() {
-    echo "Building ThorVG v1.0-pre34 for Linux..."
+    echo "Building ThorVG v1.0-pre34 for Linux from mac-deps/thorvg..."
 
-    # Check if already installed in system location and verify headers
-    if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ]; then
-        if [ -f "$SYSTEM_PREFIX/include/thorvg.h" ]; then
-            # Verify no GL symbols (which cause conflicts with system OpenGL)
-            if ! nm "$SYSTEM_PREFIX/lib/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
-                echo "✅ ThorVG v1.0-pre34 already installed in system location"
-                return 0
-            else
-                echo "ThorVG library has GL symbols (conflicts with OpenGL), rebuilding..."
-                sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
-            fi
-        else
-            echo "ThorVG library found but headers missing, rebuilding..."
-        fi
+    # Determine arch-specific install path (matches build config)
+    local ARCH=$(uname -m)
+    local LIB_DIR
+    if [ "$ARCH" = "aarch64" ]; then
+        LIB_DIR="$SYSTEM_PREFIX/lib/aarch64-linux-gnu"
+    else
+        LIB_DIR="$SYSTEM_PREFIX/lib/x86_64-linux-gnu"
     fi
 
-    # Create build_temp directory if it doesn't exist
-    mkdir -p "build_temp"
-
-    if [ ! -d "build_temp/thorvg" ]; then
-        cd build_temp
-        echo "Cloning ThorVG repository..."
-        git clone https://github.com/thorvg/thorvg.git || {
-            echo "Warning: Could not clone ThorVG repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    else
-        echo "ThorVG source already downloaded"
-        cd "build_temp/thorvg"
-        # Make sure we're up to date
-        git fetch --tags 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    cd "build_temp/thorvg"
-
-    # Checkout v1.0-pre34 specifically
-    echo "Checking out ThorVG v1.0-pre34..."
-    git fetch --tags
-    git checkout v1.0-pre34 || {
-        echo "❌ Failed to checkout ThorVG v1.0-pre34"
-        cd - > /dev/null
-        return 1
-    }
-
-    # Check for meson build system
-    if [ -f "meson.build" ]; then
-        # Check if meson is available
-        if ! command -v meson >/dev/null 2>&1; then
-            echo "Installing meson via pip3..."
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user meson ninja || {
-                    echo "Failed to install meson via pip3, trying apt..."
-                    if sudo apt update && sudo apt install -y meson ninja-build; then
-                        echo "✅ meson installed via apt"
-                    else
-                        echo "Failed to install meson via apt"
-                        cd - > /dev/null
-                        return 1
-                    fi
-                }
-                # Add user bin to PATH if not already there
-                export PATH="$HOME/.local/bin:$PATH"
-            else
-                echo "pip3 not found, trying apt..."
-                if sudo apt update && sudo apt install -y python3-pip meson ninja-build; then
-                    echo "✅ meson installed via apt"
-                else
-                    echo "Cannot install meson - no pip3 or apt package manager"
-                    cd - > /dev/null
-                    return 1
-                fi
-            fi
-        fi
-
-        # Clean previous build directory to ensure fresh configuration
-        rm -rf build-linux
-        mkdir -p build-linux
-
-        echo "Configuring ThorVG with Meson..."
-        # CRITICAL: Build with ONLY SW engine (no GL) to avoid OpenGL symbol conflicts
-        # The GL engine includes GLAD which defines GL functions as global variables,
-        # causing bus errors at runtime when system OpenGL tries to use them.
-        if meson setup build-linux \
-            --buildtype=plain \
-            --default-library=static \
-            -Dengines=sw \
-            -Dloaders=svg,ttf \
-            -Dsavers= \
-            -Dbindings=capi \
-            -Dtools= \
-            -Dtests=false \
-            -Dsimd=true \
-            -Dthreads=true; then
-
-            echo "Building ThorVG v1.0-pre34..."
-            if ninja -C build-linux; then
-                echo "Installing ThorVG v1.0-pre34 to $SYSTEM_PREFIX (requires sudo)..."
-                # Copy files manually
-                sudo mkdir -p "$SYSTEM_PREFIX/lib"
-                sudo mkdir -p "$SYSTEM_PREFIX/include"
-                
-                if [ -f "build-linux/src/libthorvg.a" ]; then
-                    sudo cp "build-linux/src/libthorvg.a" "$SYSTEM_PREFIX/lib/"
-                fi
-                
-                if [ -f "inc/thorvg.h" ]; then
-                    sudo cp "inc/thorvg.h" "$SYSTEM_PREFIX/include/"
-                fi
-
-                # Verify installation
-                if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] && [ -f "$SYSTEM_PREFIX/include/thorvg.h" ]; then
-                    # Verify text API is available
-                    if nm "$SYSTEM_PREFIX/lib/libthorvg.a" | grep -q "tvg_text_new"; then
-                        # Verify no GL symbols
-                        if ! nm "$SYSTEM_PREFIX/lib/libthorvg.a" | grep -q "glClearColor"; then
-                            echo "✅ ThorVG v1.0-pre34 built successfully"
-                            echo "   - Text API: ✓ Available"
-                            echo "   - GL symbols: ✓ None (no conflicts)"
-                            cd - > /dev/null
-                            return 0
-                        else
-                            echo "❌ ThorVG contains GL symbols (should not happen with sw-only build)"
-                            cd - > /dev/null
-                            return 1
-                        fi
-                    else
-                        echo "❌ ThorVG text API not available (C API binding may have failed)"
-                        cd - > /dev/null
-                        return 1
-                    fi
-                fi
-            fi
-        fi
-    else
-        echo "❌ ThorVG meson.build not found - unsupported build system"
-        cd - > /dev/null
+    # Use mac-deps/thorvg source (already at v1.0-pre34, same as Mac)
+    local THORVG_SRC="$SCRIPT_DIR/mac-deps/thorvg"
+    if [ ! -d "$THORVG_SRC" ]; then
+        echo "❌ mac-deps/thorvg source not found - run setup-mac-deps.sh first or clone manually"
         return 1
     fi
 
-    echo "❌ ThorVG v1.0-pre34 build failed"
+    # Verify the source is at the right tag
+    cd "$THORVG_SRC"
+    local tag
+    tag=$(git describe --tags 2>/dev/null || echo "unknown")
+    if echo "$tag" | grep -qv "v1.0-pre34"; then
+        echo "⚠️  Warning: mac-deps/thorvg is at tag '$tag', expected v1.0-pre34"
+    fi
     cd - > /dev/null
+
+    # Build in mac-deps/thorvg/build-linux (mirroring Mac's build-mac)
+    cd "$THORVG_SRC"
+    rm -rf build-linux
+    mkdir -p build-linux
+
+    echo "Configuring ThorVG with Meson..."
+    if ! meson setup build-linux \
+        --buildtype=plain \
+        --default-library=static \
+        -Dengines=sw \
+        -Dloaders=svg,ttf \
+        -Dsavers= \
+        -Dbindings=capi \
+        -Dtools= \
+        -Dtests=false \
+        -Dsimd=true \
+        -Dthreads=true; then
+        echo "❌ ThorVG meson setup failed"
+        cd - > /dev/null
+        return 1
+    fi
+
+    echo "Building ThorVG v1.0-pre34..."
+    if ! ninja -C build-linux; then
+        echo "❌ ThorVG ninja build failed"
+        cd - > /dev/null
+        return 1
+    fi
+
+    # Install library and headers
+    echo "Installing ThorVG to $LIB_DIR..."
+    sudo mkdir -p "$LIB_DIR"
+    sudo mkdir -p "$SYSTEM_PREFIX/include"
+
+    sudo cp "build-linux/src/libthorvg.a" "$LIB_DIR/libthorvg.a"
+    sudo cp "inc/thorvg.h" "$SYSTEM_PREFIX/include/thorvg.h"
+    sudo cp "src/bindings/capi/thorvg_capi.h" "$SYSTEM_PREFIX/include/thorvg_capi.h"
+
+    # Verify installation and API
+    if nm "$LIB_DIR/libthorvg.a" 2>/dev/null | grep -q "tvg_text_set_size"; then
+        if ! nm "$LIB_DIR/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
+            echo "✅ ThorVG v1.0-pre34 installed to $LIB_DIR"
+            echo "   - tvg_text_set_size: ✓ Available"
+            echo "   - GL symbols: ✓ None"
+            cd - > /dev/null
+            return 0
+        else
+            echo "❌ ThorVG library has unexpected GL symbols"
+        fi
+    else
+        echo "❌ ThorVG text API missing from built library"
+    fi
+
     return 1
 }
 
@@ -966,6 +911,54 @@ build_mir_for_linux() {
     return 1
 }
 
+# Helper: returns 0 if the archive contains ELF objects, 1 if not (e.g. Mach-O from macOS)
+is_elf_archive() {
+    local lib="$1"
+    [ -f "$lib" ] || return 1
+    local first_obj
+    first_obj=$(ar t "$lib" 2>/dev/null | head -1)
+    [ -n "$first_obj" ] || return 1
+    # ELF magic bytes: 7f 45 4c 46
+    local magic
+    magic=$(ar p "$lib" "$first_obj" 2>/dev/null | od -A n -N 4 -t x1 | tr -d ' \n')
+    [ "$magic" = "7f454c46" ]
+}
+
+# Function to build RE2 for Linux (from build_temp/re2-noabsl source)
+build_re2_for_linux() {
+    echo "Building RE2 for Linux..."
+
+    local RE2_SRC="build_temp/re2-noabsl"
+    local RE2_LIB="$RE2_SRC/build/libre2.a"
+
+    if [ -f "$RE2_LIB" ] && is_elf_archive "$RE2_LIB"; then
+        echo "✅ RE2 already built for Linux"
+        return 0
+    fi
+
+    if [ ! -d "$RE2_SRC" ]; then
+        echo "❌ RE2 source not found at $RE2_SRC"
+        return 1
+    fi
+
+    echo "Building RE2 from $RE2_SRC..."
+    mkdir -p "$RE2_SRC/build"
+    cd "$RE2_SRC/build"
+
+    if cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF .. && \
+       cmake --build . -j$(nproc); then
+        if [ -f "libre2.a" ] && is_elf_archive "libre2.a"; then
+            echo "✅ RE2 built successfully"
+            cd - > /dev/null
+            return 0
+        fi
+    fi
+
+    echo "❌ RE2 build failed"
+    cd - > /dev/null
+    return 1
+}
+
 echo "Found native compiler: $(which gcc)"
 echo "System: $(uname -a)"
 
@@ -973,53 +966,43 @@ echo "System: $(uname -a)"
 cd "$SCRIPT_DIR"
 
 # Build tree-sitter for Linux
-if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
+# Always rebuild if existing archive is not Linux ELF (e.g. committed from macOS)
+if ! is_elf_archive "lambda/tree-sitter/libtree-sitter.a"; then
     if [ -d "lambda/tree-sitter" ]; then
         echo "Building tree-sitter for Linux..."
         cd lambda/tree-sitter
-        # Clean previous builds
         make clean || true
-        # Build static library for Linux
         make libtree-sitter.a
         cd - > /dev/null
         echo "Tree-sitter built successfully"
     else
         echo "❌ Directory lambda/tree-sitter does not exist. Skipping tree-sitter build."
-        echo "Please ensure the tree-sitter source is present at lambda/tree-sitter."
-        echo "Current directory: $(pwd)"
-        echo "Directory contents: $(ls -la | head -5)"
     fi
 else
-    echo "Tree-sitter already built for Linux"
+    echo "✅ Tree-sitter already built for Linux"
 fi
 
 # Build tree-sitter-lambda for Linux
-if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
+if ! is_elf_archive "lambda/tree-sitter-lambda/libtree-sitter-lambda.a"; then
     if [ -d "lambda/tree-sitter-lambda" ]; then
         echo "Building tree-sitter-lambda for Linux..."
         cd lambda/tree-sitter-lambda
-        # Clean previous builds
         make clean || true
-        # Build static library for Linux (creates libtree-sitter-lambda.a)
         make libtree-sitter-lambda.a
         cd - > /dev/null
         echo "Tree-sitter-lambda built successfully"
     else
         echo "❌ Directory lambda/tree-sitter-lambda does not exist. Skipping tree-sitter-lambda build."
-        echo "Please ensure the tree-sitter-lambda source is present at lambda/tree-sitter-lambda."
-        echo "Current directory: $(pwd)"
-        echo "Directory contents: $(ls -la | head -5)"
     fi
 else
-    echo "Tree-sitter-lambda already built for Linux"
+    echo "✅ Tree-sitter-lambda already built for Linux"
 fi
 
 # Build tree-sitter-javascript for Linux
-if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
+if ! is_elf_archive "lambda/tree-sitter-javascript/libtree-sitter-javascript.a"; then
     if [ -d "lambda/tree-sitter-javascript" ]; then
         echo "Building tree-sitter-javascript for Linux..."
         cd lambda/tree-sitter-javascript
-        # Clean previous builds
         make clean || true
 
         # Generate parser if needed
@@ -1032,24 +1015,21 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
             fi
         fi
 
-        # Build static library for Linux (creates libtree-sitter-javascript.a)
         make libtree-sitter-javascript.a
         cd - > /dev/null
         echo "Tree-sitter-javascript built successfully"
     else
         echo "❌ Directory lambda/tree-sitter-javascript does not exist. Skipping tree-sitter-javascript build."
-        echo "Please ensure the tree-sitter-javascript source is present at lambda/tree-sitter-javascript."
     fi
 else
-    echo "Tree-sitter-javascript already built for Linux"
+    echo "✅ Tree-sitter-javascript already built for Linux"
 fi
 
 # Build tree-sitter-latex for Linux
-if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
+if ! is_elf_archive "lambda/tree-sitter-latex/libtree-sitter-latex.a"; then
     if [ -d "lambda/tree-sitter-latex" ]; then
         echo "Building tree-sitter-latex for Linux..."
         cd lambda/tree-sitter-latex
-        # Clean previous builds
         make clean || true
 
         # Generate parser if needed
@@ -1062,59 +1042,64 @@ if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
             fi
         fi
 
-        # Build static library for Linux (creates libtree-sitter-latex.a)
         make libtree-sitter-latex.a
         cd - > /dev/null
         echo "Tree-sitter-latex built successfully"
     else
         echo "❌ Directory lambda/tree-sitter-latex does not exist. Skipping tree-sitter-latex build."
-        echo "Please ensure the tree-sitter-latex source is present at lambda/tree-sitter-latex."
     fi
 else
-    echo "Tree-sitter-latex already built for Linux"
+    echo "✅ Tree-sitter-latex already built for Linux"
+fi
+
+# Build tree-sitter-latex-math for Linux
+if ! is_elf_archive "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a"; then
+    if [ -d "lambda/tree-sitter-latex-math" ]; then
+        echo "Building tree-sitter-latex-math for Linux..."
+        cd lambda/tree-sitter-latex-math
+        make clean || true
+
+        make libtree-sitter-latex-math.a
+        cd - > /dev/null
+        echo "Tree-sitter-latex-math built successfully"
+    else
+        echo "❌ Directory lambda/tree-sitter-latex-math does not exist. Skipping."
+    fi
+else
+    echo "✅ Tree-sitter-latex-math already built for Linux"
 fi
 
 
-# Build ThorVG v1.0-pre34 for Linux (required for Radiant project, with TTF loader for SVG text support)
-echo "Setting up ThorVG ..."
+# Build ThorVG v1.0-pre34 for Linux using mac-deps/thorvg source (same source as Mac)
+echo "Setting up ThorVG v1.0-pre34..."
 
-# Check if ThorVG v1.0-pre34 is already properly installed
-if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
-    # Verify it's the correct version by checking if we can find the repository with the right tag
-    if [ -d "build_temp/thorvg" ]; then
-        cd "build_temp/thorvg"
-        if git describe --tags 2>/dev/null | grep -q "v1.0-pre34"; then
-            echo "✅ ThorVG v1.0-pre34 already installed and verified"
-            cd - > /dev/null
-        else
-            echo "ThorVG found but version mismatch, rebuilding..."
-            cd - > /dev/null
-            # Force rebuild to ensure we have the correct version
-            echo "Removing existing ThorVG installation to ensure correct version..."
-            sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
-            sudo rm -f "$SYSTEM_PREFIX/include/thorvg"* 2>/dev/null || true
-            sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
-            sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
-            rm -rf "build_temp/thorvg" 2>/dev/null || true
-
-            if ! build_thorvg_v1_0_pre34_for_linux; then
-                echo "❌ ThorVG v1.0-pre34 build failed - required for Radiant project"
-                exit 1
-            else
-                echo "✅ ThorVG v1.0-pre34 built successfully"
-            fi
-        fi
-    else
-        echo "✅ ThorVG v1.0-pre34 already installed in system location"
-    fi
+# Determine arch-specific lib install path (matches build config)
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ]; then
+    THORVG_LIB_INSTALL="$SYSTEM_PREFIX/lib/aarch64-linux-gnu/libthorvg.a"
 else
-    # ThorVG not found, need to build it
+    THORVG_LIB_INSTALL="$SYSTEM_PREFIX/lib/x86_64-linux-gnu/libthorvg.a"
+fi
+
+# Check if already installed with the correct pre34 API (tvg_text_set_size is pre34-specific)
+thorvg_needs_rebuild=true
+if [ -f "$THORVG_LIB_INSTALL" ] && is_elf_archive "$THORVG_LIB_INSTALL"; then
+    if nm "$THORVG_LIB_INSTALL" 2>/dev/null | grep -q "tvg_text_set_size"; then
+        thorvg_needs_rebuild=false
+    else
+        echo "ThorVG installed but API mismatch (not v1.0-pre34), rebuilding..."
+    fi
+fi
+
+if $thorvg_needs_rebuild; then
     if ! build_thorvg_v1_0_pre34_for_linux; then
         echo "❌ ThorVG v1.0-pre34 build failed - required for Radiant project"
         exit 1
     else
         echo "✅ ThorVG v1.0-pre34 built successfully"
     fi
+else
+    echo "✅ ThorVG v1.0-pre34 already installed with correct API"
 fi
 
 
@@ -1214,6 +1199,13 @@ else
     else
         echo "utf8proc built successfully"
     fi
+fi
+
+# Build RE2 for Linux (from build_temp/re2-noabsl source; Mac-built archive won't link)
+echo "Setting up RE2..."
+if ! build_re2_for_linux; then
+    echo "❌ RE2 build failed - required for regex support"
+    exit 1
 fi
 
 # Install apt dependencies that are required by build_lambda_config.json
