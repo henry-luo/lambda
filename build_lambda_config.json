@@ -751,7 +751,7 @@
         },
         "linux": {
             "output": "lambda.exe",
-            "compiler": "gcc",
+            "compiler": "clang",
             "exclude_source_files": [
                 "lib/clock_compat.c"
             ],
