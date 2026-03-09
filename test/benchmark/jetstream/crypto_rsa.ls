@@ -91,13 +91,9 @@ pn bi_from_int(x: int) {
 // ================= am3: Multiply-Accumulate (28-bit digits) =================
 // Compute w_a[j..j+n-1] += bi_a[i..i+n-1] * x, propagate carries
 // Returns final carry
-pn am3(bi_a, ii: int, x: int, w_a, jj: int, c_in: int, n_in: int) {
+pn am3(bi_a, i: int, x: int, w_a, j: int, c: int, n: int) {
     var xl = band(x, 16383)
     var xh = shr(x, 14)
-    var i = ii
-    var j = jj
-    var c = c_in
-    var n = n_in
     while (n > 0) {
         n = n - 1
         var l = band(bi_a[i], 16383)
@@ -254,8 +250,7 @@ pn bi_from_byte_array(ba) {
 
 // ================= Comparison & Bit Operations =================
 
-pn nbits(x_in: int) {
-    var x = x_in
+pn nbits(x: int) {
     var r: int = 1
     var t: int = 0
     t = shr(x, 16)
@@ -309,8 +304,7 @@ pn bi_test_bit(bi, n: int) {
     return band(a[j], shl(1, n % BI_DB)) != 0
 }
 
-pn lbit(x_in: int) {
-    var x = x_in
+pn lbit(x: int) {
     if (x == 0) { return -1 }
     var r: int = 0
     if (band(x, 65535) == 0) { x = shr(x, 16); r = r + 16 }
@@ -636,8 +630,7 @@ pn bi_square_to(x_bi, r) {
 
 // ================= Division =================
 
-pn bi_div_rem_to(bi, m, q, r_in) {
-    var r = r_in
+pn bi_div_rem_to(bi, m, q, r) {
     var pm = bi_abs(m)
     if (pm.t <= 0) { return 0 }
     var pt = bi_abs(bi)
@@ -786,8 +779,7 @@ pn bi_d_multiply(bi, n: int) {
     bi_clamp(bi)
 }
 
-pn bi_d_add_offset(bi, n: int, w_in: int) {
-    var w = w_in
+pn bi_d_add_offset(bi, n: int, w: int) {
     var a = bi.a
     while (bi.t <= w) {
         bi_ensure(bi, bi.t + 1)
@@ -1428,26 +1420,25 @@ pn pkcs1pad2(s: string, n: int, rng_state) {
     }
     var ba = fill(n, 0)
     var i = int(len(s)) - 1
-    var nn = n
-    while (i >= 0 and nn > 0) {
-        nn = nn - 1
-        ba[nn] = int(ord(slice(s, i, i + 1)))
+    while (i >= 0 and n > 0) {
+        n = n - 1
+        ba[n] = int(ord(slice(s, i, i + 1)))
         i = i - 1
     }
-    nn = nn - 1
-    ba[nn] = 0
-    while (nn > 2) {
-        nn = nn - 1
+    n = n - 1
+    ba[n] = 0
+    while (n > 2) {
+        n = n - 1
         var x: int = 0
         while (x == 0) {
             x = arc4_next(rng_state)
         }
-        ba[nn] = x
+        ba[n] = x
     }
-    nn = nn - 1
-    ba[nn] = 2
-    nn = nn - 1
-    ba[nn] = 0
+    n = n - 1
+    ba[n] = 2
+    n = n - 1
+    ba[n] = 0
     return bi_from_byte_array(ba)
 }
 
