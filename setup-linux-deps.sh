@@ -959,6 +959,59 @@ build_re2_for_linux() {
     return 1
 }
 
+# Function to build mbedTLS 3.6.5 for Linux (matches Homebrew version on Mac)
+build_mbedtls_for_linux() {
+    local MBEDTLS_VERSION="3.6.5"
+    local MBEDTLS_INSTALL="/usr/local"
+    local MBEDTLS_LIB="$MBEDTLS_INSTALL/lib/libmbedtls.a"
+
+    # Check if the correct version is already installed
+    if [ -f "$MBEDTLS_LIB" ]; then
+        local installed_ver
+        installed_ver=$(grep 'VERSION_STRING ' "$MBEDTLS_INSTALL/include/mbedtls/build_info.h" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"')
+        if [ "$installed_ver" = "$MBEDTLS_VERSION" ]; then
+            echo "✅ mbedTLS $MBEDTLS_VERSION already installed"
+            return 0
+        fi
+        echo "Upgrading mbedTLS from $installed_ver to $MBEDTLS_VERSION..."
+    else
+        echo "Building mbedTLS $MBEDTLS_VERSION..."
+    fi
+
+    local BUILD_DIR="build_temp/mbedtls-${MBEDTLS_VERSION}"
+    mkdir -p "$BUILD_DIR"
+    local TARBALL="build_temp/mbedtls-${MBEDTLS_VERSION}.tar.bz2"
+
+    if [ ! -f "$TARBALL" ]; then
+        echo "Downloading mbedTLS $MBEDTLS_VERSION..."
+        wget -q "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${MBEDTLS_VERSION}/mbedtls-${MBEDTLS_VERSION}.tar.bz2" \
+            -O "$TARBALL" || { echo "❌ Failed to download mbedTLS"; return 1; }
+    fi
+
+    tar xjf "$TARBALL" -C build_temp/ 2>/dev/null || true
+    mkdir -p "$BUILD_DIR/build"
+    cd "$BUILD_DIR/build"
+
+    if cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$MBEDTLS_INSTALL" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DENABLE_TESTING=OFF \
+        -DENABLE_PROGRAMS=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DMBEDTLS_FATAL_WARNINGS=OFF && \
+       cmake --build . -j$(nproc) && \
+       sudo cmake --install .; then
+        echo "✅ mbedTLS $MBEDTLS_VERSION installed to $MBEDTLS_INSTALL"
+        cd - > /dev/null
+        return 0
+    fi
+
+    echo "❌ mbedTLS build failed"
+    cd - > /dev/null
+    return 1
+}
+
 echo "Found native compiler: $(which gcc)"
 echo "System: $(uname -a)"
 
@@ -1208,6 +1261,13 @@ if ! build_re2_for_linux; then
     exit 1
 fi
 
+# Build mbedTLS 3.6.5 for Linux (matches Homebrew/Mac version)
+echo "Setting up mbedTLS..."
+if ! build_mbedtls_for_linux; then
+    echo "❌ mbedTLS build failed - required for TLS support"
+    exit 1
+fi
+
 # Install apt dependencies that are required by build_lambda_config.json
 echo "Installing apt dependencies..."
 
@@ -1356,7 +1416,7 @@ echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/incl
 echo "- curl: $([ -f "$LIB_ARCH_PATH/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "$LIB_ARCH_PATH/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "$LIB_ARCH_PATH/libutf8proc.so" ] || [ -f "$LIB_ARCH_PATH/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- mbedtls: $([ -f "$LIB_ARCH_PATH/libmbedtls.a" ] || dpkg -l | grep -q libmbedtls-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- mbedtls: $([ -f "/usr/local/lib/libmbedtls.a" ] && grep -o '"[^"]*"' /usr/local/include/mbedtls/build_info.h 2>/dev/null | head -1 | tr -d '"' | xargs -I{} echo "✓ {} (3.x)" || echo "✗ Missing")"
 echo "- gtest: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
