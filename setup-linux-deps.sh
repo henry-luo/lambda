@@ -945,7 +945,7 @@ build_re2_for_linux() {
     mkdir -p "$RE2_SRC/build"
     cd "$RE2_SRC/build"
 
-    if cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF .. && \
+    if cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON .. && \
        cmake --build . -j$(nproc); then
         if [ -f "libre2.a" ] && is_elf_archive "libre2.a"; then
             echo "✅ RE2 built successfully"
