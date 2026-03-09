@@ -1765,7 +1765,7 @@ build-lambda-input:
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
-	cd build/premake && premake5 gmake --file=../../premake5.mac.lua
+	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
 	@echo "Building lambda-input DLLs with $(JOBS) parallel jobs..."
 	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(JOBS)
 	@echo "✅ lambda-input DLLs built successfully!"
@@ -1775,7 +1775,7 @@ build-test: build-lambda-input
 	@echo "Building configurations..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
-	cd build/premake && premake5 gmake --file=../../premake5.mac.lua
+	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
 	@# If last build was release, rebuild lambda.exe incrementally in release mode
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
