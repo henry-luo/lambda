@@ -42,12 +42,12 @@
 {r: "foo" ++ "bar"}
 
 // ============================================================
-// CHARS DECOMPOSITION
+// CHARS VIA INDEXING
 // ============================================================
-'chars'
-{r: chars("hello")}
-{r: chars("café")}
-{r: chars("a")}
+'chars via indexing'
+{r: [for (i in 0 to len("hello") - 1) "hello"[i]]}
+{r: [for (i in 0 to len("café") - 1) "café"[i]]}
+{r: [for (i in 0 to len("a") - 1) "a"[i]]}
 
 // ============================================================
 // INDEXING (UTF-8 aware)
