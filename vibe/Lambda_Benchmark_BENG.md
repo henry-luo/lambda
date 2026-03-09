@@ -76,7 +76,7 @@ The Benchmarks Game currently has 10 active benchmark tasks:
 | While loops with mutation | **Supported** | `pn` functions: `var i = 0; while (i < n) { ... }` |
 | String construction/concatenation | **Supported** | `++` operator, string interpolation |
 | String split/join/replace | **Supported** | `split(str, sep)`, `str_join(arr, sep)`, `replace(str, old, new)` — all literal-only |
-| String char access/iteration | **Supported** | `chars(str)` → array of 1-char strings, `slice(str, i, j)` for substrings |
+| String char access/iteration | **Supported** | `str[i]` for character access, `slice(str, i, j)` for substrings |
 | Mutable hash table (dynamic keys) | **Supported** | `map()` constructor + `m.set(key, val)` for in-place insertion of arbitrary runtime keys |
 | File input | **Supported** | `input(@path)` / `input(@path, 'text)` for reading files |
 | stdin reading | **Not supported** | Lambda has no stdin reading; use file input as adaptation |
@@ -819,7 +819,7 @@ This benchmark suite demonstrates several distinctive Lambda features:
 | `map()` + `m.set(key, val)` | k-nucleotide | Dynamic mutable hash tables with runtime key insertion |
 | `fill(n, val)` | fannkuch, spectral-norm | Array creation with fill values |
 | `shl`/`shr`/`band`/`bor` | mandelbrot, binary-trees | Bitwise operations as system functions |
-| `replace()` / `chars()` / `reverse()` | reverse-complement | String manipulation functions (literal matching) |
+| `replace()` / `str[i]` / `reverse()` | reverse-complement | String manipulation functions (literal matching) |
 | `split()` / `str_join()` | fasta, reverse-complement | String splitting and joining |
 | `input(@path)` | k-nucleotide, reverse-complement | File-based input parsing |
 | `floor()` on decimals | pidigits | Integer division on arbitrary-precision numbers |

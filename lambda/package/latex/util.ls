@@ -84,17 +84,17 @@ fn join_rich_children(el, i, n, acc) {
 // slugify a string for use as an HTML id (lowercase, replace spaces with -)
 pub fn slugify(s) {
     let lower = lower(trim(s))
-    slug_chars(chars(lower), 0, len(chars(lower)), "")
+    slug_chars(lower, 0, len(lower), "")
 }
 
-fn slug_chars(cs, i, n, acc) {
+fn slug_chars(s, i, n, acc) {
     if (i >= n) { acc }
     else {
-        let c = cs[i]
+        let c = s[i]
         let next = if (c == " " or c == "\t" or c == "\n") "-"
             else if (c == "_") "-"
             else c
-        slug_chars(cs, i + 1, n, acc ++ next)
+        slug_chars(s, i + 1, n, acc ++ next)
     }
 }
 

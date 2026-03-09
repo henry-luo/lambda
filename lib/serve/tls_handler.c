@@ -179,8 +179,8 @@ int tls_load_certificates(SSL_CTX *ctx, const char *cert_file,
         return -1;
     }
 
-    // load private key - mbedTLS 3.x requires RNG parameters
-    ret = mbedtls_pk_parse_keyfile(&ctx->pkey, key_file, NULL, NULL, NULL);
+    // load private key
+    ret = mbedtls_pk_parse_keyfile(&ctx->pkey, key_file, NULL, mbedtls_ctr_drbg_random, &ctx->ctr_drbg);
     if (ret != 0) {
         char error_buf[100];
         mbedtls_strerror(ret, error_buf, sizeof(error_buf));
@@ -479,8 +479,14 @@ int tls_is_valid_private_key(const char *key_file) {
     mbedtls_pk_context key;
     mbedtls_pk_init(&key);
 
-    // mbedTLS 3.x requires RNG parameters even for NULL password
-    int ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL, NULL, NULL);
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
+    int ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL, mbedtls_ctr_drbg_random, &ctr_drbg);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
     mbedtls_pk_free(&key);
 
     return (ret == 0) ? 1 : 0;
@@ -505,29 +511,25 @@ int tls_certificate_key_match(const char *cert_file, const char *key_file) {
     mbedtls_pk_context key;
     mbedtls_pk_init(&key);
 
-    ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL, NULL, NULL);
+    mbedtls_entropy_context entropy2;
+    mbedtls_ctr_drbg_context ctr_drbg2;
+    mbedtls_entropy_init(&entropy2);
+    mbedtls_ctr_drbg_init(&ctr_drbg2);
+    mbedtls_ctr_drbg_seed(&ctr_drbg2, mbedtls_entropy_func, &entropy2, NULL, 0);
+    ret = mbedtls_pk_parse_keyfile(&key, key_file, NULL, mbedtls_ctr_drbg_random, &ctr_drbg2);
     if (ret != 0) {
+        mbedtls_ctr_drbg_free(&ctr_drbg2);
+        mbedtls_entropy_free(&entropy2);
         mbedtls_x509_crt_free(&cert);
         mbedtls_pk_free(&key);
         return 0;
     }
 
-    // check if they match by comparing the public key from cert with the key
-    // mbedTLS 3.x requires RNG parameters for pk_check_pair
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
+    // check if certificate and private key match
+    int match = mbedtls_pk_check_pair(&cert.pk, &key, mbedtls_ctr_drbg_random, &ctr_drbg2) == 0;
+    mbedtls_ctr_drbg_free(&ctr_drbg2);
+    mbedtls_entropy_free(&entropy2);
 
-    const char *pers = "cert_key_match";
-    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                         (const unsigned char*)pers, strlen(pers));
-
-    int match = mbedtls_pk_check_pair(&cert.pk, &key,
-                                      mbedtls_ctr_drbg_random, &ctr_drbg) == 0;
-
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
     mbedtls_x509_crt_free(&cert);
     mbedtls_pk_free(&key);
 

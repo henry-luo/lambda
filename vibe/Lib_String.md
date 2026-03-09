@@ -185,7 +185,7 @@ filter_chars(str: string, fn: (string) -> bool) -> string    // filter character
 fold_chars(str: string, init: any, fn: (any, string) -> any) -> any  // reduce chars
 
 // String comprehensions (works with existing for syntax)
-for (char in chars(str)) transform(char)
+for (i in 0 to len(str) - 1) transform(str[i])
 for (word in split(str, " ")) process(word)
 
 // Examples:

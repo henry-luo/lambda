@@ -415,6 +415,78 @@
             "build_dir": "build_debug",
             "debug": true
         },
+        "cli": {
+            "description": "Headless CLI-only build: Lambda scripting without Radiant layout engine or GUI support",
+            "output": "lambda-cli.exe",
+            "source_dirs": [
+                "lib",
+                "lambda",
+                "lambda/input",
+                "lambda/input/css",
+                "lambda/input/html5",
+                "lambda/input/markup",
+                "lambda/input/markup/block",
+                "lambda/input/markup/inline",
+                "lambda/input/markup/format",
+                "lambda/format",
+                "lambda/validator",
+                "lambda/js",
+                "lambda/network"
+            ],
+            "exclude_source_files": [
+                "lambda/schema_builder.cpp",
+                "lambda/format/format_latex_html_v2.cpp",
+                "lambda/input/input-adoc.cpp",
+                "lib/font_config.c",
+                "lib/clock_compat.c",
+                "lib/image.c",
+                "lambda/network/resource_loaders.cpp",
+                "lambda/network/network_integration.cpp",
+                "lambda/network/network_resource_manager.cpp"
+            ],
+            "includes": [
+                ".",
+                "include",
+                "build_temp/re2-noabsl",
+                "lambda/tree-sitter/lib/include",
+                "lambda/tree-sitter-lambda/bindings/c",
+                "lambda/tree-sitter-javascript/bindings/c",
+                "mac-deps/rpmalloc-install/include"
+            ],
+            "exclude_libraries": [
+                "glfw",
+                "ThorVG",
+                "freetype",
+                "png",
+                "turbojpeg",
+                "gif",
+                "brotlidec",
+                "brotlicommon",
+                "libevent",
+                "libevent_openssl"
+            ],
+            "exclude_macos_libraries": [
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "GL",
+                "CoreGraphics",
+                "AppKit",
+                "Carbon"
+            ],
+            "defines": [
+                "LAMBDA_HEADLESS"
+            ],
+            "flags": [
+                "std=c++17",
+                "pedantic",
+                "fdiagnostics-color=auto",
+                "fno-omit-frame-pointer"
+            ],
+            "linker_flags": [],
+            "build_dir": "build_cli",
+            "debug": false
+        },
         "windows": {
             "output": "lambda.exe",
             "compiler": "gcc",
@@ -751,7 +823,7 @@
         },
         "linux": {
             "output": "lambda.exe",
-            "compiler": "gcc",
+            "compiler": "clang",
             "exclude_source_files": [
                 "lib/clock_compat.c"
             ],
@@ -813,22 +885,22 @@
                 {
                     "name": "mbedtls",
                     "description": "mbedTLS - SSL/TLS library",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmbedtls.a",
                     "link": "static"
                 },
                 {
                     "name": "mbedx509",
                     "description": "mbedTLS - X.509 certificate parsing",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmbedx509.a",
                     "link": "static"
                 },
                 {
                     "name": "mbedcrypto",
                     "description": "mbedTLS - Cryptographic primitives",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmbedcrypto.a",
                     "link": "static"
                 },
                 {
@@ -901,6 +973,32 @@
                     "link": "static"
                 },
                 {
+                    "name": "libevent",
+                    "description": "Event notification library for HTTP server",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libevent.a",
+                    "link": "static"
+                },
+                {
+                    "name": "libevent_openssl",
+                    "description": "Event notification library OpenSSL support",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libevent_openssl.a",
+                    "link": "static"
+                },
+                {
+                    "name": "brotlidec",
+                    "description": "Brotli decompression (WOFF2 dependency)",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libbrotlidec.a",
+                    "link": "static"
+                },
+                {
+                    "name": "brotlicommon",
+                    "description": "Brotli common (WOFF2 dependency)",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libbrotlicommon.a",
+                    "link": "static"
+                },
+                {
                     "name": "GL",
                     "lib": "-lGL",
                     "link": "dynamic"
@@ -939,7 +1037,7 @@
                 "lpthread",
                 "lm",
                 "ldl",
-                "lzlib",
+                "lz",
                 "lstdc++fs"
             ],
             "build_dir": "build",

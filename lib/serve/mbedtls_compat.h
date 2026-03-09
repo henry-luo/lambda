@@ -18,6 +18,7 @@
 #include <mbedtls/error.h>
 #include <mbedtls/debug.h>
 #include <mbedtls/net_sockets.h>
+#include <mbedtls/build_info.h>
 
 #ifdef __cplusplus
 extern "C" {

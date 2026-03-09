@@ -179,6 +179,11 @@ struct MirTranspiler {
     // (unboxed) versions and their parameter/return types.
     // name -> NativeFuncInfo
     struct hashmap* native_func_info;
+
+    // P4-3.4: Native return type for the current function being compiled.
+    // Set when a function (fn or pn) has a native return type (INT, FLOAT, BOOL).
+    // Used by transpile_return() to emit unboxed return values in procs.
+    TypeId native_return_tid;
 };
 
 // ============================================================================
@@ -1353,7 +1358,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
             // Dereference the double* to get the actual double value
             MIR_reg_t r = new_reg(mt, "flt", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV, MIR_new_reg_op(mt->ctx, r),
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_mem_op(mt->ctx, MIR_T_D, 0, ptr, 0, 1)));
             return r;
         }
@@ -1478,7 +1483,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 MIR_new_ref_op(mt->ctx, imp)));
             // Load the native value from the BSS address with correct type
             MIR_reg_t val_reg = new_reg(mt, "impvar", load_type);
-            MIR_insn_code_t load_insn = (load_type == MIR_T_D) ? MIR_LDMOV : MIR_MOV;
+            MIR_insn_code_t load_insn = (load_type == MIR_T_D) ? MIR_DMOV : MIR_MOV;
             emit_insn(mt, MIR_new_insn(mt->ctx, load_insn,
                 MIR_new_reg_op(mt->ctx, val_reg),
                 MIR_new_mem_op(mt->ctx, load_type, 0, addr_reg, 0, 1)));
@@ -4207,7 +4212,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 
     TypeElmt* type = (TypeElmt*)elmt_node->type;
 
-    // Create element: Element* el = elmt(type_index) 
+    // Create element: Element* el = elmt(type_index)
     MIR_reg_t el = emit_call_1(mt, "elmt", MIR_T_P, MIR_T_I64,
         MIR_new_int_op(mt->ctx, type->type_index));
 
@@ -4296,7 +4301,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             // Has attributes but no content — call list_end to finalize frame
             emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
-        // else: no attrs and no content — element is just a bare pointer, 
+        // else: no attrs and no content — element is just a bare pointer,
     }
 
     return el;
@@ -4779,7 +4784,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
 
         // Load as double (MIR_T_D) — ArrayFloat stores raw doubles
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV, MIR_new_reg_op(mt->ctx, result),
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1)));
 
         emit_label(mt, l_end);
@@ -6653,6 +6658,9 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         mt->in_tail_position = true;
     }
 
+    // P4-3.4: Check if current function has native return type
+    TypeId native_ret = mt->native_return_tid;
+
     if (ret_node->value) {
         MIR_reg_t val = transpile_expr(mt, ret_node->value);
 
@@ -6669,18 +6677,50 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // untyped, causing emit_box_float to receive an I64 register → MIR
         // type validation error "Got 'int', expected 'double'".
         TypeId val_tid = get_effective_type(mt, ret_node->value);
-        MIR_reg_t boxed = emit_box(mt, val, val_tid);
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
+
+        if (native_ret != LMD_TYPE_ANY) {
+            // P4-3.4: Native return — emit unboxed value matching function's return type
+            MIR_reg_t native_val;
+            if (val_tid == native_ret) {
+                // Perfect match — use value directly
+                native_val = val;
+            } else if (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL) {
+                // Boxed Item → unbox to native type
+                native_val = emit_unbox(mt, val, native_ret);
+            } else {
+                // Different native type — box then unbox
+                MIR_reg_t boxed = emit_box(mt, val, val_tid);
+                native_val = emit_unbox(mt, boxed, native_ret);
+            }
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, native_val)));
+        } else {
+            // Standard: box and return
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
+        }
     } else {
-        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        // Return with no value
+        if (native_ret == LMD_TYPE_FLOAT) {
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
+        } else if (native_ret != LMD_TYPE_ANY) {
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, 0)));
+        } else {
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        }
     }
 
     mt->in_tail_position = saved_tail;
 
-    MIR_reg_t r = new_reg(mt, "ret_dummy", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, 0)));
+    MIR_type_t dummy_type = (native_ret == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+    MIR_reg_t r = new_reg(mt, "ret_dummy", dummy_type);
+    if (dummy_type == MIR_T_D) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_double_op(mt->ctx, 0.0)));
+    } else {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, 0)));
+    }
     mt->block_returned = true;
     return r;
 }
@@ -7406,7 +7446,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
 
                 // Store native double directly
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV,
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1),
                     MIR_new_reg_op(mt->ctx, val_native)));
             }
@@ -8345,11 +8385,7 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
 // ============================================================================
 static TypeId infer_return_type(AstFuncNode* fn_node) {
     AstNode* fn_as_node = (AstNode*)fn_node;
-
-    // Skip procedural functions — they have multiple return paths (explicit
-    // `return` statements) that would all need to emit native-typed values.
-    // TODO: handle proc native returns in a future phase.
-    if (fn_as_node->node_type == AST_NODE_PROC) return LMD_TYPE_ANY;
+    bool is_proc = (fn_as_node->node_type == AST_NODE_PROC);
 
     // 1. Check declared return type from TypeFunc::returned
     if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
@@ -8362,15 +8398,16 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
             // Only accept simple native types for now
             if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
                 ret_tid == LMD_TYPE_BOOL) {
-                log_debug("mir: infer_return_type - declared type_id=%d", ret_tid);
+                log_debug("mir: infer_return_type - declared type_id=%d (proc=%d)", ret_tid, is_proc);
                 return ret_tid;
             }
         }
     }
 
-    // 2. Check the body expression's type (fn body IS the return value)
-
-    if (fn_node->body && fn_node->body->type) {
+    // 2. For fn (not pn): Check the body expression's type (fn body IS the return value)
+    // Procs have multiple return paths via explicit `return` statements,
+    // so body type inference is unreliable — only declared types are used.
+    if (!is_proc && fn_node->body && fn_node->body->type) {
         TypeId body_tid = fn_node->body->type->type_id;
         // Only accept simple native scalar types
         if (body_tid == LMD_TYPE_INT || body_tid == LMD_TYPE_FLOAT ||
@@ -8576,13 +8613,24 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // Determine if this function qualifies for native (unboxed) dual version.
     // Eligible: not a closure, not a method, not variadic, has at least one
-    // param with a native type (INT, FLOAT, BOOL, STRING, INT64).
+    // param with a native type (INT, FLOAT, BOOL, STRING, INT64), OR has a
+    // declared native return type (P4-3.4: return-type-only optimization).
     bool generate_native = false;
     if (!is_closure && !is_method && !is_variadic) {
         for (int i = 0; i < user_param_count; i++) {
             if (mir_is_native_param_type(resolved_param_types[i])) {
                 generate_native = true;
                 break;
+            }
+        }
+        // P4-3.4: Also enable native version when return type alone is native.
+        // This allows procs with untyped params but declared return type to
+        // avoid boxing/unboxing return values at call sites.
+        if (!generate_native) {
+            TypeId ret_tid = infer_return_type(fn_node);
+            if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
+                ret_tid == LMD_TYPE_BOOL) {
+                generate_native = true;
             }
         }
     }
@@ -8828,6 +8876,17 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Set proc flag based on function type
     bool saved_in_proc = mt->in_proc;
     mt->in_proc = (fn_as_node->node_type == AST_NODE_PROC);
+
+    // P4-3.4: Set native return type for transpile_return() to use
+    TypeId saved_native_return_tid = mt->native_return_tid;
+    mt->native_return_tid = LMD_TYPE_ANY;
+    if (native_return) {
+        NativeFuncInfo* nfi_ctx = find_native_func_info(mt, name_buf->str);
+        if (nfi_ctx && nfi_ctx->return_type != LMD_TYPE_ANY) {
+            mt->native_return_tid = nfi_ctx->return_type;
+        }
+    }
+
     log_debug("mir: params bound, transpiling body of '%s'", name_buf->str);
 
     // Reset block_returned for this function's compilation scope.
@@ -8947,15 +9006,34 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // P4-3.3: Native return — produce unboxed native value
         NativeFuncInfo* nfi_body = find_native_func_info(mt, name_buf->str);
         body_result = transpile_expr(mt, fn_node->body);
-        TypeId body_tid = get_effective_type(mt, fn_node->body);
-        if (body_tid != nfi_body->return_type) {
-            if (body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL) {
-                // Body returned boxed Item, unbox to native
-                body_result = emit_unbox(mt, body_result, nfi_body->return_type);
+        // P4-3.4: For procs, explicit `return` statements already emit native
+        // MIR_new_ret_insn via transpile_return(). The body_result here is just
+        // the ret_dummy value and may have an incompatible MIR type. Skip the
+        // post-body unbox/box when block_returned is set.
+        if (!mt->block_returned) {
+            TypeId body_tid = get_effective_type(mt, fn_node->body);
+            if (body_tid != nfi_body->return_type) {
+                if (body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL) {
+                    // Body returned boxed Item, unbox to native
+                    body_result = emit_unbox(mt, body_result, nfi_body->return_type);
+                } else {
+                    // Different native type — box then unbox
+                    MIR_reg_t boxed = emit_box(mt, body_result, body_tid);
+                    body_result = emit_unbox(mt, boxed, nfi_body->return_type);
+                }
+            }
+        } else {
+            // Proc already returned — emit type-correct dummy for trailing ret
+            if (nfi_body->return_mir == MIR_T_D) {
+                body_result = new_reg(mt, "body_fallthrough", MIR_T_D);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, body_result),
+                    MIR_new_double_op(mt->ctx, 0.0)));
             } else {
-                // Different native type — box then unbox
-                MIR_reg_t boxed = emit_box(mt, body_result, body_tid);
-                body_result = emit_unbox(mt, boxed, nfi_body->return_type);
+                body_result = new_reg(mt, "body_fallthrough", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, body_result),
+                    MIR_new_int_op(mt->ctx, 0)));
             }
         }
     } else {
@@ -8993,6 +9071,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_closure = saved_closure;
     mt->env_reg = saved_env_reg;
     mt->in_proc = saved_in_proc;
+    mt->native_return_tid = saved_native_return_tid;
     mt->block_returned = saved_block_returned;
     mt->method_owner = saved_method_owner;
     mt->self_reg = saved_self_reg;
@@ -9177,6 +9256,34 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         register_native_func_info(mt, name_buf->str, &nfi);
                         log_debug("mir: pre-registered NativeFuncInfo for '%s', return=%d",
                             name_buf->str, fwd_ret_tid);
+                    }
+                    // P4-3.4: Also enable native version when return type alone is native
+                    if (!has_native) {
+                        TypeId fwd_ret_tid = infer_return_type(fn_node);
+                        if (fwd_ret_tid == LMD_TYPE_INT || fwd_ret_tid == LMD_TYPE_FLOAT ||
+                            fwd_ret_tid == LMD_TYPE_BOOL) {
+                            // Forward-declare the _b wrapper
+                            StrBuf* wrapper_buf = strbuf_new_cap(64);
+                            write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
+                            MIR_item_t fwd_b = MIR_new_forward(mt->ctx, wrapper_buf->str);
+                            register_local_func(mt, wrapper_buf->str, fwd_b);
+                            log_debug("mir: forward-declared boxed wrapper '%s' (return-type-only)", wrapper_buf->str);
+                            strbuf_free(wrapper_buf);
+
+                            NativeFuncInfo nfi;
+                            memset(&nfi, 0, sizeof(nfi));
+                            nfi.param_count = fwd_param_count;
+                            nfi.has_native = true;
+                            for (int i = 0; i < fwd_param_count; i++) {
+                                nfi.param_types[i] = fwd_param_types[i];
+                                nfi.param_mir[i] = type_to_mir(fwd_param_types[i]);
+                            }
+                            nfi.return_type = fwd_ret_tid;
+                            nfi.return_mir = type_to_mir(fwd_ret_tid);
+                            register_native_func_info(mt, name_buf->str, &nfi);
+                            log_debug("mir: pre-registered NativeFuncInfo for '%s' (return-only), return=%d",
+                                name_buf->str, fwd_ret_tid);
+                        }
                     }
                 }
             }
@@ -9678,6 +9785,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.is_main = true;
     mt.type_list = type_list;
     mt.script_pool = script_pool;
+    mt.native_return_tid = LMD_TYPE_ANY;  // P4-3.4: no native return at module level
 
     // Init import cache
     mt.import_cache = hashmap_new(sizeof(ImportCacheEntry), 128, 0, 0,
@@ -9850,12 +9958,14 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     // Return result
     emit_insn(&mt, MIR_new_ret_insn(ctx, 1, MIR_new_reg_op(ctx, result)));
 
+#ifndef NDEBUG
     // Dump MIR text for debugging (before finish_func to capture state on error)
     FILE* mir_dump = fopen("temp/mir_dump.txt", "w");
     if (mir_dump) {
         MIR_output(ctx, mir_dump);
         fclose(mir_dump);
     }
+#endif
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);

@@ -1,0 +1,108 @@
+"Basic path expressions"
+/etc.hosts
+/usr.local.bin
+http.api.example.com
+https.secure.api.example.com
+sys.config
+"Path with 6+ segments (tests extended path_build)"
+/home.user.documents.projects.lambda.test
+"Path in let binding"
+/etc.config
+"Path in array"
+[/a, /b, http.x]
+"Path in map"
+{
+  input: /data.input,
+  output: /data.output
+}
+"Path with quoted segments (dots in filenames)"
+/etc.'nginx.conf'
+/home.user.'config.json'
+http.'api.github.com'.users
+"Dynamic path segment with subscript"
+/etc.config
+"Wildcard patterns (single segment match)"
+/src.*
+http.api.users.*
+"Wildcard patterns (recursive match)"
+/src.**
+http.api.**
+"Quoted wildcard (literal asterisk, not a wildcard)"
+/data.'*'
+/data.'**'
+"Path type checking"
+path
+"File content (lazy loading)"
+172
+"exists() function - directory exists"
+true
+"exists() function - file exists"
+true
+"exists() function - non-existent path"
+false
+"len() on directory - counts entries"
+true
+"Path iteration - for loop over directory"
+true
+"Path iteration - collect types"
+path
+"Relative path with . scheme"
+.test.input.dir
+"exists() on relative path"
+true
+"len() on relative directory"
+3
+"Relative path iteration with single wildcard (*) - list paths"
+.test.input.dir.'test.txt'
+.test.input.dir.child_dir
+.test.input.dir.readme_link
+"Relative path iteration with recursive wildcard (**) - list paths"
+.test.input.dir.'test.txt'
+.test.input.dir.child_dir
+.test.input.dir.child_dir.'child.txt'
+.test.input.dir.readme_link
+"Wildcard finds nested items"
+true
+"Path property: nametest.jsonPath property: is_dir on directory"
+true
+"Path property: is_file on directory (should be false)"
+false
+"Path property: is_file on file"
+true
+"Path property: is_dir on file (should be false)"
+false
+"Path property: is_link on regular file"
+false
+"Path property: size on file (returns bytes)"
+true
+"Path property: modified on file (returns datetime)"
+datetime
+"Path property: name from iteration"
+true
+"Path property: filter using is_dir"
+true
+"Parent path with .. scheme"
+..
+"Parent path with segment"
+..test.input.dir
+"Parent path type checking"
+path
+'exists() on parent path'
+"Parent path in let binding"
+..Lambda.test
+"Parent path with quoted segment"
+..Lambda.'README.md'
+"Path ++ string: append segment"
+/etc.hosts
+"Path ++ string: multiple appends"
+/home.user.documents
+"Path ++ symbol: append symbol segment"
+/var.log
+"Path ++ relative path: concat relative path"
+/home.user.documents.file
+"Path ++ parent path: concat parent path"
+/home.user.projects.shared.lib
+"Path type preserved after ++"
+path
+"Chained ++ operations"
+/home.user.documents.'file.txt'

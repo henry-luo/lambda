@@ -254,7 +254,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
 
     // --- Pattern 1: '...' (variadic token) outside function parameters ---
     // In the parse tree, '...' becomes a variadic node. It can appear in several positions:
-    //   - map context: map → primary_expr(variadic) → ERROR(identifier 'a')  
+    //   - map context: map → primary_expr(variadic) → ERROR(identifier 'a')
     //     → variadic is prev sibling of ERROR
     //   - call context: call_expr → ( → ERROR(primary_expr(variadic)) → args → )
     //     → variadic is inside the ERROR node itself
@@ -840,7 +840,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     // script not found, create a new one
-    const char* script_source = source ? source : read_text_file(lookup_path);
+    // strdup when source is provided externally (e.g. REPL) so the script owns its copy
+    // and runtime_cleanup can safely free it without a double-free
+    const char* script_source = source ? strdup(source) : read_text_file(lookup_path);
     if (!script_source) {
         log_error("Error: Failed to read source code from %s", lookup_path);
         if (canonical_path) free(canonical_path);

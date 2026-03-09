@@ -14,6 +14,7 @@ BUILD_LINUX_DIR = build_linux
 
 # Output executables
 LAMBDA_EXE = lambda.exe
+LAMBDA_CLI_EXE = lambda-cli.exe
 
 # Unicode support is always enabled (utf8proc-based)
 # No longer using conditional compilation flags
@@ -24,13 +25,16 @@ OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
 	NPROCS := $(shell sysctl -n hw.ncpu)
 	PREMAKE_FILE := premake5.mac.lua
+	PREMAKE_CLI_FILE := premake5.cli.mac.lua
 else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc)
 	PREMAKE_FILE := premake5.lin.lua
+	PREMAKE_CLI_FILE := premake5.cli.lin.lua
 else
 	# Windows/MSYS2 detection
 	NPROCS := $(shell nproc 2>/dev/null || echo 4)
 	PREMAKE_FILE := premake5.win.lua
+	PREMAKE_CLI_FILE := premake5.cli.win.lua
 endif
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
@@ -80,6 +84,11 @@ else ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
 	CXX := /clang64/bin/clang++
 	AR := /clang64/bin/ar
 	RANLIB := /clang64/bin/ranlib
+else ifeq ($(OS),Linux)
+	CC := clang
+	CXX := clang++
+	AR := ar
+	RANLIB := ranlib
 else
 	CC := gcc
 	CXX := g++
@@ -354,7 +363,7 @@ clean-tree-sitter-minimal:
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
-	    lambda format lint check docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
@@ -374,6 +383,7 @@ help:
 	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
+	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  all           - Build all projects"
@@ -607,6 +617,26 @@ endif
 	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
 	@touch .lambda_release_build
 	$(call mingw64_dll_check)
+
+# Headless CLI build (no Radiant layout engine or GUI support)
+# Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
+lambda-cli: build-cli
+
+build-cli: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Building Lambda CLI (headless, release) using Premake build system..."
+	@echo "Excluded: Radiant layout engine, GUI windowing, font rendering, image codecs"
+	$(PYTHON) utils/generate_premake.py --variant cli --output $(PREMAKE_CLI_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_CLI_FILE)
+	@echo "Building lambda-cli executable (release) with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=release_native lambda-cli -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+ifeq ($(OS),Darwin)
+	@strip -x lambda-cli.exe 2>/dev/null || true
+else
+	@strip lambda-cli.exe 2>/dev/null || true
+endif
+	@echo "✅ CLI build completed. Executable: lambda-cli.exe"
+	@ls -lh lambda-cli.exe 2>/dev/null || true
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -1760,7 +1790,7 @@ build-lambda-input:
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
-	cd build/premake && premake5 gmake --file=../../premake5.mac.lua
+	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
 	@echo "Building lambda-input DLLs with $(JOBS) parallel jobs..."
 	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(JOBS)
 	@echo "✅ lambda-input DLLs built successfully!"
@@ -1770,7 +1800,7 @@ build-test: build-lambda-input
 	@echo "Building configurations..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
-	cd build/premake && premake5 gmake --file=../../premake5.mac.lua
+	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
 	@# If last build was release, rebuild lambda.exe incrementally in release mode
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
