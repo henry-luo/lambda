@@ -1358,7 +1358,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
             // Dereference the double* to get the actual double value
             MIR_reg_t r = new_reg(mt, "flt", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV, MIR_new_reg_op(mt->ctx, r),
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_mem_op(mt->ctx, MIR_T_D, 0, ptr, 0, 1)));
             return r;
         }
@@ -1483,7 +1483,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 MIR_new_ref_op(mt->ctx, imp)));
             // Load the native value from the BSS address with correct type
             MIR_reg_t val_reg = new_reg(mt, "impvar", load_type);
-            MIR_insn_code_t load_insn = (load_type == MIR_T_D) ? MIR_LDMOV : MIR_MOV;
+            MIR_insn_code_t load_insn = (load_type == MIR_T_D) ? MIR_DMOV : MIR_MOV;
             emit_insn(mt, MIR_new_insn(mt->ctx, load_insn,
                 MIR_new_reg_op(mt->ctx, val_reg),
                 MIR_new_mem_op(mt->ctx, load_type, 0, addr_reg, 0, 1)));
@@ -4212,7 +4212,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 
     TypeElmt* type = (TypeElmt*)elmt_node->type;
 
-    // Create element: Element* el = elmt(type_index) 
+    // Create element: Element* el = elmt(type_index)
     MIR_reg_t el = emit_call_1(mt, "elmt", MIR_T_P, MIR_T_I64,
         MIR_new_int_op(mt->ctx, type->type_index));
 
@@ -4301,7 +4301,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             // Has attributes but no content — call list_end to finalize frame
             emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
-        // else: no attrs and no content — element is just a bare pointer, 
+        // else: no attrs and no content — element is just a bare pointer,
     }
 
     return el;
@@ -4784,7 +4784,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
 
         // Load as double (MIR_T_D) — ArrayFloat stores raw doubles
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV, MIR_new_reg_op(mt->ctx, result),
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1)));
 
         emit_label(mt, l_end);
@@ -7446,7 +7446,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
 
                 // Store native double directly
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LDMOV,
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1),
                     MIR_new_reg_op(mt->ctx, val_native)));
             }
