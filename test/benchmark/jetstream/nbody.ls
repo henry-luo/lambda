@@ -105,6 +105,7 @@ pn run_nbody_system(n_steps: int) {
                           5.15138902046611451e-05 * SOLAR_MASS]
 
     offset_momentum(bvx, bvy, bvz, bmass)
+    // Original JetStream: accumulate BOTH initial and final energy
     var ret = energy(bx, by, bz, bvx, bvy, bvz, bmass)
     var k: int = 0
     while (k < n_steps) {
@@ -128,25 +129,21 @@ pn run() {
 
 pn main() {
     var __t0 = clock()
-    // JetStream runs 8 iterations
-    var iter: int = 0
-    var result = 0.0
-    while (iter < 8) {
-        result = run()
-        iter = iter + 1
+    // Original JetStream workload: 8 iterations of run() (4500 steps each = 36000 total)
+    var pass = true
+    var i: int = 0
+    while (i < 8) {
+        var result = run()
+        var check = floor(result * -10000000.0)
+        if (check != 13524862) {
+            print("nbody: FAIL iteration=" ++ string(i) ++ " check=" ++ string(check) ++ " energy=" ++ string(result) ++ "\n")
+            pass = false
+        }
+        i = i + 1
     }
     var __t1 = clock()
-    // The original JS expected -1.3524862408537381 from run()
-    // Check within tolerance (floating-point may differ slightly)
-    var expected = -1.3524862408537381
-    var diff = result - expected
-    if (diff < 0.0) {
-        diff = 0.0 - diff
-    }
-    if (diff < 0.0000001) {
+    if (pass) {
         print("nbody: PASS\n")
-    } else {
-        print("nbody: FAIL got=" ++ string(result) ++ " expected=" ++ string(expected) ++ "\n")
     }
     print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

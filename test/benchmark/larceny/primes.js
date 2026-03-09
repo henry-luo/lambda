@@ -1,5 +1,5 @@
 // Larceny Benchmark: primes (Node.js)
-// Sieve of Eratosthenes to 8000, repeated 10 times
+// Sieve of Eratosthenes to 1000000
 'use strict';
 
 function sieve(limit) {
@@ -23,12 +23,9 @@ function sieve(limit) {
 
 function main() {
     const __t0 = process.hrtime.bigint();
-    let result = 0;
-    for (let iter = 0; iter < 10; iter++) {
-        result = sieve(8000);
-    }
+    const result = sieve(1000000);
     const __t1 = process.hrtime.bigint();
-    if (result === 1007) {
+    if (result === 78498) {
         process.stdout.write("primes: PASS\n");
     } else {
         process.stdout.write("primes: FAIL result=" + result + "\n");

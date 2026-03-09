@@ -4,7 +4,7 @@
 import sys
 import time
 
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 200
+N = int(sys.argv[1]) if len(sys.argv) > 1 else 500
 
 t0 = time.perf_counter_ns()
 checksum = 0

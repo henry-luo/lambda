@@ -1,8 +1,8 @@
 // BENG Benchmark: n-body
 // 5-body (Sun + Jovian planets) gravitational simulation
-// N=1000 expected: "-0.169075164\n-0.169087605\n"
+// Synchronized with JetStream: 36000 steps
 
-let N = 1000
+let N = 36000
 let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24

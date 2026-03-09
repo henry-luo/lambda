@@ -5,7 +5,7 @@ import sys
 import time
 import math
 
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
+N = int(sys.argv[1]) if len(sys.argv) > 1 else 36000
 
 PI = math.pi
 SOLAR_MASS = 4 * PI * PI
