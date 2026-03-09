@@ -492,81 +492,81 @@
       "mir": 47.355,
       "c2mir": 84.649,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 125.0,
       "nodejs": 5.519,
-      "python": null
+      "python": 133.8
     },
     "cube3d": {
       "category": "3d",
       "mir": 48.964,
       "c2mir": 140.924,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 228.5,
       "nodejs": 17.907,
-      "python": null
+      "python": 45.6
     },
     "navier_stokes": {
       "category": "numeric",
       "mir": 802.806,
       "c2mir": 801.296,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 95.1,
       "nodejs": 14.488,
-      "python": null
+      "python": 1837.1
     },
     "richards": {
       "category": "macro",
       "mir": 301.244,
       "c2mir": 286.781,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 158.4,
       "nodejs": 8.26,
-      "python": null
+      "python": 216.6
     },
     "splay": {
       "category": "data",
       "mir": 51.147,
       "c2mir": null,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 198.7,
       "nodejs": 20.421,
-      "python": null
+      "python": 326.1
     },
     "deltablue": {
       "category": "macro",
       "mir": 18.604,
       "c2mir": 18.882,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 118.7,
       "nodejs": 10.393,
-      "python": null
+      "python": 17.0
     },
     "hashmap": {
       "category": "data",
       "mir": 96.036,
       "c2mir": 99.2,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 323.2,
       "nodejs": 16.341,
-      "python": null
+      "python": 184.4
     },
     "crypto_sha1": {
       "category": "crypto",
       "mir": 16.985,
       "c2mir": 20.051,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 222.1,
       "nodejs": 8.964,
-      "python": null
+      "python": 321.4
     },
     "raytrace3d": {
       "category": "3d",
       "mir": 369.547,
       "c2mir": 561.588,
       "lambdajs": null,
-      "quickjs": null,
+      "quickjs": 170.5,
       "nodejs": 18.687,
-      "python": null
+      "python": 144.1
     }
   }
 }
