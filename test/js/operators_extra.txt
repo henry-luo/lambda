@@ -14,7 +14,7 @@
   "typeStr": "string",
   "typeBool": "boolean",
   "typeNull": "object",
-  "typeUndef": "object",
+  "typeUndef": "undefined",
   "pow1": 1024,
   "pow2": 27,
   "pow3": 1,

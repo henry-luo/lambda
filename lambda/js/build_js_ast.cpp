@@ -216,6 +216,9 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
         return NULL;
     }
 
+    // Check actual tree-sitter node type for debugging
+    const char* actual_type = ts_node_type(id_node);
+
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, id_node, sizeof(JsIdentifierNode));
 
     StrView source = js_node_source(tp, id_node);
@@ -252,7 +255,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     } else {
         // Undefined identifier - could be global or error
         identifier->base.type = &TYPE_ANY;
-        log_debug("Undefined identifier: %.*s", (int)identifier->name->len, identifier->name->chars);
+        log_debug("Undefined identifier: %.*s (ts_type=%s)", (int)identifier->name->len, identifier->name->chars, actual_type);
     }
 
     return (JsAstNode*)identifier;
@@ -369,7 +372,10 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
 
         for (uint32_t i = 0; i < arg_count; i++) {
             TSNode arg_node = ts_node_named_child(args_node, i);
+            const char* arg_type = ts_node_type(arg_node);
+            if (strcmp(arg_type, "comment") == 0) continue;
             JsAstNode* arg = build_js_expression(tp, arg_node);
+            if (!arg) continue;
 
             if (!prev_arg) {
                 call->arguments = arg;
@@ -480,6 +486,24 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         const char* child_type = ts_node_type(property_node);
         if (strcmp(child_type, "comment") == 0) continue;
 
+        // Handle shorthand_property_identifier: { Vector } -> { Vector: Vector }
+        if (strcmp(child_type, "shorthand_property_identifier") == 0) {
+            JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
+            // The node itself is an identifier — use it for both key and value
+            JsAstNode* ident = build_js_expression(tp, property_node);
+            property->key = ident;
+            // Create a separate identifier node for value (same name)
+            property->value = build_js_expression(tp, property_node);
+            property->base.type = &TYPE_ANY;
+            if (!prev_property) {
+                object->properties = (JsAstNode*)property;
+            } else {
+                prev_property->next = (JsAstNode*)property;
+            }
+            prev_property = (JsAstNode*)property;
+            continue;
+        }
+
         // Build property node
         JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
 
@@ -487,8 +511,15 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         TSNode key_node = ts_node_child_by_field_name(property_node, "key", strlen("key"));
         TSNode value_node = ts_node_child_by_field_name(property_node, "value", strlen("value"));
 
-        property->key = build_js_expression(tp, key_node);
-        property->value = build_js_expression(tp, value_node);
+        if (!ts_node_is_null(key_node)) {
+            property->key = build_js_expression(tp, key_node);
+        }
+        if (!ts_node_is_null(value_node)) {
+            property->value = build_js_expression(tp, value_node);
+        } else {
+            // Shorthand property: { key } is equivalent to { key: key }
+            property->value = property->key;
+        }
         property->base.type = &TYPE_ANY;
 
         if (!prev_property) {
@@ -809,7 +840,8 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
 JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
     const char* node_type = ts_node_type(expr_node);
 
-    if (strcmp(node_type, "identifier") == 0 || strcmp(node_type, "property_identifier") == 0) {
+    if (strcmp(node_type, "identifier") == 0 || strcmp(node_type, "property_identifier") == 0 ||
+        strcmp(node_type, "shorthand_property_identifier") == 0) {
         return build_js_identifier(tp, expr_node);
     } else if (strcmp(node_type, "this") == 0) {
         // Handle 'this' keyword
@@ -817,6 +849,12 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         this_node->name = name_pool_create_len(tp->name_pool, "this", 4);
         this_node->base.type = &TYPE_ANY;
         return (JsAstNode*)this_node;
+    } else if (strcmp(node_type, "super") == 0) {
+        // Handle 'super' keyword — create identifier with name "super"
+        JsIdentifierNode* super_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+        super_node->name = name_pool_create_len(tp->name_pool, "super", 5);
+        super_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)super_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 ||
                strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
                strcmp(node_type, "null") == 0 || strcmp(node_type, "undefined") == 0) {
@@ -1082,6 +1120,16 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         // Skip empty statements (standalone semicolons) - they don't generate any code
         return NULL;
     } else {
+        // Treat any other expression types as expression statements (e.g., standalone
+        // assignment_expression, call_expression, update_expression)
+        JsAstNode* expr = build_js_expression(tp, stmt_node);
+        if (expr) {
+            JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
+            expr_stmt->expression = expr;
+            expr_stmt->base.type = expr->type ? expr->type : &TYPE_NULL;
+            return (JsAstNode*)expr_stmt;
+        }
         log_error("Unsupported JavaScript statement type: %s", node_type);
         return NULL;
     }
@@ -1476,10 +1524,18 @@ JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node) {
         class_decl->name = name_pool_create_strview(tp->name_pool, name_source);
     }
 
-    // Get superclass (optional)
-    TSNode superclass_node = ts_node_child_by_field_name(class_node, "superclass", strlen("superclass"));
-    if (!ts_node_is_null(superclass_node)) {
-        class_decl->superclass = build_js_expression(tp, superclass_node);
+    // Get superclass (optional) — tree-sitter puts it inside a class_heritage child node
+    uint32_t child_count_cls = ts_node_named_child_count(class_node);
+    for (uint32_t i = 0; i < child_count_cls; i++) {
+        TSNode child = ts_node_named_child(class_node, i);
+        if (strcmp(ts_node_type(child), "class_heritage") == 0) {
+            // The heritage node contains the superclass expression as its first named child
+            TSNode super_expr = ts_node_named_child(child, 0);
+            if (!ts_node_is_null(super_expr)) {
+                class_decl->superclass = build_js_expression(tp, super_expr);
+            }
+            break;
+        }
     }
 
     // Get class body
@@ -1498,6 +1554,40 @@ JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node) {
     return (JsAstNode*)class_decl;
 }
 
+// Build JavaScript static/instance field definition (class field)
+JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
+    JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)alloc_js_ast_node(
+        tp, JS_AST_NODE_FIELD_DEFINITION, field_node, sizeof(JsFieldDefinitionNode));
+    field->is_static = false;
+    field->key = NULL;
+    field->value = NULL;
+
+    // check for 'static' keyword
+    uint32_t child_count = ts_node_child_count(field_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(field_node, i);
+        const char* child_type = ts_node_type(child);
+        if (strcmp(child_type, "static") == 0) {
+            field->is_static = true;
+            break;
+        }
+    }
+
+    // get property name (field name "property")
+    TSNode prop_node = ts_node_child_by_field_name(field_node, "property", strlen("property"));
+    if (!ts_node_is_null(prop_node)) {
+        field->key = build_js_expression(tp, prop_node);
+    }
+
+    // get initializer value
+    TSNode value_node = ts_node_child_by_field_name(field_node, "value", strlen("value"));
+    if (!ts_node_is_null(value_node)) {
+        field->value = build_js_expression(tp, value_node);
+    }
+
+    return (JsAstNode*)field;
+}
+
 // Build JavaScript class body
 JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
     JsBlockNode* body = (JsBlockNode*)alloc_js_ast_node(tp, JS_AST_NODE_BLOCK_STATEMENT, body_node, sizeof(JsBlockNode));
@@ -1506,8 +1596,15 @@ JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
     JsAstNode* prev_method = NULL;
 
     for (uint32_t i = 0; i < method_count; i++) {
-        TSNode method_node = ts_node_named_child(body_node, i);
-        JsAstNode* method = build_js_method_definition(tp, method_node);
+        TSNode child_node = ts_node_named_child(body_node, i);
+        const char* child_type = ts_node_type(child_node);
+
+        JsAstNode* method = NULL;
+        if (strcmp(child_type, "field_definition") == 0) {
+            method = build_js_field_definition(tp, child_node);
+        } else {
+            method = build_js_method_definition(tp, child_node);
+        }
 
         if (method) {
             if (!prev_method) {
@@ -1530,6 +1627,17 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
     // Initialize method properties
     method->computed = false;
     method->static_method = false;
+
+    // Check for 'static' keyword — it appears as a child node of method_definition
+    uint32_t child_count = ts_node_child_count(method_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(method_node, i);
+        const char* child_type = ts_node_type(child);
+        if (strcmp(child_type, "static") == 0) {
+            method->static_method = true;
+            break;
+        }
+    }
 
     // Get method key
     TSNode key_node = ts_node_child_by_field_name(method_node, "name", strlen("name"));

@@ -97,15 +97,15 @@
 
 > Community benchmarks from kostya/benchmarks comparing languages on common tasks.
 
-| Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
-| --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| brainfuck | interpreter |   165 |   272 |   508 |   906 |    45 |   691 | 3.69x | 0.24x |
-| matmul | numeric |   8.7 |   129 | 1.10s |   546 |    16 |   535 | 0.55x | 0.02x |
-| primes | numeric |   7.1 |   9.6 |   8.1 |    96 |   4.5 |    97 | 1.57x | 0.07x |
-| base64 | string |   214 |   210 | 0.000 |   182 |    18 |    85 | 12.2x | 2.53x |
-| levenshtein | string |   7.7 |    13 |    14 |    55 |   4.0 |    71 | 1.92x | 0.11x |
-| json_gen | data |    62 |    65 |    19 |    21 |   6.3 |   8.3 | 9.82x | 7.42x |
-| collatz | numeric |   299 |   337 | 6.48s | 6.22s | 1.42s | 8.00s | 0.21x | 0.04x |
+| Benchmark   | Category    | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
+| ----------- | ----------- | --: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
+| brainfuck   | interpreter | 165 |   272 |      508 |     906 |      45 |    691 |    3.69x |  0.24x |
+| matmul      | numeric     | 8.7 |   129 |    1.10s |     546 |      16 |    535 |    0.55x |  0.02x |
+| primes      | numeric     | 7.1 |   9.6 |      8.1 |      96 |     4.5 |     97 |    1.57x |  0.07x |
+| base64      | string      | 214 |   210 |    0.000 |     182 |      18 |     85 |    12.2x |  2.53x |
+| levenshtein | string      | 7.7 |    13 |       14 |      55 |     4.0 |     71 |    1.92x |  0.11x |
+| json_gen    | data        |  62 |    65 |       19 |      21 |     6.3 |    8.3 |    9.82x |  7.42x |
+| collatz     | numeric     | 299 |   337 |    6.48s |   6.22s |   1.42s |  8.00s |    0.21x |  0.04x |
 
 **Geometric mean MIR/Node.js: 2.06x** — Lambda slower on 2/7 benchmarks
 **Geometric mean MIR/Python: 0.22x** — Lambda faster on 5/7 benchmarks
@@ -254,24 +254,24 @@ LambdaJS also passes **crypto_md5** (74ms†) and **regex_dna** (206ms†), whic
 
 ### Lambda JS Engine Improvements (R2 → R3)
 
-| Benchmark | Suite | R2 (ms) | R3 (ms) | Change |
-|-----------|-------|--------:|--------:|--------|
-| permute | AWFY | 0.008 | 0.006 | 1.2× faster |
-| mandelbrot | AWFY | --- | 144 | NEW |
-| fannkuch | BENG | --- | 0.53 | NEW |
-| mandelbrot | BENG | --- | 12 | NEW |
-| nbody | BENG | 134 | 11 | 11.8× faster |
-| regexredux | BENG | 0.083 | 0.045 | 1.9× faster |
-| revcomp | BENG | 0.001 | 0.001 | 1.4× faster |
-| primes | KOSTYA | 19 | 8.1 | 2.4× faster |
-| levenshtein | KOSTYA | 31 | 14 | 2.2× faster |
-| collatz | KOSTYA | --- | 6.48s | NEW |
-| triangl | LARCENY | 1.68s | 1.39s | 1.2× faster |
-| array1 | LARCENY | 4.1 | 0.56 | 7.3× faster |
-| primes | LARCENY | 1.5 | 0.66 | 2.3× faster |
-| quicksort | LARCENY | 0.19 | 9.4 | 49.6× slower* |
-| sumfp | R7RS | 1.7 | 4.2 | 2.5× slower* |
-| nqueens | R7RS | 0.013 | 41 | 3136.7× slower* |
+| Benchmark   | Suite   | R2 (ms) | R3 (ms) | Change          |
+| ----------- | ------- | ------: | ------: | --------------- |
+| permute     | AWFY    |   0.008 |   0.006 | 1.2× faster     |
+| mandelbrot  | AWFY    |     --- |     144 | NEW             |
+| fannkuch    | BENG    |     --- |    0.53 | NEW             |
+| mandelbrot  | BENG    |     --- |      12 | NEW             |
+| nbody       | BENG    |     134 |      11 | 11.8× faster    |
+| regexredux  | BENG    |   0.083 |   0.045 | 1.9× faster     |
+| revcomp     | BENG    |   0.001 |   0.001 | 1.4× faster     |
+| primes      | KOSTYA  |      19 |     8.1 | 2.4× faster     |
+| levenshtein | KOSTYA  |      31 |      14 | 2.2× faster     |
+| collatz     | KOSTYA  |     --- |   6.48s | NEW             |
+| triangl     | LARCENY |   1.68s |   1.39s | 1.2× faster     |
+| array1      | LARCENY |     4.1 |    0.56 | 7.3× faster     |
+| primes      | LARCENY |     1.5 |    0.66 | 2.3× faster     |
+| quicksort   | LARCENY |    0.19 |     9.4 | 49.6× slower*   |
+| sumfp       | R7RS    |     1.7 |     4.2 | 2.5× slower*    |
+| nqueens     | R7RS    |   0.013 |      41 | 3136.7× slower* |
 
 *Workload or test changes between rounds may account for some differences.
 

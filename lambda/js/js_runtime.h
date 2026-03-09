@@ -69,6 +69,7 @@ Item js_bitwise_and(Item left, Item right);      // &
 Item js_bitwise_or(Item left, Item right);       // |
 Item js_bitwise_xor(Item left, Item right);      // ^
 Item js_bitwise_not(Item operand);               // ~
+int64_t js_double_to_int32(double d);            // ToInt32 (safe for Infinity/NaN)
 Item js_left_shift(Item left, Item right);       // <<
 Item js_right_shift(Item left, Item right);      // >>
 Item js_unsigned_right_shift(Item left, Item right); // >>>
@@ -109,6 +110,7 @@ Item js_new_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item* js_alloc_env(int count);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+Item js_debug_check_callee(Item callee, int64_t site_id);
 Item js_get_this();
 void js_set_this(Item this_val);
 
@@ -236,6 +238,14 @@ Item js_new_error(Item message);
  * Called during JS execution setup. Takes void* for C compatibility (actually Input*).
  */
 void js_runtime_set_input(void* input);
+
+// =============================================================================
+// Module Variable Table
+// =============================================================================
+
+void js_set_module_var(int index, Item value);
+Item js_get_module_var(int index);
+void js_reset_module_vars(void);
 
 #ifdef __cplusplus
 }

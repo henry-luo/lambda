@@ -529,6 +529,8 @@ static Item _map_read_field(ShapeEntry* field, void* map_data) {
     }
     case LMD_TYPE_BOOL:
         return {.item = b2it(*(bool*)field_ptr)};
+    case LMD_TYPE_UNDEFINED:
+        return {.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     case LMD_TYPE_INT:
         return {.item = i2it(*(int64_t*)field_ptr)};
     case LMD_TYPE_INT64:

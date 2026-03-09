@@ -115,6 +115,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_FUNC_    23
 #define LMD_TYPE_ANY_     24
 #define LMD_TYPE_ERROR_   25
+#define LMD_TYPE_UNDEFINED_ 26
 #define LMD_TYPE_PATH_    27
 
 // ============================================================================
@@ -621,7 +622,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 uint8_t field_type_id = *(uint8_t*)field_type;  // Type.type_id
                 // only trace Item-typed fields (containers, strings, etc.)
                 // Skip inline values (bool, int) which don't hold GC pointers
-                if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_) {
+                if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_
+                    && field_type_id != LMD_TYPE_UNDEFINED_ && field_type_id != LMD_TYPE_ERROR_) {
                     if (byte_offset >= 0 && byte_offset < byte_size) {
                         void* field_ptr = (uint8_t*)data_ptr + byte_offset;
 

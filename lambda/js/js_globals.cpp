@@ -12,6 +12,7 @@
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 #include <cstdlib>
@@ -321,12 +322,39 @@ extern "C" Item js_array_fill(Item arr_item, Item value) {
 }
 
 // =============================================================================
-// instanceof operator (simplified — always false for now)
+// instanceof operator — walks prototype chain
 // =============================================================================
 
 extern "C" Item js_instanceof(Item left, Item right) {
-    (void)left; (void)right;
-    // simplified: no class hierarchy support yet
+    // right should be a constructor (a class). We check if left's prototype chain
+    // contains right's prototype. For our implementation, we check if right has
+    // a __class_name__ marker that matches any __class_name__ in left's proto chain.
+    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    if (get_type_id(right) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+
+    // Get the class name from right (constructor's __class_name__)
+    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    Item right_name = map_get(right.map, class_key);
+    if (right_name.item == 0) return (Item){.item = b2it(false)};
+
+    // Check if left has this class name in its prototype chain
+    Item obj = left;
+    int depth = 0;
+    while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
+        Item obj_name = map_get(obj.map, class_key);
+        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING &&
+            get_type_id(right_name) == LMD_TYPE_STRING) {
+            String* on = it2s(obj_name);
+            String* rn = it2s(right_name);
+            if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
+                return (Item){.item = b2it(true)};
+            }
+        }
+        // walk up __proto__
+        Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        obj = map_get(obj.map, proto_key);
+        depth++;
+    }
     return (Item){.item = b2it(false)};
 }
 
@@ -356,7 +384,7 @@ extern "C" Item js_in(Item key, Item object) {
 
 extern "C" Item js_nullish_coalesce(Item left, Item right) {
     TypeId type = get_type_id(left);
-    if (type == LMD_TYPE_NULL) return right;
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) return right;
     return left;
 }
 
