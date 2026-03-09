@@ -23,15 +23,15 @@ let NONE     = 0
 let FORWARD  = 1
 let BACKWARD = 2
 
-pn stronger(s1: int, s2: int) {
+pn stronger(s1: int, s2: int) bool {
     return s1 < s2
 }
 
-pn weaker(s1: int, s2: int) {
+pn weaker(s1: int, s2: int) bool {
     return s1 > s2
 }
 
-pn weakest_of(s1: int, s2: int) {
+pn weakest_of(s1: int, s2: int) int {
     if (s1 > s2) {
         return s1
     }
@@ -131,7 +131,7 @@ pn constraint_output(p: Planner, ci: int) {
     return c.v1
 }
 
-pn constraint_is_input(p: Planner, ci: int, vi: int) {
+pn constraint_is_input(p: Planner, ci: int, vi: int) bool {
     var c: Constraint = (p.constraints)[ci]
     if (c.direction == FORWARD) {
         return vi == c.v1

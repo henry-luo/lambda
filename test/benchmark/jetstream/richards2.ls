@@ -64,7 +64,7 @@ pn create_tcb(link, id: int, priority: int, queue, state: int, fn_id: int) {
     return tcb
 }
 
-pn tcb_is_held_or_suspended(tcb: TCB) {
+pn tcb_is_held_or_suspended(tcb: TCB) bool {
     if (band(tcb.state, STATE_HELD) != 0) {
         return true
     }
@@ -272,7 +272,7 @@ pn scheduler_schedule(sched: Scheduler, blocks) {
     }
 }
 
-pn run_richards() {
+pn run_richards() bool {
     var sched: Scheduler = create_scheduler()
     var blocks = [null, null, null, null, null, null]
 
