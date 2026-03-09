@@ -523,14 +523,17 @@ class PremakeGenerator:
             print("DEBUG: AddressSanitizer disabled")
 
         # Release configuration with size optimizations
+        # Use -flto=thin (ThinLTO) on macOS/Clang and Linux/Clang, -flto on Linux/GCC
+        linux_uses_clang = self.use_linux_config and base_compiler == 'clang'
+        lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
         self.premake_content.extend([
             '    filter "configurations:Release"',
             '        defines { "NDEBUG" }',
             '        symbols "Off"',
             '        optimize "On"',
-            '        -- Dead code elimination and ThinLTO',
+            f'        -- Dead code elimination and LTO',
             '        buildoptions {',
-            '            "-flto=thin",',
+            f'            {lto_flag},',
             '            "-ffunction-sections",',
             '            "-fdata-sections",',
             '            "-fvisibility=hidden",',
@@ -549,19 +552,30 @@ class PremakeGenerator:
                 '        }',
             ])
         elif self.use_linux_config:
-            self.premake_content.extend([
-                '        -- Linux: strip dead code and symbols with ThinLTO',
-                '        linkoptions {',
-                '            "-flto=thin",',
-                '            "-Wl,--gc-sections",',
-                '            "-Wl,--strip-all",',
-                '        }',
-            ])
+            if base_compiler == 'clang':
+                self.premake_content.extend([
+                    '        -- Linux/Clang: strip dead code and symbols with ThinLTO + LLD',
+                    '        linkoptions {',
+                    '            "-flto=thin",',
+                    '            "-fuse-ld=lld",',
+                    '            "-Wl,--gc-sections",',
+                    '            "-Wl,--strip-all",',
+                    '        }',
+                ])
+            else:
+                self.premake_content.extend([
+                    '        -- Linux/GCC: strip dead code and symbols with LTO',
+                    '        linkoptions {',
+                    '            "-flto",',
+                    '            "-Wl,--gc-sections",',
+                    '            "-Wl,--strip-all",',
+                    '        }',
+                ])
         elif self.use_windows_config:
             self.premake_content.extend([
-                '        -- Windows: strip dead code with ThinLTO',
+                '        -- Windows: strip dead code with LTO',
                 '        linkoptions {',
-                '            "-flto=thin",',
+                '            "-flto",',
                 '            "-Wl,--gc-sections",',
                 '            "-s",  -- Strip symbols',
                 '        }',
@@ -572,7 +586,7 @@ class PremakeGenerator:
         ])
 
         # Note: Windows linker flags are now added to Debug configuration above, not globally
-        if platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
+        if platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++', 'clang']:
             self.premake_content.extend([
                 '    -- Native Linux build settings',
                 f'    toolset "{toolset}"',
@@ -2283,7 +2297,7 @@ class PremakeGenerator:
         # Get global exclusions and additions first
         exclude_files = self.config.get('exclude_source_files', []).copy()
         additional_files = self.config.get('additional_source_files', []).copy()
-        
+
         # Then add platform-specific exclusions and additions
         platforms_config = self.config.get('platforms', {})
         if self.use_windows_config:

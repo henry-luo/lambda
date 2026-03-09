@@ -80,6 +80,11 @@ else ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
 	CXX := /clang64/bin/clang++
 	AR := /clang64/bin/ar
 	RANLIB := /clang64/bin/ranlib
+else ifeq ($(OS),Linux)
+	CC := clang
+	CXX := clang++
+	AR := ar
+	RANLIB := ranlib
 else
 	CC := gcc
 	CXX := g++
