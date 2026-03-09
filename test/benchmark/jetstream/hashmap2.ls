@@ -15,7 +15,7 @@ let DEFAULT_CAPACITY = 16
 let LOAD_FACTOR = 0.75
 let EMPTY = -1
 
-pn compute_hash(key: int) {
+pn compute_hash(key: int) int {
     // Java-style int hash
     var h = key
     h = bxor(h, shr(h, 16))
@@ -44,14 +44,14 @@ pn hashmap_new(capacity: int) {
 }
 
 // Find a free slot in the flat arrays
-pn find_free_slot(hm: HashMap) {
+pn find_free_slot(hm: HashMap) int {
     // Simply use size as the next index (compact storage)
     return hm.size
 }
 
 pn hashmap_put(hm: HashMap, key: int, value: int) {
-    var hash = compute_hash(key)
-    var bucket = hash % hm.cap
+    var hash: int = compute_hash(key)
+    var bucket: int = hash % hm.cap
     var hm_keys = hm.keys
     var hm_values = hm.values
     var hm_hashes = hm.hashes
@@ -129,9 +129,9 @@ pn hashmap_rehash(hm: HashMap) {
     }
 }
 
-pn hashmap_get(hm: HashMap, key: int) {
-    var hash = compute_hash(key)
-    var bucket = hash % hm.cap
+pn hashmap_get(hm: HashMap, key: int) int {
+    var hash: int = compute_hash(key)
+    var bucket: int = hash % hm.cap
     var hm_heads = hm.heads
     var hm_keys = hm.keys
     var hm_values = hm.values
