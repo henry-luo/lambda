@@ -51,7 +51,7 @@
 {
   r: "foobar"
 }
-'chars'
+'chars via indexing'
 {
   r: ["h", "e", "l", "l", "o"]
 }
