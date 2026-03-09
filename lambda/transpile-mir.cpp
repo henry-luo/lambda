@@ -9958,12 +9958,14 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     // Return result
     emit_insn(&mt, MIR_new_ret_insn(ctx, 1, MIR_new_reg_op(ctx, result)));
 
+#ifndef NDEBUG
     // Dump MIR text for debugging (before finish_func to capture state on error)
     FILE* mir_dump = fopen("temp/mir_dump.txt", "w");
     if (mir_dump) {
         MIR_output(ctx, mir_dump);
         fclose(mir_dump);
     }
+#endif
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
