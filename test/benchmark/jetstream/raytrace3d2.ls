@@ -30,7 +30,7 @@ pn vec_scalev(v1, v2) {
     return [v1[0] * v2[0], v1[1] * v2[1], v1[2] * v2[2]]
 }
 
-pn vec_dot(v1, v2) {
+pn vec_dot(v1, v2) float {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
 }
 
@@ -40,12 +40,12 @@ pn vec_cross(v1, v2) {
             v1[0] * v2[1] - v1[1] * v2[0]]
 }
 
-pn vec_length(v) {
+pn vec_length(v) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
 pn vec_normalise(v) {
-    var l = vec_length(v)
+    var l: float = vec_length(v)
     return [v[0] / l, v[1] / l, v[2] / l]
 }
 
@@ -135,7 +135,7 @@ pn create_triangle(p1, p2, p3) {
     return tri
 }
 
-pn triangle_intersect(tri: Triangle, orig, dir, near: float, far: float) {
+pn triangle_intersect(tri: Triangle, orig, dir, near: float, far: float) float {
     var u = (tri.axis + 1) % 3
     var v = (tri.axis + 2) % 3
     var d = dir[tri.axis] + tri.nu * dir[u] + tri.nv * dir[v]
@@ -184,11 +184,11 @@ pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: in
         return scene.background
     }
     var closest = null
-    var closest_d = far
+    var closest_d: float = far
     var i: int = 0
     while (i < scene.n_triangles) {
         var tri: Triangle = (scene.triangles)[i]
-        var d = triangle_intersect(tri, origin, dir, near, closest_d)
+        var d: float = triangle_intersect(tri, origin, dir, near, closest_d)
         if (d > 0.0) {
             closest_d = d
             closest = tri
@@ -211,14 +211,14 @@ pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: in
     while (i < scene.n_lights) {
         var light: Light = (scene.lights)[i]
         var to_light = vec_sub(light.pos, hit)
-        var distance = vec_length(to_light)
+        var distance: float = vec_length(to_light)
         to_light = vec_scale(to_light, 1.0 / distance)
         // Shadow test
         var blocked = false
         var bi: int = 0
         while (bi < scene.n_triangles) {
             var tri: Triangle = (scene.triangles)[bi]
-            var sd = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
+            var sd: float = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
             if (sd > 0.0) {
                 blocked = true
                 bi = scene.n_triangles  // break
@@ -226,7 +226,7 @@ pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: in
             bi = bi + 1
         }
         if (blocked == false) {
-            var nl = vec_dot(normal, to_light)
+            var nl: float = vec_dot(normal, to_light)
             if (nl > 0.0) {
                 l = vec_add_inplace(l, vec_scale(light.colour, nl))
             }
