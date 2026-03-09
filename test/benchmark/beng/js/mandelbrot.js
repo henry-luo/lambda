@@ -1,7 +1,7 @@
 // BENG Benchmark: mandelbrot (Node.js reference)
 // XOR checksum approach (matches Lambda adaptation)
 
-const N = parseInt(process.argv[2] || "200");
+const N = parseInt(process.argv[2] || "500");
 
 const __t0 = process.hrtime.bigint();
 let checksum = 0;

@@ -387,14 +387,13 @@ pn benchmark() {
 
 pn main() {
     var __t0 = clock()
-    // JetStream runs 20 iterations
-    var iter: int = 0
-    while (iter < 20) {
+    // Original JetStream workload: 20 iterations
+    var i: int = 0
+    while (i < 20) {
         benchmark()
-        iter = iter + 1
+        i = i + 1
     }
     var __t1 = clock()
-    // DeltaBlue has no explicit output verification in JS (just runs without error)
     print("deltablue: PASS\n")
     print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
 }

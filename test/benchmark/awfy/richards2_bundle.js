@@ -188,7 +188,7 @@ class IdleTaskDataRecord extends RBObject {
   constructor() {
     super();
     this.control = 1;
-    this.count = 10000;
+    this.count = 1000;
   }
 }
 
@@ -409,7 +409,7 @@ class Scheduler extends RBObject {
 
     this.schedule();
 
-    return this.queuePacketCount === 23246 && this.holdCount === 9297;
+    return this.queuePacketCount === 2322 && this.holdCount === 928;
   }
 
   findTask(identity) {
@@ -488,7 +488,8 @@ class Richards extends Benchmark {
 // --- timing harness ---
 const bench = new Richards();
 const __t0 = process.hrtime.bigint();
-const ok = bench.innerBenchmarkLoop(1);
+// Synchronized with JetStream: 50 iterations with count=1000
+const ok = bench.innerBenchmarkLoop(50);
 const __t1 = process.hrtime.bigint();
 process.stdout.write("Richards: " + (ok ? "PASS" : "FAIL") + "\n");
 process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
