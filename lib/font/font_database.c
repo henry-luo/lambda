@@ -567,8 +567,27 @@ static bool should_skip_directory(const char* name) {
 
 static bool is_priority_font_family(const char* name) {
     if (!name) return false;
+    // exact case-insensitive match
     for (int i = 0; priority_font_families[i]; i++) {
         if (strcasecmp(name, priority_font_families[i]) == 0) return true;
+    }
+    // normalized match: compare with spaces stripped from both sides
+    // so that heuristic filename names like "DejaVuSans" match "DejaVu Sans"
+    char n1[MAX_FONT_FAMILY_NAME];
+    int j1 = 0;
+    for (int i = 0; name[i] && j1 < MAX_FONT_FAMILY_NAME - 1; i++) {
+        if (name[i] != ' ') n1[j1++] = (char)tolower((unsigned char)name[i]);
+    }
+    n1[j1] = '\0';
+    for (int i = 0; priority_font_families[i]; i++) {
+        char n2[MAX_FONT_FAMILY_NAME];
+        int j2 = 0;
+        const char* pf = priority_font_families[i];
+        for (int k = 0; pf[k] && j2 < MAX_FONT_FAMILY_NAME - 1; k++) {
+            if (pf[k] != ' ') n2[j2++] = (char)tolower((unsigned char)pf[k]);
+        }
+        n2[j2] = '\0';
+        if (strcmp(n1, n2) == 0) return true;
     }
     return false;
 }
