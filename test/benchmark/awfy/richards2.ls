@@ -183,7 +183,7 @@ pn create_handler_data() {
 }
 
 pn create_idle_data() {
-    var rec = { control: 1, icount: 10000 }
+    var rec = { control: 1, icount: 1000 }
     return rec
 }
 
@@ -428,8 +428,8 @@ pn benchmark() {
 
     var qpc = (sched.qpc)
     var hc = (sched.hc)
-    if (qpc == 23246) {
-        if (hc == 9297) {
+    if (qpc == 2322) {
+        if (hc == 928) {
             return 1
         }
     }
@@ -443,12 +443,20 @@ pn benchmark() {
 
 pn main() {
     var __t0 = clock()
-    var result = benchmark()
-    var __t1 = clock()
-    if (result == 1) {
-        print("Richards: PASS\n")
+    // Synchronized with JetStream: 50 iterations with icount=1000
+    var pass = true
+    var k: int = 0
+    while (k < 50) {
+        var result = benchmark()
+        if (result == 0) {
+            pass = false
+        }
+        k = k + 1
     }
-    if (result == 0) {
+    var __t1 = clock()
+    if (pass) {
+        print("Richards: PASS\n")
+    } else {
         print("Richards: FAIL\n")
     }
     print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")

@@ -157,30 +157,30 @@
     },
     "mandelbrot": {
       "category": "compute",
-      "mir": 33.342,
-      "c2mir": 52.827,
-      "lambdajs": 153.509666664063,
-      "quickjs": 883.146,
-      "nodejs": 31.489542,
-      "python": 0.004
+      "mir": 30.825,
+      "c2mir": 50.681,
+      "lambdajs": 144.394625,
+      "quickjs": 888.468,
+      "nodejs": 31.679833,
+      "python": 740.552
     },
     "nbody": {
       "category": "compute",
-      "mir": 1.322,
-      "c2mir": 2.311,
-      "lambdajs": 0.0446666640625,
-      "quickjs": 0.024,
-      "nodejs": 0.224,
-      "python": null
+      "mir": 48.29,
+      "c2mir": 84.776,
+      "lambdajs": 514.410083328125,
+      "quickjs": 166.959,
+      "nodejs": 5.591916,
+      "python": 135.031
     },
     "richards": {
       "category": "macro",
-      "mir": 51.835,
-      "c2mir": 48.609,
-      "lambdajs": 218.283541664063,
-      "quickjs": 38.462,
-      "nodejs": 4.607209,
-      "python": 33.403
+      "mir": 246.372,
+      "c2mir": 212.151,
+      "lambdajs": 1045.60366667188,
+      "quickjs": 194.481,
+      "nodejs": 47.789375,
+      "python": 168.444
     },
     "json": {
       "category": "macro",
@@ -193,12 +193,12 @@
     },
     "deltablue": {
       "category": "macro",
-      "mir": 5.266,
-      "c2mir": 4.936,
-      "lambdajs": 0.3332916640625,
-      "quickjs": 0.261,
-      "nodejs": 0.852459,
-      "python": null
+      "mir": 98.563,
+      "c2mir": 95.87,
+      "lambdajs": 219.566583328125,
+      "quickjs": 113.121,
+      "nodejs": 12.647791,
+      "python": 67.862
     },
     "havlak": {
       "category": "macro",
@@ -258,21 +258,21 @@
     },
     "mandelbrot": {
       "category": "numeric",
-      "mir": 22.699,
-      "c2mir": 37.703,
-      "lambdajs": 12.3361666640625,
-      "quickjs": 110.818,
-      "nodejs": 4.19325,
-      "python": 216.074
+      "mir": 144.415,
+      "c2mir": 239.686,
+      "lambdajs": 78.9086666640625,
+      "quickjs": 697.866,
+      "nodejs": 15.612333,
+      "python": 1368.435
     },
     "nbody": {
       "category": "numeric",
-      "mir": 1.334,
-      "c2mir": 2.326,
-      "lambdajs": 11.806625,
-      "quickjs": 4.395,
-      "nodejs": 4.511959,
-      "python": 4.77
+      "mir": 48.084,
+      "c2mir": 85.147,
+      "lambdajs": 422.594041664063,
+      "quickjs": 154.905,
+      "nodejs": 8.067209,
+      "python": 171.722
     },
     "pidigits": {
       "category": "bignum",
@@ -332,12 +332,12 @@
     },
     "primes": {
       "category": "numeric",
-      "mir": 7.147,
-      "c2mir": 9.642,
-      "lambdajs": 8.4852916640625,
-      "quickjs": 95.939,
-      "nodejs": 4.516583,
-      "python": 96.74
+      "mir": 7.228,
+      "c2mir": 9.813,
+      "lambdajs": 8.318083328125,
+      "quickjs": 97.309,
+      "nodejs": 4.494,
+      "python": 96.725
     },
     "base64": {
       "category": "string",
@@ -451,12 +451,12 @@
     },
     "primes": {
       "category": "iterative",
-      "mir": 0.475,
-      "c2mir": 0.713,
-      "lambdajs": 0.6636666640625,
-      "quickjs": 7.106,
-      "nodejs": 1.714875,
-      "python": 8.522
+      "mir": 7.204,
+      "c2mir": 10.059,
+      "lambdajs": 8.0596666640625,
+      "quickjs": 97.374,
+      "nodejs": 4.671208,
+      "python": 121.115
     },
     "puzzle": {
       "category": "search",
@@ -489,12 +489,12 @@
   "jetstream": {
     "nbody": {
       "category": "numeric",
-      "mir": 45.588,
-      "c2mir": 84.649,
+      "mir": 47.926,
+      "c2mir": 85.409,
       "lambdajs": null,
-      "quickjs": 125.0,
-      "nodejs": 5.519,
-      "python": 133.8
+      "quickjs": null,
+      "nodejs": 5.549,
+      "python": 146.127
     },
     "cube3d": {
       "category": "3d",
@@ -516,12 +516,12 @@
     },
     "richards": {
       "category": "macro",
-      "mir": 250.48,
-      "c2mir": 286.781,
+      "mir": 256.131,
+      "c2mir": 239.237,
       "lambdajs": null,
-      "quickjs": 158.4,
-      "nodejs": 8.26,
-      "python": 216.6
+      "quickjs": null,
+      "nodejs": 8.282,
+      "python": 225.104
     },
     "splay": {
       "category": "data",
@@ -534,12 +534,12 @@
     },
     "deltablue": {
       "category": "macro",
-      "mir": 18.439,
-      "c2mir": 18.882,
+      "mir": 18.731,
+      "c2mir": 19.276,
       "lambdajs": null,
-      "quickjs": 118.7,
-      "nodejs": 10.393,
-      "python": 17.0
+      "quickjs": null,
+      "nodejs": 10.792,
+      "python": 18.075
     },
     "hashmap": {
       "category": "data",

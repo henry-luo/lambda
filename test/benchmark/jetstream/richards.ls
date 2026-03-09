@@ -299,13 +299,15 @@ pn run_richards() {
 
 pn main() {
     var __t0 = clock()
+    // Original JetStream workload: 50 iterations with COUNT=1000
     var pass = true
-    var iter: int = 0
-    while (iter < 50) {
-        if (run_richards() == false) {
+    var i: int = 0
+    while (i < 50) {
+        var result = run_richards()
+        if (result == false) {
             pass = false
         }
-        iter = iter + 1
+        i = i + 1
     }
     var __t1 = clock()
     if (pass) {

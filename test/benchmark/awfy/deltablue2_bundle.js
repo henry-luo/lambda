@@ -1227,7 +1227,11 @@ class DeltaBlue extends Benchmark {
 // --- timing harness ---
 const bench = new DeltaBlue();
 const __t0 = process.hrtime.bigint();
-const ok = bench.innerBenchmarkLoop(1);
+// Synchronized with JetStream: 20 iterations of chainTest(100) + projectionTest(100)
+let ok = true;
+for (let i = 0; i < 20; ++i) {
+    ok = bench.innerBenchmarkLoop(100) && ok;
+}
 const __t1 = process.hrtime.bigint();
 process.stdout.write("DeltaBlue: " + (ok ? "PASS" : "FAIL") + "\n");
 process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
