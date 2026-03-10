@@ -60,7 +60,6 @@ extern "C" {
 #define SYM_MATCH_DEFAULT sym_match_default
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
-#define SYM_PUB_STAM sym_pub_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
 #define SYM_WHILE_STAM sym_while_stam

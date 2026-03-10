@@ -254,7 +254,6 @@ module.exports = grammar({
     // expr statements that need ';'
     _expr_stam: $ => choice(
       $.let_stam,
-      $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
     ),
@@ -568,17 +567,8 @@ module.exports = grammar({
     ),
 
     let_stam: $ => seq(
-      'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
-    ),
-
-    pub_stam: $ => choice(
-      // pub variable: pub x = expr, pub y = expr
-      seq('pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))),
-      // pub type alias: pub type T = type_expr
-      seq('pub', 'type', field('declare', alias($.type_assign, $.assign_expr)),
-        repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))),
-      // pub object type: pub type T { ... }
-      seq('pub', field('declare', $.object_type)),
+      choice('let', 'pub'),
+      field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
     // Expression-form if: if (cond) expr else expr
@@ -951,6 +941,7 @@ module.exports = grammar({
     // Element (with content): type Article { title: string, string, element; fn render() => ... }
     // Without content → object type; with content → element type
     object_type: $ => seq(
+      optional(field('pub', 'pub')),
       'type', field('name', choice($.identifier, $.symbol)),
       optional(seq(':', field('base', choice($.identifier, $.symbol)))),
       '{',
@@ -975,6 +966,7 @@ module.exports = grammar({
     // type_stam handles type aliases, string patterns, and symbol patterns.
     // The leading keyword distinguishes them; AST builder checks the text.
     type_stam: $ => seq(
+      optional(field('pub', 'pub')),
       field('kind', choice('type', 'string', 'symbol')),
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
