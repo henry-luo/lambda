@@ -314,11 +314,6 @@ module.exports = grammar({
     ),
 
     map_item: $ => choice(
-      // dotted key: a.b: val — lower dynamic precedence so GLR prefers member_expr when ambiguous
-      // prec.dynamic(-1, seq(
-      //   field('name', $.dotted_name),
-      //   ':', field('as', $._expr)
-      // )),
       seq(
         field('name', choice($.dotted_name, $.symbol, $.identifier, $.base_type)),
         ':', field('as', $._expr),
