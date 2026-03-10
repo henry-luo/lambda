@@ -128,4 +128,73 @@ static inline int parse_escape_char(const char** pos, StringBuf* sb) {
     return (int)(*pos - start);
 }
 
+/**
+ * Match and consume a literal keyword in a pointer-style parser.
+ *
+ * Checks that *src starts with @p literal, then advances both *src and
+ * ctx.tracker by len(literal).  On mismatch, adds an error and returns false
+ * (leaving *src and the tracker unchanged).
+ *
+ * @param ctx     InputContext (for tracker sync + error reporting)
+ * @param src     In/out: pointer advanced on success
+ * @param literal NUL-terminated string to match (e.g. "true", "null")
+ * @return        true on success, false on mismatch
+ */
+static inline bool input_expect_literal(InputContext& ctx, const char** src,
+                                        const char* literal) {
+    size_t len = strlen(literal);
+    if (strncmp(*src, literal, len) != 0) {
+        ctx.addError(ctx.tracker.location(), "Expected '%s'", literal);
+        return false;
+    }
+    *src += len;
+    ctx.tracker.advance(len);
+    return true;
+}
+
+/**
+ * Parse a double-quoted string from ctx.tracker.
+ *
+ * On entry tracker.current() must be '"'.  Handles standard escape sequences
+ * via parse_escape_char() (superset of JSON/DOT/D2 escapes).
+ *
+ * @param ctx  InputContext for tracker, string-buffer, and builder
+ * @return     New String* on success, nullptr on error
+ */
+static inline String* parse_shared_quoted_string(InputContext& ctx) {
+    SourceTracker& tracker = ctx.tracker;
+    if (tracker.atEnd() || tracker.current() != '"') return nullptr;
+
+    SourceLocation start_loc = tracker.location();
+    tracker.advance(); // skip opening '"'
+
+    StringBuf* sb = ctx.sb;
+    stringbuf_reset(sb);
+
+    while (!tracker.atEnd() && tracker.current() != '"') {
+        char c = tracker.current();
+        if (c == '\\') {
+            tracker.advance(); // skip '\'
+            if (tracker.atEnd()) {
+                ctx.addError(tracker.location(), "Unterminated string escape");
+                return nullptr;
+            }
+            const char* pos = tracker.rest();
+            int consumed = parse_escape_char(&pos, sb);
+            tracker.advance(consumed);
+        } else {
+            stringbuf_append_char(sb, c);
+            tracker.advance();
+        }
+    }
+
+    if (tracker.atEnd()) {
+        ctx.addError(start_loc, "Unterminated quoted string");
+        return nullptr;
+    }
+
+    tracker.advance(); // skip closing '"'
+    return ctx.builder.createString(sb->str->chars, sb->length);
+}
+
 } // namespace lambda
