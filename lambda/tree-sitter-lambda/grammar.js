@@ -124,6 +124,7 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$._expr, $.member_expr],
+    [$.dotted_name, $.primary_expr],                 // identifier.identifier: shift for dotted_name vs reduce to primary_expr
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
@@ -312,10 +313,16 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    map_item: $ => seq(
-      field('name', choice($.symbol, $.identifier, $.base_type, $.string)),
-      ':',
-      field('as', $._expr),
+    map_item: $ => choice(
+      // dotted key: a.b: val — lower dynamic precedence so GLR prefers member_expr when ambiguous
+      prec.dynamic(-1, seq(
+        field('name', $.dotted_name),
+        ':', field('as', $._expr)
+      )),
+      seq(
+        field('name', choice($.symbol, $.identifier, $.base_type, $.string)),
+        ':', field('as', $._expr),
+      ),
     ),
 
     map: $ => seq(
@@ -345,24 +352,26 @@ module.exports = grammar({
     ),
 
     // Attribute name: dotted or simple name
-    attr_name: $ => choice(
+    // prec.dynamic(2) > member_expr(1) so GLR prefers attr in element context
+    attr_name: $ => prec.dynamic(2, choice(
       $.dotted_name,
       $.symbol,
       $.identifier,
       $.base_type,
-    ),
+    )),
 
     attr: $ => seq(
       field('name', $.attr_name),
       ':', field('as', $._attr_expr)
     ),
 
-    // Dotted name: arbitrary depth dotted segments (no spaces around dots)
+    // Dotted name: arbitrary depth dotted segments
     // Each segment is an identifier or symbol: a.b.'c'.d
-    dotted_name: $ => seq(
+    // prec(50) matches primary_expr so shift-reduce becomes a real GLR conflict
+    dotted_name: $ => prec.left(50, seq(
       choice($.identifier, $.symbol),
-      repeat1(seq(token.immediate('.'), choice($.identifier, $.symbol))),
-    ),
+      repeat1(seq('.', choice($.identifier, $.symbol))),
+    )),
 
     element: $ => seq('<',
       choice($.dotted_name, $.symbol, $.identifier),
@@ -414,6 +423,7 @@ module.exports = grammar({
       $.map,
       $.element,
       $.base_type,  // includes null
+      prec.dynamic(-1, $.dotted_name),  // a.b, svg.rect — lower priority than member_expr
       $.identifier,
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
@@ -470,7 +480,7 @@ module.exports = grammar({
     // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
     // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
     member_expr: $ => prec.dynamic(1, seq(
-      field('object', $.primary_expr), ".",
+      field('object', $.primary_expr), '.',
       field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),
 

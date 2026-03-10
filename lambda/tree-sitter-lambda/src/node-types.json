@@ -2509,6 +2509,10 @@
             "named": true
           },
           {
+            "type": "dotted_name",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -3255,6 +3259,10 @@
         },
         {
           "type": "decimal",
+          "named": true
+        },
+        {
+          "type": "dotted_name",
           "named": true
         },
         {
@@ -4276,19 +4284,19 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
-  },
-  {
-    "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
     "named": true
+  },
+  {
+    "type": "symbol",
+    "named": false
   },
   {
     "type": "that",
