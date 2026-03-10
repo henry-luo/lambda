@@ -569,7 +569,18 @@ inline void resolve_intrinsic_track_sizes(
         if (contrib.crosses_flexible_track) continue;
 
         float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
-        float extra_space = contrib.min_content_contribution - current_size;
+        // CSS §11.5 step 4.1: if any spanned track's min sizing is max-content, use max-content contribution
+        float p1_contrib = contrib.min_content_contribution;
+        {
+            size_t p1_end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+            for (size_t ii = contrib.track_start; ii < p1_end; ++ii) {
+                if (tracks[ii].min_track_sizing_function.type == SizingFunctionType::MaxContent) {
+                    p1_contrib = contrib.max_content_contribution;
+                    break;
+                }
+            }
+        }
+        float extra_space = p1_contrib - current_size;
 
         if (extra_space > 0) {
             increase_sizes_for_spanning_item(
@@ -626,6 +637,59 @@ inline void resolve_intrinsic_track_sizes(
                 extra_space,
                 IntrinsicContributionType::Maximum
             );
+        }
+    }
+
+    // Phase 3: Set automatic minimum sizes for auto-min flexible tracks from items spanning them.
+    // This establishes the base_size floor that expand_flexible_tracks() uses in its iterative
+    // freeze algorithm. increase_sizes_for_spanning_item() skips flex tracks, so we must do
+    // this directly here. CSS Grid §11.5 - items crossing flexible tracks handled here.
+    for (const auto& contrib : contributions) {
+        if (contrib.track_span == 0) continue;
+        if (!contrib.crosses_flexible_track) continue;
+
+        size_t p3_end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+
+        // Count auto-min flexible tracks in this span and sum their current base sizes
+        int flex_auto_count = 0;
+        float current_flex_size = 0.0f;
+        for (size_t i = contrib.track_start; i < p3_end; ++i) {
+            if (tracks[i].is_flexible() &&
+                tracks[i].min_track_sizing_function.type == SizingFunctionType::Auto) {
+                flex_auto_count++;
+                current_flex_size += tracks[i].base_size;
+            }
+        }
+
+        if (flex_auto_count == 0) continue;
+
+        // Compute how much more the flex tracks need to cover the item's min-content contribution
+        float non_flex_span_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap)
+                                   - current_flex_size;
+        float remaining_needed = contrib.min_content_contribution - non_flex_span_size - current_flex_size;
+
+        if (remaining_needed > 0) {
+            // Distribute proportionally by flex factor so that each track gets
+            // its fair share: a span-2 item on [1fr,2fr] gives 1/3 and 2/3
+            float total_flex_factor = 0.0f;
+            for (size_t i = contrib.track_start; i < p3_end; ++i) {
+                if (tracks[i].is_flexible() &&
+                    tracks[i].min_track_sizing_function.type == SizingFunctionType::Auto) {
+                    total_flex_factor += tracks[i].flex_factor();
+                }
+            }
+            if (total_flex_factor <= 0.0f) continue;
+
+            for (size_t i = contrib.track_start; i < p3_end; ++i) {
+                auto& track = tracks[i];
+                if (!track.is_flexible() ||
+                    track.min_track_sizing_function.type != SizingFunctionType::Auto) {
+                    continue;
+                }
+                float proportion = track.flex_factor() / total_flex_factor;
+                track.base_size += remaining_needed * proportion;
+                // growth_limit stays INFINITY for flex tracks - sized in expand_flexible_tracks
+            }
         }
     }
 
@@ -741,8 +805,21 @@ inline void expand_flexible_tracks(
     // Determine available space
     float available = axis_available_space;
     if (available < 0) {
-        // No definite available space - use min-content based sizing
-        // Flexible tracks get their base size (which should be 0 for fr tracks)
+        // Indefinite container (shrink-to-fit): the fr size is driven by content only.
+        // Phase 3 set each flex track's base_size proportionally from items spanning it.
+        // CSS §11.7.1 (indefinite free space): fr_size = max(base_size / flex_factor) over
+        // all flex tracks, then assign track_size = flex_factor * fr_size for all flex tracks.
+        // This ensures tracks with no spanning items still scale with the shared fr unit.
+        float fr_size_indef = 0.0f;
+        for (const auto& track : tracks) {
+            if (!track.is_flexible() || track.flex_factor() <= 0.0f) continue;
+            fr_size_indef = std::max(fr_size_indef, track.base_size / track.flex_factor());
+        }
+        for (auto& track : tracks) {
+            if (!track.is_flexible()) continue;
+            track.base_size = track.flex_factor() * fr_size_indef;
+            track.growth_limit = track.base_size;
+        }
         return;
     }
 
@@ -757,41 +834,68 @@ inline void expand_flexible_tracks(
     float free_space = available - used_by_non_flex;
     if (free_space <= 0) return;
 
-    // Calculate hypothetical fr size
-    float hypothetical_fr_size = free_space / flex_factor_sum;
+    // CSS §11.7.1 Iterative freeze algorithm.
+    // Each flexible track has an effective minimum = max(base_size from Phase 3, resolved min fn).
+    // If a flexible track's minimum exceeds its fr share, freeze it at that minimum and
+    // recompute the fr size from the remaining unfrozen tracks. Repeat until stable.
 
-    // Find the largest base size among flexible tracks (clamping fr value)
-    // CSS Grid spec: the fr value is the maximum of:
-    // - The result of dividing the leftover space by the sum of flex factors
-    // - The largest min track sizing function of flexible tracks divided by its flex factor
-    float fr_size = hypothetical_fr_size;
-    for (const auto& track : tracks) {
-        if (!track.is_flexible()) continue;
+    size_t n = tracks.size();
+    std::vector<float> min_floor(n, 0.0f);
+    std::vector<bool> frozen(n, false);
 
-        float min_size = track.min_track_sizing_function.resolve(axis_available_space);
-        if (min_size < 0) min_size = 0;  // Treat indefinite as 0
-
-        float track_fr = track.flex_factor();
-        if (track_fr > 0) {
-            float min_fr = min_size / track_fr;
-            fr_size = std::max(fr_size, min_fr);
+    for (size_t i = 0; i < n; ++i) {
+        if (!tracks[i].is_flexible()) {
+            frozen[i] = true;  // non-flex tracks already at final size
+        } else {
+            float auto_min = tracks[i].base_size;  // automatic minimum from Phase 3
+            float spec_min = tracks[i].min_track_sizing_function.resolve(axis_available_space);
+            min_floor[i] = std::max(auto_min, (spec_min >= 0) ? spec_min : 0.0f);
         }
     }
 
-    // Assign sizes to flexible tracks
-    for (auto& track : tracks) {
-        if (!track.is_flexible()) continue;
+    float fr_size = 0.0f;
+    bool changed = true;
+    while (changed) {
+        changed = false;
 
-        float track_size = track.flex_factor() * fr_size;
-
-        // Clamp to min size
-        float min_size = track.min_track_sizing_function.resolve(axis_available_space);
-        if (min_size >= 0) {
-            track_size = std::max(track_size, min_size);
+        // Leftover space = available minus sum of frozen (non-flex + frozen-flex) track sizes
+        float leftover = available;
+        float sum_flex = 0.0f;
+        for (size_t i = 0; i < n; ++i) {
+            if (frozen[i]) {
+                leftover -= tracks[i].base_size;
+            } else {
+                sum_flex += tracks[i].flex_factor();
+            }
         }
 
-        track.base_size = track_size;
-        track.growth_limit = track_size;
+        if (sum_flex <= 0.0f) break;
+
+        fr_size = (leftover > 0.0f) ? (leftover / sum_flex) : 0.0f;
+
+        // Freeze any flexible track whose minimum exceeds its fr share
+        for (size_t i = 0; i < n; ++i) {
+            if (frozen[i]) continue;
+            if (min_floor[i] > fr_size * tracks[i].flex_factor() + 0.001f) {
+                tracks[i].base_size = min_floor[i];
+                frozen[i] = true;
+                changed = true;
+            }
+        }
+    }
+
+    // Assign final sizes to unfrozen flexible tracks
+    for (size_t i = 0; i < n; ++i) {
+        if (!tracks[i].is_flexible() || frozen[i]) continue;
+        tracks[i].base_size = tracks[i].flex_factor() * fr_size;
+        tracks[i].growth_limit = tracks[i].base_size;
+    }
+
+    // Sync growth_limit for frozen flexible tracks
+    for (size_t i = 0; i < n; ++i) {
+        if (tracks[i].is_flexible() && frozen[i]) {
+            tracks[i].growth_limit = tracks[i].base_size;
+        }
     }
 }
 
