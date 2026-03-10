@@ -120,6 +120,7 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._number,
+    $._key
   ],
 
   conflicts: $ => [
@@ -313,9 +314,11 @@ module.exports = grammar({
       $.named_value,
     ),
 
+    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type),
+
     map_item: $ => choice(
       seq(
-        field('name', choice($.dotted_name, $.symbol, $.identifier, $.base_type)),
+        field('name', $._key),
         ':', field('as', $._expr),
       ),
     ),
@@ -348,12 +351,7 @@ module.exports = grammar({
 
     // Attribute name: dotted or simple name
     // prec.dynamic(2) > member_expr(1) so GLR prefers attr in element context
-    attr_name: $ => prec.dynamic(2, choice(
-      $.dotted_name,
-      $.symbol,
-      $.identifier,
-      $.base_type,
-    )),
+    attr_name: $ => prec.dynamic(2, $._key),
 
     attr: $ => seq(
       field('name', $.attr_name),
