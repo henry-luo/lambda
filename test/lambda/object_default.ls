@@ -6,13 +6,13 @@ type Config {
 }
 
 // Partial override: specify some, default the rest
-let c1 = {Config host: "example.com"}
+let c1 = <Config host: "example.com">
 c1.host
 c1.port
 c1.debug
 
 // Full override
-let c2 = {Config host: "api.io", port: 443, debug: true}
+let c2 = <Config host: "api.io", port: 443, debug: true>
 c2.host
 c2.port
 c2.debug
@@ -24,6 +24,6 @@ type Shape {
 type Circle : Shape {
     radius: int = 10
 }
-let c3 = {Circle color: "red"}
+let c3 = <Circle color: "red">
 c3.color
 c3.radius

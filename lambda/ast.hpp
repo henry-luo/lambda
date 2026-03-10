@@ -97,10 +97,9 @@ extern "C" {
 // #define SYM_SYS_FUNC sym_sys_func
 #define SYM_IMPORT_MODULE sym_import_module
 
-// Object type definition and object literal symbols
+// Object type definition symbols
 #define SYM_OBJECT_TYPE sym_object_type
 #define SYM_ENTITY_TYPE sym_entity_type
-#define SYM_OBJECT_LITERAL sym_object_literal
 #define SYM_THAT_CONSTRAINT sym_that_constraint
 
 // String/Symbol Pattern symbols
@@ -143,6 +142,7 @@ extern "C" {
 #define FIELD_VARIADIC field_variadic
 #define FIELD_TARGET field_target
 #define FIELD_PREFIX field_prefix
+#define FIELD_SOURCE field_source
 #define FIELD_URI field_uri
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index

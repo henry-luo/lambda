@@ -6,7 +6,7 @@
 
 // Test 1: fn method reads float fields directly
 type Vec2 { x: float, y: float; fn mag() => math.sqrt(x * x + y * y) }
-let v = {Vec2 x: 3.0, y: 4.0}
+let v = <Vec2 x: 3.0, y: 4.0>
 v.mag()
 
 // Test 2: fn method reads mixed types (string + int + bool)
@@ -17,7 +17,7 @@ type Entry {
     fn summary() => label ++ ":" ++ string(count)
     fn is_active() => active
 }
-let e = {Entry label: "hits", count: 42, active: true}
+let e = <Entry label: "hits", count: 42, active: true>
 e.summary()
 e.is_active()
 
@@ -27,7 +27,7 @@ type Adder {
     fn add(n: int) => base + n
     fn mul(n: int) => base * n
 }
-let a = {Adder base: 10}
+let a = <Adder base: 10>
 a.add(5)
 a.mul(3)
 
@@ -37,7 +37,7 @@ type Stats {
     fn range() => max - min
     fn mid() => (min + max) / 2
 }
-let s = {Stats min: 10, max: 50}
+let s = <Stats min: 10, max: 50>
 [s.range(), s.mid()]
 
 // Test 5: fn method accessing bool field in condition
@@ -45,8 +45,8 @@ type Gate {
     open: bool;
     fn status() => if (open) "open" else "closed"
 }
-let g1 = {Gate open: true}
-let g2 = {Gate open: false}
+let g1 = <Gate open: true>
+let g2 = <Gate open: false>
 g1.status()
 g2.status()
 
@@ -59,7 +59,7 @@ type Tally {
     pn add(x: int) { n = n + x }
     fn value() => n
 }
-let t = {Tally}
+let t = <Tally>
 t.bump()
 t.bump()
 t.bump()
@@ -75,7 +75,7 @@ type Pos {
     }
     fn coords() => [x, y]
 }
-let pos = {Pos}
+let pos = <Pos>
 pos.move(1.5, 2.5)
 pos.coords()
 pos.move(-0.5, 3.5)
@@ -91,7 +91,7 @@ type Accum {
     }
     fn avg() => total / calls
 }
-let ac = {Accum}
+let ac = <Accum>
 ac.record(10)
 ac.record(20)
 ac.record(30)
@@ -104,7 +104,7 @@ type Toggle {
     pn disable() { on = false }
     fn state() => on
 }
-let tog = {Toggle}
+let tog = <Toggle>
 tog.state()
 tog.enable()
 tog.state()
@@ -118,7 +118,7 @@ type Wallet {
     pn withdraw(amt: int) { balance = balance - amt }
     fn check() => balance
 }
-let w = {Wallet}
+let w = <Wallet>
 w.deposit(100)
 w.check()
 w.withdraw(30)
@@ -132,7 +132,7 @@ type Logger {
     pn log(msg: string) { last = msg }
     fn peek() => last
 }
-let lg = {Logger}
+let lg = <Logger>
 lg.log("hello")
 lg.peek()
 lg.log("world")
@@ -144,7 +144,7 @@ type Counter {
     fn doubled() => val * 2
     pn inc() { val = val + 1 }
 }
-let cnt = {Counter}
+let cnt = <Counter>
 cnt.doubled()
 cnt.inc()
 cnt.inc()

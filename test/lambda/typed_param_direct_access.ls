@@ -61,7 +61,7 @@ type Counter {
     pn inc() { val = val + 1 }
 }
 fn read_counter(c: Counter) => c.val
-let cnt = {Counter}
+let cnt = <Counter>
 cnt.inc()
 cnt.inc()
 cnt.inc()
@@ -74,7 +74,7 @@ type Pair {
     fn sum() => a + b
 }
 fn diff_pair(p: Pair) => p.a - p.b
-let pr = {Pair a: 10, b: 3}
+let pr = <Pair a: 10, b: 3>
 diff_pair(pr)
 
 // Test 11: two object params of different types
@@ -83,7 +83,7 @@ type NamedVal {
     num: int;
 }
 fn format_nv(nv: NamedVal) => nv.label ++ "=" ++ string(nv.num)
-let nv1 = {NamedVal label: "score", num: 42}
+let nv1 = <NamedVal label: "score", num: 42>
 format_nv(nv1)
 
 // Test 12: nested function calls with typed params

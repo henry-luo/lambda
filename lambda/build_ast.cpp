@@ -661,6 +661,18 @@ void* alloc_const(Transpiler* tp, size_t size) {
     return bytes;
 }
 
+// extract name text from an identifier or symbol node
+// for identifiers, returns the source text as-is
+// for symbols, strips the surrounding single quotes
+static StrView node_name_text(Transpiler* tp, TSNode node) {
+    StrView text = ts_node_source(tp, node);
+    if (ts_node_symbol(node) == SYM_SYMBOL && text.length >= 2) {
+        text.str++;
+        text.length -= 2;
+    }
+    return text;
+}
+
 // check if a name is a reserved type keyword
 bool is_type_keyword(StrView name) {
     static const char* type_keywords[] = {
@@ -3207,15 +3219,13 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
-    int start_byte = ts_node_start_byte(name);
-    StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
+    StrView name_view = node_name_text(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     // check for error destructuring: let a^err = expr
     TSNode error_name_node = ts_node_child_by_field_id(asn_node, FIELD_ERROR);
     if (!ts_node_is_null(error_name_node)) {
-        int err_start = ts_node_start_byte(error_name_node);
-        StrView err_view = { .str = tp->source + err_start, .length = ts_node_end_byte(error_name_node) - err_start };
+        StrView err_view = node_name_text(tp, error_name_node);
         ast_node->error_name = name_pool_create_strview(tp->name_pool, err_view);
         log_debug("error destructuring: %.*s^%.*s", (int)name_view.length, name_view.str,
             (int)err_view.length, err_view.str);
@@ -3451,8 +3461,7 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_NAME) {
             TSNode name_node = ts_tree_cursor_current_node(&cursor);
-            int start_byte = ts_node_start_byte(name_node);
-            StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
+            StrView name_view = node_name_text(tp, name_node);
             ast_node->names[idx] = name_pool_create_strview(tp->name_pool, name_view);
             log_debug("decompose name[%d]: %.*s", idx, (int)name_view.length, name_view.str);
             idx++;
@@ -3604,15 +3613,15 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
 // ==================== Namespace Attribute Desugaring ====================
 // Desugar ns.attr: val → ns: {attr: val} at AST build time (v2 namespace design)
 
-// Find ns_identifier node from attr_name or direct name node
-// Returns the ns_identifier TSNode, or a null TSNode if not found
-static TSNode find_ns_identifier_in_name(TSNode name_node) {
+// Find dotted_name node from attr_name or direct name node
+// Returns the dotted_name TSNode, or a null TSNode if not found
+static TSNode find_dotted_name_in_name(TSNode name_node) {
     TSSymbol sym = ts_node_symbol(name_node);
-    if (sym == sym_ns_identifier) return name_node;
+    if (sym == sym_dotted_name) return name_node;
     if (sym == sym_attr_name) {
         // attr_name wraps the actual name node
         TSNode child = ts_node_named_child(name_node, 0);
-        if (!ts_node_is_null(child) && ts_node_symbol(child) == sym_ns_identifier) {
+        if (!ts_node_is_null(child) && ts_node_symbol(child) == sym_dotted_name) {
             return child;
         }
     }
@@ -3713,7 +3722,7 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
     TSSymbol symbol = ts_node_symbol(key_node);
     switch (symbol) {
     case sym_attr_name: {
-        // attr_name contains the actual name node (ns_identifier, string, symbol, or identifier)
+        // attr_name wraps the actual name node (dotted_name, symbol, or identifier)
         TSNode name_child = ts_node_child_by_field_id(key_node, field_name);
         if (!ts_node_is_null(name_child)) {
             return build_key_string(tp, name_child);
@@ -3725,14 +3734,14 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         }
         return (StrView) { .str = NULL, .length = 0 };
     }
-    case sym_ns_identifier: {
-        // ns.name - return the full text including namespace
+    case sym_dotted_name: {
+        // a.b.'c' - return the full text including dots
         int start_byte = ts_node_start_byte(key_node);
         int end_byte = ts_node_end_byte(key_node);
         return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
     }
-        // todo: handle string and symbol escape
     case SYM_SYMBOL:  case SYM_STRING: {
+        // todo: handle string and symbol escape
         int start_byte = ts_node_start_byte(key_node) + 1; // skip the first quote
         int end_byte = ts_node_end_byte(key_node) - 1; // skip the last quote
         return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
@@ -3760,15 +3769,15 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
         return ast_node;
     }
 
-    // Check for ns_identifier to desugar: ns.attr: val → ns: {attr: val}
-    TSNode ns_id_node = find_ns_identifier_in_name(name);
-    if (!ts_node_is_null(ns_id_node)) {
-        // extract ns prefix and local attr name from ns_identifier fields
-        TSNode ns_node = ts_node_child_by_field_id(ns_id_node, field_ns);
-        TSNode local_node = ts_node_child_by_field_id(ns_id_node, field_name);
+    // Check for dotted_name to desugar: ns.attr: val → ns: {attr: val}
+    TSNode dotted_node = find_dotted_name_in_name(name);
+    if (!ts_node_is_null(dotted_node)) {
+        // first named child is the namespace prefix, second is the local attr name
+        TSNode ns_node = ts_node_named_child(dotted_node, 0);
+        TSNode local_node = ts_node_named_child(dotted_node, 1);
         if (!ts_node_is_null(ns_node) && !ts_node_is_null(local_node)) {
-            StrView ns_prefix = ts_node_source(tp, ns_node);
-            StrView local_name = ts_node_source(tp, local_node);
+            StrView ns_prefix = node_name_text(tp, ns_node);
+            StrView local_name = node_name_text(tp, local_node);
             log_debug("ns attr desugar: %.*s.%.*s → %.*s: {%.*s: val}",
                 (int)ns_prefix.length, ns_prefix.str,
                 (int)local_name.length, local_name.str,
@@ -4065,7 +4074,7 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
 
     // get type name
     TSNode name_node = ts_node_child_by_field_id(type_node, FIELD_NAME);
-    StrView name = ts_node_source(tp, name_node);
+    StrView name = node_name_text(tp, name_node);
     ast_node->name = name_pool_create_strview(tp->name_pool, name);
     obj_type->type_name.str = ast_node->name->chars;
     obj_type->type_name.length = ast_node->name->len;
@@ -4227,70 +4236,6 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
 
     log_debug("build_object_type: '%.*s' with %d fields, %d methods",
         (int)name.length, name.str, obj_type->length, obj_type->method_count);
-    return (AstNode*)ast_node;
-}
-
-// ============================================================================
-// Object literal: {TypeName key: value, ...} or {TypeName source, key: value, ...}
-// ============================================================================
-AstNode* build_object_literal(Transpiler* tp, TSNode lit_node) {
-    log_debug("build_object_literal");
-    AstObjectLiteralNode* ast_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
-        AST_NODE_OBJECT_LITERAL, lit_node, sizeof(AstObjectLiteralNode));
-
-    // get type name
-    TSNode name_node = ts_node_child_by_field_id(lit_node, field_type_name);
-    StrView type_name = ts_node_source(tp, name_node);
-    ast_node->type_name = name_pool_create_strview(tp->name_pool, type_name);
-    log_debug("build_object_literal: type_name='%.*s'", (int)type_name.length, type_name.str);
-
-    // look up the type definition to get the TypeObject
-    NameEntry* type_entry = lookup_name(tp, type_name);
-    TypeObject* obj_type = NULL;
-    if (type_entry && type_entry->node && type_entry->node->type) {
-        Type* resolved = type_entry->node->type;
-        if (resolved->type_id == LMD_TYPE_TYPE) {
-            Type* inner = ((TypeType*)resolved)->type;
-            if (inner && inner->type_id == LMD_TYPE_OBJECT) {
-                obj_type = (TypeObject*)inner;
-            }
-        }
-    }
-
-    if (!obj_type) {
-        log_error("build_object_literal: unknown object type '%.*s'", (int)type_name.length, type_name.str);
-        ast_node->type = &TYPE_ANY;
-    } else {
-        // create a copy of the TypeObject for this literal (to get a unique type_index)
-        ast_node->type = (Type*)obj_type;
-    }
-
-    // build items (map_item or bare expressions for wrapping)
-    // skip the type_name identifier child
-    int type_name_start = ts_node_start_byte(name_node);
-    TSNode child = ts_node_named_child(lit_node, 0);
-    AstNode* prev_item = NULL;
-    while (!ts_node_is_null(child)) {
-        TSSymbol symbol = ts_node_symbol(child);
-        if (symbol == SYM_COMMENT) {
-            child = ts_node_next_named_sibling(child);
-            continue;
-        }
-        // skip the type_name identifier (already extracted above)
-        if ((int)ts_node_start_byte(child) == type_name_start) {
-            child = ts_node_next_named_sibling(child);
-            continue;
-        }
-
-        AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
-        if (item) {
-            if (!prev_item) { ast_node->item = item; }
-            else { prev_item->next = item; }
-            prev_item = item;
-        }
-        child = ts_node_next_named_sibling(child);
-    }
-
     return (AstNode*)ast_node;
 }
 
@@ -4944,6 +4889,88 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
 
 AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     log_debug("build element expr");
+
+    // first pass: extract the tag name to check if it's an object type
+    TSNode first_child = ts_node_named_child(elmt_node, 0);
+    TSSymbol first_sym = ts_node_symbol(first_child);
+    StrView tag_name = {};
+    if (first_sym == SYM_IDENT) {
+        tag_name = ts_node_source(tp, first_child);
+    } else if (first_sym == SYM_SYMBOL) {
+        tag_name = ts_node_source(tp, first_child);
+        if (tag_name.length >= 2) { tag_name.str++; tag_name.length -= 2; }
+    } else if (first_sym == sym_dotted_name) {
+        int sb = ts_node_start_byte(first_child);
+        int eb = ts_node_end_byte(first_child);
+        tag_name = { .str = tp->source + sb, .length = static_cast<size_t>(eb - sb) };
+    }
+
+    // check if tag name resolves to an object type definition
+    if (tag_name.length > 0) {
+        NameEntry* entry = lookup_name(tp, tag_name);
+        if (entry && entry->node && entry->node->type) {
+            Type* resolved = entry->node->type;
+            if (resolved->type_id == LMD_TYPE_TYPE) {
+                Type* inner = ((TypeType*)resolved)->type;
+                if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                    // build as object literal instead of element
+                    log_debug("build_elmt: detected <%.*s> as object type, building object literal", (int)tag_name.length, tag_name.str);
+                    TypeObject* obj_type = (TypeObject*)inner;
+                    AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+                        AST_NODE_OBJECT_LITERAL, elmt_node, sizeof(AstObjectLiteralNode));
+                    obj_node->type_name = name_pool_create_strview(tp->name_pool, tag_name);
+                    obj_node->type = (Type*)obj_type;
+                    obj_node->item = NULL;
+
+                    // check for source expression: <TypeName source, ...>
+                    AstNode* prev_item = NULL;
+                    TSNode source_node = ts_node_child_by_field_id(elmt_node, FIELD_SOURCE);
+                    if (!ts_node_is_null(source_node)) {
+                        log_debug("build_elmt: found source field");
+                        // build_expr returns bare AST_NODE_IDENT for identifiers;
+                        // wrap in AST_NODE_PRIMARY so the C transpiler can handle it
+                        AstNode* source_inner = build_expr(tp, source_node);
+                        if (source_inner) {
+                            if (source_inner->node_type == AST_NODE_IDENT || source_inner->node_type == AST_NODE_CURRENT_ITEM) {
+                                AstPrimaryNode* wrapper = (AstPrimaryNode*)alloc_ast_node(tp,
+                                    AST_NODE_PRIMARY, source_node, sizeof(AstPrimaryNode));
+                                wrapper->expr = source_inner;
+                                wrapper->type = source_inner->type;
+                                obj_node->item = (AstNode*)wrapper;
+                                prev_item = (AstNode*)wrapper;
+                            } else {
+                                obj_node->item = source_inner;
+                                prev_item = source_inner;
+                            }
+                        }
+                    }
+
+                    // parse children: attrs become key:val items, bare exprs stay as expressions
+                    TSNode child = ts_node_named_child(elmt_node, 0);
+                    int name_start = ts_node_start_byte(first_child);
+                    int source_start = ts_node_is_null(source_node) ? -1 : (int)ts_node_start_byte(source_node);
+                    while (!ts_node_is_null(child)) {
+                        TSSymbol symbol = ts_node_symbol(child);
+                        int child_start = (int)ts_node_start_byte(child);
+                        if (symbol == SYM_COMMENT || child_start == name_start || child_start == source_start) {
+                            child = ts_node_next_named_sibling(child);
+                            continue;
+                        }
+                        AstNode* item = (symbol == SYM_ATTR) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+                        if (item) {
+                            if (!prev_item) { obj_node->item = item; }
+                            else { prev_item->next = item; }
+                            prev_item = item;
+                        }
+                        child = ts_node_next_named_sibling(child);
+                    }
+                    return (AstNode*)obj_node;
+                }
+            }
+        }
+    }
+
+    // not an object type — build as normal element
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp,
         AST_NODE_ELEMENT, elmt_node, sizeof(AstElementNode));
     TypeElmt* type = (TypeElmt*)alloc_type(tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
@@ -4961,17 +4988,17 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
         }
-        else if (symbol == sym_ns_identifier) {  // namespaced element name (ns.name)
+        else if (symbol == sym_dotted_name) {  // dotted element name (a.b.'c')
             int start_byte = ts_node_start_byte(child);
             int end_byte = ts_node_end_byte(child);
             StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
             String* pooled_name = name_pool_create_strview(tp->name_pool, name);
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
-            // look up namespace prefix and set TypeElmt.ns
-            TSNode ns_node = ts_node_child_by_field_id(child, field_ns);
+            // look up namespace prefix (first segment) and set TypeElmt.ns
+            TSNode ns_node = ts_node_named_child(child, 0);
             if (!ts_node_is_null(ns_node)) {
-                StrView ns_prefix = ts_node_source(tp, ns_node);
+                StrView ns_prefix = node_name_text(tp, ns_node);
                 NamespaceEntry* ns_entry = lookup_namespace_strview(tp, ns_prefix);
                 if (ns_entry) {
                     type->ns = ns_entry->target;
@@ -5750,7 +5777,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_PARAM, param_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(param_node, FIELD_NAME);
-    StrView name_str = ts_node_source(tp, name);
+    StrView name_str = node_name_text(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
 
     // allocate TypeParam for this parameter
@@ -5827,7 +5854,7 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_NAMED_ARG, arg_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(arg_node, FIELD_NAME);
-    StrView name_str = ts_node_source(tp, name);
+    StrView name_str = node_name_text(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
 
     TSNode value_node = ts_node_child_by_field_id(arg_node, FIELD_VALUE);
@@ -5863,7 +5890,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     // get the function name
     if (is_named) {
         TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
-        StrView name = ts_node_source(tp, fn_name_node);
+        StrView name = node_name_text(tp, fn_name_node);
 
         // check if name conflicts with a system function (only for global scope)
         if (is_global && is_sys_func_name(name.str, name.length)) {
@@ -6088,7 +6115,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
                 // Get function name and register it early
                 TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
-                StrView name = ts_node_source(tp, fn_name_node);
+                StrView name = node_name_text(tp, fn_name_node);
                 fn_node->name = name_pool_create_strview(tp->name_pool, name);
 
                 log_debug("pass 1: registering function placeholder '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
@@ -6097,7 +6124,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
             else if (symbol == SYM_OBJECT_TYPE) {
                 // pre-register object type placeholder so it can be forward-referenced
                 TSNode obj_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
-                StrView obj_name = ts_node_source(tp, obj_name_node);
+                StrView obj_name = node_name_text(tp, obj_name_node);
 
                 AstObjectTypeNode* obj_node = (AstObjectTypeNode*)alloc_ast_node(tp,
                     AST_NODE_OBJECT_TYPE, child, sizeof(AstObjectTypeNode));
@@ -6135,7 +6162,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
             if (is_global) {
                 // For global functions, look up the pre-registered placeholder
                 TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
-                StrView name = ts_node_source(tp, fn_name_node);
+                StrView name = node_name_text(tp, fn_name_node);
                 NameEntry* entry = lookup_name(tp, name);
 
                 if (entry && entry->node &&
@@ -6269,7 +6296,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
         } else if (symbol == SYM_OBJECT_TYPE && is_global) {
             // For global object types, look up the pre-registered placeholder and complete it
             TSNode obj_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
-            StrView obj_name = ts_node_source(tp, obj_name_node);
+            StrView obj_name = node_name_text(tp, obj_name_node);
             NameEntry* entry = lookup_name(tp, obj_name);
 
             if (entry && entry->node && entry->node->node_type == AST_NODE_OBJECT_TYPE) {
@@ -6576,8 +6603,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         }
         return build_map(tp, expr_node);
     }
-    case SYM_OBJECT_LITERAL:
-        return build_object_literal(tp, expr_node);
     case SYM_OBJECT_TYPE:
         return build_object_type(tp, expr_node);
     case SYM_ELEMENT:
@@ -7020,8 +7045,7 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
 
     // Get pattern name
     TSNode name_node = ts_node_child_by_field_id(node, FIELD_NAME);
-    int start_byte = ts_node_start_byte(name_node);
-    StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
+    StrView name_view = node_name_text(tp, name_node);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     // Get pattern expression — from type_assign's 'as' field (or legacy 'pattern' field)

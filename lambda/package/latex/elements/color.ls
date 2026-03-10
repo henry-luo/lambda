@@ -9,26 +9,26 @@ import util: lambda.package.latex.util
 // ============================================================
 
 let NAMED_COLORS = {
-    "red":       "#d32f2f",
-    "blue":      "#1976d2",
-    "green":     "#388e3c",
-    "black":     "#000000",
-    "white":     "#ffffff",
-    "gray":      "#9e9e9e",
-    "grey":      "#9e9e9e",
-    "yellow":    "#fbc02d",
-    "orange":    "#f57c00",
-    "purple":    "#7b1fa2",
-    "cyan":      "#00bcd4",
-    "magenta":   "#e91e63",
-    "brown":     "#795548",
-    "lime":      "#cddc39",
-    "olive":     "#827717",
-    "pink":      "#e91e63",
-    "teal":      "#009688",
-    "violet":    "#9c27b0",
-    "darkgray":  "#616161",
-    "lightgray": "#bdbdbd"
+    'red':       "#d32f2f",
+    'blue':      "#1976d2",
+    'green':     "#388e3c",
+    'black':     "#000000",
+    'white':     "#ffffff",
+    'gray':      "#9e9e9e",
+    'grey':      "#9e9e9e",
+    'yellow':    "#fbc02d",
+    'orange':    "#f57c00",
+    'purple':    "#7b1fa2",
+    'cyan':      "#00bcd4",
+    'magenta':   "#e91e63",
+    'brown':     "#795548",
+    'lime':      "#cddc39",
+    'olive':     "#827717",
+    'pink':      "#e91e63",
+    'teal':      "#009688",
+    'violet':    "#9c27b0",
+    'darkgray':  "#616161",
+    'lightgray': "#bdbdbd"
 }
 
 // ============================================================
