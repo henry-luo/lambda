@@ -16,7 +16,6 @@ function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
 
-const digit = /\d/;
 const linebreak = /\r\n|\n/;
 const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
@@ -248,11 +247,7 @@ module.exports = grammar({
 
     // datetime token: t'...' containing date/time text
     // Actual parsing done by AST builder via datetime_parse()
-    datetime: _ => token(seq(
-      "t'",
-      repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)),
-      "'",
-    )),
+    datetime: _ => token(seq( "t'", repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)), "'" )),
 
     // Note: 'null' is now part of $.base_type, no separate rule needed
     // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
@@ -300,9 +295,7 @@ module.exports = grammar({
       $._content_expr
     ),
 
-    list: $ => seq(
-      '(', $._expr, repeat(seq(',', $._expr)), ')'
-    ),
+    list: $ => seq( '(', $._expr, repeat(seq(',', $._expr)), ')' ),
 
     // Literals and Containers
     _non_null_literal: $ => choice(
@@ -316,25 +309,13 @@ module.exports = grammar({
 
     _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type),
 
-    map_item: $ => choice(
-      seq(
-        field('name', $._key),
-        ':', field('as', $._expr),
-      ),
-    ),
+    map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
-    map: $ => seq(
-      // $._expr for dynamic map item
-      '{', comma_sep(choice($.map_item, $._expr)), '}',
-    ),
+    map: $ => seq( '{', comma_sep(choice($.map_item, $._expr)), '}' ),
 
-    array: $ => seq(
-      '[', comma_sep($._expr), ']',
-    ),
+    array: $ => seq( '[', comma_sep($._expr), ']'),
 
-    range: $ => seq(
-      $._expr, 'to', $._expr,
-    ),
+    range: $ => seq( $._expr, 'to', $._expr ),
 
     attr_binary_expr: $ => choice(
       ...binary_expr($, true),
@@ -349,14 +330,10 @@ module.exports = grammar({
       $.for_expr,
     ),
 
-    // Attribute name: dotted or simple name
-    // prec.dynamic(2) > member_expr(1) so GLR prefers attr in element context
-    attr_name: $ => prec.dynamic(2, $._key),
+    // Attribute name
+    attr_name: $ => $._key,
 
-    attr: $ => seq(
-      field('name', $.attr_name),
-      ':', field('as', $._attr_expr)
-    ),
+    attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
 
     // Dotted name: arbitrary depth dotted segments
     // Each segment is an identifier or symbol: a.b.'c'.d
