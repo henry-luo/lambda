@@ -124,20 +124,14 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$._expr, $.member_expr],
-    [$.dotted_name, $.primary_expr],                 // identifier.identifier: shift for dotted_name vs reduce to primary_expr
+    [$.dotted_name, $.primary_expr],               // identifier.identifier: shift for dotted_name vs reduce to primary_expr
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
-    [$._attr_expr, $._expr],                       // else { expr } in if_expr: block content vs map
-    [$.attr_binary_expr, $._expr],                 // else { expr + ... } binary in block vs map
-    [$._statement, $._expr],                       // else { stam } in if_expr: statement vs expr in block
-    [$._expr, $.raise_stam],                       // raise expr could be raise_expr or start of raise_stam
-    [$.let_expr, $.let_stam],                      // else { let x = ... } in block
     [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
     [$._type_expr, $.concat_type],                 // unary_type could be complete or start of concat
     [$._type_expr, $.constrained_type],            // unary_type could be complete or base of constrained
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
-    [$.attr_type, $.binary_expr],                  // attr_type default `= expr >` vs binary `expr > expr`
   ],
 
   precedences: $ => [[
@@ -309,14 +303,11 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type),
+    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, '*'),
 
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
-    // Spread: *:expr for dynamic map items and object source
-    spread: $ => seq('*', ':', field('as', $._expr)),
-
-    map: $ => seq( '{', comma_sep(choice($.map_item, $.spread)), '}' ),
+    map: $ => seq( '{', comma_sep($.map_item), '}' ),
 
     array: $ => seq( '[', comma_sep($._expr), ']'),
 
@@ -340,9 +331,6 @@ module.exports = grammar({
 
     attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
 
-    // Spread in element context (restricted, no < > operators)
-    attr_spread: $ => seq('*', ':', field('as', $._attr_expr)),
-
     // Dotted name: arbitrary depth dotted segments
     // Each segment is an identifier or symbol: a.b.'c'.d
     // prec(50) matches primary_expr so shift-reduce becomes a real GLR conflict
@@ -355,8 +343,8 @@ module.exports = grammar({
       choice($.dotted_name, $.symbol, $.identifier),
       optional(
         seq(
-          choice($.attr, alias($.attr_spread, $.spread)),
-          repeat(seq(',', choice($.attr, alias($.attr_spread, $.spread)))),
+          $.attr,
+          repeat(seq(',', $.attr)),
         ),
       ),
       optional(
@@ -832,7 +820,7 @@ module.exports = grammar({
     attr_type: $ => prec(1, seq(
       field('name', choice($.symbol, $.identifier)),
       ':', field('as', $._type_expr),
-      optional(seq('=', field('default', $._expr))),
+      optional(seq('=', field('default', $._attr_expr))),
     )),
 
     content_type: $ => seq(
