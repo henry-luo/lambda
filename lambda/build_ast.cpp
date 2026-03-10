@@ -22,8 +22,7 @@ AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSy
 AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 
 // Forward declarations for pipe expression building
-AstNode* build_current_item(Transpiler* tp, TSNode node);
-AstNode* build_current_index(Transpiler* tp, TSNode node);
+AstNode* build_current_expr(Transpiler* tp, TSNode node);
 
 // Forward declaration for type building (used by query expressions)
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
@@ -1158,8 +1157,8 @@ static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
 
     TSSymbol symbol = ts_node_symbol(node);
 
-    // Check for current_item (~) or current_index (~#)
-    if (symbol == sym_current_item || symbol == sym_current_index) {
+    // Check for current_expr (~ or ~#)
+    if (symbol == sym_current_expr) {
         return true;
     }
 
@@ -2419,12 +2418,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = (AstNode*)parent_node;
         ast_node->type = parent_node->type;
     }
-    else if (symbol == SYM_CURRENT_ITEM) {
-        ast_node->expr = build_current_item(tp, child);
-        ast_node->type = ast_node->expr->type;
-    }
-    else if (symbol == SYM_CURRENT_INDEX) {
-        ast_node->expr = build_current_index(tp, child);
+    else if (symbol == SYM_CURRENT_EXPR) {
+        ast_node->expr = build_current_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else { // from _parenthesized_expr
@@ -2943,19 +2938,20 @@ bool has_current_item_ref(AstNode* node) {
 }
 
 // build current item reference (~)
-AstNode* build_current_item(Transpiler* tp, TSNode node) {
-    log_debug("build current item (~)");
-    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, node, sizeof(AstNode));
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-    return ast_node;
-}
-
-// build current index reference (~#)
-AstNode* build_current_index(Transpiler* tp, TSNode node) {
-    log_debug("build current index (~#)");
-    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_INDEX, node, sizeof(AstNode));
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-    return ast_node;
+AstNode* build_current_expr(Transpiler* tp, TSNode node) {
+    uint32_t len = ts_node_end_byte(node) - ts_node_start_byte(node);
+    bool is_index = (len == 2); // ~# is 2 chars, ~ is 1
+    if (is_index) {
+        log_debug("build current index (~#)");
+        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_INDEX, node, sizeof(AstNode));
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+        return ast_node;
+    } else {
+        log_debug("build current item (~)");
+        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, node, sizeof(AstNode));
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+        return ast_node;
+    }
 }
 
 // Unified build_if_expr: handles both expression and block forms
@@ -6578,10 +6574,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
-    case SYM_CURRENT_ITEM:
-        return build_current_item(tp, expr_node);
-    case SYM_CURRENT_INDEX:
-        return build_current_index(tp, expr_node);
+    case SYM_CURRENT_EXPR:
+        return build_current_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
     case SYM_LET_STAM:  case SYM_PUB_STAM:  case SYM_TYPE_DEFINE:
