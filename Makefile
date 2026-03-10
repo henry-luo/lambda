@@ -144,6 +144,7 @@ TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
+RE2_LIB = build_temp/re2-noabsl/build/libre2.a
 
 # LaTeX grammar dependencies
 LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
@@ -236,6 +237,15 @@ $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
 	@echo "Building tree-sitter-latex-math library..."
 	@echo "🔧 Working directory: lambda/tree-sitter-latex-math"
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-latex-math libtree-sitter-latex-math.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+
+# Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
+$(RE2_LIB):
+	@echo "Building re2 library from source..."
+	@mkdir -p build_temp/re2-noabsl/build
+	@cd build_temp/re2-noabsl/build && \
+		cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -Wno-dev 2>&1 | tail -3 && \
+		cmake --build . --target re2 -- -j$(JOBS)
+	@echo "re2 library built: $(RE2_LIB)"
 
 # MINGW64 Environment Validation Functions
 define mingw64_env_check
@@ -505,7 +515,7 @@ env-debug:
 	@echo "IS_CLANG64: '$(IS_CLANG64)'"
 
 # Main build target (incremental) - Windows/MSYS2 optimized
-build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "🔧 Windows/MSYS2 detected - using optimized build configuration..."
@@ -572,7 +582,7 @@ build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 
 
 # Debug build - Now uses Premake with MINGW64 preference
-debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	$(call mingw64_env_check)
@@ -595,7 +605,7 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 #   5. LTO enabled (-flto)
 release: build-release
 
-build-release: clean-all $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+build-release: clean-all $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call mingw64_env_check)
@@ -749,6 +759,10 @@ clean-all: clean-premake clean-test
 	@if [ -d "lambda/tree-sitter-latex" ]; then \
 		cd lambda/tree-sitter-latex && rm -f src/*.o *.a *.so *.dylib; \
 	fi
+	@if [ -d "lambda/tree-sitter-latex-math" ]; then \
+		cd lambda/tree-sitter-latex-math && rm -f src/*.o *.a *.so *.dylib; \
+	fi
+	@rm -f $(RE2_LIB)
 	@echo "All build directories and tree-sitter libraries cleaned."
 
 distclean: clean-all clean-grammar clean-test
