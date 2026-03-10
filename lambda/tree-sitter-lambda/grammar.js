@@ -309,14 +309,11 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type),
+    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, '*'),
 
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
-    // Spread: *:expr for dynamic map items and object source
-    spread: $ => seq('*', ':', field('as', $._expr)),
-
-    map: $ => seq( '{', comma_sep(choice($.map_item, $.spread)), '}' ),
+    map: $ => seq( '{', comma_sep($.map_item), '}' ),
 
     array: $ => seq( '[', comma_sep($._expr), ']'),
 
@@ -355,8 +352,8 @@ module.exports = grammar({
       choice($.dotted_name, $.symbol, $.identifier),
       optional(
         seq(
-          choice($.attr, alias($.attr_spread, $.spread)),
-          repeat(seq(',', choice($.attr, alias($.attr_spread, $.spread)))),
+          $.attr,
+          repeat(seq(',', $.attr)),
         ),
       ),
       optional(
