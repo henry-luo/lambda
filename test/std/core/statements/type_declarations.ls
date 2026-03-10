@@ -18,7 +18,7 @@ show_val(42)
 
 // ===== Object type with fields =====
 type Point { x: float, y: float }
-let p = {Point x: 1.0, y: 2.0}
+let p = <Point x: 1.0, y: 2.0>
 p.x
 p.y
 p is Point
@@ -29,12 +29,12 @@ type Config {
     port: int = 8080
     debug: bool = false
 }
-let cfg = {Config}
+let cfg = <Config>
 cfg.host
 cfg.port
 cfg.debug
 
-let cfg2 = {Config host: "example.com", debug: true}
+let cfg2 = <Config host: "example.com", debug: true>
 cfg2.host
 cfg2.port
 cfg2.debug
@@ -46,7 +46,7 @@ type Rectangle {
     fn area() => ~.width * ~.height
     fn perimeter() => 2 * (~.width + ~.height)
 }
-let rect = {Rectangle width: 3.0, height: 4.0}
+let rect = <Rectangle width: 3.0, height: 4.0>
 rect.area()
 rect.perimeter()
 
@@ -54,8 +54,8 @@ rect.perimeter()
 type Animal { name: string, sound: string = "..." }
 type Dog : Animal { sound: string = "woof" }
 type Cat : Animal { sound: string = "meow" }
-let d = {Dog name: "Rex"}
-let c = {Cat name: "Whiskers"}
+let d = <Dog name: "Rex">
+let c = <Cat name: "Whiskers">
 d.name
 d.sound
 c.name
@@ -70,14 +70,14 @@ type Positive {
     value: int
     that value > 0
 }
-let pos = {Positive value: 5}
+let pos = <Positive value: 5>
 pos.value
 
 // ===== Nominal typing (different types not equal) =====
 type Meters { value: float }
 type Seconds { value: float }
-let m = {Meters value: 10.0}
-let s = {Seconds value: 10.0}
+let m = <Meters value: 10.0>
+let s = <Seconds value: 10.0>
 m is Meters
 m is Seconds
 

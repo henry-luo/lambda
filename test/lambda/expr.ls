@@ -91,7 +91,7 @@ let chained_err = e2.a.b.c
 chained_err is error  // chained error propagation
 
 "Test empty string/symbol keys (no crash):"
-let empty_str_map = {"": "empty string key", "a": "a value"}
+let empty_str_map = {'': "empty string key", 'a': "a value"}
 [empty_str_map[""]]   // empty string key access
 empty_str_map["a"]    // normal key access
 

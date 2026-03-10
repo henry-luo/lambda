@@ -1,6 +1,6 @@
 // Object type definition and basic usage
 type Point { x: int, y: int }
-let p = {Point x: 3, y: 4}
+let p = <Point x: 3, y: 4>
 p.x
 p.y
 
@@ -10,7 +10,7 @@ type Counter {
     fn double() => value * 2
     fn add(n: int) => value + n
 }
-let c = {Counter value: 5}
+let c = <Counter value: 5>
 c.double()
 c.add(3)
 

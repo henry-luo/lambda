@@ -33,8 +33,9 @@
 9. [Comprehensive Examples](#comprehensive-examples)
 10. [Grammar Sketch](#grammar-sketch)
 11. [Alternatives Considered](#alternatives-considered)
-12. [Future Extensions](#future-extensions)
-13. [Open Questions](#open-questions)
+12. [Alternative Syntax: Keyword-Free Arms with `_` Default](#alternative-syntax-keyword-free-arms-with-_-default)
+13. [Future Extensions](#future-extensions)
+14. [Open Questions](#open-questions)
 
 ---
 
@@ -733,6 +734,148 @@ Full destructuring patterns (map `{a, b}`, array `[head, ...tail]`, element `<ta
 - Destructuring introduces a significant new sub-language for patterns.
 - The `~` convention is already familiar from pipe expressions.
 - The simpler design is easier to implement, learn, and maintain.
+
+---
+
+## Alternative Syntax: Keyword-Free Arms with `_` Default
+
+An alternative syntax is under consideration that removes the `case` keyword from arms and replaces `default` with the `_` wildcard, yielding a more concise match form:
+
+```lambda
+match (expr) {
+    pattern: arm_expr
+    pattern { stam; }
+    _: arm_expr
+    _ { stam; }
+}
+```
+
+### Side-by-Side Comparison
+
+**Current syntax (with `case`/`default`):**
+
+```lambda
+match code {
+    case 200: "OK"
+    case 301 | 302: "Redirect"
+    case 404: "Not Found"
+    default: "Unknown"
+}
+```
+
+**Proposed alternative (keyword-free):**
+
+```lambda
+match (code) {
+    200: "OK"
+    301 | 302: "Redirect"
+    404: "Not Found"
+    _: "Unknown"
+}
+```
+
+**Type matching:**
+
+```lambda
+match (data) {
+    int: ~ * 2
+    string: ~.upper()
+    [int]: sum(~)
+    _: error("unsupported")
+}
+```
+
+**Mixed expression and statement arms:**
+
+```lambda
+match (event.kind) {
+    'click' {
+        var count = state.clicks;
+        count = count + 1;
+        update_state({clicks: count})
+    }
+    'keypress': process_key(event.key)
+    _ {
+        log("unknown event")
+    }
+}
+```
+
+### Design Notes
+
+- **Parenthesized scrutinee `match (expr)`** — Required in this variant, consistent with `if (cond)` and `for (x in ...)`.
+- **No `case` keyword** — Arms are delimited by their position inside `{ }`, so `case` is redundant. Reduces visual noise.
+- **`_` wildcard** — Replaces `default`. This is the established convention in Rust, Scala, Swift, Kotlin, Python, and C# for catch-all/discard patterns.
+- **`:` and `{ }` arm separators** — Unchanged. Expression arms use `pattern: expr`, statement arms use `pattern { stmts }`.
+
+### Comparison with Other Languages
+
+| Language | Keyword | Arm syntax | Default | Subject syntax |
+|----------|---------|------------|---------|----------------|
+| **Rust** | `match` | `pattern => expr,` | `_ => expr` | `match val` |
+| **Swift** | `switch` | `case pattern:` body | `default:` body | `switch val` |
+| **Scala** | `match` | `case pattern => expr` | `case _ => expr` | `val match` |
+| **Kotlin** | `when` | `pattern -> expr` | `else -> expr` | `when (val)` |
+| **Python** | `match` | `case pattern:` body | `case _:` body | `match val` |
+| **C#** | `switch` | `pattern => expr,` | `_ => expr` | `val switch` |
+| **Lambda (current)** | `match` | `case pattern: expr` | `default: expr` | `match expr` |
+| **Lambda (proposed)** | `match` | `pattern: expr` | `_: expr` | `match (expr)` |
+
+**Key observations:**
+
+- **Rust** — No per-arm keyword, `=>` separator, `_` wildcard, comma-delimited arms. The gold standard for pattern matching ergonomics.
+- **Swift** — Uses `case` keyword per arm but `default` for catch-all. Colon separator like Lambda.
+- **Scala** — Uses `case` keyword and `=>` separator. `case _` for wildcard.
+- **Kotlin** — No per-arm keyword (`when` body is keyword-free), `->` separator, `else` for default. Parenthesized subject. Closest to the proposed Lambda alternative in overall structure.
+- **Python** — Uses `case` keyword per arm, colon separator, `case _` for wildcard. Indentation-delimited.
+- **C#** — Switch expressions are keyword-free per arm, `=>` separator, `_` discard. Comma-delimited.
+
+The proposed Lambda alternative combines **Kotlin's** keyword-free arms and parenthesized subject with **Rust/C#'s** `_` wildcard convention, while keeping Lambda's native `:` separator.
+
+### Grammar Sketch (Alternative)
+
+```js
+match_expr: $ => seq(
+    'match', '(', field('scrutinee', $._expression), ')',
+    '{',
+    repeat1(choice($.match_arm_expr, $.match_arm_stam,
+                   $.match_default_expr, $.match_default_stam)),
+    '}'
+),
+
+// Expression arm:  <type_expr>: <expr>
+match_arm_expr: $ => prec.right(seq(
+    field('pattern', $._type_expr),
+    ':', field('body', $._expression)
+)),
+
+// Default expression arm:  _: <expr>
+match_default_expr: $ => prec.right(seq(
+    '_', ':', field('body', $._expression)
+)),
+
+// Statement arm:  <type_expr> { <stmts> }
+match_arm_stam: $ => seq(
+    field('pattern', $._type_expr),
+    '{', field('body', $.content), '}'
+),
+
+// Default statement arm:  _ { <stmts> }
+match_default_stam: $ => seq(
+    '_', '{', field('body', $.content), '}'
+),
+```
+
+### Trade-offs
+
+| Aspect | Current (`case`/`default`) | Proposed (`_`, no keyword) |
+|--------|---------------------------|---------------------------|
+| **Verbosity** | More tokens per arm | Minimal — pattern and body only |
+| **Readability** | `case` visually marks each arm | Arms blend with map-like `key: value` syntax |
+| **Familiarity** | Familiar to Swift/Python/Java users | Familiar to Rust/Kotlin/C# users |
+| **Parsing** | `case` keyword makes arms unambiguous | Requires grammar care to distinguish arms from map entries |
+| **Error messages** | `case` keyword aids error recovery | Missing `case` may make parse errors less clear |
+| **Consistency** | Unique match syntax distinct from maps | `:` syntax parallels maps — could be seen as elegant or confusing |
 
 ---
 

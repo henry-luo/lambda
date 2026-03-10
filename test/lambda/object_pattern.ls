@@ -17,8 +17,8 @@ fn describe(s) => match s {
     default: "unknown"
 }
 
-let c = {Circle color: "red", radius: 5.0}
-let r = {Rect color: "blue", width: 3.0, height: 4.0}
+let c = <Circle color: "red", radius: 5.0>
+let r = <Rect color: "blue", width: 3.0, height: 4.0>
 describe(c)
 1
 describe(r)

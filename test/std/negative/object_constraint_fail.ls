@@ -8,7 +8,7 @@ type Positive {
 }
 
 // Violate constraint - should produce runtime error
-let bad = {Positive value: -5}
+let bad = <Positive value: -5>
 bad.value
 
 // Violate range constraint
@@ -19,5 +19,5 @@ type InRange {
 }
 
 // min > max - should produce error
-let bad_range = {InRange min: 10, max: 5}
+let bad_range = <InRange min: 10, max: 5>
 bad_range.min

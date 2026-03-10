@@ -284,14 +284,14 @@ fn render_element(el, info) {
 
 // skip commands that produce null output
 let SKIP_COMMANDS = {
-    "newcommand": true, "renewcommand": true, "providecommand": true,
-    "setcounter": true, "newcounter": true, "addtocounter": true,
-    "stepcounter": true, "comment": true,
+    'newcommand': true, 'renewcommand': true, 'providecommand': true,
+    'setcounter': true, 'newcounter': true, 'addtocounter': true,
+    'stepcounter': true, 'comment': true,
     // picture sub-commands handled inside picture.render_picture
-    "put": true, "line": true, "vector": true,
-    "circle": true, "oval": true, "bezier": true, "qbezier": true,
-    "unitlength": true, "linethickness": true, "thinlines": true,
-    "thicklines": true, "multiput": true, "circle*": true
+    'put': true, 'line': true, 'vector': true,
+    'circle': true, 'oval': true, 'bezier': true, 'qbezier': true,
+    'unitlength': true, 'linethickness': true, 'thinlines': true,
+    'thicklines': true, 'multiput': true, 'circle*': true
 }
 
 // Fallback: check skip commands, extended symbol map, then macro, then generic

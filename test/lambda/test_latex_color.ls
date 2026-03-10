@@ -24,7 +24,7 @@ import color: lambda.package.latex.elements.color
 "13. hex passthrough:"; color.resolve_color("#ff0000", null)
 
 // ---- resolve_color: custom colors ----
-let my_colors = {"myred": "#cc0000", "myblue": "rgb(0,0,200)"}
+let my_colors = {'myred': "#cc0000", 'myblue': "rgb(0,0,200)"}
 "14. custom myred:"; color.resolve_color("myred", my_colors)
 "15. custom myblue:"; color.resolve_color("myblue", my_colors)
 "16. custom fallback:"; color.resolve_color("red", my_colors)

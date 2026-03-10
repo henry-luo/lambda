@@ -8,22 +8,22 @@
 
 // maps font declaration tag names to CSS style strings
 let FONT_DECL_STYLES = {
-    "itshape":   "font-style:italic",
-    "bfseries":  "font-weight:bold",
-    "ttfamily":  "font-family:monospace",
-    "rmfamily":  "font-family:serif",
-    "sffamily":  "font-family:sans-serif",
-    "scshape":   "font-variant:small-caps",
-    "slshape":   "font-style:oblique",
-    "upshape":   "font-style:normal",
-    "mdseries":  "font-weight:normal"
+    'itshape':   "font-style:italic",
+    'bfseries':  "font-weight:bold",
+    'ttfamily':  "font-family:monospace",
+    'rmfamily':  "font-family:serif",
+    'sffamily':  "font-family:sans-serif",
+    'scshape':   "font-variant:small-caps",
+    'slshape':   "font-style:oblique",
+    'upshape':   "font-style:normal",
+    'mdseries':  "font-weight:normal"
 }
 
 // alignment declaration tag names to CSS style strings
 let ALIGN_DECL_STYLES = {
-    "centering":   "text-align:center",
-    "raggedright": "text-align:left",
-    "raggedleft":  "text-align:right"
+    'centering':   "text-align:center",
+    'raggedright': "text-align:left",
+    'raggedleft':  "text-align:right"
 }
 
 // ============================================================

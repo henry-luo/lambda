@@ -32,7 +32,7 @@ type SoapBody = <soap:Body
 >
 
 type Document = <soap:Envelope
-    "xmlns:soap": string,             // SOAP namespace attribute
+    'xmlns:soap': string,             // SOAP namespace attribute
     encodingStyle: string?,           // optional encoding style
     SoapHeader?,                      // optional header element
     SoapBody                          // required body element
