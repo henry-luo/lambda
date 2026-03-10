@@ -969,6 +969,27 @@
         }
       ]
     },
+    "_key": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "dotted_name"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "symbol"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "base_type"
+        }
+      ]
+    },
     "map_item": {
       "type": "CHOICE",
       "members": [
@@ -979,25 +1000,8 @@
               "type": "FIELD",
               "name": "name",
               "content": {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "SYMBOL",
-                    "name": "dotted_name"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "symbol"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "identifier"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "base_type"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "_key"
               }
             },
             {
@@ -2631,25 +2635,8 @@
       "type": "PREC_DYNAMIC",
       "value": 2,
       "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "SYMBOL",
-            "name": "dotted_name"
-          },
-          {
-            "type": "SYMBOL",
-            "name": "symbol"
-          },
-          {
-            "type": "SYMBOL",
-            "name": "identifier"
-          },
-          {
-            "type": "SYMBOL",
-            "name": "base_type"
-          }
-        ]
+        "type": "SYMBOL",
+        "name": "_key"
       }
     },
     "attr": {
@@ -8293,7 +8280,8 @@
     "_non_null_literal",
     "_parenthesized_expr",
     "_arguments",
-    "_number"
+    "_number",
+    "_key"
   ],
   "supertypes": []
 }
