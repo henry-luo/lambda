@@ -18,13 +18,15 @@
 #include <cmath>
 #include <algorithm>
 
-// Forward declarations
-struct LayoutContext;
-struct ViewBlock;
-struct GridContainerLayout;
+#include "view.hpp"
+#include "grid.hpp"
 
 namespace radiant {
 namespace grid {
+
+// Bring global ViewBlock and GridContainerLayout into namespace scope
+using ::ViewBlock;
+using ::GridContainerLayout;
 
 // ============================================================================
 // Baseline Alignment Data
@@ -55,12 +57,12 @@ struct RowBaselineGroup {
 } // namespace grid
 } // namespace radiant
 
-// Include implementation dependencies after forward declarations
-#include "grid.hpp"
-#include "view.hpp"
-
 namespace radiant {
 namespace grid {
+
+// Bring global ViewBlock into this namespace scope so it shadows the forward decl in namespace radiant
+using ::ViewBlock;
+using ::GridContainerLayout;
 
 // ============================================================================
 // Baseline Calculation
@@ -74,7 +76,7 @@ inline bool item_participates_in_baseline(ViewBlock* item) {
     if (!item || !item->gi) return false;
 
     // Get align-self value from grid item properties
-    int align_self = item->gi->align_self;
+    int align_self = item->gi->align_self_grid;
 
     // CSS_VALUE_BASELINE = 22 typically
     constexpr int CSS_VALUE_BASELINE = 22;
