@@ -24,7 +24,6 @@ extern "C" {
 #define SYM_LIST sym_list
 #define SYM_ARRAY sym_array
 #define SYM_MAP_ITEM sym_map_item
-#define SYM_SPREAD sym_spread
 #define SYM_MAP sym_map
 #define SYM_ELEMENT sym_element
 #define SYM_ATTR sym_attr

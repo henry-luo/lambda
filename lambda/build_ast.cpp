@@ -3732,6 +3732,11 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         if (!ts_node_is_null(first_child)) {
             return build_key_string(tp, first_child);
         }
+        // fallback: try anonymous child (e.g., '*' key)
+        TSNode anon_child = ts_node_child(key_node, 0);
+        if (!ts_node_is_null(anon_child)) {
+            return build_key_string(tp, anon_child);
+        }
         return (StrView) { .str = NULL, .length = 0 };
     }
     case sym_dotted_name: {
@@ -3749,6 +3754,10 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
     case SYM_IDENT:
     case SYM_BASE_TYPE: {
         return (StrView)ts_node_source(tp, key_node);
+    }
+    case anon_sym_STAR: {
+        // spread key: *:expr
+        return (StrView) { .str = "*", .length = 1 };
     }
     default:
         log_debug("unknown key type %d", symbol);
@@ -4847,14 +4856,18 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         if (symbol == SYM_COMMENT) {  // skip comments
             child = ts_node_next_named_sibling(child);  continue;
         }
-        // named map item, or spread (*:expr)
+        // named map item; *:expr is a map_item with key name "*" (spread)
         AstNode* item;
+        bool is_spread = false;
         if (symbol == SYM_MAP_ITEM) {
-            item = (AstNode*)build_key_expr(tp, child);
-        } else if (symbol == SYM_SPREAD) {
-            // spread: *:expr — extract the 'as' field expression
-            TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
-            item = ts_node_is_null(as_node) ? NULL : build_expr(tp, as_node);
+            AstNamedNode* key_expr = build_key_expr(tp, child);
+            if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                // spread: *:expr — extract the value expression
+                item = key_expr->as;
+                is_spread = true;
+            } else {
+                item = (AstNode*)key_expr;
+            }
         } else {
             item = build_expr(tp, child);
         }
@@ -4865,7 +4878,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         prev_item = item;
 
         ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
-        if (symbol == SYM_MAP_ITEM) {
+        if (!is_spread) {
             // convert pooled String* to StrView* for shape entry
             String* pooled_name = ((AstNamedNode*)item)->name;
             StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
@@ -4886,7 +4899,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         prev_entry = shape_entry;
 
         type->length++;
-        byte_offset += (symbol == SYM_MAP_ITEM) ? type_info[item->type->type_id].byte_size : sizeof(void*);
+        byte_offset += (!is_spread) ? type_info[item->type->type_id].byte_size : sizeof(void*);
         child = ts_node_next_named_sibling(child);
     }
     type->byte_size = byte_offset;
@@ -4944,23 +4957,25 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
                         }
                         AstNode* item;
                         if (symbol == SYM_ATTR) {
-                            item = (AstNode*)build_key_expr(tp, child);
-                        } else if (symbol == SYM_SPREAD) {
-                            // spread: *:expr — extract the 'as' field, wrap as source
-                            TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
-                            AstNode* source_inner = ts_node_is_null(as_node) ? NULL : build_expr(tp, as_node);
-                            if (source_inner) {
-                                if (source_inner->node_type == AST_NODE_IDENT || source_inner->node_type == AST_NODE_CURRENT_ITEM) {
-                                    AstPrimaryNode* wrapper = (AstPrimaryNode*)alloc_ast_node(tp,
-                                        AST_NODE_PRIMARY, as_node, sizeof(AstPrimaryNode));
-                                    wrapper->expr = source_inner;
-                                    wrapper->type = source_inner->type;
-                                    item = (AstNode*)wrapper;
+                            AstNamedNode* key_expr = build_key_expr(tp, child);
+                            if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                                // spread: *:expr — extract value as source
+                                AstNode* source_inner = key_expr->as;
+                                if (source_inner) {
+                                    if (source_inner->node_type == AST_NODE_IDENT || source_inner->node_type == AST_NODE_CURRENT_ITEM) {
+                                        AstPrimaryNode* wrapper = (AstPrimaryNode*)alloc_ast_node(tp,
+                                            AST_NODE_PRIMARY, child, sizeof(AstPrimaryNode));
+                                        wrapper->expr = source_inner;
+                                        wrapper->type = source_inner->type;
+                                        item = (AstNode*)wrapper;
+                                    } else {
+                                        item = source_inner;
+                                    }
                                 } else {
-                                    item = source_inner;
+                                    item = NULL;
                                 }
                             } else {
-                                item = NULL;
+                                item = (AstNode*)key_expr;
                             }
                         } else {
                             child = ts_node_next_named_sibling(child);
@@ -5026,14 +5041,18 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
         else if (symbol == SYM_CONTENT) {  // element content
             ast_node->content = build_content(tp, child, false, false);
         }
-        else {  // attrs and spread
+        else {  // attrs (including spread *:expr)
             AstNode* item;
+            bool is_spread = false;
             if (symbol == SYM_ATTR) {
-                item = (AstNode*)build_key_expr(tp, child);
-            } else if (symbol == SYM_SPREAD) {
-                // spread: *:expr — extract the 'as' field
-                TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
-                item = ts_node_is_null(as_node) ? NULL : build_expr(tp, as_node);
+                AstNamedNode* key_expr = build_key_expr(tp, child);
+                if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                    // spread: *:expr — extract value expression
+                    item = key_expr->as;
+                    is_spread = true;
+                } else {
+                    item = (AstNode*)key_expr;
+                }
             } else {
                 child = ts_node_next_named_sibling(child);
                 continue;
@@ -5059,7 +5078,7 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             prev_item = item;
 
             ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
-            if (symbol == SYM_ATTR) {
+            if (!is_spread) {
                 // Convert pooled String* to StrView* for shape entry
                 String* pooled_name = ((AstNamedNode*)item)->name;
                 StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
@@ -5080,7 +5099,7 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             prev_entry = shape_entry;
 
             type->length++;
-            byte_offset += (symbol == SYM_ATTR) ? type_info[item->type->type_id].byte_size : sizeof(void*);
+            byte_offset += (!is_spread) ? type_info[item->type->type_id].byte_size : sizeof(void*);
         }
         child = ts_node_next_named_sibling(child);
     }
