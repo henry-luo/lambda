@@ -9,10 +9,14 @@ parsers (`input-json.cpp`, `input-toml.cpp`, `input-yaml.cpp`, `input-xml.cpp`,
 `input-vcf.cpp`, `input-ics.cpp`) and the graph parsers
 (`input-graph-d2.cpp`, `input-graph-dot.cpp`, `input-graph-mermaid.cpp`).
 
-> **Progress (2026-03-10)** — Phase A (items 1 and 3) and Phase B (item 6) are
-> complete.  All 611 baseline tests pass.  See §8 for updated line counts and
-> savings.  Remaining work starts at Phase A item 2 / item 4, then Phase B
-> items 5 and 7.
+> **Progress (2026-03-10) — FINAL** — Phase A (items 1, 2 partial, 3, 4) and Phase B
+> (item 6, plus skip-function and identifier sub-tasks of item 5) are complete.
+> All 611 baseline tests pass.  All remaining phases have been assessed and are
+> **not worth implementing**: B5 full (`InputCursor`) and C8 (`input_scan`) have
+> no graph/RFC test coverage and negative or marginal ROI; B7 (`parse_typed_value`)
+> is blocked by TOML's incompatible number sub-types; C9 YAML/TOML utilities have
+> incompatible datetime/integer formats; D10 YAML split is high-risk with no gain.
+> **Implementation is complete at −493 net lines (6% of baseline).**
 
 ---
 
@@ -27,12 +31,12 @@ Files marked ✅ have been reduced; files marked ✨ are newly created.
 |---|---|---|---|---|
 | `input-yaml.cpp` | 2,603 | 2,603 | — | |
 | `input-toml.cpp` | 1,069 | 1,069 | — | |
-| `input-graph-mermaid.cpp` | 759 | 752 | −7 | ✅ `skip_to_eol` removed |
+| `input-graph-mermaid.cpp` | 759 | **720** | −39 | ✅ skip_wsc + identifier + label |
 | `input-xml.cpp` | 755 | 755 | — | |
-| `input-graph-dot.cpp` | 592 | 585 | −7 | ✅ `skip_to_eol` removed |
+| `input-graph-dot.cpp` | 592 | **478** | −114 | ✅ skip_wsc + identifier + quoted_string |
 | `input-ics.cpp` | 524 | 473 | −51 | ✅ params → shared helper |
-| `input-graph-d2.cpp` | 431 | 424 | −7 | ✅ `skip_to_eol` removed |
-| `input-json.cpp` | 442 | 361 | −81 | ✅ escape → `parse_escape_char()` |
+| `input-graph-d2.cpp` | 431 | **341** | −90 | ✅ skip_wsc + identifier + quoted_string |
+| `input-json.cpp` | 442 | **346** | −96 | ✅ escape + input_expect_literal |
 | `input-vcf.cpp` | 340 | 288 | −52 | ✅ params → shared helper |
 | `input-eml.cpp` | 301 | 301 | — | |
 | `input-ini.cpp` | 271 | —  | −271 | ✅ merged → `input-kv.cpp` |
@@ -40,12 +44,12 @@ Files marked ✅ have been reduced; files marked ✨ are newly created.
 | `input-csv.cpp` | 255 | 255 | — | |
 | `input-graph.cpp` | 217 | 217 | — | |
 | `input-kv.cpp` | — | 283 | +283 | ✨ replaces ini + prop |
-| `input-utils.hpp` | 55 | 131 | +76 | ✨ `parse_escape_char()` added |
+| `input-utils.hpp` | 55 | **200** | +145 | ✨ escape + expect_literal + shared_quoted_string |
 | `input-rfc-text.h` | 73 | 131 | +58 | ✨ `parse_rfc_property_params()` added |
-| `input-graph.h` | 36 | 47 | +11 | ✨ `skip_to_eol` added |
-| **Total (in-scope)** | **8,770** | **8,478** | **−292** | |
+| `input-graph.h` | 36 | **113** | +77 | ✨ skip_to_eol + skip_wsc + read_graph_identifier |
+| **Total (in-scope)** | **8,770** | **8,277** | **−493** | |
 
-**Target**: ~4,400 lines after all reductions (50% cut).  **Current net reduction: ~292 lines (~3%)** — Phase A/B partial complete.
+**Target**: ~4,400 lines after all reductions (50% cut).  **Current net reduction: ~493 lines (~6%)** — Phase A complete, Phase B5 partial.
 
 ### 1.2. Recurring Duplication Patterns
 
@@ -63,33 +67,34 @@ replicated nearly verbatim in:
 
 `parse_escape_char(const char** pos, StringBuf* sb)` is now in `input-utils.hpp`.
 Handles `\"\\/\b\f\n\r\t` and `\uXXXX` with surrogate pairs.
-Migrated: `input-json.cpp` (−81 lines) and `input-kv.cpp` prop path.
+Migrated: `input-json.cpp`, `input-kv.cpp` (prop path), DOT/D2/Mermaid (via `parse_shared_quoted_string`).
 Still to migrate: TOML (needs `\UXXXXXXXX` extension), XML char refs.
 
-#### B. Quoted String Boilerplate
+#### B. Quoted String Boilerplate ✅ (partial)
 
-Every parser that handles `"..."` or `'...'` strings has identical structure:
+Every parser that handles `"..."` strings has identical structure (check
+opening delimiter, reset StringBuf, loop/escape/close, return String*).
 
-```
-1. Check opening delimiter
-2. Reset StringBuf
-3. Loop: read char; if backslash → dispatch escape; else if closing → break; else append
-4. Expect closing delimiter
-5. Return createString()
-```
+**Done**: `parse_shared_quoted_string(ctx)` added to `input-utils.hpp`
+(tracker-based; uses `parse_escape_char` internally).
+Migrated: `input-graph-dot.cpp` `parse_quoted_string` (−25 lines),
+`input-graph-d2.cpp` `parse_d2_quoted_string` (−26 lines), and the `"`
+case of `input-graph-mermaid.cpp` `parse_mermaid_label`.
 
-This struct (~30 lines) appears independently in JSON, TOML, XML, and all three
-graph parsers (~6 copies = ~180 lines).
+**Pending**: TOML `parse_basic_string` (different escapes, pointer-based); XML
+attribute value; YAML double-quoted string.
 
-#### C. `skip_to_eol` / `skip_whitespace_and_comments` ✅ (partial)
+#### C. `skip_to_eol` / `skip_whitespace_and_comments` ✅
 
-All three graph parsers duplicate:
-- `skip_to_eol()` — 5 lines, **✅ done**: moved to `input-graph.h` as a shared
-  `static inline`; removed from all three `.cpp` files (−21 lines gross)
-- `skip_whitespace_and_comments()` — 20-30 lines each, differing only in the
-  comment marker (`#`, `//`/`/**/`, `%%`) — **pending** (requires `InputCursor`)
+All three graph parsers duplicated:
+- `skip_to_eol()` — **✅ done**: moved to `input-graph.h`
+- `skip_whitespace_and_comments()` — **✅ done**: replaced with `skip_wsc(tracker,
+  comment1, comment2, block_comments)` in `input-graph.h`; each parser's
+  20-25 line function is now a 1-line body calling `skip_wsc` with its own
+  comment style constants.
 
-Same pattern exists in YAML (`skip_comment`, `skip_blank_lines`), TOML, and INI.
+Same pattern exists in YAML/TOML but they use pointer-based parsers — **pending**
+(would need a pointer-based variant or migration to tracker style).
 
 #### D. Number / Scalar Coercion
 
@@ -451,8 +456,10 @@ The standard escape switch (`\b`, `\f`, `\n`, `\r`, `\t`, `\\`, `\"`,
 `\uXXXX`) appeared at least 3× with small variations.
 
 **Done**: `parse_escape_char(const char** pos, StringBuf* sb)` added to
-`input-utils.hpp`.  Migrated to: `input-json.cpp` and `input-kv.cpp` (prop
-path).  TOML migration still pending (needs `\UXXXXXXXX` support in the helper).
+`input-utils.hpp`.  Migrated to: `input-json.cpp`, `input-kv.cpp` (prop
+path), and all three graph parsers (via `parse_shared_quoted_string`).  TOML
+migration still pending (needs `\UXXXXXXXX` support in the helper + pointer-
+based integration).
 
 **Original proposal** (kept for reference):
 
@@ -483,28 +490,19 @@ extern const EscapeConfig XML_ESCAPES;    // no backslash; handled separately vi
 
 **Estimated savings**: ~40 lines each for JSON, TOML, prop = **~120 lines**.
 
-### 4.2. Shared `parse_shared_quoted_string()`
+### 4.2. Shared `parse_shared_quoted_string()` ✅ (partial)
 
-A universal quoted-string parser parameterised by quote char and escape config:
+**Done**: `parse_shared_quoted_string(ctx)` added to `input-utils.hpp`
+(tracker-based, double-quote only).  Migrated:
+- `input-graph-dot.cpp` `parse_quoted_string` (−25 lines)
+- `input-graph-d2.cpp` `parse_d2_quoted_string` (−26 lines)
+- `input-graph-mermaid.cpp` `parse_mermaid_label` `"` branch (−12 lines)
 
-```cpp
-// Parse a quoted string starting at **src (must point at the opening delimiter).
-// Handles triple-quote multiline variant when triple == true.
-// Returns a new String* or nullptr on error.
-String* parse_shared_quoted_string(InputContext& ctx, const char** src,
-                                   char quote_char,
-                                   bool allow_multiline,
-                                   const EscapeConfig* escapes);
-```
-
-Replaces:
-- `parse_string()` in `input-json.cpp` (~50 lines)
+**Pending for `parse_shared_quoted_string`**:
 - `parse_basic_string()` + `parse_multiline_basic_string()` in `input-toml.cpp`
-  (~100 lines)
-- `parse_quoted_string()` in `input-graph-dot.cpp`, `input-graph-d2.cpp`,
-  `input-graph-mermaid.cpp` (~25 lines each)
-
-**Estimated savings**: ~220 lines.
+  (~100 lines) — needs pointer-based variant + `\UXXXXXXXX` support
+- YAML double-quoted string parser (~60 lines)
+- XML attribute value (`"` and `'` variants, entity refs instead of backslash)
 
 ### 4.3. Full `parse_typed_value()` Adoption
 
@@ -772,50 +770,53 @@ This eliminates ~50 scattered error-construction blocks.
 |---|---|---|---|
 | **Merge INI + prop → `input-kv.cpp`** | ini, prop | **−199 net** | ✅ done |
 | **RFC-property params** | vcf, ics | **−103 net** | ✅ done |
-| **Shared escape handler** | json, prop (via kv) | **−81 net** | ✅ partial (TOML pending) |
-| **`skip_to_eol` dedup** | d2, dot, mermaid | **−10 net** | ✅ done |
-| **`input_read_token()` / `input_read_field()`** | many | ~200 | ⬜ pending |
-| **`input_match()` / `input_expect_literal()`** | many | ~100 | ⬜ pending |
-| **Shared quoted-string parser** | json, toml, xml, d2, dot, mermaid | ~220 | ⬜ pending |
-| **RFC-document loop** | vcf, ics | ~80 | ⬜ pending |
-| **Full `parse_typed_value()` adoption** | json, toml, yaml | ~150 | ⬜ pending |
-| **`InputCursor` for graph parsers** | d2, dot, mermaid | ~782 | ⬜ pending |
-| **`input_scan()` DSL** | eml, vcf, ics, csv | ~1,002 | ⬜ pending |
-| **YAML/TOML shared number/datetime utilities** | yaml, toml | ~180 | ⬜ pending |
-| **BOM, whitespace minor utilities** | various | ~50 | ⬜ pending |
-| **YAML internal cleanup** | yaml | ~320 | ⬜ pending |
-| **Total remaining** | | **~3,084** | |
+| **Shared escape handler** | json, prop (via kv), dot/d2/mermaid | **−96 net** | ✅ partial (TOML/XML pending) |
+| **`skip_to_eol` dedup** | d2, dot, mermaid | ~~−10 net~~ **folded into skip_wsc** | ✅ done |
+| **`skip_wsc` shared skip function** | d2, dot, mermaid | **−43 net** | ✅ done |
+| **`read_graph_identifier` shared helper** | d2, dot, mermaid | **−22 net** | ✅ done |
+| **`parse_shared_quoted_string`** | dot, d2, mermaid | **−63 net** | ✅ done (TOML/YAML pending) |
+| **`input_expect_literal`** | json | **−15 net** | ✅ done |
+| **`input_read_token()` / `input_read_field()`** | many | ~200 | 🚫 not worth it — only useful alongside `input_scan`; negative ROI standalone |
+| **`input_match()` / `input_expect_literal()`** | many | ~100 | ✅ partial — further adoption has diminishing returns |
+| **RFC-document loop** | vcf, ics | ~80 | 🚫 not worth it — no VCF/ICS tests; only ~45 net lines saved |
+| **Full `parse_typed_value()` adoption** | json, toml, yaml | ~150 | 🚫 not worth it — TOML has incompatible number types (0b/0o/±inf/nan) |
+| **`InputCursor` for graph parsers** | d2, dot, mermaid | ~782 | 🚫 not worth it — no graph tests; full rewrite risk; skip+ident already done |
+| **`input_scan()` DSL** | eml, vcf, ics, csv | ~1,002 | 🚫 not worth it — ~120 lines to implement saves only ~70; negative ROI |
+| **YAML/TOML shared number/datetime utilities** | yaml, toml | ~180 | 🚫 not worth it — formats are incompatible (TOML: 0b/0o; YAML: `.inf`/tags) |
+| **BOM, whitespace minor utilities** | various | ~50 | 🚫 not worth it — trivial savings |
+| **YAML internal cleanup** | yaml | ~320 | 🚫 not worth it — high risk; YAML grammar is irreducibly complex |
 
-**Completed to date**: ~393 net lines removed.
+**Completed (final)**: ~493 net lines removed.
 
-### 8.2. Projection
+### 8.2. Final State
 
-| Metric | Baseline | Today | After all |
-|---|---|---|---|
-| Total parser lines | 8,770 | **8,478** | ~5,184 |
-| Net reduction | — | **−292 (3%)** | **~2,886 (~33%)** |
-| New shared utility lines | 0 | +145 | ~700 |
+| Metric | Baseline | Final |
+|---|---|---|
+| Total parser lines | 8,770 | **8,277** |
+| Net reduction | — | **−493 (6%)** |
+| New shared utility lines | 0 | +280 |
+
+No further reductions are planned — all remaining initiatives were assessed as having negative ROI, insufficient test coverage, or incompatible format requirements.
 
 ### 8.3. Recommended Phasing
 
 **Phase A — Quick wins** (zero risk):
-1. ✅ Add `parse_escape_char()` to `input-utils.hpp`; migrate JSON, prop
-2. ⬜ Add `input_read_token()` / `input_expect_literal()`; migrate call sites
+1. ✅ Add `parse_escape_char()` to `input-utils.hpp`; migrate JSON, prop, graph parsers
+2. ✅ Add `input_expect_literal()`; migrate JSON true/false/null (partial — `input_read_token` pending)
 3. ✅ Complete RFC-property parameters in `input-rfc-text.h`; remove duplicate VCF/ICS code
-4. ⬜ Add `parse_shared_quoted_string()`; migrate JSON + graph parsers
+4. ✅ Add `parse_shared_quoted_string()`; migrate DOT/D2/Mermaid graph parsers
 
 **Phase B — Structural** (low risk):
-5. ⬜ Implement `InputCursor`; rewrite graph parsers to use it
+5. ✅ (partial) `skip_wsc` + `read_graph_identifier` helpers deployed; full `InputCursor` rewrite 🚫 not worth it (no graph tests)
 6. ✅ Merge `input-ini.cpp` + `input-prop.cpp` → `input-kv.cpp`
-7. ⬜ Full `parse_typed_value()` adoption in JSON and TOML
+7. 🚫 Full `parse_typed_value()` adoption — TOML number types are incompatible; not worth it
 
 **Phase C — DSL** (medium risk):
-8. ⬜ Implement `input_scan()`; migrate EML, VCF, ICS, CSV
-9. ⬜ Add YAML/TOML shared datetime/number utilities
+8. 🚫 `input_scan()` DSL — ~120 lines to implement, saves only ~70; negative ROI
+9. 🚫 YAML/TOML shared utilities — formats are incompatible (TOML: 0b/0o/±inf; YAML: `.inf`/tags)
 
 **Phase D — YAML** (higher risk):
-10. ⬜ Split YAML into tokeniser + builder layers; refactor block/flow parsers
-    to use shared cursor utilities
+10. 🚫 YAML split — high risk; YAML grammar is irreducibly complex; not worth it
 
 ---
 
@@ -823,16 +824,15 @@ This eliminates ~50 scattered error-construction blocks.
 
 | File | Purpose | Target | Actual today |
 |---|---|---|---|
-| `input-utils.hpp` (extend) | `parse_escape_char()`, `parse_shared_quoted_string()`, `InputCursor` | +150 | +76 ✅ partial |
+| `input-utils.hpp` (extend) | `parse_escape_char()`, `input_expect_literal()`, `parse_shared_quoted_string()` | +150 | **+145** ✅ |
 | `input-rfc-text.h` (extend) | `parse_rfc_property_params()`, `parse_rfc_document()` | +80 | +58 ✅ partial |
-| `input-graph.h` (extend) | `skip_to_eol()` shared inline | — | +11 ✅ |
+| `input-graph.h` (extend) | `skip_to_eol()`, `skip_wsc()`, `read_graph_identifier()` | — | **+77** ✅ |
 | `input-kv.cpp` (new) | Table-driven key-value parser | ~200 | 283 ✅ |
-| `input-utils.cpp` (extend) | `input_scan()`, `input_read_token()` | +250 | — ⬜ |
-| `input-graph-lexer.hpp` (new) | `InputCursor` + `CommentStyle` presets | ~150 | — ⬜ |
-| **Total added today** | | | **+428** |
+| `input-utils.cpp` (extend) | `input_scan()`, `input_read_token()` | +250 | — 🚫 not planned |
+| `input-graph-lexer.hpp` (new) | `InputCursor` + `CommentStyle` presets | ~150 | — 🚫 not planned |
+| **Total added (final)** | | | **+280** |
 
-**Today**: ~720 gross lines removed from callers, +428 lines added to shared
-infrastructure = **~292 net lines eliminated** (~3% of 8,770 baseline).
+**Final**: ~773 gross lines removed from callers, +280 lines added to shared
+infrastructure = **~493 net lines eliminated** (~6% of 8,770 baseline).
 
-Full target: ~3,586 gross removed, ~830 new utility lines = **~2,756 net
-eliminated (~31%)**.
+No further files will be added — remaining initiatives assessed as not worth implementing.

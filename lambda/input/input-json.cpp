@@ -293,28 +293,13 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
             return (Item){.item = s2it(str)};
         }
         case 't':
-            if (strncmp(*json, "true", 4) == 0) {
-                *json += 4;
-                tracker.advance(4);
-                return ctx.builder.createBool(true);
-            }
-            ctx.addError(tracker.location(), "Invalid value, expected 'true'");
-            return ctx.builder.createNull();
+            if (!input_expect_literal(ctx, json, "true")) return ctx.builder.createNull();
+            return ctx.builder.createBool(true);
         case 'f':
-            if (strncmp(*json, "false", 5) == 0) {
-                *json += 5;
-                tracker.advance(5);
-                return ctx.builder.createBool(false);
-            }
-            ctx.addError(tracker.location(), "Invalid value, expected 'false'");
-            return ctx.builder.createNull();
+            if (!input_expect_literal(ctx, json, "false")) return ctx.builder.createNull();
+            return ctx.builder.createBool(false);
         case 'n':
-            if (strncmp(*json, "null", 4) == 0) {
-                *json += 4;
-                tracker.advance(4);
-                return ctx.builder.createNull();
-            }
-            ctx.addError(tracker.location(), "Invalid value, expected 'null'");
+            if (!input_expect_literal(ctx, json, "null")) return ctx.builder.createNull();
             return ctx.builder.createNull();
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {

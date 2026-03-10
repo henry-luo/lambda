@@ -1,6 +1,7 @@
 #include "input-graph.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/log.h"
 #include <ctype.h>
@@ -19,51 +20,15 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id, 
 static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph);
 static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_elem);
 
-// Skip whitespace and comments in Mermaid
+// skip whitespace and %% line comments
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker) {
-    while (!tracker.atEnd()) {
-        // skip whitespace
-        if (isspace(tracker.current())) {
-            tracker.advance();
-            continue;
-        }
-
-        // skip %% comments
-        if (tracker.current() == '%' && tracker.peek(1) == '%') {
-            skip_to_eol(tracker);
-            continue;
-        }
-
-        break;
-    }
+    skip_wsc(tracker, "%%", nullptr, false);
 }
 
-// Parse Mermaid identifier (alphanumeric + underscore + dash)
+// read Mermaid identifier: [A-Za-z_][A-Za-z0-9_\-]* (whitespace skipped first)
 static String* parse_mermaid_identifier(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
-    skip_whitespace_and_comments_mermaid(tracker);
-
-    if (tracker.atEnd()) return nullptr;
-
-    char c = tracker.current();
-    if (!isalpha(c) && c != '_') {
-        return nullptr;
-    }
-
-    const char* start = tracker.rest();
-    size_t len = 0;
-
-    while (!tracker.atEnd()) {
-        c = tracker.current();
-        if (isalnum(c) || c == '_' || c == '-') {
-            tracker.advance();
-            len++;
-        } else {
-            break;
-        }
-    }
-
-    return ctx.builder.createString(start, len);
+    skip_whitespace_and_comments_mermaid(ctx.tracker);
+    return read_graph_identifier(ctx, "-", true);
 }
 
 // Parse Mermaid node shape and extract label
@@ -240,7 +205,11 @@ static String* parse_mermaid_label(InputContext& ctx) {
     if (tracker.atEnd()) return nullptr;
 
     char quote = tracker.current();
-    if (quote != '"' && quote != '\'' && quote != '[') {
+    if (quote == '"') {
+        // double-quoted: use the shared handler (JSON-compatible escapes)
+        return parse_shared_quoted_string(ctx);
+    }
+    if (quote != '\'' && quote != '[') {
         return nullptr;
     }
 
@@ -252,7 +221,6 @@ static String* parse_mermaid_label(InputContext& ctx) {
 
     while (!tracker.atEnd() && tracker.current() != closing) {
         char c = tracker.current();
-
         if (c == '\\') {
             tracker.advance();
             if (!tracker.atEnd()) {
@@ -270,7 +238,7 @@ static String* parse_mermaid_label(InputContext& ctx) {
         return nullptr;
     }
 
-    tracker.advance(); // skip closing quote
+    tracker.advance(); // skip closing
     return ctx.builder.createString(sb->str->chars);
 }
 
