@@ -34,90 +34,9 @@ static String* parse_string(InputContext& ctx, const char **json) {
                 return nullptr;
             }
 
-            switch (**json) {
-                case '"': stringbuf_append_char(sb, '"'); break;
-                case '\\': stringbuf_append_char(sb, '\\'); break;
-                case '/': stringbuf_append_char(sb, '/'); break;
-                case 'b': stringbuf_append_char(sb, '\b'); break;
-                case 'f': stringbuf_append_char(sb, '\f'); break;
-                case 'n': stringbuf_append_char(sb, '\n'); break;
-                case 'r': stringbuf_append_char(sb, '\r'); break;
-                case 't': stringbuf_append_char(sb, '\t'); break;
-                // handle \uXXXX escapes (including surrogate pairs for emojis)
-                case 'u': {
-                    (*json)++; // skip 'u'
-                    tracker.advance(1);
-
-                    if (strlen(*json) < 4) {
-                        ctx.addError(tracker.location(), "Invalid unicode escape: need 4 hex digits");
-                        return nullptr;
-                    }
-
-                    char hex[5] = {0};
-                    strncpy(hex, *json, 4);
-                    (*json) += 4; // skip 4 hex digits
-                    tracker.advance(4);
-
-                    int codepoint = (int)strtol(hex, NULL, 16);
-
-                    // check for surrogate pairs (used for characters > U+FFFF like emojis)
-                    // high surrogate: 0xD800-0xDBFF, low surrogate: 0xDC00-0xDFFF
-                    if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
-                        // this is a high surrogate, look for low surrogate
-                        if ((*json)[0] == '\\' && (*json)[1] == 'u') {
-                            (*json) += 2; // skip \u
-                            tracker.advance(2);
-
-                            if (strlen(*json) < 4) {
-                                ctx.addError(tracker.location(), "Invalid unicode escape: need 4 hex digits for low surrogate");
-                                return nullptr;
-                            }
-
-                            char hex_low[5] = {0};
-                            strncpy(hex_low, *json, 4);
-                            (*json) += 4;
-                            tracker.advance(4);
-
-                            int low_surrogate = (int)strtol(hex_low, NULL, 16);
-                            uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
-                            if (combined != 0) {
-                                // valid surrogate pair - combine into full codepoint
-                                codepoint = (int)combined;
-                            } else {
-                                ctx.addWarning(tracker.location(),
-                                    "Invalid surrogate pair: high surrogate not followed by low surrogate");
-                                // output the high surrogate as replacement char and re-process low
-                                stringbuf_append_char(sb, (char)0xEF);
-                                stringbuf_append_char(sb, (char)0xBF);
-                                stringbuf_append_char(sb, (char)0xBD);
-                                codepoint = low_surrogate;
-                            }
-                        } else {
-                            // lone high surrogate - output replacement character
-                            ctx.addWarning(tracker.location(), "Lone high surrogate in unicode escape");
-                            stringbuf_append_char(sb, (char)0xEF);
-                            stringbuf_append_char(sb, (char)0xBF);
-                            stringbuf_append_char(sb, (char)0xBD);
-                            continue;  // skip final (*json)++
-                        }
-                    } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
-                        // lone low surrogate - output replacement character
-                        ctx.addWarning(tracker.location(), "Lone low surrogate in unicode escape");
-                        stringbuf_append_char(sb, (char)0xEF);
-                        stringbuf_append_char(sb, (char)0xBF);
-                        stringbuf_append_char(sb, (char)0xBD);
-                        continue;  // skip final (*json)++
-                    }
-
-                    // encode codepoint as UTF-8
-                    append_codepoint_utf8(sb, (uint32_t)codepoint);
-                    continue;  // skip the (*json)++ at end of loop - we already advanced
-                }
-                default:
-                    ctx.addWarning(tracker.location(),
-                                   "Invalid escape sequence: \\%c", **json);
-                    break;
-            }
+            int consumed = parse_escape_char(json, sb);
+            tracker.advance(consumed);
+            continue;
         } else {
             stringbuf_append_char(sb, **json);
         }

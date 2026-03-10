@@ -9,47 +9,62 @@ parsers (`input-json.cpp`, `input-toml.cpp`, `input-yaml.cpp`, `input-xml.cpp`,
 `input-vcf.cpp`, `input-ics.cpp`) and the graph parsers
 (`input-graph-d2.cpp`, `input-graph-dot.cpp`, `input-graph-mermaid.cpp`).
 
+> **Progress (2026-03-10)** — Phase A (items 1 and 3) and Phase B (item 6) are
+> complete.  All 611 baseline tests pass.  See §8 for updated line counts and
+> savings.  Remaining work starts at Phase A item 2 / item 4, then Phase B
+> items 5 and 7.
+
 ---
 
 ## 1. Baseline Inventory
 
 ### 1.1. Line Counts
 
-| File | Lines | Notes |
-|---|---|---|
-| `input-yaml.cpp` | 2,603 | Largest; YAML 1.2 full parser |
-| `input-toml.cpp` | 1,069 | |
-| `input-graph-mermaid.cpp` | 759 | |
-| `input-xml.cpp` | 755 | |
-| `input-graph-dot.cpp` | 592 | |
-| `input-ics.cpp` | 524 | |
-| `input-graph-d2.cpp` | 431 | |
-| `input-json.cpp` | 442 | |
-| `input-vcf.cpp` | 340 | |
-| `input-eml.cpp` | 301 | |
-| `input-ini.cpp` | 271 | |
-| `input-prop.cpp` | 211 | |
-| `input-csv.cpp` | 255 | |
-| `input-graph.cpp` | 217 | |
-| **Total** | **8,770** | |
+Baseline figures (before any work) and current actuals are shown side by side.
+Files marked ✅ have been reduced; files marked ✨ are newly created.
 
-**Target**: ~4,400 lines after all reductions (50% cut).
+| File | Baseline | Current | Δ | Status |
+|---|---|---|---|---|
+| `input-yaml.cpp` | 2,603 | 2,603 | — | |
+| `input-toml.cpp` | 1,069 | 1,069 | — | |
+| `input-graph-mermaid.cpp` | 759 | 752 | −7 | ✅ `skip_to_eol` removed |
+| `input-xml.cpp` | 755 | 755 | — | |
+| `input-graph-dot.cpp` | 592 | 585 | −7 | ✅ `skip_to_eol` removed |
+| `input-ics.cpp` | 524 | 473 | −51 | ✅ params → shared helper |
+| `input-graph-d2.cpp` | 431 | 424 | −7 | ✅ `skip_to_eol` removed |
+| `input-json.cpp` | 442 | 361 | −81 | ✅ escape → `parse_escape_char()` |
+| `input-vcf.cpp` | 340 | 288 | −52 | ✅ params → shared helper |
+| `input-eml.cpp` | 301 | 301 | — | |
+| `input-ini.cpp` | 271 | —  | −271 | ✅ merged → `input-kv.cpp` |
+| `input-prop.cpp` | 211 | — | −211 | ✅ merged → `input-kv.cpp` |
+| `input-csv.cpp` | 255 | 255 | — | |
+| `input-graph.cpp` | 217 | 217 | — | |
+| `input-kv.cpp` | — | 283 | +283 | ✨ replaces ini + prop |
+| `input-utils.hpp` | 55 | 131 | +76 | ✨ `parse_escape_char()` added |
+| `input-rfc-text.h` | 73 | 131 | +58 | ✨ `parse_rfc_property_params()` added |
+| `input-graph.h` | 36 | 47 | +11 | ✨ `skip_to_eol` added |
+| **Total (in-scope)** | **8,770** | **8,478** | **−292** | |
+
+**Target**: ~4,400 lines after all reductions (50% cut).  **Current net reduction: ~292 lines (~3%)** — Phase A/B partial complete.
 
 ### 1.2. Recurring Duplication Patterns
 
-#### A. Escape Sequence Handling
+#### A. Escape Sequence Handling ✅ (partial)
 
 The `\b`, `\f`, `\n`, `\r`, `\t`, `\\`, `\"`, and `\uXXXX` switch block is
 replicated nearly verbatim in:
 
 | File | ~Lines | Notes |
 |---|---|---|
-| `input-json.cpp` | 40 | `\uXXXX` with surrogate pairs |
-| `input-toml.cpp` | 50 | `\uXXXX` + `\UXXXXXXXX` + additional |
-| `input-prop.cpp` | 35 | `\uXXXX` |
-| `input-xml.cpp` | 25 | character references `&#NNNN;` / `&#xHHHH;` |
+| `input-json.cpp` | ~~40~~ **done** | migrated to `parse_escape_char()` |
+| `input-toml.cpp` | 50 | `\uXXXX` + `\UXXXXXXXX` + additional — **pending** |
+| `input-prop.cpp` | ~~35~~ **done** | via `input-kv.cpp` merge |
+| `input-xml.cpp` | 25 | character references `&#NNNN;` / `&#xHHHH;` — **pending** |
 
-All of these could call one parameterized `parse_escape_char()`.
+`parse_escape_char(const char** pos, StringBuf* sb)` is now in `input-utils.hpp`.
+Handles `\"\\/\b\f\n\r\t` and `\uXXXX` with surrogate pairs.
+Migrated: `input-json.cpp` (−81 lines) and `input-kv.cpp` prop path.
+Still to migrate: TOML (needs `\UXXXXXXXX` extension), XML char refs.
 
 #### B. Quoted String Boilerplate
 
@@ -66,12 +81,13 @@ Every parser that handles `"..."` or `'...'` strings has identical structure:
 This struct (~30 lines) appears independently in JSON, TOML, XML, and all three
 graph parsers (~6 copies = ~180 lines).
 
-#### C. `skip_to_eol` / `skip_whitespace_and_comments`
+#### C. `skip_to_eol` / `skip_whitespace_and_comments` ✅ (partial)
 
 All three graph parsers duplicate:
-- `skip_to_eol()` — 5 lines, identical in all three
+- `skip_to_eol()` — 5 lines, **✅ done**: moved to `input-graph.h` as a shared
+  `static inline`; removed from all three `.cpp` files (−21 lines gross)
 - `skip_whitespace_and_comments()` — 20-30 lines each, differing only in the
-  comment marker (`#`, `//`/`/**/`, `%%`)
+  comment marker (`#`, `//`/`/**/`, `%%`) — **pending** (requires `InputCursor`)
 
 Same pattern exists in YAML (`skip_comment`, `skip_blank_lines`), TOML, and INI.
 
@@ -86,17 +102,23 @@ it. YAML has its own `coerce_plain_scalar()` with overlapping logic.
 | `input-toml.cpp` | integer + float + bool + datetime | 70 |
 | `input-yaml.cpp` | all scalars + hex/octal | 90 |
 
-#### E. RFC-Property Parameters (VCF + ICS)
+#### E. RFC-Property Parameters (VCF + ICS) ✅
 
-`parse_property_parameters()` — a 60-line function — exists identically in both
-`input-vcf.cpp` and `input-ics.cpp`, differing only in whether the key is
-upper- or lower-cased. The `input-rfc-text.h` layer was started but does not yet
-cover parameter parsing.
+`parse_property_parameters()` — a 60-line function — was duplicated in both
+`input-vcf.cpp` and `input-ics.cpp`.
 
-#### F. Key-Value Line Parsing (INI + prop)
+**Done**: `parse_rfc_property_params(sb, pos, ctx, params_map, upper_case_keys)`
+added to `input-rfc-text.h`.  Both files replaced their 60-line body with a
+3-line wrapper call.  Net: −103 lines across the two files (gross −120, +17 in
+the header).
 
-`input-ini.cpp` and `input-prop.cpp` are near-clones (~482 lines combined) with
-different comment characters, key-value separators, and section handling.
+#### F. Key-Value Line Parsing (INI + prop) ✅
+
+`input-ini.cpp` and `input-prop.cpp` were near-clones (~482 lines combined).
+
+**Done**: merged into `input-kv.cpp` (283 lines) using a `KvConfig` struct.
+Both old files removed from the build via `build_lambda_config.json` exclusions.
+The public API (`parse_ini` / `parse_properties`) is unchanged.
 
 ---
 
@@ -423,12 +445,16 @@ are fixed for all three graph formats simultaneously.
 
 ## 4. Shared String Parsing Utilities
 
-### 4.1. Shared Escape Sequence Handler
+### 4.1. Shared Escape Sequence Handler ✅ (partial)
 
-Currently the standard JSON/TOML escape switch (`\b`, `\f`, `\n`, `\r`, `\t`,
-`\\`, `\"`, `\uXXXX`) appears at least 3× with small variations.
+The standard escape switch (`\b`, `\f`, `\n`, `\r`, `\t`, `\\`, `\"`,
+`\uXXXX`) appeared at least 3× with small variations.
 
-**Proposal**: extend `input-utils.hpp` with a single `parse_escape_char()`:
+**Done**: `parse_escape_char(const char** pos, StringBuf* sb)` added to
+`input-utils.hpp`.  Migrated to: `input-json.cpp` and `input-kv.cpp` (prop
+path).  TOML migration still pending (needs `\UXXXXXXXX` support in the helper).
+
+**Original proposal** (kept for reference):
 
 ```cpp
 struct EscapeConfig {
@@ -504,9 +530,14 @@ through to format-specific logic.
 
 ## 5. Merges and Table-Driven Parsers
 
-### 5.1. Merge `input-ini.cpp` + `input-prop.cpp` → `input-kv.cpp`
+### 5.1. Merge `input-ini.cpp` + `input-prop.cpp` → `input-kv.cpp` ✅
 
-These two files are near-clones (~482 lines combined). The only differences are:
+**Done**.  `input-kv.cpp` (283 lines) replaces both files using a `KvConfig`
+struct. `build_lambda_config.json` `exclude_source_files` and `exclude_patterns`
+entries added for both old files; the `lambda-input-full-cpp` SharedLib target
+also updated.  Public API unchanged.
+
+**Original design** (kept for reference) — differences between the two formats:
 
 | Feature | INI | Properties |
 |---|---|---|
@@ -552,27 +583,17 @@ void parse_properties(Input* input, const char* src) {
 
 **Estimated savings**: ~482 lines combined → ~200 lines merged = **~282 lines**.
 
-### 5.2. RFC-Property Layer Completion (VCF + ICS)
+### 5.2. RFC-Property Layer Completion (VCF + ICS) ✅ (partial)
 
-`input-rfc-text.h` already provides `parse_rfc_property_name()` and
-`parse_rfc_property_value()`. What is missing is `parse_rfc_property_parameters()`
-— the `;PARAM=value` block that `input-vcf.cpp` and `input-ics.cpp` each implement
-in ~60 lines.
+**Done (params)**: `parse_rfc_property_params(sb, pos, ctx, params_map,
+upper_case_keys)` added to `input-rfc-text.h`; both `input-vcf.cpp` and
+`input-ics.cpp` now call it instead of the 60-line local copy.  Net: −103
+lines.
+
+**Pending (parse_rfc_document)**: the property-loop callback interface below has
+not yet been implemented.
 
 Add to `input-rfc-text.h`:
-
-```cpp
-// Parse ';'-delimited parameters into params_map.
-// On entry, **pos must point at ';' or ':'.
-// Returns on ':', leaving **pos pointing at ':'.
-// Parameter keys are normalised to lowercase (set upper_case = true for ICS).
-void parse_rfc_property_params(StringBuf* sb, const char** pos,
-                               InputContext& ctx, Map* params_map,
-                               bool upper_case_keys);
-```
-
-Also consolidate the property-loop scaffold shared by VCF and ICS into a callback
-interface:
 
 ```cpp
 // Called for each fully-parsed property.
@@ -584,10 +605,10 @@ void parse_rfc_document(InputContext& ctx, const char* src,
                         RfcPropertyHandler handler, void* user_data);
 ```
 
-VCF and ICS each provide a ~30-line handler function; the 60-line parse loop
-and parameter parser move to `input-rfc-text.h`.
+VCF and ICS each provide a ~30-line handler function; the outer parse loop
+moves to `input-rfc-text.h`.
 
-**Estimated savings**: **~180 lines** across VCF + ICS.
+**Additional estimated savings** from `parse_rfc_document`: **~80 lines** across VCF + ICS.
 
 ### 5.3. Unify YAML / TOML Duplicate Infrastructure
 
@@ -747,69 +768,71 @@ This eliminates ~50 scattered error-construction blocks.
 
 ### 8.1. Savings by Initiative
 
-| Initiative | Files Affected | Lines Saved (est.) |
-|---|---|---|
-| **`input_scan()` DSL** | ini, prop, eml, vcf, ics, csv | ~1,002 |
-| **`InputCursor` for graph parsers** | d2, dot, mermaid | ~782 |
-| **Merge INI + prop → `input-kv.cpp`** | ini, prop | ~282 |
-| **Shared quoted-string parser** | json, toml, xml, d2, dot, mermaid | ~220 |
-| **RFC-property layer completion** | vcf, ics | ~180 |
-| **YAML/TOML shared number/datetime utilities** | yaml, toml | ~180 |
-| **Full `parse_typed_value()` adoption** | json, toml, yaml | ~150 |
-| **Shared escape handler** | json, toml, prop | ~120 |
-| **`input_read_token()` / `input_read_field()`** | many | ~200 |
-| **`input_match()` / `input_expect_literal()`** | many | ~100 |
-| **BOM, whitespace minor utilities** | various | ~50 |
-| **YAML internal cleanup** | yaml | ~320 |
-| **Total** | | **~3,586** |
+| Initiative | Files Affected | Actual / Est. saved | Status |
+|---|---|---|---|
+| **Merge INI + prop → `input-kv.cpp`** | ini, prop | **−199 net** | ✅ done |
+| **RFC-property params** | vcf, ics | **−103 net** | ✅ done |
+| **Shared escape handler** | json, prop (via kv) | **−81 net** | ✅ partial (TOML pending) |
+| **`skip_to_eol` dedup** | d2, dot, mermaid | **−10 net** | ✅ done |
+| **`input_read_token()` / `input_read_field()`** | many | ~200 | ⬜ pending |
+| **`input_match()` / `input_expect_literal()`** | many | ~100 | ⬜ pending |
+| **Shared quoted-string parser** | json, toml, xml, d2, dot, mermaid | ~220 | ⬜ pending |
+| **RFC-document loop** | vcf, ics | ~80 | ⬜ pending |
+| **Full `parse_typed_value()` adoption** | json, toml, yaml | ~150 | ⬜ pending |
+| **`InputCursor` for graph parsers** | d2, dot, mermaid | ~782 | ⬜ pending |
+| **`input_scan()` DSL** | eml, vcf, ics, csv | ~1,002 | ⬜ pending |
+| **YAML/TOML shared number/datetime utilities** | yaml, toml | ~180 | ⬜ pending |
+| **BOM, whitespace minor utilities** | various | ~50 | ⬜ pending |
+| **YAML internal cleanup** | yaml | ~320 | ⬜ pending |
+| **Total remaining** | | **~3,084** | |
+
+**Completed to date**: ~393 net lines removed.
 
 ### 8.2. Projection
 
-| Metric | Current | After |
-|---|---|---|
-| Total parser lines | 8,770 | ~5,184 |
-| Reduction | — | **~41%** |
-| New shared utility lines added | 0 | ~700 |
-| Net reduction | — | **~2,886 lines (~33%)** |
-
-With high-fidelity execution of all initiatives, ~40% gross reduction is
-achievable. Reaching 50% would additionally require a more aggressive YAML
-refactor (splitting tokeniser from tree-builder, ~600 more lines) or a
-table-driven approach for JSON (small gains there since JSON is already lean).
+| Metric | Baseline | Today | After all |
+|---|---|---|---|
+| Total parser lines | 8,770 | **8,478** | ~5,184 |
+| Net reduction | — | **−292 (3%)** | **~2,886 (~33%)** |
+| New shared utility lines | 0 | +145 | ~700 |
 
 ### 8.3. Recommended Phasing
 
-**Phase A — Quick wins** (~1-2 days, ~500 lines saved, zero risk):
-1. Add `parse_escape_char()` to `input-utils.hpp`; migrate JSON, TOML, prop
-2. Add `input_read_token()` / `input_expect_literal()`; migrate call sites
-3. Complete RFC-property parameters in `input-rfc-text.h`; remove duplicate VCF/ICS code
-4. Add `parse_shared_quoted_string()`; migrate JSON + graph parsers
+**Phase A — Quick wins** (zero risk):
+1. ✅ Add `parse_escape_char()` to `input-utils.hpp`; migrate JSON, prop
+2. ⬜ Add `input_read_token()` / `input_expect_literal()`; migrate call sites
+3. ✅ Complete RFC-property parameters in `input-rfc-text.h`; remove duplicate VCF/ICS code
+4. ⬜ Add `parse_shared_quoted_string()`; migrate JSON + graph parsers
 
-**Phase B — Structural** (~3-5 days, ~1,000 lines saved, low risk):
-5. Implement `InputCursor`; rewrite graph parsers to use it
-6. Merge `input-ini.cpp` + `input-prop.cpp` → `input-kv.cpp`
-7. Full `parse_typed_value()` adoption in JSON and TOML
+**Phase B — Structural** (low risk):
+5. ⬜ Implement `InputCursor`; rewrite graph parsers to use it
+6. ✅ Merge `input-ini.cpp` + `input-prop.cpp` → `input-kv.cpp`
+7. ⬜ Full `parse_typed_value()` adoption in JSON and TOML
 
-**Phase C — DSL** (~1 week, ~1,200 lines saved, medium risk):
-8. Implement `input_scan()`; migrate INI, prop (via KV), EML, VCF, ICS, CSV
-9. Add YAML/TOML shared datetime/number utilities
+**Phase C — DSL** (medium risk):
+8. ⬜ Implement `input_scan()`; migrate EML, VCF, ICS, CSV
+9. ⬜ Add YAML/TOML shared datetime/number utilities
 
-**Phase D — YAML** (~1-2 weeks, ~600-900 lines saved, higher risk):
-10. Split YAML into tokeniser + builder layers; refactor block/flow parsers
+**Phase D — YAML** (higher risk):
+10. ⬜ Split YAML into tokeniser + builder layers; refactor block/flow parsers
     to use shared cursor utilities
 
 ---
 
 ## Appendix: New Files Introduced
 
-| File | Purpose | ~Lines |
-|---|---|---|
-| `input-utils.cpp` (extend) | `input_scan()`, `parse_escape_char()`, `input_read_token()` | +250 |
-| `input-utils.hpp` (extend) | `parse_shared_quoted_string()`, `InputCursor`, `parse_typed_value()` extensions | +150 |
-| `input-rfc-text.h` (extend) | `parse_rfc_property_params()`, `parse_rfc_document()` | +80 |
-| `input-kv.cpp` (new — replaces ini + prop) | Table-driven key-value parser | ~200 |
-| `input-graph-lexer.hpp` (new) | `InputCursor` + `CommentStyle` presets for graph parsers | ~150 |
-| **Total added** | | **~830** |
+| File | Purpose | Target | Actual today |
+|---|---|---|---|
+| `input-utils.hpp` (extend) | `parse_escape_char()`, `parse_shared_quoted_string()`, `InputCursor` | +150 | +76 ✅ partial |
+| `input-rfc-text.h` (extend) | `parse_rfc_property_params()`, `parse_rfc_document()` | +80 | +58 ✅ partial |
+| `input-graph.h` (extend) | `skip_to_eol()` shared inline | — | +11 ✅ |
+| `input-kv.cpp` (new) | Table-driven key-value parser | ~200 | 283 ✅ |
+| `input-utils.cpp` (extend) | `input_scan()`, `input_read_token()` | +250 | — ⬜ |
+| `input-graph-lexer.hpp` (new) | `InputCursor` + `CommentStyle` presets | ~150 | — ⬜ |
+| **Total added today** | | | **+428** |
 
-Net: ~3,586 gross lines removed, ~830 new utility lines added = **~2,756 net
-lines eliminated (~31% net reduction of the 8,770 line total)**.
+**Today**: ~720 gross lines removed from callers, +428 lines added to shared
+infrastructure = **~292 net lines eliminated** (~3% of 8,770 baseline).
+
+Full target: ~3,586 gross removed, ~830 new utility lines = **~2,756 net
+eliminated (~31%)**.

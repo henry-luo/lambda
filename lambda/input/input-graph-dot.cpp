@@ -7,13 +7,6 @@
 
 using namespace lambda;
 
-// Helper: skip to end of line
-static void skip_to_eol(SourceTracker& tracker) {
-    while (!tracker.atEnd() && tracker.current() != '\n') {
-        tracker.advance();
-    }
-}
-
 // Forward declarations for internal functions
 static void skip_whitespace_and_comments(SourceTracker& tracker);
 static String* parse_identifier(InputContext& ctx);

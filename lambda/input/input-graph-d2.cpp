@@ -24,13 +24,6 @@ static bool parse_d2_property_assignment(InputContext& ctx, Element* graph, cons
 static bool parse_d2_edge(InputContext& ctx, Element* graph, const char* first_id);
 static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const char* first_id);
 
-// Helper: skip to end of line
-static void skip_to_eol(SourceTracker& tracker) {
-    while (!tracker.atEnd() && tracker.current() != '\n') {
-        tracker.advance();
-    }
-}
-
 // Skip whitespace and comments in D2
 static void skip_whitespace_and_comments_d2(SourceTracker& tracker) {
     while (!tracker.atEnd()) {

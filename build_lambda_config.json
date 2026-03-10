@@ -33,7 +33,9 @@
         "radiant/render_texnode.cpp",
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
-        "lib/font_config.c"
+        "lib/font_config.c",
+        "lambda/input/input-ini.cpp",
+        "lambda/input/input-prop.cpp"
     ],
     "includes": [
         ".",
@@ -284,7 +286,9 @@
             ],
             "exclude_patterns": [
                 "lambda/format/format_latex_html.cpp",
-                "lambda/format/format_latex_html_v2.cpp"
+                "lambda/format/format_latex_html_v2.cpp",
+                "lambda/input/input-ini.cpp",
+                "lambda/input/input-prop.cpp"
             ],
             "source_files": [
                 "lambda/print.cpp",
