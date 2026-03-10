@@ -405,6 +405,29 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
+    // P6: Auto margins override justify-self/align-self, consuming available free space (CSS Grid §8.1)
+    bool applied_horiz_auto = false, applied_vert_auto = false;
+    if (item->bound) {
+        bool left_auto  = (item->bound->margin.left_type   == CSS_VALUE_AUTO);
+        bool right_auto = (item->bound->margin.right_type  == CSS_VALUE_AUTO);
+        bool top_auto   = (item->bound->margin.top_type    == CSS_VALUE_AUTO);
+        bool bot_auto   = (item->bound->margin.bottom_type == CSS_VALUE_AUTO);
+        float horiz_free = (float)available_width  - item->width;
+        float vert_free  = (float)available_height - item->height;
+        if (left_auto || right_auto) {
+            applied_horiz_auto = true;
+            if (left_auto && right_auto) item->x += horiz_free * 0.5f;
+            else if (left_auto)          item->x += horiz_free;
+            // right_auto alone: item stays at track start (no shift)
+        }
+        if (top_auto || bot_auto) {
+            applied_vert_auto = true;
+            if (top_auto && bot_auto) item->y += vert_free * 0.5f;
+            else if (top_auto)        item->y += vert_free;
+            // bot_auto alone: item stays at track start (no shift)
+        }
+    }
+
     // Apply justify-self (horizontal alignment)
     // Using unified resolve function from layout_alignment.hpp
     int justify = radiant::resolve_justify_self(item->gi->justify_self, grid_layout->justify_items);
@@ -412,7 +435,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // For non-stretch alignment, use content width if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
     float actual_width = item->width;
-    if (justify != CSS_VALUE_STRETCH && !has_explicit_width) {
+    if (!applied_horiz_auto && justify != CSS_VALUE_STRETCH && !has_explicit_width) {
         // Use content width if it was computed in Pass 3
         if (item->content_width > 0 && item->content_width < available_width) {
             actual_width = item->content_width;
@@ -420,14 +443,16 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
-    // Apply horizontal alignment offset
+    // Apply horizontal alignment offset (skipped when auto margins already consumed free space)
     float free_width = available_width - actual_width;
-    if (!radiant::alignment_is_stretch(justify)) {
-        item->x += radiant::compute_alignment_offset_simple(justify, free_width);
-    } else {
-        // Stretch to fill track area (unless item has explicit width or aspect-ratio)
-        if (!has_explicit_width && aspect_ratio <= 0) {
-            item->width = available_width;
+    if (!applied_horiz_auto) {
+        if (!radiant::alignment_is_stretch(justify)) {
+            item->x += radiant::compute_alignment_offset_simple(justify, free_width);
+        } else {
+            // Stretch to fill track area (unless item has explicit width or aspect-ratio)
+            if (!has_explicit_width && aspect_ratio <= 0) {
+                item->width = available_width;
+            }
         }
     }
 
@@ -438,7 +463,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
     float actual_height = item->height;
-    if (align != CSS_VALUE_STRETCH && !has_explicit_height) {
+    if (!applied_vert_auto && align != CSS_VALUE_STRETCH && !has_explicit_height) {
         // Use content height if it was computed in Pass 3
         // Content height should be used regardless of whether it's smaller or larger
         // than available height - the item should size to its content for non-stretch alignment
@@ -449,14 +474,16 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
-    // Apply vertical alignment offset
+    // Apply vertical alignment offset (skipped when auto margins already consumed free space)
     float free_height = available_height - actual_height;
-    if (!radiant::alignment_is_stretch(align)) {
-        item->y += radiant::compute_alignment_offset_simple(align, free_height);
-    } else {
-        // Stretch to fill track area (unless item has explicit height or aspect-ratio)
-        if (!has_explicit_height && aspect_ratio <= 0) {
-            item->height = available_height;
+    if (!applied_vert_auto) {
+        if (!radiant::alignment_is_stretch(align)) {
+            item->y += radiant::compute_alignment_offset_simple(align, free_height);
+        } else {
+            // Stretch to fill track area (unless item has explicit height or aspect-ratio)
+            if (!has_explicit_height && aspect_ratio <= 0) {
+                item->height = available_height;
+            }
         }
     }
 

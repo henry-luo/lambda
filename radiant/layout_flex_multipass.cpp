@@ -1046,6 +1046,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         log_info(">>> NESTED GRID DETECTED: item=%p (%s) has display.inner=GRID",
                  flex_item, flex_item->node_name());
         log_enter();
+        log_debug(">>> NESTED GRID: flex_item->width=%.1f, flex_item->height=%.1f before grid layout", flex_item->width, flex_item->height);
 
         // Call the grid layout algorithm for this nested grid container
         layout_grid_content(lycon, flex_item);
