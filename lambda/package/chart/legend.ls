@@ -24,7 +24,7 @@ pub default_legend_config = {
 // ============================================================
 
 fn merge_config(config) {
-    if config != null { {*config, *default_legend_config} }
+    if config != null { {*:config, *:default_legend_config} }
     else { default_legend_config }
 }
 

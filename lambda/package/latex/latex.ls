@@ -47,7 +47,7 @@ pub fn render(ast, options) {
     // pass 1: analyze AST to collect counters, headings, labels
     let base_info = analyzer.analyze(ast)
     // add macro definitions to info for render-time expansion
-    let info = {macros: macro_defs, base_info}
+    let info = {macros: macro_defs, *:base_info}
     // pass 2: render AST using pre-computed info
     let html = dispatcher.render_node(ast, info)
 

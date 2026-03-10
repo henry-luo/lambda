@@ -330,7 +330,7 @@ let cfg2 = <Cfg host: "example.com">
 // 13a: spread typed map into new map
 type Base = {x: int, y: int}
 let base: Base = {x: 1, y: 2}
-let ext = {base, z: 3}
+let ext = {*:base, z: 3}
 '=13a='
 [ext.x, ext.y, ext.z]
 
@@ -341,7 +341,7 @@ let ext = {base, z: 3}
 // 14a: update object preserving type
 type Point2 { x: float, y: float }
 let orig = <Point2 x: 1.0, y: 2.0>
-let moved = <Point2 orig, x: 10.0>
+let moved = <Point2 *:orig, x: 10.0>
 '=14a='
 [moved.x, moved.y]
 

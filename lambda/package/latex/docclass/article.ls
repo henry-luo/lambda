@@ -40,11 +40,11 @@ pub fn format_section_number(counters, counter_name, in_appendix) {
 pub fn step_counter(counters, counter_name) {
     match counter_name {
         case "section":
-            ({section: counters.section + 1, subsection: 0, subsubsection: 0, counters})
+            ({section: counters.section + 1, subsection: 0, subsubsection: 0, *:counters})
         case "subsection":
-            ({subsection: counters.subsection + 1, subsubsection: 0, counters})
+            ({subsection: counters.subsection + 1, subsubsection: 0, *:counters})
         case "subsubsection":
-            ({subsubsection: counters.subsubsection + 1, counters})
+            ({subsubsection: counters.subsubsection + 1, *:counters})
         default: counters
     }
 }
