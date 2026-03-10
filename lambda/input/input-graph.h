@@ -4,6 +4,15 @@
 #include "input.hpp"
 
 #ifdef __cplusplus
+
+#include "source_tracker.hpp"
+
+// Shared helper: skip to end of current line (used by all graph parsers).
+static inline void skip_to_eol(lambda::SourceTracker& tracker) {
+    while (!tracker.atEnd() && tracker.current() != '\n')
+        tracker.advance();
+}
+
 extern "C" {
 #endif
 

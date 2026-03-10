@@ -8,13 +8,6 @@
 
 using namespace lambda;
 
-// Helper: skip to end of line
-static void skip_to_eol(SourceTracker& tracker) {
-    while (!tracker.atEnd() && tracker.current() != '\n') {
-        tracker.advance();
-    }
-}
-
 // Forward declarations for Mermaid parsing
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker);
 static String* parse_mermaid_identifier(InputContext& ctx);
