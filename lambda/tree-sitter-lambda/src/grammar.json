@@ -2952,11 +2952,7 @@
           },
           {
             "type": "SYMBOL",
-            "name": "current_item"
-          },
-          {
-            "type": "SYMBOL",
-            "name": "current_index"
+            "name": "current_expr"
           },
           {
             "type": "SYMBOL",
@@ -4168,13 +4164,21 @@
         }
       ]
     },
-    "current_item": {
-      "type": "STRING",
-      "value": "~"
-    },
-    "current_index": {
-      "type": "STRING",
-      "value": "~#"
+    "current_expr": {
+      "type": "TOKEN",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "~#"
+          },
+          {
+            "type": "STRING",
+            "value": "~"
+          }
+        ]
+      }
     },
     "unary_expr": {
       "type": "PREC_LEFT",

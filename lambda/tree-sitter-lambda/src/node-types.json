@@ -3153,11 +3153,7 @@
           "named": true
         },
         {
-          "type": "current_index",
-          "named": true
-        },
-        {
-          "type": "current_item",
+          "type": "current_expr",
           "named": true
         },
         {
@@ -4054,11 +4050,7 @@
     "named": false
   },
   {
-    "type": "current_index",
-    "named": true
-  },
-  {
-    "type": "current_item",
+    "type": "current_expr",
     "named": true
   },
   {

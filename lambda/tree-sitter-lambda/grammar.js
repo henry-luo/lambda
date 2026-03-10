@@ -397,8 +397,7 @@ module.exports = grammar({
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
-      $.current_item,   // ~ for pipe context
-      $.current_index,  // ~# for pipe key/index
+      $.current_expr,   // ~ or ~# for pipe context
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
 
@@ -462,11 +461,8 @@ module.exports = grammar({
       ...binary_expr($, false),
     ),
 
-    // Current item reference in pipe context
-    current_item: _ => '~',
-
-    // Current key/index reference in pipe context
-    current_index: _ => '~#',
+    // Current item (~) or key/index (~#) reference in pipe context
+    current_expr: _ => token(choice('~#', '~')),
 
     // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
@@ -693,7 +689,7 @@ module.exports = grammar({
       'offset', field('count', $._expr)
     ),
 
-    // shared for clauses: where, group, order, limit, offset in any order
+    // shared for clauses: fixed order where → group → order → limit → offset (like SQL)
     for_clauses: $ => repeat1(choice(
       field('where', $.for_where_clause),
       field('group', $.for_group_clause),
@@ -709,7 +705,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses (comma-separated after declarations)
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses (where, group, order, limit, offset) in any order
+      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       ')',
       field('then', $._expr),
@@ -721,7 +717,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses (where, group, order, limit, offset) in any order
+      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       '{', field('then', $.content), '}'
     ),
