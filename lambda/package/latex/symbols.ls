@@ -6,10 +6,10 @@
 
 // map diacritic command name → combining Unicode character
 let DIACRITICS = {
-    "'": "\u0301",   // acute accent
+    '\'': "\u0301",   // acute accent
     '`':  "\u0300",   // grave accent
     '^':  "\u0302",   // circumflex
-    "\"": "\u0308",   // diaeresis/umlaut
+    '"':  "\u0308",   // diaeresis/umlaut
     '~':  "\u0303",   // tilde
     '=':  "\u0304",   // macron
     '.':  "\u0307",   // dot above
@@ -136,7 +136,7 @@ let LIGATURES = {
     '---': "\u2014",     // em dash
     '--':  "\u2013",     // en dash
     '``': "\u201C",      // left double quote
-    "''": "\u201D",      // right double quote
+    '\u{27}\u{27}': "\u201D",      // right double quote
     '<<': "\u00AB",      // left guillemet
     '>>': "\u00BB"       // right guillemet
 }

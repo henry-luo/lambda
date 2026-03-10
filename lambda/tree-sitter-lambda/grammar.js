@@ -320,7 +320,7 @@ module.exports = grammar({
         ':', field('as', $._expr)
       )),
       seq(
-        field('name', choice($.symbol, $.identifier, $.base_type, $.string)),
+        field('name', choice($.symbol, $.identifier, $.base_type)),
         ':', field('as', $._expr),
       ),
     ),

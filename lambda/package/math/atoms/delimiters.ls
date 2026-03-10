@@ -32,30 +32,30 @@ let SIZED_DELIMS = {
     '(': true, ')': true,
     '[': true, ']': true,
     '{': true, '}': true,
-    "\\{": true, "\\}": true,
-    "\\lbrace": true, "\\rbrace": true,
-    '|': true, "\\vert": true,
-    '‖': true, "\\Vert": true, "\\|": true,
-    "\\lfloor": true, "\\rfloor": true,
-    "\\lceil": true, "\\rceil": true,
+    '\\{': true, '\\}': true,
+    '\\lbrace': true, '\\rbrace': true,
+    '|': true, '\\vert': true,
+    '‖': true, '\\Vert': true, '\\|': true,
+    '\\lfloor': true, '\\rfloor': true,
+    '\\lceil': true, '\\rceil': true,
     '⟨': true, '⟩': true,
-    "\\langle": true, "\\rangle": true,
-    '/': true, "\\backslash": true,
-    "\\uparrow": true, "\\downarrow": true, "\\updownarrow": true,
-    "\\Uparrow": true, "\\Downarrow": true, "\\Updownarrow": true
+    '\\langle': true, '\\rangle': true,
+    '/': true, '\\backslash': true,
+    '\\uparrow': true, '\\downarrow': true, '\\updownarrow': true,
+    '\\Uparrow': true, '\\Downarrow': true, '\\Updownarrow': true
 }
 
 // Map command names to display characters
 let DELIM_CHARS = {
-    "\\{": "{", "\\}": "}",
-    "\\lbrace": "{", "\\rbrace": "}",
-    "\\vert": "|", "\\|": "‖", "\\Vert": "‖",
-    "\\lfloor": "⌊", "\\rfloor": "⌋",
-    "\\lceil": "⌈", "\\rceil": "⌉",
-    "\\langle": "⟨", "\\rangle": "⟩",
-    "\\uparrow": "↑", "\\downarrow": "↓", "\\updownarrow": "↕",
-    "\\Uparrow": "⇑", "\\Downarrow": "⇓", "\\Updownarrow": "⇕",
-    "\\backslash": "∖"
+    '\\{': "{", '\\}': "}",
+    '\\lbrace': "{", '\\rbrace': "}",
+    '\\vert': "|", '\\|': "‖", '\\Vert': "‖",
+    '\\lfloor': "⌊", '\\rfloor': "⌋",
+    '\\lceil': "⌈", '\\rceil': "⌉",
+    '\\langle': "⟨", '\\rangle': "⟩",
+    '\\uparrow': "↑", '\\downarrow': "↓", '\\updownarrow': "↕",
+    '\\Uparrow': "⇑", '\\Downarrow': "⇓", '\\Updownarrow': "⇕",
+    '\\backslash': "∖"
 }
 
 // SVG path data for delimiter segments (top, repeat, bottom, middle)
