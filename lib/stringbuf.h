@@ -53,10 +53,18 @@ void stringbuf_vappend(StringBuf *sb, int num_args, va_list args);
 void stringbuf_append_format(StringBuf *sb, const char *format, ...);
 void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args);
 
-// Template emit functions (document formatting oriented)
-// Format specifiers: %s (C string), %S (String*), %d (int), %l (int64_t),
-// %f (double), %c (char), %n (newline), %i (indent N*2 spaces),
-// %r (repeat char N times), %% (literal %)
+// Template emit functions (document formatting oriented).
+//
+// Format specifiers:
+//   %s  — C string (const char*)                  %S  — Lambda String*
+//   %d  — int                                     %l  — int64_t
+//   %f  — double (%.15g)                          %c  — single char
+//   %n  — newline                                 %i  — indent N×2 spaces (int N)
+//   %r  — repeat char N times (int N, char)       %%  — literal %
+//   %q  — double-quote C string with \ and " escaped:  "arg"
+//   %Q  — double-quote Lambda String* with \ and " escaped:  "arg"
+//   %b  — bool as text: true or false (int arg, 0=false)
+//   %N  — name/key semantic alias for %s (C string)
 void stringbuf_emit(StringBuf *sb, const char *fmt, ...);
 void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args);
 

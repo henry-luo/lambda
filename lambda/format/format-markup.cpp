@@ -70,23 +70,7 @@ void MarkupEmitter::format_text(String* str) {
 void MarkupEmitter::format_text_cstr(const char* text) {
     if (!text || text[0] == '\0') return;
     if (rules_->escape_config) {
-        const TextEscapeConfig* config = rules_->escape_config;
-        size_t len = strlen(text);
-        for (size_t i = 0; i < len; i++) {
-            char c = text[i];
-            bool needs_escape = false;
-            if (config->chars_to_escape) {
-                for (const char* p = config->chars_to_escape; *p; p++) {
-                    if (c == *p) { needs_escape = true; break; }
-                }
-            }
-            if (needs_escape && config->use_backslash_escape) {
-                write_char('\\');
-                write_char(c);
-            } else {
-                write_char(c);
-            }
-        }
+        format_text_with_escape(output(), text, strlen(text), rules_->escape_config);
     } else {
         write_text(text);
     }

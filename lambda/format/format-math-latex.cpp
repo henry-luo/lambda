@@ -5,17 +5,7 @@
 // radical, command, fraction, delimiter_group, environment, etc.
 // Variables and numbers appear as plain String children.
 
-#include "format.h"
-#include "../mark_reader.hpp"
-#include "../../lib/stringbuf.h"
-#include "../../lib/log.h"
-#include <stdio.h>
-#include <string.h>
-
-// Forward declarations
-static void format_item(StringBuf* sb, const ItemReader& item, int depth);
-static void format_element(StringBuf* sb, const ElementReader& elem, int depth);
-static void format_children(StringBuf* sb, const ElementReader& elem, int depth, const char* sep);
+#include "format-math-shared.hpp"
 
 // ============================================================================
 // Helper: check if item needs braces when used as a sub/superscript argument
@@ -46,11 +36,6 @@ static bool needs_script_braces(const ItemReader& item) {
 // Element formatters
 // ============================================================================
 
-// Format the root `math` element: emit children separated by spaces
-static void format_math_root(StringBuf* sb, const ElementReader& elem, int depth) {
-    format_children(sb, elem, depth, " ");
-}
-
 // Format `operator` element: value attr contains the operator text (e.g., "+", "-", "\\times")
 static void format_operator(StringBuf* sb, const ElementReader& elem) {
     ItemReader val = elem.get_attr("value");
@@ -61,14 +46,6 @@ static void format_operator(StringBuf* sb, const ElementReader& elem) {
 
 // Format `relation` element: value attr contains the relation (e.g., "=", "\\leq", "\\to")
 static void format_relation(StringBuf* sb, const ElementReader& elem) {
-    ItemReader val = elem.get_attr("value");
-    if (!val.isNull() && val.isString()) {
-        stringbuf_append_str(sb, val.asString()->chars);
-    }
-}
-
-// Format `punctuation` element
-static void format_punctuation(StringBuf* sb, const ElementReader& elem) {
     ItemReader val = elem.get_attr("value");
     if (!val.isNull() && val.isString()) {
         stringbuf_append_str(sb, val.asString()->chars);
@@ -628,14 +605,6 @@ static void format_matrix_command(StringBuf* sb, const ElementReader& elem, int 
     stringbuf_append_str(sb, "}");
 }
 
-// Format `delimiter` element (standalone)
-static void format_delimiter(StringBuf* sb, const ElementReader& elem) {
-    ItemReader val = elem.get_attr("value");
-    if (!val.isNull() && val.isString()) {
-        stringbuf_append_str(sb, val.asString()->chars);
-    }
-}
-
 // Format `rule_command`: \rule[raise]{width}{height}
 static void format_rule_command(StringBuf* sb, const ElementReader& elem, int depth) {
     stringbuf_append_str(sb, "\\rule");
@@ -657,10 +626,23 @@ static void format_rule_command(StringBuf* sb, const ElementReader& elem, int de
 }
 
 // ============================================================================
+// Per-format symbol handler
+// ============================================================================
+
+// format_symbol_impl: emit LaTeX symbol representation
+static void format_symbol_impl(StringBuf* sb, Symbol* sym) {
+    if (!sym || !sym->chars) return;
+    // Symbols: row_sep → \\, col_sep → &
+    if (strcmp(sym->chars, "row_sep") == 0) { stringbuf_append_str(sb, " \\\\ "); }
+    else if (strcmp(sym->chars, "col_sep") == 0) { stringbuf_append_str(sb, " & "); }
+    else { stringbuf_append_str(sb, "\\"); stringbuf_append_str(sb, sym->chars); }
+}
+
+// ============================================================================
 // Dispatch
 // ============================================================================
 
-static void format_element(StringBuf* sb, const ElementReader& elem, int depth) {
+static void format_element_impl(StringBuf* sb, const ElementReader& elem, int depth) {
     const char* tag = elem.tagName();
     if (!tag) return;
 
@@ -719,55 +701,6 @@ static void format_element(StringBuf* sb, const ElementReader& elem, int depth) 
     // Generic fallback: emit all children
     log_debug("format-math-latex: unknown element '%s', using fallback", tag);
     format_children(sb, elem, depth, " ");
-}
-
-// ============================================================================
-// Item dispatch
-// ============================================================================
-
-static void format_item(StringBuf* sb, const ItemReader& item, int depth) {
-    if (depth > 50) {
-        stringbuf_append_str(sb, "...");
-        return;
-    }
-
-    if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        format_element(sb, elem, depth);
-    }
-    else if (item.isString()) {
-        String* str = item.asString();
-        if (str && str->chars) {
-            stringbuf_append_str(sb, str->chars);
-        }
-    }
-    else if (item.isSymbol()) {
-        Symbol* sym = item.asSymbol();
-        if (sym && sym->chars) {
-            // Symbols: row_sep → \\, col_sep → &
-            if (strcmp(sym->chars, "row_sep") == 0) {
-                stringbuf_append_str(sb, " \\\\ ");
-            } else if (strcmp(sym->chars, "col_sep") == 0) {
-                stringbuf_append_str(sb, " & ");
-            } else {
-                // Command name as symbol - emit with backslash
-                stringbuf_append_str(sb, "\\");
-                stringbuf_append_str(sb, sym->chars);
-            }
-        }
-    }
-    else if (item.isInt()) {
-        int value = item.asInt();
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%d", value);
-        stringbuf_append_str(sb, buffer);
-    }
-    else if (item.isFloat()) {
-        double value = item.asFloat();
-        char buffer[64];
-        snprintf(buffer, sizeof(buffer), "%.10g", value);
-        stringbuf_append_str(sb, buffer);
-    }
 }
 
 // ============================================================================

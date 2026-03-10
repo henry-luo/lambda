@@ -86,11 +86,8 @@ const TextEscapeConfig RST_ESCAPE_CONFIG = {
 };
 
 // format text with configurable escaping
-void format_text_with_escape(StringBuf* sb, String* str, const TextEscapeConfig* config) {
-    if (!sb || !str || str->len == 0 || !config) return;
-
-    const char* s = str->chars;
-    size_t len = str->len;
+void format_text_with_escape(StringBuf* sb, const char* s, size_t len, const TextEscapeConfig* config) {
+    if (!sb || !s || len == 0 || !config) return;
 
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
@@ -99,35 +96,30 @@ void format_text_with_escape(StringBuf* sb, String* str, const TextEscapeConfig*
         // check if character needs escaping
         if (config->chars_to_escape) {
             for (const char* p = config->chars_to_escape; *p; p++) {
-                if (c == *p) {
-                    needs_escape = true;
-                    break;
-                }
+                if (c == *p) { needs_escape = true; break; }
             }
         }
 
         if (needs_escape) {
             if (config->use_backslash_escape) {
-                // use backslash escape
                 stringbuf_append_char(sb, '\\');
                 stringbuf_append_char(sb, c);
             } else if (config->escape_fn) {
-                // use custom escape function
                 const char* escaped = config->escape_fn(c);
-                if (escaped) {
-                    stringbuf_append_str(sb, escaped);
-                } else {
-                    // fallback to character itself
-                    stringbuf_append_char(sb, c);
-                }
+                if (escaped) stringbuf_append_str(sb, escaped);
+                else         stringbuf_append_char(sb, c);
             } else {
-                // no escaping method specified
                 stringbuf_append_char(sb, c);
             }
         } else {
             stringbuf_append_char(sb, c);
         }
     }
+}
+
+void format_text_with_escape(StringBuf* sb, String* str, const TextEscapeConfig* config) {
+    if (!sb || !str || str->len == 0 || !config) return;
+    format_text_with_escape(sb, str->chars, str->len, config);
 }
 
 // ==============================================================================
