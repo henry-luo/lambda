@@ -268,7 +268,6 @@ module.exports = grammar({
     // statement content
     _statement: $ => choice(
       $.object_type,
-      $.entity_type,
       $.if_stam,
       $.match_expr,
       $.for_stam,
@@ -951,22 +950,23 @@ module.exports = grammar({
 
     type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', $._type_expr)),
 
-    entity_type: $ => seq(
-      'type', field('name', choice($.identifier, $.symbol)), '<', _attr_content_type($), '>'
-    ),
-
-    // Object type with optional inheritance and method/constraint body
-    // type Point { x: float, y: float; fn magnitude() => ... }
-    // type Circle : Shape { radius: float; fn area() => ... }
+    // Object/element type with optional inheritance, content schema, and methods
+    // Object (no content): type Point { x: float, y: float }
+    // Element (with content): type Article { title: string, string, element; fn render() => ... }
+    // Without content → object type; with content → element type
     object_type: $ => seq(
       'type', field('name', choice($.identifier, $.symbol)),
       optional(seq(':', field('base', choice($.identifier, $.symbol)))),
       '{',
-      // fields (comma-separated attr list)
-      optional(seq(
-        alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
+      // optional fields and content (attrs have name:type, content is bare type_expr)
+      optional(choice(
+        seq(
+          alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
+          optional(seq(',', $.content_type)),
+        ),
+        $.content_type,
       )),
-      // ';' separates fields from methods/constraints
+      // optional ';' introduces methods section
       optional(seq(';',
         repeat(choice($.fn_stam, $.fn_expr_stam, $.that_constraint))
       )),
@@ -984,7 +984,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
-    // top-level type defintions: type_stam | entity_type | object_type
+    // top-level type definitions: type_stam | object_type
 
     // ==================== String/Symbol Pattern Definitions ====================
     // Pattern atoms are unified into the type system. String/symbol pattern bodies
