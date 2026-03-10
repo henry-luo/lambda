@@ -3535,25 +3535,24 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
         return first;
     }
 
+    // detect 'pub': let_stam uses choice('let','pub') so check first child symbol;
+    // type_stam uses optional field('pub','pub') so check FIELD_PUB
+    bool is_pub = false;
+    if (symbol == SYM_LET_STAM) {
+        TSNode first = ts_node_child(let_node, 0);
+        is_pub = !ts_node_is_null(first) && ts_node_symbol(first) == anon_sym_pub;
+    } else if (symbol == SYM_TYPE_DEFINE) {
+        TSNode pub_node = ts_node_child_by_field_id(let_node, FIELD_PUB);
+        is_pub = !ts_node_is_null(pub_node);
+    }
+
+    AstNodeType node_type = is_pub ? AST_NODE_PUB_STAM :
+        symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM : AST_NODE_LET_STAM;
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp,
-        symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM :
-        symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
+        node_type, let_node, sizeof(AstLetNode));
 
     // determine if this is a type definition based on the parent symbol
     bool is_type_definition = (symbol == SYM_TYPE_DEFINE);
-
-    // for pub_stam: detect 'pub type ...' variants by scanning for the anonymous 'type' keyword
-    if (symbol == SYM_PUB_STAM) {
-        TSNode child = ts_node_child(let_node, 0);
-        int child_count = ts_node_child_count(let_node);
-        for (int i = 0; i < child_count; i++) {
-            child = ts_node_child(let_node, i);
-            if (ts_node_symbol(child) == anon_sym_type) {
-                is_type_definition = true;
-                break;
-            }
-        }
-    }
 
     // 'let' can have multiple name-value declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
@@ -4060,7 +4059,9 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     log_debug("build_object_type");
     AstObjectTypeNode* ast_node = (AstObjectTypeNode*)alloc_ast_node(tp,
         AST_NODE_OBJECT_TYPE, type_node, sizeof(AstObjectTypeNode));
-    ast_node->is_public = false;
+    // detect 'pub' field on object_type
+    TSNode pub_node = ts_node_child_by_field_id(type_node, FIELD_PUB);
+    ast_node->is_public = !ts_node_is_null(pub_node);
     ast_node->local_type_index = -1;
 
     // allocate TypeObject (extends TypeMap) for this object type definition
@@ -6185,6 +6186,10 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 obj_node->constraints = NULL;
                 obj_node->item = NULL;
 
+                // detect 'pub' field on object_type
+                TSNode pub_node = ts_node_child_by_field_id(child, FIELD_PUB);
+                obj_node->is_public = !ts_node_is_null(pub_node);
+
                 log_debug("pass 1: registering object type placeholder '%.*s'",
                     (int)obj_name.length, obj_name.str);
                 push_name(tp, (AstNamedNode*)obj_node, NULL);
@@ -6578,7 +6583,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_current_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
-    case SYM_LET_STAM:  case SYM_PUB_STAM:  case SYM_TYPE_DEFINE:
+    case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
         return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
         return build_for_expr(tp, expr_node);
@@ -6863,6 +6868,27 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                     }
                 }
                 declare = declare->next;
+            }
+        }
+        else if (node->node_type == AST_NODE_OBJECT_TYPE) {
+            // standalone pub object type (e.g. pub type Counter { ... })
+            AstObjectTypeNode* obj_node = (AstObjectTypeNode*)node;
+            if (obj_node->is_public) {
+                Type* node_type = obj_node->type;
+                if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                    TypeType* tt = (TypeType*)node_type;
+                    TypeObject* obj_type = (TypeObject*)tt->type;
+                    arraylist_append(tp->type_list, (void*)tt);
+                    obj_type->type_index = tp->type_list->length - 1;
+                    log_debug("registered imported object type '%.*s' at local index %d",
+                        (int)obj_node->name->len, obj_node->name->chars, obj_type->type_index);
+                }
+                if (has_alias) {
+                    push_qualified_name(tp, (AstNamedNode*)obj_node, import_node, import_node->alias);
+                } else {
+                    push_name(tp, (AstNamedNode*)obj_node, import_node);
+                }
+                log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
             }
         }
         node = node->next;
