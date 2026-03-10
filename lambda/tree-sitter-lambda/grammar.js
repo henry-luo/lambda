@@ -254,7 +254,6 @@ module.exports = grammar({
     // expr statements that need ';'
     _expr_stam: $ => choice(
       $.let_stam,
-      $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
     ),
@@ -397,8 +396,7 @@ module.exports = grammar({
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
-      $.current_item,   // ~ for pipe context
-      $.current_index,  // ~# for pipe key/index
+      $.current_expr,   // ~ or ~# for pipe context
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
 
@@ -462,11 +460,8 @@ module.exports = grammar({
       ...binary_expr($, false),
     ),
 
-    // Current item reference in pipe context
-    current_item: _ => '~',
-
-    // Current key/index reference in pipe context
-    current_index: _ => '~#',
+    // Current item (~) or key/index (~#) reference in pipe context
+    current_expr: _ => token(choice('~#', '~')),
 
     // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
@@ -572,17 +567,8 @@ module.exports = grammar({
     ),
 
     let_stam: $ => seq(
-      'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
-    ),
-
-    pub_stam: $ => choice(
-      // pub variable: pub x = expr, pub y = expr
-      seq('pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))),
-      // pub type alias: pub type T = type_expr
-      seq('pub', 'type', field('declare', alias($.type_assign, $.assign_expr)),
-        repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))),
-      // pub object type: pub type T { ... }
-      seq('pub', field('declare', $.object_type)),
+      choice('let', 'pub'),
+      field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
     // Expression-form if: if (cond) expr else expr
@@ -693,7 +679,7 @@ module.exports = grammar({
       'offset', field('count', $._expr)
     ),
 
-    // shared for clauses: where, group, order, limit, offset in any order
+    // shared for clauses: fixed order where → group → order → limit → offset (like SQL)
     for_clauses: $ => repeat1(choice(
       field('where', $.for_where_clause),
       field('group', $.for_group_clause),
@@ -709,7 +695,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses (comma-separated after declarations)
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses (where, group, order, limit, offset) in any order
+      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       ')',
       field('then', $._expr),
@@ -721,7 +707,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses (where, group, order, limit, offset) in any order
+      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       '{', field('then', $.content), '}'
     ),
@@ -955,6 +941,7 @@ module.exports = grammar({
     // Element (with content): type Article { title: string, string, element; fn render() => ... }
     // Without content → object type; with content → element type
     object_type: $ => seq(
+      optional(field('pub', 'pub')),
       'type', field('name', choice($.identifier, $.symbol)),
       optional(seq(':', field('base', choice($.identifier, $.symbol)))),
       '{',
@@ -979,6 +966,7 @@ module.exports = grammar({
     // type_stam handles type aliases, string patterns, and symbol patterns.
     // The leading keyword distinguishes them; AST builder checks the text.
     type_stam: $ => seq(
+      optional(field('pub', 'pub')),
       field('kind', choice('type', 'string', 'symbol')),
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
