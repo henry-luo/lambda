@@ -315,12 +315,12 @@ module.exports = grammar({
 
     map_item: $ => choice(
       // dotted key: a.b: val — lower dynamic precedence so GLR prefers member_expr when ambiguous
-      prec.dynamic(-1, seq(
-        field('name', $.dotted_name),
-        ':', field('as', $._expr)
-      )),
+      // prec.dynamic(-1, seq(
+      //   field('name', $.dotted_name),
+      //   ':', field('as', $._expr)
+      // )),
       seq(
-        field('name', choice($.symbol, $.identifier, $.base_type)),
+        field('name', choice($.dotted_name, $.symbol, $.identifier, $.base_type)),
         ':', field('as', $._expr),
       ),
     ),
@@ -423,11 +423,11 @@ module.exports = grammar({
       $.map,
       $.element,
       $.base_type,  // includes null
-      prec.dynamic(-1, $.dotted_name),  // a.b, svg.rect — lower priority than member_expr
       $.identifier,
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
       $.member_expr,
+      $.dotted_name,  // a.b, svg.rect — lower priority than member_expr
       $.parent_expr,  // expr.. for parent access shorthand
       $.call_expr,
       $.query_expr,         // expr?T or expr.?T - query by type
