@@ -1906,7 +1906,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
 
     // Second pass: parse values
     int i = 0;
-    while (i < count && track_list->track_count < track_list->allocated_tracks) {
+    while (i < count) {
         CssValue* val = values[i];
         if (!val) { i++; continue; }
 
@@ -1953,6 +1953,42 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
         // Legacy CUSTOM handling for old-style parsing
         if (val->type == CSS_VALUE_TYPE_CUSTOM && val->data.custom_property.name) {
             const char* name = val->data.custom_property.name;
+
+            // Named line group: [ <ident>* ] — capture names into track_list->line_names
+            if (strcmp(name, "[") == 0) {
+                int line_idx = track_list->track_count; // this name belongs at the current line position
+                while (++i < count) {
+                    CssValue* nv = values[i];
+                    if (!nv) continue;
+                    // Closing bracket
+                    if (nv->type == CSS_VALUE_TYPE_CUSTOM && nv->data.custom_property.name &&
+                            strcmp(nv->data.custom_property.name, "]") == 0) {
+                        i++; // advance past "]"
+                        break;
+                    }
+                    // Keyword ident used as line name (e.g. "start", "end", "top", "center")
+                    if (nv->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* ki = css_enum_info(nv->data.keyword);
+                        if (ki && ki->name && line_idx <= track_list->allocated_tracks && !track_list->line_names[line_idx]) {
+                            track_list->line_names[line_idx] = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                            track_list->line_name_count++;
+                        }
+                        continue;
+                    }
+                    // Custom ident used as line name (e.g. "middle", user-defined names)
+                    if (nv->type == CSS_VALUE_TYPE_CUSTOM && nv->data.custom_property.name) {
+                        const char* nn = nv->data.custom_property.name;
+                        if (strcmp(nn, "[") == 0) break; // malformed nested bracket
+                        if (line_idx <= track_list->allocated_tracks && !track_list->line_names[line_idx]) {
+                            track_list->line_names[line_idx] = mem_strdup(nn, MEM_CAT_LAYOUT);
+                            track_list->line_name_count++;
+                        }
+                    }
+                }
+                continue;
+            }
+            if (strcmp(name, "]") == 0) { i++; continue; } // stray closing bracket
+
             if (strncmp(name, "repeat(", 7) == 0 || strcmp(name, "repeat") == 0) {
                 i++; // Move past "repeat("
                 if (i >= count || !values[i] || values[i]->type != CSS_VALUE_TYPE_NUMBER) {
@@ -7012,6 +7048,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (value->data.keyword == CSS_VALUE_AUTO) {
                     span->gi->grid_column_start = 0;  // auto
                     log_debug("[CSS] grid-column-start: auto");
+                } else {
+                    const CssEnumInfo* ki = css_enum_info(value->data.keyword);
+                    if (ki && ki->name) {
+                        span->gi->grid_column_start_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                        span->gi->has_explicit_grid_column_start = true;
+                        span->gi->is_grid_auto_placed = false;
+                        log_debug("[CSS] grid-column-start: named line '%s'", ki->name);
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                const char* n = value->data.custom_property.name;
+                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
+                    span->gi->grid_column_start_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_column_start = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-column-start: named line '%s'", n);
                 }
             }
             break;
@@ -7029,6 +7081,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 span->gi->grid_column_end = 0;  // auto
                 log_debug("[CSS] grid-column-end: auto");
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* ki = css_enum_info(value->data.keyword);
+                if (ki && ki->name) {
+                    span->gi->grid_column_end_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_column_end = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-column-end: named line '%s'", ki->name);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                const char* n = value->data.custom_property.name;
+                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
+                    span->gi->grid_column_end_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_column_end = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-column-end: named line '%s'", n);
+                }
             }
             break;
         }
@@ -7045,6 +7113,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 span->gi->grid_row_start = 0;  // auto
                 log_debug("[CSS] grid-row-start: auto");
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* ki = css_enum_info(value->data.keyword);
+                if (ki && ki->name) {
+                    span->gi->grid_row_start_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_row_start = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-row-start: named line '%s'", ki->name);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                const char* n = value->data.custom_property.name;
+                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
+                    span->gi->grid_row_start_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_row_start = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-row-start: named line '%s'", n);
+                }
             }
             break;
         }
@@ -7061,6 +7145,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 span->gi->grid_row_end = 0;  // auto
                 log_debug("[CSS] grid-row-end: auto");
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* ki = css_enum_info(value->data.keyword);
+                if (ki && ki->name) {
+                    span->gi->grid_row_end_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_row_end = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-row-end: named line '%s'", ki->name);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                const char* n = value->data.custom_property.name;
+                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
+                    span->gi->grid_row_end_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    span->gi->has_explicit_grid_row_end = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-row-end: named line '%s'", n);
+                }
             }
             break;
         }
@@ -7159,8 +7259,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* info = css_enum_info(v->data.keyword);
-                            if (info && info->name && strcmp(info->name, "span") == 0) {
-                                saw_span = true;
+                            if (info && info->name) {
+                                if (strcmp(info->name, "span") == 0) {
+                                    saw_span = true;
+                                } else if (strcmp(info->name, "auto") != 0) {
+                                    // CSS keyword used as a named line reference (e.g. "start", "end")
+                                    if (value_idx == 0) {
+                                        span->gi->grid_column_start_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        span->gi->has_explicit_grid_column_start = true;
+                                    } else {
+                                        span->gi->grid_column_end_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        span->gi->has_explicit_grid_column_end = true;
+                                    }
+                                }
                             }
                         } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
                             const char* name = v->data.custom_property.name;
@@ -7170,6 +7281,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 // "/" separator may come as CUSTOM type
                                 value_idx = 1;
                                 saw_span = false;
+                            } else if (name && name[0] != '[' && name[0] != ']') {
+                                // Named line reference (e.g. grid-column: header-start / content-end)
+                                if (value_idx == 0) {
+                                    span->gi->grid_column_start_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    span->gi->has_explicit_grid_column_start = true;
+                                } else {
+                                    span->gi->grid_column_end_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    span->gi->has_explicit_grid_column_end = true;
+                                }
                             }
                         } else if (v->type == CSS_VALUE_TYPE_STRING) {
                             if (v->data.string && strcmp(v->data.string, "/") == 0) {
@@ -7288,8 +7408,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* info = css_enum_info(v->data.keyword);
-                            if (info && info->name && strcmp(info->name, "span") == 0) {
-                                saw_span = true;
+                            if (info && info->name) {
+                                if (strcmp(info->name, "span") == 0) {
+                                    saw_span = true;
+                                } else if (strcmp(info->name, "auto") != 0) {
+                                    // CSS keyword used as a named line reference (e.g. "top", "center")
+                                    if (value_idx == 0) {
+                                        span->gi->grid_row_start_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        span->gi->has_explicit_grid_row_start = true;
+                                    } else {
+                                        span->gi->grid_row_end_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        span->gi->has_explicit_grid_row_end = true;
+                                    }
+                                }
                             }
                         } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
                             const char* name = v->data.custom_property.name;
@@ -7299,6 +7430,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 // "/" separator may come as CUSTOM type
                                 value_idx = 1;
                                 saw_span = false;
+                            } else if (name && name[0] != '[' && name[0] != ']') {
+                                // Named line reference (e.g. grid-row: header-start / content-end)
+                                if (value_idx == 0) {
+                                    span->gi->grid_row_start_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    span->gi->has_explicit_grid_row_start = true;
+                                } else {
+                                    span->gi->grid_row_end_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    span->gi->has_explicit_grid_row_end = true;
+                                }
                             }
                         } else if (v->type == CSS_VALUE_TYPE_STRING) {
                             if (v->data.string && strcmp(v->data.string, "/") == 0) {

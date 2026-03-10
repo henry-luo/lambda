@@ -252,9 +252,65 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 2 - Resolving grid template areas");
     resolve_grid_template_areas(grid_layout);
 
+    // Phase 2.5: Register named grid lines from track lists and template areas
+    log_debug("DEBUG: Phase 2.5 - Registering named grid lines");
+    if (grid_layout->grid_template_columns) {
+        GridTrackList* cols = grid_layout->grid_template_columns;
+        for (int i = 0; i <= cols->track_count && i < cols->allocated_tracks + 1; i++) {
+            if (cols->line_names[i]) {
+                add_grid_line_name(grid_layout, cols->line_names[i], i + 1, false);
+            }
+        }
+    }
+    if (grid_layout->grid_template_rows) {
+        GridTrackList* rows = grid_layout->grid_template_rows;
+        for (int i = 0; i <= rows->track_count && i < rows->allocated_tracks + 1; i++) {
+            if (rows->line_names[i]) {
+                add_grid_line_name(grid_layout, rows->line_names[i], i + 1, true);
+            }
+        }
+    }
+    // Generate <area>-start / <area>-end named line aliases from grid-template-areas
+    {
+        char name_buf[512];
+        for (int a = 0; a < grid_layout->area_count; a++) {
+            GridArea* area = &grid_layout->grid_areas[a];
+            if (!area->name) continue;
+            snprintf(name_buf, sizeof(name_buf), "%s-start", area->name);
+            add_grid_line_name(grid_layout, name_buf, area->column_start, false);
+            add_grid_line_name(grid_layout, name_buf, area->row_start, true);
+            snprintf(name_buf, sizeof(name_buf), "%s-end", area->name);
+            add_grid_line_name(grid_layout, name_buf, area->column_end, false);
+            add_grid_line_name(grid_layout, name_buf, area->row_end, true);
+        }
+    }
+
     // Phase 3: Determine initial grid size from templates (before placement)
     log_debug("DEBUG: Phase 3 - Determining initial grid size from templates");
     determine_grid_size(grid_layout);
+
+    // Phase 3.5: Resolve named line references into integer line numbers
+    log_debug("DEBUG: Phase 3.5 - Resolving named line references");
+    for (int idx = 0; idx < item_count; idx++) {
+        ViewBlock* item = items[idx];
+        if (!item->gi) continue;
+        if (item->gi->grid_column_start_name) {
+            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_column_start_name, false);
+            if (ln > 0) { item->gi->grid_column_start = ln; item->gi->has_explicit_grid_column_start = true; }
+        }
+        if (item->gi->grid_column_end_name) {
+            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_column_end_name, false);
+            if (ln > 0) { item->gi->grid_column_end = ln; item->gi->has_explicit_grid_column_end = true; }
+        }
+        if (item->gi->grid_row_start_name) {
+            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_row_start_name, true);
+            if (ln > 0) { item->gi->grid_row_start = ln; item->gi->has_explicit_grid_row_start = true; }
+        }
+        if (item->gi->grid_row_end_name) {
+            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_row_end_name, true);
+            if (ln > 0) { item->gi->grid_row_end = ln; item->gi->has_explicit_grid_row_end = true; }
+        }
+    }
 
     // Phase 4: Place grid items (using enhanced CellOccupancyMatrix algorithm)
     log_debug("DEBUG: Phase 4 - Placing grid items with enhanced algorithm");
@@ -304,6 +360,41 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Phase 7: Align grid items
     log_debug("DEBUG: Phase 7 - Aligning grid items");
     align_grid_items(grid_layout);
+
+    // Phase 7.5: Apply relative positioning offsets to grid items
+    // Items with position:relative + top/right/bottom/left should be offset from their grid-area position
+    log_debug("DEBUG: Phase 7.5 - Applying relative positioning offsets");
+    for (int i = 0; i < item_count; i++) {
+        ViewBlock* item = items[i];
+        if (!item || !item->position) continue;
+        if (item->position->position != CSS_VALUE_RELATIVE) continue;
+        float offset_x = 0, offset_y = 0;
+        float parent_w = (float)container->width;
+        float parent_h = (float)container->height;
+        if (item->position->has_left) {
+            offset_x = isnan(item->position->left_percent)
+                ? item->position->left
+                : item->position->left_percent * parent_w / 100.0f;
+        } else if (item->position->has_right) {
+            offset_x = isnan(item->position->right_percent)
+                ? -item->position->right
+                : -(item->position->right_percent * parent_w / 100.0f);
+        }
+        if (item->position->has_top) {
+            offset_y = isnan(item->position->top_percent)
+                ? item->position->top
+                : item->position->top_percent * parent_h / 100.0f;
+        } else if (item->position->has_bottom) {
+            offset_y = isnan(item->position->bottom_percent)
+                ? -item->position->bottom
+                : -(item->position->bottom_percent * parent_h / 100.0f);
+        }
+        if (offset_x != 0 || offset_y != 0) {
+            log_debug("Phase 7.5: grid item %d relative offset (%.0f, %.0f)", i, offset_x, offset_y);
+            item->x += (int)offset_x;
+            item->y += (int)offset_y;
+        }
+    }
 
     // Note: Phase 8 (content layout) is now handled by layout_grid_multipass.cpp Pass 3
     // The multipass flow calls layout_final_grid_content() after this function returns
@@ -356,12 +447,13 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         }
 
         ViewBlock* child = (ViewBlock*)child_node;
-        // Filter out absolutely positioned and hidden items
+        // Filter out absolutely positioned, hidden, and display:none items
         bool is_absolute = child->position &&
                           (child->position->position == CSS_VALUE_ABSOLUTE ||
                            child->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child->in_line && child->in_line->visibility == VIS_HIDDEN;
-        if (!is_absolute && !is_hidden) {
+        bool is_display_none = (child->display.outer == CSS_VALUE_NONE);
+        if (!is_absolute && !is_hidden && !is_display_none) {
             count++;
         }
         child_node = child_node->next_sibling;
@@ -392,12 +484,13 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         }
 
         ViewBlock* child = (ViewBlock*)child_node;
-        // Filter out absolutely positioned and hidden items
+        // Filter out absolutely positioned, hidden, and display:none items
         bool is_absolute = child->position &&
                           (child->position->position == CSS_VALUE_ABSOLUTE ||
                            child->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child->in_line && child->in_line->visibility == VIS_HIDDEN;
-        if (!is_absolute && !is_hidden) {
+        bool is_display_none = (child->display.outer == CSS_VALUE_NONE);
+        if (!is_absolute && !is_hidden && !is_display_none) {
             grid_layout->grid_items[count] = child;
 
             // Initialize grid item placement properties with defaults if not set

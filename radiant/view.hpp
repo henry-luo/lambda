@@ -414,6 +414,11 @@ struct GridItemProp {
     int grid_column_start;       // Grid column start line
     int grid_column_end;         // Grid column end line
     char* grid_area;             // Named grid area
+    // Named line references — resolved to integers before placement
+    const char* grid_column_start_name;
+    const char* grid_column_end_name;
+    const char* grid_row_start_name;
+    const char* grid_row_end_name;
     int justify_self;            // Item-specific justify alignment (CSS_VALUE_*)
     int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
     int order;                   // CSS order property (affects placement order)
