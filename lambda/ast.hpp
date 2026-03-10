@@ -99,7 +99,6 @@ extern "C" {
 
 // Object type definition symbols
 #define SYM_OBJECT_TYPE sym_object_type
-#define SYM_ENTITY_TYPE sym_entity_type
 #define SYM_THAT_CONSTRAINT sym_that_constraint
 
 // String/Symbol Pattern symbols
@@ -502,11 +501,13 @@ typedef struct AstElementNode : AstMapNode {
 } AstElementNode;
 
 // Object type definition node
-// type Point { x: float, y: float; fn magnitude() => ... }
+// Object (no content): type Point { x: float, y: float; fn magnitude() => ... }
+// Element (with content): type Article { title: string\n string, element }
 // Extends AstNamedNode so it can be registered in the name scope via push_name
 typedef struct AstObjectTypeNode : AstNamedNode {
     AstNode* item;              // linked list of field declaration AST nodes
     AstNode* base_type;         // base type identifier for inheritance (NULL if none)
+    AstNode* content;           // content type schema (NULL if none → object, non-NULL → element)
     AstNode* methods;           // linked list of fn/pn AST nodes
     AstNode* constraints;       // linked list of that-constraint AST nodes
     bool is_public;             // true when declared with 'pub type T { ... }'

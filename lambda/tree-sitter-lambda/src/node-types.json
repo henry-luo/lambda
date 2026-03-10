@@ -849,10 +849,6 @@
           "named": true
         },
         {
-          "type": "entity_type",
-          "named": true
-        },
-        {
           "type": "fn_expr_stam",
           "named": true
         },
@@ -1055,40 +1051,6 @@
         },
         {
           "type": "identifier",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "entity_type",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "attr",
-          "named": true
-        },
-        {
-          "type": "content_type",
           "named": true
         }
       ]
@@ -2868,6 +2830,10 @@
           "named": true
         },
         {
+          "type": "content_type",
+          "named": true
+        },
+        {
           "type": "fn_expr_stam",
           "named": true
         },
@@ -4225,11 +4191,11 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",

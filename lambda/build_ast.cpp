@@ -4058,6 +4058,8 @@ static void push_inherited_fields_to_scope(Transpiler* tp, TypeObject* base_type
 // ============================================================================
 // Object type definition: type Point { x: float, y: float; fn magnitude() => ... }
 // ============================================================================
+AstNode* build_content_type(Transpiler* tp, TSNode list_node); // forward declaration
+
 AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     log_debug("build_object_type");
     AstObjectTypeNode* ast_node = (AstObjectTypeNode*)alloc_ast_node(tp,
@@ -4111,8 +4113,9 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     AstNode* prev_constraint = NULL;
     ast_node->methods = NULL;
     ast_node->constraints = NULL;
+    ast_node->content = NULL;
 
-    // Pass 1: build fields and constraints (no methods yet)
+    // Pass 1: build fields, content schema, and constraints (no methods yet)
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
 
@@ -4172,6 +4175,11 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
                     obj_type->constraint = constraint;
                 }
             }
+        }
+        else if (symbol == SYM_CONTENT_TYPE) {
+            // content schema: when present, type acts as element type
+            ast_node->content = build_content_type(tp, child);
+            log_debug("build_object_type: has content schema");
         }
 
         child = ts_node_next_named_sibling(child);
