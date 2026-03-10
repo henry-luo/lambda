@@ -160,23 +160,23 @@ fn walk_children(el, i, n, state) {
 
 fn walk_documentclass(el, state) {
     let cls = trim(util.text_of(el))
-    if cls != "" { {state, docclass: cls} }
+    if cls != "" { {*:state, docclass: cls} }
     else { state }
 }
 
 fn walk_title(el, state) {
     let t = util.text_of(el)
-    {state, title: t}
+    {*:state, title: t}
 }
 
 fn walk_author(el, state) {
     let a = util.text_of(el)
-    {state, author: a}
+    {*:state, author: a}
 }
 
 fn walk_date(el, state) {
     let d = util.text_of(el)
-    {state, date: d}
+    {*:state, date: d}
 }
 
 // ============================================================
@@ -208,7 +208,7 @@ fn walk_heading(el, state, counter_name, html_level) {
     let sec_num_str = sec_num_to_str(sec_num)
 
     let new_state = {
-        state,
+        *:state,
         counters: new_counters,
         headings: new_headings,
         heading_nums: new_heading_nums,
@@ -256,7 +256,7 @@ fn walk_figure(el, state) {
     let fig_text = trim(util.text_of(el))
     let entry = {number: fig_num, content: fig_text}
     let new_figures = state.figures ++ [entry]
-    let new_state = {state, counters: new_counters, figures: new_figures,
+    let new_state = {*:state, counters: new_counters, figures: new_figures,
         env_context: "figure", env_context_num: string(fig_num)}
     walk_children(el, 0, len(el), new_state)
 }
@@ -267,7 +267,7 @@ fn walk_table(el, state) {
     let tab_text = trim(util.text_of(el))
     let entry = {number: tab_num, content: tab_text}
     let new_tables = state.tables ++ [entry]
-    let new_state = {state, counters: new_counters, tables: new_tables,
+    let new_state = {*:state, counters: new_counters, tables: new_tables,
         env_context: "table", env_context_num: string(tab_num)}
     walk_children(el, 0, len(el), new_state)
 }
@@ -275,7 +275,7 @@ fn walk_table(el, state) {
 fn walk_equation(el, state) {
     let new_counters = step_counter(state.counters, "equation")
     let eq_num = new_counters.equation
-    let new_state = {state, counters: new_counters,
+    let new_state = {*:state, counters: new_counters,
         env_context: "equation", env_context_num: string(eq_num)}
     walk_children(el, 0, len(el), new_state)
 }
@@ -286,7 +286,7 @@ fn walk_numbered_env(el, state, env_type) {
     let env_text = trim(util.text_of(el))
     let entry = make_thm_entry(env_type, env_num, env_text)
     let new_theorems = state.theorems ++ [entry]
-    let new_state = {state, counters: new_counters, theorems: new_theorems,
+    let new_state = {*:state, counters: new_counters, theorems: new_theorems,
         env_context: env_type, env_context_num: string(env_num)}
     walk_children(el, 0, len(el), new_state)
 }
@@ -315,7 +315,7 @@ fn walk_bibitem(el, state) {
     let bib_num = len(state.bibitems) + 1
     let entry = make_bib_entry(bib_key, bib_num)
     let new_bibitems = state.bibitems ++ [entry]
-    {state, bibitems: new_bibitems}
+    {*:state, bibitems: new_bibitems}
 }
 
 fn make_bib_entry(k, n) {
@@ -328,8 +328,8 @@ fn make_bib_entry(k, n) {
 
 fn walk_appendix(el, state) {
     // reset section counter and switch to appendix mode
-    let new_counters = {state.counters, section: 0, subsection: 0, subsubsection: 0}
-    {state, in_appendix: true, counters: new_counters}
+    let new_counters = {*:state.counters, section: 0, subsection: 0, subsubsection: 0}
+    {*:state, in_appendix: true, counters: new_counters}
 }
 
 fn walk_setcounter(el, state) {
@@ -340,7 +340,7 @@ fn walk_setcounter(el, state) {
         let cval = trim(string(el[1]))
         let val = int(cval)
         if (cname == "secnumdepth" and val != null) {
-            {state, secnumdepth: val}
+            {*:state, secnumdepth: val}
         }
         else { state }
     }
@@ -356,7 +356,7 @@ fn walk_definecolor(el, state) {
         let spec = trim(string(el[2]))
         let css = parse_color_model(model, spec)
         let new_colors = add_entry(state.custom_colors, cname, css)
-        {state, custom_colors: new_colors}
+        {*:state, custom_colors: new_colors}
     }
     else { state }
 }
@@ -435,7 +435,7 @@ fn build_newtheorem_def(el, state, n, is_numbered) {
     let is_unnumbered = is_numbered == false
     let new_custom_counters = if (is_unnumbered or shared_counter != null) state.custom_counters
                       else add_entry(state.custom_counters, clean_name, 0)
-    {state, theorem_defs: new_defs, custom_counters: new_custom_counters}
+    {*:state, theorem_defs: new_defs, custom_counters: new_custom_counters}
 }
 
 fn get_newthm_child_text(el, idx) {
@@ -459,7 +459,7 @@ fn walk_default(el, tag, state) {
 fn walk_custom_theorem(el, state, thm_def) {
     if (thm_def.numbered == false) {
         // unnumbered: just walk children
-        let new_state = {state, env_context: thm_def.env_name, env_context_num: ""}
+        let new_state = {*:state, env_context: thm_def.env_name, env_context_num: ""}
         walk_children(el, 0, len(el), new_state)
     } else {
         walk_custom_theorem_numbered(el, state, thm_def)
@@ -478,7 +478,7 @@ fn walk_custom_theorem_numbered(el, state, thm_def) {
     let env_text = trim(util.text_of(el))
     let entry = make_thm_entry(thm_def.env_name, env_num, env_text)
     let new_theorems = state.theorems ++ [entry]
-    let new_state = {state, counters: new_counters, custom_counters: new_custom_counters,
+    let new_state = {*:state, counters: new_counters, custom_counters: new_custom_counters,
         theorems: new_theorems,
         env_context: thm_def.env_name, env_context_num: string(env_num)}
     walk_children(el, 0, len(el), new_state)
@@ -570,7 +570,7 @@ fn walk_label(el, state) {
 
     let entry = {type: label_type, number: label_number, id: label_id, title: label_title}
     let new_labels = add_entry(state.labels, label_name, entry)
-    {state, labels: new_labels}
+    {*:state, labels: new_labels}
 }
 
 // ============================================================
@@ -586,7 +586,7 @@ fn walk_footnote(el, state) {
     let entry = {number: fn_num, node: el}
     let new_fn_map = add_entry(state.footnote_map, fn_key, entry)
     let new_footnotes = state.footnotes ++ [entry]
-    {state, counters: new_counters, footnote_map: new_fn_map, footnotes: new_footnotes}
+    {*:state, counters: new_counters, footnote_map: new_fn_map, footnotes: new_footnotes}
 }
 
 // ============================================================
@@ -595,36 +595,36 @@ fn walk_footnote(el, state) {
 
 fn step_counter(counters, counter_name) {
     match counter_name {        case "part":
-            ({counters, part: counters.part + 1})        case "chapter":
-            {counters, chapter: counters.chapter + 1, section: 0, subsection: 0, subsubsection: 0}
+            ({*:counters, part: counters.part + 1})        case "chapter":
+            {*:counters, chapter: counters.chapter + 1, section: 0, subsection: 0, subsubsection: 0}
         case "section":
-            {counters, section: counters.section + 1, subsection: 0, subsubsection: 0}
+            {*:counters, section: counters.section + 1, subsection: 0, subsubsection: 0}
         case "subsection":
-            {counters, subsection: counters.subsection + 1, subsubsection: 0}
+            {*:counters, subsection: counters.subsection + 1, subsubsection: 0}
         case "subsubsection":
-            {counters, subsubsection: counters.subsubsection + 1}
+            {*:counters, subsubsection: counters.subsubsection + 1}
         case "figure":
-            {counters, figure: counters.figure + 1}
+            {*:counters, figure: counters.figure + 1}
         case "table":
-            {counters, table: counters.table + 1}
+            {*:counters, table: counters.table + 1}
         case "equation":
-            {counters, equation: counters.equation + 1}
+            {*:counters, equation: counters.equation + 1}
         case "theorem":
-            {counters, theorem: counters.theorem + 1}
+            {*:counters, theorem: counters.theorem + 1}
         case "lemma":
-            {counters, lemma: counters.lemma + 1}
+            {*:counters, lemma: counters.lemma + 1}
         case "corollary":
-            {counters, corollary: counters.corollary + 1}
+            {*:counters, corollary: counters.corollary + 1}
         case "proposition":
-            {counters, proposition: counters.proposition + 1}
+            {*:counters, proposition: counters.proposition + 1}
         case "definition":
-            {counters, definition: counters.definition + 1}
+            {*:counters, definition: counters.definition + 1}
         case "example":
-            {counters, example: counters.example + 1}
+            {*:counters, example: counters.example + 1}
         case "remark":
-            {counters, remark: counters.remark + 1}
+            {*:counters, remark: counters.remark + 1}
         case "footnote":
-            {counters, footnote: counters.footnote + 1}
+            {*:counters, footnote: counters.footnote + 1}
         default: counters
     }
 }
