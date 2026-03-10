@@ -1021,10 +1021,6 @@
                   {
                     "type": "SYMBOL",
                     "name": "base_type"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "string"
                   }
                 ]
               }
