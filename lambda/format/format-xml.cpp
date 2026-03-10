@@ -81,7 +81,7 @@ static void format_map_attributes(XmlContext& ctx, const MapReader& map_reader) 
     while (iter.next(&key, &value)) {
         // Only output simple types as attributes
         if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
-            stringbuf_append_format(ctx.output(), " %s=\"", key);
+            ctx.emit(" %N=\"", key);
 
             if (value.isString()) {
                 String* str = value.asString();
@@ -99,11 +99,10 @@ static void format_map_attributes(XmlContext& ctx, const MapReader& map_reader) 
                 snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
                 stringbuf_append_str(ctx.output(), num_buf);
             } else if (value.isBool()) {
-                bool bool_val = value.asBool();
-                stringbuf_append_str(ctx.output(), bool_val ? "true" : "false");
+                ctx.emit("%b", value.asBool());
             }
 
-            stringbuf_append_char(ctx.output(), '"');
+            ctx.write_char('"');
         }
     }
 }
@@ -120,7 +119,7 @@ static void format_map_elements(XmlContext& ctx, const MapReader& map_reader) {
         if (!value.isString() && !value.isInt() && !value.isFloat() && !value.isBool()) {
             if (value.isNull()) {
                 // Create empty element for null
-                stringbuf_append_format(ctx.output(), "<%s/>", key);
+                ctx.emit("<%N/>", key);
             } else {
                 // Format complex types as child elements
                 format_item_reader(ctx, value, key);
@@ -134,7 +133,7 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
 
     if (!tag_name) tag_name = "object";
 
-    stringbuf_append_format(ctx.output(), "<%s", tag_name);
+    ctx.emit("<%N", tag_name);
 
     // Add simple types as attributes for better XML structure
     format_map_attributes(ctx, map_reader);
@@ -152,15 +151,15 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
     }
 
     if (has_children) {
-        stringbuf_append_char(ctx.output(), '>');
+        ctx.write_char('>');
 
         // Add complex types as child elements
         format_map_elements(ctx, map_reader);
 
-        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
+        ctx.emit("</%N>", tag_name);
     } else {
         // Self-closing tag if no children
-        stringbuf_append_str(ctx.output(), "/>");
+        ctx.write_text("/>");
     }
 }
 
@@ -169,51 +168,37 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        stringbuf_append_format(ctx.output(), "<%s/><!-- max_depth -->", tag_name);
+        ctx.emit("<%N/><!-- max_depth -->", tag_name);
         return;
     }
 
     // Check if item is null
     if (item.isNull()) {
-        stringbuf_append_format(ctx.output(), "<%s/>", tag_name);
+        ctx.emit("<%N/>", tag_name);
         return;
     }
 
     log_debug("format_item_reader: formatting item, tag_name '%s'", tag_name);
 
     if (item.isBool()) {
-        bool val = item.asBool();
-        stringbuf_append_format(ctx.output(), "<%s>%s</%s>", tag_name, val ? "true" : "false", tag_name);
+        ctx.emit("<%N>%b</%N>", tag_name, item.asBool(), tag_name);
     }
     else if (item.isInt()) {
-        stringbuf_append_format(ctx.output(), "<%s>", tag_name);
-        int64_t int_val = item.asInt();
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%" PRId64, int_val);
-        stringbuf_append_str(ctx.output(), num_buf);
-        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
+        ctx.emit("<%N>%l</%N>", tag_name, item.asInt(), tag_name);
     }
     else if (item.isFloat()) {
-        stringbuf_append_format(ctx.output(), "<%s>", tag_name);
-        double float_val = item.asFloat();
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
-        stringbuf_append_str(ctx.output(), num_buf);
-        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
+        ctx.emit("<%N>%f</%N>", tag_name, item.asFloat(), tag_name);
     }
     else if (item.isString()) {
+        ctx.emit("<%N>", tag_name);
         String* str = item.asString();
-        stringbuf_append_format(ctx.output(), "<%s>", tag_name);
-        if (str) {
-            format_xml_string(ctx, str);
-        }
-        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
+        if (str) format_xml_string(ctx, str);
+        ctx.emit("</%N>", tag_name);
     }
     else if (item.isArray()) {
-        ArrayReader arr = item.asArray();
-        stringbuf_append_format(ctx.output(), "<%s>", tag_name);
-        format_array_reader(ctx, arr, "item");
-        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
+        ctx.emit("<%N>", tag_name);
+        format_array_reader(ctx, item.asArray(), "item");
+        ctx.emit("</%N>", tag_name);
     }
     else if (item.isMap()) {
         MapReader mp = item.asMap();
@@ -226,7 +211,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
         const char* elem_name = elem.tagName();
         if (!elem_name || elem_name[0] == '\0') {
             log_debug("format_item_reader: element has no name");
-            stringbuf_append_format(ctx.output(), "<%s/>", tag_name);
+            ctx.emit("<%N/>", tag_name);
             return;
         }
 
@@ -235,7 +220,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
         // Special handling for XML declaration
         if (strcmp(elem_name, "?xml") == 0) {
-            stringbuf_append_str(ctx.output(), "<?xml");
+            ctx.write_text("<?xml");
 
             // Handle XML declaration content as attributes
             auto child_iter = elem.children();
@@ -244,16 +229,16 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 if (child.isString()) {
                     String* str = child.asString();
                     if (str) {
-                        stringbuf_append_format(ctx.output(), " %s", str->chars);
+                        ctx.emit(" %N", str->chars);
                     }
                 }
             }
 
-            stringbuf_append_str(ctx.output(), "?>");
+            ctx.write_text("?>");
             return; // Early return for XML declaration
         }
 
-        stringbuf_append_format(ctx.output(), "<%s", elem_name);
+        ctx.emit("<%N", elem_name);
 
         // Handle attributes
         if (elem.attrCount() > 0) {
@@ -266,7 +251,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 const char* key = field->name->str;
                 ItemReader value = elem.get_attr(key);
 
-                stringbuf_append_format(ctx.output(), " %s=\"", key);
+                ctx.emit(" %N=\"", key);
 
                 if (value.isString()) {
                     String* str = value.asString();
@@ -278,16 +263,16 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 } else if (value.isFloat()) {
                     stringbuf_append_format(ctx.output(), "%g", value.asFloat());
                 } else if (value.isBool()) {
-                    stringbuf_append_str(ctx.output(), value.asBool() ? "true" : "false");
+                    ctx.emit("%b", value.asBool());
                 }
 
-                stringbuf_append_char(ctx.output(), '"');
+                ctx.write_char('"');
 
                 field = field->next;
             }
         }
 
-        stringbuf_append_char(ctx.output(), '>');
+        ctx.write_char('>');
 
         // Handle element content (text/child elements)
         if (elem.childCount() > 0) {
@@ -305,7 +290,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                     // Symbol items (named entities) - output as &name;
                     Symbol* sym = child.asSymbol();
                     if (sym && sym->chars) {
-                        stringbuf_append_format(ctx.output(), "&%s;", sym->chars);
+                        ctx.emit("&%N;", sym->chars);
                     }
                 } else if (child.isArray()) {
                     // flatten array children: render each item directly
@@ -323,12 +308,12 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             }
         }
 
-        stringbuf_append_format(ctx.output(), "</%s>", elem_name);
+        ctx.emit("</%N>", elem_name);
     }
     else {
         // Unknown type or null
         log_debug("format_item_reader: unknown type, outputting empty element");
-        stringbuf_append_format(ctx.output(), "<%s/>", tag_name);
+        ctx.emit("<%N/>", tag_name);
     }
 }
 

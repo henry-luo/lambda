@@ -104,9 +104,10 @@ public:
     inline void set_compact(bool compact) { compact_mode_ = compact; }
 
     // Printf-style template output for concise formatting.
-    // See stringbuf_emit() for format specifiers:
-    //   %s (C string), %S (String*), %d (int), %l (int64_t), %f (double),
-    //   %c (char), %n (newline), %i (indent N*2 spaces), %r (repeat char N times)
+    // Specifiers: %s (C str), %S (String*), %d (int), %l (int64_t), %f (double),
+    //   %c (char), %n (newline), %i (indent N×2 spaces), %r (repeat char N times),
+    //   %q (quoted C str with \" \\ escaping), %Q (quoted String*),
+    //   %b (bool → true/false), %N (name/key alias for %s), %% (literal %)
     inline void emit(const char* fmt, ...) {
         if (!output_ || !fmt) return;
         va_list args;
@@ -537,6 +538,13 @@ public:
         if (text) write_text(text);
         write_text(" */");
     }
+};
+
+class TomlContext : public FormatterContextCpp {
+public:
+    TomlContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 20)
+    {}
 };
 
 #endif // FORMAT_UTILS_HPP

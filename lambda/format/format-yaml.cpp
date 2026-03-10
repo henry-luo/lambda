@@ -16,14 +16,6 @@ static void format_array_reader(YamlContext& ctx, const ArrayReader& arr, int in
 static void format_map_reader(YamlContext& ctx, const MapReader& map_reader, int indent_level);
 static void format_element_reader(YamlContext& ctx, const ElementReader& elem, int indent_level);
 static void format_yaml_string(YamlContext& ctx, String* str);
-static void add_yaml_indent(YamlContext& ctx, int indent_level);
-
-// add indentation for nested structures
-static void add_yaml_indent(YamlContext& ctx, int indent_level) {
-    for (int i = 0; i < indent_level * 2; i++) {
-        stringbuf_append_char(ctx.output(), ' ');
-    }
-}
 
 // format a string value for YAML - handle quoting and escaping
 static void format_yaml_string(YamlContext& ctx, String* str) {
@@ -88,10 +80,9 @@ static void format_array_reader(YamlContext& ctx, const ArrayReader& arr, int in
 
     while (iter.next(&item)) {
         if (index > 0 || indent_level > 0) {
-            stringbuf_append_char(ctx.output(), '\n');
-            add_yaml_indent(ctx, indent_level);
+            ctx.emit("%n%i", indent_level);
         }
-        stringbuf_append_str(ctx.output(), "- ");
+        ctx.write_text("- ");
 
         // for complex types, add proper indentation
         if (item.isMap() || item.isElement() || item.isArray() || item.isList()) {
@@ -106,8 +97,7 @@ static void format_array_reader(YamlContext& ctx, const ArrayReader& arr, int in
 // format map items using MapReader
 static void format_map_reader(YamlContext& ctx, const MapReader& map_reader, int indent_level) {
     if (!map_reader.isValid()) {
-        stringbuf_append_str(ctx.output(), "{}");
-        return;
+            ctx.write_text("{}");
     }
 
     bool first_item = true;
@@ -118,30 +108,17 @@ static void format_map_reader(YamlContext& ctx, const MapReader& map_reader, int
     while (iter.next(&key, &value)) {
         // skip null/unset fields appropriately
         if (value.isNull()) {
-            if (!first_item) {
-                stringbuf_append_char(ctx.output(), '\n');
-            }
+            if (!first_item) ctx.write_char('\n');
             first_item = false;
-
-            if (indent_level > 0) {
-                add_yaml_indent(ctx, indent_level);
-            }
-
-            stringbuf_append_format(ctx.output(), "%s: null", key);
+            ctx.emit("%i%N: null", indent_level, key);
             continue;
         }
 
-        if (!first_item) {
-            stringbuf_append_char(ctx.output(), '\n');
-        }
+        if (!first_item) ctx.write_char('\n');
         first_item = false;
 
-        if (indent_level > 0) {
-            add_yaml_indent(ctx, indent_level);
-        }
-
         // add field name
-        stringbuf_append_format(ctx.output(), "%s: ", key);
+        ctx.emit("%i%N: ", indent_level, key);
 
         // format field value
         if (value.isMap() || value.isElement() || value.isArray() || value.isList()) {
@@ -159,15 +136,12 @@ static void format_map_reader(YamlContext& ctx, const MapReader& map_reader, int
 // format element using ElementReader
 static void format_element_reader(YamlContext& ctx, const ElementReader& elem, int indent_level) {
     // for yaml, represent element as an object with special "$" key for tag name
-    if (indent_level > 0) {
-        stringbuf_append_char(ctx.output(), '\n');
-        add_yaml_indent(ctx, indent_level);
-    }
-    stringbuf_append_format(ctx.output(), "$: \"%s\"", elem.tagName());
+    if (indent_level > 0) ctx.emit("%n%i", indent_level);
+    ctx.emit("$: \"%N\"", elem.tagName());
 
     // add attributes if any
     if (elem.attrCount() > 0) {
-        stringbuf_append_char(ctx.output(), '\n');
+        ctx.write_char('\n');
         // create MapReader from element attributes
         // note: for now we'll iterate manually, but ElementReader could provide attribute iteration
         const TypeMap* map_type = (const TypeMap*)elem.element()->type;
@@ -178,16 +152,9 @@ static void format_element_reader(YamlContext& ctx, const ElementReader& elem, i
             const char* key = field->name->str;
             ItemReader attr_value = elem.get_attr(key);
 
-            if (!first_attr) {
-                stringbuf_append_char(ctx.output(), '\n');
-            }
+            if (!first_attr) ctx.write_char('\n');
             first_attr = false;
-
-            if (indent_level > 0) {
-                add_yaml_indent(ctx, indent_level);
-            }
-
-            stringbuf_append_format(ctx.output(), "%s: ", key);
+            ctx.emit("%i%N: ", indent_level, key);
             format_item_reader(ctx, attr_value, 0);
 
             field = field->next;
@@ -196,13 +163,9 @@ static void format_element_reader(YamlContext& ctx, const ElementReader& elem, i
 
     // add children if any
     if (elem.childCount() > 0) {
-        if (indent_level > 0) {
-            stringbuf_append_char(ctx.output(), '\n');
-            add_yaml_indent(ctx, indent_level);
-        } else {
-            stringbuf_append_char(ctx.output(), '\n');
-        }
-        stringbuf_append_str(ctx.output(), "_:");
+        ctx.write_char('\n');
+        ctx.write_indent(indent_level);
+        ctx.write_text("_:");
 
         auto child_iter = elem.children();
         ItemReader child;
@@ -210,10 +173,9 @@ static void format_element_reader(YamlContext& ctx, const ElementReader& elem, i
 
         while (child_iter.next(&child)) {
             if (child_index > 0 || indent_level >= 0) {
-                stringbuf_append_char(ctx.output(), '\n');
-                add_yaml_indent(ctx, indent_level + 1);
+                ctx.emit("%n%i", indent_level + 1);
             }
-            stringbuf_append_str(ctx.output(), "- ");
+            ctx.write_text("- ");
 
             if (child.isMap() || child.isElement() || child.isArray() || child.isList()) {
                 format_item_reader(ctx, child, indent_level + 2);
@@ -230,14 +192,14 @@ static void format_item_reader(YamlContext& ctx, const ItemReader& item, int ind
     // prevent infinite recursion
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        stringbuf_append_str(ctx.output(), "\"[max_depth]\"");
+        ctx.write_text("\"[max_depth]\"");
         return;
     }
 
     if (item.isNull()) {
-        stringbuf_append_str(ctx.output(), "null");
+        ctx.write_text("null");
     } else if (item.isBool()) {
-        stringbuf_append_str(ctx.output(), item.asBool() ? "true" : "false");
+        ctx.emit("%b", item.asBool());
     } else if (item.isInt() || item.isFloat()) {
         // use centralized number formatting
         format_number(ctx.output(), item.item());
@@ -245,21 +207,21 @@ static void format_item_reader(YamlContext& ctx, const ItemReader& item, int ind
         // format datetime as ISO 8601 string for YAML output
         DateTime* dt = (DateTime*)item.item().datetime_ptr;
         if (dt) {
-            stringbuf_append_char(ctx.output(), '"');
+            ctx.write_char('"');
             StrBuf* temp = strbuf_new();
             datetime_format_iso8601(temp, dt);
-            stringbuf_append_str(ctx.output(), temp->str);
+            ctx.write_text(temp->str);
             strbuf_free(temp);
-            stringbuf_append_char(ctx.output(), '"');
+            ctx.write_char('"');
         } else {
-            stringbuf_append_str(ctx.output(), "null");
+            ctx.write_text("null");
         }
     } else if (item.isString()) {
         String* str = item.asString();
         if (str) {
             format_yaml_string(ctx, str);
         } else {
-            stringbuf_append_str(ctx.output(), "null");
+            ctx.write_text("null");
         }
     } else if (item.isArray() || item.isList()) {
         ArrayReader arr = item.asArray();
@@ -272,7 +234,7 @@ static void format_item_reader(YamlContext& ctx, const ItemReader& item, int ind
         format_element_reader(ctx, elem, indent_level);
     } else {
         // fallback for unknown types
-        stringbuf_append_format(ctx.output(), "\"[type_%d]\"", (int)item.getType());
+        ctx.emit("\"[type_%d]\"", (int)item.getType());
     }
 }
 
