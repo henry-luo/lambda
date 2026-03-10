@@ -50,8 +50,7 @@ extern "C" {
 #define SYM_PARENT_EXPR sym_parent_expr   // expr.. parent access shorthand
 
 // Pipe expression current item references (pipe is now part of binary_expr)
-#define SYM_CURRENT_ITEM sym_current_item
-#define SYM_CURRENT_INDEX sym_current_index
+#define SYM_CURRENT_EXPR sym_current_expr
 
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
@@ -61,7 +60,6 @@ extern "C" {
 #define SYM_MATCH_DEFAULT sym_match_default
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
-#define SYM_PUB_STAM sym_pub_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
 #define SYM_WHILE_STAM sym_while_stam
