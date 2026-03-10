@@ -53,8 +53,8 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
                 svg.line(0, 0, 0, cfg.tick_size, cfg.tick_color, 1);
                 <text x: 0,
                       y: cfg.tick_size + cfg.label_offset + cfg.label_font_size,
-                      "text-anchor": "middle",
-                      "font-size": cfg.label_font_size,
+                      'text-anchor': "middle",
+                      'font-size': cfg.label_font_size,
                       fill: cfg.label_color;
                     string(tv)
                 >
@@ -66,8 +66,8 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
     let title_el = if (title_text)
         <text x: float(pw) / 2.0,
               y: float(ph) + float(cfg.title_padding) + float(cfg.title_font_size),
-              "text-anchor": "middle",
-              "font-size": cfg.title_font_size,
+              'text-anchor': "middle",
+              'font-size': cfg.title_font_size,
               fill: cfg.title_color;
             title_text
         >
@@ -92,8 +92,8 @@ pub fn x_axis_grid(sc, pw, ph, config) {
         (let x_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (x_pos > 0.0 and x_pos < float(pw))
             <line x1: x_pos, y1: 0, x2: x_pos, y2: ph,
-                  stroke: cfg.grid_color, "stroke-width": 1,
-                  "stroke-dasharray": "4,4">
+                  stroke: cfg.grid_color, 'stroke-width': 1,
+                  'stroke-dasharray': "4,4">
         else null)
     ) that (~ != null);
 
@@ -121,8 +121,8 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
                 svg.line(0, 0, 0 - cfg.tick_size, 0, cfg.tick_color, 1);
                 <text x: 0 - cfg.tick_size - cfg.label_offset,
                       y: cfg.label_font_size / 3.0,
-                      "text-anchor": "end",
-                      "font-size": cfg.label_font_size,
+                      'text-anchor': "end",
+                      'font-size': cfg.label_font_size,
                       fill: cfg.label_color;
                     string(tv)
                 >
@@ -134,8 +134,8 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
     let title_el = if (title_text)
         <text x: 0.0 - float(cfg.title_padding) - float(cfg.label_font_size),
               y: float(ph) / 2.0,
-              "text-anchor": "middle",
-              "font-size": cfg.title_font_size,
+              'text-anchor': "middle",
+              'font-size': cfg.title_font_size,
               fill: cfg.title_color,
               transform: svg.rotate(-90, 0.0 - float(cfg.title_padding) - float(cfg.label_font_size), float(ph) / 2.0);
             title_text
@@ -161,8 +161,8 @@ pub fn y_axis_grid(sc, pw, ph, config) {
         (let y_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (y_pos > 0.0 and y_pos < float(ph))
             <line x1: 0, y1: y_pos, x2: pw, y2: y_pos,
-                  stroke: cfg.grid_color, "stroke-width": 1,
-                  "stroke-dasharray": "4,4">
+                  stroke: cfg.grid_color, 'stroke-width': 1,
+                  'stroke-dasharray': "4,4">
         else null)
     ) that (~ != null);
 

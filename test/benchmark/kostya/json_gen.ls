@@ -18,11 +18,11 @@ pn json_num(n) {
 }
 
 pn json_obj_2(k1, v1, k2, v2) {
-    return "{" ++ json_str(k1) ++ ":" ++ v1 ++ "," ++ json_str(k2) ++ ":" ++ v2 ++ "}"
+    return "{' ++ json_str(k1) ++ ':" ++ v1 ++ ",' ++ json_str(k2) ++ ':" ++ v2 ++ "}"
 }
 
 pn json_obj_4(k1, v1, k2, v2, k3, v3, k4, v4) {
-    return "{" ++ json_str(k1) ++ ":" ++ v1 ++ "," ++ json_str(k2) ++ ":" ++ v2 ++ "," ++ json_str(k3) ++ ":" ++ v3 ++ "," ++ json_str(k4) ++ ":" ++ v4 ++ "}"
+    return "{' ++ json_str(k1) ++ ':" ++ v1 ++ ",' ++ json_str(k2) ++ ':" ++ v2 ++ ",' ++ json_str(k3) ++ ':" ++ v3 ++ ",' ++ json_str(k4) ++ ':" ++ v4 ++ "}"
 }
 
 pn next_rand(seed) {

@@ -140,17 +140,17 @@ print('Generated Markdown document with ', len(md_pages), ' pages.')
 latex_content = '
 \\documentclass{article}
 \\usepackage{amsmath}
-\\title{Sample LaTeX Document}
-\\author{Lambda Typesetting System}
+\\title<Sample LaTeX Document>
+\\author<Lambda Typesetting System>
 \\date{\\today}
 
 \\begin{document}
 \\maketitle
 
-\\section{Introduction}
+\\section<Introduction>
 This is a sample LaTeX document processed by the Lambda typesetting system.
 
-\\section{Mathematics}
+\\section<Mathematics>
 Here are some mathematical expressions:
 
 \\begin{equation}
@@ -158,13 +158,13 @@ E = mc^2
 \\end{equation}
 
 \\begin{align}
-\\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\epsilon_0} \\\\
-\\nabla \\cdot \\mathbf{B} &= 0 \\\\
-\\nabla \\times \\mathbf{E} &= -\\frac{\\partial \\mathbf{B}}{\\partial t} \\\\
-\\nabla \\times \\mathbf{B} &= \\mu_0 \\mathbf{J} + \\mu_0 \\epsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}
+\\nabla \\cdot \\mathbf<E> &= \\frac{\\rho}{\\epsilon_0} \\\\
+\\nabla \\cdot \\mathbf<B> &= 0 \\\\
+\\nabla \\times \\mathbf<E> &= -\\frac{\\partial \\mathbf<B>}{\\partial t} \\\\
+\\nabla \\times \\mathbf<B> &= \\mu_0 \\mathbf<J> + \\mu_0 \\epsilon_0 \\frac{\\partial \\mathbf<E>}{\\partial t}
 \\end{align}
 
-\\section{Conclusion}
+\\section<Conclusion>
 The Lambda typesetting system successfully processes LaTeX documents.
 
 \\end{document}

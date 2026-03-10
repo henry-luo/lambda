@@ -8,7 +8,7 @@ type ManyFields {
     f11: int = 11, f12: int = 12, f13: int = 13, f14: int = 14, f15: int = 15
     f16: int = 16, f17: int = 17, f18: int = 18, f19: int = 19, f20: int = 20
 }
-let mf = {ManyFields}
+let mf = <ManyFields>
 mf.f01
 mf.f10
 mf.f20
@@ -20,7 +20,7 @@ type L2 : L1 { val: int = 2 }
 type L3 : L2 { val: int = 3 }
 type L4 : L3 { val: int = 4 }
 type L5 : L4 { val: int = 5 }
-let deep = {L5}
+let deep = <L5>
 deep.val
 deep is L0
 deep is L3
@@ -38,7 +38,7 @@ type MathObj {
     fn is_positive() => ~.value > 0
     fn is_zero() => ~.value == 0
 }
-let mo = {MathObj value: 7}
+let mo = <MathObj value: 7>
 mo.add(3)
 mo.sub(2)
 mo.mul(5)
@@ -56,14 +56,14 @@ nested.a.b.c.d.e.f
 
 // ===== Collection of objects =====
 type Item { id: int, name: string }
-let items = for (i in 1 to 10) {Item id: i, name: "item" & str(i)}
+let items = for (i in 1 to 10) <Item id: i, name: "item" & str(i)>
 len(items)
 items[0].name
 items[9].name
 
 // ===== Object update chain =====
 type Counter { count: int = 0 }
-let c0 = {Counter}
+let c0 = <Counter>
 let c1 = {c0, count: 1}
 let c2 = {c1, count: 2}
 let c3 = {c2, count: 3}
