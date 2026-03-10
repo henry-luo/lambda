@@ -4847,8 +4847,17 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         if (symbol == SYM_COMMENT) {  // skip comments
             child = ts_node_next_named_sibling(child);  continue;
         }
-        // named map item, or dynamic map expr
-        AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+        // named map item, or spread (*:expr)
+        AstNode* item;
+        if (symbol == SYM_MAP_ITEM) {
+            item = (AstNode*)build_key_expr(tp, child);
+        } else if (symbol == SYM_SPREAD) {
+            // spread: *:expr — extract the 'as' field expression
+            TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
+            item = ts_node_is_null(as_node) ? NULL : build_expr(tp, as_node);
+        } else {
+            item = build_expr(tp, child);
+        }
         if (!item) { log_error("build_map: null expr item");  break; }
 
         if (!prev_item) { ast_node->item = item; }
@@ -4922,41 +4931,41 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
                     obj_node->type = (Type*)obj_type;
                     obj_node->item = NULL;
 
-                    // check for source expression: <TypeName source, ...>
+                    // parse children: attrs and spread become items
                     AstNode* prev_item = NULL;
-                    TSNode source_node = ts_node_child_by_field_id(elmt_node, FIELD_SOURCE);
-                    if (!ts_node_is_null(source_node)) {
-                        log_debug("build_elmt: found source field");
-                        // build_expr returns bare AST_NODE_IDENT for identifiers;
-                        // wrap in AST_NODE_PRIMARY so the C transpiler can handle it
-                        AstNode* source_inner = build_expr(tp, source_node);
-                        if (source_inner) {
-                            if (source_inner->node_type == AST_NODE_IDENT || source_inner->node_type == AST_NODE_CURRENT_ITEM) {
-                                AstPrimaryNode* wrapper = (AstPrimaryNode*)alloc_ast_node(tp,
-                                    AST_NODE_PRIMARY, source_node, sizeof(AstPrimaryNode));
-                                wrapper->expr = source_inner;
-                                wrapper->type = source_inner->type;
-                                obj_node->item = (AstNode*)wrapper;
-                                prev_item = (AstNode*)wrapper;
-                            } else {
-                                obj_node->item = source_inner;
-                                prev_item = source_inner;
-                            }
-                        }
-                    }
-
-                    // parse children: attrs become key:val items, bare exprs stay as expressions
                     TSNode child = ts_node_named_child(elmt_node, 0);
                     int name_start = ts_node_start_byte(first_child);
-                    int source_start = ts_node_is_null(source_node) ? -1 : (int)ts_node_start_byte(source_node);
                     while (!ts_node_is_null(child)) {
                         TSSymbol symbol = ts_node_symbol(child);
                         int child_start = (int)ts_node_start_byte(child);
-                        if (symbol == SYM_COMMENT || child_start == name_start || child_start == source_start) {
+                        if (symbol == SYM_COMMENT || child_start == name_start) {
                             child = ts_node_next_named_sibling(child);
                             continue;
                         }
-                        AstNode* item = (symbol == SYM_ATTR) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+                        AstNode* item;
+                        if (symbol == SYM_ATTR) {
+                            item = (AstNode*)build_key_expr(tp, child);
+                        } else if (symbol == SYM_SPREAD) {
+                            // spread: *:expr — extract the 'as' field, wrap as source
+                            TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
+                            AstNode* source_inner = ts_node_is_null(as_node) ? NULL : build_expr(tp, as_node);
+                            if (source_inner) {
+                                if (source_inner->node_type == AST_NODE_IDENT || source_inner->node_type == AST_NODE_CURRENT_ITEM) {
+                                    AstPrimaryNode* wrapper = (AstPrimaryNode*)alloc_ast_node(tp,
+                                        AST_NODE_PRIMARY, as_node, sizeof(AstPrimaryNode));
+                                    wrapper->expr = source_inner;
+                                    wrapper->type = source_inner->type;
+                                    item = (AstNode*)wrapper;
+                                } else {
+                                    item = source_inner;
+                                }
+                            } else {
+                                item = NULL;
+                            }
+                        } else {
+                            child = ts_node_next_named_sibling(child);
+                            continue;
+                        }
                         if (item) {
                             if (!prev_item) { obj_node->item = item; }
                             else { prev_item->next = item; }
@@ -5017,8 +5026,19 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
         else if (symbol == SYM_CONTENT) {  // element content
             ast_node->content = build_content(tp, child, false, false);
         }
-        else {  // attrs
-            AstNode* item = (symbol == SYM_ATTR) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+        else {  // attrs and spread
+            AstNode* item;
+            if (symbol == SYM_ATTR) {
+                item = (AstNode*)build_key_expr(tp, child);
+            } else if (symbol == SYM_SPREAD) {
+                // spread: *:expr — extract the 'as' field
+                TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
+                item = ts_node_is_null(as_node) ? NULL : build_expr(tp, as_node);
+            } else {
+                child = ts_node_next_named_sibling(child);
+                continue;
+            }
+            if (!item) { child = ts_node_next_named_sibling(child); continue; }
 
             // check for ns attr merging: if key already exists and both are maps, merge
             if (item->node_type == AST_NODE_KEY_EXPR) {

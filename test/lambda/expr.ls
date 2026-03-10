@@ -30,12 +30,12 @@ let d:float = 123
 "Test element:"
 <elmt a:1+2;  4+5;  "hello"++" world";  1+2 is number;  1+2 is int;  3.5/0 is float>
 
-let nested = {a:678, {b:123, c:456}, d:789}
+let nested = {a:678, *:{b:123, c:456}, d:789}
 nested.a;  nested.b;  nested.c;  nested.d;
 
 let mp2 = {d:78}
-<elmt a:12, {b:34}, c:56, {mp2}>  // dynamic attrs
-<elmt ;{mp2}>  // mp2 now is content
+<elmt a:12, *:{b:34}, c:56, *:mp2>  // dynamic attrs
+<elmt ;{*:mp2}>  // mp2 now is content
 
 "Test range exprs:"
 1 to 0;  // should be []

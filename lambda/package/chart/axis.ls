@@ -28,7 +28,7 @@ pub default_axis_config = {
 // ============================================================
 
 fn merge_config(config) {
-    if config != null { {*config, *default_axis_config} }
+    if config != null { {*:config, *:default_axis_config} }
     else { default_axis_config }
 }
 
