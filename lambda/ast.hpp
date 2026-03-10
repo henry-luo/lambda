@@ -24,6 +24,7 @@ extern "C" {
 #define SYM_LIST sym_list
 #define SYM_ARRAY sym_array
 #define SYM_MAP_ITEM sym_map_item
+#define SYM_SPREAD sym_spread
 #define SYM_MAP sym_map
 #define SYM_ELEMENT sym_element
 #define SYM_ATTR sym_attr
@@ -142,7 +143,6 @@ extern "C" {
 #define FIELD_VARIADIC field_variadic
 #define FIELD_TARGET field_target
 #define FIELD_PREFIX field_prefix
-#define FIELD_SOURCE field_source
 #define FIELD_URI field_uri
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index

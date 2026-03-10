@@ -26,12 +26,12 @@ let lb = (4, 5, 6)
 // ===== Spread into map =====
 let m1 = {a: 1, b: 2}
 let m2 = {c: 3, d: 4}
-{*m1, *m2}
+{*:m1, *:m2}
 
 // ===== Spread map override =====
 let base = {x: 1, y: 2, z: 3}
 let override = {y: 20, z: 30}
-{*base, *override}
+{*:base, *:override}
 
 // ===== Nested spread =====
 let inner = [1, 2]
@@ -60,7 +60,7 @@ mixed[3]
 
 // ===== Spread map into map with many fields =====
 let config_base = {host: "localhost", port: 8080, debug: false, log: true, cache: true}
-let config_prod = {*config_base, host: "prod.com", debug: false, port: 443}
+let config_prod = {*:config_base, host: "prod.com", debug: false, port: 443}
 config_prod.host
 config_prod.port
 config_prod.log

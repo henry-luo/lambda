@@ -1021,22 +1021,7 @@
   {
     "type": "element",
     "named": true,
-    "fields": {
-      "source": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "current_item",
-            "named": true
-          },
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
       "multiple": true,
       "required": true,
@@ -1058,7 +1043,7 @@
           "named": true
         },
         {
-          "type": "map",
+          "type": "spread",
           "named": true
         },
         {
@@ -2022,6 +2007,10 @@
             "named": true
           },
           {
+            "type": "content",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -2420,39 +2409,11 @@
       "required": false,
       "types": [
         {
-          "type": "binary_expr",
-          "named": true
-        },
-        {
-          "type": "for_expr",
-          "named": true
-        },
-        {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "let_expr",
-          "named": true
-        },
-        {
           "type": "map_item",
           "named": true
         },
         {
-          "type": "match_expr",
-          "named": true
-        },
-        {
-          "type": "primary_expr",
-          "named": true
-        },
-        {
-          "type": "raise_expr",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
+          "type": "spread",
           "named": true
         }
       ]
@@ -3742,6 +3703,50 @@
     }
   },
   {
+    "type": "spread",
+    "named": true,
+    "fields": {
+      "as": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "raise_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "that_constraint",
     "named": true,
     "fields": {
@@ -4280,19 +4285,19 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
     "named": false
+  },
+  {
+    "type": "symbol",
+    "named": true
   },
   {
     "type": "that",

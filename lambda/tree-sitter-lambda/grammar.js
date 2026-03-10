@@ -179,7 +179,9 @@ module.exports = grammar({
     $.occurrence_type,        // quantified types (primary_type with ?, +, *, [n]) - tightest
     $.binary_type,           // alternation (|, &, !)
     $.fn_type,               // fn binds loosest: fn int+ means fn (int+)
-  ]],
+  ],
+  [$.attr_binary_expr, $._attr_expr]
+],
 
   rules: {
     document: $ => optional(choice(
@@ -311,7 +313,10 @@ module.exports = grammar({
 
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
-    map: $ => seq( '{', comma_sep(choice($.map_item, $._expr)), '}' ),
+    // Spread: *:expr for dynamic map items and object source
+    spread: $ => seq('*', ':', field('as', $._expr)),
+
+    map: $ => seq( '{', comma_sep(choice($.map_item, $.spread)), '}' ),
 
     array: $ => seq( '[', comma_sep($._expr), ']'),
 
@@ -335,6 +340,9 @@ module.exports = grammar({
 
     attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
 
+    // Spread in element context (restricted, no < > operators)
+    attr_spread: $ => seq('*', ':', field('as', $._attr_expr)),
+
     // Dotted name: arbitrary depth dotted segments
     // Each segment is an identifier or symbol: a.b.'c'.d
     // prec(50) matches primary_expr so shift-reduce becomes a real GLR conflict
@@ -345,17 +353,16 @@ module.exports = grammar({
 
     element: $ => seq('<',
       choice($.dotted_name, $.symbol, $.identifier),
-      choice(
+      optional(
         seq(
-          optional(seq(field('source', choice($.identifier, $.current_item)), ',')),
-          choice($.attr, $.map),
-          repeat(seq(',', choice($.attr, $.map))),
-          optional(
-            seq(choice(linebreak, ';'), $.content),
-          )
+          choice($.attr, alias($.attr_spread, $.spread)),
+          repeat(seq(',', choice($.attr, alias($.attr_spread, $.spread)))),
         ),
-        optional( seq(optional(choice(linebreak, ';')), $.content) )
-      ),'>'
+      ),
+      optional(
+        seq(optional(choice(linebreak, ';')), $.content)
+      ),
+      '>'
     ),
 
     // Expressions
@@ -591,11 +598,15 @@ module.exports = grammar({
       seq('pub', field('declare', $.object_type)),
     ),
 
-    // Expression-form if: if (cond) expr else expr | else { stam }
+    // Expression-form if: if (cond) expr else expr
     // Condition always in parens. Else is REQUIRED (ternary-style).
-    // New: else can be a block { content } (preferred over map via prec.dynamic).
+    // Both then and else can be a block { content } (preferred over map via prec.dynamic).
     if_expr: $ => prec.right(seq(
-      'if', '(', field('cond', $._expr), ')', field('then', $._expr),
+      'if', '(', field('cond', $._expr), ')',
+      choice(
+        prec.dynamic(1, seq('{', field('then', $.content), '}')),
+        field('then', $._expr),
+      ),
       'else', choice(
         prec.dynamic(1, seq('{', field('else', $.content), '}')),
         field('else', $._expr),
