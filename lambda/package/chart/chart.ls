@@ -273,7 +273,7 @@ fn render_arc(spec) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               "text-anchor": "middle", "font-size": 16, "font-weight": "bold", fill: "#333";
+               'text-anchor': "middle", 'font-size': 16, 'font-weight': "bold", fill: "#333";
              spec.title
          >]
     else children0;
@@ -373,7 +373,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               "text-anchor": "middle", "font-size": 16, "font-weight": "bold", fill: "#333";
+               'text-anchor': "middle", 'font-size': 16, 'font-weight': "bold", fill: "#333";
              spec.title
          >]
     else children0;

@@ -252,8 +252,6 @@ module.exports = grammar({
       "'",
     )),
 
-
-
     // Note: 'null' is now part of $.base_type, no separate rule needed
     // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
     named_value: _ => token(choice('true', 'false', 'inf', 'nan')),
@@ -315,7 +313,7 @@ module.exports = grammar({
     ),
 
     map_item: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier, $.base_type)),
+      field('name', choice($.symbol, $.identifier, $.base_type, $.string)),
       ':',
       field('as', $._expr),
     ),
@@ -346,10 +344,9 @@ module.exports = grammar({
       $.for_expr,
     ),
 
-    // Attribute name with optional namespace prefix: name or ns.name
+    // Attribute name: dotted or simple name
     attr_name: $ => choice(
-      $.ns_identifier,
-      $.string,
+      $.dotted_name,
       $.symbol,
       $.identifier,
       $.base_type,
@@ -360,17 +357,19 @@ module.exports = grammar({
       ':', field('as', $._attr_expr)
     ),
 
-    // Namespaced identifier: ns.name (no spaces around dot)
-    ns_identifier: $ => seq(
-      field('ns', $.identifier),
-      token.immediate('.'),
-      field('name', $.identifier),
+    // Dotted name: arbitrary depth dotted segments (no spaces around dots)
+    // Each segment is an identifier or symbol: a.b.'c'.d
+    dotted_name: $ => seq(
+      choice($.identifier, $.symbol),
+      repeat1(seq(token.immediate('.'), choice($.identifier, $.symbol))),
     ),
 
     element: $ => seq('<',
-      choice($.ns_identifier, $.symbol, $.identifier),
+      choice($.dotted_name, $.symbol, $.identifier),
       choice(
-        seq(choice($.attr, $.map),
+        seq(
+          optional(seq(field('source', choice($.identifier, $.current_item)), ',')),
+          choice($.attr, $.map),
           repeat(seq(',', choice($.attr, $.map))),
           optional(
             seq(choice(linebreak, ';'), $.content),
@@ -413,7 +412,6 @@ module.exports = grammar({
       $.list,
       $.array,
       $.map,
-      $.object_literal,
       $.element,
       $.base_type,  // includes null
       $.identifier,
@@ -517,7 +515,7 @@ module.exports = grammar({
     // Supports: name, name?, name: type, name?: type, name = default, name: type = default
     parameter: $ => choice(
       seq(
-        field('name', $.identifier),
+        field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type
         optional(seq(':', field('type', $._type_expr))),
         optional(seq('=', field('default', $._expr))),
@@ -527,7 +525,7 @@ module.exports = grammar({
 
     // Named argument in function call: name: value
     named_argument: $ => seq(
-      field('name', $.identifier),
+      field('name', choice($.identifier, $.symbol)),
       ':',
       field('value', $._expr),
     ),
@@ -535,7 +533,7 @@ module.exports = grammar({
     // fn with stam body
     fn_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      field('kind', choice('fn','pn')), field('name', $.identifier),
+      field('kind', choice('fn','pn')), field('name', choice($.identifier, $.symbol)),
       '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type with optional error type: T or T^E or T^
       optional(field('type', $.return_type)),
@@ -545,7 +543,7 @@ module.exports = grammar({
     // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      'fn', field('name', $.identifier),
+      'fn', field('name', choice($.identifier, $.symbol)),
       '(', optional(seq(field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))))), ')',
       // return type with optional error type: T or T^E or T^
       optional(field('type', $.return_type)),
@@ -577,19 +575,19 @@ module.exports = grammar({
     assign_expr: $ => prec.right(choice(
       // error destructuring: let name^error_name = expr
       seq(
-        field('name', $.identifier),
-        '^', field('error', $.identifier),
+        field('name', choice($.identifier, $.symbol)),
+        '^', field('error', choice($.identifier, $.symbol)),
         '=', field('as', $._expr),
       ),
       // single variable assignment
       seq(
-        field('name', $.identifier),
+        field('name', choice($.identifier, $.symbol)),
         optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expr),
       ),
       // multi-variable decomposition: let a, b = expr OR let a, b at expr
       seq(
-        field('name', $.identifier),
-        repeat1(seq(',', field('name', $.identifier))),
+        field('name', choice($.identifier, $.symbol)),
+        repeat1(seq(',', field('name', choice($.identifier, $.symbol)))),
         field('decompose', choice('=', 'at')),
         field('as', $._expr),
       ),
@@ -841,7 +839,7 @@ module.exports = grammar({
     ),
 
     attr_type: $ => prec(1, seq(
-      field('name', choice($.string, $.symbol, $.identifier)),
+      field('name', choice($.symbol, $.identifier)),
       ':', field('as', $._type_expr),
       optional(seq('=', field('default', $._expr))),
     )),
@@ -972,18 +970,18 @@ module.exports = grammar({
       ))
     )),
 
-    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
+    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', $._type_expr)),
 
     entity_type: $ => seq(
-      'type', field('name', $.identifier), '<', _attr_content_type($), '>'
+      'type', field('name', choice($.identifier, $.symbol)), '<', _attr_content_type($), '>'
     ),
 
     // Object type with optional inheritance and method/constraint body
     // type Point { x: float, y: float; fn magnitude() => ... }
     // type Circle : Shape { radius: float; fn area() => ... }
     object_type: $ => seq(
-      'type', field('name', $.identifier),
-      optional(seq(':', field('base', $.identifier))),
+      'type', field('name', choice($.identifier, $.symbol)),
+      optional(seq(':', field('base', choice($.identifier, $.symbol)))),
       '{',
       // fields (comma-separated attr list)
       optional(seq(
@@ -998,15 +996,6 @@ module.exports = grammar({
 
     // Object-level constraint: that (expr)
     that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
-
-    // Object literal: {TypeName field: value, ...}
-    object_literal: $ => prec.dynamic(1, seq(
-      '{', field('type_name', $.identifier),
-      optional(seq(
-        choice($.map_item, $._expr), repeat(seq(',', choice($.map_item, $._expr)))
-      )),
-      '}'
-    )),
 
     // type_stam handles type aliases, string patterns, and symbol patterns.
     // The leading keyword distinguishes them; AST builder checks the text.

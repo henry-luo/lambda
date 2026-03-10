@@ -6,7 +6,7 @@ type PositiveInt {
     value: int
     that value > 0
 }
-let p = {PositiveInt value: 5}
+let p = <PositiveInt value: 5>
 p.value
 
 // ===== Multiple field constraints =====
@@ -15,7 +15,7 @@ type BoundedInt {
     that value >= 0
     that value <= 100
 }
-let b = {BoundedInt value: 50}
+let b = <BoundedInt value: 50>
 b.value
 
 // ===== Object-level constraint =====
@@ -24,7 +24,7 @@ type Range {
     max: int
     that min <= max
 }
-let r = {Range min: 1, max: 10}
+let r = <Range min: 1, max: 10>
 r.min
 r.max
 
@@ -33,7 +33,7 @@ type NonEmpty {
     text: string
     that len(text) > 0
 }
-let ne = {NonEmpty text: "hello"}
+let ne = <NonEmpty text: "hello">
 ne.text
 
 // ===== Constraint with method =====
@@ -42,7 +42,7 @@ type Percentage {
     that value >= 0.0 and value <= 100.0
     fn normalized() => ~.value / 100.0
 }
-let pct = {Percentage value: 75.0}
+let pct = <Percentage value: 75.0>
 pct.value
 pct.normalized()
 
@@ -53,7 +53,7 @@ positives
 // ===== Constraint inheritance =====
 type Base { value: int, that value > 0 }
 type Extended : Base { label: string }
-let ext = {Extended value: 10, label: "ten"}
+let ext = <Extended value: 10, label: "ten">
 ext.value
 ext.label
 ext is Extended

@@ -11,10 +11,10 @@ let vl = {
         {category: "B", amount: 55},
         {category: "C", amount: 43}
     ]},
-    mark: {"type": "bar"},
+    mark: {'type': "bar"},
     encoding: {
-        x: {field: "category", "type": "nominal"},
-        y: {field: "amount", "type": "quantitative"}
+        x: {field: "category", 'type': "nominal"},
+        y: {field: "amount", 'type': "quantitative"}
     }
 }
 

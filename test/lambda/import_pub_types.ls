@@ -9,7 +9,7 @@ let s: Score = 99
 s;
 
 // test object type creation from imported type
-let c = {Counter value: 5}
+let c = <Counter value: 5>
 c.value;
 c.double();
 c is Counter

@@ -171,6 +171,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
           }
         ]
       },
@@ -180,6 +184,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -375,10 +383,6 @@
             "named": true
           },
           {
-            "type": "string",
-            "named": true
-          },
-          {
             "type": "symbol",
             "named": true
           }
@@ -399,15 +403,11 @@
           "named": true
         },
         {
+          "type": "dotted_name",
+          "named": true
+        },
+        {
           "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "ns_identifier",
-          "named": true
-        },
-        {
-          "type": "string",
           "named": true
         },
         {
@@ -1000,9 +1000,43 @@
     }
   },
   {
-    "type": "element",
+    "type": "dotted_name",
     "named": true,
     "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "element",
+    "named": true,
+    "fields": {
+      "source": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "current_item",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
       "required": true,
@@ -1016,15 +1050,15 @@
           "named": true
         },
         {
+          "type": "dotted_name",
+          "named": true
+        },
+        {
           "type": "identifier",
           "named": true
         },
         {
           "type": "map",
-          "named": true
-        },
-        {
-          "type": "ns_identifier",
           "named": true
         },
         {
@@ -1067,6 +1101,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -1272,6 +1310,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
           }
         ]
       },
@@ -1383,6 +1425,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -2772,6 +2818,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
           }
         ]
       },
@@ -2832,90 +2882,6 @@
     }
   },
   {
-    "type": "ns_identifier",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "ns": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "object_literal",
-    "named": true,
-    "fields": {
-      "type_name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "binary_expr",
-          "named": true
-        },
-        {
-          "type": "for_expr",
-          "named": true
-        },
-        {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "let_expr",
-          "named": true
-        },
-        {
-          "type": "map_item",
-          "named": true
-        },
-        {
-          "type": "match_expr",
-          "named": true
-        },
-        {
-          "type": "primary_expr",
-          "named": true
-        },
-        {
-          "type": "raise_expr",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "object_type",
     "named": true,
     "fields": {
@@ -2926,6 +2892,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
           }
         ]
       },
@@ -2935,6 +2905,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -3125,6 +3099,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -3333,10 +3311,6 @@
         },
         {
           "type": "named_value",
-          "named": true
-        },
-        {
-          "type": "object_literal",
           "named": true
         },
         {
@@ -4302,19 +4276,19 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
     "named": false
+  },
+  {
+    "type": "symbol",
+    "named": true
   },
   {
     "type": "that",
