@@ -740,8 +740,9 @@ void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int avai
         return;
     }
 
-    // Distribute space proportionally
-    float fr_size = available_space / total_fr;
+    // Distribute space proportionally; use max(total_fr, 1.0) per CSS §11.7.1 to avoid
+    // over-expanding when the sum of flex factors is less than 1 (e.g. 0.3fr + 0.2fr)
+    float fr_size = available_space / (total_fr < 1.0f ? 1.0f : total_fr);
 
     log_debug(" Flexible track sizing - available_space=%d, total_fr=%.2f, fr_size=%.2f, flexible_count=%d\n",
            available_space, total_fr, fr_size, flexible_count);

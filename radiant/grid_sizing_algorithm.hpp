@@ -871,7 +871,10 @@ inline void expand_flexible_tracks(
 
         if (sum_flex <= 0.0f) break;
 
-        fr_size = (leftover > 0.0f) ? (leftover / sum_flex) : 0.0f;
+        // CSS §11.7.1: if sum of flex factors < 1, use the sum as divisor to avoid over-distributing
+        // (i.e., 0.3fr + 0.2fr of 100px = 30px + 20px, not 60px + 40px)
+        float effective_flex_denom = std::max(sum_flex, 1.0f);
+        fr_size = (leftover > 0.0f) ? (leftover / effective_flex_denom) : 0.0f;
 
         // Freeze any flexible track whose minimum exceeds its fr share
         for (size_t i = 0; i < n; ++i) {

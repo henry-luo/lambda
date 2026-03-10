@@ -7,6 +7,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
+#include "grid_baseline.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -35,7 +36,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     if (!grid_container) return;
 
     log_enter();
-    log_info("GRID LAYOUT START: container=%p (%s)", grid_container, grid_container->node_name());
+    log_info("GRID LAYOUT START: container=%p (%s) width=%.1f height=%.1f", grid_container, grid_container->node_name(), grid_container->width, grid_container->height);
 
     // =========================================================================
     // CACHE LOOKUP: Check if we have a cached result for these constraints
@@ -113,7 +114,36 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_info("=== GRID PASS 0 COMPLETE: %d items initialized ===", item_count);
 
     if (item_count == 0) {
-        log_debug("No grid items found");
+        // Check if there are absolutely positioned children that use grid lines
+        // for their containing block (CSS Grid §9.1 - grid container is containing block).
+        // If so, we still need to run track sizing to produce correct grid line positions,
+        // then layout those absolute children in Pass 4.
+        bool has_absolute_children = false;
+        DomNode* ch = grid_container->first_child;
+        while (ch) {
+            if (ch->is_element()) {
+                DomElement* ce = ch->as_element();
+                if (ce->position &&
+                    (ce->position->position == CSS_VALUE_ABSOLUTE ||
+                     ce->position->position == CSS_VALUE_FIXED)) {
+                    // Resolve styles for the absolute child so its gi is populated
+                    init_grid_item_view(lycon, ch);
+                    has_absolute_children = true;
+                }
+            }
+            ch = ch->next_sibling;
+        }
+        if (!has_absolute_children) {
+            log_debug("No grid items and no absolute children - skipping");
+            cleanup_grid_container(lycon);
+            lycon->grid_container = pa_grid;
+            log_leave();
+            return;
+        }
+        // Fall through: run Passes 2 and 4 only
+        log_info("=== GRID: no in-flow items, running track sizing for absolute children ===");
+        layout_grid_container(lycon, grid_container);
+        layout_grid_absolute_children(lycon, grid_container);
         cleanup_grid_container(lycon);
         lycon->grid_container = pa_grid;
         log_leave();
@@ -131,6 +161,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // PASS 2: Grid Algorithm Execution
     // ========================================================================
     log_info("=== GRID PASS 2: Grid algorithm execution ===");
+    log_debug("GRID PASS 2 PRE: grid_container=%p width=%d height=%d", grid_container, grid_container->width, grid_container->height);
     layout_grid_container(lycon, grid_container);
     log_info("=== GRID PASS 2 COMPLETE ===");
 
@@ -176,6 +207,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
     }
+
+    // Apply baseline alignment: shift items within each row to a shared baseline
+    radiant::grid::resolve_and_apply_grid_baselines(lycon->grid_container);
 
     log_info("=== GRID PASS 3 COMPLETE ===");
 
@@ -464,6 +498,8 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
     // Iterate through all grid items and measure their content
     ViewBlock* container = (ViewBlock*)lycon->elmt;
     DomNode* child = container ? container->first_child : nullptr;
+    log_debug("measure_grid_items: lycon->elmt=%p (container), grid_container via lycon->elmt width=%d",
+              lycon->elmt, container ? container->width : -1);
 
     while (child) {
         if (child->is_element()) {

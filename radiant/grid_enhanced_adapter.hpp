@@ -124,7 +124,8 @@ inline MaxTrackSizingFunction convert_to_max_sizing(GridTrackSize* old_size) {
             return MaxTrackSizingFunction::Auto();
 
         case GRID_TRACK_SIZE_FR:
-            return MaxTrackSizingFunction::Fr(static_cast<float>(old_size->value));
+            // old_size->value stores the fr factor multiplied by 100 (e.g. 0.3fr → 30)
+            return MaxTrackSizingFunction::Fr(static_cast<float>(old_size->value) / 100.0f);
 
         case GRID_TRACK_SIZE_FIT_CONTENT:
             if (old_size->is_percentage) {
