@@ -349,19 +349,7 @@
             "named": true
           },
           {
-            "type": "let_expr",
-            "named": true
-          },
-          {
-            "type": "match_expr",
-            "named": true
-          },
-          {
             "type": "primary_expr",
-            "named": true
-          },
-          {
-            "type": "raise_expr",
             "named": true
           },
           {
