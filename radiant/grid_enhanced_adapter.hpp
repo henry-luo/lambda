@@ -727,21 +727,16 @@ inline std::vector<GridItemContribution> collect_item_contributions(
                 contrib.max_content_contribution = sizes.max_content;
             }
 
-            // Apply CSS min-width/max-width constraints (these may not be in the cache)
-            if (item->blk) {
-                if (item->blk->given_min_width > 0) {
-                    contrib.min_content_contribution = std::max(contrib.min_content_contribution,
-                                                                item->blk->given_min_width);
-                    contrib.max_content_contribution = std::max(contrib.max_content_contribution,
-                                                                contrib.min_content_contribution);
-                }
-                if (item->blk->given_max_width > 0) {
-                    contrib.max_content_contribution = std::min(contrib.max_content_contribution,
-                                                                item->blk->given_max_width);
-                    // min must still be <= max
-                    contrib.min_content_contribution = std::min(contrib.min_content_contribution,
-                                                                contrib.max_content_contribution);
-                }
+            // Apply CSS min-width constraint if not already in the cached measurement.
+            // NOTE: Do NOT apply given_max_width here — the measurement functions return
+            // the border-box size which already respects max-width at the content level
+            // while preserving padding+border. Capping by given_max_width would strip
+            // out padding/border from the contribution (e.g. padding_border_overrides_max_size).
+            if (item->blk && item->blk->given_min_width > 0) {
+                contrib.min_content_contribution = std::max(contrib.min_content_contribution,
+                                                            item->blk->given_min_width);
+                contrib.max_content_contribution = std::max(contrib.max_content_contribution,
+                                                            contrib.min_content_contribution);
             }
         } else {
             // Row axis
@@ -846,11 +841,17 @@ inline void run_enhanced_track_sizing(
                       col_contributions[ci].max_content_contribution);
         }
 
-        // When the container has definite width, cap auto track growth limits so that
-        // the intrinsic sizing phase (Phase 2: max-content) doesn't cause tracks to overflow.
-        // Per browser behavior: each auto max track's growth_limit = max(min-content-floor, available/auto_count)
-        // This ensures tracks fit within the available space after maximize_tracks.
-        if (col_available > 0.0f && !col_contributions.empty()) {
+        // When the container has definite width, cap auto track growth limits to prevent
+        // Phase 2 (max-content sizing) from overflowing the container.
+        // Only cap when: (1) no flexible (fr) tracks present (fr tracks take remaining space),
+        //               (2) the track's max-content would exceed its equal share (per_auto),
+        //               (3) the track's min-content floor doesn't already exceed per_auto.
+        bool col_has_fr = false;
+        for (const auto& t : col_tracks) {
+            if (t.is_flexible()) { col_has_fr = true; break; }
+        }
+
+        if (col_available > 0.0f && !col_contributions.empty() && !col_has_fr) {
             // Count auto max tracks (non-flexible) and sum fixed-track space
             size_t auto_max_count = 0;
             float fixed_track_space = 0.0f;
@@ -868,39 +869,40 @@ inline void run_enhanced_track_sizing(
                 float per_auto = available_for_auto / static_cast<float>(auto_max_count);
 
                 if (per_auto > 0.0f) {
-                    // Find the max min-content contribution for each auto track
-                    // (this is the floor: the track must be at least this wide)
+                    // Find per-track min-content and max-content floors from single-span items
                     std::vector<float> track_min_floor(col_tracks.size(), 0.0f);
+                    std::vector<float> track_max_floor(col_tracks.size(), 0.0f);
                     for (const auto& contrib : col_contributions) {
-                        if (contrib.track_span == 1) {  // Only single-span items define per-track floors
+                        if (contrib.track_span == 1) {
                             size_t ti = contrib.track_start;
                             if (ti < track_min_floor.size()) {
                                 track_min_floor[ti] = std::max(track_min_floor[ti],
                                                                contrib.min_content_contribution);
+                                track_max_floor[ti] = std::max(track_max_floor[ti],
+                                                               contrib.max_content_contribution);
                             }
                         }
                     }
 
-                    // Cap growth_limit for auto tracks that need less space than per_auto.
-                    // Tracks whose min-content floor EXCEEDS per_auto are left uncapped:
-                    // they will absorb their min-content requirement first, then maximize_tracks
-                    // distributes the remaining free space equally among all uncapped tracks.
+                    // Cap growth_limit only when the track's max-content would overflow per_auto
+                    // and the min-content floor doesn't already exceed per_auto.
+                    // This prevents Phase 2 overflow while allowing natural content sizing
+                    // for tracks whose items fit within the equal-share budget.
                     for (size_t i = 0; i < col_tracks.size(); i++) {
                         auto& track = col_tracks[i];
                         if (track.kind != GridTrackKind::Track) continue;
                         if (track.max_track_sizing_function.type == SizingFunctionType::Auto &&
                             !track.is_flexible() && std::isinf(track.growth_limit)) {
                             float floor = (i < track_min_floor.size()) ? track_min_floor[i] : 0.0f;
-                            if (floor < per_auto) {
-                                // Cap: this track's content fits within equal distribution
+                            float max_fl = (i < track_max_floor.size()) ? track_max_floor[i] : 0.0f;
+                            if (max_fl > per_auto && floor <= per_auto) {
+                                // Cap: max-content exceeds equal share but min-content fits
                                 track.growth_limit = per_auto;
-                                log_debug("  col_track[%zu] auto-cap: growth_limit=%.1f (floor=%.1f < per_auto=%.1f)",
-                                          i, track.growth_limit, floor, per_auto);
+                                log_debug("  col_track[%zu] auto-cap: growth_limit=%.1f (max_floor=%.1f > per_auto=%.1f)",
+                                          i, track.growth_limit, max_fl, per_auto);
                             } else {
-                                // Don't cap: content requirement exceeds equal share
-                                // maximize_tracks will distribute remaining space
-                                log_debug("  col_track[%zu] no-cap: floor=%.1f >= per_auto=%.1f",
-                                          i, floor, per_auto);
+                                log_debug("  col_track[%zu] no-cap: floor=%.1f, max_floor=%.1f, per_auto=%.1f",
+                                          i, floor, max_fl, per_auto);
                             }
                         }
                     }
