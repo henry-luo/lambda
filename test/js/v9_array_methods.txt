@@ -1,0 +1,15 @@
+splice remove: 1,4,5 removed: 2,3
+splice insert: 1,2,3,4,5
+splice replace: 1,20,30,4,5 replaced: 2,3
+splice neg: 1,2,3,5
+shift: 10 remaining: 20,30
+unshift: 1,2,3,4,5 len: 5
+lastIndexOf 2: 3
+lastIndexOf 9: -1
+flatMap: 1,2,2,4,3,6
+reduceRight: 10
+at 0: 10
+at -1: 50
+at -2: 40
+toString: 1,2,3
+null

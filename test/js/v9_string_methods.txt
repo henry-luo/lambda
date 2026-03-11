@@ -1,0 +1,13 @@
+replaceAll: hi world hi
+padStart: 005
+padStart sp:    hi
+padStart long: hello
+padEnd: 500
+padEnd sp: hi   
+at 0: h
+at -1: o
+at 4: o
+search: 6
+search miss: -1
+toString: test
+null

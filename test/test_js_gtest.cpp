@@ -426,6 +426,31 @@ TEST(JavaScriptTests, test_tco) {
     test_js_script_against_file("test/js/tco.js", "test/js/tco.txt");
 }
 
+// v9 tests: new array/string/math/object methods, destructuring, Number statics
+TEST(JavaScriptTests, test_v9_array_methods) {
+    test_js_script_against_file("test/js/v9_array_methods.js", "test/js/v9_array_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v9_string_methods) {
+    test_js_script_against_file("test/js/v9_string_methods.js", "test/js/v9_string_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v9_math_methods) {
+    test_js_script_against_file("test/js/v9_math_methods.js", "test/js/v9_math_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v9_object_methods) {
+    test_js_script_against_file("test/js/v9_object_methods.js", "test/js/v9_object_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v9_number_json) {
+    test_js_script_against_file("test/js/v9_number_json.js", "test/js/v9_number_json.txt");
+}
+
+TEST(JavaScriptTests, test_v9_obj_destructuring) {
+    test_js_script_against_file("test/js/v9_obj_destructuring.js", "test/js/v9_obj_destructuring.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

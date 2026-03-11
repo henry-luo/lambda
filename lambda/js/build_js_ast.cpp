@@ -1011,6 +1011,79 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         }
         pattern->base.type = &TYPE_ARRAY;
         return (JsAstNode*)pattern;
+    } else if (strcmp(node_type, "object_pattern") == 0) {
+        // destructuring pattern: {a, b, c: d, ...rest}
+        JsObjectPatternNode* pattern = (JsObjectPatternNode*)alloc_js_ast_node(
+            tp, JS_AST_NODE_OBJECT_PATTERN, expr_node, sizeof(JsObjectPatternNode));
+        uint32_t count = ts_node_named_child_count(expr_node);
+        JsAstNode* prev = NULL;
+        for (uint32_t i = 0; i < count; i++) {
+            TSNode child = ts_node_named_child(expr_node, i);
+            const char* child_type = ts_node_type(child);
+            JsAstNode* elem = NULL;
+            if (strcmp(child_type, "shorthand_property_identifier_pattern") == 0 ||
+                strcmp(child_type, "shorthand_property_identifier") == 0) {
+                // {x} shorthand — build as property with key=value=x
+                JsPropertyNode* prop = (JsPropertyNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_PROPERTY, child, sizeof(JsPropertyNode));
+                prop->key = build_js_identifier(tp, child);
+                prop->value = build_js_identifier(tp, child);
+                prop->computed = false;
+                prop->method = false;
+                prop->base.type = &TYPE_ANY;
+                elem = (JsAstNode*)prop;
+            } else if (strcmp(child_type, "pair_pattern") == 0) {
+                // {a: b} or {a: b = default}
+                JsPropertyNode* prop = (JsPropertyNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_PROPERTY, child, sizeof(JsPropertyNode));
+                TSNode key_node = ts_node_child_by_field_name(child, "key", 3);
+                TSNode value_node = ts_node_child_by_field_name(child, "value", 5);
+                if (!ts_node_is_null(key_node)) prop->key = build_js_expression(tp, key_node);
+                if (!ts_node_is_null(value_node)) prop->value = build_js_expression(tp, value_node);
+                prop->computed = false;
+                prop->method = false;
+                prop->base.type = &TYPE_ANY;
+                elem = (JsAstNode*)prop;
+            } else if (strcmp(child_type, "rest_pattern") == 0) {
+                // ...rest
+                JsSpreadElementNode* rest = (JsSpreadElementNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_REST_PROPERTY, child, sizeof(JsSpreadElementNode));
+                TSNode inner = ts_node_named_child(child, 0);
+                if (!ts_node_is_null(inner)) {
+                    rest->argument = build_js_expression(tp, inner);
+                }
+                rest->base.type = &TYPE_ANY;
+                elem = (JsAstNode*)rest;
+            } else if (strcmp(child_type, "object_assignment_pattern") == 0) {
+                // {x = defaultVal} shorthand with default
+                JsPropertyNode* prop = (JsPropertyNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_PROPERTY, child, sizeof(JsPropertyNode));
+                TSNode left = ts_node_child_by_field_name(child, "left", 4);
+                TSNode right = ts_node_child_by_field_name(child, "right", 5);
+                // key is the left identifier
+                if (!ts_node_is_null(left)) prop->key = build_js_expression(tp, left);
+                // value is an assignment pattern wrapping left = right
+                JsAssignmentPatternNode* assign_pat = (JsAssignmentPatternNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_ASSIGNMENT_PATTERN, child, sizeof(JsAssignmentPatternNode));
+                if (!ts_node_is_null(left)) assign_pat->left = build_js_expression(tp, left);
+                if (!ts_node_is_null(right)) assign_pat->right = build_js_expression(tp, right);
+                assign_pat->base.type = &TYPE_ANY;
+                prop->value = (JsAstNode*)assign_pat;
+                prop->computed = false;
+                prop->method = false;
+                prop->base.type = &TYPE_ANY;
+                elem = (JsAstNode*)prop;
+            } else {
+                elem = build_js_expression(tp, child);
+            }
+            if (elem) {
+                if (!prev) pattern->properties = elem;
+                else prev->next = elem;
+                prev = elem;
+            }
+        }
+        pattern->base.type = &TYPE_ANY;
+        return (JsAstNode*)pattern;
     } else {
         // Handle nodes that return numeric symbol IDs instead of type names
         TSSymbol symbol = ts_node_symbol(expr_node);
