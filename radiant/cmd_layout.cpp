@@ -3321,6 +3321,50 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         return nullptr;
     }
 
+    // Check if the script returned SVG content — embed it in an HTML page so the
+    // inline SVG rendering pipeline (render_inline_svg) handles it, rather than
+    // the external-SVG file path (which uses ThorVG's root-embed approach that
+    // is not drawn by render_children at the root level).
+    auto write_svg_wrapped_html = [&](const char* svg_content) -> DomDocument* {
+        // Build a minimal HTML page that contains only the SVG
+        StrBuf* html_buf = strbuf_new_cap(strlen(svg_content) + 256);
+        strbuf_append_format(html_buf,
+            "<!DOCTYPE html><html><head><style>"
+            "html,body{margin:0;padding:0;background:#fff;}"
+            "svg{display:block;}"
+            "</style></head><body>%s</body></html>",
+            svg_content);
+        const char* temp_html_path = "./temp/lambda_script_view.html";
+        write_text_file(temp_html_path, html_buf->str);
+        strbuf_free(html_buf);
+        runtime_cleanup(&runtime);
+        Url* cwd = get_current_dir();
+        log_info("[Lambda Script] Loading SVG-in-HTML wrapper: %s", temp_html_path);
+        return load_html_doc(cwd, (char*)temp_html_path, viewport_width, viewport_height);
+    };
+
+    if (result_type == LMD_TYPE_ELEMENT) {
+        Element* check_elem = script_output->root.element;
+        TypeElmt* check_type = (TypeElmt*)check_elem->type;
+        if (check_type && check_type->name.str && str_ieq_const(check_type->name.str, strlen(check_type->name.str), "svg")) {
+            log_info("[Lambda Script] Script returned SVG element, wrapping in HTML for rendering");
+            String* svg_str = format_xml(script_output->pool, script_output->root);
+            if (svg_str && svg_str->len > 0) {
+                return write_svg_wrapped_html(svg_str->chars);
+            }
+            log_error("[Lambda Script] Failed to format SVG element");
+            runtime_cleanup(&runtime);
+            return nullptr;
+        }
+    } else if (result_type == LMD_TYPE_STRING) {
+        String* result_str = script_output->root.get_string();
+        if (result_str && result_str->len >= 4 &&
+                strncmp(result_str->chars, "<svg", 4) == 0) {
+            log_info("[Lambda Script] Script returned SVG string, wrapping in HTML for rendering");
+            return write_svg_wrapped_html(result_str->chars);
+        }
+    }
+
     // Check if the script returned a complete HTML document
     bool is_html_document = false;
     Element* html_elem = nullptr;
