@@ -1010,6 +1010,7 @@ JitImport jit_runtime_imports[] = {
     // timing
     {"js_performance_now", FPTR(js_performance_now)},
     {"js_date_now", FPTR(js_date_now)},
+    {"js_date_new", FPTR(js_date_new)},
     // shims
     {"js_alert", FPTR(js_alert)},
     // typed arrays
