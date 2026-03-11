@@ -184,13 +184,12 @@ pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: in
         return scene.background
     }
     var closest = null
-    var closest_d: float = far
     var i: int = 0
     while (i < scene.n_triangles) {
         var tri: Triangle = (scene.triangles)[i]
-        var d: float = triangle_intersect(tri, origin, dir, near, closest_d)
+        var d: float = triangle_intersect(tri, origin, dir, near, far)
         if (d > 0.0) {
-            closest_d = d
+            far = d
             closest = tri
         }
         i = i + 1
@@ -199,7 +198,7 @@ pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: in
         return [scene.background[0], scene.background[1], scene.background[2]]
     }
     var normal = closest.normal
-    var hit = vec_add(origin, vec_scale(dir, closest_d))
+    var hit = vec_add(origin, vec_scale(dir, far))
     if (vec_dot(dir, normal) > 0.0) {
         normal = [0.0 - normal[0], 0.0 - normal[1], 0.0 - normal[2]]
     }

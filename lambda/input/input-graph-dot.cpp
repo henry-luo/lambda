@@ -1,18 +1,12 @@
 #include "input-graph.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include <ctype.h>
 #include <string.h>
 
 using namespace lambda;
-
-// Helper: skip to end of line
-static void skip_to_eol(SourceTracker& tracker) {
-    while (!tracker.atEnd() && tracker.current() != '\n') {
-        tracker.advance();
-    }
-}
 
 // Forward declarations for internal functions
 static void skip_whitespace_and_comments(SourceTracker& tracker);
@@ -26,129 +20,21 @@ static Element* parse_node_statement(InputContext& ctx);
 static Element* parse_edge_statement(InputContext& ctx);
 static void parse_subgraph(InputContext& ctx, Element* graph, int depth = 0);
 
-// Skip whitespace and comments
+// skip whitespace, // line comments, /* */ block comments, and # line comments
 static void skip_whitespace_and_comments(SourceTracker& tracker) {
-    while (!tracker.atEnd()) {
-        char c = tracker.current();
-
-        // skip whitespace
-        if (isspace(c)) {
-            tracker.advance();
-            continue;
-        }
-
-        // skip // comments
-        if (c == '/' && tracker.peek(1) == '/') {
-            skip_to_eol(tracker);
-            continue;
-        }
-
-        // skip /* */ comments
-        if (c == '/' && tracker.peek(1) == '*') {
-            tracker.advance(); // skip /
-            tracker.advance(); // skip *
-            while (!tracker.atEnd() && !(tracker.current() == '*' && tracker.peek(1) == '/')) {
-                tracker.advance();
-            }
-            if (!tracker.atEnd()) {
-                tracker.advance(); // skip *
-                tracker.advance(); // skip /
-            }
-            continue;
-        }
-
-        // skip # comments (also valid in DOT)
-        if (c == '#') {
-            skip_to_eol(tracker);
-            continue;
-        }
-
-        break;
-    }
+    skip_wsc(tracker, "//", "#", true);
 }
 
-// Parse identifier
+// read DOT identifier: [A-Za-z_][A-Za-z0-9_]*  (whitespace skipped first)
 static String* parse_identifier(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
-
-    skip_whitespace_and_comments(tracker);
-
-    if (tracker.atEnd()) return nullptr;
-
-    char c = tracker.current();
-    if (!isalpha(c) && c != '_') {
-        return nullptr;
-    }
-
-    const char* start = tracker.rest();
-    size_t len = 0;
-
-    while (!tracker.atEnd()) {
-        c = tracker.current();
-        if (isalnum(c) || c == '_') {
-            tracker.advance();
-            len++;
-        } else {
-            break;
-        }
-    }
-
-    return ctx.builder.createString(start, len);
+    skip_whitespace_and_comments(ctx.tracker);
+    return read_graph_identifier(ctx, nullptr, true);
 }
 
-// Parse quoted string
+// parse a double-quoted string, using the shared escape handler
 static String* parse_quoted_string(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
-
-    skip_whitespace_and_comments(tracker);
-
-    if (tracker.atEnd() || tracker.current() != '"') {
-        return nullptr;
-    }
-
-    SourceLocation start_loc = tracker.location();
-    tracker.advance(); // skip opening quote
-
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    while (!tracker.atEnd() && tracker.current() != '"') {
-        char c = tracker.current();
-
-        if (c == '\\') {
-            tracker.advance();
-            if (tracker.atEnd()) {
-                ctx.addError(tracker.location(), "Unterminated string escape");
-                return nullptr;
-            }
-
-            c = tracker.current();
-            switch (c) {
-                case '"': stringbuf_append_char(sb, '"'); break;
-                case '\\': stringbuf_append_char(sb, '\\'); break;
-                case 'n': stringbuf_append_char(sb, '\n'); break;
-                case 't': stringbuf_append_char(sb, '\t'); break;
-                case 'r': stringbuf_append_char(sb, '\r'); break;
-                default:
-                    stringbuf_append_char(sb, '\\');
-                    stringbuf_append_char(sb, c);
-                    break;
-            }
-            tracker.advance();
-        } else {
-            stringbuf_append_char(sb, c);
-            tracker.advance();
-        }
-    }
-
-    if (tracker.atEnd()) {
-        ctx.addError(start_loc, "Unterminated quoted string");
-        return nullptr;
-    }
-
-    tracker.advance(); // skip closing quote
-
-    return ctx.builder.createString(sb->str->chars, sb->length);
+    skip_whitespace_and_comments(ctx.tracker);
+    return parse_shared_quoted_string(ctx);
 }
 
 // Parse attribute value (identifier or quoted string)

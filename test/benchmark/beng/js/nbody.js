@@ -1,7 +1,7 @@
 // BENG Benchmark: n-body (Node.js reference)
-// Planetary motion simulation
+// Planetary motion simulation — Synchronized with JetStream: 36000 steps
 
-const N = parseInt(process.argv[2] || "1000");
+const N = parseInt(process.argv[2] || "36000");
 const PI = 3.141592653589793;
 const SOLAR_MASS = 4 * PI * PI;
 const DAYS_PER_YEAR = 365.24;

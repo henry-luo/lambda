@@ -227,23 +227,60 @@ for suite in SUITE_ORDER:
     gm_str = f"{gm:.2f}x" if gm else "---"
     w(f"| {SUITE_LABELS[suite]} | {gm_str} | {lw} | {nw} | {len(benchmarks)} |")
 
-overall_gm_n = geo_mean(all_mn)
-w(f"| **Overall** | **{overall_gm_n:.2f}x** | **{total_lw_n}** | **{total_nw}** | **{total_bench}** |")
+overall_gm_n_raw = geo_mean(all_mn)
+w(f"| **Overall (raw)** | **{overall_gm_n_raw:.2f}x** | **{total_lw_n}** | **{total_nw}** | **{total_bench}** |")
+
+# De-duplicated overall: for benchmarks appearing in multiple suites, pick the
+# best (lowest) MIR and best (lowest) Node.js value, then compute ratio once.
+dedup_mn = {}  # bench_name -> best MIR/Node ratio
+for suite in SUITE_ORDER:
+    if suite not in data:
+        continue
+    for bench_name, bench_data in data[suite].items():
+        mir_v = bench_data.get("mir")
+        node_v = bench_data.get("nodejs")
+        if not (mir_v and node_v and mir_v > 0 and node_v > 0):
+            continue
+        best_mir = mir_v
+        best_node = node_v
+        if bench_name in dedup_mn:
+            prev_mir, prev_node = dedup_mn[bench_name]
+            best_mir = min(prev_mir, mir_v)
+            best_node = min(prev_node, node_v)
+        dedup_mn[bench_name] = (best_mir, best_node)
+
+dedup_mn_ratios = [m / n for m, n in dedup_mn.values()]
+overall_gm_n = geo_mean(dedup_mn_ratios)
+dedup_lw_n = sum(1 for r in dedup_mn_ratios if r < 1.0)
+dedup_nw_n = len(dedup_mn_ratios) - dedup_lw_n
+w(f"| **Overall (dedup)** | **{overall_gm_n:.2f}x** | **{dedup_lw_n}** | **{dedup_nw_n}** | **{len(dedup_mn_ratios)}** |")
 
 w()
 w("> Ratio < 1.0 = Lambda MIR is faster. Ratio > 1.0 = Node.js is faster.")
+w(f"> **Dedup note:** {len(dedup_mn_ratios)} unique benchmarks out of {total_bench} total entries. Duplicates (same name across suites): deltablue, mandelbrot, nbody, primes, richards — best time per engine is used.")
 w()
 
-# Excluding JetStream
-mn_no_jet = [r for suite in ["r7rs", "awfy", "beng", "kostya", "larceny"]
-             for bench_name, bench_data in data.get(suite, {}).items()
-             if (mir_v := bench_data.get("mir")) and (node_v := bench_data.get("nodejs"))
-             and mir_v > 0 and node_v > 0
-             for r in [mir_v / node_v]]
+# Excluding JetStream (also de-duplicated)
+dedup_mn_no_jet = {}
+for suite in ["r7rs", "awfy", "beng", "kostya", "larceny"]:
+    for bench_name, bench_data in data.get(suite, {}).items():
+        mir_v = bench_data.get("mir")
+        node_v = bench_data.get("nodejs")
+        if not (mir_v and node_v and mir_v > 0 and node_v > 0):
+            continue
+        best_mir = mir_v
+        best_node = node_v
+        if bench_name in dedup_mn_no_jet:
+            prev_mir, prev_node = dedup_mn_no_jet[bench_name]
+            best_mir = min(prev_mir, mir_v)
+            best_node = min(prev_node, node_v)
+        dedup_mn_no_jet[bench_name] = (best_mir, best_node)
+
+mn_no_jet = [m / n for m, n in dedup_mn_no_jet.values()]
 gm_no_jet = geo_mean(mn_no_jet)
 lw_no_jet = sum(1 for r in mn_no_jet if r < 1.0)
 nw_no_jet = len(mn_no_jet) - lw_no_jet
-w(f"**Excluding JetStream (original 53 benchmarks): {gm_no_jet:.2f}x** — Lambda wins {lw_no_jet}/{len(mn_no_jet)}")
+w(f"**Excluding JetStream ({len(mn_no_jet)} unique benchmarks): {gm_no_jet:.2f}x** — Lambda wins {lw_no_jet}/{len(mn_no_jet)}")
 w()
 
 w("### MIR Direct vs Python (Self-Reported Exec Time)")
@@ -279,8 +316,34 @@ for suite in SUITE_ORDER:
     compared = len(mp)
     w(f"| {SUITE_LABELS[suite]} | {gm_str} | {lw} | {pw} | {compared} |")
 
-overall_gm_p = geo_mean(all_mp)
-w(f"| **Overall** | **{overall_gm_p:.2f}x** | **{total_lw_p}** | **{total_pw}** | **{total_compared_p}** |")
+overall_gm_p_raw = geo_mean(all_mp)
+w(f"| **Overall (raw)** | **{overall_gm_p_raw:.2f}x** | **{total_lw_p}** | **{total_pw}** | **{total_compared_p}** |")
+
+# De-duplicated overall for Python
+dedup_mp = {}
+for suite in SUITE_ORDER:
+    if suite not in data:
+        continue
+    for bench_name, bench_data in data[suite].items():
+        mir_v = bench_data.get("mir")
+        py_v = bench_data.get("python")
+        if (suite, bench_name, "python") in BAD_VALUES:
+            py_v = None
+        if not (mir_v and py_v and mir_v > 0 and py_v > 0):
+            continue
+        best_mir = mir_v
+        best_py = py_v
+        if bench_name in dedup_mp:
+            prev_mir, prev_py = dedup_mp[bench_name]
+            best_mir = min(prev_mir, mir_v)
+            best_py = min(prev_py, py_v)
+        dedup_mp[bench_name] = (best_mir, best_py)
+
+dedup_mp_ratios = [m / p for m, p in dedup_mp.values()]
+overall_gm_p = geo_mean(dedup_mp_ratios)
+dedup_lw_p = sum(1 for r in dedup_mp_ratios if r < 1.0)
+dedup_pw_p = len(dedup_mp_ratios) - dedup_lw_p
+w(f"| **Overall (dedup)** | **{overall_gm_p:.2f}x** | **{dedup_lw_p}** | **{dedup_pw_p}** | **{len(dedup_mp_ratios)}** |")
 w()
 w("> Lambda MIR is overwhelmingly faster than CPython across all suites.")
 
@@ -446,6 +509,112 @@ w()
 w("---")
 
 # ============================================================
+# Memory Profiling
+# ============================================================
+import os
+mem_data = None
+mem_path = "test/benchmark/memory_results.json"
+if os.path.exists(mem_path):
+    with open(mem_path) as f:
+        mem_data = json.load(f)
+
+if mem_data:
+    w()
+    w("## Memory Profiling (Peak RSS)")
+    w()
+    w("Peak resident set size measured via `/usr/bin/time -l` (macOS). Values in **MB**.")
+    w("Includes runtime, JIT compiler, and all loaded libraries for each engine.")
+    w()
+
+    MEM_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
+    MEM_LABELS = {"mir": "MIR", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
+                  "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python"}
+
+    def fmt_mb(v):
+        if v is None:
+            return "---"
+        if v < 1:
+            return f"{v:.2f}"
+        if v < 10:
+            return f"{v:.1f}"
+        return f"{v:.0f}"
+
+    # Per-suite memory tables
+    for suite in SUITE_ORDER:
+        if suite not in mem_data:
+            continue
+        w(f"### {SUITE_LABELS[suite]} — Peak RSS (MB)")
+        w()
+        w("| Benchmark | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python |")
+        w("| --------- | ---: | ----: | -------: | ------: | ------: | -----: |")
+
+        for bench_name, bench_mem in mem_data[suite].items():
+            row = f"| {bench_name} |"
+            for eng in MEM_ENGINES:
+                v = bench_mem.get(eng)
+                row += f" {fmt_mb(v)} |"
+            w(row)
+        w()
+
+    # Summary table: average peak RSS per engine per suite
+    w("### Memory Summary — Average Peak RSS per Suite (MB)")
+    w()
+    w("| Suite | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/QJS |")
+    w("|-------|----:|------:|---------:|--------:|--------:|-------:|---------:|--------:|")
+
+    all_mir_mem = []
+    all_node_mem = []
+    all_qjs_mem = []
+
+    for suite in SUITE_ORDER:
+        if suite not in mem_data:
+            continue
+        avgs = {}
+        for eng in MEM_ENGINES:
+            vals = [b.get(eng) for b in mem_data[suite].values() if b.get(eng) is not None]
+            avgs[eng] = sum(vals) / len(vals) if vals else None
+
+        mir_avg = avgs.get("mir")
+        node_avg = avgs.get("nodejs")
+        qjs_avg = avgs.get("quickjs")
+
+        if mir_avg and node_avg:
+            all_mir_mem.append(mir_avg)
+            all_node_mem.append(node_avg)
+        if mir_avg and qjs_avg:
+            all_qjs_mem.append(qjs_avg)
+
+        mn_str = f"{mir_avg/node_avg:.2f}x" if mir_avg and node_avg and node_avg > 0 else "---"
+        mq_str = f"{mir_avg/qjs_avg:.1f}x" if mir_avg and qjs_avg and qjs_avg > 0 else "---"
+
+        row = f"| {SUITE_LABELS[suite]} |"
+        for eng in MEM_ENGINES:
+            row += f" {fmt_mb(avgs.get(eng))} |"
+        row += f" {mn_str} | {mq_str} |"
+        w(row)
+
+    if all_mir_mem and all_node_mem:
+        avg_mir = sum(all_mir_mem) / len(all_mir_mem)
+        avg_node = sum(all_node_mem) / len(all_node_mem)
+        overall_ratio = avg_mir / avg_node if avg_node > 0 else None
+        w()
+        if overall_ratio:
+            if overall_ratio < 1:
+                w(f"**Lambda MIR uses {overall_ratio:.2f}× the memory of Node.js** ({avg_mir:.0f} MB vs {avg_node:.0f} MB average) — Lambda is more memory-efficient.")
+            else:
+                w(f"**Lambda MIR uses {overall_ratio:.2f}× the memory of Node.js** ({avg_mir:.0f} MB vs {avg_node:.0f} MB average).")
+    if all_qjs_mem:
+        avg_qjs = sum(all_qjs_mem) / len(all_qjs_mem)
+        avg_mir2 = sum(all_mir_mem) / len(all_mir_mem)
+        w(f"**QuickJS is the most memory-efficient** at {avg_qjs:.0f} MB average — {avg_mir2/avg_qjs:.0f}× less than Lambda MIR.")
+
+    w()
+    w("> Memory footprint is dominated by engine/runtime overhead; actual benchmark data is small.")
+    w("> QuickJS's tiny interpreter has minimal memory overhead. Node.js includes the full V8 engine.")
+    w()
+    w("---")
+
+# ============================================================
 # Key Findings
 # ============================================================
 w()
@@ -453,14 +622,14 @@ w("## Key Findings")
 w()
 w("### 1. Overall: Lambda MIR competitive with Node.js V8")
 w()
-w(f"Across {len(all_mn)} benchmarks with both MIR and Node.js results, the geometric mean ratio is **{overall_gm_n:.2f}x**.")
+w(f"Across {len(dedup_mn_ratios)} unique benchmarks with both MIR and Node.js results, the geometric mean ratio is **{overall_gm_n:.2f}x**.")
 w(f"Excluding the new JetStream suite (which ports are not yet optimized), Lambda achieves **{gm_no_jet:.2f}x**")
-w(f"on the original 53 benchmarks, winning {lw_no_jet} of {len(mn_no_jet)}.")
+w(f"on {len(mn_no_jet)} unique benchmarks, winning {lw_no_jet} of {len(mn_no_jet)}.")
 w()
 
 w("### 2. Lambda MIR dominates CPython")
 w()
-w(f"Across {total_compared_p} benchmarks with Python comparisons, Lambda MIR is **{1/overall_gm_p:.0f}× faster** (geo mean {overall_gm_p:.2f}x).")
+w(f"Across {len(dedup_mp_ratios)} unique benchmarks with Python comparisons, Lambda MIR is **{1/overall_gm_p:.0f}× faster** (geo mean {overall_gm_p:.2f}x).")
 w("CPython's interpreted execution cannot match JIT-compiled code on compute-intensive tasks.")
 w("Lambda wins on all suites, with particular dominance on tight loops and numeric code (AWFY micro-benchmarks: 1000–30000× faster).")
 w()
@@ -477,29 +646,32 @@ w()
 w("### 4. Weaknesses: OOP-heavy and allocation-intensive code")
 w()
 w("Node.js V8's optimizing JIT (TurboFan) significantly outperforms Lambda on:")
-w("- **Class-heavy benchmarks**: richards (12.1x), cd (11.3x), deltablue (5.8x) — V8's hidden classes and inline caches")
-w("- **Heavy allocation/GC**: gcbench (17.6x), base64 (12.2x) — V8's generational GC advantage")
-w("- **JetStream suite (7.12x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate")
+w("- **Class-heavy benchmarks**: richards (5.1x AWFY), cd (14.3x) — V8's hidden classes and inline caches")
+w("- **Heavy allocation/GC**: gcbench (20.3x), base64 (12.5x) — V8's generational GC advantage")
+w("- **JetStream suite (7.92x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate")
 w()
 
 w("### 5. JetStream: New frontier for optimization")
 w()
-w("The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.12× slower** than Node.js.")
-w("Key bottlenecks:")
-w("- **navier_stokes (55×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern")
-w("- **richards (36×)**: OOP task scheduler — class/method dispatch overhead")
+w("The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.92× slower** than Node.js (geo mean).")
+w("Workloads are now synchronized to the original heavy JetStream workloads.")
+w("Key remaining bottlenecks:")
+w("- **navier_stokes (56×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern")
+w("- **richards (31×)**: OOP task scheduler — 50 iterations × 1000 COUNT exposes class/method dispatch overhead")
 w("- **raytrace3d (20×)**: Object-heavy 3D computation — property access patterns")
-w("- **deltablue (1.79×)**: Closest to parity — constraint solver benefits from Lambda's approach")
+w("- **nbody (8.6×)**: Numeric simulation — 36000 advance steps per run")
+w("- **splay (7.8×)**: Red-black tree operations — property access patterns")
+w("- **deltablue (1.7×)**: Constraint solver — close to competitive at 20 iterations")
 w("These represent clear optimization targets for future MIR engine improvements.")
 w()
 
 w("### 6. MIR JIT improvements from Round 2")
 w()
 w("MIR Direct shows measurable improvements across the board:")
-w("- **havlak**: 339 → 177ms (**1.92× faster**) — graph algorithm optimization")
+w("- **havlak**: 339 → 183ms (**1.85× faster**) — graph algorithm optimization")
 w("- **nbody (BENG)**: 2.8 → 1.3ms (**2.15× faster**) — continued typed-array optimization")
-w("- **deltablue**: 6.1 → 5.0ms (**1.23× faster**) — macro benchmark improvement")
-w("- **gcbench**: 472 → 435ms (**1.09× faster**) — GC improvements")
+w("- **deltablue**: 6.1 → 5.3ms (**1.15× faster**) — macro benchmark improvement")
+w("- **gcbench**: 472 → 500ms — slight regression due to GC tuning trade-offs")
 w(f"- **Overall**: ~{(geo_impr-1)*100:.0f}% faster across {len(valid_impr)} comparable benchmarks")
 w()
 
@@ -507,9 +679,9 @@ w("### 7. Lambda JS engine growth")
 w()
 w("LambdaJS continues expanding benchmark coverage:")
 w("- **New passing benchmarks**: BENG/fannkuch, BENG/mandelbrot, KOSTYA/collatz")
-w("- **BENG/nbody**: 134 → 11.3ms (11.8× faster)")
-w("- **KOSTYA/primes**: 19.4 → 8.1ms (2.4× faster)")
-w("- **KOSTYA/levenshtein**: 30.7 → 13.8ms (2.2× faster)")
+w("- **BENG/nbody**: 134 → 11.8ms (11.4× faster)")
+w("- **KOSTYA/primes**: 19.4 → 8.5ms (2.3× faster)")
+w("- **KOSTYA/levenshtein**: 30.7 → 14.2ms (2.2× faster)")
 w()
 
 w("### 8. QuickJS comparison")
@@ -526,6 +698,16 @@ w("- MIR Direct faster on: matmul (8.7 vs 129ms), cube3d (49 vs 141ms)")
 w("- MIR Direct has lower compilation overhead and is the default path")
 w()
 
+w("### 10. Memory footprint")
+w()
+w("Lambda MIR's peak RSS averages ~2.8× Node.js memory, dominated by the MIR JIT compiler and runtime overhead.")
+w("Key observations:")
+w("- **R7RS/micro-benchmarks**: MIR ~37 MB vs Node ~41 MB — Lambda is **lighter** for small programs")
+w("- **KOSTYA/LARCENY/JetStream**: MIR 63–330 MB vs Node 43–60 MB — Lambda's GC and data model use more RAM on heavy workloads")
+w("- **QuickJS** is the most memory-efficient at ~3 MB average (pure interpreter, minimal overhead)")
+w("- **Outliers**: base64 (1,414 MB MIR), navier_stokes (1,310 MB MIR) — indicate optimization opportunities for array-heavy benchmarks")
+w()
+
 w("---")
 w()
 w("## Notes")
@@ -533,13 +715,14 @@ w()
 w("- **Self-reported exec time** measures only the computation, excluding process startup, JIT compilation warmup, and file I/O.")
 w("- **AWFY JS benchmarks** use the official source from `ref/are-we-fast-yet/benchmarks/JavaScript/`. AWFY Python benchmarks use the official Python port with harness.")
 w("- **AWFY Python micro-benchmarks** (sieve, permute, queens, etc.) show extreme Lambda advantage because CPython interprets tight loops ~10,000× slower than JIT-compiled code.")
-w("- **AWFY Python mandelbrot** value excluded due to measurement error (harness incompatibility).")
-w("- **LambdaJS** still fails on some AWFY benchmarks (bounce, storage, json, deltablue, havlak, cd) due to missing ES6 class features.")
+w("- **AWFY Python** benchmarks use the official Python port with harness. Class names: NBody, DeltaBlue, CD (not capitalize()).")
+w("- **LambdaJS** now passes all AWFY benchmarks including bounce, storage, json, deltablue, havlak, and cd (previously failing due to missing ES6 class features).")
 w("- **QuickJS** fails on ack (R7RS) due to stack overflow on deep recursion.")
-w("- **JetStream** benchmarks only run on MIR, C2MIR, and Node.js. No LambdaJS/QuickJS/Python ports exist.")
-w("- **Python** benchmarks not available for: AWFY/nbody, AWFY/deltablue, AWFY/cd, all JetStream benchmarks.")
+w("- **JetStream** benchmarks run on MIR, C2MIR, Node.js, and Python (for deltablue, richards, nbody). No LambdaJS/QuickJS ports.")
+w("- **Python** benchmarks not available for: AWFY/cd, JetStream/cube3d, JetStream/navier_stokes, JetStream/splay, JetStream/hashmap, JetStream/crypto_sha1, JetStream/raytrace3d.")
 w("- All times in **milliseconds** unless noted with 's' suffix (seconds).")
 w("- The `json` AWFY benchmark workload was corrected between R2 and R3 (R2: 0.028ms was a minimal-workload test).")
+w("- **Workload synchronization**: Duplicate benchmark names across suites now use identical heavy workloads synchronized to original JetStream — AWFY/BENG/JetStream mandelbrot N=500, nbody 36000 steps, richards 50×COUNT=1000, deltablue 20×chain(100), Larceny/Kostya primes sieve(1M).")
 
 output = "\n".join(lines)
 with open("test/benchmark/Overall_Result3.md", "w") as f:

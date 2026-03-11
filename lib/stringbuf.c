@@ -283,6 +283,52 @@ void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
             }
             break;
         }
+        case 'q': {
+            // %q — bare-quoted C string: wrap in double quotes, escape " and \.
+            // Use for JSON-style, DOT, and TOML string values.
+            const char* s = va_arg(args, const char*);
+            stringbuf_append_char(sb, '"');
+            if (s) {
+                while (*s) {
+                    if      (*s == '"')  { stringbuf_append_str(sb, "\\\""); }
+                    else if (*s == '\\') { stringbuf_append_str(sb, "\\\\"); }
+                    else                 { stringbuf_append_char(sb, *s); }
+                    s++;
+                }
+            }
+            stringbuf_append_char(sb, '"');
+            break;
+        }
+        case 'Q': {
+            // %Q — bare-quoted Lambda String*: same as %q but for String*.
+            String* s = va_arg(args, String*);
+            stringbuf_append_char(sb, '"');
+            if (s && s->chars && s->len > 0) {
+                const char* p2 = s->chars;
+                const char* end = p2 + s->len;
+                while (p2 < end) {
+                    if      (*p2 == '"')  { stringbuf_append_str(sb, "\\\""); }
+                    else if (*p2 == '\\') { stringbuf_append_str(sb, "\\\\"); }
+                    else                  { stringbuf_append_char(sb, *p2); }
+                    p2++;
+                }
+            }
+            stringbuf_append_char(sb, '"');
+            break;
+        }
+        case 'b': {
+            // %b — boolean: emits "true" or "false" (arg is int, 0=false).
+            int v = va_arg(args, int);
+            stringbuf_append_str(sb, v ? "true" : "false");
+            break;
+        }
+        case 'N': {
+            // %N — name/key specifier: semantic alias for %s (C string).
+            // Prefer %N when the argument is a key or field name for readability.
+            const char* s = va_arg(args, const char*);
+            if (s) stringbuf_append_str(sb, s);
+            break;
+        }
         case '%':
             stringbuf_append_char(sb, '%');
             break;

@@ -22,19 +22,19 @@ TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 # Each benchmark: (name, js_source, run_expression)
 # run_expression is what to call to execute the benchmark once
 BENCHMARKS = [
-    ("nbody",         "ref/JetStream/SunSpider/n-body.js",       "run()"),
-    ("cube3d",        "ref/JetStream/SunSpider/3d-cube.js",      "run()"),
-    ("navier_stokes", "ref/JetStream/Octane/navier-stokes.js",   None),  # need to check
-    ("richards",      "ref/JetStream/Octane/richards.js",        None),  # need to check
-    ("splay",         "ref/JetStream/Octane/splay.js",           None),  # need to check
-    ("deltablue",     "ref/JetStream/Octane/deltablue.js",       None),  # need to check
-    ("hashmap",       "ref/JetStream/simple/hash-map.js",        None),  # need to check
-    ("crypto_sha1",   "ref/JetStream/SunSpider/crypto-sha1.js",  "run()"),
-    ("crypto_aes",    "ref/JetStream/SunSpider/crypto-aes.js",   "run()"),
-    ("crypto_md5",    "ref/JetStream/SunSpider/crypto-md5.js",   None),  # check
-    ("raytrace3d",    "ref/JetStream/SunSpider/3d-raytrace.js",  "run()"),
-    ("base64",        "ref/JetStream/SunSpider/base64.js",       None),  # check
-    ("regex_dna",     "ref/JetStream/SunSpider/regex-dna.js",    None),  # check
+    ("nbody",         "test/benchmark/jetstream/n-body.js",       "run()"),
+    ("cube3d",        "test/benchmark/jetstream/3d-cube.js",      "run()"),
+    ("navier_stokes", "test/benchmark/jetstream/navier-stokes.js",   None),  # need to check
+    ("richards",      "test/benchmark/jetstream/richards.js",        None),  # need to check
+    ("splay",         "test/benchmark/jetstream/splay.js",           None),  # need to check
+    ("deltablue",     "test/benchmark/jetstream/deltablue.js",       None),  # need to check
+    ("hashmap",       "test/benchmark/jetstream/hash-map.js",        None),  # need to check
+    ("crypto_sha1",   "test/benchmark/jetstream/crypto-sha1.js",  "run()"),
+    ("crypto_aes",    "test/benchmark/jetstream/crypto-aes.js",   "run()"),
+    ("crypto_md5",    "test/benchmark/jetstream/crypto-md5.js",   None),  # check
+    ("raytrace3d",    "test/benchmark/jetstream/3d-raytrace.js",  "run()"),
+    ("base64",        "test/benchmark/jetstream/base64.js",       None),  # check
+    ("regex_dna",     "test/benchmark/jetstream/regex-dna.js",    None),  # check
 ]
 
 

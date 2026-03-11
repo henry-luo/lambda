@@ -91,7 +91,7 @@ static void format_kv_item(StringBuf* sb, const ItemReader& item,
     if (item.isNull()) return;
 
     if (item.isBool()) {
-        stringbuf_append_str(sb, item.asBool() ? "true" : "false");
+        stringbuf_emit(sb, "%b", item.asBool());
     }
     else if (item.isInt() || item.isFloat()) {
         format_number(sb, item.item());

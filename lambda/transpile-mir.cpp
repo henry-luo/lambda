@@ -6438,6 +6438,60 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
 
     // Simple aggregate pipe without ~ : data | func -> func(data)
     if (!uses_current_item && pipe_node->op == OPERATOR_PIPE) {
+        // Check for pipe call injection: data | func(args) -> func(data, args)
+        // This avoids generating fn_name1 for overloaded sys functions that only have fn_name2
+        AstNode* right_node = pipe_node->right;
+        if (right_node && right_node->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)right_node;
+            if (pri->expr) right_node = pri->expr;
+        }
+        if (right_node && right_node->node_type == AST_NODE_CALL_EXPR) {
+            AstCallNode* call_node = (AstCallNode*)right_node;
+            AstNode* fn_expr = call_node->function;
+            if (fn_expr && fn_expr->node_type == AST_NODE_SYS_FUNC) {
+                AstSysFuncNode* sys = (AstSysFuncNode*)fn_expr;
+                SysFuncInfo* info = sys->fn_info;
+                if (info) {
+                    // build the correct function name using the fn_info (already resolved to N+1 version)
+                    char sys_fn_name[128];
+                    if (info->is_overloaded) {
+                        snprintf(sys_fn_name, sizeof(sys_fn_name), "%s%s%d",
+                            info->is_proc ? "pn_" : "fn_", info->name, info->arg_count);
+                    } else {
+                        snprintf(sys_fn_name, sizeof(sys_fn_name), "%s%s",
+                            info->is_proc ? "pn_" : "fn_", info->name);
+                    }
+
+                    // count call arguments
+                    AstNode* arg = call_node->argument;
+                    int arg_count = 0;
+                    while (arg) { arg_count++; arg = arg->next; }
+
+                    // emit call with left injected as first argument
+                    if (arg_count == 0) {
+                        return emit_call_1(mt, sys_fn_name, MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+                    } else if (arg_count == 1) {
+                        arg = call_node->argument;
+                        MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+                        return emit_call_2(mt, sys_fn_name, MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+                    } else if (arg_count == 2) {
+                        arg = call_node->argument;
+                        MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+                        arg = arg->next;
+                        MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
+                        return emit_call_3(mt, sys_fn_name, MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+                    }
+                    // fall through for more args — use fn_pipe_call
+                }
+            }
+        }
+
         MIR_reg_t right = transpile_expr(mt, pipe_node->right);
         TypeId right_tid = get_effective_type(mt, pipe_node->right);
         MIR_reg_t boxed_right = emit_box(mt, right, right_tid);

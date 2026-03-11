@@ -17,18 +17,18 @@ fn evaluate(op) => match op {
 }
 
 // ===== Execute operations =====
-evaluate({AddOp a: 3, b: 4})
-evaluate({MulOp a: 5, b: 6})
-evaluate({NegOp value: 42})
-evaluate({SquareOp value: 7})
+evaluate(<AddOp a: 3, b: 4>)
+evaluate(<MulOp a: 5, b: 6>)
+evaluate(<NegOp value: 42>)
+evaluate(<SquareOp value: 7>)
 
 // ===== Batch operations =====
 let operations = [
-    {AddOp a: 1, b: 2},
-    {MulOp a: 3, b: 4},
-    {NegOp value: 5},
-    {SquareOp value: 6},
-    {AddOp a: 10, b: 20}
+    <AddOp a: 1, b: 2>,
+    <MulOp a: 3, b: 4>,
+    <NegOp value: 5>,
+    <SquareOp value: 6>,
+    <AddOp a: 10, b: 20>
 ]
 let results = operations | map(evaluate)
 results

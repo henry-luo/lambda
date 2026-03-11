@@ -30,12 +30,6 @@ static bool is_simple_type(TypeId type) {
            type == LMD_TYPE_BOOL;
 }
 
-static void format_indent(HtmlContext& ctx, int depth) {
-    for (int i = 0; i < depth; i++) {
-        stringbuf_append_str(ctx.output(), "  ");
-    }
-}
-
 String* format_html(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
@@ -142,7 +136,7 @@ void format_html_to_strbuf(StringBuf* sb, Item root_item) {
 static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, int depth, bool raw_text_mode) {
     const char* tag_name = elem.tagName();
     if (!tag_name) {
-        stringbuf_append_str(ctx.output(), "<element/>");
+        ctx.write_text("<element/>");
         return;
     }
 
@@ -162,7 +156,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
     // special handling for #doctype (HTML5 parser DOCTYPE element)
     // format as <!DOCTYPE name>
     if (tag_len == 8 && memcmp(tag_name, "#doctype", 8) == 0) {
-        stringbuf_append_str(ctx.output(), "<!DOCTYPE ");
+        ctx.write_text("<!DOCTYPE ");
         // get the "name" attribute
         ItemReader name_attr = elem.get_attr("name");
         if (name_attr.isString()) {
@@ -172,16 +166,16 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
             }
         } else {
             // default to "html" if no name specified
-            stringbuf_append_str(ctx.output(), "html");
+            ctx.write_text("html");
         }
-        stringbuf_append_char(ctx.output(), '>');
+        ctx.write_char('>');
         return;
     }
 
     // special handling for #comment (HTML5 parser comment element)
     // format as <!--data-->
     if (tag_len == 8 && memcmp(tag_name, "#comment", 8) == 0) {
-        stringbuf_append_str(ctx.output(), "<!--");
+        ctx.write_text("<!--");
         // get the "data" attribute
         ItemReader data_attr = elem.get_attr("data");
         if (data_attr.isString()) {
@@ -191,14 +185,14 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         }
-        stringbuf_append_str(ctx.output(), "-->");
+        ctx.write_text("-->");
         return;
     }
 
     // special handling for HTML comments (tag name "!--") - old parser format
     if (tag_len == 3 && memcmp(tag_name, "!--", 3) == 0) {
         // this is a comment element - format as <!--content-->
-        stringbuf_append_str(ctx.output(), "<!--");
+        ctx.write_text("<!--");
 
         // output comment content (first child text node)
         ItemReader first_child = elem.childAt(0);
@@ -210,7 +204,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
             }
         }
 
-        stringbuf_append_str(ctx.output(), "-->");
+        ctx.write_text("-->");
         return;
     }
 
@@ -233,7 +227,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
             }
         }
 
-        stringbuf_append_char(ctx.output(), '>');
+        ctx.write_char('>');
         return;
     }
 
@@ -273,7 +267,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
     }
 
     // format as proper HTML element
-    stringbuf_append_format(ctx.output(), "<%s", tag_name);
+    ctx.emit("<%N", tag_name);
 
     // add attributes - iterate through element's type shape to get all attributes
     if (elem.element() && elem.element()->type && elem.element()->data) {
@@ -311,12 +305,12 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                     // Regular attributes should always have ="value" even if empty
                     bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
                     if (str && str->len > 0) {
-                        stringbuf_append_str(ctx.output(), "=\"");
+                        ctx.write_text("=\"");
                         format_html_string_safe(ctx.output(), str, true);  // true = is_attribute
-                        stringbuf_append_char(ctx.output(), '"');
+                        ctx.write_char('"');
                     } else if (!is_bool_attr) {
-                        // Non-boolean attribute with empty value: output =""
-                        stringbuf_append_str(ctx.output(), "=\"\"");
+                        // Non-boolean attribute with empty value: output =\"\"
+                        ctx.write_text("=\"\"");
                     }
                     // Boolean attribute with empty value: output just the name (no ="" part)
                 }
@@ -330,9 +324,9 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
 
     if (is_void) {
         // void elements don't have closing tags in HTML5
-        stringbuf_append_char(ctx.output(), '>');
+        ctx.write_char('>');
     } else {
-        stringbuf_append_char(ctx.output(), '>');
+        ctx.write_char('>');
 
         // check if this is a raw text element (script, style, etc.)
         bool is_raw = is_raw_text_element(tag_name, tag_len);
@@ -345,7 +339,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         }
 
         // close tag (only for non-void elements)
-        stringbuf_append_format(ctx.output(), "</%s>", tag_name);
+        ctx.emit("</%N>", tag_name);
     }
 }
 
@@ -356,30 +350,23 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
 
     FormatterContextCpp::RecursionGuard guard(ctx);
     if (guard.exceeded()) {
-        stringbuf_append_str(ctx.output(), "<!-- max_depth -->");
+        ctx.write_text("<!-- max_depth -->");
         return;
     }
 
     if (item.isNull()) {
-        stringbuf_append_str(ctx.output(), "null");
+        ctx.write_text("null");
         return;
     }
 
     if (item.isBool()) {
-        bool val = item.asBool();
-        stringbuf_append_str(ctx.output(), val ? "true" : "false");
+        ctx.emit("%b", item.asBool());
     }
     else if (item.isInt()) {
-        int val = item.asInt();
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%d", val);
-        stringbuf_append_str(ctx.output(), num_buf);
+        ctx.emit("%d", (int)item.asInt());
     }
     else if (item.isFloat()) {
-        double val = item.asFloat();
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%.15g", val);
-        stringbuf_append_str(ctx.output(), num_buf);
+        ctx.emit("%f", item.asFloat());
     }
     else if (item.isString()) {
         String* str = item.asString();
@@ -404,28 +391,28 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
     else if (item.isArray()) {
         ArrayReader arr = item.asArray();
         if (!arr.isEmpty()) {
-            stringbuf_append_str(ctx.output(), "<ul>");
+            ctx.write_text("<ul>");
             auto it = arr.items();
             ItemReader array_item;
             while (it.next(&array_item)) {
-                stringbuf_append_str(ctx.output(), "<li>");
+                ctx.write_text("<li>");
                 format_item_reader(ctx, array_item, depth + 1, raw_text_mode);
-                stringbuf_append_str(ctx.output(), "</li>");
+                ctx.write_text("</li>");
             }
-            stringbuf_append_str(ctx.output(), "</ul>");
+            ctx.write_text("</ul>");
         } else {
-            stringbuf_append_str(ctx.output(), "[]");
+            ctx.write_text("[]");
         }
     }
     else if (item.isMap()) {
         // simple map representation
-        stringbuf_append_str(ctx.output(), "<div>{object}</div>");
+        ctx.write_text("<div>{object}</div>");
     }
     else if (item.isElement()) {
         ElementReader elem = item.asElement();
         format_element_reader(ctx, elem, depth, raw_text_mode);
     }
     else {
-        stringbuf_append_str(ctx.output(), "unknown");
+        ctx.write_text("unknown");
     }
 }

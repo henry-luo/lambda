@@ -22,61 +22,9 @@ static String* parse_property_name(InputContext& ctx, const char **vcf) {
 }
 
 // Helper function to parse property parameters (between ; and :)
+// Uses the shared RFC helper — param names normalised to lower-case.
 static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* params_map) {
-    MarkBuilder& builder = ctx.builder;
-    Input* input = ctx.input();
-
-    while (**vcf == ';') {
-        (*vcf)++; // skip ';'
-
-        // Parse parameter name
-        StringBuf* sb = ctx.sb;
-        stringbuf_reset(sb);
-
-        while (**vcf && **vcf != '=' && **vcf != ':' && **vcf != '\n' && **vcf != '\r') {
-            stringbuf_append_char(sb, tolower(**vcf));
-            (*vcf)++;
-        }
-
-        if (sb->length == 0) continue;
-
-        String* param_name = builder.createName(sb->str->chars, sb->length);
-        if (!param_name) continue;
-
-        String* param_value = NULL;
-
-        if (**vcf == '=') {
-            (*vcf)++; // skip '='
-            stringbuf_reset(sb);
-
-            // Handle quoted values
-            bool in_quotes = false;
-            if (**vcf == '"') {
-                (*vcf)++;
-                in_quotes = true;
-            }
-
-            while (**vcf &&
-                   (in_quotes ? **vcf != '"' : (**vcf != ';' && **vcf != ':')) &&
-                   **vcf != '\n' && **vcf != '\r') {
-                stringbuf_append_char(sb, **vcf);
-                (*vcf)++;
-            }
-
-            if (in_quotes && **vcf == '"') {
-                (*vcf)++; // skip closing quote
-            }
-
-            if (sb->length > 0) {
-                param_value = builder.createString(sb->str->chars, sb->length);
-            }
-        }
-
-        if (param_value) {
-            Item value = {.item = s2it(param_value)};
-            ctx.builder.putToMap(params_map, param_name, value);
-        }
-    }
+    parse_rfc_property_params(ctx.sb, vcf, ctx, params_map, /*upper_case_keys=*/false);
 }
 
 // Helper function to parse property value (after the colon, handling folded lines)

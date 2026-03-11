@@ -3,11 +3,10 @@
 // Adapted from r7rs-benchmarks/src/sumfp.scm (scaled down for Lambda JIT)
 
 pn run(n: float) {
-    var i: float = n
     var s: float = 0.0
-    while (i >= 0.0) {
-        s = s + i
-        i = i - 1.0
+    while (n >= 0.0) {
+        s = s + n
+        n = n - 1.0
     }
     return s
 }

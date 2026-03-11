@@ -1,6 +1,6 @@
 # Lambda Benchmark Guide
 
-This document describes how to prepare, run, and report Lambda benchmarks across 5 suites and 5 engines.
+This document describes how to prepare, run, and report Lambda benchmarks across 6 suites and 6 engines.
 
 ---
 
@@ -13,10 +13,11 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 | **BENG** | `beng/` | 10 | [Benchmarks Game](https://benchmarksgame-team.pages.debian.net/) | Real-world: GC, regex, FASTA, BigInt, N-body |
 | **Kostya** | `kostya/` | 7 | [kostya/benchmarks](https://github.com/kostya/benchmarks) | Community: brainfuck, matmul, base64, JSON |
 | **Larceny** | `larceny/` | 12 | [Larceny/Gabriel](https://www.larcenists.org/) | Gabriel suite: search, symbolic, allocation |
+| **JetStream** | `jetstream/` | 9 | [JetStream](https://browserbench.org/JetStream/) | SunSpider/Octane classics: n-body, deltablue, richards, splay |
 
-**Total: 53 benchmarks**
+**Total: 62 benchmarks**
 
-Each benchmark has a Lambda script (`.ls`) and a JavaScript equivalent (`.js`).
+Each benchmark has a Lambda script (`.ls`), a JavaScript equivalent (`.js`), and where available a Python equivalent (`.py`).
 
 ### File naming
 
@@ -38,14 +39,16 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 | **MIR Direct** | `mir`      | JIT         | `./lambda.exe run script.ls`         |
 | **C2MIR**      | `c2mir`    | JIT         | `./lambda.exe run --c2mir script.ls` |
 | **LambdaJS**   | `lambdajs` | JIT         | `./lambda.exe js script.js`          |
-| **Node.js**    | `nodejs`   | JIT (V8)    | `node script.js`                     |
 | **QuickJS**    | `quickjs`  | Interpreter | `qjs --std -m wrapper.js`            |
+| **Node.js**    | `nodejs`   | JIT (V8)    | `node script.js`                     |
+| **Python**     | `python`   | Interpreter | `python3 script.py`                  |
 
 - **MIR Direct**: Lambda → MIR IR → native. Default compiler path, lowest startup.
 - **C2MIR**: Lambda → C source → MIR. Legacy path, sometimes better optimized.
 - **LambdaJS**: Lambda's built-in JS JIT engine. No `require()` or `fs`.
 - **Node.js**: Google V8 with optimizing JIT. Full Node.js API.
 - **QuickJS**: Lightweight interpreter. Needs a polyfill wrapper (auto-generated).
+- **Python**: CPython interpreter. AWFY benchmarks use the official AWFY Python harness.
 
 ### QuickJS wrapper
 
@@ -151,14 +154,20 @@ AWFY benchmarks reuse official source from `ref/are-we-fast-yet/benchmarks/JavaS
    ```
 2. Create `<name>2_bundle.js` — a standalone file that inlines all AWFY dependencies plus the `__TIMING__` wrapper. This is needed for LambdaJS and QuickJS.
 
-### 4.4 Register in the runner
+### 4.4 Python equivalent
 
-Add the benchmark tuple to the appropriate list in `run_all_benchmarks.py`:
+1. Translate the same algorithm to Python.
+2. Add timing and print `__TIMING__:<ms>\n`.
+3. Save in the suite's `python/` subdirectory.
+
+### 4.5 Register in the runner
+
+Add the benchmark tuple to the appropriate list in `run_benchmarks.py`:
 
 ```python
 R7RS = [
     ...
-    ("name", "test/benchmark/r7rs/name2.ls", "test/benchmark/r7rs/name2.js"),
+    ("name", "category", "test/benchmark/r7rs/name2.ls", "test/benchmark/r7rs/name2.js", "test/benchmark/r7rs/python/name.py"),
 ]
 ```
 
@@ -167,29 +176,106 @@ R7RS = [
 ## 5. Running Benchmarks
 
 All commands run from the **project root** (`/Users/henryluo/Projects/Lambda`).
+The single unified runner is `test/benchmark/run_benchmarks.py`.
 
-### Full run (all 5 suites × 5 engines)
+### Modes
+
+The runner supports three benchmark modes via `-m/--mode`:
+
+| Mode | Description | Default runs | Output file |
+|------|-------------|:------------:|-------------|
+| **time** (default) | Execution time across all engines | 3 | `benchmark_results_v3.json` |
+| **memory** | Peak resident set size (RSS) via `/usr/bin/time` | 1 | `memory_results.json` |
+| **mir-vs-c** | MIR Direct vs C2MIR transpiler wall-clock comparison | 3 | `temp/mir_vs_c_bench.csv` |
+
+### Full run (all 6 suites × 6 engines)
 
 ```bash
-python3 test/benchmark/run_all_benchmarks.py [NUM_RUNS]
+python3 test/benchmark/run_benchmarks.py
 ```
 
-- Default: 3 runs per benchmark, reports median.
+- Default: 3 runs per benchmark per engine, reports median.
 - Timeout: 120 seconds per run.
-- Results saved to `test/benchmark/benchmark_results.json`.
-- Prints wall-clock and exec-time tables to stdout.
+- Results merged into `test/benchmark/benchmark_results_v3.json`.
 
-### Single-suite runners
+### Filtering by suite, benchmark, or engine
 
 ```bash
-# BENG suite only (all 5 engines)
-python3 test/benchmark/run_beng_benchmarks.py [NUM_RUNS]
+# Run only JetStream suite
+python3 test/benchmark/run_benchmarks.py -s jetstream
 
-# JS engines only for R7RS + AWFY (LambdaJS, Node.js, QuickJS)
-python3 test/benchmark/run_js_benchmarks.py [NUM_RUNS]
+# Run AWFY + BENG suites
+python3 test/benchmark/run_benchmarks.py -s awfy,beng
+
+# Run nbody & richards across all suites that have them
+python3 test/benchmark/run_benchmarks.py -b nbody,richards
+
+# Combine: AWFY mandelbrot + nbody only
+python3 test/benchmark/run_benchmarks.py -s awfy -b mandelbrot,nbody
+
+# Only MIR and Node.js engines
+python3 test/benchmark/run_benchmarks.py -e mir,nodejs
+
+# 5 runs per engine instead of default 3
+python3 test/benchmark/run_benchmarks.py -b deltablue -n 5
 ```
 
-These merge results into the same `benchmark_results.json`.
+Filters use **case-insensitive substring matching**: `-b nbody` matches `nbody` in all suites.
+
+### Memory profiling
+
+```bash
+# Peak RSS for all benchmarks (default 1 run)
+python3 test/benchmark/run_benchmarks.py -m memory
+
+# Peak RSS for AWFY only, 3 runs
+python3 test/benchmark/run_benchmarks.py -m memory -s awfy -n 3
+```
+
+Uses `/usr/bin/time -l` (macOS) or `/usr/bin/time -v` (Linux) to measure peak RSS.
+
+### MIR Direct vs C2MIR comparison
+
+```bash
+# Compare MIR vs C2MIR for all suites (untyped only)
+python3 test/benchmark/run_benchmarks.py -m mir-vs-c
+
+# Include typed R7RS variants
+python3 test/benchmark/run_benchmarks.py -m mir-vs-c --typed
+
+# Only R7RS suite
+python3 test/benchmark/run_benchmarks.py -m mir-vs-c -s r7rs --typed
+```
+
+Measures wall-clock time in microseconds. Only uses MIR and C2MIR engines.
+
+### Listing and dry-run
+
+```bash
+# List all 62 benchmarks across 6 suites
+python3 test/benchmark/run_benchmarks.py --list
+
+# Preview what would run without executing
+python3 test/benchmark/run_benchmarks.py --dry-run -b nbody -e mir,nodejs
+
+# Run without saving results to JSON
+python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save
+```
+
+### CLI reference
+
+| Flag | Description |
+|------|-------------|
+| `-m, --mode` | `time` (default), `memory`, or `mir-vs-c` |
+| `-s, --suite` | Comma-separated suite filter (substring match) |
+| `-b, --bench` | Comma-separated benchmark filter (substring match) |
+| `-e, --engines` | Comma-separated engine filter: `mir,c2mir,lambdajs,quickjs,nodejs,python` |
+| `-n, --runs` | Number of runs per engine (default: 3 for time, 1 for memory) |
+| `-t, --timeout` | Timeout per run in seconds (default: 120) |
+| `--typed` | Include typed R7RS variants (mir-vs-c mode only) |
+| `--list` | List all available benchmarks and exit |
+| `--dry-run` | Show what would run without executing |
+| `--no-save` | Don't write results to JSON/CSV |
 
 ### Manual single-benchmark run
 
@@ -208,6 +294,9 @@ node test/benchmark/r7rs/fib2.js
 
 # QuickJS (needs wrapper — or use the auto-generated one in temp/)
 qjs --std -m temp/qjs_fib2.js
+
+# Python
+python3 test/benchmark/r7rs/python/fib.py
 ```
 
 ### Prerequisites
@@ -217,7 +306,9 @@ qjs --std -m temp/qjs_fib2.js
 | `./lambda.exe` | `make release` (must use release build for benchmarking) |
 | `node` | [nodejs.org](https://nodejs.org/) |
 | `qjs` | `brew install quickjs` (macOS) |
+| `python3` | Pre-installed on macOS/Linux |
 | AWFY source | `ref/are-we-fast-yet/` (git submodule or clone) |
+| JetStream source | `ref/JetStream/` (for Node.js JetStream benchmarks) |
 
 > **IMPORTANT**: Never benchmark with a debug build. Always use `make release`.
 
@@ -225,70 +316,75 @@ qjs --std -m temp/qjs_fib2.js
 
 ## 6. Results and Reporting
 
-### Data file
+### Data files
 
-`benchmark_results.json` stores all results:
+| File | Mode | Format |
+|------|------|--------|
+| `benchmark_results_v3.json` | time | Exec time (ms) per engine per benchmark |
+| `memory_results.json` | memory | Peak RSS (MB) + raw bytes per engine |
+| `temp/mir_vs_c_bench.csv` | mir-vs-c | C2MIR vs MIR Direct (μs) + ratio |
+
+`benchmark_results_v3.json` structure:
 
 ```json
 {
   "r7rs": {
     "fib": {
-      "mir":      [19.1, 1.96],
-      "c2mir":    [19.1, 2.22],
-      "lambdajs": [20.8, 10.8],
-      "nodejs":   [37.8, 1.64],
-      "quickjs":  [22.0, 17.4]
+      "mir": 1.96,
+      "c2mir": 2.22,
+      "lambdajs": 10.8,
+      "quickjs": 17.4,
+      "nodejs": 1.64,
+      "python": 12.5
     }
   }
 }
 ```
 
-Each engine value is `[wall_clock_ms, exec_time_ms]`. A value of `null` means the benchmark failed or timed out.
-
-### Tabulate results
-
-```bash
-python3 test/benchmark/summarize_benchmarks.py
-```
-
-Prints summary tables: suite totals (wall-clock and exec-time), per-engine comparison, and common-only totals (benchmarks where all 5 engines succeeded).
+Each engine value is the **self-reported exec time in milliseconds** (median of N runs). A value of `null` means the benchmark failed or timed out. The runner operates in **merge mode** — only the benchmarks you run are overwritten; existing results are preserved.
 
 ### Generate the report
 
 ```bash
-python3 test/benchmark/gen_result_doc.py
+python3 test/benchmark/gen_result3.py
 ```
 
-Reads `benchmark_results.json` and writes `Overall_Result2.md` with:
-- Per-suite tables (all 5 engines + MIR/Node ratio column)
-- Geometric mean MIR/Node.js ratios per suite
-- Overall summary table
-- Performance tier breakdown (Lambda >2x faster, comparable, Node faster, etc.)
+Reads `benchmark_results_v3.json` and writes `Overall_Result3.md` with:
+- Per-suite tables (6 engines + MIR/Node.js and MIR/Python ratio columns)
+- Geometric mean ratios per suite
+- Overall summary table with deduplication of shared benchmarks
+- Performance tier breakdown
 - Key findings narrative
 
 ### Pipeline summary
 
 ```
-prepare scripts  →  run benchmarks  →  tabulate  →  report
-   (.ls + .js)        run_all_        summarize_    gen_result_
-                    benchmarks.py   benchmarks.py    doc.py
-                         ↓                              ↓
-               benchmark_results.json        Overall_Result2.md
+prepare scripts  →  run benchmarks  →  report
+ (.ls + .js + .py)   run_benchmarks.py   gen_result3.py
+                          ↓                    ↓
+              benchmark_results_v3.json   Overall_Result3.md
+              memory_results.json
+              temp/mir_vs_c_bench.csv
 ```
 
 ---
 
 ## 7. Methodology Notes
 
-- **Median of N runs** (default N=3). The median filters outliers from GC pauses or system load.
+- **Median of N runs** (default N=3 for time, N=1 for memory). The median filters outliers from GC pauses or system load.
 - **Self-reported exec time** is the primary comparison metric. It isolates algorithmic performance from process startup overhead (~15–40 ms for Lambda/Node).
-- **Wall-clock time** is also recorded for total cost analysis.
-- **Timeout**: 120 seconds per run. Benchmarks exceeding this are marked as failed.
+- **Wall-clock time** is also measured internally but exec time is preferred when available.
+- **Merge mode**: The runner only overwrites results for benchmarks you actually run. Existing results for other benchmarks are preserved in the JSON.
+- **Process-group kill**: The runner uses `os.setsid` + `os.killpg` for reliable timeout handling, ensuring child processes don't leak.
+- **Timeout**: 120 seconds per run (configurable via `-t`). MIR-vs-C mode auto-raises to 300s.
 - **QuickJS wrappers** are auto-generated in `temp/` and not committed.
+- **AWFY Python harness**: AWFY Python benchmarks run via the official AWFY `harness.py` with per-benchmark class name mapping and iteration counts.
+- **JetStream Node.js wrappers**: Auto-generated in `temp/` — instantiate `new Benchmark()` and call `runIteration()` with timing.
 - **Known engine limitations**:
   - LambdaJS: No `require()`, no `fs`, limited ES6 class support (fails some AWFY).
   - QuickJS: No `fs` module (fails BENG file-reading benchmarks), stack overflow on deep recursion (fails `ack`).
   - MIR: Some `.ls` benchmarks fail due to runtime issues (recorded as `---` in results).
+  - Python: Not all suites have Python ports. JetStream has Python for deltablue, richards, nbody only.
 
 ---
 
@@ -296,12 +392,12 @@ prepare scripts  →  run benchmarks  →  tabulate  →  report
 
 | File | Purpose |
 |------|---------|
-| `run_all_benchmarks.py` | Main runner: 5 suites × 5 engines |
-| `run_beng_benchmarks.py` | BENG-only runner (all 5 engines) |
-| `run_js_benchmarks.py` | JS-only runner (R7RS + AWFY, 3 engines) |
-| `gen_result_doc.py` | Generates `Overall_Result2.md` from JSON |
+| `run_benchmarks.py` | **Unified runner**: 6 suites × 6 engines, time/memory/mir-vs-c modes |
+| `gen_result3.py` | Generates `Overall_Result3.md` from `benchmark_results_v3.json` |
 | `summarize_benchmarks.py` | Prints summary tables to stdout |
-| `benchmark_results.json` | Raw results data (wall + exec times) |
-| `Overall_Result2.md` | Generated report with tables and analysis |
+| `benchmark_results_v3.json` | Execution time results (ms per engine per benchmark) |
+| `memory_results.json` | Peak RSS memory results (MB + raw bytes) |
+| `Overall_Result3.md` | Generated report with tables and analysis |
 | `awfy/awfy_helper.js` | AWFY timing wrapper for Node.js |
 | `awfy/*_bundle.js` | Standalone AWFY bundles for LambdaJS/QuickJS |
+| `_old/` | Archived previous runner scripts (for reference) |

@@ -11,7 +11,7 @@ import color: .color
 // ============================================================
 
 pub fn linear_scale(dlo, dhi, rlo, rhi) {
-    { kind: "linear", domain: [float(dlo), float(dhi)], "range": [float(rlo), float(rhi)] }
+    { kind: "linear", domain: [float(dlo), float(dhi)], 'range': [float(rlo), float(rhi)] }
 }
 
 pub fn linear_scale_nice(values, rlo, rhi, include_zero: bool) {
@@ -24,11 +24,11 @@ pub fn linear_scale_nice(values, rlo, rhi, include_zero: bool) {
 }
 
 pub fn log_scale(dlo, dhi, rlo, rhi, b) {
-    { kind: "log", domain: [float(dlo), float(dhi)], "range": [float(rlo), float(rhi)], base: float(b) }
+    { kind: "log", domain: [float(dlo), float(dhi)], 'range': [float(rlo), float(rhi)], base: float(b) }
 }
 
 pub fn sqrt_scale(dlo, dhi, rlo, rhi) {
-    { kind: "sqrt", domain: [float(dlo), float(dhi)], "range": [float(rlo), float(rhi)] }
+    { kind: "sqrt", domain: [float(dlo), float(dhi)], 'range': [float(rlo), float(rhi)] }
 }
 
 pub fn band_scale(categories, rlo, rhi, pad) {
@@ -36,7 +36,7 @@ pub fn band_scale(categories, rlo, rhi, pad) {
     let range_span = float(rhi) - float(rlo);
     let total_padding = float(pad) * float(n + 1);
     let band_w = if (n > 0) (range_span - total_padding) / float(n) else range_span;
-    { kind: "band", domain: categories, "range": [float(rlo), float(rhi)], bandwidth: band_w, padding: float(pad) }
+    { kind: "band", domain: categories, 'range': [float(rlo), float(rhi)], bandwidth: band_w, padding: float(pad) }
 }
 
 pub fn point_scale(categories, rlo, rhi, pad) {
@@ -44,11 +44,11 @@ pub fn point_scale(categories, rlo, rhi, pad) {
     let range_span = float(rhi) - float(rlo);
     let pad_total = float(pad) * 2.0;
     let step = if (n > 1) (range_span - pad_total) / float(n - 1) else 0.0;
-    { kind: "point", domain: categories, "range": [float(rlo), float(rhi)], step: step, padding: float(pad) }
+    { kind: "point", domain: categories, 'range': [float(rlo), float(rhi)], step: step, padding: float(pad) }
 }
 
 pub fn ordinal_scale(categories, range_values) {
-    { kind: "ordinal", domain: categories, "range": range_values }
+    { kind: "ordinal", domain: categories, 'range': range_values }
 }
 
 // ============================================================

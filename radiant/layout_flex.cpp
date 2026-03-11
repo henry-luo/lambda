@@ -1749,13 +1749,28 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
             if (cached) {
                 log_debug("Applying cached measurements to flex item %d: %dx%d (content: %dx%d)",
                     count, cached->measured_width, cached->measured_height, cached->content_width, cached->content_height);
+                // For grid containers, skip the cached height — it was computed by
+                // stacking children as blocks (wrong); grid height = max_row_height.
+                bool child_is_grid_fc = (child_elmt && child_elmt->display.inner == CSS_VALUE_GRID);
+                if (!child_is_grid_fc && child_elmt && child_elmt->specified_style) {
+                    CssDeclaration* d = style_tree_get_declaration(
+                        child_elmt->specified_style, CSS_PROPERTY_DISPLAY);
+                    if (d && d->value && d->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum dv = d->value->data.keyword;
+                        child_is_grid_fc = (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID);
+                    }
+                }
                 child->width = cached->measured_width;
-                child->height = cached->measured_height;
+                if (!child_is_grid_fc) {
+                    child->height = cached->measured_height;
+                }
                 if (child_elmt) {
                     child_elmt->content_width = cached->content_width;
-                    child_elmt->content_height = cached->content_height;
-                    log_debug("Applied measurements: item %d now has size %dx%d (content: %dx%d)",
-                        count, child->width, child->height, child_elmt->content_width, child_elmt->content_height);
+                    if (!child_is_grid_fc) {
+                        child_elmt->content_height = cached->content_height;
+                    }
+                    log_debug("Applied measurements: item %d now has size %dx%d (content: %dx%d, is_grid=%d)",
+                        count, child->width, child->height, child_elmt->content_width, child_elmt->content_height, child_is_grid_fc);
                 }
             } else {
                 log_debug("No cached measurement found for flex item %d", count);
@@ -1986,15 +2001,34 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                       child->node_name(), cached->measured_width, cached->measured_height,
                       cached->content_width, cached->content_height);
 
+            // Determine if this item is a grid container.
+            // For grid containers the measurement cache stores a height computed by
+            // stacking children as blocks, which is wrong — grid arranges children in
+            // columns so the container height is max_row_height, not sum of rows.
+            // Skip applying the cached height for grid containers; the flex algorithm
+            // will later determine the correct height via calculate_item_intrinsic_sizes.
+            bool child_is_grid = (item->display.inner == CSS_VALUE_GRID);
+            if (!child_is_grid && item->specified_style) {
+                CssDeclaration* disp_decl = style_tree_get_declaration(
+                    item->specified_style, CSS_PROPERTY_DISPLAY);
+                if (disp_decl && disp_decl->value &&
+                    disp_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum dv = disp_decl->value->data.keyword;
+                    child_is_grid = (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID);
+                }
+            }
+
             // Apply measurements (don't override explicit CSS dimensions)
             if (item->width <= 0) {
                 item->width = cached->measured_width;
             }
-            if (item->height <= 0) {
+            if (!child_is_grid && item->height <= 0) {
                 item->height = cached->measured_height;
             }
             item->content_width = cached->content_width;
-            item->content_height = cached->content_height;
+            if (!child_is_grid) {
+                item->content_height = cached->content_height;
+            }
         }
 
         // Step 5: Re-resolve percentage widths/heights relative to flex container

@@ -258,6 +258,7 @@ def run_richards():
 
 def main():
     t0 = time.perf_counter_ns()
+    # Original JetStream workload: 50 iterations with COUNT=1000
     pass_all = True
     for _ in range(50):
         if not run_richards():

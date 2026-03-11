@@ -1,8 +1,7 @@
 "===== MILESTONE 7 TESTS =====1. macro def count:"
 1
 "2. macro name:greeting3. macro params:"
-{[null nested map]
-}
+1
 "4. macro default_arg:World5. simple def count:"
 1
 "6. simple default_arg null:"

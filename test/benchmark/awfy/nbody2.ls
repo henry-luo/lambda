@@ -1,5 +1,5 @@
 // AWFY Benchmark: NBody (Typed version)
-// Expected result: PASS (energy after 1000 iterations ~ -0.169088)
+// Synchronized with JetStream: 36000 total advance steps
 
 let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
@@ -117,7 +117,7 @@ pn benchmark() {
     offset_momentum(bvx, bvy, bvz, bmass)
 
     var i: int = 0
-    while (i < 1000) {
+    while (i < 36000) {
         advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
         i = i + 1
     }
@@ -130,7 +130,7 @@ pn main() {
     let result = benchmark()
     var __t1 = clock()
     var check = floor(result * -10000000.0)
-    if (check == 1690876) {
+    if (check == 1690142) {
         print("NBody: PASS\n")
     } else {
         print("NBody: FAIL check=")

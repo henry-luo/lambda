@@ -13,7 +13,7 @@ type Counter {
 }
 
 // basic mutation
-let c = {Counter count: 0}
+let c = <Counter count: 0>
 c.count
 c.increment()
 c.count
@@ -38,7 +38,7 @@ type Rect {
     }
     fn area() => width * height
 }
-let r = {Rect width: 3.0, height: 4.0}
+let r = <Rect width: 3.0, height: 4.0>
 r.area()
 r.scale(2.0)
 r.area()

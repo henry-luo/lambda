@@ -25,6 +25,7 @@ typedef void (*ItemProcessor)(StringBuf* sb, const ItemReader& item);
 // common text formatting functions
 void format_raw_text_common(StringBuf* sb, String* str);
 void format_text_with_escape(StringBuf* sb, String* str, const TextEscapeConfig* config);
+void format_text_with_escape(StringBuf* sb, const char* s, size_t len, const TextEscapeConfig* config);
 
 // process element children with custom text and item handlers
 void format_element_children_with_processors(

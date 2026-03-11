@@ -52,4 +52,149 @@ static inline void append_codepoint_utf8_strbuf(StrBuf* sb, uint32_t codepoint) 
     }
 }
 
+/**
+ * Handle one JSON/properties escape sequence starting at @p *pos (which must
+ * point at the char AFTER the leading backslash).
+ *
+ * Recognised escapes: \" \\ \/ \b \f \n \r \t \uXXXX (UTF-16 surrogate pairs
+ * are combined automatically).  Unknown escapes append the literal char.
+ *
+ * @param pos  In/out: advanced past the escape sequence on return
+ * @param sb   Output buffer — decoded bytes are appended here
+ * @return     Number of source chars consumed (i.e. how much *pos advanced)
+ */
+static inline int parse_escape_char(const char** pos, StringBuf* sb) {
+    const char* start = *pos;
+    char c = **pos;
+
+    switch (c) {
+        case '"':  stringbuf_append_char(sb, '"');  (*pos)++; break;
+        case '\\': stringbuf_append_char(sb, '\\'); (*pos)++; break;
+        case '/':  stringbuf_append_char(sb, '/');  (*pos)++; break;
+        case 'b':  stringbuf_append_char(sb, '\b'); (*pos)++; break;
+        case 'f':  stringbuf_append_char(sb, '\f'); (*pos)++; break;
+        case 'n':  stringbuf_append_char(sb, '\n'); (*pos)++; break;
+        case 'r':  stringbuf_append_char(sb, '\r'); (*pos)++; break;
+        case 't':  stringbuf_append_char(sb, '\t'); (*pos)++; break;
+        case 'u': {
+            (*pos)++;  // skip 'u'
+            if (!(*pos)[0] || !(*pos)[1] || !(*pos)[2] || !(*pos)[3]) {
+                // not enough digits — output replacement char
+                stringbuf_append_char(sb, (char)0xEF);
+                stringbuf_append_char(sb, (char)0xBF);
+                stringbuf_append_char(sb, (char)0xBD);
+                break;
+            }
+            char hex[5] = {(*pos)[0], (*pos)[1], (*pos)[2], (*pos)[3], '\0'};
+            char* end;
+            unsigned long cp = strtoul(hex, &end, 16);
+            if (end != hex + 4) {
+                stringbuf_append_char(sb, (char)0xEF);
+                stringbuf_append_char(sb, (char)0xBF);
+                stringbuf_append_char(sb, (char)0xBD);
+                break;
+            }
+            (*pos) += 4;
+
+            if (cp >= 0xD800 && cp <= 0xDBFF) {
+                // high surrogate — look for low surrogate \uXXXX
+                const char* la = *pos;
+                if (la[0] == '\\' && la[1] == 'u' &&
+                    la[2] && la[3] && la[4] && la[5]) {
+                    char hex2[5] = {la[2], la[3], la[4], la[5], '\0'};
+                    char* end2;
+                    unsigned long lo = strtoul(hex2, &end2, 16);
+                    uint32_t combined = decode_surrogate_pair((uint16_t)cp, (uint16_t)lo);
+                    if (end2 == hex2 + 4 && combined != 0) {
+                        cp = combined;
+                        (*pos) += 6;  // skip \uXXXX
+                    } else {
+                        cp = 0xFFFD;
+                    }
+                } else {
+                    cp = 0xFFFD;
+                }
+            } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                cp = 0xFFFD;  // lone low surrogate
+            }
+            append_codepoint_utf8(sb, (uint32_t)cp);
+            break;
+        }
+        default:
+            stringbuf_append_char(sb, c);
+            (*pos)++;
+            break;
+    }
+    return (int)(*pos - start);
+}
+
+/**
+ * Match and consume a literal keyword in a pointer-style parser.
+ *
+ * Checks that *src starts with @p literal, then advances both *src and
+ * ctx.tracker by len(literal).  On mismatch, adds an error and returns false
+ * (leaving *src and the tracker unchanged).
+ *
+ * @param ctx     InputContext (for tracker sync + error reporting)
+ * @param src     In/out: pointer advanced on success
+ * @param literal NUL-terminated string to match (e.g. "true", "null")
+ * @return        true on success, false on mismatch
+ */
+static inline bool input_expect_literal(InputContext& ctx, const char** src,
+                                        const char* literal) {
+    size_t len = strlen(literal);
+    if (strncmp(*src, literal, len) != 0) {
+        ctx.addError(ctx.tracker.location(), "Expected '%s'", literal);
+        return false;
+    }
+    *src += len;
+    ctx.tracker.advance(len);
+    return true;
+}
+
+/**
+ * Parse a double-quoted string from ctx.tracker.
+ *
+ * On entry tracker.current() must be '"'.  Handles standard escape sequences
+ * via parse_escape_char() (superset of JSON/DOT/D2 escapes).
+ *
+ * @param ctx  InputContext for tracker, string-buffer, and builder
+ * @return     New String* on success, nullptr on error
+ */
+static inline String* parse_shared_quoted_string(InputContext& ctx) {
+    SourceTracker& tracker = ctx.tracker;
+    if (tracker.atEnd() || tracker.current() != '"') return nullptr;
+
+    SourceLocation start_loc = tracker.location();
+    tracker.advance(); // skip opening '"'
+
+    StringBuf* sb = ctx.sb;
+    stringbuf_reset(sb);
+
+    while (!tracker.atEnd() && tracker.current() != '"') {
+        char c = tracker.current();
+        if (c == '\\') {
+            tracker.advance(); // skip '\'
+            if (tracker.atEnd()) {
+                ctx.addError(tracker.location(), "Unterminated string escape");
+                return nullptr;
+            }
+            const char* pos = tracker.rest();
+            int consumed = parse_escape_char(&pos, sb);
+            tracker.advance(consumed);
+        } else {
+            stringbuf_append_char(sb, c);
+            tracker.advance();
+        }
+    }
+
+    if (tracker.atEnd()) {
+        ctx.addError(start_loc, "Unterminated quoted string");
+        return nullptr;
+    }
+
+    tracker.advance(); // skip closing '"'
+    return ctx.builder.createString(sb->str->chars, sb->length);
+}
+
 } // namespace lambda

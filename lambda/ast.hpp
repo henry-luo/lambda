@@ -50,8 +50,7 @@ extern "C" {
 #define SYM_PARENT_EXPR sym_parent_expr   // expr.. parent access shorthand
 
 // Pipe expression current item references (pipe is now part of binary_expr)
-#define SYM_CURRENT_ITEM sym_current_item
-#define SYM_CURRENT_INDEX sym_current_index
+#define SYM_CURRENT_EXPR sym_current_expr
 
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
@@ -61,7 +60,6 @@ extern "C" {
 #define SYM_MATCH_DEFAULT sym_match_default
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
-#define SYM_PUB_STAM sym_pub_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
 #define SYM_WHILE_STAM sym_while_stam
@@ -97,10 +95,8 @@ extern "C" {
 // #define SYM_SYS_FUNC sym_sys_func
 #define SYM_IMPORT_MODULE sym_import_module
 
-// Object type definition and object literal symbols
+// Object type definition symbols
 #define SYM_OBJECT_TYPE sym_object_type
-#define SYM_ENTITY_TYPE sym_entity_type
-#define SYM_OBJECT_LITERAL sym_object_literal
 #define SYM_THAT_CONSTRAINT sym_that_constraint
 
 // String/Symbol Pattern symbols
@@ -503,11 +499,13 @@ typedef struct AstElementNode : AstMapNode {
 } AstElementNode;
 
 // Object type definition node
-// type Point { x: float, y: float; fn magnitude() => ... }
+// Object (no content): type Point { x: float, y: float; fn magnitude() => ... }
+// Element (with content): type Article { title: string\n string, element }
 // Extends AstNamedNode so it can be registered in the name scope via push_name
 typedef struct AstObjectTypeNode : AstNamedNode {
     AstNode* item;              // linked list of field declaration AST nodes
     AstNode* base_type;         // base type identifier for inheritance (NULL if none)
+    AstNode* content;           // content type schema (NULL if none → object, non-NULL → element)
     AstNode* methods;           // linked list of fn/pn AST nodes
     AstNode* constraints;       // linked list of that-constraint AST nodes
     bool is_public;             // true when declared with 'pub type T { ... }'

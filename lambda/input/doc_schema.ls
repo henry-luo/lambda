@@ -238,66 +238,66 @@ type AttrType = {
 }
 
 // Core document structure types
-type Document <
+type Document {
     version: string,
     <meta: Meta>?,
     <body>
->
+}
 
-type Meta <
+type Meta {
     // All metadata fields as defined above
->
+}
 
-type Body < BlockContent* >
+type Body { BlockContent* }
 
 // Block-level elements
-type Para < id: string?, class: CssClass?, 'data-*': DataAttrs?, InlineContent* >
-type LineBlock < BaseAttrs, <line: InlineContent*>* >
-type CodeBlock < CodeAttrs, string >
-type RawBlock < RawAttrs, string >
-type BlockQuote < BaseAttrs, BlockContent* >
-type Header < HeaderAttrs, InlineContent* >
-type HorizontalRule < BaseAttrs >
-type Div < BaseAttrs, BlockContent* >
-type Figure < BaseAttrs, <img>, <figcaption: InlineContent*>? >
+type Para { id: string?, class: CssClass?, 'data-*': DataAttrs?, InlineContent* }
+type LineBlock { BaseAttrs, <line: InlineContent*>* }
+type CodeBlock { CodeAttrs, string }
+type RawBlock { RawAttrs, string }
+type BlockQuote { BaseAttrs, BlockContent* }
+type Header { HeaderAttrs, InlineContent* }
+type HorizontalRule { BaseAttrs }
+type Div { BaseAttrs, BlockContent* }
+type Figure { BaseAttrs, <img>, <figcaption: InlineContent*>? }
 
 // List elements
-type OrderedList < ListAttrs, <li: BlockContent*>* >
-type BulletList < BaseAttrs, <li: BlockContent*>* >
-type DefinitionList < 
+type OrderedList { ListAttrs, <li: BlockContent*>* }
+type BulletList { BaseAttrs, <li: BlockContent*>* }
+type DefinitionList {
     BaseAttrs,
     (<dt: InlineContent*>, <dd: BlockContent*>)*
->
+}
 
 // Table elements
-type Table <
+type Table {
     BaseAttrs,
     <caption: InlineContent*>?,
     <colgroup: <col: ColAttrs>*>?,
     <thead: <tr: (<th: TableCellAttrs, BlockContent*> | <td: TableCellAttrs, BlockContent*>)*>*>?,
     <tbody: <tr: (<th: TableCellAttrs, BlockContent*> | <td: TableCellAttrs, BlockContent*>)*>*>?
->
+}
 
 // Inline elements
-type Emphasis < BaseAttrs, InlineContent* >
-type Strong < BaseAttrs, InlineContent* >
-type Strikeout < BaseAttrs, InlineContent* >
-type Superscript < BaseAttrs, InlineContent* >
-type Subscript < BaseAttrs, InlineContent* >
-type SmallCaps < SpanAttrs, InlineContent* >
-type Quoted < QuoteAttrs, InlineContent* >
-type Link < LinkAttrs, InlineContent* >
-type Image < ImageAttrs >
-type Code < CodeAttrs, string >
-type RawInline < RawAttrs, string >
-type LineBreak < BaseAttrs >
-type Space < BaseAttrs >
-type SoftBreak < BaseAttrs >
+type Emphasis { BaseAttrs, InlineContent* }
+type Strong { BaseAttrs, InlineContent* }
+type Strikeout { BaseAttrs, InlineContent* }
+type Superscript { BaseAttrs, InlineContent* }
+type Subscript { BaseAttrs, InlineContent* }
+type SmallCaps { SpanAttrs, InlineContent* }
+type Quoted { QuoteAttrs, InlineContent* }
+type Link { LinkAttrs, InlineContent* }
+type Image { ImageAttrs }
+type Code { CodeAttrs, string }
+type RawInline { RawAttrs, string }
+type LineBreak { BaseAttrs }
+type Space { BaseAttrs }
+type SoftBreak { BaseAttrs }
 
 // Citation elements
-type Cite < BaseAttrs, <citation: CitationAttrs>* >
-type Note < BaseAttrs, BlockContent* >
-type Math < MathAttrs, string >
+type Cite { BaseAttrs, <citation: CitationAttrs>* }
+type Note { BaseAttrs, BlockContent* }
+type Math { MathAttrs, string }
 
 // HTML element aliases for common elements
 type p = Para
