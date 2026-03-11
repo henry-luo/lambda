@@ -2403,39 +2403,7 @@
         "required": true,
         "types": [
           {
-            "type": "array_type",
-            "named": true
-          },
-          {
-            "type": "base_type",
-            "named": true
-          },
-          {
-            "type": "binary",
-            "named": true
-          },
-          {
             "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "datetime",
-            "named": true
-          },
-          {
-            "type": "decimal",
-            "named": true
-          },
-          {
-            "type": "element_type",
-            "named": true
-          },
-          {
-            "type": "float",
             "named": true
           },
           {
@@ -2443,43 +2411,7 @@
             "named": true
           },
           {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "list_type",
-            "named": true
-          },
-          {
-            "type": "named_value",
-            "named": true
-          },
-          {
-            "type": "negation_type",
-            "named": true
-          },
-          {
-            "type": "occurrence_type",
-            "named": true
-          },
-          {
-            "type": "pattern_char_class",
-            "named": true
-          },
-          {
-            "type": "range_type",
-            "named": true
-          },
-          {
-            "type": "string",
-            "named": true
-          },
-          {
-            "type": "symbol",
+            "type": "unary_type",
             "named": true
           }
         ]

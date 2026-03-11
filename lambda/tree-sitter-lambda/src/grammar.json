@@ -5317,7 +5317,7 @@
             "name": "pattern",
             "content": {
               "type": "SYMBOL",
-              "name": "_match_type_expr"
+              "name": "_type_expr"
             }
           },
           {
@@ -7193,63 +7193,6 @@
         {
           "type": "SYMBOL",
           "name": "unary_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "binary_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "fn_type"
-        }
-      ]
-    },
-    "_match_type_expr": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "range_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_non_null_literal"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "base_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "identifier"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "list_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "array_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "element_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "pattern_char_class"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "occurrence_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "negation_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "constrained_type"
         },
         {
           "type": "SYMBOL",

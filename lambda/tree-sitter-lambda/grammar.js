@@ -613,7 +613,7 @@ module.exports = grammar({
     ),
 
     match_arm: $ => prec.right(seq(
-      'case', field('pattern', $._match_type_expr),
+      'case', field('pattern', $._type_expr),
       choice(
         seq(':', field('body', $._expr)),
         seq('{', field('body', $.content), '}')
@@ -900,18 +900,7 @@ module.exports = grammar({
       $.fn_type,
     ),
 
-    // Match arm type expression - like _type_expr but excludes map_type
-    // to avoid ambiguity with { block } body in match arms.
-    // Since _match_type_expr is hidden, children appear directly in parse tree.
-    _match_type_expr: $ => choice(
-      // primary_type alternatives minus map_type
-      $.range_type, $._non_null_literal, $.base_type, $.identifier,
-      $.list_type, $.array_type, $.element_type, $.pattern_char_class,
-      // unary modifiers
-      $.occurrence_type, $.negation_type, $.constrained_type,
-      // compound types
-      $.binary_type, $.fn_type,
-    ),
+    
 
     // Type concatenation (for string/symbol patterns): whitespace-separated sequence of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
