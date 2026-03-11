@@ -128,13 +128,10 @@ module.exports = grammar({
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
-    [$.unary_type, $.occurrence_type],             // primary_type + [n] could be occurrence or end of type
-    [$._type_expr, $._string_type_expr],           // type_assign: unary_type could be _type_expr or _string_type_expr
-    [$._string_type_expr, $.concat_type],          // unary_type could be complete _string_type_expr or start of concat_type
-    [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
   ],
 
-  precedences: $ => [[
+  precedences: $ => [
+  [
     $.fn_expr_stam,
     $.call_expr,
     $.index_expr,
@@ -170,6 +167,8 @@ module.exports = grammar({
     $.assign_stam,
   ],
   [
+    $.range_type,
+    $.primary_type,
     $.unary_type,         // tight unary types 
     $.grouped_type,
     $.concat_type,        // in regex, concatenation has higher precedence than alternation, so concat_type is tighter than binary_type
@@ -178,6 +177,7 @@ module.exports = grammar({
     $._type_expr,   
     $.return_type,   
     $.fn_type,            // fn binds loosest: fn int+ means fn (int+)
+    $._string_type_expr
   ],
   [$.attr_binary_expr, $._attr_expr]
 ],
@@ -848,7 +848,7 @@ module.exports = grammar({
       $.array_type,
       $.map_type,
       $.element_type,
-      // String/symbol pattern atoms (unified into type system)
+      // string/symbol pattern atoms (unified into type system)
       $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
     ),
 
@@ -880,12 +880,12 @@ module.exports = grammar({
 
     // Unary type: primary type with optional occurrence modifier
     // Replaces the old unary_type → _quantified_type chain
-    unary_type: $ => choice(
+    unary_type: $ => prec.right(choice(
       $.occurrence_type,
       $.negation_type,          // !T - prefix negation
       $.primary_type,
       $.constrained_type
-    ),
+    )),
 
     binary_type: $ => choice(
       ...type_pattern(choice($._type_expr)),
@@ -896,7 +896,6 @@ module.exports = grammar({
     //   primary_type > occurrence_type > constrained/concat > binary > fn_type
     _type_expr: $ => choice(
       $.unary_type,            // covers primary_type and occurrence_type
-      // $.concat_type,        // whitespace-separated type terms (patterns)
       $.binary_type,           // alternation: T | U, T & U, T ! U
       $.fn_type,
     ),
