@@ -2,11 +2,11 @@
 // Layer: 4 | Category: integration | Covers: string patterns, is, match, find/replace
 
 // ===== Define validation patterns =====
-string email_pat = [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
-string phone_pat = \d{3}-\d{3}-\d{4}
-string zip_pat = ^\d{5}$
-string alpha_pat = ^[a-zA-Z]+$
-string num_pat = ^\d+$
+type email_pat = [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+type phone_pat = \d{3}-\d{3}-\d{4}
+type zip_pat = ^\d{5}$
+type alpha_pat = ^[a-zA-Z]+$
+type num_pat = ^\d+$
 
 // ===== Validate emails =====
 "user@example.com" is email_pat
@@ -67,10 +67,10 @@ let classified = raw_data | map((s) => {
 classified | map((c) => c.input & " -> " & c.type)
 
 // ===== Password strength =====
-string has_upper = [A-Z]
-string has_lower = [a-z]
-string has_digit = \d
-string has_special = [!@#$%^&*]
+type has_upper = [A-Z]
+type has_lower = [a-z]
+type has_digit = \d
+type has_special = [!@#$%^&*]
 
 fn password_strength(pw: string) {
     let checks = [

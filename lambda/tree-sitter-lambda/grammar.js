@@ -901,8 +901,8 @@ module.exports = grammar({
       $.fn_type,
     ),
 
-    // ==================== String/Symbol Pattern Definitions ====================
-  
+    //  String/Symbol Pattern Definitions ----------------------
+
     // Character classes for pattern matching
     pattern_char_class: _ => token(choice(
       '\\d',  // digit [0-9]
@@ -963,6 +963,18 @@ module.exports = grammar({
     type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', 
       choice($._type_expr, $._string_type_expr))),
 
+    // type_stam handles type aliases and string/symbol patterns.
+    // The AST builder detects pattern definitions by analyzing the type expression content.
+    type_stam: $ => seq(
+      optional(field('pub', 'pub')),
+      'type',
+      field('declare', alias($.type_assign, $.assign_expr)),
+      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
+    ),
+
+    // Object-level constraint: that (expr)
+    that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
+
     // Object/element type with optional inheritance, content schema, and methods
     // Object (no content): type Point { x: float, y: float }
     // Element (with content): type Article { title: string, string, element; fn render() => ... }
@@ -985,18 +997,6 @@ module.exports = grammar({
         repeat(choice($.fn_stam, $.fn_expr_stam, $.that_constraint))
       )),
       '}'
-    ),
-
-    // Object-level constraint: that (expr)
-    that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
-
-    // type_stam handles type aliases and string/symbol patterns.
-    // The AST builder detects pattern definitions by analyzing the type expression content.
-    type_stam: $ => seq(
-      optional(field('pub', 'pub')),
-      'type',
-      field('declare', alias($.type_assign, $.assign_expr)),
-      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
     // top-level type definitions: type_stam | object_type
