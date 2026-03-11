@@ -204,14 +204,53 @@ inline void copy_enhanced_to_old(const EnhancedGridTrack& enhanced, ::GridTrack*
 
 /**
  * Copy vector of EnhancedGridTrack back to old GridTrack array (from grid.hpp)
+ * Uses the "largest remainder" method to distribute any fractional pixel loss:
+ * floor all track sizes first, then give +1px to the tracks with the largest
+ * fractional parts until the integer total matches round(float total).
+ * This prevents accumulated truncation errors (e.g. 4×17.5 → 158 instead of 160).
  */
 inline void copy_enhanced_tracks_to_old(
     const std::vector<EnhancedGridTrack>& enhanced_tracks,
     ::GridTrack* old_tracks, int count)
 {
     int copy_count = std::min(static_cast<int>(enhanced_tracks.size()), count);
+
+    // Pass 1: floor each track and copy non-size fields
+    float float_total = 0.0f;
+    int floor_total = 0;
     for (int i = 0; i < copy_count; i++) {
-        copy_enhanced_to_old(enhanced_tracks[i], &old_tracks[i]);
+        float v = enhanced_tracks[i].base_size;
+        int fv = static_cast<int>(v);           // floor (truncate towards zero)
+        old_tracks[i].base_size     = fv;
+        old_tracks[i].computed_size = fv;
+        old_tracks[i].growth_limit  = enhanced_tracks[i].growth_limit;
+        old_tracks[i].is_flexible   = enhanced_tracks[i].max_track_sizing_function.is_fr();
+        float_total += v;
+        floor_total += fv;
+    }
+
+    // Pass 2: distribute the fractional remainder to tracks with highest frac parts
+    int remainder = static_cast<int>(roundf(float_total)) - floor_total;
+    if (remainder > 0 && copy_count > 0) {
+        // Build (fractional_part, index) pairs and sort descending
+        // Use a simple selection approach to keep code minimal
+        std::vector<std::pair<float, int>> fracs;
+        fracs.reserve(copy_count);
+        for (int i = 0; i < copy_count; i++) {
+            float frac = enhanced_tracks[i].base_size
+                       - static_cast<float>(static_cast<int>(enhanced_tracks[i].base_size));
+            if (frac > 0.0f) fracs.push_back({frac, i});
+        }
+        std::sort(fracs.begin(), fracs.end(),
+                  [](const std::pair<float,int>& a, const std::pair<float,int>& b) {
+                      return a.first > b.first;
+                  });
+        int to_add = std::min(remainder, static_cast<int>(fracs.size()));
+        for (int j = 0; j < to_add; j++) {
+            int idx = fracs[j].second;
+            old_tracks[idx].base_size++;
+            old_tracks[idx].computed_size++;
+        }
     }
 }
 
@@ -714,9 +753,11 @@ inline std::vector<GridItemContribution> collect_item_contributions(
             contrib.track_start = col_start - 1;  // Convert to 0-based
             contrib.track_span = col_end - col_start;
 
-            // Get intrinsic sizes from pre-computed measurements or calculate
-            if (item->gi->has_measured_size &&
-                (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0)) {
+            // Get intrinsic sizes from pre-computed measurements or calculate.
+            // NOTE: has_measured_size=true means the measurement pass ran successfully.
+            // 0 is a valid measurement (empty elements); do NOT skip it by checking > 0,
+            // as that would cause the fallback to return 1px for empty flex items.
+            if (item->gi->has_measured_size) {
                 contrib.min_content_contribution = item->gi->measured_min_width;
                 contrib.max_content_contribution = item->gi->measured_max_width;
             } else {
@@ -826,13 +867,18 @@ inline std::vector<GridItemContribution> collect_item_contributions(
  * @param item_count Number of items
  * @param container_width Available width for columns
  * @param container_height Available height for rows (may be indefinite)
+ * @param out_col_intrinsic_width Optional output: the first-pass (pct-as-auto) column width.
+ *        Set only when percentage tracks were re-resolved for an indefinite container.
+ *        Callers should use this as the container's intrinsic width (not the sum of tracks
+ *        after pct re-resolution, which may be larger due to overflow).
  */
 inline void run_enhanced_track_sizing(
     GridContainerLayout* grid_layout,
     ViewBlock** items,
     int item_count,
     float container_width,
-    float container_height)
+    float container_height,
+    float* out_col_intrinsic_width = nullptr)
 {
     if (!grid_layout) return;
 
@@ -867,6 +913,21 @@ inline void run_enhanced_track_sizing(
 
     // === Run track sizing for columns ===
     if (!col_tracks.empty()) {
+        // CSS Grid §12.5: For indefinite containers, percentage tracks are treated as auto
+        // during intrinsic sizing, then re-resolved against the determined container width.
+        // Identify and temporarily convert pct tracks to Auto for the first pass.
+        struct PctColInfo { int idx; float pct; };
+        std::vector<PctColInfo> pct_col_infos;
+        if (col_available < 0.0f) {
+            for (int i = 0; i < (int)col_tracks.size(); i++) {
+                if (col_tracks[i].min_track_sizing_function.type == SizingFunctionType::Percent) {
+                    pct_col_infos.push_back({i, col_tracks[i].min_track_sizing_function.value});
+                    col_tracks[i].min_track_sizing_function = MinTrackSizingFunction::Auto();
+                    col_tracks[i].max_track_sizing_function = MaxTrackSizingFunction::Auto();
+                }
+            }
+        }
+
         // Log track types before sizing
         for (size_t i = 0; i < col_tracks.size(); i++) {
             log_debug("  col_track[%zu] before: base_size=%.1f",
@@ -987,6 +1048,46 @@ inline void run_enhanced_track_sizing(
         // Row sizing needs to know the final column widths to calculate item heights
         copy_enhanced_tracks_to_old(col_tracks, grid_layout->computed_columns,
                                      grid_layout->computed_column_count);
+
+        // === Second pass: re-resolve percentage tracks ===
+        // After the first pass (where pct were treated as auto), we know the container width.
+        // Re-resolve pct tracks to their actual percentage values and re-run all phases.
+        if (!pct_col_infos.empty()) {
+            // Compute first-pass total width (sum of track base_sizes + gaps)
+            float first_total = col_gap_total;
+            for (const auto& t : col_tracks) first_total += t.base_size;
+
+            // Expose the intrinsic width for the caller so it can cap container size
+            if (out_col_intrinsic_width) *out_col_intrinsic_width = first_total;
+
+            // Run second pass with col_available = first_total (now a definite container).
+            // This makes percentage tracks expand correctly while respecting intrinsic limits.
+            float col_available2 = first_total - col_gap_total;
+
+            // Re-create col_tracks from the original track definitions
+            std::vector<EnhancedGridTrack> col_tracks2 =
+                convert_tracks_to_enhanced(grid_layout->computed_columns,
+                                           grid_layout->computed_column_count);
+            // Override pct tracks with their resolved Length values
+            for (const auto& pti : pct_col_infos) {
+                float resolved = first_total * (pti.pct / 100.0f);
+                col_tracks2[pti.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
+                col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+            }
+
+            // Re-run all phases with pct tracks now definite and col_available = first_total
+            initialize_track_sizes(col_tracks2, col_available2);
+            if (!col_contributions.empty()) {
+                resolve_intrinsic_track_sizes(col_tracks2, col_contributions, grid_layout->column_gap);
+            }
+            maximize_tracks(col_tracks2, col_available2, col_available2);
+            expand_flexible_tracks(col_tracks2, 0.0f, col_available2, col_available2,
+                                   col_contributions, grid_layout->column_gap);
+            stretch_auto_tracks(col_tracks2, 0.0f, col_available2);
+            compute_track_offsets(col_tracks2, grid_layout->column_gap);
+            copy_enhanced_tracks_to_old(col_tracks2, grid_layout->computed_columns,
+                                         grid_layout->computed_column_count);
+        }
     }
 
     // === Run track sizing for rows ===

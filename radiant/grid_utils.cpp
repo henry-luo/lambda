@@ -417,7 +417,8 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             }
         } else {
             // Use pre-computed width measurements if available
-            if (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0) {
+            // has_measured_size=true means measurement ran; 0 is valid for empty items.
+            if (item->gi->has_measured_size) {
                 sizes.min_content = item->gi->measured_min_width;
                 sizes.max_content = item->gi->measured_max_width;
 
