@@ -1,0 +1,14 @@
+{
+  "width": 400,
+  "height": 300,
+  "data": {
+    "values": [
+      {"threshold": 25},
+      {"threshold": 50}
+    ]
+  },
+  "mark": {"type": "rule", "color": "#e45756"},
+  "encoding": {
+    "y": {"field": "threshold", "type": "quantitative"}
+  }
+}

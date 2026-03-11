@@ -16,7 +16,6 @@ function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
 
-const digit = /\d/;
 const linebreak = /\r\n|\n/;
 const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
@@ -120,23 +119,19 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._number,
+    $._key
   ],
 
   conflicts: $ => [
     [$._expr, $.member_expr],
+    [$.dotted_name, $.primary_expr],               // identifier.identifier: shift for dotted_name vs reduce to primary_expr
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
-    [$._attr_expr, $._expr],                       // else { expr } in if_expr: block content vs map
-    [$.attr_binary_expr, $._expr],                 // else { expr + ... } binary in block vs map
-    [$._statement, $._expr],                       // else { stam } in if_expr: statement vs expr in block
-    [$._expr, $.raise_stam],                       // raise expr could be raise_expr or start of raise_stam
-    [$.let_expr, $.let_stam],                      // else { let x = ... } in block
     [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
     [$._type_expr, $.concat_type],                 // unary_type could be complete or start of concat
     [$._type_expr, $.constrained_type],            // unary_type could be complete or base of constrained
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
-    [$.attr_type, $.binary_expr],                  // attr_type default `= expr >` vs binary `expr > expr`
   ],
 
   precedences: $ => [[
@@ -178,7 +173,9 @@ module.exports = grammar({
     $.occurrence_type,        // quantified types (primary_type with ?, +, *, [n]) - tightest
     $.binary_type,           // alternation (|, &, !)
     $.fn_type,               // fn binds loosest: fn int+ means fn (int+)
-  ]],
+  ],
+  [$.attr_binary_expr, $._attr_expr]
+],
 
   rules: {
     document: $ => optional(choice(
@@ -246,13 +243,7 @@ module.exports = grammar({
 
     // datetime token: t'...' containing date/time text
     // Actual parsing done by AST builder via datetime_parse()
-    datetime: _ => token(seq(
-      "t'",
-      repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)),
-      "'",
-    )),
-
-
+    datetime: _ => token(seq( "t'", repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)), "'" )),
 
     // Note: 'null' is now part of $.base_type, no separate rule needed
     // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
@@ -263,7 +254,6 @@ module.exports = grammar({
     // expr statements that need ';'
     _expr_stam: $ => choice(
       $.let_stam,
-      $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
     ),
@@ -277,7 +267,6 @@ module.exports = grammar({
     // statement content
     _statement: $ => choice(
       $.object_type,
-      $.entity_type,
       $.if_stam,
       $.match_expr,
       $.for_stam,
@@ -300,9 +289,7 @@ module.exports = grammar({
       $._content_expr
     ),
 
-    list: $ => seq(
-      '(', $._expr, repeat(seq(',', $._expr)), ')'
-    ),
+    list: $ => seq( '(', $._expr, repeat(seq(',', $._expr)), ')' ),
 
     // Literals and Containers
     _non_null_literal: $ => choice(
@@ -314,24 +301,15 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    map_item: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier, $.base_type)),
-      ':',
-      field('as', $._expr),
-    ),
+    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, '*'),
 
-    map: $ => seq(
-      // $._expr for dynamic map item
-      '{', comma_sep(choice($.map_item, $._expr)), '}',
-    ),
+    map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
-    array: $ => seq(
-      '[', comma_sep($._expr), ']',
-    ),
+    map: $ => seq( '{', comma_sep($.map_item), '}' ),
 
-    range: $ => seq(
-      $._expr, 'to', $._expr,
-    ),
+    array: $ => seq( '[', comma_sep($._expr), ']'),
+
+    range: $ => seq( $._expr, 'to', $._expr ),
 
     attr_binary_expr: $ => choice(
       ...binary_expr($, true),
@@ -346,38 +324,31 @@ module.exports = grammar({
       $.for_expr,
     ),
 
-    // Attribute name with optional namespace prefix: name or ns.name
-    attr_name: $ => choice(
-      $.ns_identifier,
-      $.string,
-      $.symbol,
-      $.identifier,
-      $.base_type,
-    ),
+    // Attribute name
+    attr_name: $ => $._key,
 
-    attr: $ => seq(
-      field('name', $.attr_name),
-      ':', field('as', $._attr_expr)
-    ),
+    attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
 
-    // Namespaced identifier: ns.name (no spaces around dot)
-    ns_identifier: $ => seq(
-      field('ns', $.identifier),
-      token.immediate('.'),
-      field('name', $.identifier),
-    ),
+    // Dotted name: arbitrary depth dotted segments
+    // Each segment is an identifier or symbol: a.b.'c'.d
+    // prec(50) matches primary_expr so shift-reduce becomes a real GLR conflict
+    dotted_name: $ => prec.left(50, seq(
+      choice($.identifier, $.symbol),
+      repeat1(seq('.', choice($.identifier, $.symbol))),
+    )),
 
     element: $ => seq('<',
-      choice($.ns_identifier, $.symbol, $.identifier),
-      choice(
-        seq(choice($.attr, $.map),
-          repeat(seq(',', choice($.attr, $.map))),
-          optional(
-            seq(choice(linebreak, ';'), $.content),
-          )
+      choice($.dotted_name, $.symbol, $.identifier),
+      optional(
+        seq(
+          $.attr,
+          repeat(seq(',', $.attr)),
         ),
-        optional( seq(optional(choice(linebreak, ';')), $.content) )
-      ),'>'
+      ),
+      optional(
+        seq(optional(choice(linebreak, ';')), $.content)
+      ),
+      '>'
     ),
 
     // Expressions
@@ -413,20 +384,19 @@ module.exports = grammar({
       $.list,
       $.array,
       $.map,
-      $.object_literal,
       $.element,
       $.base_type,  // includes null
       $.identifier,
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
       $.member_expr,
+      $.dotted_name,  // a.b, svg.rect — lower priority than member_expr
       $.parent_expr,  // expr.. for parent access shorthand
       $.call_expr,
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
-      $.current_item,   // ~ for pipe context
-      $.current_index,  // ~# for pipe key/index
+      $.current_expr,   // ~ or ~# for pipe context
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
 
@@ -472,7 +442,7 @@ module.exports = grammar({
     // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
     // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
     member_expr: $ => prec.dynamic(1, seq(
-      field('object', $.primary_expr), ".",
+      field('object', $.primary_expr), '.',
       field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),
 
@@ -490,11 +460,8 @@ module.exports = grammar({
       ...binary_expr($, false),
     ),
 
-    // Current item reference in pipe context
-    current_item: _ => '~',
-
-    // Current key/index reference in pipe context
-    current_index: _ => '~#',
+    // Current item (~) or key/index (~#) reference in pipe context
+    current_expr: _ => token(choice('~#', '~')),
 
     // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
@@ -517,7 +484,7 @@ module.exports = grammar({
     // Supports: name, name?, name: type, name?: type, name = default, name: type = default
     parameter: $ => choice(
       seq(
-        field('name', $.identifier),
+        field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type
         optional(seq(':', field('type', $._type_expr))),
         optional(seq('=', field('default', $._expr))),
@@ -527,7 +494,7 @@ module.exports = grammar({
 
     // Named argument in function call: name: value
     named_argument: $ => seq(
-      field('name', $.identifier),
+      field('name', choice($.identifier, $.symbol)),
       ':',
       field('value', $._expr),
     ),
@@ -535,7 +502,7 @@ module.exports = grammar({
     // fn with stam body
     fn_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      field('kind', choice('fn','pn')), field('name', $.identifier),
+      field('kind', choice('fn','pn')), field('name', choice($.identifier, $.symbol)),
       '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type with optional error type: T or T^E or T^
       optional(field('type', $.return_type)),
@@ -545,7 +512,7 @@ module.exports = grammar({
     // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      'fn', field('name', $.identifier),
+      'fn', field('name', choice($.identifier, $.symbol)),
       '(', optional(seq(field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))))), ')',
       // return type with optional error type: T or T^E or T^
       optional(field('type', $.return_type)),
@@ -577,19 +544,19 @@ module.exports = grammar({
     assign_expr: $ => prec.right(choice(
       // error destructuring: let name^error_name = expr
       seq(
-        field('name', $.identifier),
-        '^', field('error', $.identifier),
+        field('name', choice($.identifier, $.symbol)),
+        '^', field('error', choice($.identifier, $.symbol)),
         '=', field('as', $._expr),
       ),
       // single variable assignment
       seq(
-        field('name', $.identifier),
+        field('name', choice($.identifier, $.symbol)),
         optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expr),
       ),
       // multi-variable decomposition: let a, b = expr OR let a, b at expr
       seq(
-        field('name', $.identifier),
-        repeat1(seq(',', field('name', $.identifier))),
+        field('name', choice($.identifier, $.symbol)),
+        repeat1(seq(',', field('name', choice($.identifier, $.symbol)))),
         field('decompose', choice('=', 'at')),
         field('as', $._expr),
       ),
@@ -600,24 +567,19 @@ module.exports = grammar({
     ),
 
     let_stam: $ => seq(
-      'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+      choice('let', 'pub'),
+      field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
-    pub_stam: $ => choice(
-      // pub variable: pub x = expr, pub y = expr
-      seq('pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))),
-      // pub type alias: pub type T = type_expr
-      seq('pub', 'type', field('declare', alias($.type_assign, $.assign_expr)),
-        repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))),
-      // pub object type: pub type T { ... }
-      seq('pub', field('declare', $.object_type)),
-    ),
-
-    // Expression-form if: if (cond) expr else expr | else { stam }
+    // Expression-form if: if (cond) expr else expr
     // Condition always in parens. Else is REQUIRED (ternary-style).
-    // New: else can be a block { content } (preferred over map via prec.dynamic).
+    // Both then and else can be a block { content } (preferred over map via prec.dynamic).
     if_expr: $ => prec.right(seq(
-      'if', '(', field('cond', $._expr), ')', field('then', $._expr),
+      'if', '(', field('cond', $._expr), ')',
+      choice(
+        prec.dynamic(1, seq('{', field('then', $.content), '}')),
+        field('then', $._expr),
+      ),
       'else', choice(
         prec.dynamic(1, seq('{', field('else', $.content), '}')),
         field('else', $._expr),
@@ -717,7 +679,7 @@ module.exports = grammar({
       'offset', field('count', $._expr)
     ),
 
-    // shared for clauses: where, group, order, limit, offset in any order
+    // shared for clauses: fixed order where → group → order → limit → offset (like SQL)
     for_clauses: $ => repeat1(choice(
       field('where', $.for_where_clause),
       field('group', $.for_group_clause),
@@ -733,7 +695,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses (comma-separated after declarations)
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses (where, group, order, limit, offset) in any order
+      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       ')',
       field('then', $._expr),
@@ -745,7 +707,7 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses (where, group, order, limit, offset) in any order
+      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       '{', field('then', $.content), '}'
     ),
@@ -841,9 +803,9 @@ module.exports = grammar({
     ),
 
     attr_type: $ => prec(1, seq(
-      field('name', choice($.string, $.symbol, $.identifier)),
+      field('name', choice($.symbol, $.identifier)),
       ':', field('as', $._type_expr),
-      optional(seq('=', field('default', $._expr))),
+      optional(seq('=', field('default', $._attr_expr))),
     )),
 
     content_type: $ => seq(
@@ -972,24 +934,26 @@ module.exports = grammar({
       ))
     )),
 
-    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
+    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', $._type_expr)),
 
-    entity_type: $ => seq(
-      'type', field('name', $.identifier), '<', _attr_content_type($), '>'
-    ),
-
-    // Object type with optional inheritance and method/constraint body
-    // type Point { x: float, y: float; fn magnitude() => ... }
-    // type Circle : Shape { radius: float; fn area() => ... }
+    // Object/element type with optional inheritance, content schema, and methods
+    // Object (no content): type Point { x: float, y: float }
+    // Element (with content): type Article { title: string, string, element; fn render() => ... }
+    // Without content → object type; with content → element type
     object_type: $ => seq(
-      'type', field('name', $.identifier),
-      optional(seq(':', field('base', $.identifier))),
+      optional(field('pub', 'pub')),
+      'type', field('name', choice($.identifier, $.symbol)),
+      optional(seq(':', field('base', choice($.identifier, $.symbol)))),
       '{',
-      // fields (comma-separated attr list)
-      optional(seq(
-        alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
+      // optional fields and content (attrs have name:type, content is bare type_expr)
+      optional(choice(
+        seq(
+          alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
+          optional(seq(',', $.content_type)),
+        ),
+        $.content_type,
       )),
-      // ';' separates fields from methods/constraints
+      // optional ';' introduces methods section
       optional(seq(';',
         repeat(choice($.fn_stam, $.fn_expr_stam, $.that_constraint))
       )),
@@ -999,24 +963,16 @@ module.exports = grammar({
     // Object-level constraint: that (expr)
     that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
 
-    // Object literal: {TypeName field: value, ...}
-    object_literal: $ => prec.dynamic(1, seq(
-      '{', field('type_name', $.identifier),
-      optional(seq(
-        choice($.map_item, $._expr), repeat(seq(',', choice($.map_item, $._expr)))
-      )),
-      '}'
-    )),
-
     // type_stam handles type aliases, string patterns, and symbol patterns.
     // The leading keyword distinguishes them; AST builder checks the text.
     type_stam: $ => seq(
+      optional(field('pub', 'pub')),
       field('kind', choice('type', 'string', 'symbol')),
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
-    // top-level type defintions: type_stam | entity_type | object_type
+    // top-level type definitions: type_stam | object_type
 
     // ==================== String/Symbol Pattern Definitions ====================
     // Pattern atoms are unified into the type system. String/symbol pattern bodies

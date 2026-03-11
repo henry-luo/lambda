@@ -34,8 +34,8 @@ more text">
         <span b:123, c:true; "test"; 123; "a">; 123;
         <span <br> "test">
         <hr> "package:"
-        {"license": "MIT",
-        "engines": {
-            "node": ">=14.0.0"
+        {'license': "MIT",
+        'engines': {
+            'node': ">=14.0.0"
         }, e:<f <g> "test">, h:{i:'j', k:'l'}
         }>>

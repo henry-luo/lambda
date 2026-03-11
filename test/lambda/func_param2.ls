@@ -102,20 +102,20 @@ let v11 = varg_len(1, 2, 3)       // 3
 
 // Output all results
 {
-    "test1_default": [r1, r2],
-    "test2_optional": [r3, r4],
-    "test3_multi_default": [p1, p2, p3, p4],
-    "test4_positional": rect1,
-    "test5_all_named": rect2,
-    "test6_reordered": rect3,
-    "test7_mixed": rect4,
-    "test8_named_with_defaults": [cfg1, cfg2, cfg3, cfg4],
-    "test9_expr_default": [s1, s2],
-    "test10_typed_default": [m1, m2],
-    "test11_optional_typed": [o1, o2],
-    "test11b_optional_and_or": [oa1, oa2, oo1, oo2],
-    "test12_variadic_sum": [v1, v2, v3, v4],
-    "test13_variadic_with_params": [v5, v6, v7],
-    "test14_variadic_first": [v8, v9],
-    "test15_variadic_len": [v10, v11]
+    'test1_default': [r1, r2],
+    'test2_optional': [r3, r4],
+    'test3_multi_default': [p1, p2, p3, p4],
+    'test4_positional': rect1,
+    'test5_all_named': rect2,
+    'test6_reordered': rect3,
+    'test7_mixed': rect4,
+    'test8_named_with_defaults': [cfg1, cfg2, cfg3, cfg4],
+    'test9_expr_default': [s1, s2],
+    'test10_typed_default': [m1, m2],
+    'test11_optional_typed': [o1, o2],
+    'test11b_optional_and_or': [oa1, oa2, oo1, oo2],
+    'test12_variadic_sum': [v1, v2, v3, v4],
+    'test13_variadic_with_params': [v5, v6, v7],
+    'test14_variadic_first': [v8, v9],
+    'test15_variadic_len': [v10, v11]
 }

@@ -9,7 +9,7 @@ import macros: lambda.package.latex.macros
 // ---- Macro optional-arg definition parsing ----
 // Construct a \newcommand element: \newcommand{\greeting}[1][World]{Hello, #1!}
 let nc1 = <newcommand <curly_group "\\greeting"> <brack_group "1"> <brack_group "World"> <curly_group "Hello, #1!">>
-let defs1 = macros.get_defs(<document nc1>)
+let defs1 = macros.get_defs(<document ;nc1>)
 "1. macro def count:"; len(defs1)
 "2. macro name:"; defs1[0].name
 "3. macro params:"; defs1[0].params
@@ -17,7 +17,7 @@ let defs1 = macros.get_defs(<document nc1>)
 
 // A simpler macro without optional arg
 let nc2 = <newcommand <curly_group "\\simple"> <brack_group "1"> <curly_group "Hello #1">>
-let defs2 = macros.get_defs(<document nc2>)
+let defs2 = macros.get_defs(<document ;nc2>)
 "5. simple def count:"; len(defs2)
 "6. simple default_arg null:"; defs2[0].default_arg == null
 

@@ -12,10 +12,10 @@ let vl = {
         {x: 3, y: 45},
         {x: 4, y: 40}
     ]},
-    mark: {"type": "line", point: true},
+    mark: {'type': "line", point: true},
     encoding: {
-        x: {field: "x", "type": "quantitative"},
-        y: {field: "y", "type": "quantitative"}
+        x: {field: "x", 'type': "quantitative"},
+        y: {field: "y", 'type': "quantitative"}
     }
 }
 

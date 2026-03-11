@@ -7,7 +7,7 @@ type Circle : Shape {
     radius: int;
     fn area() => radius * radius * 3
 }
-let c = {Circle color: "red", radius: 5}
+let c = <Circle color: "red", radius: 5>
 
 // Field access (inherited + own)
 c.color
@@ -32,7 +32,7 @@ type Dog : Animal {
     breed: string;
     fn speak() => name ++ " says woof!"
 }
-let d = {Dog name: "Rex", breed: "Lab"}
+let d = <Dog name: "Rex", breed: "Lab">
 d.speak()
 1
 d.name

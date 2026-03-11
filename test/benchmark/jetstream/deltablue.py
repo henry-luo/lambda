@@ -249,6 +249,7 @@ def benchmark():
 
 def main():
     t0 = time.perf_counter_ns()
+    # Original JetStream workload: 20 iterations
     for _ in range(20):
         benchmark()
     t1 = time.perf_counter_ns()

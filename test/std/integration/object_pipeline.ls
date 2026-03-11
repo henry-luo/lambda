@@ -11,12 +11,12 @@ type Product {
 
 // ===== Create instances =====
 let products = [
-    {Product name: "Laptop", price: 999.99, category: "electronics"},
-    {Product name: "Book", price: 15.50, category: "books"},
-    {Product name: "Headphones", price: 79.99, category: "electronics"},
-    {Product name: "Pen", price: 2.99, category: "office"},
-    {Product name: "Monitor", price: 349.00, category: "electronics"},
-    {Product name: "Notebook", price: 5.99, category: "office"}
+    <Product name: "Laptop", price: 999.99, category: "electronics">,
+    <Product name: "Book", price: 15.50, category: "books">,
+    <Product name: "Headphones", price: 79.99, category: "electronics">,
+    <Product name: "Pen", price: 2.99, category: "office">,
+    <Product name: "Monitor", price: 349.00, category: "electronics">,
+    <Product name: "Notebook", price: 5.99, category: "office">
 ]
 
 // ===== Pipeline: filter expensive =====

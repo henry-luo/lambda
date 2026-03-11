@@ -24,7 +24,7 @@ pub default_legend_config = {
 // ============================================================
 
 fn merge_config(config) {
-    if config != null { {*config, *default_legend_config} }
+    if config != null { {*:config, *:default_legend_config} }
     else { default_legend_config }
 }
 
@@ -42,8 +42,8 @@ pub fn color_legend(categories, color_scale, title_text, config) {
     // title
     let title_el = if (title_text)
         <text x: 0, y: float(cfg.title_font_size),
-              "font-size": cfg.title_font_size,
-              "font-weight": "bold",
+              'font-size': cfg.title_font_size,
+              'font-weight': "bold",
               fill: "#333";
             title_text
         >
@@ -60,7 +60,7 @@ pub fn color_legend(categories, color_scale, title_text, config) {
                   fill: c, rx: 2>
             <text x: float(sym_size) + cfg.symbol_padding,
                   y: float(sym_size) - 1.0,
-                  "font-size": cfg.label_font_size,
+                  'font-size': cfg.label_font_size,
                   fill: "#333";
                 string(cat)
             >
@@ -84,8 +84,8 @@ pub fn gradient_legend(sc, title_text, config) {
     // title
     let title_el = if (title_text)
         <text x: 0, y: float(cfg.title_font_size),
-              "font-size": cfg.title_font_size,
-              "font-weight": "bold",
+              'font-size': cfg.title_font_size,
+              'font-weight': "bold",
               fill: "#333";
             title_text
         >
@@ -106,11 +106,11 @@ pub fn gradient_legend(sc, title_text, config) {
     let domain = sc.domain;
     let labels = [
         <text x: float(bar_w) + 4.0, y: y_start + 10.0,
-              "font-size": cfg.label_font_size, fill: "#333";
+              'font-size': cfg.label_font_size, fill: "#333";
             util.fmt_num(domain[1])
         >,
         <text x: float(bar_w) + 4.0, y: y_start + float(bar_h),
-              "font-size": cfg.label_font_size, fill: "#333";
+              'font-size': cfg.label_font_size, fill: "#333";
             util.fmt_num(domain[0])
         >
     ];

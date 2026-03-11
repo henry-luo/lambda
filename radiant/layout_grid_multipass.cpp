@@ -1,11 +1,13 @@
 #include "layout.hpp"
 #include "layout_grid_multipass.hpp"
+#include "layout_alignment.hpp"
 #include "grid.hpp"
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
+#include "grid_baseline.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -34,7 +36,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     if (!grid_container) return;
 
     log_enter();
-    log_info("GRID LAYOUT START: container=%p (%s)", grid_container, grid_container->node_name());
+    log_info("GRID LAYOUT START: container=%p (%s) width=%.1f height=%.1f", grid_container, grid_container->node_name(), grid_container->width, grid_container->height);
 
     // =========================================================================
     // CACHE LOOKUP: Check if we have a cached result for these constraints
@@ -112,7 +114,36 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_info("=== GRID PASS 0 COMPLETE: %d items initialized ===", item_count);
 
     if (item_count == 0) {
-        log_debug("No grid items found");
+        // Check if there are absolutely positioned children that use grid lines
+        // for their containing block (CSS Grid §9.1 - grid container is containing block).
+        // If so, we still need to run track sizing to produce correct grid line positions,
+        // then layout those absolute children in Pass 4.
+        bool has_absolute_children = false;
+        DomNode* ch = grid_container->first_child;
+        while (ch) {
+            if (ch->is_element()) {
+                DomElement* ce = ch->as_element();
+                if (ce->position &&
+                    (ce->position->position == CSS_VALUE_ABSOLUTE ||
+                     ce->position->position == CSS_VALUE_FIXED)) {
+                    // Resolve styles for the absolute child so its gi is populated
+                    init_grid_item_view(lycon, ch);
+                    has_absolute_children = true;
+                }
+            }
+            ch = ch->next_sibling;
+        }
+        if (!has_absolute_children) {
+            log_debug("No grid items and no absolute children - skipping");
+            cleanup_grid_container(lycon);
+            lycon->grid_container = pa_grid;
+            log_leave();
+            return;
+        }
+        // Fall through: run Passes 2 and 4 only
+        log_info("=== GRID: no in-flow items, running track sizing for absolute children ===");
+        layout_grid_container(lycon, grid_container);
+        layout_grid_absolute_children(lycon, grid_container);
         cleanup_grid_container(lycon);
         lycon->grid_container = pa_grid;
         log_leave();
@@ -130,6 +161,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // PASS 2: Grid Algorithm Execution
     // ========================================================================
     log_info("=== GRID PASS 2: Grid algorithm execution ===");
+    log_debug("GRID PASS 2 PRE: grid_container=%p width=%d height=%d", grid_container, grid_container->width, grid_container->height);
     layout_grid_container(lycon, grid_container);
     log_info("=== GRID PASS 2 COMPLETE ===");
 
@@ -142,6 +174,43 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // Re-align items after content is laid out (now items have final heights)
     // This is needed for align-items: center/end to work correctly
     align_grid_items(lycon->grid_container);
+
+    // Apply relative positioning offsets (position:relative + top/left/bottom/right)
+    // Must be done AFTER final alignment so offsets are relative to the aligned position
+    {
+        GridContainerLayout* gl = lycon->grid_container;
+        float parent_w = (float)grid_container->width;
+        float parent_h = (float)grid_container->height;
+        for (int i = 0; i < gl->item_count; i++) {
+            ViewBlock* item = gl->grid_items[i];
+            if (!item || !item->position) continue;
+            if (item->position->position != CSS_VALUE_RELATIVE) continue;
+            float ox = 0, oy = 0;
+            if (item->position->has_left) {
+                ox = isnan(item->position->left_percent) ? item->position->left
+                    : item->position->left_percent * parent_w / 100.0f;
+            } else if (item->position->has_right) {
+                ox = isnan(item->position->right_percent) ? -item->position->right
+                    : -(item->position->right_percent * parent_w / 100.0f);
+            }
+            if (item->position->has_top) {
+                oy = isnan(item->position->top_percent) ? item->position->top
+                    : item->position->top_percent * parent_h / 100.0f;
+            } else if (item->position->has_bottom) {
+                oy = isnan(item->position->bottom_percent) ? -item->position->bottom
+                    : -(item->position->bottom_percent * parent_h / 100.0f);
+            }
+            if (ox != 0 || oy != 0) {
+                log_debug("GRID relative offset: item %d (%.0f, %.0f)", i, ox, oy);
+                item->x += (int)ox;
+                item->y += (int)oy;
+            }
+        }
+    }
+
+    // Apply baseline alignment: shift items within each row to a shared baseline
+    radiant::grid::resolve_and_apply_grid_baselines(lycon->grid_container);
+
     log_info("=== GRID PASS 3 COMPLETE ===");
 
     // ========================================================================
@@ -338,8 +407,14 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
             if (!is_absolute) {
                 // Initialize the view with style resolution
                 init_grid_item_view(lycon, child);
-                item_count++;
-                log_debug("Initialized grid item %d: %s", item_count, child->node_name());
+                // check display:none AFTER style resolution (display may be set via cascade)
+                DomElement* elem = child->as_element();
+                if (elem->display.outer == CSS_VALUE_NONE) {
+                    log_debug("Skipping display:none child after style resolution: %s", child->node_name());
+                } else {
+                    item_count++;
+                    log_debug("Initialized grid item %d: %s", item_count, child->node_name());
+                }
             } else {
                 log_debug("Skipping absolute positioned child: %s", child->node_name());
             }
@@ -423,17 +498,20 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
     // Iterate through all grid items and measure their content
     ViewBlock* container = (ViewBlock*)lycon->elmt;
     DomNode* child = container ? container->first_child : nullptr;
+    log_debug("measure_grid_items: lycon->elmt=%p (container), grid_container via lycon->elmt width=%d",
+              lycon->elmt, container ? container->width : -1);
 
     while (child) {
         if (child->is_element()) {
             ViewBlock* item = (ViewBlock*)child->as_element();
 
-            // Skip absolute positioned items
+            // Skip absolute positioned and display:none items
             bool is_absolute = item->position &&
                               (item->position->position == CSS_VALUE_ABSOLUTE ||
                                item->position->position == CSS_VALUE_FIXED);
+            bool is_display_none = (item->display.outer == CSS_VALUE_NONE);
 
-            if (!is_absolute) {
+            if (!is_absolute && !is_display_none) {
                 int min_width = 0, max_width = 0, min_height = 0, max_height = 0;
                 measure_grid_item_intrinsic(lycon, item, &min_width, &max_width,
                                             &min_height, &max_height);
@@ -994,6 +1072,44 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
 
                     log_debug("Grid area adjusted position: (%.1f, %.1f) -> (%.1f, %.1f)",
                               old_x, old_y, new_x, new_y);
+                } else if (child_block->gi) {
+                    // No grid-area: item is positioned in the container's padding box.
+                    // Apply justify-self/align-self alignment when no explicit insets are set.
+                    PositionProp* pos = child_block->position;
+                    bool no_horiz = !pos->has_left && !pos->has_right;
+                    bool no_vert  = !pos->has_top  && !pos->has_bottom;
+
+                    float right_border  = (container->bound && container->bound->border) ? container->bound->border->width.right  : 0;
+                    float bottom_border = (container->bound && container->bound->border) ? container->bound->border->width.bottom : 0;
+                    float pb_w = container->width  - border_offset_x - right_border;
+                    float pb_h = container->height - border_offset_y - bottom_border;
+                    float ml = child_block->bound ? child_block->bound->margin.left   : 0;
+                    float mr = child_block->bound ? child_block->bound->margin.right  : 0;
+                    float mt = child_block->bound ? child_block->bound->margin.top    : 0;
+                    float mb = child_block->bound ? child_block->bound->margin.bottom : 0;
+
+                    if (no_horiz) {
+                        int justify = radiant::resolve_justify_self(child_block->gi->justify_self,
+                            grid_layout ? grid_layout->justify_items : CSS_VALUE_STRETCH);
+                        float free_w = pb_w - child_block->width - ml - mr;
+                        float offset = radiant::compute_alignment_offset_simple(justify, free_w);
+                        if (offset != 0) {
+                            child_block->x += (int)offset;
+                            log_debug("Absolute no-area: justify=%d free=%.0f offset=%.0f -> x=%.0f",
+                                      justify, free_w, offset, child_block->x);
+                        }
+                    }
+                    if (no_vert) {
+                        int align = radiant::resolve_align_self(child_block->gi->align_self_grid,
+                            grid_layout ? grid_layout->align_items : CSS_VALUE_STRETCH);
+                        float free_h = pb_h - child_block->height - mt - mb;
+                        float offset = radiant::compute_alignment_offset_simple(align, free_h);
+                        if (offset != 0) {
+                            child_block->y += (int)offset;
+                            log_debug("Absolute no-area: align=%d free=%.0f offset=%.0f -> y=%.0f",
+                                      align, free_h, offset, child_block->y);
+                        }
+                    }
                 }
 
                 // Restore parent context

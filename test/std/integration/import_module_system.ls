@@ -62,8 +62,8 @@ type Result {
     fn is_ok() => ~.status == "ok"
 }
 
-fn compute_result(x: int) => {Result value: x * 2, status: "ok"}
-fn error_result(msg: string) => {Result value: 0, status: msg}
+fn compute_result(x: int) => <Result value: x * 2, status: "ok">
+fn error_result(msg: string) => <Result value: 0, status: msg>
 
 let r1 = compute_result(21)
 r1.value

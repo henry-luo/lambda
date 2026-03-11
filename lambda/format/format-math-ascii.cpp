@@ -8,16 +8,9 @@
 // This formatter handles both LaTeX-parsed and ASCII-parsed math since
 // both go through the same unified tree-sitter grammar.
 
-#include "format.h"
-#include "../mark_reader.hpp"
-#include "../../lib/stringbuf.h"
-#include "../../lib/log.h"
-#include <stdio.h>
-#include <string.h>
+#include "format-math-shared.hpp"
 
-// Forward declarations
-static void format_item(StringBuf* sb, const ItemReader& item, int depth);
-static void format_element(StringBuf* sb, const ElementReader& elem, int depth);
+// Forward declarations (format_item/format_element_impl/format_children from shared header):
 static void format_children(StringBuf* sb, const ElementReader& elem, int depth, const char* sep);
 static void format_children_range(StringBuf* sb, const ElementReader& elem,
                                    int64_t start, int64_t end, int depth, const char* sep);
@@ -274,11 +267,6 @@ static int64_t find_matching_paren(const ElementReader& elem, int64_t start, int
 }
 
 
-// Format the root `math` element: just emit children separated by spaces
-static void format_math_root(StringBuf* sb, const ElementReader& elem, int depth) {
-    format_children(sb, elem, depth, " ");
-}
-
 // Format `operator` element: value attr contains the operator text
 static void format_operator(StringBuf* sb, const ElementReader& elem) {
     ItemReader val = elem.get_attr("value");
@@ -305,14 +293,6 @@ static void format_relation(StringBuf* sb, const ElementReader& elem) {
         } else {
             stringbuf_append_str(sb, v);
         }
-    }
-}
-
-// Format `punctuation` element
-static void format_punctuation(StringBuf* sb, const ElementReader& elem) {
-    ItemReader val = elem.get_attr("value");
-    if (!val.isNull() && val.isString()) {
-        stringbuf_append_str(sb, val.asString()->chars);
     }
 }
 
@@ -548,10 +528,26 @@ static void format_space_command(StringBuf* sb, const ElementReader& elem) {
 }
 
 // ============================================================================
+// Per-format symbol handler
+// ============================================================================
+
+// format_symbol_impl: emit ASCII math symbol representation
+static void format_symbol_impl(StringBuf* sb, Symbol* sym) {
+    if (!sym || !sym->chars) return;
+    // Symbols: row_sep → semicolon, col_sep → comma, other → cmd_to_ascii lookup
+    if (strcmp(sym->chars, "row_sep") == 0) { stringbuf_append_str(sb, "; "); }
+    else if (strcmp(sym->chars, "col_sep") == 0) { stringbuf_append_str(sb, ", "); }
+    else {
+        const char* ascii = cmd_to_ascii(sym->chars);
+        stringbuf_append_str(sb, ascii ? ascii : sym->chars);
+    }
+}
+
+// ============================================================================
 // Dispatch
 // ============================================================================
 
-static void format_element(StringBuf* sb, const ElementReader& elem, int depth) {
+static void format_element_impl(StringBuf* sb, const ElementReader& elem, int depth) {
     const char* tag = elem.tagName();
     if (!tag) return;
 
@@ -607,11 +603,7 @@ static void format_element(StringBuf* sb, const ElementReader& elem, int depth) 
 
     // Limits modifier, middle_delim, sized_delimiter, etc: skip or emit value
     if (strcmp(tag, "limits_modifier") == 0) return; // handled by subsup
-    if (strcmp(tag, "delimiter") == 0) {
-        ItemReader val = elem.get_attr("value");
-        if (!val.isNull() && val.isString()) stringbuf_append_str(sb, val.asString()->chars);
-        return;
-    }
+    if (strcmp(tag, "delimiter") == 0) return format_delimiter(sb, elem);
     if (strcmp(tag, "sized_delimiter") == 0) {
         ItemReader delim = elem.get_attr("delim");
         if (!delim.isNull() && delim.isString()) stringbuf_append_str(sb, delim.asString()->chars);
@@ -621,51 +613,6 @@ static void format_element(StringBuf* sb, const ElementReader& elem, int depth) 
     // Generic fallback: emit all children
     log_debug("format-math-ascii: unknown element '%s', using fallback", tag);
     format_children(sb, elem, depth, " ");
-}
-
-static void format_item(StringBuf* sb, const ItemReader& item, int depth) {
-    if (depth > 50) {
-        stringbuf_append_str(sb, "...");
-        return;
-    }
-
-    if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        format_element(sb, elem, depth);
-    }
-    else if (item.isString()) {
-        String* str = item.asString();
-        if (str && str->chars) {
-            stringbuf_append_str(sb, str->chars);
-        }
-    }
-    else if (item.isSymbol()) {
-        Symbol* sym = item.asSymbol();
-        if (sym && sym->chars) {
-            // Symbols are used for command_name (backslash-stripped), row_sep, col_sep
-            if (strcmp(sym->chars, "row_sep") == 0) {
-                stringbuf_append_str(sb, "; ");
-            } else if (strcmp(sym->chars, "col_sep") == 0) {
-                stringbuf_append_str(sb, ", ");
-            } else {
-                // Command name as symbol - look up in tables
-                const char* ascii = cmd_to_ascii(sym->chars);
-                stringbuf_append_str(sb, ascii ? ascii : sym->chars);
-            }
-        }
-    }
-    else if (item.isInt()) {
-        int value = item.asInt();
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%d", value);
-        stringbuf_append_str(sb, buffer);
-    }
-    else if (item.isFloat()) {
-        double value = item.asFloat();
-        char buffer[64];
-        snprintf(buffer, sizeof(buffer), "%.10g", value);
-        stringbuf_append_str(sb, buffer);
-    }
 }
 
 // Core coalescing loop over children [start, end)

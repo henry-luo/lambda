@@ -106,11 +106,11 @@ pub fn line_mark(data, ctx, mark_config) {
             [x_pos + bw, y_pos])),
         let d = svg.line_path(points),
         let line_el = <path d: d, fill: "none", stroke: s.color,
-                            "stroke-width": stroke_w, opacity: opacity>,
+                            'stroke-width': stroke_w, opacity: opacity>,
         let point_els = if (show_points)
             (for (p in points)
                 <circle cx: p[0], cy: p[1], r: 3, fill: s.color,
-                        stroke: "white", "stroke-width": 1>)
+                        stroke: "white", 'stroke-width': 1>)
         else [],
         [line_el, *point_els]
     ));
@@ -198,7 +198,7 @@ pub fn point_mark(data, ctx, mark_config) {
         else base_opacity,
         <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
                 fill: pt_fill, opacity: pt_opacity,
-                stroke: "white", "stroke-width": 0.5>
+                stroke: "white", 'stroke-width': 0.5>
     ));
 
     svg.group_class("marks points", points)
@@ -238,7 +238,7 @@ pub fn arc_mark(data, ctx, mark_config) {
             scale.scale_apply(color_scale, a.datum[color_field])
         else color.pick_color(color.category10, a.index),
         let d = svg.arc_path(cx, cy, inner_radius, outer_radius, a.start - util.PI / 2.0, a.end - util.PI / 2.0),
-        <path d: d, fill: fill, opacity: opacity, stroke: "white", "stroke-width": 1>
+        <path d: d, fill: fill, opacity: opacity, stroke: "white", 'stroke-width': 1>
     ));
 
     svg.group_class("marks arcs", arcs)
@@ -263,7 +263,7 @@ pub fn text_mark(data, ctx, mark_config) {
         let bw_x = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let label = if (text_field) string(d[text_field]) else string(d[y_field]),
         <text x: x_pos + bw_x, y: y_pos - 4.0,
-              "text-anchor": "middle", "font-size": font_size, fill: fill_color;
+              'text-anchor': "middle", 'font-size': font_size, fill: fill_color;
             label
         >
     ));
@@ -292,8 +292,8 @@ pub fn rule_mark(data, ctx, mark_config) {
             (let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
             if (dash)
                 <line x1: 0, y1: y_pos, x2: plot_w, y2: y_pos,
-                      stroke: stroke_color, "stroke-width": stroke_w,
-                      "stroke-dasharray": dash>
+                      stroke: stroke_color, 'stroke-width': stroke_w,
+                      'stroke-dasharray': dash>
             else
                 svg.line(0, y_pos, plot_w, y_pos, stroke_color, stroke_w))
         else if (x_field and not y_field)
@@ -301,8 +301,8 @@ pub fn rule_mark(data, ctx, mark_config) {
             (let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
             if (dash)
                 <line x1: x_pos, y1: 0, x2: x_pos, y2: plot_h,
-                      stroke: stroke_color, "stroke-width": stroke_w,
-                      "stroke-dasharray": dash>
+                      stroke: stroke_color, 'stroke-width': stroke_w,
+                      'stroke-dasharray': dash>
             else
                 svg.line(x_pos, 0, x_pos, plot_h, stroke_color, stroke_w))
         else null

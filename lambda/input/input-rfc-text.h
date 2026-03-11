@@ -4,13 +4,15 @@
  * Common helpers for formats that use RFC-style line-oriented records
  * with line folding (VCF/RFC 6350, ICS/RFC 5545, EML/RFC 5322).
  *
- * parse_rfc_property_name  — read key before ':' or ';'
- * parse_rfc_property_value — read value after ':', handling line folding
+ * parse_rfc_property_name   — read key before ':' or ';'
+ * parse_rfc_property_value  — read value after ':', handling line folding
+ * parse_rfc_property_params — read ';'-delimited parameter list into a Map
  */
 #ifndef LAMBDA_INPUT_RFC_TEXT_H
 #define LAMBDA_INPUT_RFC_TEXT_H
 
 #include "input-utils.h"
+#include "input-context.hpp"
 #include "../../lib/stringbuf.h"
 
 /**
@@ -69,5 +71,61 @@ static inline size_t parse_rfc_property_value(StringBuf* sb, const char** pos) {
     *pos = p;
     return sb->length;
 }
+
+/**
+ * Parse ';'-delimited parameters into @p params_map.
+ *
+ * On entry @p *pos must point at ';' or ':'.
+ * Returns leaving *pos at ':' (ready for parse_rfc_property_value).
+ *
+ * @param sb             Scratch string buffer (reset internally)
+ * @param pos            In/out: current parse position
+ * @param ctx            InputContext for pool allocation
+ * @param params_map     Map to populate with PARAM_NAME → value pairs
+ * @param upper_case_keys  true → normalise param names to UPPER; false → lower
+ */
+namespace lambda {
+static inline void parse_rfc_property_params(StringBuf* sb, const char** pos,
+                                              InputContext& ctx, Map* params_map,
+                                              bool upper_case_keys) {
+    MarkBuilder& builder = ctx.builder;
+    while (**pos == ';') {
+        (*pos)++;   // skip ';'
+        stringbuf_reset(sb);
+        while (**pos && **pos != '=' && **pos != ':' && **pos != '\n' && **pos != '\r') {
+            char c = upper_case_keys ? (char)toupper((unsigned char)**pos)
+                                     : (char)tolower((unsigned char)**pos);
+            stringbuf_append_char(sb, c);
+            (*pos)++;
+        }
+        if (sb->length == 0) continue;
+
+        String* param_name = builder.createName(sb->str->chars, sb->length);
+        if (!param_name) continue;
+
+        String* param_value = NULL;
+        if (**pos == '=') {
+            (*pos)++;  // skip '='
+            stringbuf_reset(sb);
+            bool in_quotes = (**pos == '"');
+            if (in_quotes) (*pos)++;
+            while (**pos &&
+                   (in_quotes ? **pos != '"'
+                               : (**pos != ';' && **pos != ':')) &&
+                   **pos != '\n' && **pos != '\r') {
+                stringbuf_append_char(sb, **pos);
+                (*pos)++;
+            }
+            if (in_quotes && **pos == '"') (*pos)++;  // skip closing quote
+            if (sb->length > 0)
+                param_value = builder.createString(sb->str->chars, sb->length);
+        }
+        if (param_value) {
+            Item value = {.item = s2it(param_value)};
+            builder.putToMap(params_map, param_name, value);
+        }
+    }
+}
+} // namespace lambda
 
 #endif // LAMBDA_INPUT_RFC_TEXT_H

@@ -1,22 +1,21 @@
 // BENG Benchmark: n-body
 // 5-body (Sun + Jovian planets) gravitational simulation
-// N=1000 expected: "-0.169075164\n-0.169087605\n"
+// Synchronized with JetStream: 36000 steps
 
-let N = 1000
+let N = 36000
 let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
 // format a float to exactly 9 decimal places
 pn format9(x) {
-    var v = x
     var neg = ""
-    if (v < 0.0) {
+    if (x < 0.0) {
         neg = "-"
-        v = -v
+        x = -x
     }
-    var int_part = int(floor(v))
-    var frac = v - float(int_part)
+    var int_part = int(floor(x))
+    var frac = x - float(int_part)
     var scaled = frac * 1000000000.0 + 0.5
     var fl = floor(scaled)
     var frac_int = int(fl)

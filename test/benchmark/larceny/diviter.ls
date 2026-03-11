@@ -6,20 +6,18 @@
 
 pn diviter_div(x, y) {
     var q = 0
-    var r = x
-    while (r >= y) {
-        r = r - y
+    while (x >= y) {
+        x = x - y
         q = q + 1
     }
     return q
 }
 
 pn diviter_mod(x, y) {
-    var r = x
-    while (r >= y) {
-        r = r - y
+    while (x >= y) {
+        x = x - y
     }
-    return r
+    return x
 }
 
 pn benchmark() {

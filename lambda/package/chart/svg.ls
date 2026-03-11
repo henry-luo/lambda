@@ -29,7 +29,7 @@ pub fn circle(cx, cy, r, fill) {
 
 pub fn line(x1, y1, x2, y2, stroke, stroke_width) {
     <line x1: x1, y1: y1, x2: x2, y2: y2,
-          stroke: stroke, "stroke-width": stroke_width>
+          stroke: stroke, 'stroke-width': stroke_width>
 }
 
 pub fn text_el(x, y, content) {

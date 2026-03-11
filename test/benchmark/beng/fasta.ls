@@ -16,12 +16,11 @@ pn repeat_fasta(id, desc, src, count) {
     print(">" ++ id ++ " " ++ desc ++ "\n")
     var src_len = len(src)
     var pos = 0
-    var remaining = count
 
-    while (remaining > 0) {
+    while (count > 0) {
         var line_len = LINE_WIDTH
-        if (remaining < line_len) {
-            line_len = remaining
+        if (count < line_len) {
+            line_len = count
         }
 
         // build one line by copying from src with wraparound
@@ -41,7 +40,7 @@ pn repeat_fasta(id, desc, src, count) {
             written = written + chunk_len
         }
         print(line ++ "\n")
-        remaining = remaining - line_len
+        count = count - line_len
     }
 }
 
@@ -73,12 +72,11 @@ pn random_fasta(id, desc, chars, probs, count, seed_arr) {
     print(">" ++ id ++ " " ++ desc ++ "\n")
     var cum = make_cumulative(probs)
     var num_chars = len(chars)
-    var remaining = count
 
-    while (remaining > 0) {
+    while (count > 0) {
         var line_len = LINE_WIDTH
-        if (remaining < line_len) {
-            line_len = remaining
+        if (count < line_len) {
+            line_len = count
         }
 
         var line = ""
@@ -97,7 +95,7 @@ pn random_fasta(id, desc, chars, probs, count, seed_arr) {
             j = j + 1
         }
         print(line ++ "\n")
-        remaining = remaining - line_len
+        count = count - line_len
     }
 }
 

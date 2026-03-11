@@ -1092,6 +1092,106 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
         log_debug("measure_element_intrinsic_widths: grid container with explicit height=%.1f", grid_explicit_height);
+
+        // CSS Grid §10.1: Grid container intrinsic widths are computed column-by-column.
+        // For a grid with N explicit columns, the max-content width = sum of column max-contents
+        // (each column's max-content = max of all items spanning only that column).
+        // This is different from a block container which takes max of block children.
+        GridProp* grid_prop = view_block->embed ? view_block->embed->grid : nullptr;
+        int col_count = 0;
+        if (grid_prop && grid_prop->grid_template_columns) {
+            col_count = grid_prop->grid_template_columns->track_count;
+        }
+        // Also check specified_style for unresolved grid-template-columns
+        if (col_count == 0 && element->specified_style) {
+            CssDeclaration* cols_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
+            if (cols_decl && cols_decl->value && cols_decl->value->type == CSS_VALUE_TYPE_LIST) {
+                col_count = cols_decl->value->data.list.count;
+            } else if (cols_decl && cols_decl->value && cols_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
+                col_count = 1;
+            }
+        }
+
+        if (col_count > 1) {
+            // Compute per-column max-content: assign each child to a column (auto-placement)
+            // and take max of children's max-content in each column
+            float* col_min = (float*)calloc(col_count, sizeof(float));
+            float* col_max = (float*)calloc(col_count, sizeof(float));
+
+            int item_idx = 0;
+            for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                if (!child->is_element()) continue;
+                DomElement* child_elem = child->as_element();
+                // Auto-placement: assign to column item_idx % col_count
+                int col = item_idx % col_count;
+                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+                if (child_sizes.min_content > col_min[col]) col_min[col] = child_sizes.min_content;
+                if (child_sizes.max_content > col_max[col]) col_max[col] = child_sizes.max_content;
+
+                // Check for explicit fixed-width track
+                if (grid_prop && grid_prop->grid_template_columns && col < col_count) {
+                    GridTrackSize* track = grid_prop->grid_template_columns->tracks[col];
+                    if (track && track->type == GRID_TRACK_SIZE_LENGTH && track->value > 0) {
+                        // Fixed length track: the column size is the fixed value, not the content
+                        float fixed_px = track->is_percentage ? 0 : (float)track->value;
+                        if (fixed_px > 0) {
+                            col_max[col] = fixed_px;
+                            col_min[col] = fixed_px;
+                        }
+                    }
+                }
+
+                item_idx++;
+            }
+
+            // Check if track sizes are fixed-length (from CSS)
+            // For fixed tracks, use fixed value regardless of content
+            if (grid_prop && grid_prop->grid_template_columns) {
+                for (int c = 0; c < col_count; c++) {
+                    GridTrackSize* track = grid_prop->grid_template_columns->tracks[c];
+                    if (track && track->type == GRID_TRACK_SIZE_LENGTH && !track->is_percentage && track->value > 0) {
+                        col_max[c] = (float)track->value;
+                        col_min[c] = (float)track->value;
+                    }
+                }
+            }
+
+            // Sum column sizes + gaps
+            float column_gap = (grid_prop ? grid_prop->column_gap : 0.0f);
+            float total_min = 0.0f, total_max = 0.0f;
+            for (int c = 0; c < col_count; c++) {
+                total_min += col_min[c];
+                total_max += col_max[c];
+            }
+            if (col_count > 1 && column_gap > 0) {
+                total_min += column_gap * (col_count - 1);
+                total_max += column_gap * (col_count - 1);
+            }
+
+            free(col_min);
+            free(col_max);
+
+            // Add padding and border
+            float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;
+            if (view_block->bound) {
+                pad_left = view_block->bound->padding.left;
+                pad_right = view_block->bound->padding.right;
+                if (view_block->bound->border) {
+                    border_left = view_block->bound->border->width.left;
+                    border_right = view_block->bound->border->width.right;
+                }
+            }
+            total_min += pad_left + pad_right + border_left + border_right;
+            total_max += pad_left + pad_right + border_left + border_right;
+
+            log_debug("measure_element_intrinsic_widths: grid %s with %d columns: min=%.1f, max=%.1f",
+                      element->node_name(), col_count, total_min, total_max);
+
+            // Restore font
+            if (font_changed) lycon->font = saved_font;
+            return {total_min, total_max};
+        }
     }
 
     // First check resolved display.inner

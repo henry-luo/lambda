@@ -19,60 +19,9 @@ static String* parse_property_name(InputContext& ctx, const char **ics) {
 }
 
 // Helper function to parse property parameters (between ; and :)
+// Uses the shared RFC helper — param names normalised to UPPER-CASE.
 static void parse_property_parameters(InputContext& ctx, const char **ics, Map* params_map) {
-    MarkBuilder& builder = ctx.builder;
-
-    while (**ics == ';') {
-        (*ics)++; // skip ';'
-
-        // Parse parameter name
-        StringBuf* sb = ctx.sb;
-        stringbuf_reset(sb);
-
-        while (**ics && **ics != '=' && **ics != ':' && **ics != '\n' && **ics != '\r') {
-            stringbuf_append_char(sb, toupper(**ics));
-            (*ics)++;
-        }
-
-        if (sb->length == 0) continue;
-
-        String* param_name = builder.createName(sb->str->chars, sb->length);
-        if (!param_name) continue;
-
-        String* param_value = NULL;
-
-        if (**ics == '=') {
-            (*ics)++; // skip '='
-            stringbuf_reset(sb);
-
-            // Handle quoted values
-            bool in_quotes = false;
-            if (**ics == '"') {
-                (*ics)++;
-                in_quotes = true;
-            }
-
-            while (**ics &&
-                   (in_quotes ? **ics != '"' : (**ics != ';' && **ics != ':')) &&
-                   **ics != '\n' && **ics != '\r') {
-                stringbuf_append_char(sb, **ics);
-                (*ics)++;
-            }
-
-            if (in_quotes && **ics == '"') {
-                (*ics)++; // skip closing quote
-            }
-
-            if (sb->length > 0) {
-                param_value = stringbuf_to_string(sb);
-            }
-        }
-
-        if (param_value) {
-            Item value = {.item = s2it(param_value)};
-            builder.putToMap(params_map, param_name, value);
-        }
-    }
+    parse_rfc_property_params(ctx.sb, ics, ctx, params_map, /*upper_case_keys=*/true);
 }
 
 // Helper function to parse property value (after the colon, handling folded lines)

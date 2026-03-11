@@ -411,14 +411,13 @@ pn rbt_get(tree, key) {
 }
 
 pn rbt_tree_min(tree, xId) {
-    var cur = xId
-    while (cur != NIL) {
-        var n = rbt_nd(tree, cur)
+    while (xId != NIL) {
+        var n = rbt_nd(tree, xId)
         var lId = n[NL]
-        if (lId == NIL) { return cur }
-        cur = lId
+        if (lId == NIL) { return xId }
+        xId = lId
     }
-    return cur
+    return xId
 }
 
 pn rbt_successor(tree, xId) {
@@ -428,13 +427,12 @@ pn rbt_successor(tree, xId) {
         var r = rbt_tree_min(tree, rId)
         return r
     }
-    var cur = xId
     var yId = xn[NP]
     while (yId != NIL) {
         var yn = rbt_nd(tree, yId)
         var yrId = yn[NR]
-        if (cur != yrId) { return yId }
-        cur = yId
+        if (xId != yrId) { return yId }
+        xId = yId
         yId = yn[NP]
     }
     return NIL
@@ -447,9 +445,7 @@ pn rbt_first(tree) {
     return r
 }
 
-pn rbt_remove_fixup(tree, xId_p, xParId_p) {
-    var xId = xId_p
-    var xParId = xParId_p
+pn rbt_remove_fixup(tree, xId, xParId) {
     var rootId = (tree.root)
     while (xId != rootId) {
         var xCol = BLACK
