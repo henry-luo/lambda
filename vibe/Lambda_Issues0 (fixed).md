@@ -274,18 +274,16 @@ No similar nesting issues found in other `__thread` globals — `input_context` 
 
 ---
 
-### Issue #14: `heap_strcpy` sets `ref_cnt = 0`
+### Issue #14: `heap_strcpy` sets `ref_cnt = 0` — obsolete (GC migration)
 
 **File:** `lambda/lambda-mem.cpp` — `heap_strcpy()`
-**Severity:** 🟢 Medium — premature free risk
+**Severity:** N/A — no longer applicable
 
-The newly allocated string has `ref_cnt = 0`, making it immediately eligible for freeing by `heap_cleanup`. If the caller doesn't store it somewhere that increments `ref_cnt` before the next GC sweep, it's freed prematurely. Compare with `name_pool_create` which sets `ref_cnt = 1`.
-
-**Fix:** Initialize `ref_cnt = 1` (caller is the first reference), or document that callers must immediately increment.
+**Status:** Obsolete. The runtime has moved to a GC-based memory system (`gc_heap_alloc`). Strings allocated by `heap_strcpy` are managed by the garbage collector via reachability tracing, not by `ref_cnt`. The `ref_cnt` field on `String` is only used for name-pooled strings (reference counting for interning), not for heap-allocated strings.
 
 ---
 
-### Issue #16: `TypedItem` `pack(1)` causes unaligned 8-byte access
+### Issue #15: `TypedItem` `pack(1)` causes unaligned 8-byte access — deferred
 
 **File:** `lambda/lambda-data.hpp` — `struct TypedItem`
 **Severity:** 🟢 Low — performance penalty on ARM64
@@ -305,4 +303,6 @@ typedef struct TypedItem {
 
 The 8-byte union members start at byte offset 1. On x86/ARM64 this works but incurs a performance penalty. On strict-alignment architectures it would cause SIGBUS.
 
-**Fix:** Pad to 16 bytes (1 byte TypeId + 7 padding + 8 byte union), or accept the 1-byte overhead and remove `pack(1)`.
+**How TypedItem is used:** `TypedItem` (9 bytes) is the storage format for `LMD_TYPE_ANY` map fields. Maps store field data in a contiguous byte region; each field occupies `type_info[field_type].byte_size` bytes at its `ShapeEntry.byte_offset`. For any-typed fields, `byte_size = 9`. Writing (`*(TypedItem*)field_ptr = titem`), reading (`typeditem_to_item((TypedItem*)field_ptr)`), and GC tracing (`*(uint64_t*)((uint8_t*)field_ptr + 1)`) all access the union at offset 1 — an unaligned 8-byte load/store.
+
+**Status:** Deferred. This is part of a broader map field byte-alignment optimization — not just `TypedItem`, but all fields across the map data region should be considered together (field reordering, padding strategy, alignment-aware byte_offset calculation). Will revisit as a holistic map layout optimization.
