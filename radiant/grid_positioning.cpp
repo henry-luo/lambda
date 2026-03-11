@@ -267,6 +267,70 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     log_debug("Grid items positioned\n");
 }
 
+// Helper: read the CSS percentage value for a horizontal margin side (left or right).
+// If the margin declared in specified_style was a percentage, returns pct/100 * track_width.
+// Returns the pre-resolved value from bound for fixed lengths, 0 for auto/absent.
+// side: 0=left, 1=right, 2=top, 3=bottom
+static float resolve_margin_side(ViewBlock* item, int side, float track_width) {
+    if (!item || !item->bound) return 0.0f;
+
+    float  bound_val  = 0.0f;
+    CssEnum bound_type = CSS_VALUE__UNDEF;
+    switch (side) {
+        case 0: bound_val = item->bound->margin.left;   bound_type = item->bound->margin.left_type;   break;
+        case 1: bound_val = item->bound->margin.right;  bound_type = item->bound->margin.right_type;  break;
+        case 2: bound_val = item->bound->margin.top;    bound_type = item->bound->margin.top_type;    break;
+        case 3: bound_val = item->bound->margin.bottom; bound_type = item->bound->margin.bottom_type; break;
+    }
+
+    if (bound_type == CSS_VALUE_AUTO) return 0.0f;
+
+    if (bound_type != CSS_VALUE__PERCENTAGE) {
+        // Fixed length margin - use pre-resolved value
+        return bound_val;
+    }
+
+    // Percentage margin: re-resolve against the actual track width.
+    // CSS §11.4: for grid items, percentage margins resolve against the inline size of the grid area.
+    // Try individual property first.
+    static const CssPropertyId side_props[] = {
+        CSS_PROPERTY_MARGIN_LEFT, CSS_PROPERTY_MARGIN_RIGHT,
+        CSS_PROPERTY_MARGIN_TOP,  CSS_PROPERTY_MARGIN_BOTTOM
+    };
+    if (item->specified_style) {
+        CssDeclaration* decl = style_tree_get_declaration(item->specified_style, side_props[side]);
+        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            return (float)(decl->value->data.percentage.value / 100.0) * track_width;
+        }
+        // Not set individually — check the shorthand margin property.
+        CssDeclaration* sh = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN);
+        if (sh && sh->value) {
+            CssValue* pval = nullptr;
+            if (sh->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                pval = sh->value;  // single value: applies to all sides
+            } else if (sh->value->type == CSS_VALUE_TYPE_LIST) {
+                int cnt = sh->value->data.list.count;
+                CssValue** vals = sh->value->data.list.values;
+                // CSS margin shorthand: top [right [bottom [left]]]
+                // left (side==0): idx 3 for cnt==4, idx 1 for cnt<4
+                // right (side==1): idx 1 for cnt>=2, idx 0 for cnt==1
+                // top (side==2): idx 0
+                // bottom (side==3): idx 2 for cnt>=3, idx 0 for cnt<3
+                int idx = 0;
+                if (side == 0) idx = (cnt == 4) ? 3 : 1;       // left
+                else if (side == 1) idx = (cnt >= 2) ? 1 : 0;  // right
+                else if (side == 2) idx = 0;                    // top
+                else               idx = (cnt >= 3) ? 2 : 0;   // bottom
+                if (idx < cnt) pval = vals[idx];
+            }
+            if (pval && pval->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                return (float)(pval->data.percentage.value / 100.0) * track_width;
+            }
+        }
+    }
+    return 0.0f;
+}
+
 // Align all grid items
 void align_grid_items(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
@@ -292,6 +356,23 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // Use stored track area dimensions from positioning phase
     int available_width = item->gi->track_area_width;
     int available_height = item->gi->track_area_height;
+
+    // CSS Grid §8.1: fixed (non-auto) margins reduce the usable grid area for alignment.
+    // The item's alignment box = grid area minus fixed margins.  Auto margins are handled
+    // separately (they consume the remaining free space after fixed-margin reduction).
+    // Percentage margins are resolved against the actual track width (CSS §11.4).
+    float margin_left   = resolve_margin_side(item, 0, (float)available_width);
+    float margin_right  = resolve_margin_side(item, 1, (float)available_width);
+    float margin_top    = resolve_margin_side(item, 2, (float)available_width);
+    float margin_bottom = resolve_margin_side(item, 3, (float)available_width);
+    // Reduce available area by the fixed margins before any alignment calculation
+    available_width  -= (int)(margin_left + margin_right);
+    available_height -= (int)(margin_top  + margin_bottom);
+    if (available_width  < 0) available_width  = 0;
+    if (available_height < 0) available_height = 0;
+    // Offset the base position so alignment operates inside the margin box
+    item->x += margin_left;
+    item->y += margin_top;
 
     // Check if item has aspect-ratio constraint
     // IMPORTANT: fi and gi are in a union - for grid items, fi is overwritten by gi
@@ -412,16 +493,27 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         bool right_auto = (item->bound->margin.right_type  == CSS_VALUE_AUTO);
         bool top_auto   = (item->bound->margin.top_type    == CSS_VALUE_AUTO);
         bool bot_auto   = (item->bound->margin.bottom_type == CSS_VALUE_AUTO);
-        float horiz_free = (float)available_width  - item->width;
-        float vert_free  = (float)available_height - item->height;
+        // CSS Grid §8.1: auto margins consume the free space between the item's margin box and the
+        // grid area.  The item's actual (content) size must be used, not the stretch-assigned size.
+        // Pass 3 sets content_width/content_height; fall back to current item->width/height if not set.
+        // NOTE: content_height=0 is valid (empty element); the check is >= 0 to include that case
+        // so an empty element with margin:auto gets correctly centered at height=0.
+        float actual_item_width  = (item->content_width  > 0 && item->content_width  < (float)available_width)
+                                   ? item->content_width  : item->width;
+        float actual_item_height = (item->content_height >= 0 && item->content_height < (float)available_height)
+                                   ? item->content_height : item->height;
+        float horiz_free = (float)available_width  - actual_item_width;
+        float vert_free  = (float)available_height - actual_item_height;
         if (left_auto || right_auto) {
             applied_horiz_auto = true;
+            item->width = actual_item_width;   // shrink to content size before shifting
             if (left_auto && right_auto) item->x += horiz_free * 0.5f;
             else if (left_auto)          item->x += horiz_free;
             // right_auto alone: item stays at track start (no shift)
         }
         if (top_auto || bot_auto) {
             applied_vert_auto = true;
+            item->height = actual_item_height; // shrink to content size before shifting
             if (top_auto && bot_auto) item->y += vert_free * 0.5f;
             else if (top_auto)        item->y += vert_free;
             // bot_auto alone: item stays at track start (no shift)
