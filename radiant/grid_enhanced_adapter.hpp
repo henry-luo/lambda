@@ -726,6 +726,23 @@ inline std::vector<GridItemContribution> collect_item_contributions(
                 contrib.min_content_contribution = sizes.min_content;
                 contrib.max_content_contribution = sizes.max_content;
             }
+
+            // Apply CSS min-width/max-width constraints (these may not be in the cache)
+            if (item->blk) {
+                if (item->blk->given_min_width > 0) {
+                    contrib.min_content_contribution = std::max(contrib.min_content_contribution,
+                                                                item->blk->given_min_width);
+                    contrib.max_content_contribution = std::max(contrib.max_content_contribution,
+                                                                contrib.min_content_contribution);
+                }
+                if (item->blk->given_max_width > 0) {
+                    contrib.max_content_contribution = std::min(contrib.max_content_contribution,
+                                                                item->blk->given_max_width);
+                    // min must still be <= max
+                    contrib.min_content_contribution = std::min(contrib.min_content_contribution,
+                                                                contrib.max_content_contribution);
+                }
+            }
         } else {
             // Row axis
             int row_start = item->gi->computed_grid_row_start;
@@ -822,6 +839,75 @@ inline void run_enhanced_track_sizing(
         std::vector<GridItemContribution> col_contributions =
             collect_item_contributions(grid_layout, items, item_count, true /* is_column_axis */);
         log_debug("  col_contributions.size=%zu", col_contributions.size());
+        for (size_t ci = 0; ci < col_contributions.size(); ci++) {
+            log_debug("  col_contrib[%zu]: track_start=%zu, span=%zu, min=%.1f, max=%.1f",
+                      ci, col_contributions[ci].track_start, col_contributions[ci].track_span,
+                      col_contributions[ci].min_content_contribution,
+                      col_contributions[ci].max_content_contribution);
+        }
+
+        // When the container has definite width, cap auto track growth limits so that
+        // the intrinsic sizing phase (Phase 2: max-content) doesn't cause tracks to overflow.
+        // Per browser behavior: each auto max track's growth_limit = max(min-content-floor, available/auto_count)
+        // This ensures tracks fit within the available space after maximize_tracks.
+        if (col_available > 0.0f && !col_contributions.empty()) {
+            // Count auto max tracks (non-flexible) and sum fixed-track space
+            size_t auto_max_count = 0;
+            float fixed_track_space = 0.0f;
+            for (const auto& track : col_tracks) {
+                if (track.kind != GridTrackKind::Track) continue;
+                if (track.max_track_sizing_function.type == SizingFunctionType::Auto && !track.is_flexible()) {
+                    auto_max_count++;
+                } else if (!track.is_flexible() && !std::isinf(track.growth_limit)) {
+                    fixed_track_space += track.growth_limit;
+                }
+            }
+
+            if (auto_max_count > 0) {
+                float available_for_auto = col_available - fixed_track_space;
+                float per_auto = available_for_auto / static_cast<float>(auto_max_count);
+
+                if (per_auto > 0.0f) {
+                    // Find the max min-content contribution for each auto track
+                    // (this is the floor: the track must be at least this wide)
+                    std::vector<float> track_min_floor(col_tracks.size(), 0.0f);
+                    for (const auto& contrib : col_contributions) {
+                        if (contrib.track_span == 1) {  // Only single-span items define per-track floors
+                            size_t ti = contrib.track_start;
+                            if (ti < track_min_floor.size()) {
+                                track_min_floor[ti] = std::max(track_min_floor[ti],
+                                                               contrib.min_content_contribution);
+                            }
+                        }
+                    }
+
+                    // Cap growth_limit for auto tracks that need less space than per_auto.
+                    // Tracks whose min-content floor EXCEEDS per_auto are left uncapped:
+                    // they will absorb their min-content requirement first, then maximize_tracks
+                    // distributes the remaining free space equally among all uncapped tracks.
+                    for (size_t i = 0; i < col_tracks.size(); i++) {
+                        auto& track = col_tracks[i];
+                        if (track.kind != GridTrackKind::Track) continue;
+                        if (track.max_track_sizing_function.type == SizingFunctionType::Auto &&
+                            !track.is_flexible() && std::isinf(track.growth_limit)) {
+                            float floor = (i < track_min_floor.size()) ? track_min_floor[i] : 0.0f;
+                            if (floor < per_auto) {
+                                // Cap: this track's content fits within equal distribution
+                                track.growth_limit = per_auto;
+                                log_debug("  col_track[%zu] auto-cap: growth_limit=%.1f (floor=%.1f < per_auto=%.1f)",
+                                          i, track.growth_limit, floor, per_auto);
+                            } else {
+                                // Don't cap: content requirement exceeds equal share
+                                // maximize_tracks will distribute remaining space
+                                log_debug("  col_track[%zu] no-cap: floor=%.1f >= per_auto=%.1f",
+                                          i, floor, per_auto);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (!col_contributions.empty()) {
             resolve_intrinsic_track_sizes(col_tracks, col_contributions, grid_layout->column_gap);
         }
