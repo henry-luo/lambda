@@ -714,11 +714,18 @@ extern "C" Item js_property_get(Item object, Item key) {
     }
 
     // Function: reading .prototype property
+    // Lazy initialization: create an empty prototype object on first access.
+    // This is needed for patterns like `Foo.prototype.method = function(){}`
+    // where prototype must be a real object, not null.
     if (type == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)object.function;
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
+                if (fn->prototype.item == ItemNull.item) {
+                    fn->prototype = js_new_object();
+                    heap_register_gc_root(&fn->prototype.item);
+                }
                 return fn->prototype;
             }
         }

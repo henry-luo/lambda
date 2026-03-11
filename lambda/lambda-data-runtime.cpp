@@ -1034,6 +1034,106 @@ ArrayList* item_keys(Item data) {
     }
 }
 
+// Unified for-loop iteration helpers.
+// For element: attrs first (keyed), then children (indexed).
+// key_filter: 0=ALL, 1=INT only, 2=SYMBOL only
+
+// Get total iteration length for unified for-loop
+int64_t iter_len(Item data, void* keys_ptr, int key_filter) {
+    TypeId type_id = get_type_id(data);
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    int64_t key_count = keys ? (int64_t)keys->length : 0;
+
+    if (type_id == LMD_TYPE_ELEMENT) {
+        int64_t child_count = (int64_t)data.element->length;
+        if (key_filter == 1) return child_count;        // INT: children only
+        if (key_filter == 2) return key_count;           // SYMBOL: attrs only
+        return key_count + child_count;                  // ALL: attrs + children
+    }
+    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
+        if (key_filter == 1) return 0;  // INT filter on map: no indexed entries
+        return key_count;
+    }
+    // array/list/range: indexed entries
+    if (key_filter == 2) return 0;  // SYMBOL filter on array: no keyed entries
+    return fn_len(data);
+}
+
+// Get key at iteration index for unified for-loop
+// Returns: int (boxed) for indexed entries, symbol string (boxed) for keyed entries
+Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
+    TypeId type_id = get_type_id(data);
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    int64_t key_count = keys ? (int64_t)keys->length : 0;
+
+    if (type_id == LMD_TYPE_ELEMENT) {
+        if (key_filter == 2) {
+            // SYMBOL: attrs only
+            if (idx < key_count) {
+                String* key_str = (String*)keys->data[idx];
+                return {.item = s2it(key_str)};
+            }
+            return ItemNull;
+        }
+        if (key_filter == 1) {
+            // INT: children only
+            return {.item = i2it(idx)};
+        }
+        // ALL: attrs first, then children
+        if (idx < key_count) {
+            String* key_str = (String*)keys->data[idx];
+            return {.item = s2it(key_str)};
+        }
+        return {.item = i2it(idx - key_count)};
+    }
+    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
+        if (idx < key_count) {
+            String* key_str = (String*)keys->data[idx];
+            return {.item = s2it(key_str)};
+        }
+        return ItemNull;
+    }
+    // array/list/range: key is the index
+    return {.item = i2it(idx)};
+}
+
+// Get value at iteration index for unified for-loop
+Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
+    TypeId type_id = get_type_id(data);
+    ArrayList* keys = (ArrayList*)keys_ptr;
+    int64_t key_count = keys ? (int64_t)keys->length : 0;
+
+    if (type_id == LMD_TYPE_ELEMENT) {
+        if (key_filter == 2) {
+            // SYMBOL: attrs only
+            if (idx < key_count) {
+                String* key_str = (String*)keys->data[idx];
+                return item_attr(data, key_str->chars);
+            }
+            return ItemNull;
+        }
+        if (key_filter == 1) {
+            // INT: children only
+            return list_get(data.element, (int)idx);
+        }
+        // ALL: attrs first, then children
+        if (idx < key_count) {
+            String* key_str = (String*)keys->data[idx];
+            return item_attr(data, key_str->chars);
+        }
+        return list_get(data.element, (int)(idx - key_count));
+    }
+    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
+        if (idx < key_count) {
+            String* key_str = (String*)keys->data[idx];
+            return item_attr(data, key_str->chars);
+        }
+        return ItemNull;
+    }
+    // array/list/range: use item_at
+    return item_at(data, (int)idx);
+}
+
 // ============================================================================
 // Runtime typed array coercion for type annotations (int[], float[], etc.)
 // Converts generic Array/List to typed array, or validates existing typed array.

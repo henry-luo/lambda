@@ -1652,18 +1652,82 @@ Bool fn_in(Item a_item, Item b_item) {
         }
         else if (b_type == LMD_TYPE_ARRAY_INT) {
             ArrayInt *arr = b_item.array_int;
-            for (int i = 0; i < arr->length; i++) {
-                if (arr->items[i] == it2l(a_item)) {
+            int64_t a_val = it2l(a_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->items[i] == a_val) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        else if (b_type == LMD_TYPE_ARRAY_INT64) {
+            ArrayInt64 *arr = b_item.array_int64;
+            int64_t a_val = it2l(a_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->items[i] == a_val) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        else if (b_type == LMD_TYPE_ARRAY_FLOAT) {
+            ArrayFloat *arr = b_item.array_float;
+            double a_val = it2d(a_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->items[i] == a_val) {
                     return true;
                 }
             }
             return false;
         }
         else if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
-            // check if a is in map/object
+            // value membership: check if a matches any field value
+            Map *map = b_item.map;
+            TypeMap* map_type = (TypeMap*)map->type;
+            if (!map_type) return false;
+            ShapeEntry* field = map_type->shape;
+            while (field) {
+                Item val = _map_field_value(map_type, map->data, field);
+                if (fn_eq(val, a_item) == BOOL_TRUE) {
+                    return true;
+                }
+                field = field->next;
+            }
+            return false;
+        }
+        else if (b_type == LMD_TYPE_VMAP) {
+            // value membership: iterate all values and compare
+            VMap* vm = b_item.vmap;
+            int64_t count = vm->vtable->count(vm->data);
+            for (int64_t i = 0; i < count; i++) {
+                Item val = vm->vtable->value_at(vm->data, i);
+                if (fn_eq(val, a_item) == BOOL_TRUE) {
+                    return true;
+                }
+            }
+            return false;
         }
         else if (b_type == LMD_TYPE_ELEMENT) {
-            // check if a is in element
+            Element* elmt = b_item.element;
+            TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+            // check attribute values
+            if (elmt_type) {
+                ShapeEntry* field = elmt_type->shape;
+                while (field) {
+                    Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
+                    if (fn_eq(val, a_item) == BOOL_TRUE) {
+                        return true;
+                    }
+                    field = field->next;
+                }
+            }
+            // check children (value membership)
+            for (int64_t i = 0; i < elmt->length; i++) {
+                if (fn_eq(elmt->items[i], a_item) == BOOL_TRUE) {
+                    return true;
+                }
+            }
+            return false;
         }
         else {
             log_debug("invalid type %d", b_type);

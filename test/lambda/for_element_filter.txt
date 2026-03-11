@@ -1,0 +1,24 @@
+"=== for k:int, v in element (children only) ==="
+[0, 1]
+['sub', 'sub']
+"=== for k:symbol, v in element (attrs only) ==="
+["x", "y"]
+["1", "2"]
+"=== for k, v in element (all: attrs + children) ==="
+["x", "y", 0, 1]
+"=== for v in element (children values) ==="
+4
+"=== for k:int, v on element with text children ==="
+[0, 1, 2]
+3
+"=== for k:symbol, v on element with no attrs ==="
+[]
+[[0, "text"]]
+"=== for k:int, v on map (no indexed entries) ==="
+[]
+"=== for k:symbol, v on map (all entries) ==="
+[["a", 1], ["b", 2]]
+"=== for k:symbol, v on array (no keyed entries) ==="
+[]
+"=== for k:int, v on array (all entries) ==="
+[[0, 10], [1, 20]]

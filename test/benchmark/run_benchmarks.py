@@ -168,6 +168,18 @@ JETSTREAM_PY = {
     "nbody":     "test/benchmark/jetstream/nbody.py",
 }
 
+JETSTREAM_LJS = {
+    "nbody":         "test/benchmark/jetstream/n-body.js",
+    "cube3d":        "test/benchmark/jetstream/3d-cube.js",
+    "navier_stokes": "test/benchmark/jetstream/navier-stokes.js",
+    "richards":      "test/benchmark/jetstream/richards.js",
+    "splay":         "test/benchmark/jetstream/splay.js",
+    "deltablue":     "test/benchmark/jetstream/deltablue.js",
+    "hashmap":       "test/benchmark/jetstream/hash-map.js",
+    "crypto_sha1":   "test/benchmark/jetstream/crypto-sha1.js",
+    "raytrace3d":    "test/benchmark/jetstream/3d-raytrace.js",
+}
+
 STANDARD_SUITES = [
     ("r7rs",    R7RS),
     ("awfy",    AWFY),
@@ -319,6 +331,43 @@ def make_jetstream_node_wrapper(bench_name, js_path):
         f.write("b.runIteration();\n")
         f.write("const t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (t1 - t0).toFixed(3));\n')
+    return wrapper
+
+
+def _detect_jetstream_run_function(js_path):
+    """Detect the benchmark's run function from the Benchmark class body."""
+    with open(js_path) as f:
+        code = f.read()
+    m = re.search(r'runIteration\(\)\s*\{([^}]+)\}', code)
+    if m:
+        body = m.group(1).strip()
+        calls = re.findall(r'(\w+)\(\)', body)
+        for call in calls:
+            if call not in ('let', 'var', 'const', 'for', 'if'):
+                return f"{call}()"
+    return None
+
+
+def make_jetstream_ljs_wrapper(bench_name, js_path):
+    """Create LambdaJS wrapper for JetStream benchmark (strips ES6 class, adds timing)."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
+    os.makedirs("temp", exist_ok=True)
+    wrapper = os.path.join("temp", f"_ljs_jetstream_{bench_name}.js")
+    with open(js_path) as f:
+        code = f.read()
+    # strip the class Benchmark { ... } block at the end
+    code = re.sub(r'\nclass Benchmark \{[^}]+\}\s*$', '', code, flags=re.DOTALL)
+    code = code.replace("'use strict';", "")
+    code = code.replace('"use strict";', "")
+    with open(wrapper, "w") as f:
+        f.write(code)
+        f.write("\n// Timing wrapper\n")
+        f.write("var _t0 = performance.now();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write("var _t1 = performance.now();\n")
+        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
 
 
@@ -587,11 +636,26 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
                 row["python"] = None
                 print(f"  Python    ---")
     else:
-        # JetStream suite: no LambdaJS/QuickJS
+        # JetStream suite
         if "lambdajs" in engines:
-            results[suite][name]["lambdajs"] = None
-            row["lambdajs"] = None
-            print(f"  LambdaJS  ---")
+            ljs_js = JETSTREAM_LJS.get(name)
+            if ljs_js and os.path.exists(ljs_js):
+                wrapper = make_jetstream_ljs_wrapper(name, ljs_js)
+                if wrapper:
+                    print(f"  LambdaJS ", end="", flush=True)
+                    w, e, ok = time_run_benchmark(f"{LAMBDA_EXE} js {wrapper}", num_runs, timeout_s)
+                    val = e if ok and e is not None else (w if ok else None)
+                    results[suite][name]["lambdajs"] = val
+                    row["lambdajs"] = val
+                    print(f" {fmt_ms(e if e is not None else w)}")
+                else:
+                    results[suite][name]["lambdajs"] = None
+                    row["lambdajs"] = None
+                    print(f"  LambdaJS  ---")
+            else:
+                results[suite][name]["lambdajs"] = None
+                row["lambdajs"] = None
+                print(f"  LambdaJS  ---")
 
         if "quickjs" in engines:
             results[suite][name]["quickjs"] = None
