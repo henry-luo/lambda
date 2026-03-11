@@ -244,7 +244,35 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     expand_auto_repeat_tracks(grid_layout);
 
     if (item_count == 0) {
-        log_debug("No grid items found");
+        log_debug("No grid items found - computing track sizes for empty grid (for absolute children and container sizing)");
+        // Even with no items, we need to resolve explicit track sizes so that:
+        // 1. Absolutely positioned children can use grid-line positions for their containing block.
+        // 2. The container gets the correct height from explicit grid-template-rows + padding.
+        determine_grid_size(grid_layout);
+        resolve_track_sizes_enhanced(grid_layout, container);
+
+        // Update container height from explicit row heights + padding (mirroring the shrink-to-fit path)
+        if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
+            float total_row_height = 0;
+            for (int r = 0; r < grid_layout->computed_row_count; r++) {
+                total_row_height += grid_layout->computed_rows[r].base_size;
+            }
+            if (grid_layout->computed_row_count > 1) {
+                total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
+            }
+            float new_h = total_row_height;
+            if (container->bound) {
+                new_h += container->bound->padding.top + container->bound->padding.bottom;
+                if (container->bound->border) {
+                    new_h += container->bound->border->width.top + container->bound->border->width.bottom;
+                }
+            }
+            if (new_h > (float)container->height) {
+                container->height = (int)new_h;
+                log_debug("GRID: Updated empty-grid container height to %.1f from explicit rows", new_h);
+            }
+        }
+        grid_layout->needs_reflow = false;
         return;
     }
 
@@ -987,7 +1015,27 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
 
             // Account for gaps
             float gap = grid_layout->column_gap;
-            int available = grid_layout->content_width;
+
+            // Subtract the space already consumed by other (non-auto-repeat) tracks and
+            // their associated gaps, then compute how many repetitions fit in what's left.
+            // CSS Grid §7.2.3.3: available_space = container_size - non-auto-repeat tracks - gaps
+            int fixed_track_space = 0;
+            int fixed_track_count = 0;
+            for (int j = 0; j < cols->track_count; j++) {
+                if (j == i) continue;  // skip the auto-fill repeat track itself
+                GridTrackSize* other = cols->tracks[j];
+                if (!other) continue;
+                if (other->type == GRID_TRACK_SIZE_LENGTH) {
+                    fixed_track_space += (int)other->value;
+                    fixed_track_count++;
+                }
+                // percentage/flex tracks: skip (can't know their size without container width)
+            }
+            // Total gaps for the non-auto-fill tracks we know about
+            // (will be recalculated once the final track count is known, but we approximate here)
+            int total_explicit_tracks = fixed_track_count;
+            int gap_for_fixed = (total_explicit_tracks > 0) ? (int)(total_explicit_tracks * gap) : 0;
+            int available = grid_layout->content_width - fixed_track_space - gap_for_fixed;
 
             // Calculate how many repetitions fit
             // Formula: (available + gap) / (pattern_size + gap) = max repetitions
@@ -1059,7 +1107,21 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             if (pattern_size <= 0) pattern_size = 100;
 
             float gap = grid_layout->row_gap;
-            int available = grid_layout->content_height;
+
+            // Subtract space consumed by non-auto-repeat row tracks (same logic as columns)
+            int fixed_row_space = 0;
+            int fixed_row_count = 0;
+            for (int j = 0; j < rows->track_count; j++) {
+                if (j == i) continue;
+                GridTrackSize* other = rows->tracks[j];
+                if (!other) continue;
+                if (other->type == GRID_TRACK_SIZE_LENGTH) {
+                    fixed_row_space += (int)other->value;
+                    fixed_row_count++;
+                }
+            }
+            int gap_for_fixed_rows = fixed_row_count > 0 ? (int)(fixed_row_count * gap) : 0;
+            int available = grid_layout->content_height - fixed_row_space - gap_for_fixed_rows;
 
             int repeat_count = 1;
             if (pattern_size + gap > 0) {

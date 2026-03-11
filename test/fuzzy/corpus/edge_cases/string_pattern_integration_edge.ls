@@ -3,18 +3,18 @@
 // ==== BOUNDARY CASES ====
 
 // Empty pattern definitions
-string empty = ""
-string opt_empty = ""?
+type empty = ""
+type opt_empty = ""?
 
 // Single character patterns
-string single = "a"
-string single_range = "a" to "a"
+type single = "a"
+type single_range = "a" to "a"
 
 // Very deep nesting of patterns
-string d1 = "0" to "9"
-string d2 = d1 d1
-string d3 = d2 d2
-string d4 = d3 d3  // effectively digit[16]
+type d1 = "0" to "9"
+type d2 = d1 d1
+type d3 = d2 d2
+type d4 = d3 d3  // effectively digit[16]
 
 // ==== CONFLICTING DEFINITIONS ====
 
@@ -25,7 +25,7 @@ string d4 = d3 d3  // effectively digit[16]
 // ==== COMPLEX UNION/INTERSECTION WITH PATTERNS ====
 
 // Union of multiple patterns
-string numeric_format = digit+ | digit+ "." digit+ | "0x" ("0" to "9" | "a" to "f")+
+type numeric_format = digit+ | digit+ "." digit+ | "0x" ("0" to "9" | "a" to "f")+
 
 // Pattern in complex type union
 type ConfigValue = string | int | bool | date_iso
@@ -97,8 +97,8 @@ type EmailFormatter = fn(email) string
 
 // ==== TYPE ALIAS CHAIN WITH PATTERNS ====
 
-string base_email = email_local "@" email_domain
-string work_email = base_email  // alias
+type base_email = email_local "@" email_domain
+type work_email = base_email  // alias
 type WorkEmailField = work_email  // as type
 
 // ==== MIXED STRING ENUM AND STRING PATTERN ====
@@ -107,7 +107,7 @@ type WorkEmailField = work_email  // as type
 type Status = "active" | "inactive" | "pending"
 
 // String pattern (format constraint)  
-string status_code = letter[3] digit[3]
+type status_code = letter[3] digit[3]
 
 // Combined in schema
 type Record = {
@@ -144,5 +144,5 @@ type NullablePattern = {
 
 // ==== EDGE CASE: PATTERN THAT MATCHES EVERYTHING ====
 
-string any_char = \.
-string any_string = \.*  // or ...
+type any_char = \.
+type any_string = \.*  // or ...

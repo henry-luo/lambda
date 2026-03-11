@@ -1592,22 +1592,22 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         case 4:
             log_debug("resolving 4th spacing");
             sp.left = resolve_length_value(lycon, property, values[3]);
-            sp.left_type = values[3]->type == CSS_VALUE_TYPE_KEYWORD ? values[3]->data.keyword : CSS_VALUE__UNDEF;
+            sp.left_type = values[3]->type == CSS_VALUE_TYPE_KEYWORD ? values[3]->data.keyword : (values[3]->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             // intended fall through
         case 3:
             log_debug("resolving 3rd spacing");
             sp.bottom = resolve_length_value(lycon, property, values[2]);
-            sp.bottom_type = values[2]->type == CSS_VALUE_TYPE_KEYWORD ? values[2]->data.keyword : CSS_VALUE__UNDEF;
+            sp.bottom_type = values[2]->type == CSS_VALUE_TYPE_KEYWORD ? values[2]->data.keyword : (values[2]->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             // intended fall through
         case 2:
             log_debug("resolving 2nd spacing");
             sp.right = resolve_length_value(lycon, property, values[1]);
-            sp.right_type = values[1]->type == CSS_VALUE_TYPE_KEYWORD ? values[1]->data.keyword : CSS_VALUE__UNDEF;
+            sp.right_type = values[1]->type == CSS_VALUE_TYPE_KEYWORD ? values[1]->data.keyword : (values[1]->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             // intended fall through
         case 1:
             log_debug("resolving 1st spacing");
             sp.top = resolve_length_value(lycon, property, values[0]);
-            sp.top_type = values[0]->type == CSS_VALUE_TYPE_KEYWORD ? values[0]->data.keyword : CSS_VALUE__UNDEF;
+            sp.top_type = values[0]->type == CSS_VALUE_TYPE_KEYWORD ? values[0]->data.keyword : (values[0]->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             break;
         default:
             log_warn("unexpected spacing value count: %d", value_cnt);
@@ -1616,7 +1616,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     } else {
         // Single value margin
         sp.top = resolve_length_value(lycon, property, src_space);
-        sp.top_type = src_space->type == CSS_VALUE_TYPE_KEYWORD ? src_space->data.keyword : CSS_VALUE__UNDEF;
+        sp.top_type = src_space->type == CSS_VALUE_TYPE_KEYWORD ? src_space->data.keyword : (src_space->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
     }
     switch (value_cnt) {
     case 1:
@@ -3493,7 +3493,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->margin.top_specificity) {
                 span->bound->margin.top = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_TOP, value);
                 span->bound->margin.top_specificity = specificity;
-                span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             }
             break;
         }
@@ -3505,7 +3505,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->margin.right_specificity) {
                 span->bound->margin.right = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_RIGHT, value);
                 span->bound->margin.right_specificity = specificity;
-                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             }
             break;
         }
@@ -3517,7 +3517,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->margin.bottom_specificity) {
                 span->bound->margin.bottom = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_BOTTOM, value);
                 span->bound->margin.bottom_specificity = specificity;
-                span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             }
             break;
         }
@@ -3529,7 +3529,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->margin.left_specificity) {
                 span->bound->margin.left = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_LEFT, value);
                 span->bound->margin.left_specificity = specificity;
-                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             }
             break;
         }
@@ -3540,15 +3540,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             float margin_value = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_BLOCK, value);
+            CssEnum block_margin_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             if (specificity >= span->bound->margin.top_specificity) {
                 span->bound->margin.top = margin_value;
                 span->bound->margin.top_specificity = specificity;
-                span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.top_type = block_margin_type;
             }
             if (specificity >= span->bound->margin.bottom_specificity) {
                 span->bound->margin.bottom = margin_value;
                 span->bound->margin.bottom_specificity = specificity;
-                span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.bottom_type = block_margin_type;
             }
             break;
         }
@@ -3560,15 +3561,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             float margin_value = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE, value);
+            CssEnum inline_margin_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             if (specificity >= span->bound->margin.left_specificity) {
                 span->bound->margin.left = margin_value;
                 span->bound->margin.left_specificity = specificity;
-                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.left_type = inline_margin_type;
             }
             if (specificity >= span->bound->margin.right_specificity) {
                 span->bound->margin.right = margin_value;
                 span->bound->margin.right_specificity = specificity;
-                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.right_type = inline_margin_type;
             }
             break;
         }
@@ -3580,7 +3582,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->margin.left_specificity) {
                 span->bound->margin.left = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE_START, value);
                 span->bound->margin.left_specificity = specificity;
-                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             }
             break;
         }
@@ -3592,7 +3594,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->margin.right_specificity) {
                 span->bound->margin.right = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE_END, value);
                 span->bound->margin.right_specificity = specificity;
-                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
             }
             break;
         }

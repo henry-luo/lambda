@@ -142,6 +142,10 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                     lycon->block.given_width = -1;
                     lycon->block.given_height = -1;
                 }
+                // Save CSS-resolved dimensions before layout_abs_block, which may
+                // overwrite given_height/width with top+bottom / left+right inset values.
+                float abs_orig_given_width  = lycon->block.given_width;
+                float abs_orig_given_height = lycon->block.given_height;
 
                 // Lay out the absolute positioned block
                 layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
@@ -353,6 +357,46 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
 
                         log_debug("Abs child static position: justify=%d align=%d adjust_x=%d adjust_y=%d -> (%.1f, %.1f)",
                                   justify_content, align_items, adjust_x, adjust_y, child_block->x, child_block->y);
+                    }
+                }
+
+                // Apply CSS aspect-ratio to compute the missing dimension.
+                // An inset-derived height (top+bottom) is NOT considered "explicit" here;
+                // abs_orig_given_height captures only the explicit CSS height: value.
+                if (child_block->specified_style) {
+                    float ar = 0.0f;
+                    CssDeclaration* ar_decl = style_tree_get_declaration(
+                        child_block->specified_style, CSS_PROPERTY_ASPECT_RATIO);
+                    if (ar_decl && ar_decl->value) {
+                        if (ar_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                            ar = (float)ar_decl->value->data.number.value;
+                        } else if (ar_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                                   ar_decl->value->data.list.count >= 2) {
+                            double num = 0, den = 0;
+                            bool got_num = false, got_den = false;
+                            for (int i = 0; i < ar_decl->value->data.list.count && !got_den; i++) {
+                                CssValue* v = ar_decl->value->data.list.values[i];
+                                if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
+                                    if (!got_num) { num = v->data.number.value; got_num = true; }
+                                    else          { den = v->data.number.value; got_den = true; }
+                                }
+                            }
+                            if (got_num && got_den && den > 0) ar = (float)(num / den);
+                            else if (got_num)                   ar = (float)num;
+                        }
+                    }
+                    if (ar > 0.0f) {
+                        bool has_explicit_height = abs_orig_given_height > 0;
+                        bool has_explicit_width  = abs_orig_given_width  > 0;
+                        if (child_block->width > 0 && !has_explicit_height) {
+                            child_block->height = child_block->width / ar;
+                            log_debug("Absolute aspect-ratio: height = width(%.1f) / ar(%.3f) = %.1f",
+                                      child_block->width, ar, child_block->height);
+                        } else if (child_block->height > 0 && !has_explicit_width && child_block->width <= 0) {
+                            child_block->width = child_block->height * ar;
+                            log_debug("Absolute aspect-ratio: width = height(%.1f) * ar(%.3f) = %.1f",
+                                      child_block->height, ar, child_block->width);
+                        }
                     }
                 }
 
