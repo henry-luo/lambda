@@ -738,6 +738,30 @@ inline std::vector<GridItemContribution> collect_item_contributions(
                 contrib.max_content_contribution = std::max(contrib.max_content_contribution,
                                                             contrib.min_content_contribution);
             }
+
+            // CSS Grid §12.1: item contributions include margins (unless auto or percentage).
+            // The intrinsic-sizing measurement returns the border-box; add resolved
+            // horizontal margins to get the full margin-box contribution.
+            // Percentage margins are excluded: in an indefinite intrinsic sizing context,
+            // percentage margins resolve to 0 per CSS Sizing §3.
+            if (item->bound) {
+                bool left_is_auto    = (item->bound->margin.left_type  == CSS_VALUE_AUTO);
+                bool right_is_auto   = (item->bound->margin.right_type == CSS_VALUE_AUTO);
+                bool left_is_pct     = (item->bound->margin.left_type  == CSS_VALUE__PERCENTAGE);
+                bool right_is_pct    = (item->bound->margin.right_type == CSS_VALUE__PERCENTAGE);
+                float ml = (left_is_auto  || left_is_pct)  ? 0.0f : item->bound->margin.left;
+                float mr = (right_is_auto || right_is_pct) ? 0.0f : item->bound->margin.right;
+                contrib.min_content_contribution += ml + mr;
+                contrib.max_content_contribution += ml + mr;
+            }
+
+            // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
+            // inline axis have automatic minimum size = 0. The min-content track contribution
+            // must therefore be 0 — the track is not required to accommodate their contents.
+            // (The max-content contribution is unchanged: the track may still grow if space allows.)
+            if (item->scroller && item->scroller->overflow_x != CSS_VALUE_VISIBLE) {
+                contrib.min_content_contribution = 0.0f;
+            }
         } else {
             // Row axis
             int row_start = item->gi->computed_grid_row_start;
@@ -755,6 +779,25 @@ inline std::vector<GridItemContribution> collect_item_contributions(
                 grid_layout->lycon, item, true /* is_row_axis = true for height */);
             contrib.min_content_contribution = sizes.min_content;
             contrib.max_content_contribution = sizes.max_content;
+
+            // CSS Grid §12.1: add vertical margins to the row-axis contribution.
+            // Percentage margins are excluded in indefinite intrinsic sizing context.
+            if (item->bound) {
+                bool top_is_auto = (item->bound->margin.top_type    == CSS_VALUE_AUTO);
+                bool bot_is_auto = (item->bound->margin.bottom_type == CSS_VALUE_AUTO);
+                bool top_is_pct  = (item->bound->margin.top_type    == CSS_VALUE__PERCENTAGE);
+                bool bot_is_pct  = (item->bound->margin.bottom_type == CSS_VALUE__PERCENTAGE);
+                float mt = (top_is_auto || top_is_pct) ? 0.0f : item->bound->margin.top;
+                float mb = (bot_is_auto || bot_is_pct) ? 0.0f : item->bound->margin.bottom;
+                contrib.min_content_contribution += mt + mb;
+                contrib.max_content_contribution += mt + mb;
+            }
+
+            // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
+            // block axis have automatic minimum size = 0.
+            if (item->scroller && item->scroller->overflow_y != CSS_VALUE_VISIBLE) {
+                contrib.min_content_contribution = 0.0f;
+            }
         }
 
         // Only add if the contribution is meaningful
@@ -918,7 +961,8 @@ inline void run_enhanced_track_sizing(
         maximize_tracks(col_tracks, col_available, col_available);
 
         // 11.7 Expand Flexible Tracks
-        expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available);
+        expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available,
+                               col_contributions, grid_layout->column_gap);
 
         for (size_t i = 0; i < col_tracks.size(); i++) {
             log_debug("  col_track[%zu] after expand: base_size=%.1f",
@@ -956,7 +1000,8 @@ inline void run_enhanced_track_sizing(
             maximize_tracks(row_tracks, row_available, row_available);
 
             // 11.7 Expand Flexible Tracks
-            expand_flexible_tracks(row_tracks, 0.0f, row_available, row_available);
+            expand_flexible_tracks(row_tracks, 0.0f, row_available, row_available,
+                                   row_contributions, grid_layout->row_gap);
 
             // 11.8 Stretch auto Tracks
             stretch_auto_tracks(row_tracks, 0.0f, row_available);
