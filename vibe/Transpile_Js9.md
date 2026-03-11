@@ -6,33 +6,75 @@ After v8, the LambdaJS engine passes **12/13 JetStream JS** benchmarks and **62/
 
 **v9 goal:** Systematically close the remaining JavaScript language and standard library gaps so that LambdaJS can run **general-purpose JavaScript programs** — not just narrow benchmark code. The focus shifts from "make benchmarks pass" to "be a correct JS engine for real-world code."
 
-### Current Engine Stats (Post-v8)
+### v9 Implementation Progress
+
+> **Status:** v9 Phase 1 implementation complete. All 40 JS tests pass (34 existing + 6 new v9 tests). No regressions.
+
+| Phase | Feature | Status | Notes |
+|-------|---------|--------|-------|
+| **A1** | Object destructuring | ✅ Done | AST builder + transpiler (variable declarator, for-of, rename via `{x: px}`) |
+| **A2** | Sequence expressions | ❌ Not started | |
+| **A3** | Labeled statements | ❌ Not started | |
+| **A4** | `delete` operator (real impl) | ✅ Done | Detects member expression, calls `js_delete_property(obj, key)` |
+| **A5** | Regex literals | ❌ Not started | |
+| **B1** | `JSON.parse` / `JSON.stringify` | ✅ Done | Wired to Lambda's `parse_json_to_item` and `format_json` |
+| **B2** | `Object.values` / `Object.entries` | ✅ Done | Walk `ShapeEntry` linked list, skip `__` prefixed internals |
+| **B3** | `Object.assign` | ✅ Done | Iterates source ShapeEntries, copies via `js_property_set` |
+| **B4** | `Object.freeze` / `Object.isFrozen` | ✅ Done | Sets/checks `__frozen__` flag (write prevention not yet enforced) |
+| **B5** | `hasOwnProperty` / `Object.hasOwn` | ✅ Done | Direct `map_get` (no prototype chain), both method and static dispatch |
+| **B6** | `Object.getPrototypeOf` / `setPrototypeOf` | ✅ Done | Wired to existing `js_get_prototype` / `js_set_prototype` |
+| **C1** | `Array.splice` | ✅ Done | Full impl with `memmove` for shift/insert, returns deleted elements |
+| **C2** | `Array.shift` / `unshift` | ✅ Done | Direct capacity expansion + `memmove` |
+| **C3** | `Array.lastIndexOf` | ✅ Done | Reverse scan with optional `fromIndex` |
+| **C4** | `Array.flatMap` | ✅ Done | Map + flatten one level |
+| **C5** | `Array.from` / `Array.of` | ✅ Done | `Array.from` handles Array (shallow copy) and String (split to chars); `Array.of` builds via push loop |
+| **C6** | `Array.reverse` fix | ✅ Done | Changed to in-place swap |
+| **C7** | `String.match` | ❌ Not started | |
+| **C8** | `String.search` | ✅ Done | Delegates to `fn_index_of` |
+| **C9** | `String.replaceAll` | ✅ Done | Iterative `fn_replace` loop with change detection |
+| **C10** | `padStart` / `padEnd` | ✅ Done | `StrBuf`-based with modular pad character cycling |
+| **C11** | `at()` for Array + String | ✅ Done | Negative index support |
+| **C12** | `reduceRight` | ✅ Done | Reverse iteration with optional initial value |
+| **D1** | `Function.bind` | ❌ Not started | |
+| **D2** | Error subclasses | ❌ Not started | |
+| **E1** | `Map` collection | ❌ Not started | |
+| **E2** | `Set` collection | ❌ Not started | |
+| **F1** | `Number.isInteger` / `isFinite` / `isNaN` / `isSafeInteger` | ✅ Done | All four static methods |
+| **F2** | Date instance methods | ❌ Not started | |
+| **G3** | `Array.toString` | ✅ Done | Comma-joined elements via `StrBuf` |
+| — | Math: `asin`, `acos`, `atan`, `atan2`, `log2`, `cbrt`, `hypot`, `clz32`, `imul`, `fround` | ✅ Done | 10 additional Math methods |
+| — | `String.toString` | ✅ Done | Identity |
+
+**v9 LOC added:** ~700 across 6 source files, 18 new runtime functions registered.
+
+### Current Engine Stats (Post-v9 Phase 1)
 
 | Component | File | Lines | Coverage |
 |-----------|------|------:|----------|
-| AST definitions | `js_ast.hpp` | ~350 | 47 node types, 47 operators |
-| AST builder | `build_js_ast.cpp` | ~1,600 | Tree-sitter → AST |
-| Transpiler | `transpile_js_mir.cpp` | 9,308 | JS AST → MIR IR |
-| Runtime | `js_runtime.cpp` | 1,846 | Operators, type dispatch, prototype chain |
-| Globals | `js_globals.cpp` | 571 | Built-in functions, timing, constants |
-| DOM bridge | `js_dom.cpp` | ~370 | Element wrapping, computed styles |
-| Typed arrays | `js_typed_array.cpp` | ~400 | Int8–Float64 arrays |
-| Scoping | `js_scope.cpp` | ~200 | Lexical scope management |
-| Tests | `test_js_gtest.cpp` | 432 | 34 test cases |
-| **Total** | | **~15,100** | |
+| AST definitions | `js_ast.hpp` | 495 | 47 node types, 47 operators |
+| AST builder | `build_js_ast.cpp` | 1,741 | Tree-sitter → AST (+ object_pattern) |
+| Transpiler | `transpile_js_mir.cpp` | 9,614 | JS AST → MIR IR (+ obj destructuring, static dispatch) |
+| Runtime | `js_runtime.cpp` | 2,170 | Operators, type dispatch, prototype chain, 30+ array/string/math methods |
+| Globals | `js_globals.cpp` | 819 | Built-in functions, Object/Number/JSON/Array statics |
+| Runtime header | `js_runtime.h` | 298 | 18 new v9 function declarations |
+| DOM bridge | `js_dom.cpp` | 1,772 | Element wrapping, computed styles |
+| Typed arrays | `js_typed_array.cpp` | 199 | Int8–Float64 arrays |
+| Scoping | `js_scope.cpp` | 248 | Lexical scope management |
+| Tests | `test_js_gtest.cpp` | 457 | 40 test cases (6 new v9) |
+| **Total** | | **~17,813** | |
 
-### v9 Feature Gap Summary
+### v9 Feature Gap Summary (Updated)
 
 | Category | Implemented | Missing (Blocking) | Missing (Nice-to-have) |
 |----------|------------|---------------------|----------------------|
-| **Language syntax** | 42 of 47 AST nodes transpiled | Object destructuring, sequence expressions, labeled statements, `delete` (real impl), regex literals | Generators, async/await, optional chaining, import/export |
-| **Operators** | 45 of 47 | `delete` (stubbed as `true`) | — |
-| **String methods** | 16 | `match`, `search`, `replaceAll`, `padStart`, `padEnd`, `at`, `matchAll`, `lastIndexOf`, `normalize` | `localeCompare`, `codePointAt`, `toLocaleLowerCase` |
-| **Array methods** | 20 | `splice`, `shift`, `unshift`, `lastIndexOf`, `flatMap`, `reduceRight`, `Array.from`, `Array.of`, `at` | `copyWithin`, `findLast`, `findLastIndex`, `toReversed`, `toSorted` |
-| **Object methods** | 3 (`keys`, `create`, `defineProperty`) | `values`, `entries`, `assign`, `freeze`, `hasOwnProperty`, `getPrototypeOf`, `setPrototypeOf` | `seal`, `is`, `fromEntries`, `getOwnPropertyNames` |
-| **Math methods** | 17 + `atan2` | `asin`, `acos`, `atan`, `log2`, `hypot`, `cbrt` | `sinh`, `cosh`, `tanh`, `clz32`, `imul`, `fround` |
-| **Number methods** | 2 (`toFixed`, `toString`) | `isInteger`, `isFinite`, `isNaN`, `isSafeInteger` | `toExponential`, `toPrecision` |
-| **JSON** | 0 | `JSON.parse`, `JSON.stringify` | `JSON.parse` reviver, `JSON.stringify` replacer |
+| **Language syntax** | 44 of 47 AST nodes transpiled | Sequence expressions, labeled statements, regex literals | Generators, async/await, optional chaining, import/export |
+| **Operators** | 46 of 47 | — | — |
+| **String methods** | 22 | `match`, `matchAll`, `lastIndexOf`, `normalize` | `localeCompare`, `codePointAt`, `toLocaleLowerCase` |
+| **Array methods** | 30 | — | `copyWithin`, `findLast`, `findLastIndex`, `toReversed`, `toSorted` |
+| **Object methods** | 10 (`keys`, `create`, `defineProperty`, `values`, `entries`, `assign`, `freeze`, `isFrozen`, `hasOwn`, `getPrototypeOf`, `setPrototypeOf`) | — | `seal`, `is`, `fromEntries`, `getOwnPropertyNames` |
+| **Math methods** | 27 | — | `sinh`, `cosh`, `tanh` |
+| **Number methods** | 6 (`toFixed`, `toString`, `isInteger`, `isFinite`, `isNaN`, `isSafeInteger`) | — | `toExponential`, `toPrecision` |
+| **JSON** | 2 (`parse`, `stringify`) | — | Reviver, replacer, space formatting |
 | **Function methods** | `call`, `apply` | `bind` | — |
 | **Date** | `Date.now()`, `new Date()` | `getFullYear`, `getMonth`, `getDate`, `getTime`, `getHours`, `toISOString` | Full Date API |
 | **Error types** | Generic `Error` only | `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError` | `URIError`, `EvalError` |
@@ -43,17 +85,48 @@ After v8, the LambdaJS engine passes **12/13 JetStream JS** benchmarks and **62/
 | **Proxy/Reflect** | ❌ Not implemented | — | Proxy, Reflect |
 | **Other** | — | `setTimeout`/`setInterval`, `encodeURIComponent`/`decodeURIComponent` | `structuredClone`, `globalThis`, `Intl` |
 
+### v9 Test Files Added
+
+| Test | Script | Expected | Covers |
+|------|--------|----------|--------|
+| `test_v9_array_methods` | `v9_array_methods.js` | `v9_array_methods.txt` | splice, shift, unshift, lastIndexOf, flatMap, reduceRight, at, toString |
+| `test_v9_string_methods` | `v9_string_methods.js` | `v9_string_methods.txt` | replaceAll, padStart, padEnd, at, search, toString |
+| `test_v9_math_methods` | `v9_math_methods.js` | `v9_math_methods.txt` | asin, acos, atan, atan2, log2, cbrt, hypot, clz32, imul, fround |
+| `test_v9_object_methods` | `v9_object_methods.js` | `v9_object_methods.txt` | Object.values, entries, assign, hasOwnProperty, freeze/isFrozen |
+| `test_v9_number_json` | `v9_number_json.js` | `v9_number_json.txt` | Number.isInteger/isFinite/isNaN/isSafeInteger, Array.from |
+| `test_v9_obj_destructuring` | `v9_obj_destructuring.js` | `v9_obj_destructuring.txt` | Object destructuring (basic, rename, for-of), delete operator |
+
+### v9 Bugs Found & Fixed During Implementation
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| `splice` insert caused infinite loop | `list_push(a, ItemNull)` silently skips NULL values, never increasing length | Direct `malloc`/`realloc` capacity expansion instead of `list_push` |
+| `unshift` caused infinite loop | Same `list_push(a, ItemNull)` issue | Same direct capacity expansion fix |
+| `splice` returned extra `undefined` elements | `js_array_new(N)` pre-fills array with length=N, then `array_push` appended more | Changed to `js_array_new(0)` + `array_push` |
+| `splice` memmove computed wrong source in grow case | Source offset included `shift` offset twice | Track `old_len` before expansion, compute `elements_to_move` from original positions |
+| `js_input` linker error | Declared `static` in `js_runtime.cpp`, `extern` in `js_globals.cpp` | Removed `static` qualifier to make symbol visible |
+| `replaceAll` called non-existent `fn_replace_all` | Function doesn't exist in codebase | Iterative `fn_replace` loop with string comparison change detection |
+
+### Known Limitations (v9 Phase 1)
+
+1. **`Object.freeze` partial** — Sets `__frozen__` flag but `js_property_set` doesn't check it; writes are not actually prevented.
+2. **`delete` simplified** — Sets property to `ItemNull` rather than truly removing from Map shape.
+3. **`replaceAll` O(n·m)** — Iterative loop with max 10,000 iterations safety limit rather than single-pass.
+4. **Object destructuring rest (`...rest`)** — Parsed but not transpiled (logged as warning).
+5. **`JSON.stringify` pretty-printed** — Uses Lambda's `format_json` which produces indented output, not compact single-line.
+6. **`Array.of`** — Built via loop of `js_array_push` calls rather than pre-allocated.
+
 ---
 
-## 2. Phase A: Core Language Syntax Gaps
+## 2. Phase A: Core Language Syntax Gaps (Partially Done)
 
 **Goal:** Complete the remaining AST node transpilation for language constructs that real-world JS programs depend on.
 **Impact:** Enables significantly broader JS program compatibility.
 **Estimated effort:** ~400 LOC.
 
-### A1. Object Destructuring (`const {a, b} = obj`)
+### A1. Object Destructuring (`const {a, b} = obj`) — ✅ DONE
 
-**Status:** Array destructuring works. Object destructuring is **parsed** (AST node `JS_AST_NODE_OBJECT_PATTERN` exists) but **not transpiled** — `OBJECT_PATTERN` never appears in `transpile_js_mir.cpp`.
+**Status:** ~~Array destructuring works. Object destructuring is **parsed** (AST node `JS_AST_NODE_OBJECT_PATTERN` exists) but **not transpiled**.~~ **Implemented in v9.** Basic, rename, and for-of patterns work. Default values supported via `ASSIGNMENT_PATTERN`. Rest property (`...rest`) parsed but not yet transpiled.
 
 **Usage frequency:** Extremely common in modern JS. Used in Node.js modules, React components, configuration extraction, function parameter patterns.
 
@@ -160,25 +233,13 @@ outer: for (let i = 0; i < 10; i++) {
 
 **Files:** `lambda/js/build_js_ast.cpp`, `lambda/js/js_ast.hpp`, `lambda/js/transpile_js_mir.cpp`
 
-### A4. `delete` Operator (Real Implementation)
+### A4. `delete` Operator (Real Implementation) — ✅ DONE
 
-**Status:** Parsed and handled in transpiler, but **stubbed** — always returns `true` without actually deleting the property.
+**Status:** ~~Parsed and handled in transpiler, but **stubbed** — always returns `true` without actually deleting the property.~~ **Implemented in v9.** Transpiler detects `MEMBER_EXPRESSION` operand, extracts obj+key, calls `js_delete_property`. For computed properties uses boxed item, for dot access uses string literal. Variable delete returns `false`.
 
-**Current code ([line 3432](lambda/js/transpile_js_mir.cpp#L3432)):**
-```cpp
-case JS_OP_DELETE:
-    return jm_box_int_const(mt, 1); // simplified: always true
-```
+**Note:** Current implementation sets property to `ItemNull` rather than truly removing from Map shape (no `map_remove` available).
 
-**Correct behavior:**
-- `delete obj.prop` → remove the property from the object, return `true`
-- `delete obj[expr]` → same with computed key
-- `delete variable` → return `false` (can't delete variables)
-- `delete nonExistent` → return `true`
-
-**Implementation:** Add a `js_delete_property(obj, key)` runtime function that removes the key from the Map via `map_remove()` or similar. In the transpiler, detect `delete expr` where `expr` is a `MEMBER_EXPRESSION` and emit the call.
-
-**Files:** `lambda/js/js_runtime.cpp`, `lambda/js/transpile_js_mir.cpp`
+**Files:** `lambda/js/js_globals.cpp`, `lambda/js/transpile_js_mir.cpp`
 
 ### A5. Regex Literals in AST
 
@@ -209,15 +270,15 @@ In the transpiler, compile regex literals to calls that create a pre-compiled RE
 
 ---
 
-## 3. Phase B: Essential Standard Library — Object & JSON
+## 3. Phase B: Essential Standard Library — Object & JSON — ✅ DONE
 
 **Goal:** Implement `JSON.parse()`/`JSON.stringify()` and complete `Object` methods.
 **Impact:** JSON is the most critical missing built-in — virtually every real JS program uses it.
 **Estimated effort:** ~500 LOC.
 
-### B1. `JSON.parse(str)` and `JSON.stringify(obj)`
+### B1. `JSON.parse(str)` and `JSON.stringify(obj)` — ✅ DONE
 
-**Status:** Completely absent. No `JSON` reference anywhere in the JS engine.
+**Status:** ~~Completely absent.~~ **Implemented in v9.** `JSON.parse` wired to `parse_json_to_item`. `JSON.stringify` uses temp Pool + `format_json` + `heap_strcpy`. Both registered in `sys_func_registry.c` and dispatched in transpiler.
 
 **Usage:** Ubiquitous. Data exchange, configuration, serialization, API communication, deep cloning (`JSON.parse(JSON.stringify(obj))`).
 
@@ -260,9 +321,9 @@ if (obj_name == "JSON" && prop_name == "stringify") {
 
 **Files:** `lambda/js/js_globals.cpp`, `lambda/js/transpile_js_mir.cpp`, `lambda/sys_func_registry.c`
 
-### B2. `Object.values(obj)` and `Object.entries(obj)`
+### B2. `Object.values(obj)` and `Object.entries(obj)` — ✅ DONE
 
-**Status:** `Object.keys()` is implemented. `Object.values()` and `Object.entries()` are not.
+**Status:** ~~`Object.keys()` is implemented. `Object.values()` and `Object.entries()` are not.~~ **Implemented in v9.** Walk `ShapeEntry` linked list, skip `__` prefixed internal properties.
 
 **Implementation:** Mirror `js_object_keys()` — walk `ShapeEntry` linked list:
 
@@ -301,9 +362,9 @@ extern "C" Item js_object_entries(Item obj) {
 }
 ```
 
-### B3. `Object.assign(target, ...sources)`
+### B3. `Object.assign(target, ...sources)` — ✅ DONE
 
-**Status:** Not implemented. Very commonly used for shallow object merging.
+**Status:** ~~Not implemented.~~ **Implemented in v9.** Iterates source ShapeEntries, copies via `js_property_set` on target. Transpiler passes sources array + count.
 
 ```c
 extern "C" Item js_object_assign(Item target, Item* sources, int count) {
@@ -325,9 +386,9 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
 }
 ```
 
-### B4. `Object.freeze(obj)` and `Object.isFrozen(obj)`
+### B4. `Object.freeze(obj)` and `Object.isFrozen(obj)` — ✅ DONE (partial)
 
-**Status:** Not implemented. Used for immutability patterns, configuration objects, library constants.
+**Status:** ~~Not implemented.~~ **Implemented in v9.** Sets/checks `__frozen__` flag. Note: `js_property_set` does not yet check this flag — writes are not actually prevented.
 
 **Implementation:** Add a `frozen` flag to the Map struct or store it as a hidden property. `Object.freeze` sets the flag. `js_property_set` checks the flag before modifying.
 
@@ -339,9 +400,9 @@ if (get_type_id(obj) == LMD_TYPE_MAP) {
 }
 ```
 
-### B5. `obj.hasOwnProperty(key)` and `Object.hasOwn(obj, key)`
+### B5. `obj.hasOwnProperty(key)` and `Object.hasOwn(obj, key)` — ✅ DONE
 
-**Status:** Not implemented.
+**Status:** ~~Not implemented.~~ **Implemented in v9.** Direct `map_get` (no prototype chain walk). Available as both `obj.hasOwnProperty(key)` method dispatch and `Object.hasOwn(obj, key)` static dispatch.
 
 ```c
 extern "C" Item js_has_own_property(Item obj, Item key) {
@@ -357,9 +418,9 @@ Add as both:
 - Transpiler-recognized `obj.hasOwnProperty(key)` → `js_has_own_property(obj, key)`
 - `Object.hasOwn(obj, key)` → `js_has_own_property(obj, key)` static dispatch
 
-### B6. `Object.getPrototypeOf(obj)` and `Object.setPrototypeOf(obj, proto)`
+### B6. `Object.getPrototypeOf(obj)` and `Object.setPrototypeOf(obj, proto)` — ✅ DONE
 
-**Status:** Internal C functions `js_get_prototype()` and `js_set_prototype()` exist but aren't exposed to JS code.
+**Status:** ~~Internal C functions exist but aren't exposed to JS code.~~ **Implemented in v9.** Wired to existing `js_get_prototype` and `js_set_prototype` via transpiler dispatch.
 
 **Implementation:** Register as transpiler-dispatched `Object.getPrototypeOf()` / `Object.setPrototypeOf()` calls → delegate to existing runtime functions.
 
@@ -367,15 +428,15 @@ Add as both:
 
 ---
 
-## 4. Phase C: Essential Standard Library — Array & String Completion
+## 4. Phase C: Essential Standard Library — Array & String Completion — ✅ DONE (except C7)
 
 **Goal:** Fill the most critical gaps in Array and String method dispatchers.
 **Impact:** Unblocks programs using common array mutation and string formatting patterns.
 **Estimated effort:** ~400 LOC.
 
-### C1. `Array.prototype.splice(start, deleteCount, ...items)`
+### C1. `Array.prototype.splice(start, deleteCount, ...items)` — ✅ DONE
 
-**Status:** Not implemented. Critical for in-place array manipulation.
+**Status:** ~~Not implemented.~~ **Implemented in v9.** Full implementation with `memmove` for shift/insert, direct capacity expansion, returns deleted elements array.
 
 **Usage:** DOM manipulation libraries, state management, data transformation.
 
@@ -404,9 +465,9 @@ extern "C" Item js_array_splice(Item arr, int start, int delete_count,
 }
 ```
 
-### C2. `Array.prototype.shift()` and `unshift(item)`
+### C2. `Array.prototype.shift()` and `unshift(item)` — ✅ DONE
 
-**Status:** Not implemented. Used in queue-based algorithms, richards benchmark (mentioned in v8 doc as needed).
+**Status:** ~~Not implemented.~~ **Implemented in v9.** Direct capacity expansion + `memmove`. `unshift` supports variadic args.
 
 ```c
 // shift: remove and return first element
@@ -428,13 +489,13 @@ extern "C" Item js_array_unshift(Item arr, Item item) {
 }
 ```
 
-### C3. `Array.prototype.lastIndexOf(item, fromIndex?)`
+### C3. `Array.prototype.lastIndexOf(item, fromIndex?)` — ✅ DONE
 
-**Status:** `indexOf` exists, `lastIndexOf` does not. Scans from end to start.
+**Status:** ~~`indexOf` exists, `lastIndexOf` does not.~~ **Implemented in v9.** Reverse scan with optional `fromIndex`.
 
-### C4. `Array.prototype.flatMap(callback)`
+### C4. `Array.prototype.flatMap(callback)` — ✅ DONE
 
-**Status:** `flat` (one-level) and `map` are both implemented. `flatMap` combines them.
+**Status:** ~~`flat` and `map` exist separately.~~ **Implemented in v9.** Map each element with callback, flatten one level.
 
 ```c
 // flatMap: map each element, then flatten one level
@@ -445,9 +506,9 @@ if (method == "flatMap") {
 }
 ```
 
-### C5. `Array.from(iterable)` and `Array.of(...items)`
+### C5. `Array.from(iterable)` and `Array.of(...items)` — ✅ DONE
 
-**Status:** Not implemented. `Array.from()` is commonly used to convert array-like objects.
+**Status:** ~~Not implemented.~~ **Implemented in v9.** `Array.from` handles Array (shallow copy via `memcpy`) and String (split to single chars). `Array.of` builds via loop of `js_array_push` calls.
 
 ```c
 extern "C" Item js_array_from(Item iterable) {
@@ -480,9 +541,9 @@ if (obj_name == "Array" && prop_name == "from") → js_array_from
 if (obj_name == "Array" && prop_name == "of")   → build array from args
 ```
 
-### C6. `Array.prototype.reverse()` — Fix In-place Mutation
+### C6. `Array.prototype.reverse()` — Fix In-place Mutation — ✅ DONE
 
-**Status:** Implemented but **deviates from spec** — returns a new reversed array instead of mutating in-place. JS spec says `reverse()` modifies the original array.
+**Status:** ~~Returns a new reversed array instead of mutating in-place.~~ **Fixed in v9.** In-place swap loop.
 
 **Fix:** Change the implementation in `js_array_method()` to swap elements in-place:
 ```c
@@ -510,11 +571,13 @@ if (method == "match") {
 }
 ```
 
-### C8. `String.prototype.search(pattern)`
+### C8. `String.prototype.search(pattern)` — ✅ DONE
 
-Returns the index of the first match, or -1.
+**Status:** **Implemented in v9.** Delegates to `fn_index_of`. Returns index of first match, or -1.
 
-### C9. `String.prototype.replaceAll(pattern, replacement)`
+### C9. `String.prototype.replaceAll(pattern, replacement)` — ✅ DONE
+
+**Status:** **Implemented in v9.** Iterative `fn_replace` loop with string comparison change detection (max 10,000 iterations safety limit). Note: `fn_replace_all` does not exist in the codebase.
 
 ```c
 if (method == "replaceAll") {
@@ -522,7 +585,9 @@ if (method == "replaceAll") {
 }
 ```
 
-### C10. `String.prototype.padStart(targetLen, padStr)` and `padEnd`
+### C10. `String.prototype.padStart(targetLen, padStr)` and `padEnd` — ✅ DONE
+
+**Status:** **Implemented in v9.** `StrBuf`-based with modular pad character cycling. Default pad character is space.
 
 ```c
 if (method == "padStart") {
@@ -543,13 +608,13 @@ if (method == "padStart") {
 }
 ```
 
-### C11. `String.prototype.at(index)` and `Array.prototype.at(index)`
+### C11. `String.prototype.at(index)` and `Array.prototype.at(index)` — ✅ DONE
 
-Supports negative indexing: `arr.at(-1)` returns last element.
+**Status:** **Implemented in v9.** Supports negative indexing for both String and Array.
 
-### C12. `Array.prototype.reduceRight(callback, initialValue)`
+### C12. `Array.prototype.reduceRight(callback, initialValue)` — ✅ DONE
 
-Same as `reduce` but iterates in reverse.
+**Status:** **Implemented in v9.** Reverse iteration with optional initial value.
 
 **Files:** `lambda/js/js_runtime.cpp` (method dispatchers), `lambda/js/js_globals.cpp`, `lambda/js/transpile_js_mir.cpp` (static dispatch for `Array.from`, `Array.of`)
 
@@ -709,14 +774,14 @@ extern "C" Item js_map_new() {
 
 ---
 
-## 7. Phase F: Number Static Methods & Date Instance Methods
+## 7. Phase F: Number Static Methods & Date Instance Methods (Partially Done)
 
 **Goal:** Complete `Number` static methods and add essential `Date` instance methods.
 **Estimated effort:** ~200 LOC.
 
-### F1. `Number.isInteger()`, `Number.isFinite()`, `Number.isNaN()`, `Number.isSafeInteger()`
+### F1. `Number.isInteger()`, `Number.isFinite()`, `Number.isNaN()`, `Number.isSafeInteger()` — ✅ DONE
 
-**Status:** Global `isNaN()` and `isFinite()` exist, but `Number.isNaN()` (no type coercion) and `Number.isInteger()` do not.
+**Status:** ~~Global `isNaN()` and `isFinite()` exist, but `Number.isNaN()` and `Number.isInteger()` do not.~~ **Implemented in v9.** All four static methods with proper no-coercion semantics.
 
 ```c
 extern "C" Item js_number_is_integer(Item val) {
@@ -767,10 +832,10 @@ extern "C" Item js_date_get_full_year(Item date_obj) {
 
 ---
 
-## 8. Phase G: Miscellaneous Built-ins
+## 8. Phase G: Miscellaneous Built-ins (Partially Done)
 
 **Goal:** Fill remaining gaps for commonly used globals and utility functions.
-**Estimated effort:** ~200 LOC.
+**Estimated effort:** ~200 LOC. **v9 implemented: G3 (Array.toString).**
 
 ### G1. `setTimeout` / `setInterval` (Synchronous Shim)
 
@@ -807,9 +872,9 @@ extern "C" Item js_encode_uri_component(Item str) {
 }
 ```
 
-### G3. `Array.prototype.toString()` and `Object.prototype.toString()`
+### G3. `Array.prototype.toString()` and `Object.prototype.toString()` — ✅ DONE
 
-**Status:** `js_to_string` for arrays returns `"[object Array]"` (TODO comment in code). Should return comma-separated elements like JS spec (`[1,2,3].toString()` → `"1,2,3"`).
+**Status:** ~~`js_to_string` for arrays returns `"[object Array]"`.~~ **Implemented in v9.** `Array.toString()` now returns comma-separated elements per JS spec. `Object.toString()` returns `"[object Object]"`.
 
 Fix in `js_to_string()`:
 ```c
@@ -1009,33 +1074,33 @@ arr?.[index];
 
 ```
 Phase A (Language syntax)        ──→ Broader program compatibility    [P0, MEDIUM effort]
-  ├── A1 Object destructuring     (HIGH priority — extremely common)
+  ├── A1 Object destructuring     ✅ DONE (v9)
   ├── A2 Sequence expressions     (MEDIUM — minified code, for-loops)
   ├── A3 Labeled statements       (LOW — rare but blocking)
-  ├── A4 delete (real impl)       (LOW — correctness)
+  ├── A4 delete (real impl)       ✅ DONE (v9)
   └── A5 Regex literals           (MEDIUM — enables /pattern/ syntax)
 
-Phase B (JSON + Object)          ──→ Critical for any real program    [P0, MEDIUM effort]
-  ├── B1 JSON.parse/stringify     (HIGHEST priority — ubiquitous)
-  ├── B2 Object.values/entries    (HIGH — very common)
-  ├── B3 Object.assign            (HIGH — merging/cloning)
-  ├── B4 Object.freeze            (MEDIUM — immutability)
-  ├── B5 hasOwnProperty           (MEDIUM — property checking)
-  └── B6 Object.getPrototypeOf    (LOW — advanced OOP)
+Phase B (JSON + Object)          ──→ Critical for any real program    [P0 — ✅ ALL DONE]
+  ├── B1 JSON.parse/stringify     ✅ DONE (v9)
+  ├── B2 Object.values/entries    ✅ DONE (v9)
+  ├── B3 Object.assign            ✅ DONE (v9)
+  ├── B4 Object.freeze            ✅ DONE (v9)
+  ├── B5 hasOwnProperty           ✅ DONE (v9)
+  └── B6 Object.getPrototypeOf    ✅ DONE (v9 — wired to existing)
 
-Phase C (Array + String)         ──→ Complete standard library core   [P0, MEDIUM effort]
-  ├── C1 splice                   (HIGH — in-place array modification)
-  ├── C2 shift / unshift          (HIGH — queue operations)
-  ├── C3 lastIndexOf              (MEDIUM)
-  ├── C4 flatMap                  (MEDIUM)
-  ├── C5 Array.from / Array.of    (MEDIUM)
-  ├── C6 reverse (fix in-place)   (LOW — correctness fix)
-  ├── C7 String.match             (HIGH — regex usage)
-  ├── C8 String.search            (MEDIUM)
-  ├── C9 String.replaceAll        (MEDIUM)
-  ├── C10 padStart / padEnd       (MEDIUM)
-  ├── C11 at() for Array+String   (LOW)
-  └── C12 reduceRight             (LOW)
+Phase C (Array + String)         ──→ Complete standard library core   [P0 — ✅ DONE except C7]
+  ├── C1 splice                   ✅ DONE (v9)
+  ├── C2 shift / unshift          ✅ DONE (v9)
+  ├── C3 lastIndexOf              ✅ DONE (v9)
+  ├── C4 flatMap                  ✅ DONE (v9)
+  ├── C5 Array.from / Array.of    ✅ DONE (v9)
+  ├── C6 reverse (fix in-place)   ✅ DONE (v9)
+  ├── C7 String.match             (HIGH — regex usage, NOT YET)
+  ├── C8 String.search            ✅ DONE (v9)
+  ├── C9 String.replaceAll        ✅ DONE (v9)
+  ├── C10 padStart / padEnd       ✅ DONE (v9)
+  ├── C11 at() for Array+String   ✅ DONE (v9)
+  └── C12 reduceRight             ✅ DONE (v9)
 
 Phase D (bind + Error types)     ──→ Callback & error patterns       [P1, LOW effort]
   ├── D1 Function.bind            (HIGH — callback code)
@@ -1045,14 +1110,14 @@ Phase E (Map + Set)              ──→ ES6 collections                  [P1,
   ├── E1 Map                      (HIGH — efficient key-value)
   └── E2 Set                      (MEDIUM — unique collections)
 
-Phase F (Number + Date)          ──→ Utility completeness             [P2, LOW effort]
-  ├── F1 Number static methods    (LOW)
+Phase F (Number + Date)          ──→ Utility completeness             [P2 — F1 ✅ DONE]
+  ├── F1 Number static methods    ✅ DONE (v9)
   └── F2 Date instance methods    (LOW)
 
-Phase G (Misc built-ins)         ──→ Correctness & quality-of-life   [P2, LOW effort]
+Phase G (Misc built-ins)         ──→ Correctness & quality-of-life   [P2 — G3 ✅ DONE]
   ├── G1 setTimeout shim          (LOW)
   ├── G2 encodeURIComponent       (MEDIUM)
-  ├── G3 Array/Object toString    (MEDIUM — debugging)
+  ├── G3 Array/Object toString    ✅ DONE (v9)
   ├── G4 Sort O(n log n)          (LOW — performance)
   └── G5 String.slice fix         (LOW — correctness)
 
@@ -1076,14 +1141,14 @@ Phase I (Advanced)               ──→ Modern JS compat                 [P3,
 
 ### Recommended Execution Order
 
-**Step 1 — Maximum impact per LOC (Phase A1 + B1 + C1–C2):**
-1. Object destructuring → unblocks most modern JS code patterns
-2. `JSON.parse` / `JSON.stringify` → unblocks data-driven programs
-3. `splice`, `shift`, `unshift` → unblocks array-heavy algorithms
+**Step 1 — Maximum impact per LOC (Phase A1 + B1 + C1–C2): ✅ DONE**
+1. ~~Object destructuring → unblocks most modern JS code patterns~~ ✅
+2. ~~`JSON.parse` / `JSON.stringify` → unblocks data-driven programs~~ ✅
+3. ~~`splice`, `shift`, `unshift` → unblocks array-heavy algorithms~~ ✅
 
-**Step 2 — Complete core standard library (Phase B2–B5 + C7–C10):**
-4. `Object.values`, `Object.entries`, `Object.assign`, `hasOwnProperty`
-5. `String.match`, `String.search`, `String.replaceAll`, `padStart`/`padEnd`
+**Step 2 — Complete core standard library (Phase B2–B5 + C7–C10): ✅ MOSTLY DONE (C7 remaining)**
+4. ~~`Object.values`, `Object.entries`, `Object.assign`, `hasOwnProperty`~~ ✅
+5. `String.match` (NOT YET), ~~`String.search`~~ ✅, ~~`String.replaceAll`~~ ✅, ~~`padStart`/`padEnd`~~ ✅
 
 **Step 3 — Functions and errors (Phase D):**
 6. `Function.prototype.bind` → unblocks callback patterns
@@ -1092,8 +1157,8 @@ Phase I (Advanced)               ──→ Modern JS compat                 [P3,
 **Step 4 — Collections (Phase E):**
 8. `Map` and `Set` → ES6 code compatibility
 
-**Step 5 — Correctness fixes (Phase G–H):**
-9. `Array.toString`, `Sort O(n log n)`, `String.slice`, `instanceof`, `__proto__` filtering
+**Step 5 — Correctness fixes (Phase G–H): Partially done**
+9. ~~`Array.toString`~~ ✅, `Sort O(n log n)`, `String.slice`, `instanceof`, `__proto__` filtering
 
 **Step 6 — Modern syntax (Phase I — optional):**
 10. Optional chaining, generators, async/await (if needed)
@@ -1102,18 +1167,32 @@ Phase I (Advanced)               ──→ Modern JS compat                 [P3,
 
 ## 12. Estimated LOC & File Impact
 
-| Phase | Estimated LOC | Files Modified |
-|-------|----------:|----------------|
-| A: Language syntax | ~400 | `build_js_ast.cpp`, `js_ast.hpp`, `transpile_js_mir.cpp` |
-| B: JSON + Object | ~500 | `js_globals.cpp`, `transpile_js_mir.cpp`, `sys_func_registry.c` |
-| C: Array + String | ~400 | `js_runtime.cpp`, `js_globals.cpp`, `transpile_js_mir.cpp` |
-| D: bind + Error | ~200 | `js_runtime.cpp`, `js_globals.cpp`, `transpile_js_mir.cpp` |
-| E: Map + Set | ~350 | `js_globals.cpp` (or new `js_collections.cpp`), `js_runtime.h`, `transpile_js_mir.cpp` |
-| F: Number + Date | ~200 | `js_globals.cpp`, `transpile_js_mir.cpp` |
-| G: Misc built-ins | ~200 | `js_runtime.cpp`, `js_globals.cpp` |
-| H: Correctness | ~300 | `js_runtime.cpp`, `js_globals.cpp`, `transpile_js_mir.cpp` |
-| **Total (P0+P1)** | **~1,850** | |
-| **Total (all)** | **~2,550** | |
+| Phase | Estimated LOC | Actual LOC (v9) | Status |
+|-------|----------:|----------:|--------|
+| A: Language syntax | ~400 | ~120 | A1, A4 done |
+| B: JSON + Object | ~500 | ~280 | ✅ All done |
+| C: Array + String | ~400 | ~250 | Done except C7 |
+| D: bind + Error | ~200 | — | Not started |
+| E: Map + Set | ~350 | — | Not started |
+| F: Number + Date | ~200 | ~50 | F1 done |
+| G: Misc built-ins | ~200 | ~20 | G3 done |
+| H: Correctness | ~300 | — | Not started |
+| **Total (P0+P1)** | **~1,850** | | |
+| **Total (all)** | **~2,550** | **~720 (v9)** | **~28% of total** |
+
+> **v9 Phase 1 actual:** ~700 LOC added across 6 source files. Roughly 28% of the
+> original full estimate, but covers all of the highest-priority P0 items (except
+> C7 String.match and the remaining A2/A3/A5 syntax items).
+
+**Files modified:**
+| File | Lines (post-v9) |
+|------|----------:|
+| `js_runtime.cpp` | 2,170 |
+| `js_globals.cpp` | 819 |
+| `js_runtime.h` | 298 |
+| `transpile_js_mir.cpp` | 9,614 |
+| `build_js_ast.cpp` | 1,741 |
+| `sys_func_registry.c` | (18 new registrations) |
 
 ---
 
