@@ -13,12 +13,16 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
+#include "../format/format.h"
 #include "../../lib/log.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
 #include <time.h>
+
+// forward declaration for JSON parser
+extern Item parse_json_to_item(Input* input, const char* json_string);
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
@@ -567,4 +571,250 @@ extern "C" Item js_number_property(Item prop_name) {
     if (s->len == 7 && strncmp(s->chars, "EPSILON", 7) == 0) return make_double(2.220446049250313e-16);
 
     return ItemNull;
+}
+
+// =============================================================================
+// Object.values — return array of property values
+// =============================================================================
+
+extern "C" Item js_object_values(Item object) {
+    TypeId type = get_type_id(object);
+    if (type != LMD_TYPE_MAP) return js_array_new(0);
+
+    Map* m = object.map;
+    if (!m || !m->type) return js_array_new(0);
+
+    TypeMap* tm = (TypeMap*)m->type;
+    Item result = js_array_new(0);
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        // skip internal properties
+        if (e->name && e->name->length >= 2 &&
+            e->name->str[0] == '_' && e->name->str[1] == '_') {
+            e = e->next;
+            continue;
+        }
+        Item key_str = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
+        Item val = map_get(m, key_str);
+        js_array_push(result, val);
+        e = e->next;
+    }
+    return result;
+}
+
+// =============================================================================
+// Object.entries — return array of [key, value] pairs
+// =============================================================================
+
+extern "C" Item js_object_entries(Item object) {
+    TypeId type = get_type_id(object);
+    if (type != LMD_TYPE_MAP) return js_array_new(0);
+
+    Map* m = object.map;
+    if (!m || !m->type) return js_array_new(0);
+
+    TypeMap* tm = (TypeMap*)m->type;
+    Item result = js_array_new(0);
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        if (e->name && e->name->length >= 2 &&
+            e->name->str[0] == '_' && e->name->str[1] == '_') {
+            e = e->next;
+            continue;
+        }
+        Item pair = js_array_new(2);
+        char nbuf[256];
+        int nlen = (int)e->name->length < 255 ? (int)e->name->length : 255;
+        memcpy(nbuf, e->name->str, nlen);
+        nbuf[nlen] = '\0';
+        Item key_str = (Item){.item = s2it(heap_create_name(nbuf))};
+        js_array_set(pair, (Item){.item = i2it(0)}, key_str);
+        js_array_set(pair, (Item){.item = i2it(1)}, map_get(m, key_str));
+        js_array_push(result, pair);
+        e = e->next;
+    }
+    return result;
+}
+
+// =============================================================================
+// Object.assign(target, ...sources)
+// =============================================================================
+
+extern "C" Item js_object_assign(Item target, Item* sources, int count) {
+    if (get_type_id(target) != LMD_TYPE_MAP) return target;
+    for (int i = 0; i < count; i++) {
+        Item source = sources[i];
+        if (get_type_id(source) != LMD_TYPE_MAP) continue;
+        Map* m = source.map;
+        if (!m || !m->type) continue;
+        TypeMap* tm = (TypeMap*)m->type;
+        ShapeEntry* e = tm->shape;
+        while (e) {
+            if (e->name) {
+                Item key = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
+                Item val = map_get(m, key);
+                js_property_set(target, key, val);
+            }
+            e = e->next;
+        }
+    }
+    return target;
+}
+
+// =============================================================================
+// obj.hasOwnProperty(key) / Object.hasOwn(obj, key)
+// =============================================================================
+
+extern "C" Item js_has_own_property(Item obj, Item key) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item k = js_to_string(key);
+    // direct map_get — no prototype chain walk
+    Item val = map_get(obj.map, k);
+    return (Item){.item = b2it(val.item != ItemNull.item)};
+}
+
+// =============================================================================
+// Object.freeze(obj) — set __frozen__ flag, Object.isFrozen(obj)
+// =============================================================================
+
+extern "C" Item js_object_freeze(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return obj;
+    Item key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
+    js_property_set(obj, key, (Item){.item = b2it(true)});
+    return obj;
+}
+
+extern "C" Item js_object_is_frozen(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    Item key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
+    Item val = map_get(obj.map, key);
+    return (Item){.item = b2it(js_is_truthy(val))};
+}
+
+// =============================================================================
+// Number static methods — Number.isInteger, Number.isFinite, Number.isNaN, Number.isSafeInteger
+// =============================================================================
+
+extern "C" Item js_number_is_integer(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return (Item){.item = b2it(true)};
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        return (Item){.item = b2it(isfinite(d) && d == floor(d))};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_number_is_finite(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return (Item){.item = b2it(true)};
+    if (type == LMD_TYPE_FLOAT) {
+        return (Item){.item = b2it(isfinite(it2d(value)))};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_number_is_nan(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_FLOAT) {
+        return (Item){.item = b2it(isnan(it2d(value)))};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_number_is_safe_integer(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return (Item){.item = b2it(true)};
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        return (Item){.item = b2it(isfinite(d) && d == floor(d) && fabs(d) <= 9007199254740991.0)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+// =============================================================================
+// Array.from(iterable) — convert array-like to array
+// =============================================================================
+
+extern "C" Item js_array_from(Item iterable) {
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_ARRAY) {
+        // shallow copy
+        Array* src = iterable.array;
+        Item result = js_array_new(src->length);
+        Array* dst = result.array;
+        memcpy(dst->items, src->items, src->length * sizeof(Item));
+        dst->length = src->length;
+        return result;
+    }
+    if (tid == LMD_TYPE_STRING) {
+        // split string into array of single characters
+        String* s = it2s(iterable);
+        if (!s) return js_array_new(0);
+        Item result = js_array_new(0);
+        for (int i = 0; i < (int)s->len; i++) {
+            String* ch = heap_strcpy(&s->chars[i], 1);
+            js_array_push(result, (Item){.item = s2it(ch)});
+        }
+        return result;
+    }
+    return js_array_new(0);
+}
+
+// =============================================================================
+// JSON.parse(str) — parse JSON string to Lambda object
+// =============================================================================
+
+extern Input* js_input;
+
+extern "C" Item js_json_parse(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return ItemNull;
+
+    // null-terminate for the parser
+    char* buf = (char*)alloca(s->len + 1);
+    memcpy(buf, s->chars, s->len);
+    buf[s->len] = '\0';
+
+    if (!js_input) {
+        log_error("js_json_parse: no input context");
+        return ItemNull;
+    }
+
+    Item result = parse_json_to_item(js_input, buf);
+    return result;
+}
+
+// =============================================================================
+// JSON.stringify(value, replacer?, space?) — convert Lambda object to JSON string
+// =============================================================================
+
+extern "C" Item js_json_stringify(Item value) {
+    if (get_type_id(value) == LMD_TYPE_NULL) {
+        return (Item){.item = s2it(heap_create_name("null", 4))};
+    }
+
+    Pool* pool = pool_create();
+    String* json = format_json(pool, value);
+    if (!json) {
+        pool_destroy(pool);
+        return ItemNull;
+    }
+
+    // copy string to GC heap before destroying pool
+    String* result = heap_strcpy(json->chars, json->len);
+    pool_destroy(pool);
+    return (Item){.item = s2it(result)};
+}
+
+// =============================================================================
+// delete operator — remove property from object
+// =============================================================================
+
+extern "C" Item js_delete_property(Item obj, Item key) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    // set property to null (real deletion would require map_remove)
+    js_property_set(obj, key, ItemNull);
+    return (Item){.item = b2it(true)};
 }

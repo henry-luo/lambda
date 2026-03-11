@@ -396,6 +396,35 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
     log_enter();
     log_debug("Resolving styles for grid items in container %s", grid_container->node_name());
 
+    // CSS Grid §11.4: percentage margins/paddings of grid items resolve against the
+    // inline size of their grid area (their containing block for percentage purposes).
+    // Since grid areas are not yet known, we use the grid container's content-box width
+    // as the initial resolution base. This matches CSS Grid spec behaviour where percentage
+    // widths/margins/paddings on grid items use the container's definite inline size.
+    // (Same pattern as flex layout — see layout_flex.cpp and CSS §8.3.)
+    // For an indefinite container (content_width == 0), percentages resolve to 0 (= auto),
+    // which is correct per CSS Grid spec §7.2.1.
+    float container_content_width = (float)grid_container->width;
+    if (grid_container->bound) {
+        container_content_width -= grid_container->bound->padding.left + grid_container->bound->padding.right;
+        if (grid_container->bound->border) {
+            container_content_width -= grid_container->bound->border->width.left +
+                                       grid_container->bound->border->width.right;
+        }
+    }
+    if (container_content_width < 0) container_content_width = 0;
+
+    // Temporarily override lycon->block.parent so that percentage resolution
+    // inside dom_node_resolve_style uses the grid container as the containing block,
+    // not the grid container's parent.
+    BlockContext grid_parent_ctx = {};
+    BlockContext* saved_parent = lycon->block.parent;
+    if (saved_parent) {
+        grid_parent_ctx = *saved_parent;
+    }
+    grid_parent_ctx.content_width = (int)container_content_width;
+    lycon->block.parent = &grid_parent_ctx;
+
     int item_count = 0;
     DomNode* child = grid_container->first_child;
 
@@ -427,6 +456,9 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
         }
         child = child->next_sibling;
     }
+
+    // Restore original parent block context
+    lycon->block.parent = saved_parent;
 
     log_debug("Resolved styles for %d grid items", item_count);
     log_leave();

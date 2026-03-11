@@ -217,6 +217,35 @@ void js_set_prototype(Item object, Item prototype);
 Item js_get_prototype(Item object);
 
 // =============================================================================
+// v9: Object extensions
+// =============================================================================
+
+Item js_object_values(Item object);
+Item js_object_entries(Item object);
+Item js_object_assign(Item target, Item* sources, int count);
+Item js_has_own_property(Item obj, Item key);
+Item js_object_freeze(Item obj);
+Item js_object_is_frozen(Item obj);
+
+// =============================================================================
+// v9: Number static methods
+// =============================================================================
+
+Item js_number_is_integer(Item value);
+Item js_number_is_finite(Item value);
+Item js_number_is_nan(Item value);
+Item js_number_is_safe_integer(Item value);
+
+// =============================================================================
+// v9: Array.from, JSON.parse/stringify, delete
+// =============================================================================
+
+Item js_array_from(Item iterable);
+Item js_json_parse(Item str_item);
+Item js_json_stringify(Item value);
+Item js_delete_property(Item obj, Item key);
+
+// =============================================================================
 // Exception Handling (try/catch/throw)
 // =============================================================================
 

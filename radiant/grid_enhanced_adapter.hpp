@@ -781,14 +781,22 @@ inline std::vector<GridItemContribution> collect_item_contributions(
             contrib.max_content_contribution = sizes.max_content;
 
             // CSS Grid §12.1: add vertical margins to the row-axis contribution.
-            // Percentage margins are excluded in indefinite intrinsic sizing context.
+            // In CSS, `margin: N%` resolves against the grid container's INLINE size (width),
+            // not the block size. If the inline size is definite, the margins are resolved
+            // to concrete pixel values and must be included in the row-axis contribution.
+            // Only exclude percentage margins when the inline size itself is indefinite.
             if (item->bound) {
                 bool top_is_auto = (item->bound->margin.top_type    == CSS_VALUE_AUTO);
                 bool bot_is_auto = (item->bound->margin.bottom_type == CSS_VALUE_AUTO);
                 bool top_is_pct  = (item->bound->margin.top_type    == CSS_VALUE__PERCENTAGE);
                 bool bot_is_pct  = (item->bound->margin.bottom_type == CSS_VALUE__PERCENTAGE);
-                float mt = (top_is_auto || top_is_pct) ? 0.0f : item->bound->margin.top;
-                float mb = (bot_is_auto || bot_is_pct) ? 0.0f : item->bound->margin.bottom;
+                bool inline_is_definite = (grid_layout->content_width > 0);
+                float mt = top_is_auto ? 0.0f :
+                           (top_is_pct && !inline_is_definite) ? 0.0f :
+                           item->bound->margin.top;
+                float mb = bot_is_auto ? 0.0f :
+                           (bot_is_pct && !inline_is_definite) ? 0.0f :
+                           item->bound->margin.bottom;
                 contrib.min_content_contribution += mt + mb;
                 contrib.max_content_contribution += mt + mb;
             }

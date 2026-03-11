@@ -1,0 +1,9 @@
+isInteger 5: true
+isInteger 5.5: false
+isFinite 42: true
+isNaN 42: false
+isSafe 42: true
+from array: 10,20,30
+from len: 3
+from string: h,i
+null

@@ -1,0 +1,14 @@
+asin 0: 0
+acos 1: 0
+atan 0: 0
+atan2: 0
+log2 8: 3
+log2 1: 0
+cbrt 27: 3
+cbrt 8: 2
+hypot 3,4: 5
+clz32 1: 31
+imul 2,4: 8
+imul -1,8: -8
+fround 0: 0
+null

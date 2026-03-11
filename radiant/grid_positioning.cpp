@@ -496,12 +496,18 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         // CSS Grid §8.1: auto margins consume the free space between the item's margin box and the
         // grid area.  The item's actual (content) size must be used, not the stretch-assigned size.
         // Pass 3 sets content_width/content_height; fall back to current item->width/height if not set.
-        // NOTE: content_height=0 is valid (empty element); the check is >= 0 to include that case
-        // so an empty element with margin:auto gets correctly centered at height=0.
-        float actual_item_width  = (item->content_width  > 0 && item->content_width  < (float)available_width)
-                                   ? item->content_width  : item->width;
-        float actual_item_height = (item->content_height >= 0 && item->content_height < (float)available_height)
-                                   ? item->content_height : item->height;
+        // When the item has an explicit size (given_width/given_height > 0), the explicit size takes
+        // priority over content_height (which may be 0 for an empty flex container despite height: Npx).
+        // For items WITHOUT explicit size, content_height=0 is valid (empty element), so >= 0 is used
+        // to correctly center empty elements at height=0 with margin:auto.
+        float actual_item_width  = has_explicit_width
+                                   ? (float)item->blk->given_width
+                                   : ((item->content_width > 0 && item->content_width < (float)available_width)
+                                      ? item->content_width : item->width);
+        float actual_item_height = has_explicit_height
+                                   ? (float)item->blk->given_height
+                                   : ((item->content_height >= 0 && item->content_height < (float)available_height)
+                                      ? item->content_height : item->height);
         float horiz_free = (float)available_width  - actual_item_width;
         float vert_free  = (float)available_height - actual_item_height;
         if (left_auto || right_auto) {
