@@ -900,16 +900,18 @@ module.exports = grammar({
       $.fn_type,
     ),
 
-    
+    grouped_type: $ => seq(
+      '(', $._string_type_expr, ')',
+    ),
 
     // Type concatenation (for string/symbol patterns): whitespace-separated sequence of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
     // Terms are unary_type (primary_type possibly with occurrence).
-    concat_type: $ => prec.left(prec.dynamic(-1, seq(
-      $.unary_type,
-      repeat1($.unary_type),
-    ))),
+    concat_type: $ => prec.left(seq(
+      choice($.unary_type, $.grouped_type),
+      repeat1(choice($.unary_type, $.grouped_type)),
+    )),
 
     string_binary_type: $ => choice(
       ...type_pattern(choice($._string_type_expr)),
@@ -918,7 +920,8 @@ module.exports = grammar({
     _string_type_expr: $ => choice(
       $.unary_type,            // covers primary_type and occurrence_type
       $.concat_type,           // whitespace-separated type terms (patterns)
-      alias($.string_binary_type, $.binary_type),           // alternation: T | U, T & U, T ! U
+      alias($.string_binary_type, $.binary_type),   
+      $.grouped_type        // alternation: T | U, T & U, T ! U
     ),
 
     return_occurrence_type: $ => seq(choice($.base_type, $.identifier), optional($.occurrence)),
@@ -933,6 +936,7 @@ module.exports = grammar({
     // Return type with optional error type: T or T^ or T^E
     // T^ means function may return any error (shorthand for T | error)
     // T^E means function returns T on success, E on error (E must be simple)
+    // simplified return_type substantially reduced the parser size
     return_type: $ => prec.right(seq(
       field('ok', $.return_type_pattern),
       optional(seq(

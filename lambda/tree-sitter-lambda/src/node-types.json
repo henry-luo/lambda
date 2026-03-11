@@ -109,6 +109,10 @@
             "named": true
           },
           {
+            "type": "grouped_type",
+            "named": true
+          },
+          {
             "type": "if_expr",
             "named": true
           },
@@ -591,6 +595,10 @@
             "named": true
           },
           {
+            "type": "grouped_type",
+            "named": true
+          },
+          {
             "type": "unary_type",
             "named": true
           }
@@ -628,6 +636,10 @@
           },
           {
             "type": "fn_type",
+            "named": true
+          },
+          {
+            "type": "grouped_type",
             "named": true
           },
           {
@@ -723,6 +735,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "grouped_type",
+          "named": true
+        },
         {
           "type": "unary_type",
           "named": true
@@ -1734,6 +1750,33 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "grouped_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "binary_type",
+          "named": true
+        },
+        {
+          "type": "concat_type",
+          "named": true
+        },
+        {
+          "type": "grouped_type",
+          "named": true
+        },
+        {
+          "type": "unary_type",
+          "named": true
+        }
+      ]
     }
   },
   {
