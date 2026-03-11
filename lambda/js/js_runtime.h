@@ -96,6 +96,7 @@ Item js_property_access(Item object, Item key);
 // =============================================================================
 
 Item js_array_new(int length);
+Item js_array_new_from_item(Item arg);
 Item js_array_get(Item array, Item index);
 Item js_array_set(Item array, Item index, Item value);
 int64_t js_array_length(Item array);
@@ -110,6 +111,7 @@ Item js_new_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item* js_alloc_env(int count);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_debug_check_callee(Item callee, int64_t site_id);
 Item js_get_this();
 void js_set_this(Item this_val);
@@ -201,6 +203,19 @@ Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
 
 // =============================================================================
+// v8: Object & Global extensions
+// =============================================================================
+
+Item js_object_create(Item proto);
+Item js_object_define_property(Item obj, Item name, Item descriptor);
+Item js_array_is_array(Item value);
+Item js_performance_now(void);
+Item js_date_now(void);
+Item js_alert(Item msg);
+void js_set_prototype(Item object, Item prototype);
+Item js_get_prototype(Item object);
+
+// =============================================================================
 // Exception Handling (try/catch/throw)
 // =============================================================================
 
@@ -246,6 +261,7 @@ void js_runtime_set_input(void* input);
 void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
+Item js_constructor_create_object(Item callee);
 
 #ifdef __cplusplus
 }

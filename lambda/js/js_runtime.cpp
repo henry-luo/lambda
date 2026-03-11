@@ -615,12 +615,34 @@ extern "C" Item js_typeof(Item value) {
 // Object Functions
 // =============================================================================
 
+// JsFunction struct: defined here so js_property_get/set can access .prototype
+struct JsFunction {
+    TypeId type_id;  // Always LMD_TYPE_FUNC
+    void* func_ptr;  // Pointer to the compiled function
+    int param_count; // Number of parameters (user-visible, not including env)
+    Item* env;       // Closure environment (NULL for non-closures)
+    int env_size;    // Number of captured variables in env
+    Item prototype;  // Constructor prototype (Foo.prototype = {...})
+};
+
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
 extern "C" Item js_new_object() {
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->type = &EmptyMap;
     return (Item){.map = m};
+}
+
+// Create a new object for a constructor call: sets __proto__ from callee.prototype
+extern "C" Item js_constructor_create_object(Item callee) {
+    Item obj = js_new_object();
+    if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)callee.function;
+        if (fn->prototype.item != ItemNull.item && get_type_id(fn->prototype) == LMD_TYPE_MAP) {
+            js_set_prototype(obj, fn->prototype);
+        }
+    }
+    return obj;
 }
 
 // Forward declaration for prototype chain support
@@ -653,7 +675,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         // Regular Lambda map (including JS objects)
         Item result = map_get(object.map, key);
         // Prototype chain fallback: if property not found on own object, walk __proto__
-        if (result.item == 0) {
+        if (result.item == ItemNull.item) {
             result = js_prototype_lookup(object, key);
         }
         return result;
@@ -689,6 +711,17 @@ extern "C" Item js_property_get(Item object, Item key) {
             return (Item){.item = s2it(heap_create_name(ch))};
         }
         return ItemNull;
+    }
+
+    // Function: reading .prototype property
+    if (type == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)object.function;
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
+                return fn->prototype;
+            }
+        }
     }
 
     return ItemNull;
@@ -786,6 +819,23 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         return value;
     }
 
+    // Function: setting .prototype on a function (constructor pattern)
+    if (type == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)object.function;
+        String* str_key = NULL;
+        TypeId key_type = get_type_id(key);
+        if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
+        if (str_key && str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
+            fn->prototype = value;
+            // Register fn->prototype as a GC root so the prototype map survives GC.
+            // JsFunction is pool-allocated (invisible to GC), but fn->prototype points
+            // to a GC-managed map. Without this, the prototype gets collected when no
+            // live objects reference it via __proto__.
+            heap_register_gc_root(&fn->prototype.item);
+            return value;
+        }
+    }
+
     return value;
 }
 
@@ -823,6 +873,32 @@ extern "C" Item js_array_new(int length) {
         }
     }
     return (Item){.array = arr};
+}
+
+// new Array(arg) — JS spec: if arg is a valid non-negative integer, create sparse
+// array of that length. Otherwise, create a single-element array [arg].
+// This matches the JS behavior where new Array(undefined) => [undefined] (length 1).
+extern "C" Item js_array_new_from_item(Item arg) {
+    TypeId type = get_type_id(arg);
+    // Integer argument: create sparse array
+    if (type == LMD_TYPE_INT) {
+        int64_t len = it2i(arg);
+        if (len >= 0 && len <= 0x7FFFFFFF) {
+            return js_array_new((int)len);
+        }
+    }
+    // Float argument: check if it's a non-negative integer value
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(arg);
+        if (d >= 0.0 && d == (double)(int)d && d <= 2147483647.0) {
+            return js_array_new((int)d);
+        }
+    }
+    // Any other value (null, undefined, string, object, negative, non-integer float):
+    // create a single-element array [arg]
+    Item result = js_array_new(0);
+    array_push(result.array, arg);
+    return result;
 }
 
 extern "C" Item js_array_get(Item array, Item index) {
@@ -899,20 +975,39 @@ extern "C" void js_console_log(Item value) {
 // Function Functions
 // =============================================================================
 
-// Structure to wrap JS function pointers
-struct JsFunction {
-    TypeId type_id;  // Always LMD_TYPE_FUNC
-    void* func_ptr;  // Pointer to the compiled function
-    int param_count; // Number of parameters (user-visible, not including env)
-    Item* env;       // Closure environment (NULL for non-closures)
-    int env_size;    // Number of captured variables in env
-};
+// (JsFunction struct defined above, before js_property_get/set)
+
+// Cache: func_ptr → JsFunction*  (ensures same MIR function → same wrapper → same .prototype)
+static const int JS_FUNC_CACHE_SIZE = 512;
+static void* js_func_cache_keys[512];
+static JsFunction* js_func_cache_vals[512];
+static int js_func_cache_count = 0;
+
+static JsFunction* js_func_cache_lookup(void* func_ptr) {
+    for (int i = 0; i < js_func_cache_count; i++) {
+        if (js_func_cache_keys[i] == func_ptr) return js_func_cache_vals[i];
+    }
+    return NULL;
+}
+
+static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
+    if (js_func_cache_count < JS_FUNC_CACHE_SIZE) {
+        js_func_cache_keys[js_func_cache_count] = func_ptr;
+        js_func_cache_vals[js_func_cache_count] = fn;
+        js_func_cache_count++;
+    }
+}
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
     if (!func_ptr) {
         log_error("js_new_function: null func_ptr! param_count=%d", param_count);
         return ItemNull;
     }
+    // Return cached wrapper if the same MIR function was already wrapped.
+    // This ensures Foo.prototype = {...} and (new Foo()) share the same JsFunction*.
+    JsFunction* cached = js_func_cache_lookup(func_ptr);
+    if (cached) return (Item){.function = (Function*)cached};
+
     // Pool-allocate: JS functions are module-lifetime objects that must not be
     // GC-collected (they live in pool-allocated env arrays unreachable from GC roots).
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
@@ -921,6 +1016,8 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->param_count = param_count;
     fn->env = NULL;
     fn->env_size = 0;
+    fn->prototype = ItemNull;
+    js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
 }
 
@@ -934,6 +1031,7 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->param_count = param_count;
     fn->env = env;
     fn->env_size = env_size;
+    fn->prototype = ItemNull;
     return (Item){.function = (Function*)fn};
 }
 
@@ -1037,6 +1135,28 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     Item result = js_invoke_fn(fn, args, arg_count);
     js_current_this = prev_this;
     return result;
+}
+
+// Function.prototype.apply(thisArg, argsArray)
+extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        log_error("js_apply_function: not a function (type=%d)", get_type_id(func_item));
+        return ItemNull;
+    }
+    // Extract args from array
+    int argc = 0;
+    Item* args = NULL;
+    if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
+        argc = (int)args_array.array->length;
+        if (argc > 0) {
+            args = (Item*)alloca(argc * sizeof(Item));
+            for (int i = 0; i < argc; i++) {
+                Item idx = {.item = i2it(i)};
+                args[i] = js_array_get(args_array, idx);
+            }
+        }
+    }
+    return js_call_function(func_item, this_val, args, argc);
 }
 
 // =============================================================================
@@ -1687,7 +1807,7 @@ static const int PROTO_KEY_LEN = 9;
 // Set the prototype of an object (stores as __proto__ property on Map)
 extern "C" void js_set_prototype(Item object, Item prototype) {
     if (get_type_id(object) != LMD_TYPE_MAP) return;
-    if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != 0) return;
+    if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != ItemNull.item) return;
     Item key = (Item){.item = s2it(heap_create_name(PROTO_KEY, PROTO_KEY_LEN))};
     js_property_set(object, key, prototype);
 }
@@ -1707,9 +1827,9 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
     // walk up the chain via __proto__
     Item proto = js_get_prototype(object);
     int depth = 0;
-    while (proto.item != 0 && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+    while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
         Item result = map_get(proto.map, property);
-        if (result.item != 0) return result;
+        if (result.item != ItemNull.item) return result;
         proto = js_get_prototype(proto);
         depth++;
     }

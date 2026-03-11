@@ -126,8 +126,12 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 if (ce->position &&
                     (ce->position->position == CSS_VALUE_ABSOLUTE ||
                      ce->position->position == CSS_VALUE_FIXED)) {
-                    // Resolve styles for the absolute child so its gi is populated
-                    init_grid_item_view(lycon, ch);
+                    // Styles were already resolved in resolve_grid_item_styles above
+                    // (init_grid_item_view was called for all children). Only call again
+                    // if for some reason gi was not populated yet (defensive guard).
+                    if (ce->item_prop_type != DomElement::ITEM_PROP_GRID) {
+                        init_grid_item_view(lycon, ch);
+                    }
                     has_absolute_children = true;
                 }
             }
@@ -399,16 +403,16 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
         if (child->is_element()) {
             DomElement* elem = child->as_element();
 
-            // Skip absolutely positioned and hidden items (they're not grid items)
+            // Always resolve styles first (position:absolute may not be known until after cascade)
+            init_grid_item_view(lycon, child);
+
+            // Re-check absolute positioning AFTER style resolution
             bool is_absolute = elem->position &&
                               (elem->position->position == CSS_VALUE_ABSOLUTE ||
                                elem->position->position == CSS_VALUE_FIXED);
 
             if (!is_absolute) {
-                // Initialize the view with style resolution
-                init_grid_item_view(lycon, child);
                 // check display:none AFTER style resolution (display may be set via cascade)
-                DomElement* elem = child->as_element();
                 if (elem->display.outer == CSS_VALUE_NONE) {
                     log_debug("Skipping display:none child after style resolution: %s", child->node_name());
                 } else {
@@ -416,7 +420,9 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
                     log_debug("Initialized grid item %d: %s", item_count, child->node_name());
                 }
             } else {
-                log_debug("Skipping absolute positioned child: %s", child->node_name());
+                // Absolute item: gi was populated (for grid-placement containing block),
+                // but do not count as an in-flow grid item.
+                log_debug("Absolute positioned child detected after style resolution: %s", child->node_name());
             }
         }
         child = child->next_sibling;
@@ -881,38 +887,63 @@ static bool compute_grid_area_for_absolute(
         return false;
     }
 
-    // Resolve grid lines (convert from 1-based CSS to 0-based indices)
-    // For auto lines, use the grid edges (line 1 or last line)
-    int col_start_line = has_col_start ? gi->grid_column_start : 1;
-    int col_end_line = has_col_end ? gi->grid_column_end : col_line_count;
-    int row_start_line = has_row_start ? gi->grid_row_start : 1;
-    int row_end_line = has_row_end ? gi->grid_row_end : row_line_count;
+    // CSS Grid §9.1: For absolutely positioned items, when a start or end is auto,
+    // the containing block extends to the outer edge of the padding box at that end.
+    // This is the BORDER edge (not the content/padding), so it includes padding but not border.
+    float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
+    if (container->bound && container->bound->border) {
+        border_left   = container->bound->border->width.left;
+        border_right  = container->bound->border->width.right;
+        border_top    = container->bound->border->width.top;
+        border_bottom = container->bound->border->width.bottom;
+    }
+    // Padding-box outer edges in container border-box coordinates
+    float col_auto_start_pos = border_left;
+    float col_auto_end_pos   = (float)container->width  - border_right;
+    float row_auto_start_pos = border_top;
+    float row_auto_end_pos   = (float)container->height - border_bottom;
 
+    // Resolve explicit grid lines (1-based CSS to 0-based index into positions array)
     // Handle negative line numbers (count from end)
+    int col_start_line = has_col_start ? gi->grid_column_start : 0;
+    int col_end_line   = has_col_end   ? gi->grid_column_end   : 0;
+    int row_start_line = has_row_start ? gi->grid_row_start    : 0;
+    int row_end_line   = has_row_end   ? gi->grid_row_end      : 0;
+
     if (col_start_line < 0) col_start_line = col_line_count + col_start_line + 1;
-    if (col_end_line < 0) col_end_line = col_line_count + col_end_line + 1;
+    if (col_end_line   < 0) col_end_line   = col_line_count + col_end_line   + 1;
     if (row_start_line < 0) row_start_line = row_line_count + row_start_line + 1;
-    if (row_end_line < 0) row_end_line = row_line_count + row_end_line + 1;
+    if (row_end_line   < 0) row_end_line   = row_line_count + row_end_line   + 1;
 
-    // Clamp to valid range and convert to 0-based index
-    int col_start_idx = (col_start_line >= 1 && col_start_line <= col_line_count) ?
-                        col_start_line - 1 : 0;
-    int col_end_idx = (col_end_line >= 1 && col_end_line <= col_line_count) ?
-                      col_end_line - 1 : col_line_count - 1;
-    int row_start_idx = (row_start_line >= 1 && row_start_line <= row_line_count) ?
-                        row_start_line - 1 : 0;
-    int row_end_idx = (row_end_line >= 1 && row_end_line <= row_line_count) ?
-                      row_end_line - 1 : row_line_count - 1;
+    // Resolve start/end positions:
+    // - Explicit line → look up in positions array (clamp to valid range)
+    // - Auto → use padding-box outer edge per CSS Grid §9.1
+    float x_start = has_col_start
+        ? col_positions[( col_start_line >= 1 && col_start_line <= col_line_count)
+                         ? col_start_line - 1 : 0]
+        : col_auto_start_pos;
+    float x_end = has_col_end
+        ? col_positions[(col_end_line >= 1 && col_end_line <= col_line_count)
+                         ? col_end_line - 1 : col_line_count - 1]
+        : col_auto_end_pos;
+    float y_start = has_row_start
+        ? row_positions[(row_start_line >= 1 && row_start_line <= row_line_count)
+                         ? row_start_line - 1 : 0]
+        : row_auto_start_pos;
+    float y_end = has_row_end
+        ? row_positions[(row_end_line >= 1 && row_end_line <= row_line_count)
+                         ? row_end_line - 1 : row_line_count - 1]
+        : row_auto_end_pos;
 
-    // Ensure start < end
-    if (col_start_idx > col_end_idx) { int t = col_start_idx; col_start_idx = col_end_idx; col_end_idx = t; }
-    if (row_start_idx > row_end_idx) { int t = row_start_idx; row_start_idx = row_end_idx; row_end_idx = t; }
+    // Ensure start <= end
+    if (x_start > x_end) { float t = x_start; x_start = x_end; x_end = t; }
+    if (y_start > y_end) { float t = y_start; y_start = y_end; y_end = t; }
 
     // Calculate grid area rectangle
-    *out_x = col_positions[col_start_idx];
-    *out_y = row_positions[row_start_idx];
-    *out_width = col_positions[col_end_idx] - col_positions[col_start_idx];
-    *out_height = row_positions[row_end_idx] - row_positions[row_start_idx];
+    *out_x = x_start;
+    *out_y = y_start;
+    *out_width  = x_end - x_start;
+    *out_height = y_end - y_start;
 
     log_debug("Grid area for absolute item: lines col %d-%d, row %d-%d => pos (%.1f, %.1f) size %.1fx%.1f",
               col_start_line, col_end_line, row_start_line, row_end_line,
@@ -985,6 +1016,11 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                     lycon->block.given_width = -1;
                     lycon->block.given_height = -1;
                 }
+                // Save CSS-resolved dimensions before layout_abs_block, which may
+                // overwrite given_height/width with top+bottom / left+right inset values.
+                // This lets us distinguish explicit CSS height/width from inset-derived ones.
+                float abs_orig_given_width  = lycon->block.given_width;
+                float abs_orig_given_height = lycon->block.given_height;
 
                 // Lay out the absolute positioned block
                 layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
@@ -1108,6 +1144,54 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                             child_block->y += (int)offset;
                             log_debug("Absolute no-area: align=%d free=%.0f offset=%.0f -> y=%.0f",
                                       align, free_h, offset, child_block->y);
+                        }
+                    }
+                }
+
+                // Apply CSS aspect-ratio to compute the missing dimension.
+                // CSS Positioned Layout: aspect-ratio derives height from width (or vice versa).
+                // An inset-derived height (top+bottom) is NOT considered "explicit" for this purpose —
+                // aspect-ratio overrides it (e.g. test aspect_ratio_overrides_height_of_full_inset).
+                log_debug("Absolute aspect-ratio check: specified_style=%p, w=%.1f, h=%.1f",
+                          (void*)child_block->specified_style, child_block->width, child_block->height);
+                if (child_block->specified_style) {
+                    float ar = 0.0f;
+                    CssDeclaration* ar_decl = style_tree_get_declaration(
+                        child_block->specified_style, CSS_PROPERTY_ASPECT_RATIO);
+                    if (ar_decl && ar_decl->value) {
+                        if (ar_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                            ar = (float)ar_decl->value->data.number.value;
+                        } else if (ar_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                                   ar_decl->value->data.list.count >= 2) {
+                            double num = 0, den = 0;
+                            bool got_num = false, got_den = false;
+                            for (int i = 0; i < ar_decl->value->data.list.count && !got_den; i++) {
+                                CssValue* v = ar_decl->value->data.list.values[i];
+                                if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
+                                    if (!got_num) { num = v->data.number.value; got_num = true; }
+                                    else          { den = v->data.number.value; got_den = true; }
+                                }
+                            }
+                            if (got_num && got_den && den > 0) ar = (float)(num / den);
+                            else if (got_num)                   ar = (float)num;
+                        }
+                    }
+                    if (ar > 0.0f) {
+                        // Use the pre-layout dimensions to detect explicit CSS properties.
+                        // calculate_absolute_position may have set given_height from top+bottom
+                        // insets; abs_orig_given_height captures only the explicit CSS value.
+                        bool has_explicit_height = abs_orig_given_height > 0;
+                        bool has_explicit_width  = abs_orig_given_width  > 0;
+                        if (child_block->width > 0 && !has_explicit_height) {
+                            // Width is definite (from left+right or explicit CSS width); derive height.
+                            child_block->height = child_block->width / ar;
+                            log_debug("Absolute aspect-ratio: height = width(%.1f) / ar(%.3f) = %.1f",
+                                      child_block->width, ar, child_block->height);
+                        } else if (child_block->height > 0 && !has_explicit_width && child_block->width <= 0) {
+                            // Height is definite (from top+bottom or explicit CSS height); derive width.
+                            child_block->width = child_block->height * ar;
+                            log_debug("Absolute aspect-ratio: width = height(%.1f) * ar(%.3f) = %.1f",
+                                      child_block->height, ar, child_block->width);
                         }
                     }
                 }

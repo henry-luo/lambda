@@ -943,6 +943,7 @@ JitImport jit_runtime_imports[] = {
     {"js_property_set", FPTR(js_property_set)},
     {"js_property_access", FPTR(js_property_access)},
     {"js_array_new", FPTR(js_array_new)},
+    {"js_array_new_from_item", FPTR(js_array_new_from_item)},
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},
     {"js_array_length", FPTR(js_array_length)},
@@ -951,6 +952,8 @@ JitImport jit_runtime_imports[] = {
     {"js_new_closure", FPTR(js_new_closure)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_call_function", FPTR(js_call_function)},
+    {"js_apply_function", FPTR(js_apply_function)},
+    {"js_constructor_create_object", FPTR(js_constructor_create_object)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_console_log", FPTR(js_console_log)},
@@ -999,8 +1002,16 @@ JitImport jit_runtime_imports[] = {
     {"js_nullish_coalesce", FPTR(js_nullish_coalesce)},
     // object utilities
     {"js_object_keys", FPTR(js_object_keys)},
+    {"js_object_create", FPTR(js_object_create)},
+    {"js_object_define_property", FPTR(js_object_define_property)},
+    {"js_array_is_array", FPTR(js_array_is_array)},
     {"js_to_string_val", FPTR(js_to_string_val)},
     {"js_number_property", FPTR(js_number_property)},
+    // timing
+    {"js_performance_now", FPTR(js_performance_now)},
+    {"js_date_now", FPTR(js_date_now)},
+    // shims
+    {"js_alert", FPTR(js_alert)},
     // typed arrays
     {"js_typed_array_new", FPTR(js_typed_array_new)},
     {"js_typed_array_get", FPTR(js_typed_array_get)},
