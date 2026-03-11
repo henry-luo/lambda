@@ -25,15 +25,15 @@ QJS_EXE = "qjs"
 TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 
 BENCHMARKS = [
-    ("nbody",         "ref/JetStream/SunSpider/n-body.js"),
-    ("cube3d",        "ref/JetStream/SunSpider/3d-cube.js"),
-    ("navier_stokes", "ref/JetStream/Octane/navier-stokes.js"),
-    ("richards",      "ref/JetStream/Octane/richards.js"),
-    ("splay",         "ref/JetStream/Octane/splay.js"),
-    ("deltablue",     "ref/JetStream/Octane/deltablue.js"),
-    ("hashmap",       "ref/JetStream/simple/hash-map.js"),
-    ("crypto_sha1",   "ref/JetStream/SunSpider/crypto-sha1.js"),
-    ("raytrace3d",    "ref/JetStream/SunSpider/3d-raytrace.js"),
+    ("nbody",         "test/benchmark/jetstream/n-body.js"),
+    ("cube3d",        "test/benchmark/jetstream/3d-cube.js"),
+    ("navier_stokes", "test/benchmark/jetstream/navier-stokes.js"),
+    ("richards",      "test/benchmark/jetstream/richards.js"),
+    ("splay",         "test/benchmark/jetstream/splay.js"),
+    ("deltablue",     "test/benchmark/jetstream/deltablue.js"),
+    ("hashmap",       "test/benchmark/jetstream/hash-map.js"),
+    ("crypto_sha1",   "test/benchmark/jetstream/crypto-sha1.js"),
+    ("raytrace3d",    "test/benchmark/jetstream/3d-raytrace.js"),
 ]
 
 
