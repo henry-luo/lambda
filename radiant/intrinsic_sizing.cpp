@@ -1188,6 +1188,25 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             log_debug("measure_element_intrinsic_widths: grid %s with %d columns: min=%.1f, max=%.1f",
                       element->node_name(), col_count, total_min, total_max);
 
+            // Apply max-width constraint (same logic as the generic path below).
+            // The grid early-return bypasses the generic constraint code, so we apply it here.
+            {
+                float gmax = -1;
+                if (view_block->blk) gmax = view_block->blk->given_max_width;
+                if (gmax < 0 && element->specified_style) {
+                    CssDeclaration* mw = style_tree_get_declaration(
+                        element->specified_style, CSS_PROPERTY_MAX_WIDTH);
+                    if (mw && mw->value && mw->value->type == CSS_VALUE_TYPE_LENGTH) {
+                        gmax = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, mw->value);
+                    }
+                }
+                if (gmax >= 0) {
+                    float max_bb = gmax + pad_left + pad_right + border_left + border_right;
+                    if (total_max > max_bb) total_max = max_bb;
+                    if (total_min > max_bb) total_min = max_bb;
+                }
+            }
+
             // Restore font
             if (font_changed) lycon->font = saved_font;
             return {total_min, total_max};
