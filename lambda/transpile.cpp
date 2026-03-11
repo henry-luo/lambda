@@ -2446,11 +2446,20 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str(tp->code_buf, " for (int64_t idx=0; idx<iter_n; idx++) {\n");
 
                 if (has_index) {
-                    strbuf_append_str(tp->code_buf, "  Item _");
-                    strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=iter_key_at(it, iter_keys, idx, ");
-                    strbuf_append_str(tp->code_buf, filter_str);
-                    strbuf_append_str(tp->code_buf, ");\n");
+                    if (key_filter == LOOP_KEY_INT) {
+                        // key is always int — unbox to match AST TYPE_INT declaration
+                        strbuf_append_str(tp->code_buf, "  int64_t _");
+                        strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+                        strbuf_append_str(tp->code_buf, "=it2i(iter_key_at(it, iter_keys, idx, ");
+                        strbuf_append_str(tp->code_buf, filter_str);
+                        strbuf_append_str(tp->code_buf, "));\n");
+                    } else {
+                        strbuf_append_str(tp->code_buf, "  Item _");
+                        strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+                        strbuf_append_str(tp->code_buf, "=iter_key_at(it, iter_keys, idx, ");
+                        strbuf_append_str(tp->code_buf, filter_str);
+                        strbuf_append_str(tp->code_buf, ");\n");
+                    }
                 }
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
@@ -2459,6 +2468,11 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str(tp->code_buf, ");\n");
             }
 
+            // Check if the loop is known to produce zero iterations (empty path)
+            bool needs_empty = (key_filter == LOOP_KEY_SYMBOL && is_known_indexed) ||
+                               (key_filter == LOOP_KEY_INT && is_known_keyed);
+
+            if (!needs_empty) {
             // Handle nested loops
             AstNode* next_loop = loop_node->next;
             while (next_loop) {
@@ -2519,14 +2533,11 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                                       expr_type->type_id == LMD_TYPE_ARRAY_FLOAT ||
                                       expr_type->type_id == LMD_TYPE_ARRAY);
             bool used_fast_indexed = is_known_indexed && key_filter != LOOP_KEY_SYMBOL;
-            bool needs_empty = (key_filter == LOOP_KEY_SYMBOL && is_known_indexed) ||
-                               (key_filter == LOOP_KEY_INT && is_known_keyed);
-            if (!needs_empty && used_fast_indexed && (is_range || is_any_array_type)) {
+            if (used_fast_indexed && (is_range || is_any_array_type)) {
                 strbuf_append_char(tp->code_buf, '}');
             }
-            if (!needs_empty) {
-                strbuf_append_str(tp->code_buf, " }\n");
-            }
+            strbuf_append_str(tp->code_buf, " }\n");
+            } // end !needs_empty
         }
 
     // Track if we've applied any post-processing that converts Array to List

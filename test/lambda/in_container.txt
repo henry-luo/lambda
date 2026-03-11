@@ -1,0 +1,32 @@
+"=== Map (value membership) ==="
+true
+true
+false
+false
+"=== VMap (value membership) ==="
+true
+true
+false
+false
+"=== Element (attr values + children) ==="
+true
+true
+false
+"=== Array ==="
+true
+false
+"=== Array[int] ==="
+true
+false
+"=== Array[float] ==="
+true
+false
+"=== Range ==="
+true
+false
+"=== List ==="
+true
+false
+"=== String substring ==="
+true
+false
