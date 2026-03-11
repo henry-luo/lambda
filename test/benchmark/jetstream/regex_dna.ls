@@ -4,19 +4,19 @@
 // Tests regex find/replace on a ~300KB DNA string
 
 // Pattern for stripping FASTA headers and newlines
-string Fasta = ">" \.* "\n" | "\n"
+type Fasta = ">" \.* "\n" | "\n"
 
 // 9 DNA matching patterns (lowercase to match pre-lowercased DNA)
 // JS originals use /ig flag for case-insensitive global matching
-string Pat1 = "agggtaaa" | "tttaccct"
-string Pat2 = ("c" | "g" | "t") "gggtaaa" | "tttaccc" ("a" | "c" | "g")
-string Pat3 = "a" ("a" | "c" | "t") "ggtaaa" | "tttacc" ("a" | "g" | "t") "t"
-string Pat4 = "ag" ("a" | "c" | "t") "gtaaa" | "tttac" ("a" | "g" | "t") "ct"
-string Pat5 = "agg" ("a" | "c" | "t") "taaa" | "ttta" ("a" | "g" | "t") "cct"
-string Pat6 = "aggg" ("a" | "c" | "g") "aaa" | "ttt" ("c" | "g" | "t") "ccct"
-string Pat7 = "agggt" ("c" | "g" | "t") "aa" | "tt" ("a" | "c" | "g") "accct"
-string Pat8 = "agggta" ("c" | "g" | "t") "a" | "t" ("a" | "c" | "g") "taccct"
-string Pat9 = "agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "ttaccct"
+type Pat1 = "agggtaaa" | "tttaccct"
+type Pat2 = ("c" | "g" | "t") "gggtaaa" | "tttaccc" ("a" | "c" | "g")
+type Pat3 = "a" ("a" | "c" | "t") "ggtaaa" | "tttacc" ("a" | "g" | "t") "t"
+type Pat4 = "ag" ("a" | "c" | "t") "gtaaa" | "tttac" ("a" | "g" | "t") "ct"
+type Pat5 = "agg" ("a" | "c" | "t") "taaa" | "ttta" ("a" | "g" | "t") "cct"
+type Pat6 = "aggg" ("a" | "c" | "g") "aaa" | "ttt" ("c" | "g" | "t") "ccct"
+type Pat7 = "agggt" ("c" | "g" | "t") "aa" | "tt" ("a" | "c" | "g") "accct"
+type Pat8 = "agggta" ("c" | "g" | "t") "a" | "t" ("a" | "c" | "g") "taccct"
+type Pat9 = "agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "ttaccct"
 
 // Replace first occurrence only (JS string.replace with string arg replaces first match only)
 pn replace_first(s, search, repl) {
