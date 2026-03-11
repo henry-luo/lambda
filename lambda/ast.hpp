@@ -86,6 +86,7 @@ extern "C" {
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_CONSTRAINED_TYPE sym_constrained_type
+#define SYM_GROUPED_TYPE sym_grouped_type
 #define SYM_TYPE_DEFINE sym_type_stam
 #define SYM_TYPE_OCCURRENCE sym_type_occurrence
 

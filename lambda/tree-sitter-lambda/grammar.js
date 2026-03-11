@@ -128,9 +128,9 @@ module.exports = grammar({
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
-    [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
-    [$._type_expr, $._string_type_expr],            // type_assign: unary_type could be _type_expr or _string_type_expr
-    [$._string_type_expr, $.concat_type],            // unary_type could be complete _string_type_expr or start of concat_type
+    [$.unary_type, $.occurrence_type],             // primary_type + [n] could be occurrence or end of type
+    [$._type_expr, $._string_type_expr],           // type_assign: unary_type could be _type_expr or _string_type_expr
+    [$._string_type_expr, $.concat_type],          // unary_type could be complete _string_type_expr or start of concat_type
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
   ],
 
@@ -171,6 +171,7 @@ module.exports = grammar({
   ],
   [
     $.unary_type,         // tight unary types 
+    $.grouped_type,
     $.concat_type,        // in regex, concatenation has higher precedence than alternation, so concat_type is tighter than binary_type
     $.binary_type,        // alternation (|, &, !)
     $.negation_type,      // A ! B has higher precedence than A (!B)
@@ -900,18 +901,21 @@ module.exports = grammar({
       $.fn_type,
     ),
 
-    grouped_type: $ => seq(
+    grouped_type: $ => prec.right(seq(
+      optional('!'),
       '(', $._string_type_expr, ')',
-    ),
+      optional(field('occurrence', $.occurrence))
+    )),
 
     // Type concatenation (for string/symbol patterns): whitespace-separated sequence of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
     // Terms are unary_type (primary_type possibly with occurrence).
-    concat_type: $ => prec.left(seq(
+    // prec(-1) so that int[2+] is not parsed as concat_type(int, [2+])
+    concat_type: $ => prec.dynamic(-1, prec.left(seq(
       choice($.unary_type, $.grouped_type),
       repeat1(choice($.unary_type, $.grouped_type)),
-    )),
+    ))),
 
     string_binary_type: $ => choice(
       ...type_pattern(choice($._string_type_expr)),

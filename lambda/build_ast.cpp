@@ -20,6 +20,7 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
 AstNode* build_pattern_char_class(Transpiler* tp, TSNode node);
 AstNode* build_concat_type(Transpiler* tp, TSNode node);
 AstNode* build_negation_type(Transpiler* tp, TSNode node);
+AstNode* build_grouped_type(Transpiler* tp, TSNode node);
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
 AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 
@@ -6765,7 +6766,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_constrained_type(tp, expr_node);
     case sym_concat_type:
         return build_concat_type(tp, expr_node);
-    // Note: SYM_PATTERN_GROUP removed - use list_type for grouping in patterns
+    case SYM_GROUPED_TYPE:
+        return build_grouped_type(tp, expr_node);
     case sym_negation_type:
         return build_negation_type(tp, expr_node);
     case SYM_PATTERN_CHAR_CLASS:
@@ -7120,6 +7122,84 @@ AstNode* build_concat_type(Transpiler* tp, TSNode node) {
         }
     }
     return (AstNode*)seq_node;
+}
+
+// Build grouped_type node — parenthesized string type expr with optional ! prefix and occurrence
+// e.g. ("a" \d[4])?, !("x" | "y"), ("a" to "z")+
+AstNode* build_grouped_type(Transpiler* tp, TSNode node) {
+    log_debug("build grouped_type");
+    // find the inner _string_type_expr child (skip '!', '(', ')')
+    AstNode* inner = nullptr;
+    uint32_t child_count = ts_node_child_count(node);
+    bool has_negation = false;
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        StrView text = ts_node_source(tp, child);
+        if (ts_node_is_named(child)) {
+            TSSymbol sym = ts_node_symbol(child);
+            if (sym == sym_occurrence) {
+                continue; // handled below
+            }
+            inner = build_expr(tp, child);
+        } else if (text.length == 1 && text.str[0] == '!') {
+            has_negation = true;
+        }
+    }
+    if (!inner) {
+        log_error("grouped_type: no inner expression found");
+        return nullptr;
+    }
+
+    // wrap in negation if ! prefix
+    if (has_negation) {
+        AstUnaryNode* neg_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
+        neg_node->operand = inner;
+        neg_node->op = OPERATOR_NOT;
+        neg_node->op_str = {.str = "!", .length = 1};
+        neg_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        inner = (AstNode*)neg_node;
+    }
+
+    // wrap in occurrence if present
+    TSNode occ_node = ts_node_child_by_field_id(node, field_occurrence);
+    if (!ts_node_is_null(occ_node)) {
+        AstUnaryNode* occ = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, node, sizeof(AstUnaryNode));
+        occ->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+        TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+        ((TypeType*)occ->type)->type = (Type*)type;
+        type->min_count = 0;
+        type->max_count = -1;
+
+        StrView op = ts_node_source(tp, occ_node);
+        occ->op_str = op;
+
+        // parse occurrence kind
+        TSNode actual_op = ts_node_child(occ_node, 0);
+        TSSymbol op_symbol = ts_node_is_null(actual_op) ? ts_node_symbol(occ_node) : ts_node_symbol(actual_op);
+
+        if (op_symbol == SYM_OCCURRENCE_COUNT) {
+            occ->op = OPERATOR_REPEAT;
+            parse_occurrence_count(op, &type->min_count, &type->max_count);
+        } else if (strview_equal(&op, "?")) {
+            occ->op = OPERATOR_OPTIONAL;
+            type->min_count = 0; type->max_count = 1;
+        } else if (strview_equal(&op, "+")) {
+            occ->op = OPERATOR_ONE_MORE;
+            type->min_count = 1; type->max_count = -1;
+        } else if (strview_equal(&op, "*")) {
+            occ->op = OPERATOR_ZERO_MORE;
+            type->min_count = 0; type->max_count = -1;
+        }
+        type->op = occ->op;
+
+        occ->operand = inner;
+        type->operand = inner->type;
+        arraylist_append(tp->type_list, type);
+        type->type_index = tp->type_list->length - 1;
+        inner = (AstNode*)occ;
+    }
+
+    return inner;
 }
 
 // Build negation_type node — prefix ! operator (for string/symbol patterns)
