@@ -8,8 +8,8 @@
 // ============================================================
 'Test 1: Basic Pattern Match'
 
-string digits = \d+
-string alpha = \a+
+type digits = \d+
+type alpha = \a+
 
 fn classify(s) => match s {
     case digits: "number"
@@ -26,7 +26,7 @@ fn classify(s) => match s {
 // ============================================================
 'Test 2: Whitespace Pattern'
 
-string ws_only = \s+
+type ws_only = \s+
 
 fn check_whitespace(s) => match s {
     case ws_only: "yes"
@@ -42,7 +42,7 @@ fn check_whitespace(s) => match s {
 // ============================================================
 'Test 3: Word Patterns'
 
-string word = \w+
+type word = \w+
 
 fn is_word(s) => match s {
     case word: "yes"
@@ -58,8 +58,8 @@ fn is_word(s) => match s {
 // ============================================================
 'Test 4: Mixed Pattern and Literal Arms'
 
-string num = \d+
-string name = \a+
+type num = \d+
+type name = \a+
 
 fn tag(s) => match s {
     case "hello": "greeting"

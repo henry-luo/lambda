@@ -128,9 +128,9 @@ module.exports = grammar({
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
-    [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
-    [$._type_expr, $.concat_type],                 // unary_type could be complete or start of concat
-    [$._type_expr, $.constrained_type],            // unary_type could be complete or base of constrained
+    [$.unary_type, $.occurrence_type],             // primary_type + [n] could be occurrence or end of type
+    [$._type_expr, $._string_type_expr],           // type_assign: unary_type could be _type_expr or _string_type_expr
+    [$._string_type_expr, $.concat_type],          // unary_type could be complete _string_type_expr or start of concat_type
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
   ],
 
@@ -170,9 +170,14 @@ module.exports = grammar({
     $.assign_stam,
   ],
   [
-    $.occurrence_type,        // quantified types (primary_type with ?, +, *, [n]) - tightest
-    $.binary_type,           // alternation (|, &, !)
-    $.fn_type,               // fn binds loosest: fn int+ means fn (int+)
+    $.unary_type,         // tight unary types 
+    $.grouped_type,
+    $.concat_type,        // in regex, concatenation has higher precedence than alternation, so concat_type is tighter than binary_type
+    $.binary_type,        // alternation (|, &, !)
+    $.negation_type,      // A ! B has higher precedence than A (!B)
+    $._type_expr,   
+    $.return_type,   
+    $.fn_type,            // fn binds loosest: fn int+ means fn (int+)
   ],
   [$.attr_binary_expr, $._attr_expr]
 ],
@@ -825,7 +830,7 @@ module.exports = grammar({
       optional(seq(
         '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')',
       )),
-      field('type', $._type_expr),
+      field('type', $.return_type),
     ),
 
     // Range type: literal 'to' literal — supports integer ranges as types
@@ -843,17 +848,8 @@ module.exports = grammar({
       $.array_type,
       $.map_type,
       $.element_type,
-      $.fn_type,
       // String/symbol pattern atoms (unified into type system)
       $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
-      $.negation_type,          // !T - prefix negation
-    ),
-
-    // Unary type: primary type with optional occurrence modifier
-    // Replaces the old unary_type → _quantified_type chain
-    unary_type: $ => choice(
-      $.occurrence_type,
-      $.primary_type,
     ),
 
     // Occurrence applied to primary type: T?, T+, T*, T[n]
@@ -864,36 +860,11 @@ module.exports = grammar({
       field('operator', $.occurrence),
     ))),
 
-    binary_type: $ => choice(
-      ...type_pattern($._type_expr),
-    ),
-
-    // ====== Type Concatenation (for string/symbol patterns) ======
-    // Type concatenation: whitespace-separated sequence of type terms.
-    // e.g. \d[3] "-" \d[3] "-" \d[4]
-    // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // Terms are unary_type (primary_type possibly with occurrence).
-    concat_type: $ => prec.left(prec.dynamic(-1, seq(
-      $.unary_type,
-      repeat1($.unary_type),
-    ))),
-
     // Prefix negation: !T (for string/symbol patterns: !\d)
     // Validated in AST builder for context-appropriate usage.
     negation_type: $ => prec.right(seq(
       '!', field('operand', $.primary_type),
     )),
-
-    // Unified type expression - flattened hierarchy
-    // Structural precedence (tightest to loosest):
-    //   primary_type > occurrence_type > constrained/concat > binary > error_union
-    _type_expr: $ => choice(
-      $.unary_type,            // covers primary_type and occurrence_type
-      $.constrained_type,      // base_type that (constraint)
-      $.concat_type,           // whitespace-separated type terms (patterns)
-      $.binary_type,           // alternation: T | U, T & U, T ! U
-      $.error_union_type,      // T^ error union
-    ),
 
     // Constrained type: base_type that (constraint_expr)
     // e.g. int that (5 < ~ < 10), string that (len(~) > 0)
@@ -905,36 +876,92 @@ module.exports = grammar({
       '(',
       field('constraint', $._expr),
       ')',
+    ), 
+
+    // Unary type: primary type with optional occurrence modifier
+    // Replaces the old unary_type → _quantified_type chain
+    unary_type: $ => choice(
+      $.occurrence_type,
+      $.negation_type,          // !T - prefix negation
+      $.primary_type,
+      $.constrained_type
     ),
 
-    // Error union type: T^ means T | error
-    // Used in parameters, let bindings, and return types
-    // Use lower precedence than fn_type to avoid conflict with fn_type's return type
-    error_union_type: $ => prec.left(-1, seq(
-      field('ok', $._type_expr),
-      '^'
+    binary_type: $ => choice(
+      ...type_pattern(choice($._type_expr)),
+    ),
+    
+    // Unified type expression - flattened hierarchy
+    // Structural precedence (tightest to loosest):
+    //   primary_type > occurrence_type > constrained/concat > binary > fn_type
+    _type_expr: $ => choice(
+      $.unary_type,            // covers primary_type and occurrence_type
+      // $.concat_type,        // whitespace-separated type terms (patterns)
+      $.binary_type,           // alternation: T | U, T & U, T ! U
+      $.fn_type,
+    ),
+
+    // ==================== String/Symbol Pattern Definitions ====================
+  
+    // Character classes for pattern matching
+    pattern_char_class: _ => token(choice(
+      '\\d',  // digit [0-9]
+      '\\w',  // word [a-zA-Z0-9_]
+      '\\s',  // whitespace
+      '\\a',  // alpha [a-zA-Z]
+      '\\.',  // any character
     )),
 
-    // Simple error type pattern for return types
-    // Allows: error, identifier, or union of these (E1 | E2)
-    // This restriction avoids ambiguity with map_type in fn bodies: T^ { ... }
-    error_type_pattern: $ => seq(
-      field('type', choice('error', $.identifier)),
-      repeat(seq('|', field('type', choice('error', $.identifier))))
+    grouped_type: $ => prec.right(seq(
+      optional('!'),
+      '(', $._string_type_expr, ')',
+      optional(field('occurrence', $.occurrence))
+    )),
+
+    // Type concatenation (for string/symbol patterns): whitespace-separated sequence of type terms.
+    // e.g. \d[3] "-" \d[3] "-" \d[4]
+    // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
+    // Terms are unary_type (primary_type possibly with occurrence).
+    // prec(-1) so that int[2+] is not parsed as concat_type(int, [2+])
+    concat_type: $ => prec.dynamic(-1, prec.left(seq(
+      choice($.unary_type, $.grouped_type),
+      repeat1(choice($.unary_type, $.grouped_type)),
+    ))),
+
+    string_binary_type: $ => choice(
+      ...type_pattern(choice($._string_type_expr)),
     ),
+
+    _string_type_expr: $ => choice(
+      $.unary_type,            // covers primary_type and occurrence_type
+      $.concat_type,           // whitespace-separated type terms (patterns)
+      alias($.string_binary_type, $.binary_type),   
+      $.grouped_type        // alternation: T | U, T & U, T ! U
+    ),
+
+    return_occurrence_type: $ => seq(choice($.base_type, $.identifier), optional($.occurrence)),
+
+    // Simple type pattern for return types
+    // This restriction avoids ambiguity with map_type in fn () T { ... }
+    return_type_pattern: $ => prec.left(seq(
+      field('type', $.return_occurrence_type),
+      repeat(seq(choice('|', '&', '!'), field('type', $.return_occurrence_type)))
+    )),
 
     // Return type with optional error type: T or T^ or T^E
     // T^ means function may return any error (shorthand for T | error)
     // T^E means function returns T on success, E on error (E must be simple)
+    // simplified return_type substantially reduced the parser size
     return_type: $ => prec.right(seq(
-      field('ok', $._type_expr),
+      field('ok', $.return_type_pattern),
       optional(seq(
         '^',
-        optional(field('error', $.error_type_pattern))
+        optional(field('error', $.return_type_pattern))
       ))
     )),
 
-    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', $._type_expr)),
+    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', 
+      choice($._type_expr, $._string_type_expr))),
 
     // Object/element type with optional inheritance, content schema, and methods
     // Object (no content): type Point { x: float, y: float }
@@ -963,33 +990,16 @@ module.exports = grammar({
     // Object-level constraint: that (expr)
     that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
 
-    // type_stam handles type aliases, string patterns, and symbol patterns.
-    // The leading keyword distinguishes them; AST builder checks the text.
+    // type_stam handles type aliases and string/symbol patterns.
+    // The AST builder detects pattern definitions by analyzing the type expression content.
     type_stam: $ => seq(
       optional(field('pub', 'pub')),
-      field('kind', choice('type', 'string', 'symbol')),
+      'type',
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
     // top-level type definitions: type_stam | object_type
-
-    // ==================== String/Symbol Pattern Definitions ====================
-    // Pattern atoms are unified into the type system. String/symbol pattern bodies
-    // use _type_expr directly. The AST builder validates that only pattern-valid
-    // constructs appear inside pattern definitions.
-
-    // Character classes for pattern matching
-    pattern_char_class: _ => token(choice(
-      '\\d',  // digit [0-9]
-      '\\w',  // word [a-zA-Z0-9_]
-      '\\s',  // whitespace
-      '\\a',  // alpha [a-zA-Z]
-      '\\.',  // any character
-    )),
-
-    // NOTE: string_pattern and symbol_pattern are now handled by type_stam.
-    // type_stam's 'kind' field distinguishes 'type' vs 'string' vs 'symbol'.
 
     // ==================== Module Imports ====================
     relative_name: $ => repeat1(seq(
