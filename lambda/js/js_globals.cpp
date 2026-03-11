@@ -26,6 +26,8 @@
 
 extern void* heap_alloc(int size, TypeId type_id);
 extern void fn_array_set(Array* arr, int index, Item value);
+extern "C" void js_set_prototype(Item object, Item prototype);
+extern "C" Item js_get_prototype(Item object);
 
 // =============================================================================
 // Process I/O
@@ -72,6 +74,47 @@ extern "C" Item js_process_hrtime_bigint(void) {
     *fp = ns;
     return (Item){.item = d2it(fp)};
 #endif
+}
+
+// performance.now() — returns milliseconds (monotonic, high-resolution)
+// Uses static buffer (not GC heap) because the returned float must survive GC cycles.
+// MIR-generated code stores the Item value in registers/stack, where the conservative
+// GC scanner may not find it (nursery floats get overwritten; heap floats get collected).
+static double js_perf_now_buf[64];
+static int js_perf_now_idx = 0;
+
+extern "C" Item js_performance_now(void) {
+#ifdef __APPLE__
+    static mach_timebase_info_data_t timebase = {0, 0};
+    if (timebase.denom == 0) {
+        mach_timebase_info(&timebase);
+    }
+    uint64_t ticks = mach_absolute_time();
+    double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
+    double ms = ns / 1e6;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+#endif
+    double* fp = &js_perf_now_buf[js_perf_now_idx % 64];
+    js_perf_now_idx++;
+    *fp = ms;
+    return (Item){.item = d2it(fp)};
+}
+
+// Date.now() — returns milliseconds since Unix epoch
+static double js_date_now_buf[64];
+static int js_date_now_idx = 0;
+
+extern "C" Item js_date_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    double* fp = &js_date_now_buf[js_date_now_idx % 64];
+    js_date_now_idx++;
+    *fp = ms;
+    return (Item){.item = d2it(fp)};
 }
 
 // Process argv storage
@@ -386,6 +429,61 @@ extern "C" Item js_nullish_coalesce(Item left, Item right) {
     TypeId type = get_type_id(left);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) return right;
     return left;
+}
+
+// =============================================================================
+// Object.create — create new object with specified prototype
+// =============================================================================
+
+extern "C" Item js_object_create(Item proto) {
+    Item obj = js_new_object();
+    if (proto.item != 0 && get_type_id(proto) == LMD_TYPE_MAP) {
+        js_set_prototype(obj, proto);
+    }
+    return obj;
+}
+
+// =============================================================================
+// Object.defineProperty — define a property on an object
+// =============================================================================
+
+extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) {
+    if (obj.item == 0) return obj;
+    // extract descriptor.value
+    if (get_type_id(descriptor) == LMD_TYPE_MAP) {
+        Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
+        Item value = js_property_get(descriptor, value_key);
+        if (value.item != 0) {
+            js_property_set(obj, name, value);
+        } else {
+            // check for getter/setter (accessor descriptor)
+            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+            Item getter = js_property_get(descriptor, get_key);
+            if (getter.item != 0) {
+                // store getter as the property value (simplified — no true accessor)
+                js_property_set(obj, name, getter);
+            }
+        }
+    }
+    return obj;
+}
+
+// =============================================================================
+// Array.isArray — check if value is an array
+// =============================================================================
+
+extern "C" Item js_array_is_array(Item value) {
+    TypeId type = get_type_id(value);
+    return (Item){.item = (type == LMD_TYPE_ARRAY) ? ITEM_TRUE : ITEM_FALSE};
+}
+
+// =============================================================================
+// alert() — shim for benchmarks (outputs to console)
+// =============================================================================
+
+extern "C" Item js_alert(Item msg) {
+    js_console_log(msg);
+    return ItemNull;
 }
 
 // =============================================================================
