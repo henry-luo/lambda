@@ -639,20 +639,34 @@ inline void resolve_intrinsic_track_sizes(
         if (contrib.crosses_flexible_track) continue;
 
         float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
-        // CSS §11.5 step 4.1: if ALL spanned tracks have max-content min sizing, use max-content contribution.
-        // Only switch to max-content when the entire span is max-content-min, not for mixed spans
-        // (e.g. [min-content, max-content] uses min-content so Phase 2 can distribute the max correctly).
+        // CSS §12.5.1: Phase 1 generally uses min-content contribution so that Phase 2 can
+        // distribute the extra max-content to tracks with MaxContent/Auto max sizing.
+        //
+        // EXCEPTION: When ALL spanned tracks have MaxContent min sizing AND none of them
+        // has a Phase-2-eligible max (MaxContent or Auto), Phase 2 will not grow these
+        // tracks at all. In that case, use max-content in Phase 1 so the track reaches its
+        // correct size. This handles degenerate minmax(max-content, min-content) tracks
+        // where the effective sizing IS max-content but Phase 2 won't fire.
         float p1_contrib = contrib.min_content_contribution;
         {
             size_t p1_end = std::min(contrib.track_start + contrib.track_span, tracks.size());
-            bool all_max_content = true;
+            bool all_max_content_min = true;
+            bool any_phase2_eligible = false;
             for (size_t ii = contrib.track_start; ii < p1_end; ++ii) {
                 if (tracks[ii].min_track_sizing_function.type != SizingFunctionType::MaxContent) {
-                    all_max_content = false;
-                    break;
+                    all_max_content_min = false;
+                }
+                auto max_t = tracks[ii].max_track_sizing_function.type;
+                if (max_t == SizingFunctionType::MaxContent ||
+                    max_t == SizingFunctionType::Auto ||
+                    max_t == SizingFunctionType::Percent) {
+                    any_phase2_eligible = true;
                 }
             }
-            if (all_max_content) {
+            // Only use max-content when ALL tracks have MaxContent min AND none can benefit
+            // from Phase 2 (no MaxContent/Auto max tracks). This is the fallback that
+            // ensures maxContent-min tracks reach their required size when Phase 2 won't fire.
+            if (all_max_content_min && !any_phase2_eligible) {
                 p1_contrib = contrib.max_content_contribution;
             }
         }
