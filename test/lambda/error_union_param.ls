@@ -5,7 +5,7 @@
 // 1. Basic error union parameter
 // ============================================
 
-fn process_int(val: int^) int => val + 1
+fn process_int(val: int | error) int => val + 1
 
 // Passing int to int^ parameter works
 process_int(42)
@@ -14,7 +14,7 @@ process_int(42)
 // 2. Multiple parameters with error union
 // ============================================
 
-fn add_values(a: int^, b: int^) int => a + b
+fn add_values(a: int | error, b: int | error) int => a + b
 
 add_values(10, 20)
 
@@ -22,7 +22,7 @@ add_values(10, 20)
 // 3. Error union with different types
 // ============================================
 
-fn get_length(s: string^) int => len(s)
+fn get_length(s: string | error) int => len(s)
 
 get_length("hello")
 

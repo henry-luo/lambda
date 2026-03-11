@@ -4536,48 +4536,6 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     return NULL;
 }
 
-// Build error union type: T^ (shorthand for T | error) for params and let bindings
-AstNode* build_error_union_type(Transpiler* tp, TSNode node) {
-    log_debug("build error union type (T^)");
-    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
-        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
-    ((TypeType*)ast_node->type)->type = (Type*)type;
-
-    // Get the "ok" field - the success type
-    TSNode ok_node = ts_node_child_by_field_id(node, field_ok);
-    if (ts_node_is_null(ok_node)) {
-        log_error("Error: error_union_type missing ok type");
-        return NULL;
-    }
-
-    ast_node->left = build_expr(tp, ok_node);
-    if (!ast_node->left) {
-        log_error("Error: failed to parse ok type in error_union_type");
-        return NULL;
-    }
-
-    // Create a node for error type (right side of union)
-    AstPrimaryNode* error_node = (AstPrimaryNode*)alloc_ast_node(tp,
-        AST_NODE_PRIMARY, node, sizeof(AstPrimaryNode));
-    error_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    ((TypeType*)error_node->type)->type = &TYPE_ERROR;
-    ast_node->right = (AstNode*)error_node;
-
-    ast_node->op = OPERATOR_UNION;
-    ast_node->op_str = {"|", 1};  // synthetic operator
-
-    type->left = ast_node->left->type;
-    type->right = error_node->type;
-    type->op = OPERATOR_UNION;
-    arraylist_append(tp->type_list, ast_node->type);
-    type->type_index = tp->type_list->length - 1;
-
-    log_debug("error_union_type created: T | error");
-    return (AstNode*)ast_node;
-}
-
 AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary type");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
@@ -6722,8 +6680,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_expr(tp, ts_node_named_child(expr_node, 0));
     case SYM_BINARY_TYPE:
         return build_binary_type(tp, expr_node);
-    case SYM_ERROR_UNION_TYPE:
-        return build_error_union_type(tp, expr_node);
     case sym_occurrence_type:
         return build_occurrence_type(tp, expr_node);
     case SYM_RANGE_TYPE:

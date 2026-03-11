@@ -170,9 +170,13 @@ module.exports = grammar({
     $.assign_stam,
   ],
   [
-    $.occurrence_type,        // quantified types (primary_type with ?, +, *, [n]) - tightest
-    $.binary_type,           // alternation (|, &, !)
-    $.fn_type,               // fn binds loosest: fn int+ means fn (int+)
+    $.unary_type,         // tight unary types 
+    $.concat_type,        // in regex, concatenation has higher precedence than alternation, so concat_type is tighter than binary_type
+    $.binary_type,        // alternation (|, &, !)
+    $.negation_type,      // A ! B has higher precedence than A (!B)
+    $._type_expr,   
+    $.return_type,   
+    $.fn_type,            // fn binds loosest: fn int+ means fn (int+)
   ],
   [$.attr_binary_expr, $._attr_expr]
 ],
@@ -825,7 +829,7 @@ module.exports = grammar({
       optional(seq(
         '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')',
       )),
-      field('type', $._type_expr),
+      field('type', $.return_type),
     ),
 
     // Range type: literal 'to' literal — supports integer ranges as types
@@ -843,7 +847,6 @@ module.exports = grammar({
       $.array_type,
       $.map_type,
       $.element_type,
-      $.fn_type,
       // String/symbol pattern atoms (unified into type system)
       $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
     ),
@@ -865,22 +868,17 @@ module.exports = grammar({
     // Error union type: T^ means T | error
     // Used in parameters, let bindings, and return types
     // Use lower precedence than fn_type to avoid conflict with fn_type's return type
-    error_union_type: $ => prec.left(-1, seq(
-      field('ok', $.unary_type),
-      '^'
-    )),
+    // error_union_type: $ => prec.left(-1, seq(
+    //   field('ok', $.unary_type),
+    //   '^'
+    // )),
 
     // Unary type: primary type with optional occurrence modifier
     // Replaces the old unary_type → _quantified_type chain
     unary_type: $ => choice(
       $.occurrence_type,
       $.negation_type,          // !T - prefix negation
-      $.error_union_type,       // T^ for error union
       $.primary_type,
-    ),
-
-    binary_type: $ => choice(
-      ...type_pattern($._type_expr),
     ),
 
     // ====== Type Concatenation (for string/symbol patterns) ======
@@ -893,6 +891,10 @@ module.exports = grammar({
       repeat1($.unary_type),
     ))),
 
+    binary_type: $ => choice(
+      ...type_pattern(choice($._type_expr)),
+    ),
+    
     // Unified type expression - flattened hierarchy
     // Structural precedence (tightest to loosest):
     //   primary_type > occurrence_type > constrained/concat > binary > error_union
@@ -901,6 +903,7 @@ module.exports = grammar({
       $.constrained_type,      // base_type that (constraint)
       $.concat_type,           // whitespace-separated type terms (patterns)
       $.binary_type,           // alternation: T | U, T & U, T ! U
+      $.fn_type,
     ),
 
     // Constrained type: base_type that (constraint_expr)
@@ -918,10 +921,10 @@ module.exports = grammar({
     // Simple error type pattern for return types
     // Allows: error, identifier, or union of these (E1 | E2)
     // This restriction avoids ambiguity with map_type in fn bodies: T^ { ... }
-    error_type_pattern: $ => seq(
+    error_type_pattern: $ => prec.right(seq(
       field('type', choice('error', $.identifier)),
       repeat(seq('|', field('type', choice('error', $.identifier))))
-    ),
+    )),
 
     // Return type with optional error type: T or T^ or T^E
     // T^ means function may return any error (shorthand for T | error)
