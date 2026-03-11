@@ -668,6 +668,9 @@ typedef struct Transpiler : Script {
     // direct assignment; variables read by other assignments (swap patterns) are unsafe.
     String** loop_unsafe_vars;  // array of variable names that need _store_i64
     int loop_unsafe_count;      // number of unsafe variables
+
+    // Variadic function body context: when true, return/raise must emit restore_vargs
+    bool in_variadic_body;
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

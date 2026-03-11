@@ -1185,9 +1185,10 @@ typedef struct Context {
     DateTime fn_justnow();                         // justnow() - current ms timestamp
 
     // variadic parameter access
-    void set_vargs(List* vargs);  // set current variadic args
-    Item fn_varg0();              // varg() - get all variadic args as list
-    Item fn_varg1(Item index);    // varg(n) - get nth variadic arg
+    List* set_vargs(List* vargs);     // set current variadic args, returns previous
+    void restore_vargs(List* prev);   // restore previous variadic args
+    Item fn_varg0();                  // varg() - get all variadic args as list
+    Item fn_varg1(Item index);        // varg(n) - get nth variadic arg
 
     // procedural functions
     Item pn_print(Item item);

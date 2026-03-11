@@ -4290,8 +4290,16 @@ DateTime fn_justnow() {
 __thread List* current_vargs = NULL;
 
 // Set current variadic arguments (called before variadic function body)
-void set_vargs(List* vargs) {
+// Returns the previous vargs pointer so it can be restored after the call
+List* set_vargs(List* vargs) {
+    List* prev = current_vargs;
     current_vargs = vargs;
+    return prev;
+}
+
+// Restore previous variadic arguments after a variadic function completes
+void restore_vargs(List* prev) {
+    current_vargs = prev;
 }
 
 // varg() - returns all variadic arguments as a list
