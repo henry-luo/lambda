@@ -184,6 +184,9 @@ struct MirTranspiler {
     // Set when a function (fn or pn) has a native return type (INT, FLOAT, BOOL).
     // Used by transpile_return() to emit unboxed return values in procs.
     TypeId native_return_tid;
+
+    // Variadic function body context: when true, return/raise must emit restore_vargs
+    bool in_variadic_body;
 };
 
 // ============================================================================
@@ -6670,6 +6673,14 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     // P4-3.4: Check if current function has native return type
     TypeId native_ret = mt->native_return_tid;
 
+    // Helper: emit restore_vargs before returning from variadic function
+    auto emit_vargs_restore = [&]() {
+        if (mt->in_variadic_body) {
+            MIR_reg_t saved_vargs = MIR_reg(mt->ctx, "_saved_vargs", mt->current_func);
+            emit_call_void_1(mt, "restore_vargs", MIR_T_P, MIR_new_reg_op(mt->ctx, saved_vargs));
+        }
+    };
+
     if (ret_node->value) {
         MIR_reg_t val = transpile_expr(mt, ret_node->value);
 
@@ -6701,14 +6712,17 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                 MIR_reg_t boxed = emit_box(mt, val, val_tid);
                 native_val = emit_unbox(mt, boxed, native_ret);
             }
+            emit_vargs_restore();
             emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, native_val)));
         } else {
             // Standard: box and return
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            emit_vargs_restore();
             emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
         }
     } else {
         // Return with no value
+        emit_vargs_restore();
         if (native_ret == LMD_TYPE_FLOAT) {
             emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
         } else if (native_ret != LMD_TYPE_ANY) {
@@ -8815,10 +8829,16 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
 
-    // Set vargs for variadic functions
+    // Set vargs for variadic functions (save previous for nesting)
     if (is_variadic) {
         MIR_reg_t vargs_reg = MIR_reg(mt->ctx, "_vargs", func);
-        emit_call_void_1(mt, "set_vargs", MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg));
+        MIR_reg_t saved_reg = emit_call_1(mt, "set_vargs", MIR_T_P, MIR_T_P,
+            MIR_new_reg_op(mt->ctx, vargs_reg));
+        // Store in a named register so we can reference it at function exit
+        MIR_reg_t named_saved = MIR_new_func_reg(mt->ctx, mt->current_func, MIR_T_I64, "_saved_vargs");
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, named_saved),
+            MIR_new_reg_op(mt->ctx, saved_reg)));
     }
 
     // Bind parameters as local variables
@@ -8884,6 +8904,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // Set proc flag based on function type
     bool saved_in_proc = mt->in_proc;
+
+    // Set variadic body flag for restore_vargs in return/raise paths
+    bool saved_in_variadic_body = mt->in_variadic_body;
+    mt->in_variadic_body = is_variadic;
     mt->in_proc = (fn_as_node->node_type == AST_NODE_PROC);
 
     // P4-3.4: Set native return type for transpile_return() to use
@@ -9054,6 +9078,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Always emit the trailing ret — MIR needs a ret on every code path.
     // For TCO functions, this serves as the non-tail-call exit path.
     // For functions where body already returned, it's dead code (MIR removes it).
+    // Restore vargs before returning from variadic function
+    if (is_variadic) {
+        MIR_reg_t saved_vargs = MIR_reg(mt->ctx, "_saved_vargs", func);
+        emit_call_void_1(mt, "restore_vargs", MIR_T_P, MIR_new_reg_op(mt->ctx, saved_vargs));
+    }
     emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, body_result)));
 
     pop_scope(mt);
@@ -9080,6 +9109,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_closure = saved_closure;
     mt->env_reg = saved_env_reg;
     mt->in_proc = saved_in_proc;
+    mt->in_variadic_body = saved_in_variadic_body;
     mt->native_return_tid = saved_native_return_tid;
     mt->block_returned = saved_block_returned;
     mt->method_owner = saved_method_owner;
