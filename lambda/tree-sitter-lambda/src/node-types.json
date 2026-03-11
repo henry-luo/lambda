@@ -78,10 +78,6 @@
           "named": true
         },
         {
-          "type": "error_union_type",
-          "named": true
-        },
-        {
           "type": "unary_type",
           "named": true
         }
@@ -110,10 +106,6 @@
           },
           {
             "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
             "named": true
           },
           {
@@ -209,10 +201,6 @@
             "named": true
           },
           {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
             "type": "unary_type",
             "named": true
           }
@@ -304,10 +292,6 @@
           },
           {
             "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
             "named": true
           },
           {
@@ -619,10 +603,6 @@
             "named": true
           },
           {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
             "type": "unary_type",
             "named": true
           }
@@ -660,10 +640,6 @@
           },
           {
             "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
             "named": true
           },
           {
@@ -944,10 +920,6 @@
           "named": true
         },
         {
-          "type": "error_union_type",
-          "named": true
-        },
-        {
           "type": "unary_type",
           "named": true
         }
@@ -1080,22 +1052,6 @@
         "multiple": false,
         "required": true,
         "types": [
-          {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "concat_type",
-            "named": true
-          },
-          {
-            "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
           {
             "type": "unary_type",
             "named": true
@@ -1297,10 +1253,6 @@
             "named": true
           },
           {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
             "type": "unary_type",
             "named": true
           }
@@ -1410,10 +1362,6 @@
           },
           {
             "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
             "named": true
           },
           {
@@ -2268,10 +2216,6 @@
           "named": true
         },
         {
-          "type": "error_union_type",
-          "named": true
-        },
-        {
           "type": "unary_type",
           "named": true
         }
@@ -2463,10 +2407,6 @@
             "named": true
           },
           {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
             "type": "unary_type",
             "named": true
           }
@@ -2548,10 +2488,6 @@
           },
           {
             "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
             "named": true
           },
           {
@@ -2777,7 +2713,7 @@
         "required": true,
         "types": [
           {
-            "type": "primary_type",
+            "type": "unary_type",
             "named": true
           }
         ]
@@ -3048,10 +2984,6 @@
           },
           {
             "type": "constrained_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
             "named": true
           },
           {
@@ -3327,10 +3259,6 @@
         },
         {
           "type": "named_value",
-          "named": true
-        },
-        {
-          "type": "negation_type",
           "named": true
         },
         {
@@ -3623,10 +3551,6 @@
             "named": true
           },
           {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
             "type": "unary_type",
             "named": true
           }
@@ -3804,6 +3728,14 @@
       "multiple": false,
       "required": true,
       "types": [
+        {
+          "type": "error_union_type",
+          "named": true
+        },
+        {
+          "type": "negation_type",
+          "named": true
+        },
         {
           "type": "occurrence_type",
           "named": true
@@ -4039,8 +3971,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "continue",
@@ -4180,19 +4111,19 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
     "named": false
   },
   {
     "type": "symbol",
     "named": true
+  },
+  {
+    "type": "symbol",
+    "named": false
   },
   {
     "type": "that",

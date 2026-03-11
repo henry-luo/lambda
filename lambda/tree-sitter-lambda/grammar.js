@@ -846,14 +846,6 @@ module.exports = grammar({
       $.fn_type,
       // String/symbol pattern atoms (unified into type system)
       $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
-      $.negation_type,          // !T - prefix negation
-    ),
-
-    // Unary type: primary type with optional occurrence modifier
-    // Replaces the old unary_type → _quantified_type chain
-    unary_type: $ => choice(
-      $.occurrence_type,
-      $.primary_type,
     ),
 
     // Occurrence applied to primary type: T?, T+, T*, T[n]
@@ -863,6 +855,29 @@ module.exports = grammar({
       field('operand', $.primary_type),
       field('operator', $.occurrence),
     ))),
+
+    // Prefix negation: !T (for string/symbol patterns: !\d)
+    // Validated in AST builder for context-appropriate usage.
+    negation_type: $ => prec.right(seq(
+      '!', field('operand', $.unary_type),
+    )),
+
+    // Error union type: T^ means T | error
+    // Used in parameters, let bindings, and return types
+    // Use lower precedence than fn_type to avoid conflict with fn_type's return type
+    error_union_type: $ => prec.left(-1, seq(
+      field('ok', $.unary_type),
+      '^'
+    )),
+
+    // Unary type: primary type with optional occurrence modifier
+    // Replaces the old unary_type → _quantified_type chain
+    unary_type: $ => choice(
+      $.occurrence_type,
+      $.negation_type,          // !T - prefix negation
+      $.error_union_type,       // T^ for error union
+      $.primary_type,
+    ),
 
     binary_type: $ => choice(
       ...type_pattern($._type_expr),
@@ -878,12 +893,6 @@ module.exports = grammar({
       repeat1($.unary_type),
     ))),
 
-    // Prefix negation: !T (for string/symbol patterns: !\d)
-    // Validated in AST builder for context-appropriate usage.
-    negation_type: $ => prec.right(seq(
-      '!', field('operand', $.primary_type),
-    )),
-
     // Unified type expression - flattened hierarchy
     // Structural precedence (tightest to loosest):
     //   primary_type > occurrence_type > constrained/concat > binary > error_union
@@ -892,7 +901,6 @@ module.exports = grammar({
       $.constrained_type,      // base_type that (constraint)
       $.concat_type,           // whitespace-separated type terms (patterns)
       $.binary_type,           // alternation: T | U, T & U, T ! U
-      $.error_union_type,      // T^ error union
     ),
 
     // Constrained type: base_type that (constraint_expr)
@@ -906,14 +914,6 @@ module.exports = grammar({
       field('constraint', $._expr),
       ')',
     ),
-
-    // Error union type: T^ means T | error
-    // Used in parameters, let bindings, and return types
-    // Use lower precedence than fn_type to avoid conflict with fn_type's return type
-    error_union_type: $ => prec.left(-1, seq(
-      field('ok', $._type_expr),
-      '^'
-    )),
 
     // Simple error type pattern for return types
     // Allows: error, identifier, or union of these (E1 | E2)
