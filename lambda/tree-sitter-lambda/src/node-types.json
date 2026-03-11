@@ -1755,7 +1755,18 @@
   {
     "type": "grouped_type",
     "named": true,
-    "fields": {},
+    "fields": {
+      "occurrence": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "occurrence",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": false,
       "required": true,
