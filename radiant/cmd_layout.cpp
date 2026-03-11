@@ -261,13 +261,26 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
         if (child_type_id == LMD_TYPE_ELEMENT) {
             Element* html_child = child_item.element;
 
-            // Skip HTML comments and DOCTYPE - they are stored as DomComment nodes
-            // in the DOM tree, not DomElement, so we just skip them here.
-            // The DOM iterator will skip DomComment nodes via !is_element() check below.
+            // Skip HTML elements that are absent from the DOM tree.
+            // build_dom_tree_from_element returns nullptr (and does NOT create a
+            // DomElement sibling) for:
+            //   - comments ("!--") and DOCTYPE → stored as DomComment, not DomElement
+            //   - <script> elements → explicitly skipped (display:none, no layout role)
+            //   - XML declarations (tag starting with "?") → not HTML elements
+            // For all such cases we must NOT advance dom_child, because there is
+            // no corresponding DomElement in the DOM sibling chain to consume.
             TypeElmt* child_type = (TypeElmt*)html_child->type;
-            if (child_type && (strcmp(child_type->name.str, "!--") == 0 ||
-                               str_ieq_const(child_type->name.str, strlen(child_type->name.str), "!DOCTYPE"))) {
-                continue;  // Skip comment/DOCTYPE - DOM has corresponding DomComment
+            if (child_type) {
+                const char* ctn = child_type->name.str;
+                size_t ctn_len = strlen(ctn);
+                bool is_dom_absent =
+                    strcmp(ctn, "!--") == 0 ||
+                    str_ieq_const(ctn, ctn_len, "!DOCTYPE") ||
+                    str_ieq_const(ctn, ctn_len, "script") ||
+                    (ctn_len > 0 && ctn[0] == '?');  // XML declarations
+                if (is_dom_absent) {
+                    continue;  // No corresponding DomElement — do NOT advance dom_child
+                }
             }
 
             if (!dom_child) {
