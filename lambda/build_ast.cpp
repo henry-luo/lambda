@@ -5169,15 +5169,31 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     log_debug("build loop expr");
     AstLoopNode* ast_node = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstLoopNode));
     ast_node->index_name = NULL;  // default: no index variable
-    ast_node->is_named = false;   // default: 'in' keyword (not 'at')
+    ast_node->key_filter = LOOP_KEY_ALL;  // default: iterate all entries
 
-    // Check for optional index variable (first identifier in 'for i, v in/at expr')
+    // Check for optional index variable (first identifier in 'for k, v in expr')
     TSNode index_node = ts_node_child_by_field_id(loop_node, FIELD_INDEX);
     if (!ts_node_is_null(index_node)) {
         int start_byte = ts_node_start_byte(index_node);
         StrView index_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(index_node) - start_byte };
         ast_node->index_name = name_pool_create_strview(tp->name_pool, index_view);
         log_debug("loop has index variable: %.*s", (int)index_view.length, index_view.str);
+
+        // Check for optional type annotation on index variable (k:int or k:symbol)
+        TSNode index_type_node = ts_node_child_by_field_id(loop_node, FIELD_INDEX_TYPE);
+        if (!ts_node_is_null(index_type_node)) {
+            StrView type_view = ts_node_source(tp, index_type_node);
+            if (strview_equal(&type_view, "int")) {
+                ast_node->key_filter = LOOP_KEY_INT;
+                log_debug("loop key filter: int (indexed only)");
+            } else if (strview_equal(&type_view, "symbol")) {
+                ast_node->key_filter = LOOP_KEY_SYMBOL;
+                log_debug("loop key filter: symbol (keyed only)");
+            } else {
+                log_error("Error: unsupported loop key type '%.*s', expected 'int' or 'symbol'",
+                    (int)type_view.length, type_view.str);
+            }
+        }
     }
 
     // Get the main variable name
@@ -5186,41 +5202,13 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // Check for 'at' keyword by examining the node children
-    // The grammar produces different variants, we detect 'at' by checking if the source contains 'at'
-    // A more robust way: check if the node contains 'at' token
-    TSTreeCursor cursor = ts_tree_cursor_new(loop_node);
-    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
-    while (has_child) {
-        TSNode child = ts_tree_cursor_current_node(&cursor);
-        TSSymbol sym = ts_node_symbol(child);
-        if (sym == anon_sym_at) {
-            ast_node->is_named = true;
-            log_debug("loop uses 'at' keyword (named/attribute iteration)");
-            break;
-        }
-        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-
     TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_AS);
     ast_node->as = build_expr(tp, expr_node);
 
-    // determine the type of the variable
+    // determine the type of the loop variable
     Type* expr_type = ast_node->as->type;
-    if (ast_node->is_named) {
-        // 'at' iteration: for elements/maps, iterates attributes/key-value pairs
-        if (ast_node->index_name) {
-            // Two-variable form: for k, v at expr -> v (name) is value
-            ast_node->type = &TYPE_ANY;
-        } else {
-            // Single-variable form: for k at expr -> k (name) is key name (string)
-            ast_node->type = &TYPE_STRING;
-        }
-    } else if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST) {
-        // Safely determine nested type
+    if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST) {
         TypeArray* array_type = (TypeArray*)expr_type;
-        // Validate that the cast is safe by checking the nested pointer
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             ast_node->type = array_type->nested;
         }
@@ -5233,17 +5221,24 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
         ast_node->type = &TYPE_INT;
     }
     else {
-        ast_node->type = expr_type;
+        // for maps/elements/any: value type is any
+        ast_node->type = &TYPE_ANY;
     }
 
     // push the index name to the name stack if present
     if (ast_node->index_name) {
-        // Create a temporary node for the index variable
         AstNamedNode* index_entry = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstNamedNode));
         index_entry->name = ast_node->index_name;
-        // For 'at' iteration, index (first var) is the key name (string)
-        // For 'in' iteration, index (first var) is the numeric index (int)
-        index_entry->type = ast_node->is_named ? &TYPE_STRING : &TYPE_INT;
+        // key type depends on filter and container type:
+        // LOOP_KEY_INT -> always int; LOOP_KEY_SYMBOL -> always symbol/string
+        // LOOP_KEY_ALL -> could be either, use ANY
+        if (ast_node->key_filter == LOOP_KEY_INT) {
+            index_entry->type = &TYPE_INT;
+        } else if (ast_node->key_filter == LOOP_KEY_SYMBOL) {
+            index_entry->type = &TYPE_ANY;  // symbol at runtime
+        } else {
+            index_entry->type = &TYPE_ANY;  // could be int or symbol
+        }
         push_name(tp, index_entry, NULL);
     }
 

@@ -901,6 +901,11 @@ typedef struct Context {
     Item item_attr(Item data, const char* key);  // get attribute by name
     struct _ArrayList* item_keys(Item data);     // get list of attribute names
 
+    // Unified for-loop iteration helpers (key_filter: 0=ALL, 1=INT, 2=SYMBOL)
+    int64_t iter_len(Item data, void* keys_ptr, int key_filter);
+    Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter);
+    Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter);
+
     Bool is_truthy(Item item);
     Item v2it(List *list);
 

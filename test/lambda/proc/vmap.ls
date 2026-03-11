@@ -53,7 +53,7 @@ pn main() {
     m7.set("a", 1)
     m7.set("b", 2)
     m7.set("c", 3)
-    print([for (k, v at m7) k ++ "=" ++ string(v)])
+    print([for (k, v in m7) k ++ "=" ++ string(v)])
     print("\n")
 
     // Test 8: Overwrite preserves other keys

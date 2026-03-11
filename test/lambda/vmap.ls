@@ -31,22 +31,22 @@ let inner = map(["x", 42])
 let outer = map(["child", inner])
 outer.child.x
 
-// Test 9: For-loop with 'at' (k, v)
+// Test 9: For-loop with 'in' (k, v)
 let m5 = map(["a", 1, "b", 2, "c", 3])
-[for (k, v at m5) k ++ "=" ++ string(v)]
+[for (k, v in m5) k ++ "=" ++ string(v)]
 
 // Test 10: For-loop collect values
-[for (k, v at m5) v]
+[for (k, v in m5) v]
 
-// Test 11: For-loop single-variable (key only)
-[for (k at m5) k]
+// Test 11: For-loop single-variable (key only) - use two-var form
+[for (k, v in m5) k]
 
 // Test 12: Integer keys
 let m6 = map([1, "one", 2, "two", 3, "three"])
 len(m6)
 
 // Test 13: Integer key for-loop
-[for (k, v at m6) v]
+[for (k, v in m6) v]
 
 // Test 14: Float keys
 let m7 = map([3.14, "pi", 2.718, "e"])
@@ -57,7 +57,7 @@ let m8 = map([true, "yes", false, "no"])
 len(m8)
 
 // Test 16: Bool key for-loop
-[for (k, v at m8) v]
+[for (k, v in m8) v]
 
 // Test 17: Large map
 let big = map(["k1", 1, "k2", 2, "k3", 3, "k4", 4, "k5", 5])

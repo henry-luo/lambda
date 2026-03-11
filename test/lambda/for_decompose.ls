@@ -27,18 +27,18 @@ let strs = ["a", "b", "c"]
 let str_indexed = [for (i, s in strs) [i, s]]
 str_indexed
 
-"=== Attribute Iteration (for k, v at expr) ==="
+"=== Attribute Iteration (for k, v in map) ==="
 
 // Key-value from map
 let obj = {name: "Alice", age: 30, city: "NYC"}
-let keys = [for (k, v at obj) k]
+let keys = [for (k, v in obj) k]
 keys
 
-let vals = [for (k, v at obj) v]
+let vals = [for (k, v in obj) v]
 vals
 
 // Key-value pairs
-let pairs = [for (k, v at {x: 1, y: 2}) [k, v]]
+let pairs = [for (k, v in {x: 1, y: 2}) [k, v]]
 pairs
 
 "=== For Expression Spreading ==="
@@ -105,7 +105,7 @@ let indexed_spread = [for (i, v in ["a", "b"]) [i, v]]
 indexed_spread
 
 // Attribute iteration with map
-let attr_pairs = for (k, v at {a: 1, b: 2, c: 3}) [k, v]
+let attr_pairs = for (k, v in {a: 1, b: 2, c: 3}) [k, v]
 attr_pairs
 
 "=== Edge Cases ==="
