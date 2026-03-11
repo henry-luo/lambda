@@ -305,7 +305,6 @@
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",
                 "lambda/mark_editor.cpp",
-                "lambda/math_symbols.cpp",
                 "lambda/validator/validate.cpp",
                 "lambda/validator/validate_helpers.cpp",
                 "lambda/validator/validate_pattern.cpp",
