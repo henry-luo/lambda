@@ -862,7 +862,7 @@ module.exports = grammar({
     // Prefix negation: !T (for string/symbol patterns: !\d)
     // Validated in AST builder for context-appropriate usage.
     negation_type: $ => prec.right(seq(
-      '!', field('operand', $.unary_type),
+      '!', field('operand', $.primary_type),
     )),
 
     // Error union type: T^ means T | error
@@ -918,22 +918,23 @@ module.exports = grammar({
       ')',
     ),
 
-    // Simple error type pattern for return types
-    // Allows: error, identifier, or union of these (E1 | E2)
-    // This restriction avoids ambiguity with map_type in fn bodies: T^ { ... }
-    error_type_pattern: $ => prec.right(seq(
-      field('type', choice('error', $.identifier)),
-      repeat(seq('|', field('type', choice('error', $.identifier))))
+    return_occurrence_type: $ => seq(choice($.base_type, $.identifier), optional($.occurrence)),
+
+    // Simple type pattern for return types
+    // This restriction avoids ambiguity with map_type in fn () T { ... }
+    return_type_pattern: $ => prec.left(seq(
+      field('type', $.return_occurrence_type),
+      repeat(seq(choice('|', '&', '!'), field('type', $.return_occurrence_type)))
     )),
 
     // Return type with optional error type: T or T^ or T^E
     // T^ means function may return any error (shorthand for T | error)
     // T^E means function returns T on success, E on error (E must be simple)
     return_type: $ => prec.right(seq(
-      field('ok', $._type_expr),
+      field('ok', $.return_type_pattern),
       optional(seq(
         '^',
-        optional(field('error', $.error_type_pattern))
+        optional(field('error', $.return_type_pattern))
       ))
     )),
 
