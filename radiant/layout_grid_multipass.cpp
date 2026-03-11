@@ -661,12 +661,6 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         *max_height = (int)(content_height + 0.5f);
     }
 
-    // Ensure minimum sizes (prevent 0-sized items)
-    if (*min_width <= 0) *min_width = 1;
-    if (*max_width <= 0) *max_width = 1;
-    if (*min_height <= 0) *min_height = 1;
-    if (*max_height <= 0) *max_height = 1;
-
     // NOTE: Padding and border are already included by:
     // - calculate_max_content_width: via measure_element_intrinsic_widths (lines 304-318)
     // - calculate_max_content_height: directly adds padding/border (lines 405-413)
