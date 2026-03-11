@@ -211,6 +211,7 @@ Item js_object_define_property(Item obj, Item name, Item descriptor);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
+Item js_date_new(void);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 Item js_get_prototype(Item object);

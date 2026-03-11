@@ -117,6 +117,18 @@ extern "C" Item js_date_now(void) {
     return (Item){.item = d2it(fp)};
 }
 
+// new Date() — returns a map that acts as a Date object.
+// Stores the current timestamp so .getTime() can retrieve it at runtime.
+// The transpiler handles new Date().getTime() as a special case (→ js_date_now()),
+// but js_date_new() is needed if the Date object is stored in a variable first.
+extern "C" Item js_date_new(void) {
+    Item obj = js_new_object();
+    Item time_val = js_date_now();
+    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    js_property_set(obj, key, time_val);
+    return obj;
+}
+
 // Process argv storage
 static Item js_process_argv_items = {.item = ITEM_NULL};
 

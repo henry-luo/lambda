@@ -372,6 +372,182 @@ static bool jm_name_set_has(struct hashmap* set, const char* name) {
 static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals);
 
+// Collect assignment target identifiers within a single function body.
+// Does NOT recurse into nested function bodies — only collects assignments
+// at the current function level.
+static void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* a = (JsAssignmentNode*)node;
+        if (a->left && a->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)a->left;
+            if (id->name) {
+                char name[128];
+                snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                jm_name_set_add(names, name);
+            }
+        }
+        jm_collect_func_assignments(a->left, names);
+        jm_collect_func_assignments(a->right, names);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        // i++ / i-- are also implicit assignments
+        if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT) {
+                JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
+                if (id->name) {
+                    char name[128];
+                    snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                    jm_name_set_add(names, name);
+                }
+            }
+        }
+        jm_collect_func_assignments(un->operand, names);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_collect_func_assignments(s, names); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        jm_collect_func_assignments(es->expression, names);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_collect_func_assignments(ifn->test, names);
+        jm_collect_func_assignments(ifn->consequent, names);
+        jm_collect_func_assignments(ifn->alternate, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        jm_collect_func_assignments(f->init, names);
+        jm_collect_func_assignments(f->test, names);
+        jm_collect_func_assignments(f->update, names);
+        jm_collect_func_assignments(f->body, names);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        jm_collect_func_assignments(w->test, names);
+        jm_collect_func_assignments(w->body, names);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* r = (JsReturnNode*)node;
+        jm_collect_func_assignments(r->argument, names);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
+        JsAstNode* d = v->declarations;
+        while (d) { jm_collect_func_assignments(d, names); d = d->next; }
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
+        if (d->init) jm_collect_func_assignments(d->init, names);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_collect_func_assignments(bin->left, names);
+        jm_collect_func_assignments(bin->right, names);
+        break;
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* c = (JsCallNode*)node;
+        jm_collect_func_assignments(c->callee, names);
+        JsAstNode* arg = c->arguments;
+        while (arg) { jm_collect_func_assignments(arg, names); arg = arg->next; }
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* m = (JsMemberNode*)node;
+        jm_collect_func_assignments(m->object, names);
+        if (m->computed) jm_collect_func_assignments(m->property, names);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_collect_func_assignments(cond->test, names);
+        jm_collect_func_assignments(cond->consequent, names);
+        jm_collect_func_assignments(cond->alternate, names);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* arr = (JsArrayNode*)node;
+        JsAstNode* el = arr->elements;
+        while (el) { jm_collect_func_assignments(el, names); el = el->next; }
+        break;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* obj = (JsObjectNode*)node;
+        JsAstNode* prop = obj->properties;
+        while (prop) { jm_collect_func_assignments(prop, names); prop = prop->next; }
+        break;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* p = (JsPropertyNode*)node;
+        jm_collect_func_assignments(p->value, names);
+        break;
+    }
+    // Do NOT recurse into nested functions — their locals are separate
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        break;
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        jm_collect_func_assignments(sw->discriminant, names);
+        JsAstNode* c = sw->cases;
+        while (c) { jm_collect_func_assignments(c, names); c = c->next; }
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        jm_collect_func_assignments(sc->test, names);
+        JsAstNode* s = sc->consequent;
+        while (s) { jm_collect_func_assignments(s, names); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        jm_collect_func_assignments(t->block, names);
+        jm_collect_func_assignments(t->handler, names);
+        jm_collect_func_assignments(t->finalizer, names);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        jm_collect_func_assignments(cc->body, names);
+        break;
+    }
+    case JS_AST_NODE_THROW_STATEMENT: {
+        JsThrowNode* th = (JsThrowNode*)node;
+        jm_collect_func_assignments(th->argument, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* fi = (JsForInNode*)node;
+        jm_collect_func_assignments(fi->left, names);
+        jm_collect_func_assignments(fi->body, names);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 // Collect all identifier references in a function body (excluding nested function bodies)
 static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     if (!node) return;
@@ -4439,6 +4615,23 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
+    // new Date().getTime() → js_date_now() (pattern: NewExpression(Date).getTime())
+    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* m = (JsMemberNode*)call->callee;
+        if (!m->computed && m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER &&
+            m->object && m->object->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+            JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+            JsCallNode* new_call = (JsCallNode*)m->object;
+            if (new_call->callee && new_call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
+                if (ctor->name && ctor->name->len == 4 && strncmp(ctor->name->chars, "Date", 4) == 0 &&
+                    prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "getTime", 7) == 0) {
+                    return jm_call_0(mt, "js_date_now", MIR_T_I64);
+                }
+            }
+        }
+    }
+
     // Generic method call: obj.method(args) -> dispatch by receiver type
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
@@ -6856,6 +7049,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
     }
 
+    // new Date() — returns a Date object with getTime() method
+    // Used by raytrace3d: var startDate = new Date().getTime();
+    if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) {
+        return jm_call_0(mt, "js_date_new", MIR_T_I64);
+    }
+
     // User-defined class instantiation: new ClassName(args)
     JsClassEntry* ce = jm_find_class(mt, ctor_name, ctor_len);
     if (ce) {
@@ -8312,6 +8511,153 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             s = s->next;
         }
+    }
+
+    // Third pass (b): detect implicit globals — variables assigned but never declared
+    // in their enclosing function. In JS sloppy mode, assigning to an undeclared
+    // variable creates a global. We do per-function analysis: for each function
+    // (declaration or expression), collect assignments and declarations, and any
+    // assigned name that lacks a var/let/const/param declaration in that function
+    // is a candidate implicit global.
+    //
+    // IMPORTANT: A variable assigned-but-not-declared in one function may be a
+    // legitimate closure capture if it IS declared in another function. For example:
+    //   function makeRunningSum() {
+    //       let n = 0;
+    //       return function(x) { n = n + x; return n; };  // n is NOT an implicit global
+    //   }
+    // So after collecting all candidates, we filter out any name that appears as a
+    // declaration (var/let/const/param) in ANY function or at the top level.
+    {
+        struct hashmap* implicit_globals = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+
+        // all_declarations: union of every declared name across ALL functions + top level.
+        // Used to filter out false implicit globals that are actually closure captures.
+        struct hashmap* all_declarations = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn = mt->func_entries[fi].node;
+            if (!fn || !fn->body) continue;
+
+            // Collect parameter names
+            struct hashmap* func_declared = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            JsAstNode* param = fn->params;
+            while (param) {
+                if (param->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* id = (JsIdentifierNode*)param;
+                    if (id->name) {
+                        char name[128];
+                        snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        jm_name_set_add(func_declared, name);
+                        jm_name_set_add(all_declarations, name);
+                    }
+                }
+                param = param->next;
+            }
+
+            // Collect local var/let/const declarations (without recursing into inner functions)
+            jm_collect_body_locals(fn->body, func_declared);
+            // Also add to all_declarations
+            jm_collect_body_locals(fn->body, all_declarations);
+
+            // Collect assignment targets within this function (without recursing into inner functions)
+            struct hashmap* func_assigned = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_func_assignments(fn->body, func_assigned);
+
+            // assigned - declared = undeclared → candidate implicit globals
+            size_t iter = 0; void* item;
+            while (hashmap_iter(func_assigned, &iter, &item)) {
+                JsNameSetEntry* e = (JsNameSetEntry*)item;
+                if (!jm_name_set_has(func_declared, e->name)) {
+                    jm_name_set_add(implicit_globals, e->name);
+                }
+            }
+
+            hashmap_free(func_declared);
+            hashmap_free(func_assigned);
+        }
+
+        // Also check top-level assignments (not inside any function)
+        struct hashmap* top_declared = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        struct hashmap* top_assigned = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        JsAstNode* s = program->body;
+        while (s) {
+            // Collect top-level declarations
+            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                jm_collect_body_locals(s, top_declared);
+                jm_collect_body_locals(s, all_declarations);
+            } else if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                JsFunctionNode* fn = (JsFunctionNode*)s;
+                if (fn->name) {
+                    char name[128];
+                    snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                    jm_name_set_add(top_declared, name);
+                    jm_name_set_add(all_declarations, name);
+                }
+            } else if (s->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                JsClassNode* cls = (JsClassNode*)s;
+                if (cls->name) {
+                    char name[128];
+                    snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                    jm_name_set_add(top_declared, name);
+                    jm_name_set_add(all_declarations, name);
+                }
+            }
+            // Collect top-level assignments (only from non-function statements)
+            if (s->node_type != JS_AST_NODE_FUNCTION_DECLARATION &&
+                s->node_type != JS_AST_NODE_FUNCTION_EXPRESSION &&
+                s->node_type != JS_AST_NODE_ARROW_FUNCTION) {
+                jm_collect_func_assignments(s, top_assigned);
+            }
+            s = s->next;
+        }
+        // top assigned - top declared → top-level implicit globals
+        {
+            size_t iter = 0; void* item;
+            while (hashmap_iter(top_assigned, &iter, &item)) {
+                JsNameSetEntry* e = (JsNameSetEntry*)item;
+                if (!jm_name_set_has(top_declared, e->name)) {
+                    jm_name_set_add(implicit_globals, e->name);
+                }
+            }
+        }
+        hashmap_free(top_declared);
+        hashmap_free(top_assigned);
+
+        // Register implicit globals as module vars — but ONLY if the name is not
+        // declared in ANY function or at the top level. If it IS declared somewhere,
+        // it's a closure capture target, not a true implicit global.
+        size_t iter = 0; void* item;
+        while (hashmap_iter(implicit_globals, &iter, &item)) {
+            JsNameSetEntry* e = (JsNameSetEntry*)item;
+            // Filter: if declared anywhere in the program, it's a capture, not a global
+            if (jm_name_set_has(all_declarations, e->name)) {
+                log_debug("js-mir: '%s' assigned-but-not-declared in some function, "
+                          "but declared elsewhere — closure capture, not implicit global", e->name);
+                continue;
+            }
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+            if (hashmap_get(mt->module_consts, &lookup)) continue;  // already registered
+            if (mt->module_var_count < 256) {
+                JsModuleConstEntry mce;
+                memset(&mce, 0, sizeof(mce));
+                snprintf(mce.name, sizeof(mce.name), "%s", e->name);
+                mce.const_type = MCONST_MODVAR;
+                mce.int_val = mt->module_var_count++;
+                hashmap_set(mt->module_consts, &mce);
+                log_info("js-mir: implicit global '%s' → module_var[%d]", mce.name, (int)mce.int_val);
+            }
+        }
+
+        hashmap_free(all_declarations);
+        hashmap_free(implicit_globals);
     }
 
     // Add top-level function declarations as module-level identifiers
