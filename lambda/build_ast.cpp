@@ -11,6 +11,8 @@
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
+AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node);
+AstNode* build_return_type_pattern(Transpiler* tp, TSNode node);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 
 // Forward declarations for pattern building
@@ -4536,6 +4538,79 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     return NULL;
 }
 
+// Build a return_occurrence_type: (base_type | identifier) occurrence?
+// This is a simplified type used only in return type context to avoid map_type ambiguity
+AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node) {
+    log_debug("build return occurrence type");
+    uint32_t child_count = ts_node_named_child_count(node);
+    if (child_count == 0) {
+        // anonymous children only — try first child
+        TSNode child = ts_node_child(node, 0);
+        return build_expr(tp, child);
+    }
+    // Check if there's an occurrence modifier
+    TSNode first = ts_node_named_child(node, 0);
+    if (child_count == 1) {
+        // just base_type or identifier, no occurrence
+        return build_expr(tp, first);
+    }
+    // Has occurrence: treat like occurrence_type
+    return build_occurrence_type(tp, node);
+}
+
+// Build a return_type_pattern: return_occurrence_type (('|'|'&'|'!') return_occurrence_type)*
+// If single type, delegates. If multiple, builds a binary type chain.
+AstNode* build_return_type_pattern(Transpiler* tp, TSNode node) {
+    log_debug("build return type pattern");
+    // Collect all 'type' field children
+    uint32_t count = ts_node_child_count(node);
+    
+    // First type child
+    TSNode first_type = ts_node_child_by_field_id(node, FIELD_TYPE);
+    if (ts_node_is_null(first_type)) {
+        log_error("return type pattern: no type children");
+        return NULL;
+    }
+    
+    AstNode* result = build_return_occurrence_type(tp, first_type);
+    
+    // Check for operator + type pairs
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_child(node, i);
+        StrView child_str = ts_node_source(tp, child);
+        if (child_str.length == 1 && (child_str.str[0] == '|' || child_str.str[0] == '&' || child_str.str[0] == '!')) {
+            // next named sibling should be the right type
+            i++;
+            while (i < count) {
+                TSNode right_child = ts_node_child(node, i);
+                if (ts_node_is_named(right_child)) {
+                    AstNode* right = build_return_occurrence_type(tp, right_child);
+                    // build binary type node
+                    AstBinaryNode* bin = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+                    bin->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+                    ((TypeType*)bin->type)->type = (Type*)type;
+                    bin->left = result;
+                    bin->right = right;
+                    bin->op_str = child_str;
+                    if (child_str.str[0] == '|') bin->op = OPERATOR_UNION;
+                    else if (child_str.str[0] == '&') bin->op = OPERATOR_OR;
+                    else if (child_str.str[0] == '!') bin->op = OPERATOR_EXCLUDE;
+                    type->left = result->type;
+                    type->right = right->type;
+                    type->op = bin->op;
+                    arraylist_append(tp->type_list, bin->type);
+                    type->type_index = tp->type_list->length - 1;
+                    result = (AstNode*)bin;
+                    break;
+                }
+                i++;
+            }
+        }
+    }
+    return result;
+}
+
 AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary type");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
@@ -4680,7 +4755,7 @@ AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
         TSSymbol error_symbol = ts_node_symbol(error_node);
         StrView error_str = ts_node_source(tp, error_node);
 
-        if (error_symbol == SYM_ERROR_TYPE_PATTERN) {
+        if (error_symbol == SYM_RETURN_TYPE_PATTERN) {
             // Get the actual child: 'error', '.', or identifier
             TSNode child = ts_node_child(error_node, 0);
             if (!ts_node_is_null(child)) {
@@ -6695,6 +6770,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_pattern_char_class(tp, expr_node);
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
+    case SYM_RETURN_TYPE_PATTERN:
+        return build_return_type_pattern(tp, expr_node);
+    case SYM_RETURN_OCCURRENCE_TYPE:
+        return build_return_occurrence_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
         return build_named_argument(tp, expr_node);
     case SYM_IMPORT_MODULE:
