@@ -18,7 +18,7 @@
 
 // Global Input context for JS runtime map_put operations.
 // Initialized in transpile_js_to_mir() before JIT execution.
-static Input* js_input = NULL;
+Input* js_input = NULL;
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
@@ -1298,6 +1298,89 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         strbuf_free(buf);
         return (Item){.item = s2it(result)};
     }
+    // replaceAll — replace all occurrences
+    if (method->len == 10 && strncmp(method->chars, "replaceAll", 10) == 0) {
+        if (argc < 2) return str;
+        // repeatedly replace until no more occurrences
+        Item result = str;
+        String* search_str = it2s(js_to_string(args[0]));
+        if (!search_str || search_str->len == 0) return str;
+        int max_iter = 10000; // safety limit
+        while (max_iter-- > 0) {
+            Item replaced = fn_replace(result, args[0], args[1]);
+            // if nothing changed, we're done
+            String* r = it2s(replaced);
+            String* prev_s = it2s(result);
+            if (r && prev_s && r->len == prev_s->len && strncmp(r->chars, prev_s->chars, r->len) == 0) {
+                break;
+            }
+            result = replaced;
+        }
+        return result;
+    }
+    // padStart(targetLength, padString?)
+    if (method->len == 8 && strncmp(method->chars, "padStart", 8) == 0) {
+        if (argc < 1) return str;
+        String* s = it2s(str);
+        if (!s) return str;
+        int target = (int)js_get_number(args[0]);
+        if ((int)s->len >= target) return str;
+        String* pad = (argc > 1) ? it2s(js_to_string(args[1])) : NULL;
+        const char* pad_chars = pad ? pad->chars : " ";
+        int pad_len = pad ? (int)pad->len : 1;
+        if (pad_len == 0) return str;
+        int needed = target - (int)s->len;
+        StrBuf* buf = strbuf_new();
+        for (int i = 0; i < needed; i++) {
+            strbuf_append_char(buf, pad_chars[i % pad_len]);
+        }
+        strbuf_append_str_n(buf, s->chars, s->len);
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
+    // padEnd(targetLength, padString?)
+    if (method->len == 6 && strncmp(method->chars, "padEnd", 6) == 0) {
+        if (argc < 1) return str;
+        String* s = it2s(str);
+        if (!s) return str;
+        int target = (int)js_get_number(args[0]);
+        if ((int)s->len >= target) return str;
+        String* pad = (argc > 1) ? it2s(js_to_string(args[1])) : NULL;
+        const char* pad_chars = pad ? pad->chars : " ";
+        int pad_len = pad ? (int)pad->len : 1;
+        if (pad_len == 0) return str;
+        int needed = target - (int)s->len;
+        StrBuf* buf = strbuf_new();
+        strbuf_append_str_n(buf, s->chars, s->len);
+        for (int i = 0; i < needed; i++) {
+            strbuf_append_char(buf, pad_chars[i % pad_len]);
+        }
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
+    // at(index) — supports negative indexing
+    if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
+        if (argc < 1) return ItemNull;
+        String* s = it2s(str);
+        if (!s || s->len == 0) return ItemNull;
+        int idx = (int)js_get_number(args[0]);
+        if (idx < 0) idx = (int)s->len + idx;
+        if (idx < 0 || idx >= (int)s->len) return ItemNull;
+        String* ch = heap_strcpy(&s->chars[idx], 1);
+        return (Item){.item = s2it(ch)};
+    }
+    // search(pattern) — return index of first match
+    if (method->len == 6 && strncmp(method->chars, "search", 6) == 0) {
+        if (argc < 1) return (Item){.item = i2it(-1)};
+        // delegate to indexOf for string patterns
+        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+    }
+    // toString
+    if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+        return str;
+    }
 
     log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
@@ -1381,17 +1464,16 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         strbuf_free(buf);
         return (Item){.item = s2it(result)};
     }
-    // reverse - returns new reversed array (keeping as Array type)
+    // reverse - in-place reversal (JS spec: mutates and returns same array)
     if (method->len == 7 && strncmp(method->chars, "reverse", 7) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return arr;
-        Array* src = arr.array;
-        Item result = js_array_new(src->length);
-        Array* dst = result.array;
-        for (int i = 0; i < src->length; i++) {
-            dst->items[i] = src->items[src->length - 1 - i];
+        Array* a = arr.array;
+        for (int i = 0, j = a->length - 1; i < j; i++, j--) {
+            Item tmp = a->items[i];
+            a->items[i] = a->items[j];
+            a->items[j] = tmp;
         }
-        dst->length = src->length;
-        return result;
+        return arr;
     }
     // slice - returns new Array with elements from start to end
     if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
@@ -1641,6 +1723,182 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc < 1) return arr;
         return js_array_fill(arr, args[0]);
     }
+    // splice(start, deleteCount, ...items) — mutating
+    if (method->len == 6 && strncmp(method->chars, "splice", 6) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
+        Array* a = arr.array;
+        int start = argc > 0 ? (int)js_get_number(args[0]) : 0;
+        if (start < 0) start = a->length + start;
+        if (start < 0) start = 0;
+        if (start > a->length) start = a->length;
+        int delete_count = argc > 1 ? (int)js_get_number(args[1]) : (a->length - start);
+        if (delete_count < 0) delete_count = 0;
+        if (start + delete_count > a->length) delete_count = a->length - start;
+        int insert_count = argc > 2 ? argc - 2 : 0;
+
+        // save deleted elements
+        Item deleted = js_array_new(0);
+        Array* del_arr = deleted.array;
+        for (int i = 0; i < delete_count; i++) {
+            array_push(del_arr, a->items[start + i]);
+        }
+
+        // shift elements
+        int shift = insert_count - delete_count;
+        int old_len = a->length;
+        int new_len = old_len + shift;
+        if (shift > 0) {
+            // grow: ensure capacity, then memmove
+            if (new_len + 4 > a->capacity) {
+                int new_cap = new_len + 4;
+                Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
+                if (a->items && a->length > 0) {
+                    memcpy(new_items, a->items, a->length * sizeof(Item));
+                }
+                a->items = new_items;
+                a->capacity = new_cap;
+            }
+            // move elements after delete region to their new positions
+            int elements_to_move = old_len - start - delete_count;
+            if (elements_to_move > 0) {
+                memmove(&a->items[start + insert_count], &a->items[start + delete_count],
+                        elements_to_move * sizeof(Item));
+            }
+            a->length = new_len;
+        } else if (shift < 0) {
+            // shrink: memmove left, then adjust length
+            int elements_to_move = old_len - start - delete_count;
+            if (elements_to_move > 0) {
+                memmove(&a->items[start + insert_count], &a->items[start + delete_count],
+                        elements_to_move * sizeof(Item));
+            }
+            a->length = new_len;
+        }
+
+        // insert new items
+        for (int i = 0; i < insert_count; i++) {
+            a->items[start + i] = args[2 + i];
+        }
+        return deleted;
+    }
+    // shift() — remove and return first element
+    if (method->len == 5 && strncmp(method->chars, "shift", 5) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Array* a = arr.array;
+        if (a->length == 0) return ItemNull;
+        Item first = a->items[0];
+        memmove(&a->items[0], &a->items[1], (a->length - 1) * sizeof(Item));
+        a->length--;
+        return first;
+    }
+    // unshift(...items) — prepend items, return new length
+    if (method->len == 7 && strncmp(method->chars, "unshift", 7) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY || argc < 1) return (Item){.item = i2it(arr_type == LMD_TYPE_ARRAY ? arr.array->length : 0)};
+        Array* a = arr.array;
+        int old_len = a->length;
+        int new_len = old_len + argc;
+        // ensure capacity
+        if (new_len + 4 > a->capacity) {
+            int new_cap = new_len + 4;
+            Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
+            if (a->items && a->length > 0) {
+                memcpy(new_items, a->items, a->length * sizeof(Item));
+            }
+            a->items = new_items;
+            a->capacity = new_cap;
+        }
+        // shift existing elements right
+        memmove(&a->items[argc], &a->items[0], old_len * sizeof(Item));
+        // insert new items at front
+        for (int i = 0; i < argc; i++) {
+            a->items[i] = args[i];
+        }
+        a->length = new_len;
+        return (Item){.item = i2it(a->length)};
+    }
+    // lastIndexOf
+    if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        Array* a = arr.array;
+        int from = argc > 1 ? (int)js_get_number(args[1]) : a->length - 1;
+        if (from < 0) from = a->length + from;
+        if (from >= a->length) from = a->length - 1;
+        for (int i = from; i >= 0; i--) {
+            if (it2b(js_strict_equal(a->items[i], args[0]))) return (Item){.item = i2it(i)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+    // flatMap
+    if (method->len == 7 && strncmp(method->chars, "flatMap", 7) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return arr;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return arr;
+        Array* src = arr.array;
+        Item result = js_array_new(0);
+        Array* dst = result.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        for (int i = 0; i < src->length; i++) {
+            Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
+            Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
+            // flatten one level
+            if (get_type_id(mapped) == LMD_TYPE_ARRAY) {
+                Array* inner = mapped.array;
+                for (int j = 0; j < inner->length; j++) {
+                    list_push(dst, inner->items[j]);
+                }
+            } else {
+                list_push(dst, mapped);
+            }
+        }
+        return result;
+    }
+    // reduceRight
+    if (method->len == 11 && strncmp(method->chars, "reduceRight", 11) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Item callback = args[0];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
+        Array* src = arr.array;
+        JsFunction* fn = (JsFunction*)callback.function;
+        Item accumulator;
+        int start_idx;
+        if (argc >= 2) {
+            accumulator = args[1];
+            start_idx = src->length - 1;
+        } else {
+            if (src->length == 0) return ItemNull;
+            accumulator = src->items[src->length - 1];
+            start_idx = src->length - 2;
+        }
+        for (int i = start_idx; i >= 0; i--) {
+            Item cb_args[3] = { accumulator, src->items[i], (Item){.item = i2it(i)} };
+            accumulator = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : 2);
+        }
+        return accumulator;
+    }
+    // at(index) — supports negative indexing
+    if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Array* a = arr.array;
+        int idx = (int)js_get_number(args[0]);
+        if (idx < 0) idx = a->length + idx;
+        if (idx < 0 || idx >= a->length) return ItemNull;
+        return a->items[idx];
+    }
+    // toString — join elements with comma
+    if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return js_to_string(arr);
+        Array* a = arr.array;
+        StrBuf* buf = strbuf_new();
+        for (int i = 0; i < a->length; i++) {
+            if (i > 0) strbuf_append_str_n(buf, ",", 1);
+            Item elem_str = js_to_string(a->items[i]);
+            String* s = it2s(elem_str);
+            if (s && s->len > 0) strbuf_append_str_n(buf, s->chars, s->len);
+        }
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
 
     log_debug("js_array_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
@@ -1747,6 +2005,73 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     if (method->len == 6 && strncmp(method->chars, "random", 6) == 0) {
         double r = (double)rand() / (double)RAND_MAX;
         return js_make_number(r);
+    }
+    // Math.asin
+    if (method->len == 4 && strncmp(method->chars, "asin", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        double d = js_get_number(js_to_number(args[0]));
+        return js_make_number(asin(d));
+    }
+    // Math.acos
+    if (method->len == 4 && strncmp(method->chars, "acos", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        double d = js_get_number(js_to_number(args[0]));
+        return js_make_number(acos(d));
+    }
+    // Math.atan
+    if (method->len == 4 && strncmp(method->chars, "atan", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        double d = js_get_number(js_to_number(args[0]));
+        return js_make_number(atan(d));
+    }
+    // Math.atan2
+    if (method->len == 5 && strncmp(method->chars, "atan2", 5) == 0) {
+        if (argc < 2) return ItemNull;
+        double y = js_get_number(js_to_number(args[0]));
+        double x = js_get_number(js_to_number(args[1]));
+        return js_make_number(atan2(y, x));
+    }
+    // Math.log2
+    if (method->len == 4 && strncmp(method->chars, "log2", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        double d = js_get_number(js_to_number(args[0]));
+        return js_make_number(log2(d));
+    }
+    // Math.cbrt
+    if (method->len == 4 && strncmp(method->chars, "cbrt", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        double d = js_get_number(js_to_number(args[0]));
+        return js_make_number(cbrt(d));
+    }
+    // Math.hypot
+    if (method->len == 5 && strncmp(method->chars, "hypot", 5) == 0) {
+        if (argc < 1) return js_make_number(0.0);
+        double sum = 0.0;
+        for (int i = 0; i < argc; i++) {
+            double d = js_get_number(js_to_number(args[i]));
+            sum += d * d;
+        }
+        return js_make_number(sqrt(sum));
+    }
+    // Math.clz32
+    if (method->len == 5 && strncmp(method->chars, "clz32", 5) == 0) {
+        if (argc < 1) return js_make_number(32.0);
+        int32_t n = (int32_t)js_get_number(js_to_number(args[0]));
+        if (n == 0) return js_make_number(32.0);
+        return js_make_number((double)__builtin_clz((unsigned int)n));
+    }
+    // Math.imul
+    if (method->len == 4 && strncmp(method->chars, "imul", 4) == 0) {
+        if (argc < 2) return js_make_number(0.0);
+        int32_t a = (int32_t)js_get_number(js_to_number(args[0]));
+        int32_t b = (int32_t)js_get_number(js_to_number(args[1]));
+        return js_make_number((double)(a * b));
+    }
+    // Math.fround
+    if (method->len == 6 && strncmp(method->chars, "fround", 6) == 0) {
+        if (argc < 1) return ItemNull;
+        float f = (float)js_get_number(js_to_number(args[0]));
+        return js_make_number((double)f);
     }
 
     log_debug("js_math_method: unknown method '%.*s'", (int)method->len, method->chars);

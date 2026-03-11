@@ -1011,6 +1011,23 @@ JitImport jit_runtime_imports[] = {
     {"js_array_is_array", FPTR(js_array_is_array)},
     {"js_to_string_val", FPTR(js_to_string_val)},
     {"js_number_property", FPTR(js_number_property)},
+    // v9: Object extensions
+    {"js_object_values", FPTR(js_object_values)},
+    {"js_object_entries", FPTR(js_object_entries)},
+    {"js_object_assign", FPTR(js_object_assign)},
+    {"js_has_own_property", FPTR(js_has_own_property)},
+    {"js_object_freeze", FPTR(js_object_freeze)},
+    {"js_object_is_frozen", FPTR(js_object_is_frozen)},
+    // v9: Number static methods
+    {"js_number_is_integer", FPTR(js_number_is_integer)},
+    {"js_number_is_finite", FPTR(js_number_is_finite)},
+    {"js_number_is_nan", FPTR(js_number_is_nan)},
+    {"js_number_is_safe_integer", FPTR(js_number_is_safe_integer)},
+    // v9: Array.from, JSON, delete
+    {"js_array_from", FPTR(js_array_from)},
+    {"js_json_parse", FPTR(js_json_parse)},
+    {"js_json_stringify", FPTR(js_json_stringify)},
+    {"js_delete_property", FPTR(js_delete_property)},
     // timing
     {"js_performance_now", FPTR(js_performance_now)},
     {"js_date_now", FPTR(js_date_now)},
