@@ -821,6 +821,7 @@ JitImport jit_runtime_imports[] = {
     // Variadic support
     // ========================================================================
     {"set_vargs", FPTR(set_vargs)},
+    {"restore_vargs", FPTR(restore_vargs)},
 
     // ========================================================================
     // Procedural extras
