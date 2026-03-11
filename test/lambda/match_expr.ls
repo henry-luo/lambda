@@ -163,3 +163,52 @@ http_status(301)
 http_status(404)
 http_status(503)
 http_status(100)
+
+// Test 14: match with list type pattern
+fn check_list(v) => match v {
+    case list: "is list"
+    default: "not list"
+}
+
+"Test 14: list type"
+check_list((1, 2, 3))
+check_list(42)
+check_list("hi")
+check_list([1, 2])
+
+// Test 15: match with array type pattern
+fn check_array(v) => match v {
+    case array: "is array"
+    default: "not array"
+}
+
+"Test 15: array type"
+check_array([1, 2, 3])
+check_array((1, 2))
+check_array("hi")
+
+// Test 16: match with map type pattern
+fn check_map(v) => match v {
+    case map: "is map"
+    default: "not map"
+}
+
+"Test 16: map type"
+check_map({a: 1, b: 2})
+check_map(42)
+check_map([1])
+
+// Test 17: match with all collection type patterns
+fn collection_type(v) => match v {
+    case list: "list"
+    case array: "array"
+    case map: "map"
+    default: "other"
+}
+
+"Test 17: collection types"
+collection_type((1, 2))
+collection_type([1, 2])
+collection_type({a: 1})
+collection_type(42)
+collection_type("hi")
