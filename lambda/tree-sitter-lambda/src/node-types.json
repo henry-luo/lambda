@@ -3609,24 +3609,6 @@
           }
         ]
       },
-      "kind": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "string",
-            "named": false
-          },
-          {
-            "type": "symbol",
-            "named": false
-          },
-          {
-            "type": "type",
-            "named": false
-          }
-        ]
-      },
       "pub": {
         "multiple": false,
         "required": false,

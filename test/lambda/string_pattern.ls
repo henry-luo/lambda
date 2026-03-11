@@ -8,7 +8,7 @@
 // ============================================================
 'Test 1: Simple Literal Patterns'
 
-string hello_pattern = "hello"
+type hello_pattern = "hello"
 "1.1"; ("hello" is hello_pattern)    // true - exact match
 "1.2"; ("world" is hello_pattern)    // false - different string
 "1.3"; ("HELLO" is hello_pattern)    // false - case sensitive
@@ -19,9 +19,9 @@ string hello_pattern = "hello"
 // ============================================================
 'Test 2: Digit Character Class (\\d)'
 
-string single_digit = \d
-string multi_digit = \d+
-string exact_3_digits = \d[3]
+type single_digit = \d
+type multi_digit = \d+
+type exact_3_digits = \d[3]
 
 "2.1"; ("5" is single_digit)         // true
 "2.2"; ("a" is single_digit)         // false
@@ -36,7 +36,7 @@ string exact_3_digits = \d[3]
 // ============================================================
 'Test 3: Word Character Class (\\w)'
 
-string word_chars = \w+
+type word_chars = \w+
 
 "3.1"; ("hello" is word_chars)       // true
 "3.2"; ("hello123" is word_chars)    // true - alphanumeric
@@ -49,7 +49,7 @@ string word_chars = \w+
 // ============================================================
 'Test 4: Whitespace Character Class (\\s)'
 
-string whitespace = \s+
+type whitespace = \s+
 
 "4.1"; (" " is whitespace)           // true - space
 "4.2"; ("   " is whitespace)         // true - multiple spaces
@@ -60,9 +60,9 @@ string whitespace = \s+
 // ============================================================
 'Test 5: Any Character (\\.) and Zero-More (\\.\\*)'
 
-string any_char = \.
-string any_three = \. \. \.
-string any_star = \.*
+type any_char = \.
+type any_three = \. \. \.
+type any_star = \.*
 
 "5.1"; ("x" is any_char)             // true
 "5.2"; ("abc" is any_three)          // true
@@ -70,7 +70,7 @@ string any_star = \.*
 "5.4"; ("x" is any_star)             // true - single char matches .*
 "5.5"; ("anything goes here!" is any_star)  // true - any chars
 
-string h_any_o = "h" \.* "o"
+type h_any_o = "h" \.* "o"
 "5.6"; ("hello" is h_any_o)          // true - h followed by anything followed by o
 "5.7"; ("ho" is h_any_o)             // true - h immediately followed by o
 
@@ -79,8 +79,8 @@ string h_any_o = "h" \.* "o"
 // ============================================================
 'Test 6: Pattern Concatenation'
 
-string phone = \d[3] "-" \d[3] "-" \d[4]
-string email_simple = \w+ "@" \w+ "." \w+
+type phone = \d[3] "-" \d[3] "-" \d[4]
+type email_simple = \w+ "@" \w+ "." \w+
 
 "6.1"; ("123-456-7890" is phone)     // true
 "6.2"; ("1234567890" is phone)       // false - no dashes
@@ -93,7 +93,7 @@ string email_simple = \w+ "@" \w+ "." \w+
 // ============================================================
 'Test 7: Optional Pattern (?)'
 
-string optional_dash = \d[3] "-"? \d[4]
+type optional_dash = \d[3] "-"? \d[4]
 
 "7.1"; ("123-4567" is optional_dash) // true - with dash
 "7.2"; ("1234567" is optional_dash)  // true - without dash
@@ -104,7 +104,7 @@ string optional_dash = \d[3] "-"? \d[4]
 // ============================================================
 'Test 8: One or More (+)'
 
-string one_or_more_digits = \d+
+type one_or_more_digits = \d+
 
 "8.1"; ("1" is one_or_more_digits)   // true - one digit
 "8.2"; ("12345" is one_or_more_digits) // true - many digits
@@ -115,7 +115,7 @@ string one_or_more_digits = \d+
 // ============================================================
 'Test 9: Zero or More (*)'
 
-string zero_or_more_a = "a"*
+type zero_or_more_a = "a"*
 
 "9.1"; ("aaa" is zero_or_more_a)     // true - multiple a's
 "9.2"; ("a" is zero_or_more_a)       // true - one a
@@ -126,7 +126,7 @@ string zero_or_more_a = "a"*
 // ============================================================
 'Test 10: Exact Count [n]'
 
-string exactly_5 = \d[5]
+type exactly_5 = \d[5]
 
 "10.1"; ("12345" is exactly_5)       // true
 "10.2"; ("1234" is exactly_5)        // false - 4 digits
@@ -137,7 +137,7 @@ string exactly_5 = \d[5]
 // ============================================================
 'Test 11: Range Count [n, m]'
 
-string range_2_4 = \d[2, 4]
+type range_2_4 = \d[2, 4]
 
 "11.1"; ("12" is range_2_4)          // true - 2 digits
 "11.2"; ("123" is range_2_4)         // true - 3 digits
@@ -150,9 +150,9 @@ string range_2_4 = \d[2, 4]
 // ============================================================
 'Test 12: Character Range'
 
-string lowercase = ("a" to "z")+
-string uppercase = ("A" to "Z")+
-string digit_range = ("0" to "9")+
+type lowercase = ("a" to "z")+
+type uppercase = ("A" to "Z")+
+type digit_range = ("0" to "9")+
 
 "12.1"; ("hello" is lowercase)       // true
 "12.2"; ("HELLO" is lowercase)       // false
@@ -165,8 +165,8 @@ string digit_range = ("0" to "9")+
 // ============================================================
 'Test 13: Union Pattern (|)'
 
-string yes_or_no = "yes" | "no"
-string digit_or_letter = \d | \w
+type yes_or_no = "yes" | "no"
+type digit_or_letter = \d | \w
 
 "13.1"; ("yes" is yes_or_no)         // true
 "13.2"; ("no" is yes_or_no)          // true
@@ -179,8 +179,8 @@ string digit_or_letter = \d | \w
 // ============================================================
 'Test 14: Complex Combined Patterns'
 
-string us_zip = \d[5] ("-" \d[4])?
-string identifier = ("a" to "z" | "A" to "Z" | "_") \w*
+type us_zip = \d[5] ("-" \d[4])?
+type identifier = ("a" to "z" | "A" to "Z" | "_") \w*
 
 "14.1"; ("12345" is us_zip)          // true - 5 digit zip
 "14.2"; ("12345-6789" is us_zip)     // true - zip+4
@@ -194,7 +194,7 @@ string identifier = ("a" to "z" | "A" to "Z" | "_") \w*
 // ============================================================
 'Test 15: Alphabetic Pattern (\\a = letters only)'
 
-string alphabetic = \a+
+type alphabetic = \a+
 
 "15.1"; ("abc" is alphabetic)        // true - lowercase letters
 "15.2"; ("ABC" is alphabetic)        // true - uppercase letters

@@ -7204,6 +7204,34 @@
         }
       ]
     },
+    "pattern_char_class": {
+      "type": "TOKEN",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "\\d"
+          },
+          {
+            "type": "STRING",
+            "value": "\\w"
+          },
+          {
+            "type": "STRING",
+            "value": "\\s"
+          },
+          {
+            "type": "STRING",
+            "value": "\\a"
+          },
+          {
+            "type": "STRING",
+            "value": "\\."
+          }
+        ]
+      }
+    },
     "grouped_type": {
       "type": "PREC_RIGHT",
       "value": 0,
@@ -7867,25 +7895,8 @@
           ]
         },
         {
-          "type": "FIELD",
-          "name": "kind",
-          "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "type"
-              },
-              {
-                "type": "STRING",
-                "value": "string"
-              },
-              {
-                "type": "STRING",
-                "value": "symbol"
-              }
-            ]
-          }
+          "type": "STRING",
+          "value": "type"
         },
         {
           "type": "FIELD",
@@ -7926,34 +7937,6 @@
           }
         }
       ]
-    },
-    "pattern_char_class": {
-      "type": "TOKEN",
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "STRING",
-            "value": "\\d"
-          },
-          {
-            "type": "STRING",
-            "value": "\\w"
-          },
-          {
-            "type": "STRING",
-            "value": "\\s"
-          },
-          {
-            "type": "STRING",
-            "value": "\\a"
-          },
-          {
-            "type": "STRING",
-            "value": "\\."
-          }
-        ]
-      }
     },
     "relative_name": {
       "type": "REPEAT1",
