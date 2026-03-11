@@ -10,15 +10,15 @@ const NUM_RUNS = parseInt(process.argv[2]) || 3;
 const ROOT = path.resolve(__dirname, '../../..');
 
 const benchmarks = [
-    { name: 'nbody',        file: 'ref/JetStream/SunSpider/n-body.js' },
-    { name: 'cube3d',       file: 'ref/JetStream/SunSpider/3d-cube.js' },
-    { name: 'navier_stokes',file: 'ref/JetStream/Octane/navier-stokes.js' },
-    { name: 'richards',     file: 'ref/JetStream/Octane/richards.js' },
-    { name: 'splay',        file: 'ref/JetStream/Octane/splay.js' },
-    { name: 'deltablue',    file: 'ref/JetStream/Octane/deltablue.js' },
-    { name: 'hashmap',      file: 'ref/JetStream/simple/hash-map.js' },
-    { name: 'crypto_sha1',  file: 'ref/JetStream/SunSpider/crypto-sha1.js' },
-    { name: 'raytrace3d',   file: 'ref/JetStream/SunSpider/3d-raytrace.js' },
+    { name: 'nbody',        file: 'test/benchmark/jetstream/n-body.js' },
+    { name: 'cube3d',       file: 'test/benchmark/jetstream/3d-cube.js' },
+    { name: 'navier_stokes',file: 'test/benchmark/jetstream/navier-stokes.js' },
+    { name: 'richards',     file: 'test/benchmark/jetstream/richards.js' },
+    { name: 'splay',        file: 'test/benchmark/jetstream/splay.js' },
+    { name: 'deltablue',    file: 'test/benchmark/jetstream/deltablue.js' },
+    { name: 'hashmap',      file: 'test/benchmark/jetstream/hash-map.js' },
+    { name: 'crypto_sha1',  file: 'test/benchmark/jetstream/crypto-sha1.js' },
+    { name: 'raytrace3d',   file: 'test/benchmark/jetstream/3d-raytrace.js' },
 ];
 
 function median(arr) {
