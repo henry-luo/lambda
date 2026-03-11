@@ -7033,25 +7033,29 @@
       ]
     },
     "unary_type": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "occurrence_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "negation_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "primary_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "constrained_type"
-        }
-      ]
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "occurrence_type"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "negation_type"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "primary_type"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "constrained_type"
+          }
+        ]
+      }
     },
     "binary_type": {
       "type": "CHOICE",
@@ -8121,22 +8125,6 @@
     [
       "list",
       "if_expr"
-    ],
-    [
-      "unary_type",
-      "occurrence_type"
-    ],
-    [
-      "_type_expr",
-      "_string_type_expr"
-    ],
-    [
-      "_string_type_expr",
-      "concat_type"
-    ],
-    [
-      "range_type",
-      "primary_type"
     ]
   ],
   "precedences": [
@@ -8257,6 +8245,14 @@
     [
       {
         "type": "SYMBOL",
+        "name": "range_type"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "primary_type"
+      },
+      {
+        "type": "SYMBOL",
         "name": "unary_type"
       },
       {
@@ -8286,6 +8282,10 @@
       {
         "type": "SYMBOL",
         "name": "fn_type"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "_string_type_expr"
       }
     ],
     [
