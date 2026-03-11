@@ -686,6 +686,21 @@ static MIR_reg_t emit_call_3(MirTranspiler* mt, const char* fn_name,
     return res;
 }
 
+static MIR_reg_t emit_call_4(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4) {
+    MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
+    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 4, args, 1);
+    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
+    emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res),
+        a1, a2, a3, a4));
+    return res;
+}
+
 // Call with no return value
 static void emit_call_void_0(MirTranspiler* mt, const char* fn_name) {
     MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 0, nullptr, 0);
@@ -2847,65 +2862,26 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         return r;
     }
 
+    int key_filter = (int)loop->key_filter;  // 0=ALL, 1=INT, 2=SYMBOL
+
     // Evaluate collection
     MIR_reg_t collection = transpile_expr(mt, loop->as);
     TypeId coll_tid = get_effective_type(mt, loop->as);
 
-    // Box the collection for fn_len / item_at
+    // Box the collection
     MIR_reg_t boxed_coll = emit_box(mt, collection, coll_tid);
 
-    // Check for map type at runtime (maps and vmaps need special iteration via item_keys)
-    MIR_reg_t coll_type_id = emit_call_1(mt, "item_type_id", MIR_T_I64,
+    // Get keys (for maps/elements/objects - returns ArrayList* or NULL for arrays)
+    MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-    MIR_reg_t is_map_coll = new_reg(mt, "is_map_coll", MIR_T_I64);
-    MIR_reg_t is_map_t = new_reg(mt, "is_map_t", MIR_T_I64);
-    MIR_reg_t is_vmap_t = new_reg(mt, "is_vmap_t", MIR_T_I64);
-    MIR_reg_t is_obj_t = new_reg(mt, "is_obj_t", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_map_t),
-        MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_vmap_t),
-        MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_VMAP)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_obj_t),
-        MIR_new_reg_op(mt->ctx, coll_type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_OBJECT)));
-    MIR_reg_t is_map_or_vmap = new_reg(mt, "is_map_or_vmap", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_or_vmap),
-        MIR_new_reg_op(mt->ctx, is_map_t), MIR_new_reg_op(mt->ctx, is_vmap_t)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_map_coll),
-        MIR_new_reg_op(mt->ctx, is_map_or_vmap), MIR_new_reg_op(mt->ctx, is_obj_t)));
 
-    // Get length (branching for map vs non-map)
-    MIR_reg_t len = new_reg(mt, "for_len", MIR_T_I64);
-    MIR_reg_t keys_al = new_reg(mt, "for_keys", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, keys_al),
-        MIR_new_int_op(mt->ctx, 0)));
+    // Get unified iteration length via iter_len(data, keys, key_filter)
+    MIR_reg_t len = emit_call_3(mt, "iter_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
 
-    MIR_label_t l_non_map_for = new_label(mt);
-    MIR_label_t l_start_for = new_label(mt);
-
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_non_map_for),
-        MIR_new_reg_op(mt->ctx, is_map_coll)));
-
-    // MAP path
-    MIR_reg_t keys_res = emit_call_1(mt, "item_keys", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, keys_al),
-        MIR_new_reg_op(mt->ctx, keys_res)));
-    MIR_reg_t map_len_v = emit_call_1(mt, "pipe_map_len", MIR_T_I64,
-        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
-        MIR_new_reg_op(mt->ctx, map_len_v)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_start_for)));
-
-    // NON-MAP path
-    emit_label(mt, l_non_map_for);
-    MIR_reg_t arr_len_v = emit_call_1(mt, "fn_len", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
-        MIR_new_reg_op(mt->ctx, arr_len_v)));
-
-    emit_label(mt, l_start_for);
-
-    // Create spreadable output array (for-expressions produce spreadable arrays)
+    // Create spreadable output array
     MIR_reg_t output = emit_call_0(mt, "array_spreadable", MIR_T_P);
 
     // If order by is present, allocate a parallel keys array
@@ -2941,71 +2917,50 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, cmp)));
 
-    // Get current item (branching for map vs non-map)
-    MIR_reg_t current_item = new_reg(mt, "cur_item", MIR_T_I64);
-    MIR_label_t l_arr_get = new_label(mt);
-    MIR_label_t l_got_cur = new_label(mt);
-
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_arr_get),
-        MIR_new_reg_op(mt->ctx, is_map_coll)));
-
-    // MAP path: get value via pipe_map_val
-    MIR_reg_t map_v = emit_call_3(mt, "pipe_map_val", MIR_T_I64,
+    // Get current value via iter_val_at(data, keys, idx, key_filter)
+    MIR_reg_t current_item = emit_call_4(mt, "iter_val_at", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
         MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, current_item),
-        MIR_new_reg_op(mt->ctx, map_v)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_got_cur)));
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
 
-    // NON-MAP path: use item_at
-    emit_label(mt, l_arr_get);
-    MIR_reg_t arr_v = emit_call_2(mt, "item_at", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, current_item),
-        MIR_new_reg_op(mt->ctx, arr_v)));
-    emit_label(mt, l_got_cur);
+    // Determine the proper type for the loop variable from AST
+    TypeId val_tid = loop->type ? loop->type->type_id : LMD_TYPE_ANY;
+    MIR_type_t val_mtype = MIR_T_I64;
+    MIR_reg_t val_reg = current_item;
 
-    // Bind loop variable
+    // For known element types, unbox to the proper MIR type
+    if (val_tid == LMD_TYPE_FLOAT) {
+        val_reg = emit_unbox(mt, current_item, LMD_TYPE_FLOAT);
+        val_mtype = MIR_T_D;
+    } else if (val_tid == LMD_TYPE_INT) {
+        val_reg = emit_unbox(mt, current_item, LMD_TYPE_INT);
+        val_mtype = MIR_T_I64;
+    } else if (val_tid == LMD_TYPE_INT64) {
+        val_reg = emit_unbox(mt, current_item, LMD_TYPE_INT64);
+        val_mtype = MIR_T_I64;
+    } else if (val_tid == LMD_TYPE_STRING) {
+        val_reg = emit_unbox(mt, current_item, LMD_TYPE_STRING);
+        val_mtype = MIR_T_P;
+    }
+
+    // Bind loop value variable
     char var_name[128];
     snprintf(var_name, sizeof(var_name), "%.*s", (int)loop->name->len, loop->name->chars);
-    TypeId var_tid = loop->type ? loop->type->type_id : LMD_TYPE_ANY;
+    set_var(mt, var_name, val_reg, val_mtype, val_tid);
 
-    if (loop->is_named && !loop->index_name) {
-        // Single-variable 'at' form: for k at map → k is the key name
-        MIR_reg_t key_item = emit_call_2(mt, "pipe_map_key", MIR_T_I64,
+    // Bind index/key variable if present
+    if (loop->index_name) {
+        char idx_name[128];
+        snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
+
+        // Get key via iter_key_at(data, keys, idx, key_filter)
+        MIR_reg_t key_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
             MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
-        set_var(mt, var_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
-    } else {
-        // Normal case: name = current value
-        MIR_reg_t var_reg;
-        if (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL || var_tid == LMD_TYPE_STRING) {
-            var_reg = emit_unbox(mt, current_item, var_tid);
-        } else {
-            var_reg = current_item;
-            var_tid = LMD_TYPE_ANY;
-        }
-        MIR_type_t var_mir = type_to_mir(var_tid);
-        set_var(mt, var_name, var_reg, var_mir, var_tid);
-
-        // Bind index variable if present
-        if (loop->index_name) {
-            char idx_name[128];
-            snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
-            if (coll_tid == LMD_TYPE_RANGE) {
-                set_var(mt, idx_name, var_reg, var_mir, var_tid);
-            } else if (loop->is_named) {
-                // Two-variable 'at' form: for k, v at map → index_name = key
-                MIR_reg_t key_item = emit_call_2(mt, "pipe_map_key", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
-                set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
-            } else {
-                set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
-            }
-        }
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+        set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
     }
 
     // Process let clauses (additional variable bindings)

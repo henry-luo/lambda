@@ -629,19 +629,21 @@ module.exports = grammar({
       )
     )),
 
-    // Loop variable binding with optional index and 'in' or 'at' keyword
+    // Loop variable binding with optional index and type-annotated key
     // Single variable: for v in expr
-    // Indexed: for i, v in expr
-    // Attribute iteration: for v at expr OR for k, v at expr
+    // Two variables: for k, v in expr (k = index for arrays, key for maps)
+    // Type-filtered: for k:int, v in expr (indexed only) / for k:symbol, v in expr (keyed only)
     loop_expr: $ => choice(
-      // for value in | at expr
+      // for value in expr
       seq(
-        field('name', $.identifier), choice('in', 'at'), field('as', $._expr)
+        field('name', $.identifier), 'in', field('as', $._expr)
       ),
-      // for key, value in | at expr
+      // for key, value in expr (with optional type annotation on key)
       seq(
-        field('index', $.identifier), ',', field('name', $.identifier),
-        choice('in', 'at'), field('as', $._expr)
+        field('index', $.identifier),
+        optional(seq(':', field('index_type', $.identifier))),
+        ',', field('name', $.identifier),
+        'in', field('as', $._expr)
       ),
     ),
 
