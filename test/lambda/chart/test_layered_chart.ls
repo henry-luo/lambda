@@ -1,0 +1,32 @@
+// Test: layered chart (bar + rule overlay) from Vega-Lite JSON
+import vega: lambda.package.chart.vega
+import chart: lambda.package.chart.chart
+
+let vl = {
+    width: 400,
+    height: 300,
+    data: { values: [
+        {category: "A", amount: 28},
+        {category: "B", amount: 55},
+        {category: "C", amount: 43}
+    ]},
+    layer: [
+        {
+            mark: {'type': "bar"},
+            encoding: {
+                x: {field: "category", 'type': "nominal"},
+                y: {field: "amount", 'type': "quantitative"}
+            }
+        },
+        {
+            mark: {'type': "rule", color: "#e45756"},
+            encoding: {
+                y: {field: "amount", 'type': "quantitative"}
+            }
+        }
+    ]
+}
+
+let spec = vega.convert(vl)
+let svg = chart.render_spec(spec)
+format(svg, 'xml')
