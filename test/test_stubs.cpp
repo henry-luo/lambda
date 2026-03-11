@@ -18,11 +18,7 @@ Script* load_script(Runtime* runtime, const char* script_path, const char* sourc
     return nullptr;
 }
 
-// Stub implementation of find_errors for test builds
-void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors) {
-    (void)node; (void)source; (void)file; (void)errors;
-    // Stub implementation - do nothing for tests
-}
+// find_errors is now in lambda-error.cpp — no stub needed
 
 // Helper functions for C code to access EvalContext members (used by path.c)
 extern "C" {
