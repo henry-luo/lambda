@@ -81,10 +81,12 @@ extern "C" {
 #define SYM_FN_TYPE sym_fn_type
 #define SYM_RANGE_TYPE sym_range_type
 #define SYM_RETURN_TYPE sym_return_type
-#define SYM_ERROR_TYPE_PATTERN sym_error_type_pattern
+#define SYM_RETURN_TYPE_PATTERN sym_return_type_pattern
+#define SYM_RETURN_OCCURRENCE_TYPE sym_return_occurrence_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_CONSTRAINED_TYPE sym_constrained_type
+#define SYM_GROUPED_TYPE sym_grouped_type
 #define SYM_TYPE_DEFINE sym_type_stam
 #define SYM_TYPE_OCCURRENCE sym_type_occurrence
 
