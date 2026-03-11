@@ -1,26 +1,26 @@
 // String pattern integration with type patterns - tests pattern as type in various contexts
 
 // ==== BASIC STRING PATTERN DEFINITIONS ====
-string digit = "0" to "9"
-string letter = "a" to "z" | "A" to "Z"
-string alphanumeric = letter | digit
-string identifier = (letter | "_") (alphanumeric | "_")*
+type digit = "0" to "9"
+type letter = "a" to "z" | "A" to "Z"
+type alphanumeric = letter | digit
+type identifier = (letter | "_") (alphanumeric | "_")*
 
 // Common format patterns
-string email_local = (alphanumeric | "." | "_" | "-")+
-string email_domain = alphanumeric+ ("." alphanumeric+)+
-string email = email_local "@" email_domain
+type email_local = (alphanumeric | "." | "_" | "-")+
+type email_domain = alphanumeric+ ("." alphanumeric+)+
+type email = email_local "@" email_domain
 
-string phone_us = digit[3] "-" digit[3] "-" digit[4]
-string zip_code = digit[5] ("-" digit[4])?
-string date_iso = digit[4] "-" digit[2] "-" digit[2]
-string time_24h = digit[2] ":" digit[2] ":" digit[2]
+type phone_us = digit[3] "-" digit[3] "-" digit[4]
+type zip_code = digit[5] ("-" digit[4])?
+type date_iso = digit[4] "-" digit[2] "-" digit[2]
+type time_24h = digit[2] ":" digit[2] ":" digit[2]
 
-string url_scheme = letter+
-string url = url_scheme "://" alphanumeric+ ("." alphanumeric+)* ("/" alphanumeric*)*
+type url_scheme = letter+
+type url = url_scheme "://" alphanumeric+ ("." alphanumeric+)* ("/" alphanumeric*)*
 
-string semver = digit+ "." digit+ "." digit+
-string uuid = digit[8] "-" digit[4] "-" digit[4] "-" digit[4] "-" digit[12]
+type semver = digit+ "." digit+ "." digit+
+type uuid = digit[8] "-" digit[4] "-" digit[4] "-" digit[4] "-" digit[12]
 
 // ==== STRING PATTERNS AS FIELD TYPES IN MAPS ====
 type Person = {
@@ -117,15 +117,15 @@ let test_profile = {
 
 // ==== EDGE CASES ====
 // Empty string pattern (boundary)
-string empty_or_digit = "" | digit+
+type empty_or_digit = "" | digit+
 
 // Very long pattern chain
-string hex_char = "0" to "9" | "a" to "f" | "A" to "F"
-string hex_string = "0x" hex_char+
-string hex_color = "#" hex_char[6] | "#" hex_char[3]
+type hex_char = "0" to "9" | "a" to "f" | "A" to "F"
+type hex_string = "0x" hex_char+
+type hex_color = "#" hex_char[6] | "#" hex_char[3]
 
 // Pattern with special characters
-string quoted_string = '"' (letter | digit | " " | "!" | "?" | "." | ",")* '"'
+type quoted_string = '"' (letter | digit | " " | "!" | "?" | "." | ",")* '"'
 
 // Recursive-like patterns (reference other patterns)
-string nested_parens_simple = "(" alphanumeric* ")"
+type nested_parens_simple = "(" alphanumeric* ")"

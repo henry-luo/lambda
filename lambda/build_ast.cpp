@@ -3501,7 +3501,8 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
 // check if a CST subtree contains string-pattern-specific nodes
 static bool cst_has_pattern_nodes(TSNode node) {
     TSSymbol sym = ts_node_symbol(node);
-    if (sym == sym_pattern_char_class || sym == sym_concat_type || sym == sym_grouped_type) {
+    if (sym == sym_pattern_char_class || sym == sym_concat_type ||
+        sym == sym_grouped_type || sym == sym_string) {
         return true;
     }
     uint32_t count = ts_node_child_count(node);
