@@ -3953,6 +3953,10 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
     // Check if enclosing function returns RetItem (can_raise, non-closure, non-method)
     bool func_retitem = current_func_returns_retitem(tp);
 
+    // Restore vargs before returning from variadic function
+    if (tp->in_variadic_body) {
+        strbuf_append_str(tp->code_buf, "\nrestore_vargs(_saved_vargs);");
+    }
     strbuf_append_str(tp->code_buf, "\nreturn ");
     if (return_node->value) {
         // check if enclosing function returns native type (not Item)
@@ -3991,6 +3995,10 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
 void transpile_raise(Transpiler* tp, AstRaiseNode *raise_node) {
     log_debug("transpile raise stam");
     bool func_retitem = current_func_returns_retitem(tp);
+    // Restore vargs before returning from variadic function
+    if (tp->in_variadic_body) {
+        strbuf_append_str(tp->code_buf, "\nrestore_vargs(_saved_vargs);");
+    }
     strbuf_append_str(tp->code_buf, "\nreturn ");
     if (func_retitem) {
         // can_raise function returns RetItem — wrap error in item_to_ri()
@@ -6298,9 +6306,13 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         }
     }
 
-    // set vargs before function body for variadic functions
+    // set vargs before function body for variadic functions (save previous for nesting)
+    bool prev_in_variadic_body = tp->in_variadic_body;
     if (fn_type && fn_type->is_variadic) {
-        strbuf_append_str(tp->code_buf, " set_vargs(vargs);\n");
+        strbuf_append_str(tp->code_buf, " List* _saved_vargs = set_vargs(vargs);\n");
+        tp->in_variadic_body = true;
+    } else {
+        tp->in_variadic_body = false;
     }
 
     // set current_closure context for body transpilation
@@ -6337,16 +6349,35 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // Check if this function returns RetItem (can_raise, non-closure, non-method)
     bool func_retitem = fn_type_check->can_raise && !is_closure && !is_method;
-    const char* default_null_return = func_retitem ? "\n return ri_ok(ITEM_NULL);\n}\n" : "\n return ITEM_NULL;\n}\n";
+    bool is_variadic = tp->in_variadic_body;
+    const char* default_null_return;
+    if (is_variadic) {
+        default_null_return = func_retitem
+            ? "\n restore_vargs(_saved_vargs);\n return ri_ok(ITEM_NULL);\n}\n"
+            : "\n restore_vargs(_saved_vargs);\n return ITEM_NULL;\n}\n";
+    } else {
+        default_null_return = func_retitem
+            ? "\n return ri_ok(ITEM_NULL);\n}\n"
+            : "\n return ITEM_NULL;\n}\n";
+    }
 
     // for procedures, use procedural content transpilation
     bool is_proc = (fn_node->node_type == AST_NODE_PROC);
     if (is_proc && fn_node->body->node_type == AST_NODE_CONTENT) {
-        strbuf_append_str(tp->code_buf, " return ");
-        if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
-        transpile_proc_content(tp, (AstListNode*)fn_node->body);
-        if (func_retitem) strbuf_append_char(tp->code_buf, ')');
-        strbuf_append_str(tp->code_buf, ";\n}\n");
+        if (is_variadic) {
+            strbuf_append_str(tp->code_buf, " Item _vr = ");
+            transpile_proc_content(tp, (AstListNode*)fn_node->body);
+            strbuf_append_str(tp->code_buf, ";\n restore_vargs(_saved_vargs);\n return ");
+            if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(_vr)");
+            else strbuf_append_str(tp->code_buf, "_vr");
+            strbuf_append_str(tp->code_buf, ";\n}\n");
+        } else {
+            strbuf_append_str(tp->code_buf, " return ");
+            if (func_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
+            transpile_proc_content(tp, (AstListNode*)fn_node->body);
+            if (func_retitem) strbuf_append_char(tp->code_buf, ')');
+            strbuf_append_str(tp->code_buf, ";\n}\n");
+        }
     } else if (is_proc && fn_node->body->node_type == AST_NODE_ASSIGN_STAM) {
         // single assignment statement in pn body (flattened content)
         transpile_assign_stam(tp, (AstAssignStamNode*)fn_node->body);
@@ -6373,7 +6404,6 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         transpile_expr(tp, fn_node->body);
         strbuf_append_str(tp->code_buf, default_null_return);
     } else {
-        strbuf_append_str(tp->code_buf, " return ");
         // Check if we need to box the return value
         // Box if: (1) it's a closure, OR (2) can_raise is true, OR (3) return type is Item but body type is a scalar
         // OR (4) function has ALL untyped params (returns Item, body may produce native values)
@@ -6396,16 +6426,34 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
         // can_raise non-closure/non-method functions return RetItem — wrap in item_to_ri()
         bool wrap_retitem = fn_type_check->can_raise && !is_closure && !is_method;
-        if (wrap_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
 
-        if (needs_boxing) {
-            transpile_box_item(tp, fn_node->body);
+        if (is_variadic) {
+            // store result in temp, restore vargs, then return
+            strbuf_append_str(tp->code_buf, " Item _vr = ");
+            if (needs_boxing) {
+                transpile_box_item(tp, fn_node->body);
+            } else {
+                transpile_expr(tp, fn_node->body);
+            }
+            strbuf_append_str(tp->code_buf, ";\n restore_vargs(_saved_vargs);\n return ");
+            if (wrap_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(_vr)");
+            else strbuf_append_str(tp->code_buf, "_vr");
+            strbuf_append_str(tp->code_buf, ";\n}\n");
         } else {
-            transpile_expr(tp, fn_node->body);
+            strbuf_append_str(tp->code_buf, " return ");
+            if (wrap_retitem) strbuf_append_str(tp->code_buf, "item_to_ri(");
+            if (needs_boxing) {
+                transpile_box_item(tp, fn_node->body);
+            } else {
+                transpile_expr(tp, fn_node->body);
+            }
+            if (wrap_retitem) strbuf_append_char(tp->code_buf, ')');
+            strbuf_append_str(tp->code_buf, ";\n}\n");
         }
-        if (wrap_retitem) strbuf_append_char(tp->code_buf, ')');
-        strbuf_append_str(tp->code_buf, ";\n}\n");
     }
+
+    // Restore variadic context
+    tp->in_variadic_body = prev_in_variadic_body;
 
     // Restore TCO context
     tp->tco_func = prev_tco_func;

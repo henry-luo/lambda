@@ -176,10 +176,10 @@ Every lambda/closure creation leaks ~64 bytes. In a long-running script that cre
 
 ---
 
-### Issue #9: ShapePool signature compare doesn't verify field names
+### Issue #9: ShapePool signature compare doesn't verify field names — deferred
 
 **File:** `lambda/shape_pool.cpp` — `shape_signature_compare()`
-**Severity:** 🟠 High — silent data corruption on hash collision
+**Severity:** 🟠 Low (downgraded) — theoretically possible but practically negligible
 
 ```cpp
 static int shape_signature_compare(const void *a, const void *b, void *udata) {
@@ -190,7 +190,16 @@ static int shape_signature_compare(const void *a, const void *b, void *udata) {
 
 Two different shapes with the same hash + field count + byte size (a hash collision) would be treated as identical. One map's shape would be reused for a completely different map → **fields read from wrong offsets, silent data corruption**.
 
-**Fix:** On hash match, perform deep comparison of actual field names and types (similar to `shapes_equal` which already does this).
+**Collision probability analysis:** A collision requires all three discriminators to match simultaneously:
+- **`hash`** — 64-bit, computed via SipHash over all field names with XOR-rotated field types. Per-pair collision probability: ~1/2⁶⁴.
+- **`length`** (field count) — exact structural match required; different field counts are rejected immediately.
+- **`byte_size`** (sum of field sizes) — with identical field count, types must sum to the same byte size, further filtering hash collisions.
+
+By the birthday paradox, for *n* distinct shapes the probability of *any* collision is approximately n²/2⁶⁵. A typical program has at most hundreds to low thousands of distinct shapes. With n = 10,000 shapes: P ≈ 10⁸ / 3.7×10¹⁹ ≈ **2.7×10⁻¹² (1 in 370 billion)**. You would need ~4.3 billion distinct shapes to reach a 50% collision probability.
+
+**Status:** Deferred. The risk is negligible in practice. A deep field-name comparison on hash match would make it provably correct rather than probabilistically correct, but is not urgent.
+
+**Fix (when revisited):** On hash match, perform deep comparison of actual field names and types (similar to `shapes_equal` which already does this).
 
 ---
 
@@ -236,33 +245,32 @@ switch (common) {
 
 ---
 
-### Issue #12: Linear scan for system function lookup
+### Issue #12: Linear scan for system function lookup — ✅ FIXED
 
 **File:** `lambda/build_ast.cpp` — `find_sys_func()`
 **Severity:** 🟡 Medium — performance on every function call
 
-The `sys_func` table has ~130 entries. `find_sys_func()` does a linear scan on **every** function call expression during AST building. For method-style calls, a second linear scan happens in the method lookup path.
+The original `sys_func` table had ~130 entries. `find_sys_func()` did a linear scan on **every** function call expression during AST building.
 
-**Fix:** A hashmap or perfect hash (the set of system function names is known at compile time) would make this O(1).
+**Fix applied:** Replaced with hashmap-based O(1) lookup. `init_sys_func_maps()` builds two hashmaps at first use — `sys_func_map` (keyed by name + arg_count) and `sys_func_name_set` (name-only dedup set). Lookup functions `get_sys_func_info()` and `is_sys_func_name()` now use hashmap lookups.
 
 ---
 
 ## 🟢 Opportunistic Fixes
 
-### Issue #13: `current_vargs` thread-local unsafe for nesting
+### Issue #13: `current_vargs` thread-local unsafe for nesting — ✅ FIXED
 
 **File:** `lambda/lambda-eval.cpp`
 **Severity:** 🟢 Low-medium — only matters for nested variadic calls
 
-`__thread List* current_vargs = NULL;` is overwritten unconditionally when entering a variadic function. If a variadic function's argument expression calls another variadic function, the outer's vargs are lost.
+`__thread List* current_vargs = NULL;` was overwritten unconditionally when entering a variadic function. If a variadic function's argument expression called another variadic function, the outer's vargs were lost.
 
-**Fix:** Stack-based save/restore:
-```cpp
-List* saved_vargs = current_vargs;
-current_vargs = new_vargs;
-// ... call body ...
-current_vargs = saved_vargs;
-```
+**Fix applied:** `set_vargs()` now returns the previous `current_vargs` pointer. Added `restore_vargs()` to restore it before function return. Both transpiler paths (C and MIR) emit save/restore:
+- C transpiler: `List* _saved_vargs = set_vargs(vargs);` at entry, `restore_vargs(_saved_vargs);` before all return paths
+- MIR transpiler: saves return value of `set_vargs` in `_saved_vargs` register, emits `restore_vargs` before every `ret` instruction
+- `transpile_return()` and `transpile_raise()` in both transpilers emit restore when `in_variadic_body` flag is set
+
+No similar nesting issues found in other `__thread` globals — `input_context` already uses save/restore, others are per-session singletons.
 
 ---
 
@@ -274,24 +282,6 @@ current_vargs = saved_vargs;
 The newly allocated string has `ref_cnt = 0`, making it immediately eligible for freeing by `heap_cleanup`. If the caller doesn't store it somewhere that increments `ref_cnt` before the next GC sweep, it's freed prematurely. Compare with `name_pool_create` which sets `ref_cnt = 1`.
 
 **Fix:** Initialize `ref_cnt = 1` (caller is the first reference), or document that callers must immediately increment.
-
----
-
-### Issue #15: `transpile-mir.cpp` is dead code
-
-**File:** `lambda/transpile-mir.cpp` (496 lines)
-**Severity:** 🟢 Low — confusion risk
-
-The direct AST→MIR transpiler is a non-functional stub:
-- Integer literals hardcoded to `42`
-- Float literals hardcoded to `3.14`
-- Identifiers return `10`
-- Only 4 AST node types handled (primary, binary, unary, ident)
-- No functions, closures, loops, strings, or data structures
-
-The actual JIT path is Lambda → C code (via `transpile.cpp`) → MIR (via C2MIR). This file is dead code.
-
-**Fix:** Remove, or add a prominent comment marking it as experimental/unused.
 
 ---
 
