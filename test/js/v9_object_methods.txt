@@ -1,0 +1,10 @@
+values: 1,2,3
+entries len: 2
+entry 0: x 10
+entry 1: y 20
+assign a: 1 b: 2 c: 3
+hasOwn name: true
+hasOwn missing: false
+before freeze: false
+after freeze: true
+null
