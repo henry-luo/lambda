@@ -129,8 +129,8 @@ module.exports = grammar({
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
     [$.unary_type, $.occurrence_type],              // primary_type + [n] could be occurrence or end of type
-    [$._type_expr, $.concat_type],                 // unary_type could be complete or start of concat
-    [$._type_expr, $.constrained_type],            // unary_type could be complete or base of constrained
+    [$._type_expr, $._string_type_expr],            // type_assign: unary_type could be _type_expr or _string_type_expr
+    [$._string_type_expr, $.concat_type],            // unary_type could be complete _string_type_expr or start of concat_type
     [$.range_type, $.primary_type],                // literal could be complete primary_type or start of range_type
   ],
 
@@ -613,7 +613,7 @@ module.exports = grammar({
     ),
 
     match_arm: $ => prec.right(seq(
-      'case', field('pattern', $._type_expr),
+      'case', field('pattern', $._match_type_expr),
       choice(
         seq(':', field('body', $._expr)),
         seq('{', field('body', $.content), '}')
@@ -865,47 +865,6 @@ module.exports = grammar({
       '!', field('operand', $.primary_type),
     )),
 
-    // Error union type: T^ means T | error
-    // Used in parameters, let bindings, and return types
-    // Use lower precedence than fn_type to avoid conflict with fn_type's return type
-    // error_union_type: $ => prec.left(-1, seq(
-    //   field('ok', $.unary_type),
-    //   '^'
-    // )),
-
-    // Unary type: primary type with optional occurrence modifier
-    // Replaces the old unary_type → _quantified_type chain
-    unary_type: $ => choice(
-      $.occurrence_type,
-      $.negation_type,          // !T - prefix negation
-      $.primary_type,
-    ),
-
-    // ====== Type Concatenation (for string/symbol patterns) ======
-    // Type concatenation: whitespace-separated sequence of type terms.
-    // e.g. \d[3] "-" \d[3] "-" \d[4]
-    // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // Terms are unary_type (primary_type possibly with occurrence).
-    concat_type: $ => prec.left(prec.dynamic(-1, seq(
-      $.unary_type,
-      repeat1($.unary_type),
-    ))),
-
-    binary_type: $ => choice(
-      ...type_pattern(choice($._type_expr)),
-    ),
-    
-    // Unified type expression - flattened hierarchy
-    // Structural precedence (tightest to loosest):
-    //   primary_type > occurrence_type > constrained/concat > binary > error_union
-    _type_expr: $ => choice(
-      $.unary_type,            // covers primary_type and occurrence_type
-      $.constrained_type,      // base_type that (constraint)
-      $.concat_type,           // whitespace-separated type terms (patterns)
-      $.binary_type,           // alternation: T | U, T & U, T ! U
-      $.fn_type,
-    ),
-
     // Constrained type: base_type that (constraint_expr)
     // e.g. int that (5 < ~ < 10), string that (len(~) > 0)
     // The constraint uses ~ to refer to the value being checked
@@ -916,6 +875,61 @@ module.exports = grammar({
       '(',
       field('constraint', $._expr),
       ')',
+    ), 
+
+    // Unary type: primary type with optional occurrence modifier
+    // Replaces the old unary_type → _quantified_type chain
+    unary_type: $ => choice(
+      $.occurrence_type,
+      $.negation_type,          // !T - prefix negation
+      $.primary_type,
+      $.constrained_type
+    ),
+
+    binary_type: $ => choice(
+      ...type_pattern(choice($._type_expr)),
+    ),
+    
+    // Unified type expression - flattened hierarchy
+    // Structural precedence (tightest to loosest):
+    //   primary_type > occurrence_type > constrained/concat > binary > fn_type
+    _type_expr: $ => choice(
+      $.unary_type,            // covers primary_type and occurrence_type
+      // $.concat_type,        // whitespace-separated type terms (patterns)
+      $.binary_type,           // alternation: T | U, T & U, T ! U
+      $.fn_type,
+    ),
+
+    // Match arm type expression - like _type_expr but excludes map_type
+    // to avoid ambiguity with { block } body in match arms.
+    // Since _match_type_expr is hidden, children appear directly in parse tree.
+    _match_type_expr: $ => choice(
+      // primary_type alternatives minus map_type
+      $.range_type, $._non_null_literal, $.base_type, $.identifier,
+      $.list_type, $.array_type, $.element_type, $.pattern_char_class,
+      // unary modifiers
+      $.occurrence_type, $.negation_type, $.constrained_type,
+      // compound types
+      $.binary_type, $.fn_type,
+    ),
+
+    // Type concatenation (for string/symbol patterns): whitespace-separated sequence of type terms.
+    // e.g. \d[3] "-" \d[3] "-" \d[4]
+    // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
+    // Terms are unary_type (primary_type possibly with occurrence).
+    concat_type: $ => prec.left(prec.dynamic(-1, seq(
+      $.unary_type,
+      repeat1($.unary_type),
+    ))),
+
+    string_binary_type: $ => choice(
+      ...type_pattern(choice($._string_type_expr)),
+    ),
+
+    _string_type_expr: $ => choice(
+      $.unary_type,            // covers primary_type and occurrence_type
+      $.concat_type,           // whitespace-separated type terms (patterns)
+      alias($.string_binary_type, $.binary_type),           // alternation: T | U, T & U, T ! U
     ),
 
     return_occurrence_type: $ => seq(choice($.base_type, $.identifier), optional($.occurrence)),
@@ -938,7 +952,8 @@ module.exports = grammar({
       ))
     )),
 
-    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', $._type_expr)),
+    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', 
+      choice($._type_expr, $._string_type_expr))),
 
     // Object/element type with optional inheritance, content schema, and methods
     // Object (no content): type Point { x: float, y: float }
