@@ -8,9 +8,9 @@
 // ============================================================
 'Test 1: Pattern Replace'
 
-string digit = \d
-string digits = \d+
-string ws = \s+
+type digit = \d
+type digits = \d+
+type ws = \s+
 
 1; replace("a1b2c3", digit, "X")           // "aXbXcX"
 2; replace("a1b22c333", digits, "N")        // "aNbNcN"
@@ -42,7 +42,7 @@ string ws = \s+
 // ============================================================
 'Test 4: Pattern Find'
 
-string words = \w+
+type words = \w+
 13; find("a1b22c333", digits)
 14; find("no-match-here", digits)
 15; find("hello world", words)

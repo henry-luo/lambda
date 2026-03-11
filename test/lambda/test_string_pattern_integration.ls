@@ -2,10 +2,10 @@
 // Tests using string patterns as field types in type patterns
 
 // Define string patterns for validation using Lambda syntax
-string phone = \d[3] "-" \d[3] "-" \d[4]
-string email_simple = \w+ "@" \w+ "." \w+
-string zip = \d[5]
-string identifier = ("a" to "z" | "A" to "Z" | "_") ("a" to "z" | "A" to "Z" | "0" to "9" | "_")*
+type phone = \d[3] "-" \d[3] "-" \d[4]
+type email_simple = \w+ "@" \w+ "." \w+
+type zip = \d[5]
+type identifier = ("a" to "z" | "A" to "Z" | "_") ("a" to "z" | "A" to "Z" | "0" to "9" | "_")*
 
 // ============================================================
 // Test 1: Basic pattern matching - positive cases

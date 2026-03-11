@@ -3498,24 +3498,37 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     return build_assign_expr(tp, type_node, false);  // let expressions are not type definitions
 }
 
+// check if a CST subtree contains string-pattern-specific nodes
+static bool cst_has_pattern_nodes(TSNode node) {
+    TSSymbol sym = ts_node_symbol(node);
+    if (sym == sym_pattern_char_class || sym == sym_concat_type || sym == sym_grouped_type) {
+        return true;
+    }
+    uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        if (cst_has_pattern_nodes(ts_node_child(node, i))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
-    // For type_stam: check the 'kind' field to detect string/symbol pattern definitions
+    // For type_stam: detect string/symbol pattern by checking expression content
     bool is_string_pattern = false;
-    bool is_symbol_pattern = false;
     if (symbol == SYM_TYPE_DEFINE) {
-        TSNode kind_node = ts_node_child_by_field_id(let_node, FIELD_KIND);
-        if (!ts_node_is_null(kind_node)) {
-            StrView kind = ts_node_source(tp, kind_node);
-            if (strview_equal(&kind, "string")) {
-                is_string_pattern = true;
-            } else if (strview_equal(&kind, "symbol")) {
-                is_symbol_pattern = true;
+        // check first declare's 'as' field for pattern-specific nodes
+        TSNode first_declare = ts_node_child_by_field_id(let_node, FIELD_DECLARE);
+        if (!ts_node_is_null(first_declare)) {
+            TSNode as_node = ts_node_child_by_field_id(first_declare, FIELD_AS);
+            if (!ts_node_is_null(as_node)) {
+                is_string_pattern = cst_has_pattern_nodes(as_node);
             }
         }
     }
 
     // For string/symbol pattern definitions, build pattern nodes
-    if (is_string_pattern || is_symbol_pattern) {
+    if (is_string_pattern) {
         // Build from declare children (type_assign aliased as assign_expr)
         TSTreeCursor cursor = ts_tree_cursor_new(let_node);
         bool has_node = ts_tree_cursor_goto_first_child(&cursor);
@@ -3525,7 +3538,7 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
             TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
             if (field_id == FIELD_DECLARE) {
                 TSNode child = ts_tree_cursor_current_node(&cursor);
-                AstNode* pattern = build_string_pattern(tp, child, is_symbol_pattern);
+                AstNode* pattern = build_string_pattern(tp, child, false);
                 if (pattern) {
                     if (prev) prev->next = pattern;
                     else first = pattern;

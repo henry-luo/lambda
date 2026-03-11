@@ -901,6 +901,17 @@ module.exports = grammar({
       $.fn_type,
     ),
 
+    // ==================== String/Symbol Pattern Definitions ====================
+  
+    // Character classes for pattern matching
+    pattern_char_class: _ => token(choice(
+      '\\d',  // digit [0-9]
+      '\\w',  // word [a-zA-Z0-9_]
+      '\\s',  // whitespace
+      '\\a',  // alpha [a-zA-Z]
+      '\\.',  // any character
+    )),
+
     grouped_type: $ => prec.right(seq(
       optional('!'),
       '(', $._string_type_expr, ')',
@@ -979,33 +990,16 @@ module.exports = grammar({
     // Object-level constraint: that (expr)
     that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
 
-    // type_stam handles type aliases, string patterns, and symbol patterns.
-    // The leading keyword distinguishes them; AST builder checks the text.
+    // type_stam handles type aliases and string/symbol patterns.
+    // The AST builder detects pattern definitions by analyzing the type expression content.
     type_stam: $ => seq(
       optional(field('pub', 'pub')),
-      field('kind', choice('type', 'string', 'symbol')),
+      'type',
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
     // top-level type definitions: type_stam | object_type
-
-    // ==================== String/Symbol Pattern Definitions ====================
-    // Pattern atoms are unified into the type system. String/symbol pattern bodies
-    // use _type_expr directly. The AST builder validates that only pattern-valid
-    // constructs appear inside pattern definitions.
-
-    // Character classes for pattern matching
-    pattern_char_class: _ => token(choice(
-      '\\d',  // digit [0-9]
-      '\\w',  // word [a-zA-Z0-9_]
-      '\\s',  // whitespace
-      '\\a',  // alpha [a-zA-Z]
-      '\\.',  // any character
-    )),
-
-    // NOTE: string_pattern and symbol_pattern are now handled by type_stam.
-    // type_stam's 'kind' field distinguishes 'type' vs 'string' vs 'symbol'.
 
     // ==================== Module Imports ====================
     relative_name: $ => repeat1(seq(
