@@ -143,6 +143,7 @@ extern "C" {
 #define FIELD_URI field_uri
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index
+#define FIELD_INDEX_TYPE field_index_type
 #define FIELD_SEGMENT field_segment
 #define FIELD_DECOMPOSE field_decompose
 #define FIELD_BASE field_base
@@ -373,12 +374,19 @@ typedef struct AstNamedNode : AstNode {
     struct NameEntry* entry;    // back-pointer to NameEntry (set for var declarations)
 } AstNamedNode;
 
-// for AST_NODE_LOOP - extended with index variable and named flag
+// Loop key filter: controls which entries to iterate
+enum LoopKeyFilter {
+    LOOP_KEY_ALL    = 0,  // all entries (default): for k, v in container
+    LOOP_KEY_INT    = 1,  // indexed only: for k:int, v in container
+    LOOP_KEY_SYMBOL = 2,  // keyed only: for k:symbol, v in container
+};
+
+// for AST_NODE_LOOP - extended with index variable and key filter
 typedef struct AstLoopNode : AstNode {
     String* name;               // primary loop variable (v in 'for v in expr')
-    String* index_name;         // optional index variable (i in 'for i, v in expr'), NULL if not present
+    String* index_name;         // optional index variable (k in 'for k, v in expr'), NULL if not present
     AstNode *as;                // collection expression
-    bool is_named;              // true if 'at' keyword used (attribute/named iteration)
+    LoopKeyFilter key_filter;   // key type filter (ALL, INT, SYMBOL)
 } AstLoopNode;
 
 // for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)

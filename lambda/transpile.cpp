@@ -2238,169 +2238,6 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global = f
     }
 }
 
-void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, bool use_array) {
-    // Defensive validation: ensure all required pointers and components are valid
-    if (!loop_node || !loop_node->as || !loop_node->as->type || !then) {
-        log_error("Error: invalid loop_node");
-        return;
-    }
-    Type * expr_type = loop_node->as->type;
-    Type *item_type = nullptr;
-    bool is_named = loop_node->is_named;  // 'at' keyword for attribute/named iteration
-
-    // determine loop item type based on expression type and iteration mode
-    if (is_named) {
-        // 'at' iteration: iterating over attributes/fields
-        item_type = &TYPE_ANY;  // attribute values are always ANY
-    } else if (expr_type->type_id == LMD_TYPE_ARRAY) {
-        TypeArray* array_type = (TypeArray*)expr_type;
-        // Validate that the cast is safe by checking the nested pointer
-        if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
-            item_type = array_type->nested;
-        } else {
-            log_warn("Warning: Invalid nested type in array, using TYPE_ANY");
-            item_type = &TYPE_ANY;
-        }
-    } else if (expr_type->type_id == LMD_TYPE_RANGE) {
-        item_type = &TYPE_INT;
-    } else {
-        item_type = &TYPE_ANY;
-    }
-
-    if (!item_type) {
-        log_error("Error: transpile_loop_expr failed to determine item type");
-        item_type = &TYPE_ANY; // fallback to ANY type for safety
-    }
-
-    // Helper: generate index variable declaration if present
-    bool has_index = loop_node->index_name != nullptr;
-
-    if (is_named) {
-        // 'at' iteration: iterate over attributes/fields
-        // for k, v at expr -> k is key name, v is value
-        // for v at expr -> v is key name (single variable form)
-        strbuf_append_str(tp->code_buf, " Item it=");
-        transpile_box_item(tp, loop_node->as);
-        strbuf_append_str(tp->code_buf, ";\n ArrayList* attr_keys=item_keys(it);\n");
-        strbuf_append_str(tp->code_buf, " for (int ki=0; attr_keys && ki<attr_keys->length; ki++) {\n");
-
-        if (has_index) {
-            // Two-variable form: for k, v at expr
-            // k (index_name) = key name, v (name) = value
-            strbuf_append_str(tp->code_buf, "  String* _");
-            strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-            strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
-
-            strbuf_append_str(tp->code_buf, "  Item _");
-            strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-            strbuf_append_str(tp->code_buf, "=item_attr(it, _");
-            strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-            strbuf_append_str(tp->code_buf, "->chars);\n");
-        } else {
-            // Single-variable form: for v at expr -> v is key name
-            strbuf_append_str(tp->code_buf, "  String* _");
-            strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-            strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
-        }
-    } else {
-        // 'in' iteration: standard indexed iteration
-        // Check if it's any array type (typed or generic)
-        // Note: AST uses LMD_TYPE_ARRAY with nested field for typed arrays
-        bool is_generic_array = (expr_type->type_id == LMD_TYPE_ARRAY);
-        TypeId nested_type_id = LMD_TYPE_ANY;
-        if (is_generic_array) {
-            TypeArray* arr_type = (TypeArray*)expr_type;
-            if (arr_type && arr_type->nested) {
-                nested_type_id = arr_type->nested->type_id;
-            }
-        }
-
-        bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
-                               expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
-                               expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
-        bool is_any_array = is_typed_array || is_generic_array;
-
-        // Select the appropriate array pointer type
-        const char* arr_decl;
-        if (expr_type->type_id == LMD_TYPE_RANGE) {
-            arr_decl = " Range *rng=";
-        } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT || nested_type_id == LMD_TYPE_INT) {
-            arr_decl = " ArrayInt *arr=";
-        } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT64 || nested_type_id == LMD_TYPE_INT64) {
-            arr_decl = " ArrayInt64 *arr=";
-        } else if (expr_type->type_id == LMD_TYPE_ARRAY_FLOAT || nested_type_id == LMD_TYPE_FLOAT) {
-            arr_decl = " ArrayFloat *arr=";
-        } else if (is_generic_array) {
-            arr_decl = " Array *arr=";
-        } else {
-            arr_decl = " Item it=";
-        }
-        strbuf_append_str(tp->code_buf, arr_decl);
-        transpile_expr(tp, loop_node->as);
-
-        // start the loop
-        strbuf_append_str(tp->code_buf,
-            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
-            is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
-            ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
-
-        // generate index variable if present (for i, v in expr)
-        if (has_index) {
-            strbuf_append_str(tp->code_buf, "  long _");
-            strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-            strbuf_append_str(tp->code_buf, "=idx;\n");
-        }
-
-        // construct loop variable
-        write_type(tp->code_buf, item_type);
-        strbuf_append_str(tp->code_buf, " _");
-        strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-        if (expr_type->type_id == LMD_TYPE_RANGE) {
-            strbuf_append_str(tp->code_buf, "=idx;\n");
-        }
-        else if (is_any_array) {
-            if (item_type->type_id == LMD_TYPE_STRING) {
-                strbuf_append_str(tp->code_buf, "=fn_string(arr->items[idx]);\n");
-            }
-            else {
-                strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
-            }
-        }
-        else {
-            strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
-        }
-    }
-
-    // nested loop variables
-    AstNode *next_loop = loop_node->next;
-    if (next_loop) {
-        log_debug("transpile nested loop");
-        log_enter();
-        transpile_loop_expr(tp, (AstLoopNode*)next_loop, then, use_array);
-        log_leave();
-    }
-    else { // loop body
-        Type *then_type = then->type;
-        // push to array (spreadable) or list
-        if (use_array) {
-            strbuf_append_str(tp->code_buf, " array_push(arr_out,");
-        } else {
-            strbuf_append_str(tp->code_buf, " list_push(ls,");
-        }
-        transpile_box_item(tp, then);
-        strbuf_append_str(tp->code_buf, ");");
-    }
-    // end the loop
-    bool is_any_array_type = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
-                              expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
-                              expr_type->type_id == LMD_TYPE_ARRAY_FLOAT ||
-                              expr_type->type_id == LMD_TYPE_ARRAY);
-    if (!is_named && (expr_type->type_id == LMD_TYPE_RANGE || is_any_array_type)) {
-        strbuf_append_char(tp->code_buf, '}');
-    }
-    strbuf_append_str(tp->code_buf, " }\n");
-}
-
 // Helper: transpile a where condition check
 void transpile_where_check(Transpiler* tp, AstNode* where_expr) {
     strbuf_append_str(tp->code_buf, "  if (!is_truthy(");
@@ -2485,58 +2322,41 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             // Generate loop iterations
             AstLoopNode* loop_node = (AstLoopNode*)loop;
             Type* expr_type = loop_node->as->type ? loop_node->as->type : &TYPE_ANY;
-            bool is_named = loop_node->is_named;
+            LoopKeyFilter key_filter = loop_node->key_filter;
+            bool has_index = (loop_node->index_name != NULL);
 
-            if (is_named) {
-                // 'at' iteration: iterate over attributes/fields
-                strbuf_append_str(tp->code_buf, " Item it=");
-                transpile_box_item(tp, loop_node->as);
-                strbuf_append_str(tp->code_buf, ";\n ArrayList* attr_keys=item_keys(it);\n");
-                strbuf_append_str(tp->code_buf, " for (int ki=0; attr_keys && ki<attr_keys->length; ki++) {\n");
-
-                if (loop_node->index_name) {
-                    // Two-variable form: for k, v at expr
-                    // k (index_name) = key name (String*), v (name) = value (Item)
-                    strbuf_append_str(tp->code_buf, "  String* _");
-                    strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
-
-                    strbuf_append_str(tp->code_buf, "  Item _");
-                    strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                    strbuf_append_str(tp->code_buf, "=item_attr(it, _");
-                    strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "->chars);\n");
-                } else {
-                    // Single-variable form: for v at expr -> v is key name
-                    strbuf_append_str(tp->code_buf, "  String* _");
-                    strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                    strbuf_append_str(tp->code_buf, "=attr_keys->data[ki];\n");
+            // Check if it's a known indexed type (array/range) at compile time
+            bool is_generic_array = (expr_type->type_id == LMD_TYPE_ARRAY);
+            TypeId nested_type_id = LMD_TYPE_ANY;
+            if (is_generic_array) {
+                TypeArray* arr_type = (TypeArray*)expr_type;
+                if (arr_type && arr_type->nested) {
+                    nested_type_id = arr_type->nested->type_id;
                 }
-            } else {
-                // 'in' iteration: standard indexed iteration
-                // Check if it's any array type (typed or generic)
-                // Note: AST uses LMD_TYPE_ARRAY with nested field for typed arrays
-                bool is_generic_array = (expr_type->type_id == LMD_TYPE_ARRAY);
-                TypeId nested_type_id = LMD_TYPE_ANY;
-                if (is_generic_array) {
-                    TypeArray* arr_type = (TypeArray*)expr_type;
-                    if (arr_type && arr_type->nested) {
-                        nested_type_id = arr_type->nested->type_id;
-                    }
-                }
+            }
+            bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
+                                   expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
+                                   expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
+            bool is_any_array = is_typed_array || is_generic_array;
+            bool is_range = (expr_type->type_id == LMD_TYPE_RANGE);
+            bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_LIST;
+            bool is_known_keyed = (expr_type->type_id == LMD_TYPE_MAP || expr_type->type_id == LMD_TYPE_OBJECT ||
+                                   expr_type->type_id == LMD_TYPE_VMAP);
 
-                bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
-                                       expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
-                                       expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
-                // Also check if it's a generic array with typed nested elements
-                bool is_nested_typed = is_generic_array && (nested_type_id == LMD_TYPE_INT ||
-                                                            nested_type_id == LMD_TYPE_INT64 ||
-                                                            nested_type_id == LMD_TYPE_FLOAT);
-                bool is_any_array = is_typed_array || is_generic_array;
-
-                // Select the appropriate array pointer type
+            // SYMBOL filter on known indexed type -> empty iteration
+            if (key_filter == LOOP_KEY_SYMBOL && is_known_indexed) {
+                // no keyed entries in arrays/ranges/lists
+                strbuf_append_str(tp->code_buf, " /* empty: symbol filter on indexed type */\n");
+            }
+            // INT filter on known keyed type -> empty iteration
+            else if (key_filter == LOOP_KEY_INT && is_known_keyed) {
+                strbuf_append_str(tp->code_buf, " /* empty: int filter on keyed type */\n");
+            }
+            // Fast path: known indexed type (array/range/list) with no key filter or INT filter
+            else if (is_known_indexed && key_filter != LOOP_KEY_SYMBOL) {
+                // Select the appropriate pointer type
                 const char* arr_decl;
-                if (expr_type->type_id == LMD_TYPE_RANGE) {
+                if (is_range) {
                     arr_decl = " Range *rng=";
                 } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT || nested_type_id == LMD_TYPE_INT) {
                     arr_decl = " ArrayInt *arr=";
@@ -2554,15 +2374,19 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
 
                 // Start the loop
                 strbuf_append_str(tp->code_buf,
-                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+                    is_range ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
                     is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
                     ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 
                 // Index variable if present
-                if (loop_node->index_name) {
-                    strbuf_append_str(tp->code_buf, "  long _");
+                if (has_index) {
+                    strbuf_append_str(tp->code_buf, "  Item _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=idx;\n");
+                    if (is_range) {
+                        strbuf_append_str(tp->code_buf, "=i2it(idx - rng->start);\n");
+                    } else {
+                        strbuf_append_str(tp->code_buf, "=i2it(idx);\n");
+                    }
                 }
 
                 // Construct loop variable type
@@ -2576,20 +2400,63 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     item_type = &TYPE_INT;
                 } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT64) {
                     item_type = &TYPE_INT64;
-                } else if (expr_type->type_id == LMD_TYPE_RANGE) {
+                } else if (is_range) {
                     item_type = &TYPE_INT;
                 }
 
                 write_type(tp->code_buf, item_type);
                 strbuf_append_str(tp->code_buf, " _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                if (expr_type->type_id == LMD_TYPE_RANGE) {
+                if (is_range) {
                     strbuf_append_str(tp->code_buf, "=idx;\n");
                 } else if (is_any_array) {
                     strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
                 } else {
                     strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
                 }
+            }
+            // Fast path: known keyed type (map/object/vmap) with no key filter or SYMBOL filter
+            else if (is_known_keyed && key_filter != LOOP_KEY_INT) {
+                strbuf_append_str(tp->code_buf, " Item it=");
+                transpile_box_item(tp, loop_node->as);
+                strbuf_append_str(tp->code_buf, ";\n ArrayList* attr_keys=item_keys(it);\n");
+                strbuf_append_str(tp->code_buf, " for (int ki=0; attr_keys && ki<attr_keys->length; ki++) {\n");
+
+                if (has_index) {
+                    // k = key symbol
+                    strbuf_append_str(tp->code_buf, "  Item _");
+                    strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+                    strbuf_append_str(tp->code_buf, "=s2it((String*)attr_keys->data[ki]);\n");
+                }
+                // v = value
+                strbuf_append_str(tp->code_buf, "  Item _");
+                strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
+                strbuf_append_str(tp->code_buf, "=item_attr(it, ((String*)attr_keys->data[ki])->chars);\n");
+            }
+            // Generic path: unknown type or element => use unified runtime helpers
+            else {
+                strbuf_append_str(tp->code_buf, " Item it=");
+                transpile_box_item(tp, loop_node->as);
+                strbuf_append_str(tp->code_buf, ";\n ArrayList* iter_keys=item_keys(it);\n");
+                char filter_str[4];
+                snprintf(filter_str, sizeof(filter_str), "%d", (int)key_filter);
+                strbuf_append_str(tp->code_buf, " int64_t iter_n=iter_len(it, iter_keys, ");
+                strbuf_append_str(tp->code_buf, filter_str);
+                strbuf_append_str(tp->code_buf, ");\n");
+                strbuf_append_str(tp->code_buf, " for (int64_t idx=0; idx<iter_n; idx++) {\n");
+
+                if (has_index) {
+                    strbuf_append_str(tp->code_buf, "  Item _");
+                    strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+                    strbuf_append_str(tp->code_buf, "=iter_key_at(it, iter_keys, idx, ");
+                    strbuf_append_str(tp->code_buf, filter_str);
+                    strbuf_append_str(tp->code_buf, ");\n");
+                }
+                strbuf_append_str(tp->code_buf, "  Item _");
+                strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
+                strbuf_append_str(tp->code_buf, "=iter_val_at(it, iter_keys, idx, ");
+                strbuf_append_str(tp->code_buf, filter_str);
+                strbuf_append_str(tp->code_buf, ");\n");
             }
 
             // Handle nested loops
@@ -2646,15 +2513,20 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 next_loop = next_loop->next;
             }
 
-            // Close main loop - 'at' iteration only has single brace, 'in' may have extra
+            // Close main loop - fast-path indexed arrays/ranges have extra closing brace
             bool is_any_array_type = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
                                       expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
                                       expr_type->type_id == LMD_TYPE_ARRAY_FLOAT ||
                                       expr_type->type_id == LMD_TYPE_ARRAY);
-            if (!is_named && (expr_type->type_id == LMD_TYPE_RANGE || is_any_array_type)) {
+            bool used_fast_indexed = is_known_indexed && key_filter != LOOP_KEY_SYMBOL;
+            bool needs_empty = (key_filter == LOOP_KEY_SYMBOL && is_known_indexed) ||
+                               (key_filter == LOOP_KEY_INT && is_known_keyed);
+            if (!needs_empty && used_fast_indexed && (is_range || is_any_array_type)) {
                 strbuf_append_char(tp->code_buf, '}');
             }
-            strbuf_append_str(tp->code_buf, " }\n");
+            if (!needs_empty) {
+                strbuf_append_str(tp->code_buf, " }\n");
+            }
         }
 
     // Track if we've applied any post-processing that converts Array to List

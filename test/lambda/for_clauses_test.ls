@@ -35,8 +35,8 @@ for (x in [10, 5, 15, 20, 25, 3], let squared = x * x where x > 5 order by squar
 // Test 11: for with float array
 [for (x in [2.8, 1.2, 3.14]) x]
 
-// Test 12: for with 'at' iteration (attribute/field iteration)
-[for (k, v at {name: "Alice", age: 30}) k]
+// Test 12: for with two-variable map iteration
+[for (k, v in {name: "Alice", age: 30}) k]
 
 "=== Different Types ==="
 

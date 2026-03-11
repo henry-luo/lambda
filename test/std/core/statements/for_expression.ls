@@ -8,4 +8,4 @@
 [for (i, v in [10, 20, 30]) i]
 [for (x in 1 to 5) x ** 2]
 [for (x in []) x]
-[for (k at {a: 1, b: 2}) k]
+[for (k, v in {a: 1, b: 2}) k]

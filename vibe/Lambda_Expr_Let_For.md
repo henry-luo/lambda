@@ -177,115 +177,114 @@ for x in [1, 2], y in [3, 4] {
 
 ## Proposed Design Changes
 
-### Indexed Iteration: `for i, v in expr`
+### Unified Two-Variable Iteration: `for k, v in container`
 
-Provides access to the iteration index alongside the value.
+All container types use a single `for k, v in container` syntax. The behavior of `k` and `v` depends on the container type.
 
 #### Syntax
 
 ```
-for <index>, <value> in <expr>
+for <key>, <value> in <container>
 ```
 
-#### Semantics
+#### Container-Specific Behavior
 
-- `<index>`: The 0-based index of the current iteration
-- `<value>`: The current element value
-- Works with arrays, lists, ranges, and other iterables
+| Container Type    | `k`                  | `v`             | Iteration Order                        |
+|-------------------|----------------------|-----------------|----------------------------------------|
+| Range             | 0-based index (int)  | value (int)     | start to end                           |
+| Array / List      | 0-based index (int)  | element value   | sequential                             |
+| Map / Object      | key (symbol)         | value           | definition order                       |
+| Element           | key or index         | value           | attributes first (keyed), then children (indexed) |
+
+For **element**, `for k, v in element` iterates over **all entries**: first all attributes (where `k` is a symbol key), then all children (where `k` is an integer index). This provides a complete view of the element's contents.
 
 #### Examples
 
 ```lambda
-// array with index
-(for (i, v in [10, 20, 30]) {index: i, value: v})
-// [{index: 0, value: 10}, {index: 1, value: 20}, {index: 2, value: 30}]
+// array: k = index, v = value
+(for (i, v in [10, 20, 30]) [i, v])
+// [[0, 10], [1, 20], [2, 30]]
 
-// enumerate items
-for i, item in ["a", "b", "c"] {
-    print(i, ": ", item)  // 0: a, 1: b, 2: c
-}
-```
+// range: k = index, v = value (same as index for range)
+(for (i, v in 1 to 3) [i, v])
+// [[0, 1], [1, 2], [2, 3]]
 
-#### Map Iteration: `for k, v in map`
-
-When iterating over a map, the two-variable form provides key-value pairs.
-
-```lambda
+// map: k = key (symbol), v = value
 let m = {name: "Alice", age: 30}
+(for (k, v in m) [k, v])
+// [['name, "Alice"], ['age, 30]]
 
-// iterate over key-value pairs
-(for (k, v in m) k ++ ": " ++ str(v))
-// ["name: Alice", "age: 30"]
-
-for k, v in m {
-    print(k, "=", v)
-}
-```
-
-#### Element Children Iteration: `for k, v in element`
-
-When iterating over an element, the two-variable form iterates over children with their indices.
-
-```lambda
-let el = <div; <span>"Hello">, <span>"World">>
-
-// iterate over children with index
-(for (i, child in el) {pos: i, tag: child.0})
-// [{pos: 0, tag: 'span}, {pos: 1, tag: 'span}]
+// element: attributes first, then children
+let el = <div class: "main", id: "root"; <span>"Hello">, <span>"World">>
+(for (k, v in el) [k, v])
+// [['class, "main"], ['id, "root"], [0, <span>"Hello">], [1, <span>"World">]]
 ```
 
 ---
 
-### Attribute Iteration: `for k, v at expr`
+### Fine-Tuned For-Loop with Type-Annotated Key
 
-The `at` keyword provides access to attributes/named properties rather than children/values.
+The key variable can carry a type annotation to restrict iteration to specific entry kinds:
 
-#### Syntax
+#### `for k:int, v in container` — Indexed Values Only
+
+Iterates only over positionally-indexed entries. For elements, this means **only children** (skipping attributes).
 
 ```
-for <value> at <expr>
-for <key>, <value> at <expr>
+for <key>:int, <value> in <container>
 ```
 
-#### Semantics
-
-- `at` signals iteration over attributes/named properties
-- For maps: iterates over key-value pairs (same as `in`)
-- For elements: iterates over attributes (not children)
-
-#### Map Iteration: `for k, v at map`
+| Container Type    | Behavior                              |
+|-------------------|---------------------------------------|
+| Range / Array / List | Same as plain `for k, v in ...`   |
+| Map / Object      | No items (maps have no indexed entries) |
+| Element           | Only children (content), k = 0-based index |
 
 ```lambda
-let m = {x: 1, y: 2, z: 3}
+let el = <div class: "main"; <span>"Hello">, <span>"World">>
 
-// single variable: iterate over values
-(for (v at m) v * 2)  // [2, 4, 6]
+// only children
+(for (i:int, child in el) [i, child])
+// [[0, <span>"Hello">], [1, <span>"World">]]
 
-// two variables: iterate over key-value pairs
-(for (k, v at m) k ++ "=" ++ str(v))  // ["x=1", "y=2", "z=3"]
+// array (same as untyped)
+(for (i:int, v in [10, 20]) [i, v])
+// [[0, 10], [1, 20]]
 ```
 
-#### Element Attribute Iteration: `for k, v at element`
+#### `for k:symbol, v in container` — Keyed Values Only
+
+Iterates only over keyed (named) entries. For elements, this means **only attributes** (skipping children).
+
+```
+for <key>:symbol, <value> in <container>
+```
+
+| Container Type    | Behavior                              |
+|-------------------|---------------------------------------|
+| Range / Array / List | No items (these have no keyed entries) |
+| Map / Object      | Same as plain `for k, v in ...`    |
+| Element           | Only attributes, k = key symbol    |
 
 ```lambda
-let el = <div class: "container", id: "main"; "Content">
+let el = <div class: "main", id: "root"; <span>"Hello">>
 
-// iterate over attributes
-(for (k, v at el) k ++ ": " ++ v)
-// ["class: container", "id: main"]
+// only attributes
+(for (k:symbol, v at el) [k, v])
+// [['class, "main"], ['id, "root"]]
 
-// single variable: attribute values only
-(for (v at el) v)  // ["container", "main"]
+// map (same as untyped)
+(for (k:symbol, v in {x: 1, y: 2}) [k, v])
+// [['x, 1], ['y, 2]]
 ```
 
-#### Comparison: `in` vs `at`
+#### Summary: Key Type Filter
 
-| Expression | `in` iterates over | `at` iterates over |
-|------------|-------------------|--------------------|
-| Array/List | Elements (indexed) | N/A |
-| Map | Key-value pairs | Key-value pairs (same) |
-| Element | Children (indexed) | Attributes (key-value) |
-| Range | Values in range | N/A |
+| Syntax | Filter | Element iteration |
+|--------|--------|-------------------|
+| `for k, v in container` | All entries | Attributes + children |
+| `for k:int, v in container` | Indexed only | Children only |
+| `for k:symbol, v in container` | Keyed only | Attributes only |
 
 ---
 
@@ -515,13 +514,14 @@ let grid = for (x in 1 to 3, y in 1 to 3) {x: x, y: y}
 | Pattern | Meaning |
 |---------|---------|
 | `for (v in arr)` | Iterate over array/list values |
-| `for (i, v in arr)` | Iterate with 0-based index |
-| `for (k, v in map)` | Iterate over map key-value pairs |
-| `for (i, child in elem)` | Iterate over element children with index |
-| `for (v at map)` | Iterate over map values |
-| `for (k, v at map)` | Iterate over map key-value pairs |
-| `for (v at elem)` | Iterate over element attribute values |
-| `for (k, v at elem)` | Iterate over element attribute key-value pairs |
+| `for (v in map)` | Iterate over map values |
+| `for (k, v in arr)` | Iterate with 0-based index |
+| `for (k, v in map)` | Iterate over map key-value pairs (k = symbol) |
+| `for (k, v in elem)` | Iterate over element attributes + children |
+| `for (k:int, v in elem)` | Iterate over element children only (indexed) |
+| `for (k:symbol, v in elem)` | Iterate over element attributes only (keyed) |
+| `for (k:int, v in arr)` | Same as `for k, v in arr` |
+| `for (k:symbol, v in map)` | Same as `for k, v in map` |
 
 ### Decomposition Patterns
 

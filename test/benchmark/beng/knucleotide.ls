@@ -108,7 +108,7 @@ pn print_frequencies(seq, k) {
     var total = len(seq) - k + 1
 
     // collect entries as [kmer, count] pairs
-    var entries = [for (key, val at counts) [key, val]]
+    var entries = [for (key, val in counts) [key, val]]
 
     // sort by count descending, then alphabetically
     entries = sort_entries(entries)
