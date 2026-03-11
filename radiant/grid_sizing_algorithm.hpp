@@ -386,7 +386,6 @@ inline void increase_sizes_for_spanning_item(
         auto max_type = track.max_track_sizing_function.type;
         return max_type == SizingFunctionType::MaxContent ||
                max_type == SizingFunctionType::Auto ||
-               max_type == SizingFunctionType::MinContent ||
                max_type == SizingFunctionType::FitContentPx ||
                max_type == SizingFunctionType::FitContentPercent ||
                max_type == SizingFunctionType::Percent;
@@ -626,7 +625,6 @@ inline void resolve_intrinsic_track_sizes(
                 auto max_t = tracks[ii].max_track_sizing_function.type;
                 if (max_t == SizingFunctionType::MaxContent ||
                     max_t == SizingFunctionType::Auto ||
-                    max_t == SizingFunctionType::MinContent ||
                     max_t == SizingFunctionType::FitContentPx ||
                     max_t == SizingFunctionType::FitContentPercent ||
                     max_t == SizingFunctionType::Percent) {
