@@ -6755,6 +6755,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_expr(tp, ts_node_named_child(expr_node, 0));
     case SYM_BINARY_TYPE:
         return build_binary_type(tp, expr_node);
+    case SYM_FN_TYPE:
+        return build_func_type(tp, expr_node);
     case sym_occurrence_type:
         return build_occurrence_type(tp, expr_node);
     case SYM_RANGE_TYPE:
