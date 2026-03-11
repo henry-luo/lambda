@@ -89,7 +89,7 @@ fn serialize_children_rec(el, i, n, acc) {
 // ============================================================
 
 fn serialize_attrs(el) {
-    let pairs = [for (k, v at el) {key: k, val: v}]
+    let pairs = [for (k, v in el) {key: k, val: v}]
     if (len(pairs) == 0) { "" }
     else { serialize_attrs_rec(pairs, 0, len(pairs), "") }
 }
