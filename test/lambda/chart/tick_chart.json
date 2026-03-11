@@ -1,0 +1,18 @@
+{
+  "width": 400,
+  "height": 300,
+  "data": {
+    "values": [
+      {"x": "A", "y": 10},
+      {"x": "B", "y": 30},
+      {"x": "C", "y": 25},
+      {"x": "D", "y": 45},
+      {"x": "E", "y": 35}
+    ]
+  },
+  "mark": {"type": "tick"},
+  "encoding": {
+    "x": {"field": "x", "type": "nominal"},
+    "y": {"field": "y", "type": "quantitative"}
+  }
+}
