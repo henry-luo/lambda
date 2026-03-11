@@ -29,16 +29,16 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| fib | recursive |   2.1 |   2.0 |   1.0 |    18 |   2.0 |    22 | 1.03x | 0.09x |
-| fibfp | recursive |   3.6 |   3.7 |   1.2 |    19 |   1.8 |    23 | 2.04x | 0.15x |
-| tak | recursive |  0.15 |  0.17 |  0.11 |   2.9 |  0.80 |   2.2 | 0.19x | 0.07x |
+| fib | recursive |   2.1 |   2.0 |  0.99 |    18 |   2.0 |    22 | 1.03x | 0.09x |
+| fibfp | recursive |   3.6 |   3.7 |   1.0 |    19 |   1.8 |    23 | 2.04x | 0.15x |
+| tak | recursive |  0.15 |  0.17 |  0.10 |   2.9 |  0.80 |   2.2 | 0.19x | 0.07x |
 | cpstak | closure |  0.30 |  0.33 |  0.22 |   5.7 |  1.00 |   4.5 | 0.31x | 0.07x |
-| sum | iterative |  0.28 |   1.9 |    21 |    32 |   1.2 |    38 | 0.24x | 0.007x |
-| sumfp | iterative | 0.069 |  0.33 |   4.4 |   3.8 |  0.87 |   2.8 | 0.08x | 0.02x |
-| nqueens | backtrack |   7.4 |   6.6 |    41 |   9.7 |   1.8 |   3.5 | 4.12x | 2.11x |
-| fft | numeric |  0.19 |   1.0 |   2.4 |   2.8 |   1.7 |   4.3 | 0.11x | 0.04x |
-| mbrot | numeric |  0.60 |  0.60 |    17 |    18 |   1.8 |    15 | 0.34x | 0.04x |
-| ack | recursive |    10 |   9.8 |   9.1 |   --- |    14 |   156 | 0.76x | 0.07x |
+| sum | iterative |  0.28 |   1.9 |    94 |    32 |   1.2 |    38 | 0.24x | 0.007x |
+| sumfp | iterative | 0.069 |  0.33 |    14 |   3.8 |  0.87 |   2.8 | 0.08x | 0.02x |
+| nqueens | backtrack |   7.4 |   6.6 |   6.8 |   9.7 |   1.8 |   3.5 | 4.12x | 2.11x |
+| fft | numeric |  0.19 |   1.0 |   9.8 |   2.8 |   1.7 |   4.3 | 0.11x | 0.04x |
+| mbrot | numeric |  0.60 |  0.60 |    55 |    18 |   1.8 |    15 | 0.34x | 0.04x |
+| ack | recursive |    10 |   9.8 |   8.1 |   --- |    14 |   156 | 0.76x | 0.07x |
 
 **Geometric mean MIR/Node.js: 0.44x** — Lambda faster on 7/10 benchmarks
 **Geometric mean MIR/Python: 0.07x** — Lambda faster on 9/10 benchmarks
@@ -51,20 +51,20 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| sieve | micro | 0.055 | 0.051 |  0.17 |  0.60 |  0.38 | 1.76s | 0.15x | 0.000x |
-| permute | micro | 0.066 | 0.065 |   3.1 |   1.6 |  0.81 | 2.11s | 0.08x | 0.000x |
-| queens | micro |  0.15 |  0.13 |   2.8 |   1.1 |  0.64 | 1.14s | 0.23x | 0.000x |
-| towers | micro |  0.22 |  0.11 |   5.9 |   2.3 |   1.1 | 1.11s | 0.20x | 0.000x |
-| bounce | micro |  0.20 |  0.14 |   2.2 |  0.96 |  0.55 | 1.39s | 0.36x | 0.000x |
-| list | micro | 0.032 |  0.62 |   1.4 |  0.92 |  0.50 |   976 | 0.06x | 0.000x |
-| storage | micro |  0.33 |  0.48 |   1.6 |   2.7 |  0.64 | 1.27s | 0.52x | 0.000x |
-| mandelbrot | compute |    31 |    51 |   144 |   888 |    32 |   --- | 0.97x | --- |
-| nbody | compute |    48 |    85 |   514 |   167 |   5.6 |   135 | 8.64x | 0.36x |
-| richards | macro |   246 |   212 | 1.05s |   194 |    48 |   168 | 5.16x | 1.46x |
-| json | macro |   3.3 |   3.2 |    61 |    12 |   2.8 |   7.1 | 1.21x | 0.47x |
-| deltablue | macro |    99 |    96 |   220 |   113 |    13 |    68 | 7.79x | 1.45x |
-| havlak | macro |   183 |   145 | 9.13s | 4.09s |    92 | 2.11s | 1.99x | 0.09x |
-| cd | macro |   528 |   603 | 2.26s | 1.06s |    37 |   --- | 14.3x | --- |
+| sieve | micro | 0.055 | 0.051 |  0.77 |  0.60 |  0.38 | 1.76s | 0.15x | 0.000x |
+| permute | micro | 0.066 | 0.065 |    13 |   1.6 |  0.81 | 2.11s | 0.08x | 0.000x |
+| queens | micro |  0.15 |  0.13 |    11 |   1.1 |  0.64 | 1.14s | 0.23x | 0.000x |
+| towers | micro |  0.22 |  0.11 |    23 |   2.3 |   1.1 | 1.11s | 0.20x | 0.000x |
+| bounce | micro |  0.20 |  0.14 |    10 |  0.96 |  0.55 | 1.39s | 0.36x | 0.000x |
+| list | micro | 0.032 |  0.62 |   7.9 |  0.92 |  0.50 |   976 | 0.06x | 0.000x |
+| storage | micro |  0.33 |  0.48 |   6.2 |   2.7 |  0.64 | 1.27s | 0.52x | 0.000x |
+| mandelbrot | compute |    31 |    51 |   279 |   888 |    32 |   --- | 0.97x | --- |
+| nbody | compute |    48 |    85 | 2.06s |   167 |   5.6 |   135 | 8.64x | 0.36x |
+| richards | macro |   246 |   212 | 3.31s |   194 |    48 |   168 | 5.16x | 1.46x |
+| json | macro |   3.3 |   3.2 |   160 |    12 |   2.8 |   7.1 | 1.21x | 0.47x |
+| deltablue | macro |    99 |    96 |   935 |   113 |    13 |    68 | 7.79x | 1.45x |
+| havlak | macro |   183 |   145 | 39.66s | 4.09s |    92 | 2.11s | 1.99x | 0.09x |
+| cd | macro |   528 |   603 | 11.66s | 1.06s |    37 |   --- | 14.3x | --- |
 
 **Geometric mean MIR/Node.js: 0.83x** — Lambda faster on 8/14 benchmarks
 **Geometric mean MIR/Python: 0.00x** — Lambda faster on 10/12 benchmarks
@@ -77,16 +77,16 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| binarytrees | allocation |   7.5 |   7.7 |    21 |    28 |   4.1 |    10 | 1.81x | 0.72x |
-| fannkuch | permutation |  0.73 |   1.1 |  0.53 |   7.3 |   4.1 |   5.1 | 0.18x | 0.14x |
-| fasta | generation |   1.1 |  0.91 |   1.2 |    11 |   6.2 |   2.0 | 0.19x | 0.57x |
-| knucleotide | hashing |   3.1 |   4.0 | 0.076 |   --- |   5.0 |   3.9 | 0.61x | 0.79x |
-| mandelbrot | numeric |   144 |   240 |    79 |   698 |    16 | 1.37s | 9.25x | 0.11x |
-| nbody | numeric |    48 |    85 |   423 |   155 |   8.1 |   172 | 5.96x | 0.28x |
-| pidigits | bignum |  0.44 |  0.27 | 0.042 |  0.16 |   2.0 |  0.10 | 0.22x | 4.29x |
-| regexredux | regex |   1.2 |   1.4 | 0.090 |   --- |   2.5 |   1.5 | 0.50x | 0.85x |
-| revcomp | string |   1.9 |   1.9 | 0.001 |   --- |   3.4 | 0.085 | 0.55x | 22.2x |
-| spectralnorm | numeric |    13 |    10 |    19 |    64 |   2.8 |    47 | 4.72x | 0.28x |
+| binarytrees | allocation |   7.5 |   7.7 |   114 |    28 |   4.1 |    10 | 1.81x | 0.72x |
+| fannkuch | permutation |  0.73 |   1.1 |   1.6 |   7.3 |   4.1 |   5.1 | 0.18x | 0.14x |
+| fasta | generation |   1.1 |  0.91 |   3.9 |    11 |   6.2 |   2.0 | 0.19x | 0.57x |
+| knucleotide | hashing |   3.1 |   4.0 | 0.088 |   --- |   5.0 |   3.9 | 0.61x | 0.79x |
+| mandelbrot | numeric |   144 |   240 | 2.85s |   698 |    16 | 1.37s | 9.25x | 0.11x |
+| nbody | numeric |    48 |    85 | 1.75s |   155 |   8.1 |   172 | 5.96x | 0.28x |
+| pidigits | bignum |  0.44 |  0.27 | 0.083 |  0.16 |   2.0 |  0.10 | 0.22x | 4.29x |
+| regexredux | regex |   1.2 |   1.4 | 0.095 |   --- |   2.5 |   1.5 | 0.50x | 0.85x |
+| revcomp | string |   1.9 |   1.9 | 0.002 |   --- |   3.4 | 0.085 | 0.55x | 22.2x |
+| spectralnorm | numeric |    13 |    10 |    80 |    64 |   2.8 |    47 | 4.72x | 0.28x |
 
 **Geometric mean MIR/Node.js: 0.95x** — Lambda faster on 6/10 benchmarks
 **Geometric mean MIR/Python: 0.71x** — Lambda faster on 8/10 benchmarks
@@ -99,13 +99,13 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| brainfuck | interpreter |   172 |   272 |   529 |   906 |    45 |   691 | 3.86x | 0.25x |
-| matmul | numeric |   8.9 |   129 | 1.19s |   546 |    16 |   535 | 0.57x | 0.02x |
-| primes | numeric |   7.2 |   9.8 |   8.3 |    97 |   4.5 |    97 | 1.61x | 0.07x |
-| base64 | string |   220 |   210 |   340 |   182 |    18 |    85 | 12.5x | 2.59x |
-| levenshtein | string |   7.8 |    13 |    14 |    55 |   4.0 |    71 | 1.93x | 0.11x |
-| json_gen | data |    64 |    65 |    24 |    21 |   6.3 |   8.3 | 10.2x | 7.70x |
-| collatz | numeric |   300 |   337 | 6.21s | 6.22s | 1.42s | 8.00s | 0.21x | 0.04x |
+| brainfuck | interpreter |   172 |   272 | 2.31s |   906 |    45 |   691 | 3.86x | 0.25x |
+| matmul | numeric |   8.9 |   129 | 2.83s |   546 |    16 |   535 | 0.57x | 0.02x |
+| primes | numeric |   7.2 |   9.8 |    25 |    97 |   4.5 |    97 | 1.61x | 0.07x |
+| base64 | string |   220 |   210 |   900 |   182 |    18 |    85 | 12.5x | 2.59x |
+| levenshtein | string |   7.8 |    13 |    71 |    55 |   4.0 |    71 | 1.93x | 0.11x |
+| json_gen | data |    64 |    65 |    79 |    21 |   6.3 |   8.3 | 10.2x | 7.70x |
+| collatz | numeric |   300 |   337 | 18.53s | 6.22s | 1.42s | 8.00s | 0.21x | 0.04x |
 
 **Geometric mean MIR/Node.js: 2.10x** — Lambda slower on 2/7 benchmarks
 **Geometric mean MIR/Python: 0.22x** — Lambda faster on 5/7 benchmarks
@@ -118,18 +118,18 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| triangl | search |   181 | 1.11s | 1.39s | 2.23s |    68 | 2.68s | 2.66x | 0.07x |
-| array1 | array |  0.56 |   5.7 |  0.58 |    37 |   1.8 |    40 | 0.30x | 0.01x |
-| deriv | symbolic |    19 |    20 |    48 |    69 |   3.8 |    26 | 5.14x | 0.73x |
-| diviter | iterative |   274 |   272 | 10.61s | 26.85s |   473 | 26.25s | 0.58x | 0.01x |
-| divrec | recursive |  0.84 |   7.4 |  0.85 |    38 |   7.9 |    45 | 0.11x | 0.02x |
-| gcbench | allocation |   500 |   478 |   619 |   667 |    25 |   257 | 20.3x | 1.95x |
-| paraffins | combinat |  0.33 |  0.89 |   1.1 |   2.8 |   1.0 |   2.9 | 0.33x | 0.11x |
-| pnpoly | numeric |    58 |    54 |    79 |   206 |   6.1 |   112 | 9.61x | 0.52x |
-| primes | iterative |   7.2 |    10 |   8.1 |    97 |   4.7 |   121 | 1.54x | 0.06x |
-| puzzle | search |   3.9 |    17 |   --- |    29 |   3.2 |    21 | 1.19x | 0.19x |
-| quicksort | sorting |   2.9 |   4.9 |   9.1 |    19 |   1.6 |    26 | 1.78x | 0.11x |
-| ray | numeric |   7.0 |   6.9 |    12 |    14 |   3.5 |    12 | 1.99x | 0.60x |
+| triangl | search |   181 | 1.11s | 6.82s | 2.23s |    68 | 2.68s | 2.66x | 0.07x |
+| array1 | array |  0.56 |   5.7 |  0.56 |    37 |   1.8 |    40 | 0.30x | 0.01x |
+| deriv | symbolic |    19 |    20 |   894 |    69 |   3.8 |    26 | 5.14x | 0.73x |
+| diviter | iterative |   274 |   272 | 61.97s | 26.85s |   473 | 26.25s | 0.58x | 0.01x |
+| divrec | recursive |  0.84 |   7.4 |  0.82 |    38 |   7.9 |    45 | 0.11x | 0.02x |
+| gcbench | allocation |   500 |   478 | 2.86s |   667 |    25 |   257 | 20.3x | 1.95x |
+| paraffins | combinat |  0.33 |  0.89 |   6.1 |   2.8 |   1.0 |   2.9 | 0.33x | 0.11x |
+| pnpoly | numeric |    58 |    54 |   312 |   206 |   6.1 |   112 | 9.61x | 0.52x |
+| primes | iterative |   7.2 |    10 |    26 |    97 |   4.7 |   121 | 1.54x | 0.06x |
+| puzzle | search |   3.9 |    17 |    82 |    29 |   3.2 |    21 | 1.19x | 0.19x |
+| quicksort | sorting |   2.9 |   4.9 |    55 |    19 |   1.6 |    26 | 1.78x | 0.11x |
+| ray | numeric |   7.0 |   6.9 |    40 |    14 |   3.5 |    12 | 1.99x | 0.60x |
 
 **Geometric mean MIR/Node.js: 1.48x** — Lambda slower on 4/12 benchmarks
 **Geometric mean MIR/Python: 0.12x** — Lambda faster on 11/12 benchmarks
@@ -142,15 +142,15 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| nbody | numeric |    48 |    85 |   --- |   --- |   5.5 |   146 | 8.64x | 0.33x |
-| cube3d | 3d |    49 |   141 |   --- |   228 |    18 |    46 | 2.76x | 1.08x |
+| nbody | numeric |    48 |    85 | 1.91s |   --- |   5.5 |   146 | 8.64x | 0.33x |
+| cube3d | 3d |    49 |   141 |    22 |   228 |    18 |    46 | 2.76x | 1.08x |
 | navier_stokes | numeric |   815 |   801 |   --- |    95 |    14 | 1.84s | 56.3x | 0.44x |
-| richards | macro |   256 |   239 |   --- |   --- |   8.3 |   225 | 30.9x | 1.14x |
-| splay | data |   159 |   --- |   --- |   199 |    20 |   326 | 7.77x | 0.49x |
-| deltablue | macro |    19 |    19 |   --- |   --- |    11 |    18 | 1.74x | 1.04x |
+| richards | macro |   256 |   239 |   483 |   --- |   8.3 |   225 | 30.9x | 1.14x |
+| splay | data |   159 |   --- |    48 |   199 |    20 |   326 | 7.77x | 0.49x |
+| deltablue | macro |    19 |    19 |    48 |   --- |    11 |    18 | 1.74x | 1.04x |
 | hashmap | data |    98 |    99 |   --- |   323 |    16 |   184 | 5.98x | 0.53x |
-| crypto_sha1 | crypto |    16 |    20 |   --- |   222 |   9.0 |   321 | 1.82x | 0.05x |
-| raytrace3d | 3d |   376 |   562 |   --- |   170 |    19 |   144 | 20.1x | 2.61x |
+| crypto_sha1 | crypto |    16 |    20 |   141 |   222 |   9.0 |   321 | 1.82x | 0.05x |
+| raytrace3d | 3d |   376 |   562 |   709 |   170 |    19 |   144 | 20.1x | 2.61x |
 
 **Geometric mean MIR/Node.js: 7.92x** — Lambda slower on 0/9 benchmarks
 **Geometric mean MIR/Python: 0.57x** — Lambda faster on 5/9 benchmarks
@@ -474,7 +474,7 @@ Key observations:
 - **AWFY Python** benchmarks use the official Python port with harness. Class names: NBody, DeltaBlue, CD (not capitalize()).
 - **LambdaJS** now passes all AWFY benchmarks including bounce, storage, json, deltablue, havlak, and cd (previously failing due to missing ES6 class features).
 - **QuickJS** fails on ack (R7RS) due to stack overflow on deep recursion.
-- **JetStream** benchmarks run on MIR, C2MIR, Node.js, and Python (for deltablue, richards, nbody). No LambdaJS/QuickJS ports.
+- **JetStream** benchmarks run on MIR, C2MIR, LambdaJS, Node.js, and Python (for deltablue, richards, nbody). LambdaJS passes 8/9 benchmarks (hashmap times out). No QuickJS ports.
 - **Python** benchmarks not available for: AWFY/cd, JetStream/cube3d, JetStream/navier_stokes, JetStream/splay, JetStream/hashmap, JetStream/crypto_sha1, JetStream/raytrace3d.
 - All times in **milliseconds** unless noted with 's' suffix (seconds).
 - The `json` AWFY benchmark workload was corrected between R2 and R3 (R2: 0.028ms was a minimal-workload test).
