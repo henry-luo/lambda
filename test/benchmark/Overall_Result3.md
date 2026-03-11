@@ -266,6 +266,117 @@
 
 *Workload or test changes between rounds may account for some differences.
 
+### LambdaJS vs. Node.js (V8)
+
+> LambdaJS is Lambda's built-in JavaScript JIT engine (~18K LOC). Node.js uses Google's V8 with TurboFan optimizing JIT.
+> Ratio = LambdaJS time / Node.js time. Values < 1.0 mean LambdaJS is faster.
+> Only benchmarks where both LambdaJS and Node.js have results are included (60 of 62).
+
+| Suite | Geo. Mean | LJS Wins | Node Wins | Total |
+|-------|----------:|:--------:|:---------:|:-----:|
+| R7RS | 2.3x | 5 | 5 | 10 |
+| AWFY | 34.9x | 0 | 14 | 14 |
+| BENG | 0.8x | 6 | 4 | 10 |
+| KOSTYA | 25.7x | 0 | 7 | 7 |
+| LARCENY | 15.5x | 2 | 10 | 12 |
+| JetStream | 14.7x | 0 | 7 | 7 |
+| **Overall** | **8.8x** | **13** | **47** | **60** |
+
+#### Per-Benchmark Comparison (LJS/Node ratio)
+
+| Benchmark | Suite | LambdaJS | Node.js | LJS/Node |
+|-----------|-------|----------:|--------:|---------:|
+| revcomp | BENG | 0.002 | 3.4 | **0.001x** |
+| knucleotide | BENG | 0.088 | 5.0 | **0.02x** |
+| regexredux | BENG | 0.095 | 2.5 | **0.04x** |
+| pidigits | BENG | 0.083 | 2.0 | **0.04x** |
+| divrec | LARCENY | 0.82 | 7.9 | **0.10x** |
+| tak | R7RS | 0.10 | 0.80 | **0.12x** |
+| cpstak | R7RS | 0.22 | 1.00 | **0.22x** |
+| array1 | LARCENY | 0.56 | 1.8 | **0.31x** |
+| fannkuch | BENG | 1.6 | 4.1 | **0.39x** |
+| fib | R7RS | 0.99 | 2.0 | **0.50x** |
+| fibfp | R7RS | 1.0 | 1.8 | **0.56x** |
+| ack | R7RS | 8.1 | 14 | **0.58x** |
+| fasta | BENG | 3.9 | 6.2 | **0.63x** |
+| cube3d | JetStream | 22 | 18 | 1.22x |
+| sieve | AWFY | 0.77 | 0.38 | 2.03x |
+| splay | JetStream | 48 | 20 | 2.40x |
+| nqueens | R7RS | 6.8 | 1.8 | 3.78x |
+| deltablue | JetStream | 48 | 11 | 4.36x |
+| primes | LARCENY | 26 | 4.7 | 5.53x |
+| primes | KOSTYA | 25 | 4.5 | 5.56x |
+| fft | R7RS | 9.8 | 1.7 | 5.76x |
+| paraffins | LARCENY | 6.1 | 1.0 | 6.10x |
+| mandelbrot | AWFY | 279 | 32 | 8.72x |
+| storage | AWFY | 6.2 | 0.64 | 9.69x |
+| ray | LARCENY | 40 | 3.5 | 11.4x |
+| json_gen | KOSTYA | 79 | 6.3 | 12.5x |
+| collatz | KOSTYA | 18.53s | 1.42s | 13.0x |
+| crypto_sha1 | JetStream | 141 | 9.0 | 15.7x |
+| list | AWFY | 7.9 | 0.50 | 15.8x |
+| permute | AWFY | 13 | 0.81 | 16.0x |
+| sumfp | R7RS | 14 | 0.87 | 16.1x |
+| queens | AWFY | 11 | 0.64 | 17.2x |
+| levenshtein | KOSTYA | 71 | 4.0 | 17.8x |
+| bounce | AWFY | 10 | 0.55 | 18.2x |
+| towers | AWFY | 23 | 1.1 | 20.9x |
+| puzzle | LARCENY | 82 | 3.2 | 25.6x |
+| binarytrees | BENG | 114 | 4.1 | 27.8x |
+| spectralnorm | BENG | 80 | 2.8 | 28.6x |
+| mbrot | R7RS | 55 | 1.8 | 30.6x |
+| quicksort | LARCENY | 55 | 1.6 | 34.4x |
+| raytrace3d | JetStream | 709 | 19 | 37.3x |
+| base64 | KOSTYA | 900 | 18 | 50.0x |
+| pnpoly | LARCENY | 312 | 6.1 | 51.1x |
+| brainfuck | KOSTYA | 2.31s | 45 | 51.3x |
+| json | AWFY | 160 | 2.8 | 57.1x |
+| richards | JetStream | 483 | 8.3 | 58.2x |
+| richards | AWFY | 3.31s | 48 | 69.0x |
+| deltablue | AWFY | 935 | 13 | 71.9x |
+| sum | R7RS | 94 | 1.2 | 78.3x |
+| triangl | LARCENY | 6.82s | 68 | 100.3x |
+| gcbench | LARCENY | 2.86s | 25 | 114.4x |
+| diviter | LARCENY | 61.97s | 473 | 131.0x |
+| matmul | KOSTYA | 2.83s | 16 | 176.9x |
+| mandelbrot | BENG | 2.85s | 16 | 178.1x |
+| nbody | BENG | 1.75s | 8.1 | 216.0x |
+| deriv | LARCENY | 894 | 3.8 | 235.3x |
+| cd | AWFY | 11.66s | 37 | 315.1x |
+| nbody | JetStream | 1.91s | 5.5 | 347.3x |
+| nbody | AWFY | 2.06s | 5.6 | 367.9x |
+| havlak | AWFY | 39.66s | 92 | 431.1x |
+
+#### Performance Tiers (LambdaJS vs Node.js)
+
+| Tier | Count | Benchmarks |
+|------|------:|------------|
+| **LJS >10× faster** (< 0.1×) | 4 | revcomp (0.001x), knucleotide (0.02x), regexredux (0.04x), pidigits (0.04x) |
+| **LJS 2–10× faster** (0.1–0.5×) | 6 | divrec (0.10x), tak (0.12x), cpstak (0.22x), array1 (0.31x), fannkuch (0.39x), fib (0.50x) |
+| **LJS faster** (0.5–1.0×) | 3 | fibfp (0.56x), ack (0.58x), fasta (0.63x) |
+| **Comparable** (1–5×) | 5 | cube3d (1.2x), sieve (2.0x), splay (2.4x), nqueens (3.8x), deltablue (4.4x) |
+| **Node 5–50× faster** | 23 | primes, fft, paraffins, mandelbrot, storage, ray, json_gen, collatz, crypto_sha1, list, permute, sumfp, queens, levenshtein, bounce, towers, puzzle, binarytrees, spectralnorm, mbrot, quicksort, raytrace3d |
+| **Node 50–200× faster** | 13 | base64, pnpoly, brainfuck, json, richards(×2), deltablue, sum, triangl, gcbench, diviter, matmul, mandelbrot |
+| **Node >200× faster** | 6 | nbody(×3), deriv, cd, havlak |
+
+#### Analysis
+
+**Where LambdaJS beats Node.js V8 (13 benchmarks):**
+- **Delegating to Lambda's native engines** — revcomp, knucleotide, regexredux, pidigits use Lambda's built-in parsers and regex (RE2), bypassing JS-level overhead entirely. These are the strongest wins.
+- **Simple recursive functions** — tak (0.12x), cpstak (0.22x), fib (0.50x), fibfp (0.56x), ack (0.58x): LambdaJS's MIR JIT generates efficient code for pure function calls. V8's overhead from deoptimization guards and polymorphic inline caches hurts on these trivially monomorphic workloads.
+- **Small array/permutation code** — divrec (0.10x), array1 (0.31x), fannkuch (0.39x): efficient tight-loop compilation.
+
+**Where Node.js dominates (47 benchmarks):**
+- **Numeric-heavy loops** — sum (78×), sumfp (16×), mbrot (31×), nbody (216–368×), mandelbrot (178×): V8's TurboFan performs type specialization and SIMD optimizations that LambdaJS lacks.
+- **OOP/class-heavy code** — richards (58–69×), deltablue (72×), deriv (235×), havlak (431×): V8's hidden classes, inline caches, and on-stack replacement are designed for this pattern.
+- **GC-intensive** — gcbench (114×), binarytrees (28×), cd (315×): V8's generational GC with concurrent marking far outperforms Lambda's single-threaded GC.
+- **String/data processing** — base64 (50×), brainfuck (51×), json (57×): V8's optimized string representations and JIT-compiled string operations.
+
+**LambdaJS vs QuickJS (51 comparable benchmarks):**
+- Geometric mean: **1.56×** (LambdaJS slightly slower overall)
+- LambdaJS wins 15, QuickJS wins 36
+- LambdaJS's JIT advantage is offset by higher per-operation overhead in its runtime dispatch and GC pressure on OOP-heavy benchmarks.
+
 ---
 
 ## Memory Profiling (Peak RSS)
