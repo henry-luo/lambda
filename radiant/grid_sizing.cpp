@@ -889,15 +889,22 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
 
     // Use the enhanced track sizing algorithm from the adapter
     // This implements the full CSS Grid track sizing algorithm (§11.4-11.8)
+    // out_col_intrinsic_width receives the first-pass (pct-as-auto) width when pct tracks
+    // are re-resolved for an indefinite container — used to cap container size below.
+    float col_intrinsic_width = 0.0f;
     radiant::grid_adapter::run_enhanced_track_sizing(
         grid_layout,
         grid_layout->grid_items,
         grid_layout->item_count,
         sizing_width,
-        static_cast<float>(grid_layout->content_height)
+        static_cast<float>(grid_layout->content_height),
+        &col_intrinsic_width
     );
 
-    // For shrink-to-fit containers, update content_width based on resolved track sizes
+    // For shrink-to-fit containers, update content_width based on resolved track sizes.
+    // When percentage tracks exist, the container's intrinsic width (first-pass) is used
+    // as the upper bound: pct tracks may overflow the container, but the container size
+    // is determined by the non-pct content (CSS Grid §12.5).
     if (grid_layout->is_shrink_to_fit_width && grid_layout->computed_column_count > 0) {
         float total_column_width = 0;
         for (int i = 0; i < grid_layout->computed_column_count; i++) {
@@ -906,6 +913,10 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         // Add gaps between columns
         if (grid_layout->computed_column_count > 1) {
             total_column_width += grid_layout->column_gap * (grid_layout->computed_column_count - 1);
+        }
+        // Cap at the intrinsic (pre-pct-re-resolution) width when pct tracks would inflate it
+        if (col_intrinsic_width > 0.0f && col_intrinsic_width < total_column_width) {
+            total_column_width = col_intrinsic_width;
         }
         grid_layout->content_width = (int)total_column_width;
         log_debug("GRID shrink-to-fit: updated content_width to %d\n", grid_layout->content_width);

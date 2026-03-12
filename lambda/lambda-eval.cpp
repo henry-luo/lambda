@@ -773,6 +773,9 @@ Bool fn_is(Item a, Item b) {
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
                 a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
         }
+        else if (type_b == &LIT_TYPE_LIST) {  // fast path for generic list type
+            return a_type_id == LMD_TYPE_LIST;
+        }
         else if (type_b->type->type_id == LMD_TYPE_OBJECT && type_b->type != &TYPE_OBJECT) {
             // Nominal type check for named object types (e.g., c is Calc)
             if (a_type_id != LMD_TYPE_OBJECT) return BOOL_FALSE;
