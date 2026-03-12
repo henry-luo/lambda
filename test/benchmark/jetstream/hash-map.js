@@ -487,7 +487,7 @@ var HashMap = (function() {
                 return;
             for (var iter = map.entrySet().iterator(); iter.hasNext();) {
                 var entry = iter.next();
-                put(entry.key, entry.value);
+                this.put(entry.key, entry.value);
             }
         },
         

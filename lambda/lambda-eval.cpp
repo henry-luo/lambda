@@ -4803,6 +4803,20 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 return;
             }
 
+            // NULL → INT/FLOAT/STRING/FUNC fast path — same byte size (all 8 bytes)
+            // Avoids map_rebuild_for_type_change which allocates from data zone and
+            // can trigger GC compaction that corrupts field data at scale.
+            // Safe for JS constructor objects (non-pooled shapes).
+            if (field_type == LMD_TYPE_NULL) {
+                int old_bsz = type_info[field_type].byte_size;
+                int new_bsz = type_info[value_type].byte_size;
+                if (old_bsz == new_bsz) {
+                    map_field_store(field_ptr, value, value_type);
+                    entry->type = type_info[value_type].type;
+                    return;
+                }
+            }
+
             // Container/null type change — fast path (same byte size = sizeof(void*))
             // NULL↔MAP, NULL↔ARRAY, MAP↔ELEMENT, etc. all store pointers,
             // and _map_read_field handles null pointers for all container types.

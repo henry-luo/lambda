@@ -20,6 +20,11 @@
 // Initialized in transpile_js_to_mir() before JIT execution.
 Input* js_input = NULL;
 
+// Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
+Item _map_read_field(ShapeEntry* field, void* map_data);
+// Forward declaration for _map_get (used as fallback for nested/spread maps)
+Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
 
@@ -648,6 +653,50 @@ extern "C" Item js_constructor_create_object(Item callee) {
 // Forward declaration for prototype chain support
 extern "C" Item js_prototype_lookup(Item object, Item property);
 
+// P10f: Fast property lookup for JS objects.
+// Like _map_get but avoids strncmp+strlen overhead by using pre-computed key_len.
+// Still uses last-writer-wins since type changes can create duplicate shape entries.
+// Also handles spread/nested map entries (field->name == NULL).
+static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
+    TypeMap* map_type = (TypeMap*)m->type;
+    if (!map_type || !map_type->shape) return ItemNull;
+    ShapeEntry* field = map_type->shape;
+    Item result = ItemNull;
+    bool found = false;
+    while (field) {
+        if (!field->name) {
+            // spread/nested map — search recursively
+            Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
+            if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
+                // Use standard map_get for nested — rare case
+                bool nested_found;
+                Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
+                if (nested_found) {
+                    found = true;
+                    result = nested_result;
+                }
+            }
+        } else if (field->name->length == (size_t)key_len &&
+                   memcmp(field->name->str, key_str, key_len) == 0) {
+            found = true;
+            result = _map_read_field(field, m->data);
+            // don't return — later entries may override (type change duplicates)
+        }
+        field = field->next;
+    }
+    return result;
+}
+
+// P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
+// Initialized lazily on first use.
+static Item js_proto_key_item = {0};
+static Item js_get_proto_key() {
+    if (js_proto_key_item.item == 0) {
+        js_proto_key_item.item = s2it(heap_create_name("__proto__", 9));
+    }
+    return js_proto_key_item;
+}
+
 extern "C" Item js_property_get(Item object, Item key) {
     TypeId type = get_type_id(object);
 
@@ -673,10 +722,38 @@ extern "C" Item js_property_get(Item object, Item key) {
             return js_computed_style_get_property(object, key);
         }
         // Regular Lambda map (including JS objects)
-        Item result = map_get(object.map, key);
+        // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
+        Item result = ItemNull;
+        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+            const char* key_str = key.get_chars();
+            int key_len = (int)key.get_len();
+            result = js_map_get_fast(object.map, key_str, key_len);
+        } else {
+            result = map_get(object.map, key);  // fallback for non-string keys
+        }
         // Prototype chain fallback: if property not found on own object, walk __proto__
         if (result.item == ItemNull.item) {
             result = js_prototype_lookup(object, key);
+        }
+        // Getter property fallback: check for __get_<propName> on object or prototype
+        // Only check for getter if the key doesn't start with '_' (private properties
+        // never have getters) and is short enough to be a getter name
+        if (result.item == ItemNull.item && key._type_id == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
+                char getter_key[256];
+                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
+                // Use name pool lookup instead of heap allocation
+                Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
+                Item getter = map_get(object.map, gk);
+                if (getter.item == ItemNull.item) {
+                    getter = js_prototype_lookup(object, gk);
+                }
+                if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
+                    // Invoke getter with this = object (0 args)
+                    result = js_call_function(getter, object, NULL, 0);
+                }
+            }
         }
         return result;
     } else if (type == LMD_TYPE_ELEMENT) {
@@ -921,6 +998,35 @@ extern "C" Item js_array_get(Item array, Item index) {
     }
 
     return ItemNull;
+}
+
+// P10e: Fast array access with native int index (no js_get_number overhead)
+extern "C" Item js_array_get_int(Item array, int64_t index) {
+    Array* arr = array.array;
+    if (index >= 0 && index < arr->length) {
+        return arr->items[index];
+    }
+    return ItemNull;
+}
+
+// P10e: Fast array set with native int index
+extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
+    Array* arr = array.array;
+    if (index >= 0 && index < arr->length) {
+        arr->items[index] = value;
+    } else if (index >= 0) {
+        // Expand array: fill gaps with undefined, then set the value
+        Item undef = make_js_undefined();
+        while (arr->length < (int)index) {
+            array_push(arr, undef);
+        }
+        if ((int)index == arr->length) {
+            array_push(arr, value);
+        } else {
+            arr->items[index] = value;
+        }
+    }
+    return value;
 }
 
 extern "C" Item js_array_set(Item array, Item index, Item value) {
@@ -2140,27 +2246,42 @@ static const int PROTO_KEY_LEN = 9;
 extern "C" void js_set_prototype(Item object, Item prototype) {
     if (get_type_id(object) != LMD_TYPE_MAP) return;
     if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != ItemNull.item) return;
-    Item key = (Item){.item = s2it(heap_create_name(PROTO_KEY, PROTO_KEY_LEN))};
+    // P10d: use interned __proto__ key
+    Item key = js_get_proto_key();
     js_property_set(object, key, prototype);
 }
 
 // Get the prototype of an object (read __proto__ property)
+// P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
-    // direct map_get to read __proto__ without triggering prototype chain
-    Item key = (Item){.item = s2it(heap_create_name(PROTO_KEY, PROTO_KEY_LEN))};
-    return map_get(m, key);
+    // P10f+P10d: direct first-match lookup with interned key
+    return js_map_get_fast(m, PROTO_KEY, PROTO_KEY_LEN);
 }
 
 // Walk the prototype chain to find a property
+// P10f: uses first-match lookup on each prototype level
 extern "C" Item js_prototype_lookup(Item object, Item property) {
     // first check own properties (skip — caller already checked)
     // walk up the chain via __proto__
     Item proto = js_get_prototype(object);
     int depth = 0;
+    // P10f: extract key string once for first-match lookup
+    const char* key_str = NULL;
+    int key_len = 0;
+    if (get_type_id(property) == LMD_TYPE_STRING) {
+        String* s = it2s(property);
+        key_str = s->chars;
+        key_len = (int)s->len;
+    }
     while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
-        Item result = map_get(proto.map, property);
+        Item result;
+        if (key_str) {
+            result = js_map_get_fast(proto.map, key_str, key_len);
+        } else {
+            result = map_get(proto.map, property);
+        }
         if (result.item != ItemNull.item) return result;
         proto = js_get_prototype(proto);
         depth++;

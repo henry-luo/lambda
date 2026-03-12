@@ -5,7 +5,7 @@
   "pf1": 3.14,
   "pf2": 2.718,
   "pf3": -0.5,
-  "nan1": false,
+  "nan1": true,
   "nan2": false,
   "nan3": false,
   "fin1": true,
