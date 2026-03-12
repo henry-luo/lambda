@@ -515,7 +515,7 @@ Map* map_fill(Map* map, ...) {
 }
 
 // extract field value from a named shape entry's storage
-static Item _map_read_field(ShapeEntry* field, void* map_data) {
+Item _map_read_field(ShapeEntry* field, void* map_data) {
     TypeId type_id = field->type->type_id;
     void* field_ptr = (char*)map_data + field->byte_offset;
     switch (type_id) {
