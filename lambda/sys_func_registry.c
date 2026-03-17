@@ -59,14 +59,14 @@ static int64_t pipe_map_len(void* keys_ptr) {
 static Item pipe_map_val(Item data, void* keys_ptr, int64_t index) {
     ArrayList* keys = (ArrayList*)keys_ptr;
     if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
-    String* key_str = (String*)keys->data[index];
-    return item_attr(data, key_str->chars);
+    Symbol* key_sym = (Symbol*)keys->data[index];
+    return item_attr(data, key_sym->chars);
 }
 static Item pipe_map_key(void* keys_ptr, int64_t index) {
     ArrayList* keys = (ArrayList*)keys_ptr;
     if (!keys || index >= (int64_t)keys->length) return ITEM_NULL;
-    String* key_str = (String*)keys->data[index];
-    return s2it(key_str);
+    Symbol* key_sym = (Symbol*)keys->data[index];
+    return y2it(key_sym);
 }
 #endif // !LAMBDA_STATIC
 

@@ -18,12 +18,12 @@
 [0, 10, 20]
 "--- Map iteration with ~ ---"
 [10, 20, 30]
-["a", "b", "c"]
+['a', 'b', 'c']
 [{
-    key: "a",
+    key: 'a',
     value: 1
   }, {
-    key: "b",
+    key: 'b',
     value: 2
   }]
 "===== WHERE OPERATOR BASIC TESTS =====--- Filter arrays ---"

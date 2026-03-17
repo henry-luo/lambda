@@ -996,10 +996,10 @@ ArrayList* item_keys(Item data) {
         ShapeEntry* field = map_type->shape;
         while (field) {
             if (field->name) {
-                // Convert StrView to String for the transpiled code
+                // Convert StrView to Symbol for the transpiled code
                 StrView* sv = field->name;
-                String* str = heap_strcpy((char*)sv->str, sv->length);
-                arraylist_append(keys, (void*)str);
+                Symbol* sym = heap_create_symbol(sv->str, sv->length);
+                arraylist_append(keys, (void*)sym);
             }
             field = field->next;
         }
@@ -1019,10 +1019,10 @@ ArrayList* item_keys(Item data) {
         ShapeEntry* field = elmt_type->shape;
         while (field) {
             if (field->name) {
-                // Convert StrView to String for the transpiled code
+                // Convert StrView to Symbol for the transpiled code
                 StrView* sv = field->name;
-                String* str = heap_strcpy((char*)sv->str, sv->length);
-                arraylist_append(keys, (void*)str);
+                Symbol* sym = heap_create_symbol(sv->str, sv->length);
+                arraylist_append(keys, (void*)sym);
             }
             field = field->next;
         }
@@ -1070,8 +1070,8 @@ Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
-                String* key_str = (String*)keys->data[idx];
-                return {.item = s2it(key_str)};
+                Symbol* key_sym = (Symbol*)keys->data[idx];
+                return {.item = y2it(key_sym)};
             }
             return ItemNull;
         }
@@ -1081,15 +1081,15 @@ Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
-            String* key_str = (String*)keys->data[idx];
-            return {.item = s2it(key_str)};
+            Symbol* key_sym = (Symbol*)keys->data[idx];
+            return {.item = y2it(key_sym)};
         }
         return {.item = i2it(idx - key_count)};
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
         if (idx < key_count) {
-            String* key_str = (String*)keys->data[idx];
-            return {.item = s2it(key_str)};
+            Symbol* key_sym = (Symbol*)keys->data[idx];
+            return {.item = y2it(key_sym)};
         }
         return ItemNull;
     }
@@ -1107,8 +1107,8 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
-                String* key_str = (String*)keys->data[idx];
-                return item_attr(data, key_str->chars);
+                Symbol* key_sym = (Symbol*)keys->data[idx];
+                return item_attr(data, key_sym->chars);
             }
             return ItemNull;
         }
@@ -1118,15 +1118,15 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
-            String* key_str = (String*)keys->data[idx];
-            return item_attr(data, key_str->chars);
+            Symbol* key_sym = (Symbol*)keys->data[idx];
+            return item_attr(data, key_sym->chars);
         }
         return list_get(data.element, (int)(idx - key_count));
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
         if (idx < key_count) {
-            String* key_str = (String*)keys->data[idx];
-            return item_attr(data, key_str->chars);
+            Symbol* key_sym = (Symbol*)keys->data[idx];
+            return item_attr(data, key_sym->chars);
         }
         return ItemNull;
     }

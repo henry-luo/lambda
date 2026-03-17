@@ -945,8 +945,8 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
         ArrayList* keys = item_keys(collection);
         if (keys) {
             for (int64_t i = 0; i < keys->length; i++) {
-                String* key_str = (String*)keys->data[i];
-                Item key_item = { .item = s2it(key_str) };
+                Symbol* key_sym = (Symbol*)keys->data[i];
+                Item key_item = { .item = y2it(key_sym) };
                 Item value = map_get(mp, key_item);
                 Item transformed = transform(value, key_item);
                 list_push(result, transformed);
@@ -1010,8 +1010,8 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         ArrayList* keys = item_keys(collection);
         if (keys) {
             for (int64_t i = 0; i < keys->length; i++) {
-                String* key_str = (String*)keys->data[i];
-                Item key_item = { .item = s2it(key_str) };
+                Symbol* key_sym = (Symbol*)keys->data[i];
+                Item key_item = { .item = y2it(key_sym) };
                 Item value = map_get(mp, key_item);
                 Item pred_result = predicate(value, key_item);
                 if (is_truthy(pred_result)) {

@@ -372,8 +372,8 @@ for (x in data) if (x > 0) x else 0  // Conditional
 [for (x in [] ) x]             // []
 
 // for loop over map by keys
-for (k at {a: 1, b: 2}) k      // "a", "b"
-for (k, v at {a: 1, b: 2}) k ++ v  // ["a1", "b2"]
+for (k at {a: 1, b: 2}) k      // 'a', 'b'
+for (k, v at {a: 1, b: 2}) k ++ v  // ['a1', 'b2']
 ```
 
 **For Expression Clauses:** `let`, `where`, `order by`, `limit`, `offset`

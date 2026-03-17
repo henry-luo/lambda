@@ -2426,12 +2426,12 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     // k = key symbol
                     strbuf_append_str(tp->code_buf, "  Item _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=s2it((String*)attr_keys->data[ki]);\n");
+                    strbuf_append_str(tp->code_buf, "=y2it((Symbol*)attr_keys->data[ki]);\n");
                 }
                 // v = value
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                strbuf_append_str(tp->code_buf, "=item_attr(it, ((String*)attr_keys->data[ki])->chars);\n");
+                strbuf_append_str(tp->code_buf, "=item_attr(it, ((Symbol*)attr_keys->data[ki])->chars);\n");
             }
             // Generic path: unknown type or element => use unified runtime helpers
             else {
@@ -2722,9 +2722,9 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "      ArrayList* pipe_keys = item_keys(pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "      if (pipe_keys) {\n");
     strbuf_append_str(tp->code_buf, "        for (int64_t pipe_i = 0; pipe_i < pipe_keys->length; pipe_i++) {\n");
-    strbuf_append_str(tp->code_buf, "          String* key_str = (String*)pipe_keys->data[pipe_i];\n");
-    strbuf_append_str(tp->code_buf, "          Item pipe_index = s2it(key_str);\n");
-    strbuf_append_str(tp->code_buf, "          Item pipe_item = item_attr(pipe_collection, key_str->chars);\n");
+    strbuf_append_str(tp->code_buf, "          Symbol* key_sym = (Symbol*)pipe_keys->data[pipe_i];\n");
+    strbuf_append_str(tp->code_buf, "          Item pipe_index = y2it(key_sym);\n");
+    strbuf_append_str(tp->code_buf, "          Item pipe_item = item_attr(pipe_collection, key_sym->chars);\n");
 
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter - only keep if condition is truthy

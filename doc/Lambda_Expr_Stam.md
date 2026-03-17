@@ -674,24 +674,24 @@ for (num in [1, 2, 3, 4, 5])
 
 #### Map Iteration with `at`
 
-Use the `at` keyword (instead of `in`) to iterate over map keys or key-value pairs. This works with both **static maps** (literal `{...}`) and **dynamic maps** (created with `map([...])`).
+Use the `at` keyword (instead of `in`) to iterate over map keys or key-value pairs. This works with both **static maps** (literal `{...}`) and **dynamic maps** (created with `map([...])`). Map keys are returned as **symbols**.
 
 **Keys only** — `for (k at map)`:
 
 ```lambda
 for (k at {a: 1, b: 2, c: 3}) k
-// ["a", "b", "c"]
+// ['a', 'b', 'c']
 
 let m = map(["x", 10, "y", 20])
 for (k at m) k
-// ["x", "y"]
+// ['x', 'y']
 ```
 
 **Key-value pairs** — `for (k, v at map)`:
 
 ```lambda
 for (k, v at {a: 1, b: 2, c: 3}) k ++ "=" ++ string(v)
-// ["a=1", "b=2", "c=3"]
+// ['a=1', 'b=2', 'c=3']
 
 let scores = map(["alice", 95, "bob", 87])
 for (name, score at scores) {name: name, score: score}
@@ -702,7 +702,7 @@ for (name, score at scores) {name: name, score: score}
 
 ```lambda
 for (k, v at {a: 1, b: 5, c: 2} where v > 2) k
-// ["b"]
+// ['b']
 ```
 
 > **Note**: Use `in` to iterate over arrays and lists; use `at` to iterate over maps.

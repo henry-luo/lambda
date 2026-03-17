@@ -202,9 +202,9 @@ static int64_t hashmap_vmap_count(void* data) {
     return hd->count;
 }
 
-// return keys as ArrayList<String*> for compatibility with item_keys() / for-loop
-// string/symbol keys → use the key string directly
-// other keys → synthetic string "__v<index>"
+// return keys as ArrayList<Symbol*> for compatibility with item_keys() / for-loop
+// string/symbol keys → create a symbol from the key string
+// other keys → synthetic symbol "__v<index>"
 static ArrayList* hashmap_vmap_keys(void* data) {
     HashMapData* hd = (HashMapData*)data;
     ArrayList* keys = arraylist_new(hd->count > 0 ? (int)hd->count : 4);
@@ -214,21 +214,21 @@ static ArrayList* hashmap_vmap_keys(void* data) {
         if (kt == LMD_TYPE_STRING) {
             String* s = key.get_string();
             if (s) {
-                String* copy = heap_strcpy(s->chars, s->len);
-                arraylist_append(keys, (void*)copy);
+                Symbol* sym = heap_create_symbol(s->chars, s->len);
+                arraylist_append(keys, (void*)sym);
             }
         } else if (kt == LMD_TYPE_SYMBOL) {
             Symbol* s = key.get_symbol();
             if (s) {
-                String* copy = heap_strcpy(s->chars, s->len);
-                arraylist_append(keys, (void*)copy);
+                Symbol* sym = heap_create_symbol(s->chars, s->len);
+                arraylist_append(keys, (void*)sym);
             }
         } else {
             // synthetic key: "__v<index>"
             char buf[32];
             snprintf(buf, sizeof(buf), "__v%d", i);
-            String* str = heap_strcpy(buf, (int)strlen(buf));
-            arraylist_append(keys, (void*)str);
+            Symbol* sym = heap_create_symbol(buf, (int)strlen(buf));
+            arraylist_append(keys, (void*)sym);
         }
     }
     return keys;
