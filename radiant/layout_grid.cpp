@@ -1087,6 +1087,16 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             cols->allocated_tracks = new_track_count;
             cols->is_repeat = false; // No longer has unexpanded repeat
 
+            // Reallocate line_names to match the new track count.
+            // The old line_names was sized for the original (unexpanded) track count;
+            // iterating up to new track_count without reallocation causes an
+            // out-of-bounds read, returning a garbage non-null pointer that
+            // is then passed to mem_strdup/strlen, producing an infinite loop.
+            if (grid_layout->owns_template_columns) {
+                mem_free(cols->line_names);
+            }
+            cols->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
+
             log_debug("GRID: Expanded to %d column tracks", new_track_count);
             break; // Only one auto-repeat per axis allowed
         }
@@ -1161,6 +1171,12 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             rows->track_count = new_track_count;
             rows->allocated_tracks = new_track_count;
             rows->is_repeat = false;
+
+            // Reallocate line_names to match the new track count (same fix as columns).
+            if (grid_layout->owns_template_rows) {
+                mem_free(rows->line_names);
+            }
+            rows->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
 
             log_debug("GRID: Expanded to %d row tracks", new_track_count);
             break;
