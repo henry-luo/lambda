@@ -840,13 +840,118 @@ static int parse_flag(const char** p) {
     return flag;
 }
 
-// arc to bezier conversion helper
+// arc-to-bezier conversion: SVG endpoint parameterization → center parameterization → cubic beziers
+// follows the SVG spec F.6 "Conversion from endpoint to center parameterization"
 static void arc_to_beziers(Tvg_Paint shape, float x1, float y1,
-                           float rx, float ry, float rotation,
+                           float rx, float ry, float x_rotation,
                            int large_arc, int sweep, float x2, float y2) {
-    // simplified arc: just draw line for now
-    // TODO: implement proper arc-to-bezier conversion
-    tvg_shape_line_to(shape, x2, y2);
+    // F.6.2 - degenerate cases
+    if ((x1 == x2 && y1 == y2) || (rx == 0 && ry == 0)) {
+        tvg_shape_line_to(shape, x2, y2);
+        return;
+    }
+
+    rx = fabsf(rx);
+    ry = fabsf(ry);
+
+    float phi = x_rotation * (float)M_PI / 180.0f;
+    float cos_phi = cosf(phi);
+    float sin_phi = sinf(phi);
+
+    // F.6.5.1 - compute (x1', y1')
+    float dx2 = (x1 - x2) / 2.0f;
+    float dy2 = (y1 - y2) / 2.0f;
+    float x1p =  cos_phi * dx2 + sin_phi * dy2;
+    float y1p = -sin_phi * dx2 + cos_phi * dy2;
+
+    // F.6.6 - ensure radii are large enough
+    float x1p2 = x1p * x1p;
+    float y1p2 = y1p * y1p;
+    float rx2 = rx * rx;
+    float ry2 = ry * ry;
+
+    float lambda = x1p2 / rx2 + y1p2 / ry2;
+    if (lambda > 1.0f) {
+        float lambda_sqrt = sqrtf(lambda);
+        rx *= lambda_sqrt;
+        ry *= lambda_sqrt;
+        rx2 = rx * rx;
+        ry2 = ry * ry;
+    }
+
+    // F.6.5.2 - compute (cx', cy')
+    float num = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
+    float den = rx2 * y1p2 + ry2 * x1p2;
+    float sq = (den > 0.0f) ? sqrtf(fmaxf(num / den, 0.0f)) : 0.0f;
+    if (large_arc == sweep) sq = -sq;
+
+    float cxp =  sq * rx * y1p / ry;
+    float cyp = -sq * ry * x1p / rx;
+
+    // F.6.5.3 - compute (cx, cy)
+    float cx = cos_phi * cxp - sin_phi * cyp + (x1 + x2) / 2.0f;
+    float cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) / 2.0f;
+
+    // F.6.5.5 - compute start angle and sweep angle
+    auto angle_between = [](float ux, float uy, float vx, float vy) -> float {
+        float dot = ux * vx + uy * vy;
+        float len = sqrtf((ux * ux + uy * uy) * (vx * vx + vy * vy));
+        float cos_a = (len > 0) ? fmaxf(-1.0f, fminf(1.0f, dot / len)) : 1.0f;
+        float a = acosf(cos_a);
+        if (ux * vy - uy * vx < 0) a = -a;
+        return a;
+    };
+
+    float theta1 = angle_between(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    float dtheta = angle_between((x1p - cxp) / rx, (y1p - cyp) / ry,
+                                 (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+
+    if (!sweep && dtheta > 0) dtheta -= 2.0f * (float)M_PI;
+    if (sweep && dtheta < 0)  dtheta += 2.0f * (float)M_PI;
+
+    // split arc into segments of at most PI/2 and approximate each with a cubic bezier
+    int n_segs = (int)ceilf(fabsf(dtheta) / ((float)M_PI / 2.0f));
+    if (n_segs < 1) n_segs = 1;
+    float seg_angle = dtheta / (float)n_segs;
+    // control point distance factor: (4/3) * tan(seg_angle / 4)
+    float alpha = 4.0f / 3.0f * tanf(seg_angle / 4.0f);
+
+    float prev_cos = cosf(theta1);
+    float prev_sin = sinf(theta1);
+
+    for (int i = 0; i < n_segs; i++) {
+        float angle = theta1 + (float)(i + 1) * seg_angle;
+        float next_cos = cosf(angle);
+        float next_sin = sinf(angle);
+
+        // endpoint of this segment on the unit circle
+        float ep1x = prev_cos;
+        float ep1y = prev_sin;
+        float ep2x = next_cos;
+        float ep2y = next_sin;
+
+        // control points on unit circle
+        float cp1x = ep1x - alpha * ep1y;
+        float cp1y = ep1y + alpha * ep1x;
+        float cp2x = ep2x + alpha * ep2y;
+        float cp2y = ep2y - alpha * ep2x;
+
+        // transform back: scale by rx,ry then rotate by phi then translate by cx,cy
+        auto tx = [&](float px, float py) -> float {
+            return cos_phi * rx * px - sin_phi * ry * py + cx;
+        };
+        auto ty = [&](float px, float py) -> float {
+            return sin_phi * rx * px + cos_phi * ry * py + cy;
+        };
+
+        tvg_shape_cubic_to(shape,
+                           tx(cp1x, cp1y), ty(cp1x, cp1y),
+                           tx(cp2x, cp2y), ty(cp2x, cp2y),
+                           tx(ep2x, ep2y), ty(ep2x, ep2y));
+
+        prev_cos = next_cos;
+        prev_sin = next_sin;
+    }
 }
 
 static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
