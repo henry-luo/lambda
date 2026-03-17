@@ -72,17 +72,12 @@ pub fn Z_cmd() { "Z" }
 
 // cubic bezier
 pub fn C(x1, y1, x2, y2, x, y) string {
-    "C" ++ util.fmt_num(x1) ++ " " ++ util.fmt_num(y1) ++ " "
-        ++ util.fmt_num(x2) ++ " " ++ util.fmt_num(y2) ++ " "
-        ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+    "C" ++ util.fmt_num(x1) ++ " " ++ util.fmt_num(y1) ++ " " ++ util.fmt_num(x2) ++ " " ++ util.fmt_num(y2) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
 // arc command
 pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string {
-    "A" ++ util.fmt_num(rx) ++ " " ++ util.fmt_num(ry) ++ " "
-        ++ string(rotation) ++ " "
-        ++ string(large_arc) ++ " " ++ string(sweep) ++ " "
-        ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+    "A" ++ util.fmt_num(rx) ++ " " ++ util.fmt_num(ry) ++ " " ++ string(rotation) ++ " " ++ string(large_arc) ++ " " ++ string(sweep) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
 // build a path string from a list of points using line segments
@@ -133,18 +128,15 @@ pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle) string {
         let iy1 = cy + inner_r * sin_e;
         let ix2 = cx + inner_r * cos_s;
         let iy2 = cy + inner_r * sin_s;
-        M(ox1, oy1) ++ " "
-            ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2) ++ " "
-            ++ L(ix1, iy1) ++ " "
-            ++ A(inner_r, inner_r, 0, large, 0, ix2, iy2) ++ " "
-            ++ Z_cmd()
+        let p1 = M(ox1, oy1) ++ " " ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2);
+        let p2 = p1 ++ " " ++ L(ix1, iy1) ++ " " ++ A(inner_r, inner_r, 0, large, 0, ix2, iy2);
+        p2 ++ " " ++ Z_cmd()
     }
     else {
         // pie: move to center, line to edge, arc, close
-        M(cx, cy) ++ " "
-            ++ L(ox1, oy1) ++ " "
-            ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2) ++ " "
-            ++ Z_cmd()
+        let p1 = M(cx, cy) ++ " " ++ L(ox1, oy1);
+        let p2 = p1 ++ " " ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2);
+        p2 ++ " " ++ Z_cmd()
     }
 }
 

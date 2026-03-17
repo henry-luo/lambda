@@ -1153,6 +1153,9 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     return (AstNode*)ast_node;
 }
 
+// Forward declaration: check if AST node contains ~ (current_item) reference
+bool has_current_item_ref(AstNode* node);
+
 // Helper: check if TSNode contains ~ (current_item) reference before building AST
 // This is used to determine if pipe expression needs argument injection
 static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
@@ -2842,9 +2845,9 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             // where preserves input collection type
             type_id = left_type;
         } else {
-            // pipe: if left is collection, result is array; otherwise same as right
-            if (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST ||
-                left_type == LMD_TYPE_RANGE || left_type == LMD_TYPE_MAP) {
+            // pipe: if using ~ (current item), always produces Array;
+            // otherwise it's "inject first arg" and result type follows the right side
+            if (has_current_item_ref(ast_node->right)) {
                 type_id = LMD_TYPE_ARRAY;
             } else {
                 type_id = right_type;
