@@ -55,6 +55,9 @@ struct JsMirVarEntry {
     bool from_env;           // true if loaded from closure env
     int env_slot;            // slot index in env array
     MIR_reg_t env_reg;       // register holding env pointer (for write-back)
+    bool in_scope_env;       // true if this var is in parent func's scope env (write-back on assign)
+    int scope_env_slot;      // slot in scope env
+    MIR_reg_t scope_env_reg; // register holding scope env pointer
     int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
 };
 
@@ -67,6 +70,7 @@ struct JsLoopLabels {
 // Capture entry for closure analysis
 struct JsCaptureEntry {
     char name[128];      // variable name (with _js_ prefix)
+    int scope_env_slot;  // slot in parent's scope env (-1 if not remapped)
 };
 
 // Function entry for pre-pass collection
@@ -77,6 +81,11 @@ struct JsFuncCollected {
     // Capture info
     JsCaptureEntry captures[32];
     int capture_count;
+    int parent_index;       // index of parent function in func_entries (-1 = top level)
+    // Scope env: shared closure environment for all child closures
+    bool has_scope_env;              // true if this func allocates a scope env
+    int scope_env_count;             // number of vars in scope env
+    char scope_env_names[64][128];   // variable names in scope env
     // Phase 4: Type inference results
     TypeId param_types[16];         // inferred parameter types
     TypeId return_type;             // inferred return type
@@ -191,6 +200,14 @@ struct JsMirTranspiler {
     int last_closure_capture_count;
     char last_closure_capture_names[32][128];
     bool last_closure_has_env;
+
+    // Phase 1: parent function tracking during collection
+    int collect_parent_func_index;   // current parent func index (-1 = top level)
+
+    // Scope env: shared closure environment for all child closures in current function
+    MIR_reg_t scope_env_reg;         // register holding current func's scope env (0 if none)
+    int scope_env_slot_count;        // number of slots in current scope env
+    int current_func_index;          // index of current func in func_entries (-1 if not set)
 };
 
 // ============================================================================
@@ -713,11 +730,21 @@ static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals) {
         }
         break;
     }
-    // Don't recurse into nested functions
+    // Don't recurse into nested functions, but DO collect their names as locals
+    // (function declarations are hoisted and should be available in the parent scope
+    // for capture analysis — closures that reference hoisted functions need to capture them)
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_FUNCTION_DECLARATION:
         break;
+    case JS_AST_NODE_FUNCTION_DECLARATION: {
+        JsFunctionNode* fn = (JsFunctionNode*)node;
+        if (fn->name && fn->name->chars) {
+            char name[128];
+            snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+            jm_name_set_add(locals, name);
+        }
+        break;
+    }
 
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
@@ -808,6 +835,7 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         // This is a capture
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", ref->name);
+            fc->captures[fc->capture_count].scope_env_slot = -1;
             fc->capture_count++;
             log_debug("js-mir: capture '%s' in function '%s'", ref->name, fc->name);
         }
@@ -818,6 +846,7 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
     if (has_self_ref && fc->capture_count > 0 && self_name[0]) {
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
+            fc->captures[fc->capture_count].scope_env_slot = -1;
             fc->capture_count++;
             log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
         }
@@ -827,6 +856,7 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
     // In JS, arrow functions do NOT have their own 'this'; they inherit from the parent.
     if (fn->is_arrow && jm_name_set_has(refs, "_js_this") && fc->capture_count < 32) {
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_this");
+        fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
     }
@@ -1358,6 +1388,36 @@ static bool jm_is_native_type(TypeId tid) {
     return tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
 }
 
+// Helper: if a variable is in the current function's scope env, mark it and write-back.
+// Called after jm_set_var or assignment to propagate value to shared scope env.
+static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY) {
+    if (mt->scope_env_reg == 0) return;
+    // Check if this var name is in the current function's scope env
+    int fi = mt->current_func_index;
+    if (fi < 0 || fi >= mt->func_count) return;
+    JsFuncCollected* fc = &mt->func_entries[fi];
+    if (!fc->has_scope_env) return;
+    for (int s = 0; s < fc->scope_env_count; s++) {
+        if (strcmp(name, fc->scope_env_names[s]) == 0) {
+            // Mark the variable entry
+            JsMirVarEntry* var = jm_find_var(mt, name);
+            if (var) {
+                var->in_scope_env = true;
+                var->scope_env_slot = s;
+                var->scope_env_reg = mt->scope_env_reg;
+            }
+            // Write current value to scope env
+            MIR_reg_t val = val_reg;
+            if (jm_is_native_type(type_id))
+                val = jm_box_native(mt, val_reg, type_id);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                MIR_new_reg_op(mt->ctx, val)));
+            return;
+        }
+    }
+}
+
 // Forward declarations for native expression transpilation
 static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
 static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
@@ -1767,15 +1827,28 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION: {
         JsFunctionNode* fn = (JsFunctionNode*)node;
+        // Record how many functions exist before recursion — those are NOT our children
+        int children_start = mt->func_count;
         // recurse into body first (post-order)
         if (fn->body) jm_collect_functions(mt, fn->body);
+        int children_end = mt->func_count;
         // add this function
         if (mt->func_count < 256) {
-            JsFuncCollected* e = &mt->func_entries[mt->func_count];
+            int my_index = mt->func_count;
+            JsFuncCollected* e = &mt->func_entries[my_index];
             e->node = fn;
             jm_make_fn_name(e->name, sizeof(e->name), fn, mt);
             e->func_item = NULL; // set during creation
+            e->parent_index = -1; // top-level until set by parent
             mt->func_count++;
+            // Set parent_index for DIRECT children: functions collected during our body
+            // recursion that don't already have a parent assigned by a deeper enclosing
+            // function. Direct children still have parent_index == -1.
+            for (int ci = children_start; ci < children_end; ci++) {
+                if (mt->func_entries[ci].parent_index == -1) {
+                    mt->func_entries[ci].parent_index = my_index;
+                }
+            }
         }
         break;
     }
@@ -1977,6 +2050,7 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         if (mt->func_count < 256) {
                             JsFuncCollected* fc = &mt->func_entries[mt->func_count];
                             fc->node = fn;
+                            fc->parent_index = -1; // class methods are at top level
                             // Name: ClassName_methodName
                             String* method_name = NULL;
                             if (md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -2886,8 +2960,14 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
         }
     }
 
-    log_error("js-mir: undefined variable '%s'", vname);
-    return jm_emit_null(mt);
+    log_debug("js-mir: undefined variable '%s' (emitting undefined)", vname);
+    // Return undefined instead of hard error — matches V8 behavior where
+    // ReferenceError is thrown at runtime only if the code path is executed
+    MIR_reg_t undef = jm_new_reg(mt, "undef_var", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, undef),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+    return undef;
 }
 
 // Binary expression: native arithmetic fast path + boxed fallback
@@ -3268,6 +3348,11 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, var->reg)));
                 }
+                if (var->in_scope_env) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, var->reg)));
+                }
             } else if (mt->module_consts) {
                 // Module-level variable: write back via js_set_module_var
                 JsModuleConstEntry lookup;
@@ -3374,6 +3459,11 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (var->from_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, var->reg)));
+                }
+                if (var->in_scope_env) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, var->reg)));
                 }
             } else if (mt->module_consts) {
@@ -3603,6 +3693,12 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
         if (var->from_env) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                MIR_new_reg_op(mt->ctx, var->reg)));
+        }
+        // Write-back to scope env if this is a parent-scope variable captured by children
+        if (var->in_scope_env) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, var->reg)));
         }
 
@@ -6073,10 +6169,43 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     if (!fc || !fc->func_item) return jm_emit_null(mt);
     int pc = fc->param_count;
     if (fc->capture_count > 0) {
-        // Closure: allocate env and populate with captured variables from current scope
+        // Check if this closure should use the parent's shared scope env.
+        // Don't share in loop bodies — let closures need per-iteration value copies.
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0
+                              && mt->loop_depth == 0);
+        if (use_scope_env) {
+            // Use parent's shared scope env directly — no separate allocation
+            // Write-back current values of scope env vars that may have changed
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                int slot = fc->captures[ci].scope_env_slot;
+                if (slot < 0) continue;
+                JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
+                if (var) {
+                    MIR_reg_t val = var->reg;
+                    if (jm_is_native_type(var->type_id))
+                        val = jm_box_native(mt, var->reg, var->type_id);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, val)));
+                }
+            }
+            return jm_call_4(mt, "js_new_closure", MIR_T_I64,
+                MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
+        }
+
+        // Fallback: allocate own env and copy values (per-closure env, not shared).
+        // If scope_env_slot is set, use the scope env layout (since the closure body
+        // loads from scope_env_slot positions). Otherwise use dense packing.
+        bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
+        int env_alloc_size = has_remapped ? mt->scope_env_slot_count : fc->capture_count;
         MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
         for (int ci = 0; ci < fc->capture_count; ci++) {
+            int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
+            if (slot < 0) continue;
             JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
             MIR_reg_t val;
             if (var) {
@@ -6089,14 +6218,14 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
                 val = jm_emit_null(mt);
             }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                 MIR_new_reg_op(mt->ctx, val)));
         }
         return jm_call_4(mt, "js_new_closure", MIR_T_I64,
             MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
     }
     return jm_call_2(mt, "js_new_function", MIR_T_I64,
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
@@ -6114,30 +6243,71 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
     int param_count = jm_count_params(fn);
 
     if (fc->capture_count > 0) {
-        // Closure: allocate env, populate with captured variable values
-        // env = js_alloc_env(capture_count)
+        // Check if this closure should use the parent's shared scope env
+        // Don't use shared scope env inside loops — let variables need per-iteration copies
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && mt->loop_depth == 0);
+        if (use_scope_env) {
+            // Use parent's shared scope env directly — no separate allocation.
+            // Write-back current values to scope env before creating closure.
+            for (int i = 0; i < fc->capture_count; i++) {
+                int slot = fc->captures[i].scope_env_slot;
+                if (slot < 0) continue;
+                JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);
+                if (var) {
+                    MIR_reg_t val = var->reg;
+                    if (jm_is_native_type(var->type_id))
+                        val = jm_box_native(mt, var->reg, var->type_id);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, val)));
+                }
+            }
+
+            // Store env info for read-back after synchronous callback calls
+            mt->last_closure_env_reg = mt->scope_env_reg;
+            mt->last_closure_capture_count = fc->capture_count;
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
+            }
+            mt->last_closure_has_env = true;
+
+            return jm_call_4(mt, "js_new_closure", MIR_T_I64,
+                MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
+        }
+
+        // Fallback: allocate own env and copy values (per-closure env, not shared).
+        // If scope_env_slot is set, use the scope env layout (since the closure body
+        // loads from scope_env_slot positions). Otherwise use dense packing.
+        bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
+        int env_alloc_size = has_remapped ? mt->scope_env_slot_count : fc->capture_count;
+        // env = js_alloc_env(env_alloc_size)
         MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
         // Store each captured variable's current value into env slots
         for (int i = 0; i < fc->capture_count; i++) {
+            int slot = has_remapped ? fc->captures[i].scope_env_slot : i;
+            if (slot < 0) continue;
             JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);
             if (var) {
-                // env[i] = current value of captured variable
+                // env[slot] = current value of captured variable
                 // Box native-typed variables before storing in env (closures read boxed Items)
                 MIR_reg_t value_to_store = var->reg;
                 if (jm_is_native_type(var->type_id)) {
                     value_to_store = jm_box_native(mt, var->reg, var->type_id);
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                     MIR_new_reg_op(mt->ctx, value_to_store)));
             } else {
                 // Special: _js_this capture for arrow functions
                 if (strcmp(fc->captures[i].name, "_js_this") == 0) {
                     MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), env, 0, 1),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                         MIR_new_reg_op(mt->ctx, this_val)));
                 } else {
                 // Try module-level constants (class names, top-level consts)
@@ -6199,7 +6369,7 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
                             break;
                         }
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), env, 0, 1),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                             MIR_new_reg_op(mt->ctx, const_val)));
                     }
                 }
@@ -6218,12 +6388,12 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
         }
         mt->last_closure_has_env = true;
 
-        // js_new_closure(func_ptr, param_count, env, capture_count)
+        // js_new_closure(func_ptr, param_count, env, env_alloc_size)
         return jm_call_4(mt, "js_new_closure", MIR_T_I64,
             MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
     }
 
     // Regular function (no captures)
@@ -6534,6 +6704,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, native_val)));
                         jm_set_var(mt, vname, reg, MIR_T_I64, LMD_TYPE_INT);
+                        jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_INT);
                     } else if (init_type == LMD_TYPE_FLOAT) {
                         // native double variable
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_D);
@@ -6543,6 +6714,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, native_val)));
                         jm_set_var(mt, vname, reg, MIR_T_D, LMD_TYPE_FLOAT);
+                        jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_FLOAT);
                     } else {
                         // boxed (string, object, array, any, etc.)
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
@@ -6551,6 +6723,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, val)));
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
+                        jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
 
                         // P9: Track typed array type for direct memory access
                         if (d->init->node_type == JS_AST_NODE_NEW_EXPRESSION) {
@@ -6582,6 +6755,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                         MIR_new_reg_op(mt->ctx, reg),
                         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
                     jm_set_var(mt, vname, reg);
+                    jm_scope_env_mark_and_writeback(mt, vname, reg);
                 }
 
                 // For const MCONST_MODVAR in __main__, store local value to module var table
@@ -8398,6 +8572,14 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     bool saved_in_native = mt->in_native_func;
     JsFuncCollected* saved_fc = mt->current_fc;
     JsClassEntry* saved_class = mt->current_class;
+    MIR_reg_t saved_scope_env_reg = mt->scope_env_reg;
+    int saved_scope_env_slot_count = mt->scope_env_slot_count;
+    int saved_func_index = mt->current_func_index;
+
+    // Set current function index for scope env lookups
+    mt->current_func_index = (int)(fc - mt->func_entries);
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
 
     // Determine if this function is a class method and set current_class
     mt->current_class = NULL;
@@ -8480,16 +8662,18 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (has_captures) {
             env_reg = MIR_reg(mt->ctx, "_js_env", func);
             for (int i = 0; i < fc->capture_count; i++) {
+                // Use scope_env_slot if remapped, otherwise use dense index
+                int slot = fc->captures[i].scope_env_slot >= 0 ? fc->captures[i].scope_env_slot : i;
                 MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[i].name, MIR_T_I64);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, cap_reg),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[i].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
-                entry.var.env_slot = i;
+                entry.var.env_slot = slot;
                 entry.var.env_reg = env_reg;
                 entry.var.typed_array_type = -1;  // not a typed array by default
                 hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
@@ -8532,6 +8716,44 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             hashmap_free(body_locals);
         }
 
+        // Allocate shared scope env if this function has child closures that capture its vars.
+        // The scope env is a single heap-allocated Item array shared by all child closures,
+        // enabling mutable capture semantics (JS captures by reference, not by value).
+        if (fc->has_scope_env && fc->scope_env_count > 0) {
+            mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
+            mt->scope_env_slot_count = fc->scope_env_count;
+
+            // Populate scope env with current values and mark vars for write-back
+            for (int s = 0; s < fc->scope_env_count; s++) {
+                const char* sname = fc->scope_env_names[s];
+                JsMirVarEntry* svar = jm_find_var(mt, sname);
+                MIR_reg_t val;
+                if (svar) {
+                    val = svar->reg;
+                    if (jm_is_native_type(svar->type_id))
+                        val = jm_box_native(mt, svar->reg, svar->type_id);
+                    // Mark var for scope_env write-back on future assignments
+                    svar->in_scope_env = true;
+                    svar->scope_env_slot = s;
+                    svar->scope_env_reg = mt->scope_env_reg;
+                } else if (strcmp(sname, "_js_this") == 0) {
+                    val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                } else {
+                    // Var hasn't been created yet (e.g., declared later in body).
+                    // Write null for now; will be updated when the var is assigned.
+                    val = jm_emit_null(mt);
+                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
+            log_debug("js-mir: allocated scope env for '%s' with %d slots", fc->name, fc->scope_env_count);
+        } else {
+            mt->scope_env_reg = 0;
+            mt->scope_env_slot_count = 0;
+        }
+
         // Hoist inner function declarations: create variable bindings so nested
         // calls can resolve them (mirrors Phase 3 hoisting for top-level functions)
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -8552,6 +8774,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 MIR_new_reg_op(mt->ctx, hvar),
                                 MIR_new_reg_op(mt->ctx, fn_item)));
                             jm_set_var(mt, hvname, hvar);
+                            jm_scope_env_mark_and_writeback(mt, hvname, hvar);
                         }
                     }
                 }
@@ -8591,6 +8814,9 @@ finish_boxed:
     mt->in_native_func = saved_in_native;
     mt->current_fc = saved_fc;
     mt->current_class = saved_class;
+    mt->scope_env_reg = saved_scope_env_reg;
+    mt->scope_env_slot_count = saved_scope_env_slot_count;
+    mt->current_func_index = saved_func_index;
 }
 
 // ============================================================================
@@ -9201,7 +9427,136 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_analyze_captures(fc, all_names, mt->module_consts);
         }
 
+        // Phase 1.6: Transitive capture propagation for multi-level closures.
+        // If function G captures variable V from grandparent scope, then G's parent
+        // function F must also capture V (even if F doesn't reference V directly).
+        // This ensures V is available in F's scope at emit time when creating G's closure.
+        // Iterate until no new captures are added (fixed-point).
+        {
+            bool changed = true;
+            int propagation_rounds = 0;
+            while (changed && propagation_rounds < 10) {
+                changed = false;
+                propagation_rounds++;
+                for (int i = 0; i < mt->func_count; i++) {
+                    JsFuncCollected* child = &mt->func_entries[i];
+                    if (child->capture_count == 0) continue;
+                    int parent_idx = child->parent_index;
+                    if (parent_idx < 0 || parent_idx >= mt->func_count) continue;
+                    JsFuncCollected* parent = &mt->func_entries[parent_idx];
+
+                    // Build set of parent's params + locals for quick lookup
+                    struct hashmap* parent_own = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                        jm_name_hash, jm_name_cmp, NULL, NULL);
+                    JsFunctionNode* pfn = parent->node;
+                    JsAstNode* pp = pfn->params;
+                    while (pp) {
+                        if (pp->node_type == JS_AST_NODE_IDENTIFIER) {
+                            JsIdentifierNode* pid = (JsIdentifierNode*)pp;
+                            char pname[128];
+                            snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                            jm_name_set_add(parent_own, pname);
+                        }
+                        pp = pp->next;
+                    }
+                    if (pfn->body) jm_collect_body_locals(pfn->body, parent_own);
+                    // Also add parent's existing captures as "own" (already available)
+                    for (int ci = 0; ci < parent->capture_count; ci++) {
+                        jm_name_set_add(parent_own, parent->captures[ci].name);
+                    }
+
+                    // Check each capture of child: if it's not in parent's own scope,
+                    // parent must also capture it
+                    for (int ci = 0; ci < child->capture_count; ci++) {
+                        const char* cap_name = child->captures[ci].name;
+                        if (strcmp(cap_name, "_js_this") == 0) continue; // handled specially
+                        if (jm_name_set_has(parent_own, cap_name)) continue; // parent already has it
+
+                        // Check module_consts — no need to propagate compile-time constants
+                        if (mt->module_consts) {
+                            JsModuleConstEntry lookup;
+                            snprintf(lookup.name, sizeof(lookup.name), "%s", cap_name);
+                            if (hashmap_get(mt->module_consts, &lookup)) continue;
+                        }
+
+                        // Add as capture to parent
+                        if (parent->capture_count < 32) {
+                            snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
+                            parent->captures[parent->capture_count].scope_env_slot = -1;
+                            parent->capture_count++;
+                            changed = true;
+                            log_debug("js-mir: propagated capture '%s' from '%s' to parent '%s'",
+                                cap_name, child->name, parent->name);
+                        }
+                    }
+                    hashmap_free(parent_own);
+                }
+            }
+            if (propagation_rounds > 1) {
+                log_debug("js-mir: capture propagation completed in %d rounds", propagation_rounds);
+            }
+        }
+
         hashmap_free(all_names);
+    }
+
+    // Phase 1.7: Compute shared scope envs for parent functions.
+    // For each function F, the scope env contains the union of all variables
+    // captured by F's direct child closures. All child closures share the same
+    // scope env, enabling mutable capture semantics (JS captures by reference).
+    {
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFuncCollected* parent_fc = &mt->func_entries[fi];
+            parent_fc->has_scope_env = false;
+            parent_fc->scope_env_count = 0;
+
+            // Collect union of all captures from direct children
+            struct hashmap* scope_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            int slot_count = 0;
+
+            for (int ci = 0; ci < mt->func_count; ci++) {
+                JsFuncCollected* child = &mt->func_entries[ci];
+                if (child->parent_index != fi) continue;
+                if (child->capture_count == 0) continue;
+
+                for (int k = 0; k < child->capture_count; k++) {
+                    const char* cname = child->captures[k].name;
+                    if (!jm_name_set_has(scope_vars, cname)) {
+                        jm_name_set_add(scope_vars, cname);
+                        if (slot_count < 64) {
+                            snprintf(parent_fc->scope_env_names[slot_count], 128, "%s", cname);
+                            slot_count++;
+                        }
+                    }
+                }
+            }
+
+            if (slot_count > 0) {
+                parent_fc->has_scope_env = true;
+                parent_fc->scope_env_count = slot_count;
+                log_debug("js-mir: scope env for '%s': %d vars", parent_fc->name, slot_count);
+
+                // Remap child capture indices to scope env slots
+                for (int ci = 0; ci < mt->func_count; ci++) {
+                    JsFuncCollected* child = &mt->func_entries[ci];
+                    if (child->parent_index != fi) continue;
+                    if (child->capture_count == 0) continue;
+
+                    for (int k = 0; k < child->capture_count; k++) {
+                        // Find this capture's slot in the parent's scope env
+                        for (int s = 0; s < slot_count; s++) {
+                            if (strcmp(child->captures[k].name, parent_fc->scope_env_names[s]) == 0) {
+                                child->captures[k].scope_env_slot = s;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            hashmap_free(scope_vars);
+        }
     }
 
     // Phase 1.75: Infer parameter and return types for each function
@@ -9497,6 +9852,10 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     mt.var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt.scope_depth = 0;
+    mt.collect_parent_func_index = -1;
+    mt.scope_env_reg = 0;
+    mt.scope_env_slot_count = 0;
+    mt.current_func_index = -1;
 
     // Create module
     mt.module = MIR_new_module(ctx, "js_script");

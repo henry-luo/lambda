@@ -507,6 +507,63 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         // Build property node
         JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
 
+        // Handle method_definition nodes (methods, getters, setters in object literals)
+        if (strcmp(child_type, "method_definition") == 0) {
+            // Check if this is a getter: first child is "get" keyword
+            bool is_getter = false;
+            uint32_t mchild_count = ts_node_child_count(property_node);
+            for (uint32_t mi = 0; mi < mchild_count; mi++) {
+                TSNode mc = ts_node_child(property_node, mi);
+                const char* mc_type = ts_node_type(mc);
+                if (strcmp(mc_type, "get") == 0) { is_getter = true; break; }
+            }
+
+            TSNode name_node = ts_node_child_by_field_name(property_node, "name", strlen("name"));
+            TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
+
+            if (is_getter && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
+                // Getter: store as __get_<name> key with a function expression value
+                StrView getter_name = js_node_source(tp, name_node);
+                char get_key[256];
+                snprintf(get_key, sizeof(get_key), "__get_%.*s", (int)getter_name.length, getter_name.str);
+                JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
+                key_id->name = name_pool_create_len(tp->name_pool, get_key, strlen(get_key));
+                property->key = (JsAstNode*)key_id;
+
+                // Build as function expression (no params, body from getter body)
+                JsFunctionNode* func = (JsFunctionNode*)alloc_js_ast_node(tp, JS_AST_NODE_FUNCTION_EXPRESSION, property_node, sizeof(JsFunctionNode));
+                func->name = NULL;
+                func->params = NULL;
+                func->is_arrow = false;
+                func->is_async = false;
+                func->is_generator = false;
+                const char* body_type = ts_node_type(body_node);
+                if (strcmp(body_type, "statement_block") == 0) {
+                    func->body = build_js_block_statement(tp, body_node);
+                } else {
+                    func->body = build_js_expression(tp, body_node);
+                }
+                property->value = (JsAstNode*)func;
+            } else if (!ts_node_is_null(name_node)) {
+                // Regular method: method_definition without get/set prefix
+                StrView method_name = js_node_source(tp, name_node);
+                JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
+                key_id->name = name_pool_create_strview(tp->name_pool, method_name);
+                property->key = (JsAstNode*)key_id;
+                // Build the full method as a function expression
+                property->value = build_js_function(tp, property_node);
+            }
+
+            property->base.type = &TYPE_ANY;
+            if (!prev_property) {
+                object->properties = (JsAstNode*)property;
+            } else {
+                prev_property->next = (JsAstNode*)property;
+            }
+            prev_property = (JsAstNode*)property;
+            continue;
+        }
+
         // Get key and value
         TSNode key_node = ts_node_child_by_field_name(property_node, "key", strlen("key"));
         TSNode value_node = ts_node_child_by_field_name(property_node, "value", strlen("value"));
