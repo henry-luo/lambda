@@ -1389,6 +1389,26 @@ Item fn_sign(Item item) {
     return { .array_int64 = result };
 }
 
+// math.random(seed) - pure functional PRNG using SplitMix64
+// Returns a list [float_value, new_seed] where float_value is in [0.0, 1.0)
+// Usage: let x, newSeed = math.random(42)
+Item fn_math_random(Item seed_item) {
+    GUARD_ERROR1(seed_item);
+    uint64_t state = (uint64_t)it2i(seed_item);
+    // SplitMix64 algorithm
+    state += 0x9e3779b97f4a7c15ULL;
+    uint64_t z = state;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    z = z ^ (z >> 31);
+    // convert to double in [0.0, 1.0)
+    double value = (double)(z >> 11) * 0x1.0p-53;
+    List* result = list();
+    list_push(result, push_d(value));
+    list_push(result, push_l((int64_t)state));
+    return { .list = result };
+}
+
 //==============================================================================
 // Vector Manipulation Functions
 //==============================================================================

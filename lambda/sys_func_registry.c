@@ -416,6 +416,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
 
+    // random number generation (pure functional, SplitMix64)
+    {SYSFUNC_RANDOM, "math_random", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_random", FPTR(fn_math_random), NULL, NULL, false, 0},
+
     // ========================================================================
     // Vector manipulation functions — method-eligible on collections
     // ========================================================================

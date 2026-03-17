@@ -237,6 +237,31 @@ abs([-1, 2, -3])                // [1, 2, 3]
 sign([-5, 0, 3])                // [-1, 0, 1]
 ```
 
+### Random Number Generation
+
+Pure functional pseudo-random number generator using the SplitMix64 algorithm. Takes an integer seed and returns a list `[value, new_seed]` where `value` is a float in [0.0, 1.0).
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.random(seed)` | Generate random float and new seed | `let x, s = math.random(42)` | `[0.7415..., -7046...]` |
+
+```lambda
+// basic usage — returns [float_value, new_seed]
+let x, seed1 = math.random(42)
+x          // 0.7415648788 (float in [0.0, 1.0))
+
+// chain the seed for subsequent values
+let x2, seed2 = math.random(seed1)
+let x3, seed3 = math.random(seed2)
+
+// deterministic: same seed always produces same result
+let a, _ = math.random(42)   // always 0.7415648788
+
+// generate a random integer in [0, n)
+let r, s = math.random(seed)
+let dice = floor(r * 6) + 1   // random 1-6
+```
+
 ---
 
 ## Date/Time Functions

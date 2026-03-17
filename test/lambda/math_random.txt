@@ -1,0 +1,24 @@
+"=== basic usage ==="
+0.7415648788
+-7046029254386353089
+"=== chaining seeds ==="
+0.1599103929
+4354685564936845396
+true
+"=== deterministic: same seed same result ==="
+true
+true
+"=== different seeds different results ==="
+true
+"=== seed 0 works ==="
+0.8833108082
+-7046029254386353131
+"=== negative seed works ==="
+0.8939429203
+-7046029254386353132
+"=== generate multiple values ==="
+0.1372925986
+0.0145907902
+0.2434701677
+0.2533545434
+0.6680142025

@@ -252,6 +252,8 @@ typedef enum SysFunc {
     SYSFUNC_HYPOT,
     SYSFUNC_LOG1P,
     SYSFUNC_SIGN,
+    // random number generation
+    SYSFUNC_RANDOM,
     // vector manipulation functions
     SYSFUNC_REVERSE,
     SYSFUNC_SORT,
@@ -1058,6 +1060,8 @@ typedef struct Context {
     Item fn_math_hypot(Item a, Item b);
     Item fn_math_log1p(Item a);
     Item fn_sign(Item a);
+    // random number generation (pure functional, SplitMix64)
+    Item fn_math_random(Item seed);
 
     // ============================================================================
     // UNBOXED SYSTEM FUNCTIONS (fn_*_u)
