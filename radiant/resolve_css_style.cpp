@@ -7872,12 +7872,44 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] flex-flow: Cannot apply to non-block element");
                 break;
             }
-            // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
-            // Note: flex-flow is a shorthand for flex-direction and flex-wrap
-            // Would need to parse both values from the declaration
-            // For now, just log
-            log_debug("[CSS] flex-flow: shorthand parsing not yet fully implemented");
+
+            // flex-flow is a shorthand for flex-direction and flex-wrap
+            // Values can appear in any order: "column wrap", "wrap column", "row-reverse", etc.
+            auto is_direction = [](CssEnum val) -> bool {
+                return val == CSS_VALUE_ROW || val == CSS_VALUE_ROW_REVERSE ||
+                       val == CSS_VALUE_COLUMN || val == CSS_VALUE_COLUMN_REVERSE;
+            };
+            auto is_wrap = [](CssEnum val) -> bool {
+                return val == CSS_VALUE_NOWRAP || val == CSS_VALUE_WRAP || val == CSS_VALUE_WRAP_REVERSE;
+            };
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // Single keyword: either direction or wrap
+                CssEnum val = value->data.keyword;
+                if (is_direction(val)) {
+                    block->embed->flex->direction = val;
+                    log_debug("[CSS] flex-flow: direction=%s (0x%04X)", css_enum_info(val)->name, val);
+                } else if (is_wrap(val)) {
+                    block->embed->flex->wrap = val;
+                    log_debug("[CSS] flex-flow: wrap=%s (0x%04X)", css_enum_info(val)->name, val);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (size_t i = 0; i < count && i < 2; i++) {
+                    if (values[i]->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum val = values[i]->data.keyword;
+                        if (is_direction(val)) {
+                            block->embed->flex->direction = val;
+                            log_debug("[CSS] flex-flow[%zu]: direction=%s (0x%04X)", i, css_enum_info(val)->name, val);
+                        } else if (is_wrap(val)) {
+                            block->embed->flex->wrap = val;
+                            log_debug("[CSS] flex-flow[%zu]: wrap=%s (0x%04X)", i, css_enum_info(val)->name, val);
+                        }
+                    }
+                }
+            }
             break;
         }
 

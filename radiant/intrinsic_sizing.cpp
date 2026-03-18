@@ -1906,12 +1906,42 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     sizes.min_content += horiz_padding + horiz_border;
     sizes.max_content += horiz_padding + horiz_border;
 
-    // CSS 2.1 §10.4: Apply max-width constraint to intrinsic sizes.
+    // CSS 2.1 §10.4: Apply min-width and max-width constraints to intrinsic sizes.
+    // min-width sets a floor: an element can never be narrower than its min-width,
+    // so its intrinsic sizes must reflect this constraint.
     // max-width constrains the preferred (max-content) width.
-    // Note: min-width is NOT applied here — it's a layout-time concern that
-    // affects used width but should not inflate intrinsic preferred widths,
-    // which could prevent flex/grid stretching.
     ViewBlock* view_for_minmax = (ViewBlock*)element;
+    bool view_is_border_box = view_for_minmax->blk &&
+                              view_for_minmax->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+
+    // Apply min-width: floor the intrinsic sizes to ensure they're at least min-width
+    float given_min_width = -1;
+    if (view_for_minmax->blk) {
+        given_min_width = view_for_minmax->blk->given_min_width;
+    }
+    // Fallback: check CSS if blk hasn't been set up yet
+    if (given_min_width < 0 && element->specified_style) {
+        CssDeclaration* min_mw_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_MIN_WIDTH);
+        if (min_mw_decl && min_mw_decl->value &&
+            min_mw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            given_min_width = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, min_mw_decl->value);
+        }
+    }
+    if (given_min_width > 0) {
+        // For border-box: min-width is the border-box total (includes padding+border)
+        // For content-box: min-width is content width, so add padding+border for border-box comparison
+        float min_border_box = view_is_border_box ? given_min_width
+                                                  : (given_min_width + horiz_padding + horiz_border);
+        if (sizes.min_content < min_border_box) {
+            sizes.min_content = min_border_box;
+            log_debug("  -> min-width constraint: raised min_content to %.1f", sizes.min_content);
+        }
+        if (sizes.max_content < min_border_box) {
+            sizes.max_content = min_border_box;
+            log_debug("  -> min-width constraint: raised max_content to %.1f", sizes.max_content);
+        }
+    }
     float given_max_width = -1;
     if (view_for_minmax->blk) {
         given_max_width = view_for_minmax->blk->given_max_width;
@@ -2033,9 +2063,40 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
 
         // Calculate line height
-        float line_height = 20.0f;  // Default
+        float font_size = 16.0f;
         if (lycon->font.style && lycon->font.style->font_size > 0) {
-            line_height = lycon->font.style->font_size * 1.2f;  // Typical line-height
+            font_size = lycon->font.style->font_size;
+        }
+        float line_height = font_size * 1.2f;  // default for line-height: normal
+
+        // Check ancestor elements for resolved CSS line-height
+        // Walk up the DOM tree since intermediate parents may not have blk resolved yet
+        for (DomNode* ancestor = node->parent; ancestor; ancestor = ancestor->parent) {
+            if (!ancestor->is_element()) continue;
+            ViewBlock* anc_view = (ViewBlock*)ancestor->as_element();
+            if (anc_view->blk && anc_view->blk->line_height) {
+                const CssValue* lh = anc_view->blk->line_height;
+                if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+                    line_height = font_size * (float)lh->data.number.value;
+                } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+                    float lh_px = (float)lh->data.length.value;
+                    if (lh_px > 0) line_height = lh_px;
+                }
+                break;
+            }
+            if (anc_view->specified_style) {
+                CssDeclaration* lh_decl = style_tree_get_declaration(
+                    anc_view->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                if (lh_decl && lh_decl->value) {
+                    if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                        line_height = font_size * (float)lh_decl->value->data.number.value;
+                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
+                        if (lh_px > 0) line_height = lh_px;
+                    }
+                    break;
+                }
+            }
         }
 
         // Estimate how many lines the text will take based on available width
@@ -2053,9 +2114,19 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             float text_width = widths.max_content;
 
             // Calculate number of lines (rounded up)
+            // Use min_content (widest word/break unit) to estimate word-boundary waste:
+            // text wraps at word boundaries, so each line's effective width is
+            // floor(available_width / word_width) * word_width, not the full available_width.
             int num_lines = 1;
             if (text_width > width) {
-                num_lines = (int)ceil(text_width / width);
+                float effective_width = width;
+                if (widths.min_content > 0 && widths.min_content <= width) {
+                    int units_per_line = (int)(width / widths.min_content);
+                    if (units_per_line > 0) {
+                        effective_width = units_per_line * widths.min_content;
+                    }
+                }
+                num_lines = (int)ceil(text_width / effective_width);
             }
 
             log_debug("calculate_max_content_height: text len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
