@@ -70,7 +70,7 @@ static int count_elements_by_tag(Item item, const char* tag_name) {
         for (int64_t i = 0; i < list->length; i++) {
             count += count_elements_by_tag(list->items[i], tag_name);
         }
-    } else if (type == LMD_TYPE_LIST || type == LMD_TYPE_ARRAY) {
+    } else if (type == LMD_TYPE_ARRAY) {
         List* list = item.list;
         if (list) {
             for (int64_t i = 0; i < list->length; i++) {
@@ -120,7 +120,7 @@ protected:
         if (input->root.item == ITEM_NULL || input->root.item == ITEM_ERROR) return false;
 
         TypeId type = get_type_id(input->root);
-        return (type == LMD_TYPE_ELEMENT || type == LMD_TYPE_LIST || type == LMD_TYPE_ARRAY);
+        return (type == LMD_TYPE_ELEMENT || type == LMD_TYPE_ARRAY);
     }
 
     Url* cwd_ = nullptr;

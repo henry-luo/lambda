@@ -736,7 +736,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
 AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
     log_debug("build let_block expr");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, block_node, sizeof(AstListNode));
-    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
 
     // push scope for let bindings
@@ -2544,7 +2544,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         StrView op = ts_node_source(tp, op_node);
         query_node->direct = (op.length == 2);  // ".?" is direct, "?" is recursive
         // query always returns a list of matches
-        query_node->type = alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+        query_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
         log_debug("build query_expr: direct=%d", query_node->direct);
         ast_node->expr = (AstNode*)query_node;
         ast_node->type = query_node->type;
@@ -2902,7 +2902,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     }
     else if (ast_node->op == OPERATOR_ADD) {
-        if (left_type == right_type && (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST)) {
+        if (left_type == right_type && (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_ARRAY)) {
             type_id = left_type;
         }
         else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -3303,7 +3303,7 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
     log_debug("build list");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
-    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
     ast_node->type = &TYPE_ANY;  // list returns Item, not List
 
@@ -4116,7 +4116,7 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     ast_node->type = node_type;
-    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     node_type->type = (Type*)type;  ast_node->list_type = type;
 
     TSNode child = ts_node_named_child(list_node, 0);
@@ -4494,7 +4494,7 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
 AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
     log_debug("build content type");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
-    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->type = ast_node->list_type = type;
 
     TSNode child = ts_node_named_child(list_node, 0);
@@ -5382,7 +5382,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 
     // determine the type of the loop variable
     Type* expr_type = ast_node->as->type;
-    if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST) {
+    if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_ARRAY) {
         TypeArray* array_type = (TypeArray*)expr_type;
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             ast_node->type = array_type->nested;
@@ -5674,7 +5674,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     else {
         log_debug("got for then type %d", ast_node->then->node_type);
         // For expression type should be Item | List containing the element type
-        // TypeList* type_list = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+        // TypeList* type_list = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
         // type_list->nested = ast_node->then->type;
         ast_node->type = &TYPE_ANY;
     }
@@ -6338,7 +6338,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     log_debug("build content, is_global=%d", is_global);
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
-    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
     ast_node->type = &TYPE_ANY;  // content() returns Item, not List
 
@@ -7080,7 +7080,7 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                         TypeType* tt = (TypeType*)dec_node->type;
                         Type* inner = tt->type;
                         if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT
-                            || inner->type_id == LMD_TYPE_LIST || inner->type_id == LMD_TYPE_ARRAY)) {
+                            || inner->type_id == LMD_TYPE_ARRAY || inner->type_id == LMD_TYPE_ARRAY)) {
                             arraylist_append(tp->type_list, (void*)tt);
                             ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
                             log_debug("registered imported type alias '%.*s' at local index %d",

@@ -88,7 +88,7 @@ protected:
                 Element* found = findElementByTag(elem_list->items[i], tag_name);
                 if (found) return found;
             }
-        } else if (get_type_id(item) == LMD_TYPE_LIST) {
+        } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
             List* list = item.list;
             for (int64_t i = 0; i < list->length; i++) {
                 Element* found = findElementByTag(list->items[i], tag_name);
@@ -120,7 +120,7 @@ protected:
             for (int64_t i = attr_count; i < elem_list->length; i++) {
                 result += getTextContent(elem_list->items[i]);
             }
-        } else if (get_type_id(item) == LMD_TYPE_LIST) {
+        } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
             List* list = item.list;
             for (int64_t i = 0; i < list->length; i++) {
                 result += getTextContent(list->items[i]);
@@ -200,7 +200,7 @@ protected:
             for (int64_t i = attr_count; i < elem_list->length; i++) {
                 count += countElementsByTag(elem_list->items[i], tag_name);
             }
-        } else if (get_type_id(item) == LMD_TYPE_LIST) {
+        } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
             List* list = item.list;
             for (int64_t i = 0; i < list->length; i++) {
                 count += countElementsByTag(list->items[i], tag_name);

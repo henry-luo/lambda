@@ -28,7 +28,7 @@ Type TYPE_PATH = {.type_id = LMD_TYPE_PATH};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_DATE = {.type_id = LMD_TYPE_DTIME};   // sub-type: date-only datetime
 Type TYPE_TIME = {.type_id = LMD_TYPE_DTIME};   // sub-type: time-only datetime
-Type TYPE_LIST = {.type_id = LMD_TYPE_LIST};
+Type TYPE_LIST = {.type_id = LMD_TYPE_ARRAY};
 Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
 TypeArray TYPE_ARRAY;
 Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
@@ -70,7 +70,6 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_SYMBOL: return "symbol";
         case LMD_TYPE_STRING: return "string";
         case LMD_TYPE_BINARY: return "binary";
-        case LMD_TYPE_LIST: return "list";
         case LMD_TYPE_RANGE: return "range";
         case LMD_TYPE_ARRAY_INT: return "array[int]";
         case LMD_TYPE_ARRAY_INT64: return "array[int64]";
@@ -187,7 +186,6 @@ void init_type_info() {
     type_info[LMD_TYPE_SYMBOL] = {sizeof(char*), "symbol", &TYPE_SYMBOL, (Type*)&LIT_TYPE_SYMBOL};
     type_info[LMD_TYPE_STRING] = {sizeof(char*), "string", &TYPE_STRING, (Type*)&LIT_TYPE_STRING};
     type_info[LMD_TYPE_BINARY] = {sizeof(char*), "binary", &TYPE_BINARY, (Type*)&LIT_TYPE_BINARY};
-    type_info[LMD_TYPE_LIST] = {sizeof(void*), "list", &TYPE_LIST, (Type*)&LIT_TYPE_LIST};
     type_info[LMD_TYPE_RANGE] = {sizeof(void*), "range", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
     type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_INT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
@@ -442,7 +440,7 @@ List* list_arena(Arena* arena) {
     List* list = (List*)arena_alloc(arena, sizeof(List));
     if (list == NULL) return NULL;
     memset(list, 0, sizeof(List));
-    list->type_id = LMD_TYPE_LIST;
+    list->type_id = LMD_TYPE_ARRAY;
     return list;
 }
 
@@ -477,7 +475,7 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     default:
-        if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_OBJECT) {
+        if (LMD_TYPE_CONTAINER <= type_id && type_id <= LMD_TYPE_OBJECT) {
             Container *container = itm.container;
         }
     }
@@ -493,14 +491,15 @@ void array_append(Array* arr, Item itm, Pool *pool, Arena* arena) {
 
 void array_push(Array* arr, Item item) {
     TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_LIST) { // nest list is flattened
-        // copy over the items
+    if (type_id == LMD_TYPE_ARRAY) { // flatten only content lists (from list_end)
         List *nest_list = item.list;
-        for (int i = 0; i < nest_list->length; i++) {
-            Item nest_item = nest_list->items[i];
-            array_push(arr, nest_item);
+        if (nest_list && nest_list->is_content) {
+            for (int i = 0; i < nest_list->length; i++) {
+                Item nest_item = nest_list->items[i];
+                array_push(arr, nest_item);
+            }
+            return;
         }
-        return;
     }
     if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
     array_set(arr, arr->length, item);
@@ -512,23 +511,21 @@ void list_push(List *list, Item item) {
     // 1. skip NULL value
     if (type_id == LMD_TYPE_NULL) { return; }
 
-    // 2. nest list is flattened
-    if (type_id == LMD_TYPE_LIST) {
-        // copy over the items
+    // 2. nest content list is flattened (only arrays with is_content flag from list_end)
+    if (type_id == LMD_TYPE_ARRAY) {
         List *nest_list = item.list;
-        if (nest_list == NULL || (uintptr_t)nest_list < 0x1000) {
-            log_error("list_push: nested list pointer is invalid! type_id=%d, item.item=%016lx", type_id, item.item);
+        if (nest_list && (uintptr_t)nest_list >= 0x1000 && nest_list->is_content) {
+            // content list: flatten by copying over the items
+            if (nest_list->items == NULL) {
+                log_error("list_push: nested list has NULL items array! length=%ld, list=%p", nest_list->length, (void*)nest_list);
+                return;
+            }
+            for (int i = 0; i < nest_list->length; i++) {
+                Item nest_item = nest_list->items[i];
+                list_push(list, nest_item);
+            }
             return;
         }
-        if (nest_list->items == NULL) {
-            log_error("list_push: nested list has NULL items array! length=%ld, list=%p", nest_list->length, (void*)nest_list);
-            return;
-        }
-        for (int i = 0; i < nest_list->length; i++) {
-            Item nest_item = nest_list->items[i];
-            list_push(list, nest_item);
-        }
-        return;
     }
 
     // 3. need to merge with previous string if any (unless disabled)
@@ -639,7 +636,7 @@ void list_push_spread(List *list, Item item) {
         }
     }
     // check if this is a spreadable list
-    if (type_id == LMD_TYPE_LIST) {
+    if (type_id == LMD_TYPE_ARRAY) {
         List* inner = item.list;
         if (inner && inner->is_spreadable) {
             for (int i = 0; i < inner->length; i++) {
@@ -770,7 +767,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+            case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                 // item.container on ITEM_NULL gives bogus (Container*)0x0100000000000000
                 // instead of NULL — must check value type to store raw NULL for null items
                 if (get_type_id(item) == LMD_TYPE_NULL) {
@@ -831,7 +828,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     break;
                 }
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+                case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                     Container *container = item.container;
                     titem.container = container;
                     break;
@@ -905,7 +902,7 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_BINARY:
         return {.item = x2it(titem->string)};
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
         return {.item = titem->item};
     default:
         log_error("map_get ANY type is UNKNOWN: %d", titem->type_id);
@@ -947,7 +944,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         break;
 
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:  case LMD_TYPE_LIST:
+    case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         result.container = *(Container**)field_ptr;

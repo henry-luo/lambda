@@ -96,7 +96,7 @@ protected:
                 Element* found = findElementByTag(elem->items[i], tag_name);
                 if (found) return found;
             }
-        } else if (get_type_id(item) == LMD_TYPE_LIST) {
+        } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
             List* list = item.list;
             for (int64_t i = 0; i < list->length; i++) {
                 Element* found = findElementByTag(list->items[i], tag_name);
@@ -126,7 +126,7 @@ protected:
             for (int64_t i = 0; i < elem->length; i++) {
                 result += getTextContent(elem->items[i]);
             }
-        } else if (get_type_id(item) == LMD_TYPE_LIST) {
+        } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
             List* list = item.list;
             for (int64_t i = 0; i < list->length; i++) {
                 result += getTextContent(list->items[i]);
@@ -155,7 +155,7 @@ protected:
             for (int64_t i = 0; i < elem->length; i++) {
                 count += countElementsByTag(elem->items[i], tag_name);
             }
-        } else if (get_type_id(item) == LMD_TYPE_LIST) {
+        } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
             List* list = item.list;
             for (int64_t i = 0; i < list->length; i++) {
                 count += countElementsByTag(list->items[i], tag_name);
@@ -717,7 +717,7 @@ TEST_F(HtmlParserNegativeTest, ExtremeEmptyDocument) {
     EXPECT_NE(get_type_id(result), LMD_TYPE_ERROR);
     // May be null, list, or element (html/body)
     EXPECT_TRUE(get_type_id(result) == LMD_TYPE_NULL ||
-                get_type_id(result) == LMD_TYPE_LIST ||
+                get_type_id(result) == LMD_TYPE_ARRAY ||
                 get_type_id(result) == LMD_TYPE_ELEMENT);
 }
 
@@ -729,7 +729,7 @@ TEST_F(HtmlParserNegativeTest, ExtremeOnlyWhitespace) {
     EXPECT_NE(get_type_id(result), LMD_TYPE_ERROR);
     // May be null, list, or element (html/body)
     EXPECT_TRUE(get_type_id(result) == LMD_TYPE_NULL ||
-                get_type_id(result) == LMD_TYPE_LIST ||
+                get_type_id(result) == LMD_TYPE_ARRAY ||
                 get_type_id(result) == LMD_TYPE_ELEMENT);
 }
 
@@ -1213,7 +1213,7 @@ TEST_F(HtmlParserNegativeTest, CornerCaseCommentStartingWithDash) {
     EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
                 get_type_id(result) == LMD_TYPE_NULL ||
                 get_type_id(result) == LMD_TYPE_ELEMENT ||
-                get_type_id(result) == LMD_TYPE_LIST);
+                get_type_id(result) == LMD_TYPE_ARRAY);
 }
 
 TEST_F(HtmlParserNegativeTest, CornerCaseCommentEndingWithDash) {

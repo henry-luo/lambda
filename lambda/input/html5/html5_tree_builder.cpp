@@ -898,7 +898,7 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
                             Item parsed = parse_json_to_item(parser->input, json_text);
                             TypeId parsed_type = get_type_id(parsed);
                             if (parsed_type == LMD_TYPE_MAP || parsed_type == LMD_TYPE_ELEMENT
-                                || parsed_type == LMD_TYPE_ARRAY || parsed_type == LMD_TYPE_LIST) {
+                                || parsed_type == LMD_TYPE_ARRAY || parsed_type == LMD_TYPE_ARRAY) {
                                 // replace the string child with the parsed JSON
                                 current->items[current->length - 1] = parsed;
                                 log_debug("html5: replaced JSON-LD text with parsed structure");

@@ -1232,6 +1232,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // Check flex direction for row vs column
+    bool is_vertical_wm = false;
     if (is_flex_container) {
         // Default flex-direction is row
         is_row_flex = true;  // Assume row by default
@@ -1240,6 +1241,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE ||
                           dir == DIR_ROW || dir == DIR_ROW_REVERSE);
             flex_gap = view_block->embed->flex->column_gap;
+            is_vertical_wm = (view_block->embed->flex->writing_mode == WM_VERTICAL_LR ||
+                              view_block->embed->flex->writing_mode == WM_VERTICAL_RL);
         } else if (element->specified_style) {
             // Check specified_style for flex-direction
             CssDeclaration* dir_decl = style_tree_get_declaration(
@@ -1247,6 +1250,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum dir = dir_decl->value->data.keyword;
                 is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+            }
+            // Check for writing-mode
+            CssDeclaration* wm_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_WRITING_MODE);
+            if (wm_decl && wm_decl->value && wm_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum wm = wm_decl->value->data.keyword;
+                is_vertical_wm = (wm == CSS_VALUE_VERTICAL_LR || wm == CSS_VALUE_VERTICAL_RL);
             }
             // Check for gap (try column-gap first, then gap shorthand)
             CssDeclaration* gap_decl = style_tree_get_declaration(
@@ -1258,8 +1268,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 flex_gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
             }
         }
-        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f",
-                  element->node_name(), is_flex_container, is_row_flex, flex_gap);
+        // In vertical writing modes, the physical axis mapping swaps:
+        // column becomes horizontal, row becomes vertical
+        if (is_vertical_wm) {
+            is_row_flex = !is_row_flex;
+            log_debug("measure_element_intrinsic_widths: vertical writing mode, flipped is_row_flex");
+        }
+        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f, vertical_wm=%d",
+                  element->node_name(), is_flex_container, is_row_flex, flex_gap, is_vertical_wm);
     }
 
     // Set up parent context for children to inherit definite height
@@ -1398,6 +1414,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     lycon, normalized_buffer, out_pos, text_transform, font_variant);
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
+
+                // In vertical writing mode, text flows top-to-bottom.
+                // Physical width = font_size (one column of characters),
+                // physical height = text inline extent.
+                if (is_vertical_wm && is_flex_container) {
+                    float font_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                    child_sizes.min_content = font_size;
+                    child_sizes.max_content = font_size;
+                    log_debug("  vertical writing mode: text width -> font_size=%.1f", font_size);
+                }
 
                 // In flex containers, text nodes become anonymous flex items
                 if (is_flex_container) {
@@ -1906,12 +1932,42 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     sizes.min_content += horiz_padding + horiz_border;
     sizes.max_content += horiz_padding + horiz_border;
 
-    // CSS 2.1 §10.4: Apply max-width constraint to intrinsic sizes.
+    // CSS 2.1 §10.4: Apply min-width and max-width constraints to intrinsic sizes.
+    // min-width sets a floor: an element can never be narrower than its min-width,
+    // so its intrinsic sizes must reflect this constraint.
     // max-width constrains the preferred (max-content) width.
-    // Note: min-width is NOT applied here — it's a layout-time concern that
-    // affects used width but should not inflate intrinsic preferred widths,
-    // which could prevent flex/grid stretching.
     ViewBlock* view_for_minmax = (ViewBlock*)element;
+    bool view_is_border_box = view_for_minmax->blk &&
+                              view_for_minmax->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+
+    // Apply min-width: floor the intrinsic sizes to ensure they're at least min-width
+    float given_min_width = -1;
+    if (view_for_minmax->blk) {
+        given_min_width = view_for_minmax->blk->given_min_width;
+    }
+    // Fallback: check CSS if blk hasn't been set up yet
+    if (given_min_width < 0 && element->specified_style) {
+        CssDeclaration* min_mw_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_MIN_WIDTH);
+        if (min_mw_decl && min_mw_decl->value &&
+            min_mw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            given_min_width = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, min_mw_decl->value);
+        }
+    }
+    if (given_min_width > 0) {
+        // For border-box: min-width is the border-box total (includes padding+border)
+        // For content-box: min-width is content width, so add padding+border for border-box comparison
+        float min_border_box = view_is_border_box ? given_min_width
+                                                  : (given_min_width + horiz_padding + horiz_border);
+        if (sizes.min_content < min_border_box) {
+            sizes.min_content = min_border_box;
+            log_debug("  -> min-width constraint: raised min_content to %.1f", sizes.min_content);
+        }
+        if (sizes.max_content < min_border_box) {
+            sizes.max_content = min_border_box;
+            log_debug("  -> min-width constraint: raised max_content to %.1f", sizes.max_content);
+        }
+    }
     float given_max_width = -1;
     if (view_for_minmax->blk) {
         given_max_width = view_for_minmax->blk->given_max_width;
@@ -2033,9 +2089,40 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
 
         // Calculate line height
-        float line_height = 20.0f;  // Default
+        float font_size = 16.0f;
         if (lycon->font.style && lycon->font.style->font_size > 0) {
-            line_height = lycon->font.style->font_size * 1.2f;  // Typical line-height
+            font_size = lycon->font.style->font_size;
+        }
+        float line_height = font_size * 1.2f;  // default for line-height: normal
+
+        // Check ancestor elements for resolved CSS line-height
+        // Walk up the DOM tree since intermediate parents may not have blk resolved yet
+        for (DomNode* ancestor = node->parent; ancestor; ancestor = ancestor->parent) {
+            if (!ancestor->is_element()) continue;
+            ViewBlock* anc_view = (ViewBlock*)ancestor->as_element();
+            if (anc_view->blk && anc_view->blk->line_height) {
+                const CssValue* lh = anc_view->blk->line_height;
+                if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+                    line_height = font_size * (float)lh->data.number.value;
+                } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+                    float lh_px = (float)lh->data.length.value;
+                    if (lh_px > 0) line_height = lh_px;
+                }
+                break;
+            }
+            if (anc_view->specified_style) {
+                CssDeclaration* lh_decl = style_tree_get_declaration(
+                    anc_view->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                if (lh_decl && lh_decl->value) {
+                    if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                        line_height = font_size * (float)lh_decl->value->data.number.value;
+                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
+                        if (lh_px > 0) line_height = lh_px;
+                    }
+                    break;
+                }
+            }
         }
 
         // Estimate how many lines the text will take based on available width
@@ -2053,9 +2140,19 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             float text_width = widths.max_content;
 
             // Calculate number of lines (rounded up)
+            // Use min_content (widest word/break unit) to estimate word-boundary waste:
+            // text wraps at word boundaries, so each line's effective width is
+            // floor(available_width / word_width) * word_width, not the full available_width.
             int num_lines = 1;
             if (text_width > width) {
-                num_lines = (int)ceil(text_width / width);
+                float effective_width = width;
+                if (widths.min_content > 0 && widths.min_content <= width) {
+                    int units_per_line = (int)(width / widths.min_content);
+                    if (units_per_line > 0) {
+                        effective_width = units_per_line * widths.min_content;
+                    }
+                }
+                num_lines = (int)ceil(text_width / effective_width);
             }
 
             log_debug("calculate_max_content_height: text len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",

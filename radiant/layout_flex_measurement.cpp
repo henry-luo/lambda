@@ -115,9 +115,14 @@ static float get_css_margin(LayoutContext* lycon, ViewElement* elem, CssProperty
     // Fall back to CSS declaration
     if (!elem->specified_style || !lycon) return 0;
     CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
-    if (!decl || !decl->value) return 0;
-    if (decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
         float val = resolve_length_value(lycon, property_id, decl->value);
+        if (!isnan(val) && val >= 0) return val;
+    }
+    // Fallback: check shorthand margin property
+    CssDeclaration* short_decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
+    if (short_decl && short_decl->value && short_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        float val = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, short_decl->value);
         if (!isnan(val) && val >= 0) return val;
     }
     return 0;
@@ -190,8 +195,22 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     }
 
     // Traverse children to calculate content-based height
-    // Default to row direction (CSS default) unless we can determine otherwise
+    // Determine flex direction from CSS properties or resolved ViewBlock
     bool is_row = true;  // CSS default is row
+    if (elem) {
+        ViewBlock* blk_view = (ViewBlock*)elem;
+        if (blk_view->embed && blk_view->embed->flex) {
+            int dir = blk_view->embed->flex->direction;
+            is_row = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+        } else if (elem->specified_style) {
+            CssDeclaration* dir_decl = style_tree_get_declaration(
+                elem->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
+            if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum d = dir_decl->value->data.keyword;
+                is_row = (d == CSS_VALUE_ROW || d == CSS_VALUE_ROW_REVERSE);
+            }
+        }
+    }
 
     float max_child_height = 0;
     float sum_child_height = 0;
@@ -282,6 +301,17 @@ MeasurementCacheEntry* get_from_measurement_cache(DomNode* node) {
 void clear_measurement_cache() {
     cache_count = 0;
     log_debug("Cleared measurement cache");
+}
+
+void invalidate_measurement_cache_for_node(DomNode* node) {
+    for (int i = 0; i < cache_count; i++) {
+        if (measurement_cache[i].node == node) {
+            // Swap with last entry and decrement count to remove this entry
+            measurement_cache[i] = measurement_cache[--cache_count];
+            log_debug("Invalidated measurement cache for node %p (%s)", node, node ? node->node_name() : "null");
+            return;
+        }
+    }
 }
 
 // Measure flex child content without applying final sizing
@@ -1829,6 +1859,61 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 // For flex containers, use recursive DOM-based measurement
                                 child_height = measure_content_height_recursive(c, lycon);
                                 log_debug("Nested flex child height from recursive measurement: %.1f", child_height);
+                                // Fallback: if recursive returned 0 (e.g., text-only flex container),
+                                // use calculate_max_content_height with parent's cross-axis size
+                                if (child_height == 0.0f && lycon) {
+                                    float avail_w = 10000.0f;
+                                    // For column flex parents, determine item's content width for text wrapping
+                                    if (!is_row_flex_container) {
+                                        float parent_cw = -1;
+                                        if (item->blk && item->blk->given_width >= 0) {
+                                            parent_cw = item->blk->given_width;
+                                            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                                                parent_cw -= item->bound->padding.left + item->bound->padding.right;
+                                                if (item->bound->border)
+                                                    parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                            }
+                                        } else if (flex_layout && flex_layout->cross_axis_size > 0 && item->specified_style) {
+                                            // Try resolving percentage width against container cross-axis
+                                            CssDeclaration* w_decl = style_tree_get_declaration(
+                                                item->specified_style, CSS_PROPERTY_WIDTH);
+                                            if (w_decl && w_decl->value && w_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                                float pct = w_decl->value->data.percentage.value;
+                                                parent_cw = flex_layout->cross_axis_size * pct / 100.0f;
+                                            } else if (!w_decl || !w_decl->value ||
+                                                       (w_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                                                        w_decl->value->data.keyword == CSS_VALUE_AUTO)) {
+                                                // Auto width → stretch to cross-axis minus margins
+                                                parent_cw = flex_layout->cross_axis_size;
+                                                if (item->bound)
+                                                    parent_cw -= item->bound->margin.left + item->bound->margin.right;
+                                            }
+                                            // Convert border-box to content-box
+                                            if (parent_cw > 0 && item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                                                parent_cw -= item->bound->padding.left + item->bound->padding.right;
+                                                if (item->bound->border)
+                                                    parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                            }
+                                        }
+                                        if (parent_cw > 0) {
+                                            float chm = get_child_horizontal_margins(lycon, child_view);
+                                            // Also check shorthand margin property if longhand not found
+                                            if (chm == 0.0f && child_view->specified_style) {
+                                                CssDeclaration* margin_decl = style_tree_get_declaration(
+                                                    child_view->specified_style, CSS_PROPERTY_MARGIN);
+                                                if (margin_decl && margin_decl->value &&
+                                                    margin_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                                    float m = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, margin_decl->value);
+                                                    if (!isnan(m) && m > 0) chm = m * 2;
+                                                }
+                                            }
+                                            avail_w = fmax(parent_cw - chm, 0.0f);
+                                        }
+                                    }
+                                    child_height = calculate_max_content_height(lycon, c, avail_w);
+                                    log_debug("Nested flex child height fallback: avail_w=%.1f, child_height=%.1f, child_bound=%p",
+                                              avail_w, child_height, (void*)child_view->bound);
+                                }
                             } else if (child_display.outer == CSS_VALUE_BLOCK && lycon) {
                                 // For regular block elements (like h2), measure content height
                                 // using intrinsic sizing module
@@ -1924,19 +2009,32 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         }
 
         // Use cached height if available and item has explicit height, otherwise use calculated
+        // CRITICAL: cached->measured_height is border-box (includes padding+border added by
+        // measure_flex_child_content). calculate_flex_basis will add padding again, so we must
+        // store the CONTENT-ONLY height here to avoid double-counting.
+        auto strip_padding_border = [&](float border_box_height) -> float {
+            float content_h = border_box_height;
+            if (item->bound) {
+                content_h -= item->bound->padding.top + item->bound->padding.bottom;
+                if (item->bound->border) {
+                    content_h -= item->bound->border->width.top + item->bound->border->width.bottom;
+                }
+            }
+            return (content_h > 0) ? content_h : 0;
+        };
         if (cached && cached->measured_height > 0 && has_explicit_height) {
-            min_height = cached->measured_height;
-            max_height = cached->measured_height;
-            log_debug("Using cached height for complex content (has explicit height): height=%.1f", min_height);
+            min_height = strip_padding_border(cached->measured_height);
+            max_height = min_height;
+            log_debug("Using cached height for complex content (has explicit height): height=%.1f (stripped padding)", min_height);
         } else if (total_child_height > 0.0f) {
             min_height = total_child_height;
             max_height = total_child_height;
             log_debug("Using calculated height from children: height=%.1f", min_height);
         } else if (cached && cached->measured_height > 0) {
             // Fallback to cache without explicit height requirement
-            min_height = cached->measured_height;
-            max_height = cached->measured_height;
-            log_debug("Using cached height for complex content: height=%.1f", min_height);
+            min_height = strip_padding_border(cached->measured_height);
+            max_height = min_height;
+            log_debug("Using cached height for complex content: height=%.1f (stripped padding)", min_height);
         } else {
             min_height = max_height = 0;
             log_debug("No height from children or cache, using 0");

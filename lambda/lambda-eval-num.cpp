@@ -29,7 +29,7 @@ Item push_c(int64_t cval) {
 // helper macro for vector type detection
 #define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_INT || (t) == LMD_TYPE_ARRAY_INT64 || \
                            (t) == LMD_TYPE_ARRAY_FLOAT || (t) == LMD_TYPE_ARRAY || \
-                           (t) == LMD_TYPE_LIST || (t) == LMD_TYPE_RANGE)
+                           (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
 
 #define IS_SCALAR_NUMERIC(t) ((t) == LMD_TYPE_INT || (t) == LMD_TYPE_INT64 || \
                               (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_DECIMAL)
@@ -49,8 +49,7 @@ static int64_t vector_length(Item item) {
         case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
         case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
         case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
-        case LMD_TYPE_ARRAY:
-        case LMD_TYPE_LIST:        return item.list->length;
+        case LMD_TYPE_ARRAY:        return item.list->length;
         case LMD_TYPE_RANGE:       return item.range->length;
         default:                   return -1;
     }
@@ -67,7 +66,6 @@ static Item vector_get(Item item, int64_t index) {
         case LMD_TYPE_ARRAY_FLOAT:
             return push_d(item.array_float->items[index]);
         case LMD_TYPE_ARRAY:
-        case LMD_TYPE_LIST:
             return item.list->items[index];
         case LMD_TYPE_RANGE:
             return { .item = i2it(item.range->start + index) };
@@ -762,7 +760,7 @@ Item fn_abs(Item item) {
     }
     else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -811,7 +809,7 @@ Item fn_round(Item item) {
     }
     else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -857,7 +855,7 @@ Item fn_floor(Item item) {
     }
     else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -903,7 +901,7 @@ Item fn_ceil(Item item) {
     }
     else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -1038,12 +1036,12 @@ Item fn_min1(Item item_a) {
         }
         return push_d(min_val);
     }
-    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
+    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
         List* arr = item_a.list;
         if (!arr || arr->length == 0) {
             return ItemError; // Empty array has no minimum
         }
-        Item min_item = type_id == LMD_TYPE_LIST ? list_get(arr, 0) : array_get(arr, 0);
+        Item min_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, 0) : array_get(arr, 0);
         double min_val = 0.0;
         bool is_float = false;
 
@@ -1069,7 +1067,7 @@ Item fn_min1(Item item_a) {
 
         // find minimum
         for (size_t i = 1; i < arr->length; i++) {
-            Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
+            Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
             if (elem_item._type_id == LMD_TYPE_INT) {
@@ -1218,12 +1216,12 @@ Item fn_max1(Item item_a) {
         }
         return push_l(max_val);
     }
-    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
+    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
         Array* arr = item_a.array;
         if (!arr || arr->length == 0) {
             return ItemError; // Empty array has no maximum
         }
-        Item max_item = type_id == LMD_TYPE_LIST ? list_get(arr, 0) : array_get(arr, 0);
+        Item max_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, 0) : array_get(arr, 0);
         double max_val = 0.0;
         bool is_float = false;
 
@@ -1244,7 +1242,7 @@ Item fn_max1(Item item_a) {
 
         // Find maximum
         for (size_t i = 1; i < arr->length; i++) {
-            Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
+            Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
             if (elem_item._type_id == LMD_TYPE_INT) {
@@ -1371,7 +1369,7 @@ Item fn_sum(Item item) {
         }
         return push_d(sum);
     }
-    else if (type_id == LMD_TYPE_LIST) {
+    else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.list;
         if (!list || list->length == 0) {
             return (Item) { .item = i2it(0) };  // Empty list sums to 0
@@ -1491,7 +1489,7 @@ Item fn_avg(Item item) {
         }
         return push_d(sum / (double)arr->length);
     }
-    else if (type_id == LMD_TYPE_LIST) {
+    else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.list;
         if (!list || list->length == 0) {
             return ItemError;

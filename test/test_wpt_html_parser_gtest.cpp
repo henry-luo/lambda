@@ -278,9 +278,9 @@ void serialize_element_wpt(Item item, std::string& output, int depth) {
             output += "| " + indent + "\"" + text + "\"\n";
         }
     }
-    else if (type == LMD_TYPE_LIST || type == LMD_TYPE_ARRAY) {
+    else if (type == LMD_TYPE_ARRAY) {
         // Container - serialize children
-        List* list = (type == LMD_TYPE_LIST) ? item.list : (List*)item.array;
+        List* list = (List*)item.array;
         if (list && list->items) {
             for (int64_t i = 0; i < list->length; i++) {
                 serialize_element_wpt(list->items[i], output, depth);
@@ -299,8 +299,8 @@ std::string lambda_tree_to_wpt_format(Item root) {
     // Lambda's parse_html typically returns a List containing html element
     TypeId root_type = get_type_id(root);
 
-    if (root_type == LMD_TYPE_LIST || root_type == LMD_TYPE_ARRAY) {
-        List* list = (root_type == LMD_TYPE_LIST) ? root.list : (List*)root.array;
+    if (root_type == LMD_TYPE_ARRAY) {
+        List* list = (List*)root.array;
 
         if (list) {
             // Look for <html> element

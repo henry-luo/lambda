@@ -29,7 +29,7 @@ void print_tree(Item item, int depth) {
             fwrite(str->chars, 1, str->len, stdout);
             printf("\"\n");
         }
-    } else if (type == LMD_TYPE_LIST) {
+    } else if (type == LMD_TYPE_ARRAY) {
         List* list = item.list;
         printf("%sList: %lld items\n", indent.c_str(), list->length);
         for (int64_t i = 0; i < list->length; i++) {

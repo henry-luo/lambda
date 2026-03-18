@@ -264,7 +264,7 @@ ValidationResult* validate_occurrence_type(
     TypeId item_type_id = item.type_id();
 
     // Check if item is a list/array/range
-    bool is_container = (item_type_id == LMD_TYPE_LIST ||
+    bool is_container = (item_type_id == LMD_TYPE_ARRAY ||
                          item_type_id == LMD_TYPE_ARRAY ||
                          item_type_id == LMD_TYPE_ARRAY_INT ||
                          item_type_id == LMD_TYPE_ARRAY_INT64 ||

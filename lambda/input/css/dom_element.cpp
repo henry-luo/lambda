@@ -613,11 +613,30 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
 
     // Parse the style text - split by semicolons
     // Example: "color: red; font-size: 14px; background: blue"
-    char* text_copy = (char*)arena_alloc(element->doc->arena, strlen(style_text) + 1);
+    size_t style_len = strlen(style_text);
+    char* text_copy = (char*)arena_alloc(element->doc->arena, style_len + 1);
     if (!text_copy) {
         return 0;
     }
-    str_copy(text_copy, strlen(style_text) + 1, style_text, strlen(style_text));
+
+    // Strip CSS comments (/* ... */) before splitting by semicolons.
+    // Comments may contain semicolons which would break the strtok split.
+    {
+        size_t j = 0;
+        for (size_t i = 0; i < style_len; ) {
+            if (i + 1 < style_len && style_text[i] == '/' && style_text[i + 1] == '*') {
+                // skip until closing */
+                i += 2;
+                while (i + 1 < style_len && !(style_text[i] == '*' && style_text[i + 1] == '/')) {
+                    i++;
+                }
+                if (i + 1 < style_len) i += 2; // skip */
+            } else {
+                text_copy[j++] = style_text[i++];
+            }
+        }
+        text_copy[j] = '\0';
+    }
 
     char* saveptr = NULL;
     char* declaration_str = strtok_r(text_copy, ";", &saveptr);
