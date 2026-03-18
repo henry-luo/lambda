@@ -133,7 +133,11 @@ p is Point                                // true (nominal)
 ```lambda
 // Pipe expressions
 [1, 2, 3] | ~ * 2              // [2, 4, 6]
-users | ~.name where len(~) > 3  // Filter and transform
+users | ~.name that (len(~) > 3) // Filter and transform
+
+// Pipe/filter spread in array literals
+[1, [2, 3] | ~, 4, 5]          // [1, 2, 3, 4, 5]
+[0, items that (~ > 3), 9]      // flattened into enclosing array
 
 // Query expressions — type-based search
 html?<img>                       // all <img> at any depth

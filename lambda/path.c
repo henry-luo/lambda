@@ -823,8 +823,8 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
     }
     
     // Create result list (will be empty for empty directories)
-    List* children = (List*)heap_calloc(sizeof(List), LMD_TYPE_LIST);
-    children->type_id = LMD_TYPE_LIST;
+    List* children = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
+    children->type_id = LMD_TYPE_ARRAY;
     
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -908,8 +908,8 @@ static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursiv
     }
     
     // Create result list
-    List* matches = (List*)heap_calloc(sizeof(List), LMD_TYPE_LIST);
-    matches->type_id = LMD_TYPE_LIST;
+    List* matches = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
+    matches->type_id = LMD_TYPE_ARRAY;
     
     expand_wildcard_recursive(base_path, dir_path, recursive, matches, 0, 16);
     

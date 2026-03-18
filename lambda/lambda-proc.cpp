@@ -152,6 +152,14 @@ double pn_clock() {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+#ifdef _WIN32
+// Helper: copy path into buf converting forward slashes to backslashes
+static void win_path_buf(char* buf, size_t bufsz, const char* path) {
+    snprintf(buf, bufsz, "%s", path);
+    for (char* p = buf; *p; p++) if (*p == '/') *p = '\\';
+}
+#endif
+
 // Helper: Create parent directories recursively for a file path
 static int create_parent_dirs(const char* file_path) {
     char* path_copy = strdup(file_path);
@@ -174,7 +182,9 @@ static int create_parent_dirs(const char* file_path) {
 
 #ifdef _WIN32
     char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", path_copy);
+    char win_dir[4096];
+    win_path_buf(win_dir, sizeof(win_dir), path_copy);
+    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", win_dir);
     int result = system(cmd);
     if (result != 0) {
         DWORD attr = GetFileAttributesA(path_copy);
@@ -828,7 +838,7 @@ String* format_cmd_args(String* cmd, Item args) {
     if (args_type == LMD_TYPE_NULL) {
         // No arguments
     }
-    else if (args_type == LMD_TYPE_LIST || args_type == LMD_TYPE_ARRAY) {
+    else if (args_type == LMD_TYPE_ARRAY || args_type == LMD_TYPE_ARRAY) {
         List* arg_list = args.list;
         for (int i = 0; i < arg_list->length; i++) {
             Item arg_item = arg_list->items[i];
@@ -1139,9 +1149,12 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
 
     // Use platform command for simplicity (handles directories too)
 #ifdef _WIN32
+    char win_src[4096], win_dst[4096];
+    win_path_buf(win_src, sizeof(win_src), src_path);
+    win_path_buf(win_dst, sizeof(win_dst), dst_path);
     char cmd[4096];
     snprintf(cmd, sizeof(cmd), "copy /Y \"%s\" \"%s\" >nul 2>&1 || xcopy /E /I /Y \"%s\" \"%s\" >nul 2>&1",
-             src_path, dst_path, src_path, dst_path);
+             win_src, win_dst, win_src, win_dst);
 #else
     char cmd[4096];
     snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", src_path, dst_path);
@@ -1240,7 +1253,9 @@ RetItem pn_io_delete(Item path_item) {
         // Directory - use recursive delete
 #ifdef _WIN32
         char cmd[4096];
-        snprintf(cmd, sizeof(cmd), "rmdir /S /Q \"%s\"", path);
+        char win_p[4096];
+        win_path_buf(win_p, sizeof(win_p), path);
+        snprintf(cmd, sizeof(cmd), "rmdir /S /Q \"%s\"", win_p);
         result = system(cmd);
 #else
         result = nftw(path, remove_callback, 64, FTW_DEPTH | FTW_PHYS);
@@ -1276,7 +1291,9 @@ RetItem pn_io_mkdir(Item path_item) {
     // Use platform command for recursive mkdir
 #ifdef _WIN32
     char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", path);
+    char win_p[4096];
+    win_path_buf(win_p, sizeof(win_p), path);
+    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", win_p);
     int result = system(cmd);
     // Windows mkdir returns error if dir exists, ignore it
     if (result != 0) {
@@ -1393,7 +1410,10 @@ RetItem pn_io_symlink(Item target_item, Item link_item) {
     if (stat(target_path, &st) == 0 && S_ISDIR(st.st_mode)) {
         type_flag = "/D ";
     }
-    snprintf(cmd, sizeof(cmd), "mklink %s\"%s\" \"%s\"", type_flag, link_path, target_path);
+    char win_link[4096], win_target[4096];
+    win_path_buf(win_link, sizeof(win_link), link_path);
+    win_path_buf(win_target, sizeof(win_target), target_path);
+    snprintf(cmd, sizeof(cmd), "mklink %s\"%s\" \"%s\"", type_flag, win_link, win_target);
     int result = system(cmd);
 #else
     int result = symlink(target_path, link_path);

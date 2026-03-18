@@ -112,7 +112,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         *(String**)field_ptr = value.get_string();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
     case LMD_TYPE_FUNC:
         *(Map**)field_ptr = value.map;
         break;
@@ -146,7 +146,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
             break;
         }
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-        case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+        case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
             Container *container = item.container;
             titem.container = container;
             break;
@@ -228,7 +228,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         *(String**)field_ptr = value.get_string();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         Container *container = value.container;
         *(void**)field_ptr = container;
         break;
@@ -1071,7 +1071,7 @@ extern "C" Element* input_get_html_fragment_element(Input* input, const char* or
         // Fallback
         return elem;
     }
-    else if (root_type == LMD_TYPE_LIST) {
+    else if (root_type == LMD_TYPE_ARRAY) {
         List* root_list = input->root.list;
         for (int64_t i = 0; i < root_list->length; i++) {
             Item item = root_list->items[i];

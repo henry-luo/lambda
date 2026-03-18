@@ -94,7 +94,6 @@ enum EnumTypeId {
     LMD_TYPE_BINARY,
 
     // container types, LMD_TYPE_CONTAINER
-    LMD_TYPE_LIST,
     LMD_TYPE_RANGE,
     LMD_TYPE_ARRAY_INT,
     LMD_TYPE_ARRAY_INT64,
@@ -138,7 +137,7 @@ typedef enum {
 } BoolEnum;
 typedef uint8_t Bool;
 
-#define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
+#define  LMD_TYPE_CONTAINER LMD_TYPE_RANGE
 
 // System function identifiers (moved from lambda-data.hpp for C compatibility)
 typedef enum SysFunc {
@@ -376,6 +375,8 @@ struct Container {
     };
 };
 
+// List/Array flags (stored in List.flags / Array.flags field)
+
 #ifndef __cplusplus
     struct Range {
         TypeId type_id;
@@ -485,7 +486,8 @@ void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
-void array_push_spread(Array* arr, Item item);  // push item, spreading if spreadable array
+void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
+void array_push_spread_all(Array* arr, Item item);  // push item, spreading any array (for pipe exprs in array literals)
 Item array_end(Array* arr);  // finalize and return array as Item
 
 // Mark an item as spreadable (for spread operator *expr)

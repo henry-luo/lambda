@@ -271,7 +271,6 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:
-    case LMD_TYPE_LIST:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT: {
@@ -296,7 +295,6 @@ void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:
-    case LMD_TYPE_LIST:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT:
@@ -482,7 +480,7 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
                     entry->type->type_id == LMD_TYPE_BINARY) {
                     String* str = *(String**)new_field;
                 }
-                else if (entry->type->type_id >= LMD_TYPE_LIST &&
+                else if (entry->type->type_id >= LMD_TYPE_ARRAY &&
                          entry->type->type_id <= LMD_TYPE_OBJECT) {
                     Container* container = *(Container**)new_field;
                 }
@@ -1007,7 +1005,7 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
                         entry->type->type_id == LMD_TYPE_BINARY) {
                         String* str = *(String**)new_field;
                     }
-                    else if (entry->type->type_id >= LMD_TYPE_LIST &&
+                    else if (entry->type->type_id >= LMD_TYPE_ARRAY &&
                              entry->type->type_id <= LMD_TYPE_OBJECT) {
                         Container* container = *(Container**)new_field;
                     }
@@ -1660,7 +1658,7 @@ Item MarkEditor::array_set(Item array, int64_t index, Item value) {
 Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
     TypeId array_type = get_type_id(array);
 
-    if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT || array_type == LMD_TYPE_LIST) {
+    if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT || array_type == LMD_TYPE_ARRAY) {
         // All these types share the same memory layout for items/length/capacity
         Array* arr = array.array;  // Works for List and Element too since they share layout
 

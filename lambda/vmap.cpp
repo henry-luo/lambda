@@ -286,7 +286,7 @@ extern "C" Item vmap_new() {
 extern "C" Item vmap_from_array(Item array_item) {
     log_debug("vmap_from_array: creating VMap from array");
     TypeId type_id = get_type_id(array_item);
-    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_LIST) {
+    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY) {
         log_error("vmap_from_array: expected array/list, got type %s", get_type_name(type_id));
         return ItemNull;
     }

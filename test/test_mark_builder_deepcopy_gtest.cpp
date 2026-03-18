@@ -306,7 +306,7 @@ TEST_F(MarkBuilderDeepCopyTest, CopyList) {
         .push((int64_t)3)
         .final();
 
-    EXPECT_EQ(get_type_id(list), LMD_TYPE_LIST);
+    EXPECT_EQ(get_type_id(list), LMD_TYPE_ARRAY);
     EXPECT_TRUE(builder1.is_in_arena(list));
     EXPECT_FALSE(builder2.is_in_arena(list));
 
@@ -314,7 +314,7 @@ TEST_F(MarkBuilderDeepCopyTest, CopyList) {
     Item copied = builder2.deep_copy(list);
 
     // Verify type is preserved as LIST (not converted to ARRAY)
-    EXPECT_EQ(get_type_id(copied), LMD_TYPE_LIST);
+    EXPECT_EQ(get_type_id(copied), LMD_TYPE_ARRAY);
     EXPECT_TRUE(builder2.is_in_arena(copied));
 
     // Verify contents
@@ -343,7 +343,7 @@ TEST_F(MarkBuilderDeepCopyTest, CopyListSameInput) {
 
     // Should be same list (no copy needed)
     EXPECT_EQ(list.list, copied.list);
-    EXPECT_EQ(get_type_id(copied), LMD_TYPE_LIST);
+    EXPECT_EQ(get_type_id(copied), LMD_TYPE_ARRAY);
 }
 
 // ============================================================================

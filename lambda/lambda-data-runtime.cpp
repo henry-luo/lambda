@@ -291,8 +291,8 @@ void array_float_set_item(ArrayFloat *arr, int64_t index, Item value) {
 
 List* list() {
     log_enter();
-    List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
-    list->type_id = LMD_TYPE_LIST;
+    List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
+    list->type_id = LMD_TYPE_ARRAY;
     return list;
 }
 
@@ -310,7 +310,7 @@ Item list_end(List *list) {
         else if (list->length == 1) {
             return list->items[0];
         } else {
-            log_item({.list = list}, "list_end");
+            list->is_content = 1;
             return {.list = list};
         }
     }
@@ -375,7 +375,7 @@ void array_push_spread(Array* arr, Item item) {
         }
     }
     // check if this is a spreadable list
-    if (type_id == LMD_TYPE_LIST) {
+    if (type_id == LMD_TYPE_ARRAY) {
         List* inner = item.list;
         if (inner && inner->is_spreadable) {
             for (int i = 0; i < inner->length; i++) {
@@ -418,6 +418,43 @@ void array_push_spread(Array* arr, Item item) {
     array_push(arr, item);
 }
 
+// push item to array, spreading any array type unconditionally (regardless of is_spreadable flag)
+// used for pipe expression results in array literals: [a, pipe_expr | ~, b]
+void array_push_spread_all(Array* arr, Item item) {
+    if (item.item == ITEM_NULL_SPREADABLE) return;
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ARRAY) {
+        Array* inner = item.array;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, inner->items[i]);
+            return;
+        }
+    }
+    if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* inner = item.array_int;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = i2it(inner->items[i])});
+            return;
+        }
+    }
+    if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* inner = item.array_int64;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = l2it(inner->items[i])});
+            return;
+        }
+    }
+    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* inner = item.array_float;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = d2it(inner->items[i])});
+            return;
+        }
+    }
+    // non-array types are pushed as single items (maps, elements, scalars, etc.)
+    array_push(arr, item);
+}
+
 // mark an item as spreadable (for spread operator *expr)
 // works on arrays and lists - marks the is_spreadable flag
 // returns the item unchanged for spreading when used with push_spread functions
@@ -426,7 +463,7 @@ Item item_spread(Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
         if (arr) arr->is_spreadable = true;
-    } else if (type_id == LMD_TYPE_LIST) {
+    } else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.list;
         if (list) list->is_spreadable = true;
     } else if (type_id == LMD_TYPE_ARRAY_INT) {
@@ -552,7 +589,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_BINARY:
         return {.item = x2it(*(char**)field_ptr)};
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         Container* container = *(Container**)field_ptr;
         if (!container) return ItemNull;
         return {.container = container};
@@ -797,8 +834,6 @@ Item item_at(Item data, int64_t index) {
         return array_int64_get(data.array_int64, index);
     case LMD_TYPE_ARRAY_FLOAT:
         return array_float_get(data.array_float, index);
-    case LMD_TYPE_LIST:
-        return list_get(data.list, index);
     case LMD_TYPE_RANGE: {
         Range *range = data.range;
         if (index < 0 || index >= range->length) { return ItemNull; }
@@ -1203,7 +1238,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     }
 
     // convert generic Array/List to typed array (Array and List are the same struct)
-    if (item_tid == LMD_TYPE_ARRAY || item_tid == LMD_TYPE_LIST) {
+    if (item_tid == LMD_TYPE_ARRAY || item_tid == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
         Item* items = arr->items;
         int64_t length = arr->length;

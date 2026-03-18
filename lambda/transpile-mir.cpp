@@ -999,7 +999,7 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
     case LMD_TYPE_SYMBOL:
         return emit_box_symbol(mt, val_reg);
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_LIST: case LMD_TYPE_MAP:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
     case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
         return emit_box_container(mt, val_reg);
@@ -1051,7 +1051,7 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
         return emit_call_1(mt, "it2l", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
     // Container types: strip upper 8 tag bits to recover raw pointer
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_LIST: case LMD_TYPE_MAP:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE:
     case LMD_TYPE_FUNC: case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
         return emit_unbox_container(mt, item_reg);
@@ -1113,7 +1113,7 @@ static bool mir_is_direct_access_type(TypeId type_id) {
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         return true;
@@ -1128,7 +1128,7 @@ static bool mir_is_direct_access_type(TypeId type_id) {
 static bool mir_is_container_field_type(TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
-    case LMD_TYPE_LIST: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
@@ -3243,7 +3243,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // call ensure_typed_array to convert at runtime.
                 if (declare->type && declare->type->kind == TYPE_KIND_UNARY) {
                     bool needs_coerce = (expr_tid == LMD_TYPE_ANY || expr_tid == LMD_TYPE_NULL ||
-                                         expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_LIST ||
+                                         expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_ARRAY ||
                                          expr_tid == LMD_TYPE_ARRAY_INT || expr_tid == LMD_TYPE_ARRAY_INT64 ||
                                          expr_tid == LMD_TYPE_ARRAY_FLOAT);
                     if (needs_coerce) {
@@ -3446,17 +3446,22 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     // Check if any child is a for-expression, spread, or let binding
     bool has_spreadable = false;
+    bool has_pipe_spread = false;  // pipe expressions spread their array results in array literals
     bool has_let = false;
     AstNode* scan = arr_node->item;
     while (scan) {
         if (scan->node_type == AST_NODE_FOR_EXPR || scan->node_type == AST_NODE_SPREAD) {
             has_spreadable = true;
         }
+        if (scan->node_type == AST_NODE_PIPE) {
+            has_pipe_spread = true;
+        }
         if (scan->node_type == AST_NODE_ASSIGN) {
             has_let = true;
         }
         scan = scan->next;
     }
+    bool any_spread = has_spreadable || has_pipe_spread;
 
     // push scope to contain let bindings within the array
     if (has_let) push_scope(mt);
@@ -3470,7 +3475,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     // Specialized ArrayFloat path: array_float_new(count) + array_float_set(arr, i, val)
     // Skip specialized paths when array has let bindings (let nodes are transparent)
-    if (is_float_array && !has_spreadable && !has_let && arr_node->item) {
+    if (is_float_array && !any_spread && !has_let && arr_node->item) {
         int count = (int)arr_type->length;
         MIR_reg_t arr = emit_call_1(mt, "array_float_new", MIR_T_P,
             MIR_T_I64, MIR_new_int_op(mt->ctx, count));
@@ -3502,7 +3507,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     // Specialized ArrayInt path: array_int_new(count) + array_int_set(arr, i, val)
     // Skip specialized paths when array has let bindings (let nodes are transparent)
-    if (is_int_array && !has_spreadable && !has_let && arr_node->item) {
+    if (is_int_array && !any_spread && !has_let && arr_node->item) {
         int count = (int)arr_type->length;
         MIR_reg_t arr = emit_call_1(mt, "array_int_new", MIR_T_P,
             MIR_T_I64, MIR_new_int_op(mt->ctx, count));
@@ -3544,7 +3549,13 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
         TypeId val_tid = get_effective_type(mt, item);
 
-        if (has_spreadable) {
+        if (item->node_type == AST_NODE_PIPE) {
+            // pipe/that/where exprs in array literals spread their array results
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            emit_call_void_2(mt, "array_push_spread_all",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        } else if (has_spreadable) {
             // When any child is spreadable, use array_push_spread for ALL children
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
             emit_call_void_2(mt, "array_push_spread",
@@ -3569,7 +3580,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     // If array contains spreadable children (for-expressions) and all produce
     // empty results, array_end returns ITEM_NULL_SPREADABLE. For top-level
     // array literals [for ...], convert to proper empty array.
-    if (has_spreadable) {
+    if (any_spread) {
         uint64_t NULL_SPREAD = (uint64_t)LMD_TYPE_NULL << 56 | 1;
         MIR_reg_t is_sn = new_reg(mt, "sn2", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_sn),
@@ -5593,7 +5604,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         if (info->fn == SYSFUNC_LEN && arg_count == 1) {
             arg = call_node->argument;
             TypeId arg_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            if (arg_tid == LMD_TYPE_LIST) {
+            if (arg_tid == LMD_TYPE_ARRAY) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 return emit_call_1(mt, "fn_len_l", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
@@ -6002,19 +6013,58 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Create proto and import for the cross-module call
             char proto_name[160];
             snprintf(proto_name, sizeof(proto_name), "%s_ip%d", fn_import_name->str, mt->label_counter++);
-            MIR_type_t res_types[1] = { MIR_T_I64 };
-            MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, ai, arg_vars);
+
+            // Import the target function
             MIR_item_t imp_item = MIR_new_import(mt->ctx, fn_import_name->str);
 
-            int nops = 3 + ai;
-            MIR_op_t ops[19];
-            ops[0] = MIR_new_ref_op(mt->ctx, proto);
-            ops[1] = MIR_new_ref_op(mt->ctx, imp_item);
-            MIR_reg_t result = new_reg(mt, "impcall", MIR_T_I64);
-            ops[2] = MIR_new_reg_op(mt->ctx, result);
-            for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
+            MIR_reg_t result;
+            if (use_wrapper && ai <= 8) {
+                // _b wrappers return RetItem (16 bytes). On Windows x64, structs > 8 bytes
+                // use hidden pointer return, which MIR cannot handle directly.
+                // Route through fn_call_boxed_N trampoline: passes function pointer + args
+                // to C code that calls the _b wrapper with correct ABI.
+                char trampoline_name[32];
+                snprintf(trampoline_name, sizeof(trampoline_name), "fn_call_boxed_%d", ai);
 
-            emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                // Load _b function address into a register
+                MIR_reg_t fp_reg = new_reg(mt, "bfp", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, fp_reg),
+                    MIR_new_ref_op(mt->ctx, imp_item)));
+
+                // Build trampoline call: fn_call_boxed_N(fp, arg0, arg1, ...)
+                MIR_var_t tramp_vars[17];
+                tramp_vars[0] = {MIR_T_P, "fp", 0};
+                for (int i = 0; i < ai; i++) tramp_vars[1 + i] = arg_vars[i];
+
+                MirImportEntry* tramp_ie = ensure_import(mt, trampoline_name,
+                    MIR_T_I64, 1 + ai, tramp_vars, 1);
+
+                int nops = 3 + 1 + ai;  // proto + import + result + fp + args
+                MIR_op_t ops[20];
+                ops[0] = MIR_new_ref_op(mt->ctx, tramp_ie->proto);
+                ops[1] = MIR_new_ref_op(mt->ctx, tramp_ie->import);
+                result = new_reg(mt, "impcall", MIR_T_I64);
+                ops[2] = MIR_new_reg_op(mt->ctx, result);
+                ops[3] = MIR_new_reg_op(mt->ctx, fp_reg);
+                for (int i = 0; i < ai; i++) ops[4 + i] = arg_ops[i];
+
+                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            } else {
+                // Non-wrapper calls: function returns Item directly (MIR_T_I64)
+                MIR_type_t res_types[1] = { MIR_T_I64 };
+                MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, ai, arg_vars);
+
+                int nops = 3 + ai;
+                MIR_op_t ops[19];
+                ops[0] = MIR_new_ref_op(mt->ctx, proto);
+                ops[1] = MIR_new_ref_op(mt->ctx, imp_item);
+                result = new_reg(mt, "impcall", MIR_T_I64);
+                ops[2] = MIR_new_reg_op(mt->ctx, result);
+                for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
+
+                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            }
 
             // Import calls return boxed Items. Unbox to native type to match
             // local/system call behavior, so callers can re-box consistently.
@@ -7172,7 +7222,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     }
 
     // For LIST type, list_end already returns Item - return as-is
-    if (tid == LMD_TYPE_LIST && node->node_type == AST_NODE_CONTENT) {
+    if (tid == LMD_TYPE_ARRAY && node->node_type == AST_NODE_CONTENT) {
         return val;
     }
 
@@ -7205,6 +7255,16 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
                 MIR_reg_t r = new_reg(mt, "ttime", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_TIME)));
+                return r;
+            }
+            // For 'list' bare keyword: emit &LIT_TYPE_LIST directly so fn_is returns BOOL_FALSE
+            // (LMD_TYPE_LIST no longer exists; 'list' type never matches at runtime)
+            extern Type TYPE_LIST;
+            extern TypeType LIT_TYPE_LIST;
+            if (tt->type == &TYPE_LIST) {
+                MIR_reg_t r = new_reg(mt, "tlist", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_LIST)));
                 return r;
             }
             tid = tt->type->type_id;
@@ -7309,7 +7369,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         if (obj_tid == LMD_TYPE_ANY || obj_tid == LMD_TYPE_NULL) {
             arr_ptr = emit_unbox_container(mt, obj);
         } else if (obj_tid == LMD_TYPE_ARRAY_INT || obj_tid == LMD_TYPE_ARRAY_FLOAT ||
-                   obj_tid == LMD_TYPE_ARRAY || obj_tid == LMD_TYPE_LIST) {
+                   obj_tid == LMD_TYPE_ARRAY || obj_tid == LMD_TYPE_ARRAY) {
             // Container variable: stored as tagged Item, strip tag to get pointer
             arr_ptr = emit_unbox_container(mt, obj);
         } else {
@@ -7844,10 +7904,15 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     }
     case AST_NODE_CONTENT_TYPE:
     case AST_NODE_LIST_TYPE: {
-        // List type: use const_type(type_index)
+        // List type: use const_type(type_index) for structured types; fall back to base_type otherwise
         if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
             TypeType* tt = (TypeType*)node->type;
             if (tt->type) {
+                extern Type TYPE_LIST;
+                // bare 'list' keyword: TYPE_LIST is a plain Type (no type_index), use base_type
+                if (tt->type == &TYPE_LIST) {
+                    return transpile_base_type(mt, (AstTypeNode*)node);
+                }
                 TypeList* lt = (TypeList*)tt->type;
                 return transpile_const_type(mt, lt->type_index);
             }

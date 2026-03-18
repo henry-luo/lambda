@@ -545,6 +545,7 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
 // Find all non-overlapping matches of pattern in string
 List* pattern_find_all(TypePattern* pattern, const char* str, size_t len) {
     List* result = list();
+    result->is_content = 1;
     if (!pattern || !str || len == 0) return result;
 
     re2::RE2* re = pattern_get_unanchored(pattern);

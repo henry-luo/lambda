@@ -140,7 +140,7 @@ bool pdf_extract_media_box(Map* page_dict, Map* pdf_data, double* media_box) {
         if (media_box_item.item != ITEM_NULL) {
             // Check if it's actually an array
             TypeId box_type = media_box_item.type_id();
-            if (box_type != LMD_TYPE_ARRAY && box_type != LMD_TYPE_LIST) {
+            if (box_type != LMD_TYPE_ARRAY && box_type != LMD_TYPE_ARRAY) {
                 pool_destroy(temp_pool);
                 return false;
             }
@@ -481,7 +481,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
 
     if (contents_type != LMD_TYPE_MAP && contents_type != LMD_TYPE_ELEMENT) {
         // Might be an array of content streams
-        if (contents_type == LMD_TYPE_ARRAY || contents_type == LMD_TYPE_LIST) {
+        if (contents_type == LMD_TYPE_ARRAY || contents_type == LMD_TYPE_ARRAY) {
             Array* contents_array = contents_item.array;
             if (contents_array) {
                 for (int i = 0; i < contents_array->length; i++) {

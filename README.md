@@ -4,11 +4,6 @@ A general-purpose, cross-platform, functional scripting language and document pr
 
 Built from scratch in C/C++ with a custom and light-weight runtime (only **9 MB**), Tree-sitter parsing, MIR-based JIT compilation.
 
-> Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
-> A stable subset of the literal data model is separately formalised and released as
-> [Mark Notation](https://github.com/henry-luo/mark).
-
-## Overview
 Lambda is designed for two things at once:
 
 1) a small, expressive functional language for transforming data and documents, and
@@ -16,9 +11,13 @@ Lambda is designed for two things at once:
 
 Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) can be parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG layout engine.
 
+> Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
+> A stable subset of the literal data model is separately formalised and released as
+> [Mark Notation](https://github.com/henry-luo/mark).
+
 ## Features
 
-#### 1. Lambda script (pure functional runtime)
+#### Lambda script (pure functional runtime)
 - **Pure-functional core** with immutable data structures (lists, arrays, maps, elements) and first-class functions and types.
 - **Expressive pipe operator** (`|`) for fluent set-oriented data transformation pipelines with inline mapping and filtering.
 - **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
@@ -26,18 +25,18 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **Interactive REPL** for exploration and debugging.
 - **Optional MIR JIT** execution path for performance-sensitive workloads.
 
-#### 2. Markup input parsing & formatting
+#### Markup input parsing & formatting
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
 - **One universal representation**: parse disparate syntaxes into a common Lambda/Mark node tree.
 - **Conversion pipeline**: convert between formats using `lambda convert` (auto-detect input formats when possible).
 - **Document-centric tooling**: designed to treat “documents as data”, not just as text.
 
-#### 3. Type system & schema validation
+#### Type system & schema validation
 - **Rich type system** with type inference and explicit type annotations, similar to that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 - **Format-aware validation** helpers that unwrap/normalize documents before validation.
 
-#### 4. Radiant HTML/CSS/SVG layout, rendering & viewer
+#### Radiant HTML/CSS/SVG layout, rendering & viewer
 - **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
 - **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
 - **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.

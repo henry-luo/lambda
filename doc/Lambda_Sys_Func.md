@@ -83,56 +83,55 @@ Basic mathematical operations.
 | `ceil(x)` | Round up | `ceil(3.2)` | `4` |
 | `sign(x)` | Sign of number (-1, 0, 1) | `sign(-5)` | `-1` |
 
-### Min/Max
+### Aggregating Functions
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `min(a, b)` | Minimum of two values | `min(3, 5)` | `3` |
-| `min(vec)` | Minimum in collection | `min([3, 1, 2])` | `1` |
-| `max(a, b)` | Maximum of two values | `max(3, 5)` | `5` |
-| `max(vec)` | Maximum in collection | `max([3, 1, 2])` | `3` |
-| `argmin(vec)` | Index of minimum | `argmin([3, 1, 2])` | `1` |
-| `argmax(vec)` | Index of maximum | `argmax([3, 1, 2])` | `0` |
+| Function      | Description           | Example             | Result |
+| ------------- | --------------------- | ------------------- | ------ |
+| `min(a, b)`   | Minimum of two values | `min(3, 5)`         | `3`    |
+| `min(vec)`    | Minimum in collection | `min([3, 1, 2])`    | `1`    |
+| `max(a, b)`   | Maximum of two values | `max(3, 5)`         | `5`    |
+| `max(vec)`    | Maximum in collection | `max([3, 1, 2])`    | `3`    |
+| `argmin(vec)` | Index of minimum      | `argmin([3, 1, 2])` | `1`    |
+| `argmax(vec)` | Index of maximum      | `argmax([3, 1, 2])` | `0`    |
+| `sum(vec)`    | Sum of elements       | `sum([1, 2, 3])`    | `6`    |
+| `avg(vec)`    | Arithmetic mean       | `avg([1, 2, 3])`    | `2.0`  |
 
 ```lambda
-abs(-5)            // 5
-round(3.7)         // 4
-floor(3.7)         // 3
-ceil(3.2)          // 4
-sign(-5)           // -1
+abs(-5)                 // 5
+round(3.7)              // 4
+floor(3.7)              // 3
+ceil(3.2)               // 4
+sign(-5)                // -1
 
-min(3, 5)          // 3
-min([3, 1, 2])     // 1
-max(3, 5)          // 5
-max([3, 1, 2])     // 3
-argmin([5, 2, 8, 1])  // 3 (index of 1)
-argmax([5, 2, 8, 1])  // 2 (index of 8)
+min(3, 5)               // 3
+min([3, 1, 2])          // 1
+max(3, 5)               // 5
+max([3, 1, 2])          // 3
+argmin([5, 2, 8, 1])    // 3 (index of 1)
+argmax([5, 2, 8, 1])    // 2 (index of 8)
+
+sum([1, 2, 3, 4])       // 10
+avg([1, 2, 3, 4])       // 2.5
 ```
-
----
 
 ## Statistical Functions
 
-Functions for statistical analysis on collections.
+Functions for statistical analysis on collections, under `math` module.
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
-| `avg(vec)` | Arithmetic mean | `avg([1, 2, 3])` | `2.0` |
-| `math.mean(vec)` | Alias for avg | `math.mean([1, 2, 3])` | `2.0` |
-| `math.median(vec)` | Median value | `math.median([1, 3, 2])` | `2` |
-| `math.variance(vec)` | Population variance | `math.variance([1, 2, 3])` | `0.666...` |
-| `math.deviation(vec)` | Standard deviation | `math.deviation([1, 2, 3])` | `0.816...` |
-| `math.quantile(vec, p)` | p-th quantile | `math.quantile([1,2,3,4], 0.5)` | `2.5` |
-| `math.prod(vec)` | Product of elements | `math.prod([2, 3, 4])` | `24` |
-| `math.cumsum(vec)` | Cumulative sum | `math.cumsum([1, 2, 3])` | `[1, 3, 6]` |
-| `math.cumprod(vec)` | Cumulative product | `math.cumprod([1, 2, 3])` | `[1, 2, 6]` |
-| `math.dot(a, b)` | Dot product | `math.dot([1,2,3], [4,5,6])` | `32` |
-| `math.norm(vec)` | Euclidean norm | `math.norm([3, 4])` | `5` |
+| Function                | Description         | Example                         | Result      |
+| ----------------------- | ------------------- | ------------------------------- | ----------- |
+| `math.mean(vec)`        | Alias for avg       | `math.mean([1, 2, 3])`          | `2.0`       |
+| `math.median(vec)`      | Median value        | `math.median([1, 3, 2])`        | `2`         |
+| `math.variance(vec)`    | Population variance | `math.variance([1, 2, 3])`      | `0.666...`  |
+| `math.deviation(vec)`   | Standard deviation  | `math.deviation([1, 2, 3])`     | `0.816...`  |
+| `math.quantile(vec, p)` | p-th quantile       | `math.quantile([1,2,3,4], 0.5)` | `2.5`       |
+| `math.prod(vec)`        | Product of elements | `math.prod([2, 3, 4])`          | `24`        |
+| `math.cumsum(vec)`      | Cumulative sum      | `math.cumsum([1, 2, 3])`        | `[1, 3, 6]` |
+| `math.cumprod(vec)`     | Cumulative product  | `math.cumprod([1, 2, 3])`       | `[1, 2, 6]` |
+| `math.dot(a, b)`        | Dot product         | `math.dot([1,2,3], [4,5,6])`    | `32`        |
+| `math.norm(vec)`        | Euclidean norm      | `math.norm([3, 4])`             | `5`         |
 
 ```lambda
-sum([1, 2, 3, 4])           // 10
-avg([1, 2, 3, 4])           // 2.5
 math.mean([1, 2, 3, 4])          // 2.5
 math.median([1, 3, 2, 4, 5])     // 3
 math.variance([1, 2, 3])         // 0.666...
@@ -240,6 +239,7 @@ math.cbrt(27)                   // 3
 math.hypot(3, 4)                // 5
 math.log1p(0)                   // 0
 math.trunc(3.7)                 // 3
+
 abs([-1, 2, -3])                // [1, 2, 3]
 sign([-5, 0, 3])                // [-1, 0, 1]
 ```
@@ -277,13 +277,13 @@ Functions for date and time operations.
 
 ### Current Time
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `datetime()` | Current date and time | `datetime()` | `t'2025-01-23T14:30:00'` |
-| `datetime(x)` | Parse as datetime | `datetime("2025-01-01")` | `t'2025-01-01'` |
-| `today()` | Current date | `today()` | `t'2025-01-23'` |
-| `now()` | Current timestamp (proc) | `now()` | `t'2025-01-23T14:30:00'` |
-| `justnow()` | Current time only | `justnow()` | `t'14:30:00'` |
+| Function      | Description                                 | Example                  | Result                   |
+| ------------- | ------------------------------------------- | ------------------------ | ------------------------ |
+| `datetime()`  | Current date and time                       | `datetime()`             | `t'2025-01-23T14:30:00'` |
+| `datetime(x)` | Parse as datetime                           | `datetime("2025-01-01")` | `t'2025-01-01'`          |
+| `today()`     | Current date                                | `today()`                | `t'2025-01-23'`          |
+| `now()`       | Current timestamp (proc)                    | `now()`                  | `t'2025-01-23T14:30:00'` |
+| `justnow()`   | Time when current script evaluation started | `justnow()`              | `t'14:30:00'`            |
 
 ### Date/Time Extraction
 

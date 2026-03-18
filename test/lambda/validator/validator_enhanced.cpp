@@ -180,7 +180,7 @@ ValidationResult* validate_array_with_recovery(SchemaValidator* validator, Item 
     }
 
     TypeId actual_type = get_type_id(item);
-    if (actual_type != LMD_TYPE_ARRAY && actual_type != LMD_TYPE_LIST) {
+    if (actual_type != LMD_TYPE_ARRAY) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
                 "Expected array or list, got %s", get_type_name(actual_type));
@@ -559,7 +559,6 @@ const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_STRING: return "string";
         case LMD_TYPE_BOOL: return "bool";
         case LMD_TYPE_ARRAY: return "array";
-        case LMD_TYPE_LIST: return "list";
         case LMD_TYPE_MAP: return "map";
         case LMD_TYPE_ELEMENT: return "element";
         case ITEM_NULL: return "null";

@@ -45,7 +45,6 @@ bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type)
 const char* get_container_unbox_fn(TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_MAP:     return "it2map";
-    case LMD_TYPE_LIST:    return "it2list";
     case LMD_TYPE_ELEMENT: return "it2elmt";
     case LMD_TYPE_OBJECT:  return "it2obj";
     case LMD_TYPE_ARRAY:
@@ -89,7 +88,6 @@ static const TypeBoxInfo type_box_table[] = {
     {LMD_TYPE_BINARY,     "String*",   "it2s",     "x2it",    "const_x2it",  "NULL"},
     // containers: have unbox_fn, box uses (Item)(ptr) cast (box_fn=NULL)
     {LMD_TYPE_MAP,        "Map*",      "it2map",   NULL,      NULL,          "NULL"},
-    {LMD_TYPE_LIST,       "List*",     "it2list",  NULL,      NULL,          "NULL"},
     {LMD_TYPE_ELEMENT,    "Element*",  "it2elmt",  NULL,      NULL,          "NULL"},
     {LMD_TYPE_OBJECT,     "Object*",   "it2obj",   NULL,      NULL,          "NULL"},
     {LMD_TYPE_ARRAY,      "Array*",    "it2arr",   NULL,      NULL,          "NULL"},
@@ -1139,13 +1137,16 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         // NUMBER type is a union of int/float - transpile the expression directly
         transpile_expr(tp, item);
         break;
-    case LMD_TYPE_LIST:
+    case LMD_TYPE_ARRAY:
         // Single-value CONTENT blocks are handled above (before the switch).
         // Multi-value content/list: list_end() already returns Item.
+        // Array literals (array_fill) return Array* — cast to Item for MIR C compatibility.
+        strbuf_append_str(tp->code_buf, "(Item)(");
         transpile_expr(tp, item);
+        strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_PATH:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
         // All container types including Function*, Path*, and Type* (patterns, type expressions) are direct pointers
         strbuf_append_str(tp->code_buf, "(Item)(");
@@ -2152,7 +2153,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
         // only coerce when RHS is dynamic/generic (not already the correct typed array)
         bool needs_coerce = (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL ||
-                             rhs_tid == LMD_TYPE_ARRAY || rhs_tid == LMD_TYPE_LIST);
+                             rhs_tid == LMD_TYPE_ARRAY || rhs_tid == LMD_TYPE_ARRAY);
         if (needs_coerce && operand) {
             const char* cast_type = "Array";
             TypeId elem_tid = operand->type_id;
@@ -2373,7 +2374,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                                    expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
             bool is_any_array = is_typed_array || is_generic_array;
             bool is_range = (expr_type->type_id == LMD_TYPE_RANGE);
-            bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_LIST;
+            bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_ARRAY;
             bool is_known_keyed = (expr_type->type_id == LMD_TYPE_MAP || expr_type->type_id == LMD_TYPE_OBJECT ||
                                    expr_type->type_id == LMD_TYPE_VMAP);
 
@@ -2746,7 +2747,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "  Array* pipe_result = array();\n");
 
     // Check if collection type - if not, apply to single item
-    strbuf_append_str(tp->code_buf, "  if (pipe_type == LMD_TYPE_ARRAY || pipe_type == LMD_TYPE_LIST || ");
+    strbuf_append_str(tp->code_buf, "  if (pipe_type == LMD_TYPE_ARRAY || pipe_type == LMD_TYPE_ARRAY || ");
     strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_RANGE || pipe_type == LMD_TYPE_MAP || ");
     strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_INT || pipe_type == LMD_TYPE_ARRAY_INT64 || ");
     strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_FLOAT || pipe_type == LMD_TYPE_ELEMENT || pipe_type == LMD_TYPE_OBJECT) {\n");
@@ -4381,7 +4382,8 @@ void transpile_items(Transpiler* tp, AstNode *item) {
 // check if any item in the list/array needs spreading (for-expression or spread operator)
 static bool has_spreadable_item(AstNode *item) {
     while (item) {
-        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD) {
+        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD
+            || item->node_type == AST_NODE_PIPE) {
             return true;
         }
         item = item->next;
@@ -4395,12 +4397,16 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
 
-    // for arrays with spreadable items (for-expressions), use push path
+    // for arrays with spreadable items (for-expressions, spread, pipe), use push path
     if (!is_int_array && !is_int64_array && !is_float_array && has_spreadable_item(array_node->item)) {
         strbuf_append_str(tp->code_buf, "({\n Array* arr = array();\n");
         AstNode* item = array_node->item;
         while (item) {
-            strbuf_append_str(tp->code_buf, " array_push_spread(arr, ");
+            // pipe items spread any array result; for-expr/spread use conditional spread
+            const char* push_fn = (item->node_type == AST_NODE_PIPE)
+                ? " array_push_spread_all(arr, "
+                : " array_push_spread(arr, ";
+            strbuf_append_str(tp->code_buf, push_fn);
             transpile_box_item(tp, item);
             strbuf_append_str(tp->code_buf, ");\n");
             item = item->next;
@@ -4827,7 +4833,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_glob
         // use transpile_expr here (not transpile_box_item) because this is the
         // "native" path — for typed function returns, we need the raw scalar value.
         // when Item boxing is needed, the caller ensures it via transpile_box_item
-        // on the content node, which is handled in transpile_box_item's LMD_TYPE_LIST case.
+        // on the content node, which is handled in transpile_box_item's LMD_TYPE_ARRAY case.
         strbuf_append_char(tp->code_buf, '\n');
         transpile_expr(tp, last_value_item);
         strbuf_append_str(tp->code_buf, ";})");
@@ -5268,7 +5274,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // the fast paths below will unbox the index with it2i()
     bool field_is_numeric = (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64 || field_type == LMD_TYPE_FLOAT);
     bool object_is_typed_array = (object_type == LMD_TYPE_ARRAY_INT || object_type == LMD_TYPE_ARRAY_INT64
-        || object_type == LMD_TYPE_ARRAY_FLOAT || object_type == LMD_TYPE_ARRAY || object_type == LMD_TYPE_LIST);
+        || object_type == LMD_TYPE_ARRAY_FLOAT || object_type == LMD_TYPE_ARRAY || object_type == LMD_TYPE_ARRAY);
     if (!field_is_numeric && field_type != LMD_TYPE_ANY) {
         // Non-numeric, non-ANY index (e.g. range, string key), must use generic fn_index
         strbuf_append_str(tp->code_buf, "fn_index(");
@@ -5404,7 +5410,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    else if (object_type == LMD_TYPE_LIST && (field_is_int || field_is_any)) {
+    else if (object_type == LMD_TYPE_ARRAY && (field_is_int || field_is_any)) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, ",(int)");
@@ -5649,7 +5655,7 @@ static bool is_direct_access_type(TypeId type_id) {
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         return true;
@@ -6808,6 +6814,12 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
     // for datetime sub-types (date, time), we need to preserve the specific Type pointer
     // since TYPE_DATE, TYPE_TIME, and TYPE_DTIME all share type_id = LMD_TYPE_DTIME
     if (type_type->type == &TYPE_DATE || type_type->type == &TYPE_TIME) {
+        arraylist_append(tp->type_list, (void*)type_type);
+        int type_index = tp->type_list->length - 1;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);
+    } else if (type_type->type == &TYPE_LIST) {
+        // 'list' bare keyword: preserve &LIT_TYPE_LIST so fn_is returns BOOL_FALSE
+        // (LMD_TYPE_LIST no longer exists; list type never matches at runtime)
         arraylist_append(tp->type_list, (void*)type_type);
         int type_index = tp->type_list->length - 1;
         strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);

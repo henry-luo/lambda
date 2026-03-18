@@ -98,7 +98,7 @@ Input* input_from_directory(const char* directory_path, const char* original_url
     
     // Create result list using pool allocation
     List* children = (List*)pool_calloc(pool, sizeof(List));
-    children->type_id = LMD_TYPE_LIST;
+    children->type_id = LMD_TYPE_ARRAY;
     
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {

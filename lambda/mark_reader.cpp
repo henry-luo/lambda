@@ -108,7 +108,7 @@ bool ItemReader::isArray() const {
 }
 
 bool ItemReader::isList() const {
-    return cached_type_ == LMD_TYPE_LIST;
+    return cached_type_ == LMD_TYPE_ARRAY;
 }
 
 bool ItemReader::isDatetime() const {

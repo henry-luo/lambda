@@ -697,7 +697,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
     case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
         return is_pointer_in_arena_chain(item.array);
 
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_LIST: {
+    case LMD_TYPE_ARRAY: {
         List* list = item.list;
         if (!list) return true;  // Null list
 
@@ -893,6 +893,7 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         Array* arr = item.array;
         int length = arr->length;
         int capacity = arr->capacity;
+        uint8_t src_flags = arr->flags;
         ArrayBuilder arr_builder = array();
         ArrayReader reader(arr);
         for (int i = 0; i < length; i++) {
@@ -900,18 +901,12 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             Item copied_child = deep_copy_internal(child);
             arr_builder.append(copied_child);
         }
-        return arr_builder.final();
-    }
-
-    case LMD_TYPE_LIST: {
-        List* list = item.list;
-        ListBuilder list_builder = this->list();
-        for (int i = 0; i < list->length; i++) {
-            Item item = list->items[i];
-            Item copied_child = deep_copy_internal(item);
-            list_builder.push(copied_child);
+        Item result = arr_builder.final();
+        // preserve is_content flag from source array
+        if (result.array) {
+            result.array->flags |= (src_flags & 0x01); // is_content bit
         }
-        return list_builder.final();
+        return result;
     }
 
     case LMD_TYPE_MAP: {
@@ -974,7 +969,7 @@ Item MarkBuilder::deep_copy_internal(Item item) {
                 break;
             }
             case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_RANGE: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
+            case LMD_TYPE_RANGE: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
                 Container* container = *(Container**)dst_ptr;
                 if (container) {
                     Item copied = deep_copy_internal({.container = container});

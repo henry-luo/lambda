@@ -250,7 +250,7 @@ void parse_ics(Input* input, const char* ics_string) {
     // Initialize components list to store events, todos, etc.
     List* components_list = (List*)pool_calloc(input->pool, sizeof(List));
     if (components_list) {
-        components_list->type_id = LMD_TYPE_LIST;
+        components_list->type_id = LMD_TYPE_ARRAY;
         components_list->length = 0;
         components_list->capacity = 0;
         components_list->items = NULL;

@@ -240,8 +240,8 @@ Item fn_join(Item left, Item right) {
         return {.item = y2it(sym)};
     }
     // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat, Range)
-    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_LIST || left_type == LMD_TYPE_RANGE) {
-        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_LIST || right_type == LMD_TYPE_RANGE)) {
+    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_RANGE) {
+        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_RANGE)) {
             set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
                 type_info[left_type].name, type_info[right_type].name);
             return ItemError;
@@ -281,7 +281,7 @@ Item fn_join(Item left, Item right) {
                 memcpy(result->items + la->length, ra->items, sizeof(double)*ra->length);
                 return {.array_float = result};
             }
-            // LMD_TYPE_ARRAY or LMD_TYPE_LIST: both use Item* items (same struct layout)
+            // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
             Array *la = left.array, *ra = right.array;
             int64_t total_len = la->length + ra->length;
             int64_t total_extra = la->extra + ra->extra;
@@ -576,6 +576,40 @@ Item fn_call(Function* fn, List* args) {
     }
 }
 
+// Trampolines for calling _b boxed wrapper functions from MIR Direct code.
+// On Windows x64, structs > 8 bytes (like RetItem) are returned via hidden pointer,
+// so MIR cannot call RetItem-returning functions directly. These trampolines are
+// compiled by the C compiler with correct ABI, accepting a function pointer + args.
+extern "C" {
+Item fn_call_boxed_0(void* fp) {
+    return ri_to_item(((RetItem(*)())fp)());
+}
+Item fn_call_boxed_1(void* fp, Item a) {
+    return ri_to_item(((RetItem(*)(Item))fp)(a));
+}
+Item fn_call_boxed_2(void* fp, Item a, Item b) {
+    return ri_to_item(((RetItem(*)(Item,Item))fp)(a, b));
+}
+Item fn_call_boxed_3(void* fp, Item a, Item b, Item c) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item))fp)(a, b, c));
+}
+Item fn_call_boxed_4(void* fp, Item a, Item b, Item c, Item d) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item))fp)(a, b, c, d));
+}
+Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item))fp)(a, b, c, d, e));
+}
+Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f));
+}
+Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g));
+}
+Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h));
+}
+} // extern "C"
+
 // Convenience wrappers for common arities (avoid List allocation)
 // For closures, env is passed as the first argument
 // For _b boxed functions (FN_FLAG_BOXED_RET), cast to RetItem return and convert via ri_to_item()
@@ -770,13 +804,13 @@ Bool fn_is(Item a, Item b) {
             return (dt.precision == DATETIME_PRECISION_TIME_ONLY) ? BOOL_TRUE : BOOL_FALSE;
         }
         return BOOL_TRUE;  // is datetime (any precision matches)
-    case LMD_TYPE_ARRAY: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
         if (type_b == &LIT_TYPE_ARRAY) {  // fast path
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
                 a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
         }
         else if (type_b == &LIT_TYPE_LIST) {  // fast path for generic list type
-            return a_type_id == LMD_TYPE_LIST;
+            return BOOL_FALSE;  // LMD_TYPE_LIST no longer exists; 'list' never matches
         }
         else if (type_b->type->type_id == LMD_TYPE_OBJECT && type_b->type != &TYPE_OBJECT) {
             // Nominal type check for named object types (e.g., c is Calc)
@@ -1012,8 +1046,7 @@ static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
 // helper: get element at index from any sequence type (list, array, range)
 static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
     switch (tid) {
-    case LMD_TYPE_LIST:        return item.list->items[i];
-    case LMD_TYPE_ARRAY:       return item.array->items[i];
+    case LMD_TYPE_ARRAY:        return item.list->items[i];
     case LMD_TYPE_ARRAY_INT:   return {.item = i2it(item.array_int->items[i])};
     case LMD_TYPE_ARRAY_INT64: return push_l(item.array_int64->items[i]);
     case LMD_TYPE_ARRAY_FLOAT: return push_d(item.array_float->items[i]);
@@ -1025,8 +1058,7 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
 // helper: get length from any sequence type
 static inline int64_t seq_get_length(Item item, TypeId tid) {
     switch (tid) {
-    case LMD_TYPE_LIST:        return item.list->length;
-    case LMD_TYPE_ARRAY:       return item.array->length;
+    case LMD_TYPE_ARRAY:        return item.list->length;
     case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
     case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
     case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
@@ -1090,10 +1122,10 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // all represent ordered sequences and can be compared element-wise
         TypeId a_tid = (a_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(a_item) : (TypeId)a_item._type_id;
         TypeId b_tid = (b_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(b_item) : (TypeId)b_item._type_id;
-        bool a_is_seq = (a_tid == LMD_TYPE_LIST || a_tid == LMD_TYPE_ARRAY ||
+        bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY ||
                          a_tid == LMD_TYPE_ARRAY_INT || a_tid == LMD_TYPE_ARRAY_INT64 ||
                          a_tid == LMD_TYPE_ARRAY_FLOAT || a_tid == LMD_TYPE_RANGE);
-        bool b_is_seq = (b_tid == LMD_TYPE_LIST || b_tid == LMD_TYPE_ARRAY ||
+        bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY ||
                          b_tid == LMD_TYPE_ARRAY_INT || b_tid == LMD_TYPE_ARRAY_INT64 ||
                          b_tid == LMD_TYPE_ARRAY_FLOAT || b_tid == LMD_TYPE_RANGE);
         if (a_is_seq && b_is_seq) {
@@ -1163,10 +1195,10 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // structural equality for container types requires same resolved type
         if (a_tid != b_tid) {
             // cross-type sequence comparison (array[int] vs array[float], list vs range, etc.)
-            bool a_is_seq = (a_tid == LMD_TYPE_LIST || a_tid == LMD_TYPE_ARRAY ||
+            bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY ||
                              a_tid == LMD_TYPE_ARRAY_INT || a_tid == LMD_TYPE_ARRAY_INT64 ||
                              a_tid == LMD_TYPE_ARRAY_FLOAT || a_tid == LMD_TYPE_RANGE);
-            bool b_is_seq = (b_tid == LMD_TYPE_LIST || b_tid == LMD_TYPE_ARRAY ||
+            bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY ||
                              b_tid == LMD_TYPE_ARRAY_INT || b_tid == LMD_TYPE_ARRAY_INT64 ||
                              b_tid == LMD_TYPE_ARRAY_FLOAT || b_tid == LMD_TYPE_RANGE);
             if (a_is_seq && b_is_seq) {
@@ -1176,7 +1208,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
 
         // list structural equality
-        if (a_tid == LMD_TYPE_LIST) {
+        if (a_tid == LMD_TYPE_ARRAY) {
             return list_eq(a_item.list, b_item.list, depth);
         }
         // generic array (array of Items) structural equality
@@ -1429,7 +1461,7 @@ static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
     case LMD_TYPE_BINARY: return {.item = x2it(*(char**)field_ptr)};
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = *(Container**)field_ptr;
         if (!c) return ItemNull;
         return {.container = c};
@@ -1481,7 +1513,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
             }
             field = field->next;
         }
-    } else if (type_id == LMD_TYPE_LIST) {
+    } else if (type_id == LMD_TYPE_ARRAY) {
         List* lst = data.list;
         for (int64_t i = 0; i < lst->length; i++) {
             query_collect(lst->items[i], type_val, true, result, depth + 1);
@@ -1580,7 +1612,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
                 }
             }
         }
-    } else if (type_id == LMD_TYPE_LIST) {
+    } else if (type_id == LMD_TYPE_ARRAY) {
         List* lst = data.list;
         for (int64_t i = 0; i < lst->length; i++) {
             Item child = lst->items[i];
@@ -1632,7 +1664,7 @@ Bool fn_in(Item a_item, Item b_item) {
     }
     else { // b is container
         TypeId b_type = b_item.container->type_id;
-        if (b_type == LMD_TYPE_LIST) {
+        if (b_type == LMD_TYPE_ARRAY) {
             List *list = b_item.list;
             for (int i = 0; i < list->length; i++) {
                 if (fn_eq(list->items[i], a_item) == BOOL_TRUE) {
@@ -1870,7 +1902,7 @@ String* fn_string(Item itm) {
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
-    case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:
+    case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         StrBuf* sb = strbuf_new();
@@ -2740,7 +2772,7 @@ Item fn_member(Item item, Item key) {
         Element *elmt = item.element;
         return elmt_get(elmt, key);
     }
-    case LMD_TYPE_LIST: {
+    case LMD_TYPE_ARRAY: {
         // Handle built-in properties for List type
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
             const char* k = key.get_chars();
@@ -2762,14 +2794,11 @@ int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     int64_t size = 0;
     switch (type_id) {
-    case LMD_TYPE_LIST:
-        size = item.list->length;
+    case LMD_TYPE_ARRAY:
+        size = item.array->length;
         break;
     case LMD_TYPE_RANGE:
         size = item.range->length;
-        break;
-    case LMD_TYPE_ARRAY:
-        size = item.array->length;
         break;
     case LMD_TYPE_ARRAY_INT:
         size = item.array_int->length;
@@ -3511,7 +3540,7 @@ Item fn_split(Item str_item, Item sep_item) {
     TypeId sep_type = get_type_id(sep_item);
 
     // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) return {.list = list()};
+    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.list = e}; }
 
     // null separator means split on whitespace (Python convention)
     bool null_sep = (sep_type == LMD_TYPE_NULL);
@@ -3527,7 +3556,9 @@ Item fn_split(Item str_item, Item sep_item) {
             TypePattern* pattern = (TypePattern*)type;
             const char* str_chars = str_item.get_chars();
             uint32_t str_len = str_item.get_len();
-            return {.list = pattern_split(pattern, str_chars, str_len, false)};
+            List* ps = pattern_split(pattern, str_chars, str_len, false);
+            if (ps) ps->is_content = 1;
+            return {.list = ps};
         }
     }
 
@@ -3550,6 +3581,7 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     List* result = list();
+    result->is_content = 1;
 
     if (!str_chars || str_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
@@ -3653,7 +3685,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
 
     // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) return {.list = list()};
+    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.list = e}; }
 
     // pattern-based split with keep_delim
     if (sep_type == LMD_TYPE_TYPE) {
@@ -3666,7 +3698,9 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
             TypePattern* pattern = (TypePattern*)type;
             const char* str_chars = str_item.get_chars();
             uint32_t str_len = str_item.get_len();
-            return {.list = pattern_split(pattern, str_chars, str_len, keep_delim)};
+            List* ps = pattern_split(pattern, str_chars, str_len, keep_delim);
+            if (ps) ps->is_content = 1;
+            return {.list = ps};
         }
     }
 
@@ -3695,6 +3729,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     }
 
     List* result = list();
+    result->is_content = 1;
     if (!str_chars || str_len == 0 || !sep_chars || sep_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
         return {.list = result};
@@ -3805,7 +3840,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     // null list joins to null
     if (list_type == LMD_TYPE_NULL) return ItemNull;
 
-    if (list_type != LMD_TYPE_LIST && list_type != LMD_TYPE_ARRAY) {
+    if (list_type != LMD_TYPE_ARRAY && list_type != LMD_TYPE_ARRAY) {
         log_debug("fn_join2: first argument must be a list or array");
         return ItemError;
     }
@@ -3826,7 +3861,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     size_t total_len = 0;
     int64_t count = 0;
 
-    if (list_type == LMD_TYPE_LIST) {
+    if (list_type == LMD_TYPE_ARRAY) {
         List* lst = list_item.list;
         count = lst->length;
         for (int64_t i = 0; i < count; i++) {
@@ -3860,7 +3895,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     // build result
     char* p = result->chars;
 
-    if (list_type == LMD_TYPE_LIST) {
+    if (list_type == LMD_TYPE_ARRAY) {
         List* lst = list_item.list;
         for (int64_t i = 0; i < count; i++) {
             if (i > 0 && sep_len > 0) {
@@ -4048,7 +4083,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
     TypeId pattern_type = get_type_id(pattern_item);
 
     // null source -> empty list
-    if (source_type == LMD_TYPE_NULL) return {.list = list()};
+    if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.list = e}; }
 
     if (source_type != LMD_TYPE_STRING && source_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_find: first argument must be a string or symbol");
@@ -4058,14 +4093,16 @@ Item fn_find2(Item source_item, Item pattern_item) {
     const char* str_chars = source_item.get_chars();
     uint32_t str_len = source_item.get_len();
 
-    if (!str_chars || str_len == 0) return {.list = list()};
+    if (!str_chars || str_len == 0) { List* e = list(); e->is_content = 1; return {.list = e}; }
 
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(pattern_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
             TypePattern* pattern = (TypePattern*)type;
-            return {.list = pattern_find_all(pattern, str_chars, str_len)};
+            List* r = pattern_find_all(pattern, str_chars, str_len);
+            if (r) r->is_content = 1;
+            return {.list = r};
         }
     }
 
@@ -4079,6 +4116,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
     uint32_t needle_len = pattern_item.get_len();
 
     List* result = list();
+    result->is_content = 1;
     if (!needle || needle_len == 0) return {.list = result};
 
     // find all non-overlapping occurrences of the literal substring
@@ -4401,8 +4439,8 @@ Item fn_varg0() {
     if (current_vargs == NULL) {
         log_debug("fn_varg0: no variadic args, returning empty list");
         // return an empty list - allocate directly without frame context
-        List* empty = (List*)heap_calloc(sizeof(List), LMD_TYPE_LIST);
-        empty->type_id = LMD_TYPE_LIST;
+        List* empty = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
+        empty->type_id = LMD_TYPE_ARRAY;
         empty->length = 0;
         empty->capacity = 0;
         empty->items = NULL;
@@ -4574,9 +4612,8 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
         }
         break;
     }
-    case LMD_TYPE_LIST:
     case LMD_TYPE_ELEMENT: {
-        // List and Element have Item* items — use array_set directly
+        // Element has Item* items — use array_set directly
         array_set(arr, index, value);
         break;
     }
@@ -4594,7 +4631,7 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* old_c = *(Container**)field_ptr;
         break;
@@ -4627,7 +4664,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = value.container;
         *(Container**)field_ptr = c;
@@ -4920,12 +4957,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
                     field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_INT ||
                     field_type == LMD_TYPE_ARRAY_INT64 || field_type == LMD_TYPE_ARRAY_FLOAT ||
-                    field_type == LMD_TYPE_LIST || field_type == LMD_TYPE_RANGE);
+                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_RANGE);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
                     value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_INT ||
                     value_type == LMD_TYPE_ARRAY_INT64 || value_type == LMD_TYPE_ARRAY_FLOAT ||
-                    value_type == LMD_TYPE_LIST || value_type == LMD_TYPE_RANGE);
+                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE);
                 if (old_is_ptr && new_is_ptr) {
                     map_field_decrement_ref(field_ptr, field_type);
                     map_field_store(field_ptr, value, value_type);

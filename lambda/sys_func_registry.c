@@ -621,6 +621,17 @@ extern Item pn_io_fetch1_mir(Item target);
 extern Item pn_io_fetch2_mir(Item target, Item options);
 extern Item pn_output_append_mir(Item source, Item target);
 
+// Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI fix)
+extern Item fn_call_boxed_0(void* fp);
+extern Item fn_call_boxed_1(void* fp, Item a);
+extern Item fn_call_boxed_2(void* fp, Item a, Item b);
+extern Item fn_call_boxed_3(void* fp, Item a, Item b, Item c);
+extern Item fn_call_boxed_4(void* fp, Item a, Item b, Item c, Item d);
+extern Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e);
+extern Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f);
+extern Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g);
+extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h);
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset)},
@@ -653,6 +664,7 @@ JitImport jit_runtime_imports[] = {
     {"array_limit_inplace", FPTR(array_limit_inplace)},
     {"array_push", FPTR(array_push)},
     {"array_push_spread", FPTR(array_push_spread)},
+    {"array_push_spread_all", FPTR(array_push_spread_all)},
     {"array_end", FPTR(array_end)},
     {"item_spread", FPTR(item_spread)},
     // typed array constructors
@@ -1094,6 +1106,19 @@ JitImport jit_runtime_imports[] = {
     {"pn_io_fetch1_mir", FPTR(pn_io_fetch1_mir)},
     {"pn_io_fetch2_mir", FPTR(pn_io_fetch2_mir)},
     {"pn_output_append_mir", FPTR(pn_output_append_mir)},
+
+    // ========================================================================
+    // Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI)
+    // ========================================================================
+    {"fn_call_boxed_0", FPTR(fn_call_boxed_0)},
+    {"fn_call_boxed_1", FPTR(fn_call_boxed_1)},
+    {"fn_call_boxed_2", FPTR(fn_call_boxed_2)},
+    {"fn_call_boxed_3", FPTR(fn_call_boxed_3)},
+    {"fn_call_boxed_4", FPTR(fn_call_boxed_4)},
+    {"fn_call_boxed_5", FPTR(fn_call_boxed_5)},
+    {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
+    {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
+    {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

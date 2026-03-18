@@ -270,11 +270,18 @@ users | ~.age            // [12,20,62] - extract field
 ['a','b'] | {i:~#, v:~}  // ~# = index/key
 ```
 
-**Filter with `where`:**
+**Filter with `that`:**
 ```lambda
-[1,2,3,4,5] where ~ > 3         // [4,5]
-users where ~.age >= 18 | ~.name // filter then map
-[1,2,3] | ~ ** 2 where ~ > 5 | sum // 13 (4+9)
+[1,2,3,4,5] that (~ > 3)         // [4,5]
+users that (age >= 18) | ~.name  // filter then map
+[1,2,3] | ~ ** 2 that (~ > 5) | sum // 13 (4+9)
+```
+
+**Spreading in Array Literals:** pipe and filter results flatten
+```lambda
+[1, [2,3] | ~, 4, 5]              // [1, 2, 3, 4, 5]
+[0, [1,2,3] | ~ * 10, 99]         // [0, 10, 20, 30, 99]
+[1, [3,5,7] that (~ > 4), 9]      // [1, 5, 7, 9]
 ```
 
 ## Query Expressions
@@ -361,7 +368,7 @@ match input {
 }
 ```
 
-**For Expressions:** (produce spreadable arrays)
+**For Expressions:** (produce spreadable arrays — pipe/filter also spread, see above)
 ```lambda
 for (x in [1, 2, 3]) x * 2     // [2, 4, 6]
 for (i in 1 to 5) i * i        // [1, 4, 9, 16, 25]

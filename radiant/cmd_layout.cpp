@@ -96,7 +96,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
     // The input->root contains the full parsed tree including DOCTYPE
     // It's typically a List containing multiple items (DOCTYPE, html element, etc.)
     TypeId root_type = get_type_id(input->root);
-    if (root_type == LMD_TYPE_LIST) {
+    if (root_type == LMD_TYPE_ARRAY) {
         List* root_list = input->root.list;
         log_debug("Examining root list with %lld items", root_list->length);
 
@@ -324,7 +324,7 @@ Element* get_html_root_element(Input* input) {
     if (!input) return nullptr;
     TypeId root_type = get_type_id(input->root);
 
-    if (root_type == LMD_TYPE_LIST) {
+    if (root_type == LMD_TYPE_ARRAY) {
         // Old parser: root is a list, search for HTML element
         List* root_list = input->root.list;
         for (int64_t i = 0; i < root_list->length; i++) {
@@ -2581,7 +2581,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     TypeId root_type = get_type_id(input->root);
     if (root_type == LMD_TYPE_ELEMENT) {
         markdown_root = input->root.element;
-    } else if (root_type == LMD_TYPE_LIST) {
+    } else if (root_type == LMD_TYPE_ARRAY) {
         // Markdown parser may return list, find first element
         List* root_list = input->root.list;
         for (int64_t i = 0; i < root_list->length; i++) {
@@ -2735,7 +2735,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     TypeId root_type = get_type_id(input->root);
     if (root_type == LMD_TYPE_ELEMENT) {
         wiki_root = input->root.element;
-    } else if (root_type == LMD_TYPE_LIST) {
+    } else if (root_type == LMD_TYPE_ARRAY) {
         // Wiki parser may return list, find first element
         List* root_list = input->root.list;
         for (int64_t i = 0; i < root_list->length; i++) {

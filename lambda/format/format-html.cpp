@@ -43,7 +43,7 @@ String* format_html(Pool* pool, Item root_item) {
         TypeId type = get_type_id(root_item);
 
         // handle root-level List (Phase 3: may contain DOCTYPE, comments, and main element)
-        if (type == LMD_TYPE_LIST) {
+        if (type == LMD_TYPE_ARRAY) {
             List* list = root_item.list;
             if (list && list->length > 0) {
                 // format each item in the root list using reader API
