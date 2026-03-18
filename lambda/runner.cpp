@@ -8,6 +8,7 @@
 
 #if _WIN32
 #include <windows.h>
+#include <direct.h>  // for _fullpath
 #endif
 
 // ============================================================================
@@ -459,7 +460,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* lookup_path = script_path;
     char* canonical_path = NULL;
     if (!source) {
+#ifdef _WIN32
+        char resolved[_MAX_PATH];
+        canonical_path = _fullpath(resolved, script_path, _MAX_PATH) ? strdup(resolved) : NULL;
+#else
         canonical_path = realpath(script_path, NULL);
+#endif
         if (canonical_path) {
             lookup_path = canonical_path;
         }
@@ -494,6 +500,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     new_script->reference = strdup(lookup_path);
     // extract directory from script path for script-relative imports
     const char* last_slash = strrchr(lookup_path, '/');
+#ifdef _WIN32
+    const char* last_backslash = strrchr(lookup_path, '\\');
+    if (last_backslash && (!last_slash || last_backslash > last_slash))
+        last_slash = last_backslash;
+#endif
     if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
         char* dir = (char*)malloc(dir_len + 1);

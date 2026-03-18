@@ -23,8 +23,8 @@
 #ifndef _WIN32
 #include <unistd.h>
 #include <strings.h>
-#include <sys/stat.h>
 #endif
+#include <sys/stat.h>
 
 #ifdef __APPLE__
 #include <CoreText/CoreText.h>
@@ -171,6 +171,64 @@ static void add_windows_dirs(FontDatabase* db) {
         strncat(path, "\\Microsoft\\Windows\\Fonts", sizeof(path) - strlen(path) - 1);
         add_dir_if_exists(db, path);
     }
+}
+
+void scan_windows_registry_fonts(FontDatabase* db) {
+    HKEY hkey;
+    LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
+        0, KEY_READ, &hkey);
+
+    if (result != ERROR_SUCCESS) {
+        log_info("scan_windows_registry_fonts: failed to open registry key");
+        return;
+    }
+
+    DWORD index = 0;
+    char font_name[256];
+    char font_file[260];
+    DWORD name_size, file_size;
+    int added = 0;
+
+    while (1) {
+        name_size = sizeof(font_name);
+        file_size = sizeof(font_file);
+
+        result = RegEnumValueA(hkey, index++, font_name, &name_size,
+            NULL, NULL, (LPBYTE)font_file, &file_size);
+
+        if (result != ERROR_SUCCESS) break;
+
+        // convert relative path to absolute if needed
+        char full_path[260];
+        if (font_file[0] != '\\' && font_file[1] != ':') {
+            char windows_dir[260];
+            if (SHGetFolderPathA(NULL, CSIDL_FONTS, NULL, SHGFP_TYPE_CURRENT, windows_dir) == S_OK) {
+                snprintf(full_path, sizeof(full_path), "%s\\%s", windows_dir, font_file);
+            } else {
+                continue;
+            }
+        } else {
+            strncpy(full_path, font_file, sizeof(full_path) - 1);
+            full_path[sizeof(full_path) - 1] = '\0';
+        }
+
+        struct stat file_stat;
+        if (stat(full_path, &file_stat) == 0) {
+            // add as placeholder entry for lazy parsing
+            FontEntry* entry = arena_alloc(db->arena, sizeof(FontEntry));
+            if (entry) {
+                memset(entry, 0, sizeof(FontEntry));
+                entry->file_path = arena_strdup(db->arena, full_path);
+                entry->is_placeholder = true;
+                arraylist_append(db->all_fonts, entry);
+                added++;
+            }
+        }
+    }
+
+    RegCloseKey(hkey);
+    log_info("scan_windows_registry_fonts: added %d fonts from registry", added);
 }
 #endif
 

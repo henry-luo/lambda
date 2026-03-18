@@ -358,7 +358,8 @@
                 "mbedcrypto",
                 "zlib",
                 "rpmalloc",
-                "re2"
+                "re2",
+                "pthread"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
@@ -492,12 +493,15 @@
         },
         "windows": {
             "output": "lambda.exe",
-            "compiler": "gcc",
-            "exclude_source_files": [],
+            "compiler": "clang",
+            "exclude_source_files": [
+                "lib/clock_compat.c"
+            ],
             "libraries": [
                 {
                     "name": "pthread",
-                    "link": "none"
+                    "lib": "/clang64/lib/libpthread.a",
+                    "link": "static"
                 },
                 {
                     "name": "curl",
@@ -539,22 +543,36 @@
                 {
                     "name": "mbedtls",
                     "description": "mbedTLS - SSL/TLS library",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libmbedtls.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libmbedtls.a",
                     "link": "static"
                 },
                 {
                     "name": "mbedx509",
                     "description": "mbedTLS - X.509 certificate parsing",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libmbedx509.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libmbedx509.a",
                     "link": "static"
                 },
                 {
                     "name": "mbedcrypto",
                     "description": "mbedTLS - Cryptographic primitives",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libmbedcrypto.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libmbedcrypto.a",
+                    "link": "static"
+                },
+                {
+                    "name": "libevent",
+                    "description": "Event notification library for HTTP server",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libevent.a",
+                    "link": "static"
+                },
+                {
+                    "name": "libevent_openssl",
+                    "description": "Event notification library OpenSSL support",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libevent_openssl.a",
                     "link": "static"
                 },
                 {
@@ -563,8 +581,8 @@
                 },
                 {
                     "name": "mpdec",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libmpdec.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libmpdec.a",
                     "link": "static"
                 },
                 {
@@ -584,7 +602,7 @@
                 },
                 {
                     "name": "mingw-posix",
-                    "lib": "/mingw64/lib/libmingwex.a",
+                    "lib": "/clang64/lib/libmingwex.a",
                     "link": "static"
                 },
                 {
@@ -676,7 +694,7 @@
                 },
                 {
                     "name": "binmode",
-                    "lib": "/mingw64/lib/binmode.o",
+                    "lib": "/clang64/lib/binmode.o",
                     "link": "static"
                 },
                 {
@@ -685,8 +703,8 @@
                 },
                 {
                     "name": "freetype",
-                    "include": "/mingw64/include/freetype2",
-                    "lib": "/mingw64/lib/libfreetype.a",
+                    "include": "/clang64/include/freetype2",
+                    "lib": "/clang64/lib/libfreetype.a",
                     "link": "static"
                 },
                 {
@@ -698,23 +716,23 @@
                 },
                 {
                     "name": "glfw",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libglfw3.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libglfw3.a",
                     "link": "static"
                 },
                 {
                     "name": "png",
-                    "lib": "/mingw64/lib/libpng.a",
+                    "lib": "/clang64/lib/libpng.a",
                     "link": "static"
                 },
                 {
                     "name": "turbojpeg",
-                    "lib": "/mingw64/lib/libturbojpeg.a",
+                    "lib": "/clang64/lib/libturbojpeg.a",
                     "link": "static"
                 },
                 {
                     "name": "gif",
-                    "lib": "/mingw64/lib/libgif.a",
+                    "lib": "/clang64/lib/libgif.a",
                     "link": "static"
                 },
                 {
@@ -723,51 +741,51 @@
                     "link": "dynamic"
                 },
                 {
-                    "name": "gomp",
-                    "description": "GNU OpenMP library (required by ThorVG)",
-                    "lib": "/mingw64/lib/libgomp.a",
+                    "name": "omp",
+                    "description": "LLVM OpenMP library (required by ThorVG)",
+                    "lib": "/clang64/lib/libomp.a",
                     "link": "static"
                 },
                 {
                     "name": "harfbuzz",
                     "description": "HarfBuzz text shaping (required by FreeType)",
-                    "lib": "/mingw64/lib/libharfbuzz.a",
+                    "lib": "/clang64/lib/libharfbuzz.a",
                     "link": "static"
                 },
                 {
                     "name": "graphite2",
                     "description": "Graphite2 (required by HarfBuzz)",
-                    "lib": "/mingw64/lib/libgraphite2.a",
+                    "lib": "/clang64/lib/libgraphite2.a",
                     "link": "static"
                 },
                 {
                     "name": "webp",
                     "description": "WebP image library (required by ThorVG)",
-                    "lib": "/mingw64/lib/libwebp.a",
+                    "lib": "/clang64/lib/libwebp.a",
                     "link": "static"
                 },
                 {
                     "name": "brotlidec",
                     "description": "Brotli decompression (FreeType dependency)",
-                    "lib": "/mingw64/lib/libbrotlidec.a",
+                    "lib": "/clang64/lib/libbrotlidec.a",
                     "link": "static"
                 },
                 {
                     "name": "brotlicommon",
                     "description": "Brotli common (FreeType dependency)",
-                    "lib": "/mingw64/lib/libbrotlicommon.a",
+                    "lib": "/clang64/lib/libbrotlicommon.a",
                     "link": "static"
                 },
                 {
                     "name": "zlib",
                     "description": "Compression library (must come after freetype, libpng)",
-                    "lib": "/mingw64/lib/libz.a",
+                    "lib": "/clang64/lib/libz.a",
                     "link": "static"
                 },
                 {
                     "name": "bzip2",
                     "description": "BZip2 compression (must come after freetype)",
-                    "lib": "/mingw64/lib/libbz2.a",
+                    "lib": "/clang64/lib/libbz2.a",
                     "link": "static"
                 },
                 {
@@ -785,27 +803,24 @@
             "dev_libraries": [
                 {
                     "name": "gtest",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libgtest.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libgtest.a",
                     "link": "static"
                 },
                 {
                     "name": "gtest_main",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libgtest_main.a",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libgtest_main.a",
                     "link": "static"
                 }
             ],
             "flags": [
-                "std=c++17",
-                "DCROSS_COMPILE",
                 "D_WIN32",
-                "DWINVER=0x0601",
-                "D_WIN32_WINNT=0x0601",
+                "DWINVER=0x0602",
+                "D_WIN32_WINNT=0x0602",
                 "D__USE_MINGW_ANSI_STDIO=1",
                 "D_POSIX_C_SOURCE=200809L",
                 "D_GNU_SOURCE",
-                "D_TIMESPEC_DEFINED",
                 "DUTF8PROC_STATIC",
                 "DCURL_STATICLIB",
                 "DTVG_STATIC"
@@ -820,7 +835,7 @@
                 "lmoldname"
             ],
             "build_dir": "build_windows",
-            "cross_compile": true,
+            "cross_compile": false,
             "target_triplet": "x86_64-w64-mingw32",
             "disable_sanitizer": true
         },

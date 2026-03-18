@@ -176,6 +176,9 @@ install_msys2_package "wget" "wget for downloading"
 install_msys2_package "${TOOLCHAIN_PREFIX}-meson" "Meson build system (for ThorVG)"
 install_msys2_package "${TOOLCHAIN_PREFIX}-pkgconf" "pkg-config tool"
 
+# Node.js (needed for tree-sitter parser generation)
+install_msys2_package "${TOOLCHAIN_PREFIX}-nodejs" "Node.js (for tree-sitter grammar generation)"
+
 echo ""
 echo "Setting up project-specific dependencies..."
 
@@ -352,14 +355,23 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     echo "Building tree-sitter-lambda for Windows..."
     cd lambda/tree-sitter-lambda
 
-    # Clean previous builds
-    make clean || true
+    # Clean previous object files (avoid make clean which triggers parser regeneration)
+    rm -f src/*.o *.a *.so *.dylib
 
-    # Build static library for Windows (creates libtree-sitter-lambda.a)
+    # Generate parser.c if it doesn't exist
+    if [ ! -f "src/parser.c" ]; then
+        echo "Generating parser.c for tree-sitter-lambda..."
+        npx tree-sitter-cli@0.24.7 generate
+    fi
+
+    # Compile .c files directly to avoid Makefile OS guard and regeneration rules
+    SRCS=$(find src -maxdepth 1 -name '*.c')
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
-        CC="clang" AR="llvm-ar" make libtree-sitter-lambda.a
+        for f in $SRCS; do clang -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        llvm-ar rcs libtree-sitter-lambda.a src/*.o
     else
-        CC="gcc" AR="ar" make libtree-sitter-lambda.a
+        for f in $SRCS; do gcc -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        ar rcs libtree-sitter-lambda.a src/*.o
     fi
 
     if [ -f "libtree-sitter-lambda.a" ]; then
@@ -380,14 +392,23 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     echo "Building tree-sitter-javascript for Windows..."
     cd lambda/tree-sitter-javascript
 
-    # Clean previous builds
-    make clean || true
+    # Clean previous object files
+    rm -f src/*.o *.a *.so *.dylib
 
-    # Build static library for Windows
+    # Generate parser.c if it doesn't exist
+    if [ ! -f "src/parser.c" ]; then
+        echo "Generating parser.c for tree-sitter-javascript..."
+        npx tree-sitter-cli@0.24.7 generate
+    fi
+
+    # Compile .c files directly to avoid Makefile OS guard and regeneration rules
+    SRCS=$(find src -maxdepth 1 -name '*.c')
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
-        CC="clang" AR="llvm-ar" make libtree-sitter-javascript.a
+        for f in $SRCS; do clang -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        llvm-ar rcs libtree-sitter-javascript.a src/*.o
     else
-        CC="gcc" AR="ar" make libtree-sitter-javascript.a
+        for f in $SRCS; do gcc -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        ar rcs libtree-sitter-javascript.a src/*.o
     fi
 
     if [ -f "libtree-sitter-javascript.a" ]; then
@@ -408,14 +429,23 @@ if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
     echo "Building tree-sitter-latex for Windows..."
     cd lambda/tree-sitter-latex
 
-    # Clean previous builds
-    make clean || true
+    # Clean previous object files
+    rm -f src/*.o *.a *.so *.dylib
 
-    # Build static library for Windows
+    # Generate parser.c if it doesn't exist
+    if [ ! -f "src/parser.c" ]; then
+        echo "Generating parser.c for tree-sitter-latex..."
+        npx tree-sitter-cli@0.24.7 generate
+    fi
+
+    # Compile .c files directly to avoid Makefile OS guard and regeneration rules
+    SRCS=$(find src -maxdepth 1 -name '*.c')
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
-        CC="clang" AR="llvm-ar" make libtree-sitter-latex.a
+        for f in $SRCS; do clang -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        llvm-ar rcs libtree-sitter-latex.a src/*.o
     else
-        CC="gcc" AR="ar" make libtree-sitter-latex.a
+        for f in $SRCS; do gcc -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        ar rcs libtree-sitter-latex.a src/*.o
     fi
 
     if [ -f "libtree-sitter-latex.a" ]; then
@@ -723,35 +753,28 @@ if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
         # Clean previous builds
         make clean 2>/dev/null || true
 
-        # Build MIR for native Windows
+        # Build MIR for native Windows (static library only, skip shared lib which
+        # requires -soname not supported by LLD on Windows)
         echo "Building MIR..."
 
         # Always use CLANG64 tools since we installed them
         CC="/clang64/bin/clang.exe" \
         AR="/clang64/bin/llvm-ar.exe" \
         CFLAGS="-O2 -DNDEBUG -fPIC" \
-        make
+        make libmir.a
 
         # Copy built libraries and headers
         if [ -f "libmir.a" ]; then
-            if [[ "$MIR_SRC" == "../mir" ]]; then
-                cp libmir.a "../Lambda/$DEPS_DIR/lib/"
-            else
-                cp libmir.a "../../$DEPS_DIR/lib/"
-            fi
+            mkdir -p "$SCRIPT_DIR/$DEPS_DIR/lib"
+            cp libmir.a "$SCRIPT_DIR/$DEPS_DIR/lib/"
             echo "✅ MIR built successfully"
         else
             echo "⚠️  MIR build may have issues"
         fi
 
         # Copy headers
-        if [[ "$MIR_SRC" == "../mir" ]]; then
-            mkdir -p "../Lambda/$DEPS_DIR/include"
-            HEADER_DIR="../Lambda/$DEPS_DIR/include"
-        else
-            mkdir -p "../../$DEPS_DIR/include"
-            HEADER_DIR="../../$DEPS_DIR/include"
-        fi
+        mkdir -p "$SCRIPT_DIR/$DEPS_DIR/include"
+        HEADER_DIR="$SCRIPT_DIR/$DEPS_DIR/include"
 
         for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h mir-alloc.h mir-bitmap.h mir-code-alloc.h; do
             if [ -f "$header" ]; then
@@ -822,17 +845,10 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
         }
 
         # Copy library and headers
-        if [[ "$UTF8PROC_SRC" == "../utf8proc" ]]; then
-            mkdir -p "../Lambda/$DEPS_DIR/lib"
-            mkdir -p "../Lambda/$DEPS_DIR/include"
-            LIB_DIR="../Lambda/$DEPS_DIR/lib"
-            HEADER_DIR="../Lambda/$DEPS_DIR/include"
-        else
-            mkdir -p "../../$DEPS_DIR/lib"
-            mkdir -p "../../$DEPS_DIR/include"
-            LIB_DIR="../../$DEPS_DIR/lib"
-            HEADER_DIR="../../$DEPS_DIR/include"
-        fi
+        mkdir -p "$SCRIPT_DIR/$DEPS_DIR/lib"
+        mkdir -p "$SCRIPT_DIR/$DEPS_DIR/include"
+        LIB_DIR="$SCRIPT_DIR/$DEPS_DIR/lib"
+        HEADER_DIR="$SCRIPT_DIR/$DEPS_DIR/include"
 
         # Copy the static library
         if [ -f "libutf8proc.a" ]; then

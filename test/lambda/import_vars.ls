@@ -1,7 +1,7 @@
 // test pub vars of various types from imported module
 import .mod_vars
 
-(name, version, ratio)
+[name, version, ratio]
 items
 [greeting, get_greeting()]
 get_name()

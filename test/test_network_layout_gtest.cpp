@@ -15,6 +15,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+
+// Network layout tests use fork/kill/waitpid which are Unix-only
+TEST(NetworkLayout, SkippedOnWindows) {
+    GTEST_SKIP() << "Network layout tests require Unix (fork/kill/waitpid)";
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+#else // !_WIN32
+
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fstream>
@@ -25,12 +40,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <atomic>
-
-// for popen on Windows
-#ifdef _WIN32
-    #define popen _popen
-    #define pclose _pclose
-#endif
 
 /**
  * Test fixture for network layout command tests
@@ -478,3 +487,5 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+
+#endif // !_WIN32

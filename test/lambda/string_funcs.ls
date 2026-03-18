@@ -74,7 +74,7 @@ let sym1 = 'hello_world'
 "39. map:"; string(type({a: 1}))
 "40. symbol:"; string(type('sym'))
 "41. element:"; string(type(<div "hello">))
-"42. list:"; string(type((1, 2, 3)))
+"42. list:"; string(type([1, 2, 3]))
 
 "Test null handling:"
 "43. contains(null, x):"; contains(null, "x")

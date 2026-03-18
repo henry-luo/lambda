@@ -899,39 +899,6 @@
         }
       ]
     },
-    "list": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "("
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_expr"
-        },
-        {
-          "type": "REPEAT",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": ","
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_expr"
-              }
-            ]
-          }
-        },
-        {
-          "type": "STRING",
-          "value": ")"
-        }
-      ]
-    },
     "_non_null_literal": {
       "type": "CHOICE",
       "members": [
@@ -2798,6 +2765,39 @@
         }
       ]
     },
+    "let_block": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT1",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "let_expr"
+              },
+              {
+                "type": "STRING",
+                "value": ","
+              }
+            ]
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_expr"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
     "_expr": {
       "type": "CHOICE",
       "members": [
@@ -2888,10 +2888,6 @@
           },
           {
             "type": "SYMBOL",
-            "name": "list"
-          },
-          {
-            "type": "SYMBOL",
             "name": "array"
           },
           {
@@ -2941,6 +2937,10 @@
           {
             "type": "SYMBOL",
             "name": "_parenthesized_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "let_block"
           },
           {
             "type": "SYMBOL",
@@ -4713,8 +4713,32 @@
             "type": "SEQ",
             "members": [
               {
+                "type": "STRING",
+                "value": "("
+              },
+              {
                 "type": "SYMBOL",
-                "name": "list"
+                "name": "_expr"
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": ","
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "_expr"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "STRING",
+                "value": ")"
               },
               {
                 "type": "CHOICE",
@@ -8130,8 +8154,8 @@
       "query_expr"
     ],
     [
-      "list",
-      "if_expr"
+      "let_block",
+      "_expr"
     ]
   ],
   "precedences": [

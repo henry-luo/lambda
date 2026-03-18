@@ -599,6 +599,28 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 
 #ifndef LAMBDA_STATIC
 
+// MIR JIT wrapper declarations for RetItem-returning functions
+extern Item fn_parse1_mir(Item str_item);
+extern Item fn_parse2_mir(Item str_item, Item type);
+extern Item fn_input1_mir(Item url);
+extern Item fn_input2_mir(Item url, Item options);
+extern Item pn_cmd1_mir(Item cmd);
+extern Item pn_cmd2_mir(Item cmd, Item args);
+extern Item pn_fetch_mir(Item url, Item options);
+extern Item pn_output2_mir(Item source, Item target);
+extern Item pn_output3_mir(Item source, Item target, Item options);
+extern Item pn_io_copy_mir(Item src, Item dst);
+extern Item pn_io_move_mir(Item src, Item dst);
+extern Item pn_io_delete_mir(Item path);
+extern Item pn_io_mkdir_mir(Item path);
+extern Item pn_io_touch_mir(Item path);
+extern Item pn_io_symlink_mir(Item target, Item link);
+extern Item pn_io_chmod_mir(Item path, Item mode);
+extern Item pn_io_rename_mir(Item old_path, Item new_path);
+extern Item pn_io_fetch1_mir(Item target);
+extern Item pn_io_fetch2_mir(Item target, Item options);
+extern Item pn_output_append_mir(Item source, Item target);
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset)},
@@ -1048,6 +1070,30 @@ JitImport jit_runtime_imports[] = {
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
+
+    // ========================================================================
+    // MIR JIT wrappers for RetItem-returning functions
+    // ========================================================================
+    {"fn_parse1_mir", FPTR(fn_parse1_mir)},
+    {"fn_parse2_mir", FPTR(fn_parse2_mir)},
+    {"fn_input1_mir", FPTR(fn_input1_mir)},
+    {"fn_input2_mir", FPTR(fn_input2_mir)},
+    {"pn_cmd1_mir", FPTR(pn_cmd1_mir)},
+    {"pn_cmd2_mir", FPTR(pn_cmd2_mir)},
+    {"pn_fetch_mir", FPTR(pn_fetch_mir)},
+    {"pn_output2_mir", FPTR(pn_output2_mir)},
+    {"pn_output3_mir", FPTR(pn_output3_mir)},
+    {"pn_io_copy_mir", FPTR(pn_io_copy_mir)},
+    {"pn_io_move_mir", FPTR(pn_io_move_mir)},
+    {"pn_io_delete_mir", FPTR(pn_io_delete_mir)},
+    {"pn_io_mkdir_mir", FPTR(pn_io_mkdir_mir)},
+    {"pn_io_touch_mir", FPTR(pn_io_touch_mir)},
+    {"pn_io_symlink_mir", FPTR(pn_io_symlink_mir)},
+    {"pn_io_chmod_mir", FPTR(pn_io_chmod_mir)},
+    {"pn_io_rename_mir", FPTR(pn_io_rename_mir)},
+    {"pn_io_fetch1_mir", FPTR(pn_io_fetch1_mir)},
+    {"pn_io_fetch2_mir", FPTR(pn_io_fetch2_mir)},
+    {"pn_output_append_mir", FPTR(pn_output_append_mir)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

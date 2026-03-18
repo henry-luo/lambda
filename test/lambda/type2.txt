@@ -3,20 +3,10 @@
 true
 10
 12.5
-false
-"hey"
+[false, "hey"]
 true
 [3.5, 0.9, -1073.9, 1001]
-1
-2
-3
-4
-5
-6
-7
-8
-3.5
-1001
+[1, 2, 3, 4, 5, 6, 7, 8, 3.5, 1001]
 <elmt
   1
   2
@@ -29,10 +19,7 @@ true
   3.5
   1001>
 0.45
-123
-"hello world123"
-true
-true
+[123, "hello world", "123", true, true]
 [123, "hello world", "123", true]
 {
   a: 123,

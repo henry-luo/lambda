@@ -126,7 +126,7 @@
 {
   r: [1, 2, 3]
 }
-"aba"
+["a", "b"]
 'unique (array input - non-spreadable)'
 {
   r: [1, 2, 3]

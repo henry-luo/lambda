@@ -22,7 +22,7 @@ fn str_len(s: string) { len(s) }
 [
     len([1, 2, 3, 4]),
     len([10]),
-    len((1, 2, 3)),
+    len([1, 2, 3]),
     len({a: 1, b: 2, c: 3})
 ]
 

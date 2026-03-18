@@ -518,14 +518,21 @@ env-debug:
 build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
-	@echo "🔧 Windows/MSYS2 detected - using optimized build configuration..."
-	@echo "🔧 Setting up MINGW64 toolchain environment..."
-	@echo "Building $(PROJECT_NAME) using Premake build system..."
+ifeq ($(IS_CLANG64),yes)
+	@echo "Building $(PROJECT_NAME) using CLANG64 environment..."
+	PATH="/clang64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	@echo "Generating makefiles..."
+	PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@echo "Building lambda executable with $(JOBS) parallel jobs..."
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+else
+	@echo "Building $(PROJECT_NAME) using MINGW64 environment..."
 	PATH="/mingw64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
 	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+endif
 	@echo "✅ Build completed successfully!"
 else
 	@echo "Building $(PROJECT_NAME) using Premake build system..."

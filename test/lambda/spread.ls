@@ -9,15 +9,15 @@ let a = [1, 2, 3];
 
 // Test 2: Spread array into list
 let b = [4, 5, 6];
-(1, 2, 3, *b, 7, 8)
+[1, 2, 3, *b, 7, 8]
 
 // Test 3: Spread list into array
-let c = (10, 20, 30);
+let c = [10, 20, 30];
 [0, *c, 40]
 
 // Test 4: Spread list into list
-let d = (100, 200);
-(50, *d, 300)
+let d = [100, 200];
+[50, *d, 300]
 
 // Test 5: Multiple spreads in same container
 let e = [1, 2];

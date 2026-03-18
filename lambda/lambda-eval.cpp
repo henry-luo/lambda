@@ -14,6 +14,8 @@
 #if _WIN32
 #include <windows.h>
 #include <process.h>
+#include <sys/timeb.h>  // for struct timespec
+#include <pthread_time.h>  // for clock_gettime
 // Windows doesn't have these macros, provide simple equivalents
 #define WIFEXITED(status) (1)
 #define WEXITSTATUS(status) (status)
@@ -2211,6 +2213,95 @@ RetItem fn_parse2(Item str_item, Item type) {
 
 RetItem fn_parse1(Item str_item) {
     return fn_parse2(str_item, ItemNull);
+}
+
+// MIR JIT wrappers: RetItem-returning functions adapted to return Item only.
+// RetItem is a 16-byte struct which has ABI issues with MIR's i64 return type.
+// These wrappers extract .value, converting errors to ItemError.
+extern "C" Item fn_parse1_mir(Item str_item) {
+    RetItem ri = fn_parse1(str_item);
+    return ri.err ? ItemError : ri.value;
+}
+
+extern "C" Item fn_parse2_mir(Item str_item, Item type) {
+    RetItem ri = fn_parse2(str_item, type);
+    return ri.err ? ItemError : ri.value;
+}
+
+extern "C" Item fn_input1_mir(Item url) {
+    RetItem ri = fn_input1(url);
+    return ri.err ? ItemError : ri.value;
+}
+
+extern "C" Item fn_input2_mir(Item url, Item options) {
+    RetItem ri = fn_input2(url, options);
+    return ri.err ? ItemError : ri.value;
+}
+
+// Procedural function wrappers (pn_* functions also return RetItem)
+extern "C" Item pn_cmd1_mir(Item cmd) {
+    RetItem ri = pn_cmd1(cmd);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_cmd2_mir(Item cmd, Item args) {
+    RetItem ri = pn_cmd2(cmd, args);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_fetch_mir(Item url, Item options) {
+    RetItem ri = pn_fetch(url, options);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_output2_mir(Item source, Item target) {
+    RetItem ri = pn_output2(source, target);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_output3_mir(Item source, Item target, Item options) {
+    RetItem ri = pn_output3(source, target, options);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_copy_mir(Item src, Item dst) {
+    RetItem ri = pn_io_copy(src, dst);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_move_mir(Item src, Item dst) {
+    RetItem ri = pn_io_move(src, dst);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_delete_mir(Item path) {
+    RetItem ri = pn_io_delete(path);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_mkdir_mir(Item path) {
+    RetItem ri = pn_io_mkdir(path);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_touch_mir(Item path) {
+    RetItem ri = pn_io_touch(path);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_symlink_mir(Item target, Item link) {
+    RetItem ri = pn_io_symlink(target, link);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_chmod_mir(Item path, Item mode) {
+    RetItem ri = pn_io_chmod(path, mode);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_rename_mir(Item old_path, Item new_path) {
+    RetItem ri = pn_io_rename(old_path, new_path);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_fetch1_mir(Item target) {
+    RetItem ri = pn_io_fetch1(target);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_io_fetch2_mir(Item target, Item options) {
+    RetItem ri = pn_io_fetch2(target, options);
+    return ri.err ? ItemError : ri.value;
+}
+extern "C" Item pn_output_append_mir(Item source, Item target) {
+    RetItem ri = pn_output_append(source, target);
+    return ri.err ? ItemError : ri.value;
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);

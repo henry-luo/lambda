@@ -24,6 +24,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <process.h>  // for _getpid
+#include <direct.h>   // for _getcwd
+#define getpid _getpid
+#define getcwd _getcwd
 #else
 #include <sys/utsname.h>
 #include <unistd.h>

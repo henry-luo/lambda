@@ -497,7 +497,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
-            '    configurations { "Debug", "Release" }',
+            '    configurations { "debug", "release" }',
             f'    platforms {{ {platform_str} }}',
             f'    location "{location}"',
             f'    startproject "{startup_project}"',
@@ -511,7 +511,7 @@ class PremakeGenerator:
         ])
 
         self.premake_content.extend([
-            '    filter "configurations:Debug"',
+            '    filter "configurations:debug"',
             '        defines { "DEBUG" }',
             '        symbols "On"',
             '        optimize "Off"',
@@ -575,7 +575,7 @@ class PremakeGenerator:
         linux_uses_clang = self.use_linux_config and base_compiler == 'clang'
         lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
         self.premake_content.extend([
-            '    filter "configurations:Release"',
+            '    filter "configurations:release"',
             '        defines { "NDEBUG" }',
             '        symbols "Off"',
             '        optimize "On"',
@@ -1059,7 +1059,7 @@ class PremakeGenerator:
             # Add platform-specific library paths
             if self.use_windows_config:
                 self.premake_content.extend([
-                    '        "/mingw64/lib",',
+                    '        "/clang64/lib",',
                     '        "win-native-deps/lib",',
                     '        "build/lib",',
                 ])
@@ -1386,7 +1386,7 @@ class PremakeGenerator:
                 # Add platform-specific library paths
                 if self.use_windows_config:
                     self.premake_content.extend([
-                        '        "/mingw64/lib",',
+                        '        "/clang64/lib",',
                         '        "win-native-deps/lib",',
                     ])
                 else:
@@ -1407,18 +1407,16 @@ class PremakeGenerator:
                     '    '
                 ])
 
-        self.premake_content.extend([
-            '    buildoptions {',
-        ])
-
         # Get compiler-specific build options
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
 
-        # Add Windows DLL export flags for lambda-input-full projects - moved to linkoptions
-        # if (self.use_windows_config and link_type == 'dynamic' and
-        #     lib_name.startswith('lambda-input-full')):
-        #     build_opts.extend(['-Wl,--export-all-symbols', '-Wl,--enable-auto-import'])
+        # Filter out C++ standard flags since this is a C-only meta-library
+        build_opts = [opt for opt in build_opts if not opt.startswith('-std=c++')]
+
+        self.premake_content.extend([
+            '    buildoptions {',
+        ])
 
         for opt in build_opts:
             self.premake_content.append(f'        "{opt}",')
@@ -1797,7 +1795,7 @@ class PremakeGenerator:
         elif self.use_windows_config:
             # Windows/MSYS2 paths
             all_includes.extend([
-                "/mingw64/include",
+                "/clang64/include",
                 "win-native-deps/include",
             ])
         else:
@@ -1861,7 +1859,7 @@ class PremakeGenerator:
         elif self.use_windows_config:
             # Windows/MSYS2 paths
             self.premake_content.extend([
-                '        "/mingw64/lib",',
+                '        "/clang64/lib",',
                 '        "win-native-deps/lib",',
                 '        "build/lib",',
             ])
@@ -2056,11 +2054,11 @@ class PremakeGenerator:
                     "../../lambda/tree-sitter/libtree-sitter.a",
                     "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "../../win-native-deps/lib/libmir.a",
-                    "/mingw64/lib/libmpdec.a",
+                    "/clang64/lib/libmpdec.a",
                     "../../win-native-deps/lib/libutf8proc.a",
-                    "/mingw64/lib/libmbedtls.a",
-                    "/mingw64/lib/libmbedx509.a",
-                    "/mingw64/lib/libmbedcrypto.a",
+                    "/clang64/lib/libmbedtls.a",
+                    "/clang64/lib/libmbedx509.a",
+                    "/clang64/lib/libmbedcrypto.a",
                 ]
                 for lib_path in windows_lib_paths:
                     self.premake_content.append(f'        "{lib_path}",')
@@ -2217,6 +2215,17 @@ class PremakeGenerator:
             '    ',
         ])
 
+        # Add pthread for Windows test executables (needed by mempool.c, memtrack.c, etc.)
+        if self.use_windows_config:
+            if 'pthread' in self.external_libraries:
+                lib_path = self.external_libraries['pthread']['lib']
+                self.premake_content.extend([
+                    '    linkoptions {',
+                    f'        "{lib_path}",',
+                    '    }',
+                    '    ',
+                ])
+
         # Add tree-sitter libraries as linker options for tests with lambda-input-full dependencies
         # Use platform-specific flags to force inclusion of all symbols from tree-sitter libraries
         if any(dep == 'lambda-input-full' for dep in dependencies):
@@ -2271,7 +2280,7 @@ class PremakeGenerator:
         if not disable_sanitizer:
             self.premake_content.extend([
                 '    -- AddressSanitizer for test projects only',
-                '    filter { "configurations:Debug", "not platforms:Linux_x64" }',
+                '    filter { "configurations:debug", "not platforms:Linux_x64" }',
                 '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
                 '        linkoptions { "-fsanitize=address" }',
                 '    ',
@@ -2474,7 +2483,7 @@ class PremakeGenerator:
         # Add platform-specific library paths
         if self.use_windows_config:
             self.premake_content.extend([
-                '        "/mingw64/lib",',
+                '        "/clang64/lib",',
                 '        "win-native-deps/lib",',
                 '        "build/lib",',
             ])

@@ -12,9 +12,15 @@
 #include <process.h>
 #include <direct.h>  // for _mkdir
 #include <io.h>      // for _access
+#include <sys/stat.h>  // for struct stat, stat()
+#include <sys/timeb.h>  // for struct timespec
+#include <pthread_time.h>  // for clock_gettime
 // Windows doesn't have these macros, provide simple equivalents
 #define WIFEXITED(status) (1)
 #define WEXITSTATUS(status) (status)
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#endif
 #else
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #include <sys/stat.h>  // for mkdir, chmod

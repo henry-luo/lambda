@@ -804,11 +804,11 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         info_item("Active Alerts", string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)))
                     >
                     if (len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts) > 0) {
-                        alert_box("alert-warning", (
+                        alert_box("alert-warning", [
                             <strong "⚠️ Air Quality Alerts Active">,
                             <br>,
                             (string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ " location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities.")
-                        ))
+                        ])
                     }
                 >
                 <div class:"card"
@@ -902,11 +902,11 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     >
                 >
                 if (len(traffic_analysis.optimization_strategies.signal_timing_adjustments) > 0) {
-                    alert_box("alert-info", (
+                    alert_box("alert-info", [
                         <strong "🚦 Optimization Opportunity">,
                         <br>,
                         (string(len(traffic_analysis.optimization_strategies.signal_timing_adjustments)) ++ " intersection(s) identified for signal timing optimization to reduce congestion.")
-                    ))
+                    ])
                 }
             >
             // Energy Intelligence
