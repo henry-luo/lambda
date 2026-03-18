@@ -6013,19 +6013,58 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Create proto and import for the cross-module call
             char proto_name[160];
             snprintf(proto_name, sizeof(proto_name), "%s_ip%d", fn_import_name->str, mt->label_counter++);
-            MIR_type_t res_types[1] = { MIR_T_I64 };
-            MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, ai, arg_vars);
+
+            // Import the target function
             MIR_item_t imp_item = MIR_new_import(mt->ctx, fn_import_name->str);
 
-            int nops = 3 + ai;
-            MIR_op_t ops[19];
-            ops[0] = MIR_new_ref_op(mt->ctx, proto);
-            ops[1] = MIR_new_ref_op(mt->ctx, imp_item);
-            MIR_reg_t result = new_reg(mt, "impcall", MIR_T_I64);
-            ops[2] = MIR_new_reg_op(mt->ctx, result);
-            for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
+            MIR_reg_t result;
+            if (use_wrapper && ai <= 8) {
+                // _b wrappers return RetItem (16 bytes). On Windows x64, structs > 8 bytes
+                // use hidden pointer return, which MIR cannot handle directly.
+                // Route through fn_call_boxed_N trampoline: passes function pointer + args
+                // to C code that calls the _b wrapper with correct ABI.
+                char trampoline_name[32];
+                snprintf(trampoline_name, sizeof(trampoline_name), "fn_call_boxed_%d", ai);
 
-            emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                // Load _b function address into a register
+                MIR_reg_t fp_reg = new_reg(mt, "bfp", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, fp_reg),
+                    MIR_new_ref_op(mt->ctx, imp_item)));
+
+                // Build trampoline call: fn_call_boxed_N(fp, arg0, arg1, ...)
+                MIR_var_t tramp_vars[17];
+                tramp_vars[0] = {MIR_T_P, "fp", 0};
+                for (int i = 0; i < ai; i++) tramp_vars[1 + i] = arg_vars[i];
+
+                MirImportEntry* tramp_ie = ensure_import(mt, trampoline_name,
+                    MIR_T_I64, 1 + ai, tramp_vars, 1);
+
+                int nops = 3 + 1 + ai;  // proto + import + result + fp + args
+                MIR_op_t ops[20];
+                ops[0] = MIR_new_ref_op(mt->ctx, tramp_ie->proto);
+                ops[1] = MIR_new_ref_op(mt->ctx, tramp_ie->import);
+                result = new_reg(mt, "impcall", MIR_T_I64);
+                ops[2] = MIR_new_reg_op(mt->ctx, result);
+                ops[3] = MIR_new_reg_op(mt->ctx, fp_reg);
+                for (int i = 0; i < ai; i++) ops[4 + i] = arg_ops[i];
+
+                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            } else {
+                // Non-wrapper calls: function returns Item directly (MIR_T_I64)
+                MIR_type_t res_types[1] = { MIR_T_I64 };
+                MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, ai, arg_vars);
+
+                int nops = 3 + ai;
+                MIR_op_t ops[19];
+                ops[0] = MIR_new_ref_op(mt->ctx, proto);
+                ops[1] = MIR_new_ref_op(mt->ctx, imp_item);
+                result = new_reg(mt, "impcall", MIR_T_I64);
+                ops[2] = MIR_new_reg_op(mt->ctx, result);
+                for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
+
+                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            }
 
             // Import calls return boxed Items. Unbox to native type to match
             // local/system call behavior, so callers can re-box consistently.

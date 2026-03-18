@@ -576,6 +576,40 @@ Item fn_call(Function* fn, List* args) {
     }
 }
 
+// Trampolines for calling _b boxed wrapper functions from MIR Direct code.
+// On Windows x64, structs > 8 bytes (like RetItem) are returned via hidden pointer,
+// so MIR cannot call RetItem-returning functions directly. These trampolines are
+// compiled by the C compiler with correct ABI, accepting a function pointer + args.
+extern "C" {
+Item fn_call_boxed_0(void* fp) {
+    return ri_to_item(((RetItem(*)())fp)());
+}
+Item fn_call_boxed_1(void* fp, Item a) {
+    return ri_to_item(((RetItem(*)(Item))fp)(a));
+}
+Item fn_call_boxed_2(void* fp, Item a, Item b) {
+    return ri_to_item(((RetItem(*)(Item,Item))fp)(a, b));
+}
+Item fn_call_boxed_3(void* fp, Item a, Item b, Item c) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item))fp)(a, b, c));
+}
+Item fn_call_boxed_4(void* fp, Item a, Item b, Item c, Item d) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item))fp)(a, b, c, d));
+}
+Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item))fp)(a, b, c, d, e));
+}
+Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f));
+}
+Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g));
+}
+Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h) {
+    return ri_to_item(((RetItem(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h));
+}
+} // extern "C"
+
 // Convenience wrappers for common arities (avoid List allocation)
 // For closures, env is passed as the first argument
 // For _b boxed functions (FN_FLAG_BOXED_RET), cast to RetItem return and convert via ri_to_item()

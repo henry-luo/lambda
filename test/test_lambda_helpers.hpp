@@ -50,9 +50,12 @@ struct LambdaTestInfo {
 };
 
 // Returns a platform-specific expected output path if one exists, otherwise the
-// generic .txt path. Checks for .linux.txt on Linux and .mac.txt on macOS.
+// generic .txt path. Checks for .win.txt on Windows, .linux.txt on Linux and .mac.txt on macOS.
 inline std::string platform_expected_path(const std::string& base_txt_path) {
-#if defined(__linux__)
+#if defined(_WIN32)
+    std::string win_path = base_txt_path.substr(0, base_txt_path.length() - 4) + ".win.txt";
+    if (access(win_path.c_str(), F_OK) == 0) return win_path;
+#elif defined(__linux__)
     std::string linux_path = base_txt_path.substr(0, base_txt_path.length() - 4) + ".linux.txt";
     if (access(linux_path.c_str(), F_OK) == 0) return linux_path;
 #elif defined(__APPLE__)
