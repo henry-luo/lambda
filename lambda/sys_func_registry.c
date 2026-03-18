@@ -653,6 +653,7 @@ JitImport jit_runtime_imports[] = {
     {"array_limit_inplace", FPTR(array_limit_inplace)},
     {"array_push", FPTR(array_push)},
     {"array_push_spread", FPTR(array_push_spread)},
+    {"array_push_spread_all", FPTR(array_push_spread_all)},
     {"array_end", FPTR(array_end)},
     {"item_spread", FPTR(item_spread)},
     // typed array constructors

@@ -11,4 +11,4 @@ true
 false
 true
 false
-[true, true, false, [7]]
+[true, true, false, 7]

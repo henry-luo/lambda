@@ -418,6 +418,43 @@ void array_push_spread(Array* arr, Item item) {
     array_push(arr, item);
 }
 
+// push item to array, spreading any array type unconditionally (regardless of is_spreadable flag)
+// used for pipe expression results in array literals: [a, pipe_expr | ~, b]
+void array_push_spread_all(Array* arr, Item item) {
+    if (item.item == ITEM_NULL_SPREADABLE) return;
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ARRAY) {
+        Array* inner = item.array;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, inner->items[i]);
+            return;
+        }
+    }
+    if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* inner = item.array_int;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = i2it(inner->items[i])});
+            return;
+        }
+    }
+    if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* inner = item.array_int64;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = l2it(inner->items[i])});
+            return;
+        }
+    }
+    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* inner = item.array_float;
+        if (inner) {
+            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = d2it(inner->items[i])});
+            return;
+        }
+    }
+    // non-array types are pushed as single items (maps, elements, scalars, etc.)
+    array_push(arr, item);
+}
+
 // mark an item as spreadable (for spread operator *expr)
 // works on arrays and lists - marks the is_spreadable flag
 // returns the item unchanged for spreading when used with push_spread functions
