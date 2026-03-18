@@ -14,6 +14,8 @@
 #if _WIN32
 #include <windows.h>
 #include <process.h>
+#include <sys/timeb.h>  // for struct timespec
+#include <pthread_time.h>  // for clock_gettime
 // Windows doesn't have these macros, provide simple equivalents
 #define WIFEXITED(status) (1)
 #define WEXITSTATUS(status) (status)

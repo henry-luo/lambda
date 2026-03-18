@@ -14,7 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef _WIN32
+#include <malloc.h>  // alloca on Windows
+#else
 #include <alloca.h>
+#endif
 #include <time.h>
 
 extern Type TYPE_ANY, TYPE_INT;

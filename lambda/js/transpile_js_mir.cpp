@@ -23,7 +23,11 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
+#include <malloc.h>  // alloca on Windows
+#else
 #include <alloca.h>
+#endif
 
 // External reference to Lambda runtime context pointer (defined in mir.c)
 extern "C" Context* _lambda_rt;

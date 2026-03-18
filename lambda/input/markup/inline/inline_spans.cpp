@@ -9,8 +9,8 @@
  * Extracted from input-markup.cpp lines 1558-1907
  */
 #include "inline_common.hpp"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/log.h"
+#include "../../../../lib/strbuf.h"
+#include "../../../../lib/log.h"
 
 namespace lambda {
 namespace markup {

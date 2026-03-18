@@ -8,6 +8,7 @@
 
 #if _WIN32
 #include <windows.h>
+#include <direct.h>  // for _fullpath
 #endif
 
 // ============================================================================
@@ -459,7 +460,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* lookup_path = script_path;
     char* canonical_path = NULL;
     if (!source) {
+#ifdef _WIN32
+        char resolved[_MAX_PATH];
+        canonical_path = _fullpath(resolved, script_path, _MAX_PATH) ? strdup(resolved) : NULL;
+#else
         canonical_path = realpath(script_path, NULL);
+#endif
         if (canonical_path) {
             lookup_path = canonical_path;
         }

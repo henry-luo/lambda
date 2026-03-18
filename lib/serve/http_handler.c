@@ -6,7 +6,21 @@
 #include "http_handler.h"
 #include "utils.h"
 #include <stdarg.h>
+#ifndef _WIN32
 #include <sys/queue.h>
+#else
+// provide TAILQ_INIT for Windows (not available in MinGW headers)
+#ifndef TAILQ_INIT
+#define TAILQ_INIT(head) do { \
+    (head)->tqh_first = NULL; \
+    (head)->tqh_last = &(head)->tqh_first; \
+} while (0)
+#endif
+#ifndef TAILQ_FOREACH
+#define TAILQ_FOREACH(var, head, field) \
+    for ((var) = ((head)->tqh_first); (var); (var) = ((var)->field.tqe_next))
+#endif
+#endif
 #include <event2/keyvalq_struct.h>
 
 /**

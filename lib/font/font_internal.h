@@ -290,6 +290,9 @@ bool                font_database_load_cache_internal(FontDatabase* db, const ch
 // font_platform.c
 void                font_platform_add_default_dirs(FontDatabase* db);
 char*               font_platform_find_fallback(const char* font_name);
+#ifdef _WIN32
+void                scan_windows_registry_fonts(FontDatabase* db);
+#endif
 int                 get_font_metrics_platform(const char* font_family, float font_size,
                                               float* out_ascent, float* out_descent,
                                               float* out_line_height);

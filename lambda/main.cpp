@@ -48,6 +48,18 @@ extern "C" int __intrinsic_setjmpex(jmp_buf env, void* context) {
     (void)context; // Unused in MinGW version
     return setjmp(env);
 }
+
+// strcasestr is a GNU extension not available on Windows
+static const char* strcasestr(const char* haystack, const char* needle) {
+    if (!needle[0]) return haystack;
+    size_t needle_len = strlen(needle);
+    for (; *haystack; haystack++) {
+        if (_strnicmp(haystack, needle, needle_len) == 0) {
+            return haystack;
+        }
+    }
+    return NULL;
+}
 #endif
 
 // Forward declare additional transpiler functions
