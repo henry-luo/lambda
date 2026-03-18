@@ -208,7 +208,7 @@ TEST_F(MarkBuilderTest, CreateList) {
         .push(builder.createInt(3))
         .final();
 
-    EXPECT_EQ(get_type_id(list_item), LMD_TYPE_LIST);
+    EXPECT_EQ(get_type_id(list_item), LMD_TYPE_ARRAY);
 
     List* lst = list_item.list;
     ASSERT_NE(lst, nullptr);
@@ -226,7 +226,7 @@ TEST_F(MarkBuilderTest, CreateEmptyList) {
 
     Item list_item = builder.list().final();
 
-    EXPECT_EQ(get_type_id(list_item), LMD_TYPE_LIST);
+    EXPECT_EQ(get_type_id(list_item), LMD_TYPE_ARRAY);
 
     List* lst = list_item.list;
     ASSERT_NE(lst, nullptr);

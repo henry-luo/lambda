@@ -101,7 +101,7 @@ TEST_F(InputDirTest, ListCurrentDirectory) {
 
     // Use get_type_id() to properly check the type - should now be a list
     TypeId root_type = get_type_id(input->root);
-    ASSERT_EQ(root_type, LMD_TYPE_LIST) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_LIST << ")";
+    ASSERT_EQ(root_type, LMD_TYPE_ARRAY) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_ARRAY << ")";
 
     List* root = (List*)input->root.list;
     ASSERT_NE(root, nullptr) << "Root list is NULL";
@@ -116,7 +116,7 @@ TEST_F(InputDirTest, ListTestDirectory) {
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for test directory";
 
     TypeId root_type = get_type_id(input->root);
-    ASSERT_EQ(root_type, LMD_TYPE_LIST) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_LIST << ")";
+    ASSERT_EQ(root_type, LMD_TYPE_ARRAY) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_ARRAY << ")";
 
     List* root = (List*)input->root.list;
     ASSERT_NE(root, nullptr) << "Root list is NULL";

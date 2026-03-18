@@ -104,9 +104,6 @@ void write_type(StrBuf* code_buf, Type *type) {
     case LMD_TYPE_RANGE:
         strbuf_append_str(code_buf, "Range*");
         break;
-    case LMD_TYPE_LIST:
-        strbuf_append_str(code_buf, "List*");
-        break;
     case LMD_TYPE_ARRAY: {
         TypeArray *array_type = (TypeArray*)type;
         if (array_type->nested) {
@@ -334,7 +331,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
                 print_item(strbuf, *(Item*)data, depth, indent);
                 break;
@@ -413,7 +410,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         path_to_string(titem->path, strbuf);
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         // For complex types, create a temporary Item and use existing print_item logic
         Item temp_item = {.item = titem->item};
         print_item(strbuf, temp_item, depth + 1, indent);
@@ -529,16 +526,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_int(strbuf, i);
         }
         strbuf_append_char(strbuf, ']');
-        break;
-    }
-    case LMD_TYPE_LIST: {
-        List *list = item.list;
-        if (depth) strbuf_append_char(strbuf, '(');
-        for (int i = 0; i < list->length; i++) {
-            if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
-            print_item(strbuf, list->items[i], depth, indent);
-        }
-        if (depth) strbuf_append_char(strbuf, ')');
         break;
     }
     case LMD_TYPE_ARRAY: {
@@ -706,7 +693,29 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
 }
 
 void print_root_item(StrBuf *strbuf, Item item, char* indent) {
-    print_item(strbuf, item, 0, indent);
+    // top-level content block (is_content flag) prints items one per line without brackets
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ARRAY && item.array->is_content) {
+        Array *array = item.array;
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_char(strbuf, '\n');
+            print_item(strbuf, array->items[i], 0, indent);
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_INT64 && item.array_int64->is_content) {
+        ArrayInt64 *array = item.array_int64;
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_char(strbuf, '\n');
+            strbuf_append_format(strbuf, "%lld", array->items[i]);
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_FLOAT && item.array_float->is_content) {
+        ArrayFloat *array = item.array_float;
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_char(strbuf, '\n');
+            print_double(strbuf, array->items[i]);
+        }
+    } else {
+        print_item(strbuf, item, 0, indent);
+    }
     // append last '\n'
     strbuf_append_char(strbuf, '\n');
 }
@@ -762,8 +771,6 @@ char* format_type(Type *type) {
     case LMD_TYPE_BINARY:
         return "uint8_t*";
 
-    case LMD_TYPE_LIST:
-        return "List*";
     case LMD_TYPE_RANGE:
         return "Range*";
     case LMD_TYPE_ARRAY: {

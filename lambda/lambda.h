@@ -94,7 +94,6 @@ enum EnumTypeId {
     LMD_TYPE_BINARY,
 
     // container types, LMD_TYPE_CONTAINER
-    LMD_TYPE_LIST,
     LMD_TYPE_RANGE,
     LMD_TYPE_ARRAY_INT,
     LMD_TYPE_ARRAY_INT64,
@@ -138,7 +137,7 @@ typedef enum {
 } BoolEnum;
 typedef uint8_t Bool;
 
-#define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
+#define  LMD_TYPE_CONTAINER LMD_TYPE_RANGE
 
 // System function identifiers (moved from lambda-data.hpp for C compatibility)
 typedef enum SysFunc {
@@ -375,6 +374,8 @@ struct Container {
         };
     };
 };
+
+// List/Array flags (stored in List.flags / Array.flags field)
 
 #ifndef __cplusplus
     struct Range {

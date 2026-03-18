@@ -501,7 +501,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
             // ==== Native len() for typed collections/strings ====
             if (fn_id == SYSFUNC_LEN) {
-                if (arg_type == LMD_TYPE_LIST) {
+                if (arg_type == LMD_TYPE_ARRAY) {
                     strbuf_append_str(tp->code_buf, "fn_len_l((List*)(");
                     transpile_expr(tp, first_arg);
                     strbuf_append_str(tp->code_buf, "))");
@@ -861,7 +861,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             }
             strbuf_append_format(tp->code_buf,
                 "}; List fl={.type_id=%d,.items=fa,.length=%d,.capacity=%d}; &fl;}))",
-                LMD_TYPE_LIST, arg_count, arg_count);
+                LMD_TYPE_ARRAY, arg_count, arg_count);
         }
         return;  // Done with function variable call
     }
@@ -993,7 +993,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 }
                 strbuf_append_format(tp->code_buf,
                     "}; List vl={.type_id=%d,.items=va,.length=%d,.capacity=%d}; &vl;})",
-                    LMD_TYPE_LIST, varg_count, varg_count);
+                    LMD_TYPE_ARRAY, varg_count, varg_count);
             }
             has_output_arg = true;
         } else {

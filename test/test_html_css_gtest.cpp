@@ -292,7 +292,7 @@ protected:
         TypeId root_type = input->root.type_id();
 
         // Check if it's a List (may contain DOCTYPE, comments, and HTML element)
-        if (root_type == LMD_TYPE_LIST) {
+        if (root_type == LMD_TYPE_ARRAY) {
             List* potential_list = input->root.list;
             // Search for the first REAL Element (skip DOCTYPE, comments, etc.)
             for (int64_t i = 0; i < potential_list->length; i++) {
@@ -774,7 +774,7 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
     printf("DEBUG: Root element type_id=%d (expected %d for ELEMENT)\n", root_elem ? root_elem->type_id : -1, LMD_TYPE_ELEMENT);
 
     // Check if root is actually a List containing the document
-    if (root_elem && root_elem->type_id == LMD_TYPE_LIST) {
+    if (root_elem && root_elem->type_id == LMD_TYPE_ARRAY) {
         printf("DEBUG: Root is a LIST, checking first item...\n");
         List* root_list = (List*)root_elem;
         if (root_list->length > 0) {

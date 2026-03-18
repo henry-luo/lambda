@@ -101,22 +101,21 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_SYMBOL_   9
 #define LMD_TYPE_STRING_  10
 #define LMD_TYPE_BINARY_  11
-#define LMD_TYPE_LIST_    12
-#define LMD_TYPE_RANGE_   13
-#define LMD_TYPE_ARRAY_INT_ 14
-#define LMD_TYPE_ARRAY_INT64_ 15
-#define LMD_TYPE_ARRAY_FLOAT_ 16
-#define LMD_TYPE_ARRAY_   17
-#define LMD_TYPE_MAP_     18
-#define LMD_TYPE_VMAP_    19
-#define LMD_TYPE_ELEMENT_ 20
-#define LMD_TYPE_OBJECT_  21
-#define LMD_TYPE_TYPE_    22
-#define LMD_TYPE_FUNC_    23
-#define LMD_TYPE_ANY_     24
-#define LMD_TYPE_ERROR_   25
-#define LMD_TYPE_UNDEFINED_ 26
-#define LMD_TYPE_PATH_    27
+#define LMD_TYPE_RANGE_   12
+#define LMD_TYPE_ARRAY_INT_ 13
+#define LMD_TYPE_ARRAY_INT64_ 14
+#define LMD_TYPE_ARRAY_FLOAT_ 15
+#define LMD_TYPE_ARRAY_   16
+#define LMD_TYPE_MAP_     17
+#define LMD_TYPE_VMAP_    18
+#define LMD_TYPE_ELEMENT_ 19
+#define LMD_TYPE_OBJECT_  20
+#define LMD_TYPE_TYPE_    21
+#define LMD_TYPE_FUNC_    22
+#define LMD_TYPE_ANY_     23
+#define LMD_TYPE_ERROR_   24
+#define LMD_TYPE_UNDEFINED_ 25
+#define LMD_TYPE_PATH_    26
 
 // ============================================================================
 // Lifecycle
@@ -517,7 +516,7 @@ static void* item_to_ptr(uint64_t item) {
     // tags >= 12 (containers with tag in high byte): shouldn't normally occur on
     // mainstream 64-bit platforms where heap pointers have 0 in the high byte.
     // But for safety, treat as raw pointer.
-    if (tag >= LMD_TYPE_LIST_) {
+    if (tag >= LMD_TYPE_RANGE_) {
         return (void*)(uintptr_t)item;
     }
 
@@ -570,9 +569,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_PATH_:
         break;
 
-    case LMD_TYPE_LIST_:
     case LMD_TYPE_ARRAY_: {
-        // List/Array: items is an Item* array
+        // Array: items is an Item* array
         // struct layout: { type_id(1), flags(1), Item* items(8), length(8), extra(8), capacity(8) }
         // We read items and length at known offsets.
         // Container is 2 bytes, then padding to pointer alignment.
@@ -637,7 +635,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                                 byte_offset + 1 + 8 <= byte_size) {
                                 uint64_t val = *(uint64_t*)((uint8_t*)field_ptr + 1);
                                 if (val != 0) {
-                                    if (stored_type >= LMD_TYPE_LIST_) {
+                                    if (stored_type >= LMD_TYPE_RANGE_) {
                                         gc_mark_item(gc, val);
                                     } else {
                                         void* embedded_ptr = (void*)(uintptr_t)val;
@@ -655,7 +653,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                         // read as pointer-sized value (Item or pointer depending on type)
                         uint64_t val = *(uint64_t*)field_ptr;
                         if (val != 0) {
-                            if (field_type_id >= LMD_TYPE_LIST_) {
+                            if (field_type_id >= LMD_TYPE_RANGE_) {
                                 // container pointer stored directly
                                 gc_mark_item(gc, val);
                             } else if (field_type_id == LMD_TYPE_STRING_ ||
@@ -725,7 +723,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                                 byte_offset + 1 + 8 <= byte_size) {
                                 uint64_t val = *(uint64_t*)(fptr + 1);
                                 if (val != 0) {
-                                    if (stored_type >= LMD_TYPE_LIST_) {
+                                    if (stored_type >= LMD_TYPE_RANGE_) {
                                         gc_mark_item(gc, val);
                                     } else {
                                         void* ep = (void*)(uintptr_t)val;
@@ -742,7 +740,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                         } else {
                         uint64_t val = *(uint64_t*)((uint8_t*)data_ptr + byte_offset);
                         if (val != 0) {
-                            if (ftid >= LMD_TYPE_LIST_) {
+                            if (ftid >= LMD_TYPE_RANGE_) {
                                 gc_mark_item(gc, val);
                             } else {
                                 void* embedded_ptr = (void*)(uintptr_t)val;
@@ -848,7 +846,6 @@ static void gc_compact_data(gc_heap_t* gc) {
         uint16_t tag = current->type_tag;
 
         switch (tag) {
-        case LMD_TYPE_LIST_:
         case LMD_TYPE_ARRAY_: {
             uint8_t* p = (uint8_t*)obj;
             void** items_slot = (void**)(p + 8);
