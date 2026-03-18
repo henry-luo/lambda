@@ -1,0 +1,37 @@
+"===== MATH ATOM SPACING TESTS =====1. quad type:skip2. quad width:"
+1
+"3. qquad width:"
+2
+"4. enspace width:"
+0.5
+"5. thin width:"
+0.16667
+"6. thin type:skip7. medspace width:"
+0.22222
+"8. thickspace width:"
+0.27778
+"9. negthin width:"
+-0.16667
+"10. thinspace eq:"
+true
+"11. medspace eq:"
+true
+"12. thickspace eq:"
+true
+"13. negthin eq:"
+true
+"14. custom width:"
+1.5
+"15. custom type:skip16. pt width:"
+1
+"17. negative:"
+-1
+"18. null value:"
+0
+"19. quad has el:"
+true
+"20. thin has el:"
+true
+"21. cust has el:"
+true
+"===== ALL MATH ATOM SPACING TESTS DONE ====="

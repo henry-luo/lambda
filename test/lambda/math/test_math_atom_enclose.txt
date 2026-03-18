@@ -1,0 +1,63 @@
+"===== MATH ATOM ENCLOSE TESTS =====1. boxed type:ord2. boxed has border:"
+true
+"3. boxed extra height:"
+true
+"4. boxed extra width:"
+true
+"5. llap width:"
+0
+"6. llap align:"
+true
+"7. rlap width:"
+0
+"8. rlap align:"
+true
+"9. clap width:"
+0
+"10. clap align:"
+true
+"11. phantom type:ord12. phantom hidden:"
+true
+"13. phantom height > 0:"
+true
+"14. phantom width > 0:"
+true
+"15. hphantom height:"
+0
+"16. hphantom depth:"
+0
+"17. hphantom width > 0:"
+true
+"18. vphantom width:"
+0
+"19. vphantom height > 0:"
+true
+"20. smash height:"
+0
+"21. smash depth:"
+0
+"22. smash width > 0:"
+true
+"23. smash b height > 0:"
+true
+"24. smash b depth:"
+0
+"25. smash t height:"
+0
+"26. smash t depth > 0:"
+true
+"27. rule type:ord28. rule has style:"
+true
+"29. rule has bg:"
+true
+"30. rule width:"
+2
+"31. rule height:"
+0.5
+"32. shifted rule align:"
+true
+"33. default width:"
+1
+"34. default height:"
+0.4
+"===== ALL MATH ATOM ENCLOSE TESTS DONE ====="

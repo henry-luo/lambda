@@ -1,0 +1,17 @@
+"===== LATEX ANALYZE TESTS =====1. docclass:article2. title:My Title3. author:John Doe4. headings count:"
+3
+"5. first heading text:6. first heading level:"
+2
+"7. second heading text:8. third heading text:9. third heading level:"
+3
+"10. footnote count:"
+2
+"11. labels count:"
+1
+"12. empty headings:"
+0
+"13. empty title:"
+true
+"14. empty docclass:article15. secnumdepth:"
+3
+"===== ALL LATEX ANALYZE TESTS DONE ====="

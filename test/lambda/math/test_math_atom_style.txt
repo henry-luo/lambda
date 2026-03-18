@@ -1,0 +1,5 @@
+"===== MATH ATOM STYLE TESTS =====1. mathbf type:mord2. mathbf has el:"
+true
+"3. mathrm type:mord4. mathit type:mord5. mathbb type:mord6. mathcal type:mord7. mathfrak type:mord8. mathtt type:mord9. mathscr type:mord10. mathsf type:mord11. displaystyle type:mord12. textstyle type:mord13. scriptstyle type:mord14. empty node has el:"
+true
+"===== ALL MATH ATOM STYLE TESTS DONE ====="

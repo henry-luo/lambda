@@ -1,0 +1,33 @@
+"===== LATEX CSS TESTS =====1. is string:"
+true
+"2. not empty:"
+true
+"3. has body rule:"
+false
+"4. has h1 rule:"
+false
+"5. has h2 rule:"
+false
+"6. has itemize:"
+true
+"7. has enumerate:"
+true
+"8. has quote:"
+false
+"9. has verbatim:"
+true
+"10. has table:"
+false
+"11. has figure:"
+true
+"12. has footnote:"
+true
+"13. has bold:"
+false
+"14. has italic:"
+false
+"15. has monospace:"
+false
+"16. const equals fn:"
+true
+"===== ALL LATEX CSS TESTS DONE ====="

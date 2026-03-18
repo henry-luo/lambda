@@ -1,0 +1,35 @@
+"===== LATEX UTIL TESTS =====1. text_of null:2. text_of str:hello3. text_of int:424. text_of float:3.145. text_of element:world6. text_of nested:abcd7. rich_text str:plain8. rich_text LaTeX:LaTeX9. rich_text TeX:TeX10. rich_text ldots:…11. rich_text copyright:©12. rich_text nested:Hello …13. slugify simple:hello-world14. slugify spaces:foo-bar15. slugify underscore:a-b-c16. repeat 0:17. repeat 1:ab18. repeat 3:ababab19. join empty:20. join one:a21. join three:a, b, c22. parbreak sym:"
+true
+"23. parbreak str:"
+false
+"24. parbreak other:"
+false
+"25. ws empty:"
+false
+"26. ws spaces:"
+true
+"27. ws text:"
+false
+"28. ws non-str:"
+false
+"29. trim empty:"
+0
+"30. trim ws:"
+1
+"31. trim mixed:a b32. find_child span:a33. find_child em:b34. find_child missing:"
+true
+"35. find_desc p:deep36. find_desc missing:"
+true
+"37. children_array len:"
+1
+"38. children_array first:abc39. attr_or found:foo40. attr_or default:default41. text_of_child 0:firstsecondthird42. text_of_child 1:43. text_of_child oob:44. kv empty:"
+0
+"45. kv pair:3cm46. kv flag:true47. kv multi:2cm48. lookup first:"
+2
+"49. lookup last wins:"
+3
+"50. lookup missing:"
+true
+"51. lookup null:"
+true
+"===== ALL LATEX UTIL TESTS DONE ====="

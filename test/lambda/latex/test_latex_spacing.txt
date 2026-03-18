@@ -1,0 +1,59 @@
+"===== LATEX SPACING TESTS =====1. linebreak tag:"
+'br'
+"2. linebreak ctx:"
+true
+"3. newline tag:"
+'br'
+"4. hspace tag:"
+'span'
+"5. hspace class:latex-hspace6. hspace has margin:"
+true
+"7. vspace tag:"
+'div'
+"8. vspace class:latex-vspace9. vspace has margin:"
+true
+"10. hrule tag:"
+'hr'
+"11. pagebreak tag:"
+'div'
+"12. pagebreak class:latex-pagebreak13. hfill tag:"
+'span'
+"14. hfill class:latex-hfill15. hfill has flex:"
+true
+"16. nbsp is string:"
+true
+"17. bigskip tag:"
+'div'
+"18. bigskip class:latex-bigskip19. medskip tag:"
+'div'
+"20. medskip class:latex-medskip21. smallskip tag:"
+'div'
+"22. smallskip class:latex-smallskip23. bigbreak tag:"
+'div'
+"24. medbreak tag:"
+'div'
+"25. smallbreak tag:"
+'div'
+"26. quad tag:"
+'span'
+"27. quad class:latex-quad28. qquad tag:"
+'span'
+"29. qquad class:latex-qquad30. enspace is string:"
+true
+"31. thinspace is string:"
+true
+"32. negthinspace tag:"
+'span'
+"33. noindent tag:"
+'span'
+"34. italcorr null:"
+true
+"35. hspace_el tag:"
+'span'
+"36. hspace_el has margin:"
+true
+"37. vspace_el tag:"
+'div'
+"38. vspace_el has margin:"
+true
+"===== ALL LATEX SPACING TESTS DONE ====="
