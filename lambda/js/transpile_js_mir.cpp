@@ -315,6 +315,14 @@ static void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
     MIR_append_insn(mt->ctx, mt->current_func_item, label);
 }
 
+// Zero-extend uint8_t return value to full i64 (needed on Windows x64 ABI
+// where upper bits of RAX may contain garbage after a uint8_t-returning call)
+static MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_UEXT8,
+        MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, r)));
+    return r;
+}
+
 // ============================================================================
 // Scope management
 // ============================================================================
@@ -4989,8 +4997,8 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
 
             // Runtime type dispatch cascade (when receiver type unknown)
-            MIR_reg_t rtype = jm_call_1(mt, "item_type_id", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+            MIR_reg_t rtype = jm_emit_uext8(mt, jm_call_1(mt, "item_type_id", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
 
             MIR_reg_t result = jm_new_reg(mt, "mcall", MIR_T_I64);
             MIR_label_t l_string = jm_new_label(mt);
@@ -5033,12 +5041,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fallback),
                 MIR_new_reg_op(mt->ctx, is_map)));
             // Check if this is a typed array (Map with sentinel marker) -> use array method dispatch
-            MIR_reg_t is_ta = jm_call_1(mt, "js_is_typed_array", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+            MIR_reg_t is_ta = jm_emit_uext8(mt, jm_call_1(mt, "js_is_typed_array", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_array),
                 MIR_new_reg_op(mt->ctx, is_ta)));
-            MIR_reg_t is_dom = jm_call_1(mt, "js_is_dom_node", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+            MIR_reg_t is_dom = jm_emit_uext8(mt, jm_call_1(mt, "js_is_dom_node", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_dom),
                 MIR_new_reg_op(mt->ctx, is_dom)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_fallback)));
@@ -6053,8 +6061,8 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
 // Conditional expression (ternary)
 static MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond) {
     MIR_reg_t test = jm_transpile_box_item(mt, cond->test);
-    MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+    MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
 
     MIR_reg_t result = jm_new_reg(mt, "tern", MIR_T_I64);
     MIR_label_t l_false = jm_new_label(mt);
@@ -6958,8 +6966,8 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         test_val = jm_transpile_expression(mt, if_node->test);
     } else {
         MIR_reg_t test = jm_transpile_box_item(mt, if_node->test);
-        test_val = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+        test_val = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
     }
 
     MIR_label_t l_else = jm_new_label(mt);
@@ -7033,8 +7041,8 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
             MIR_new_reg_op(mt->ctx, test)));
     } else {
         MIR_reg_t test = jm_transpile_box_item(mt, wh->test);
-        MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+        MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
@@ -7226,8 +7234,8 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     MIR_new_reg_op(mt->ctx, test)));
             } else {
                 MIR_reg_t test = jm_transpile_box_item(mt, for_node->test);
-                MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+                MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
                     MIR_new_reg_op(mt->ctx, truthy)));
             }
@@ -7646,8 +7654,8 @@ static void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
         MIR_reg_t eq = jm_call_2(mt, "js_strict_equal", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, discriminant),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, test_val));
-        MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, eq));
+        MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, eq)));
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, case_labels[i]),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
@@ -7703,8 +7711,8 @@ static void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     jm_emit_label(mt, l_test);
     if (dw->test) {
         MIR_reg_t test = jm_transpile_box_item(mt, dw->test);
-        MIR_reg_t truthy = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test));
+        MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_body),
             MIR_new_reg_op(mt->ctx, truthy)));
     }

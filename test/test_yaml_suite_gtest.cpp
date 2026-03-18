@@ -315,6 +315,11 @@ static Input* parse_yaml_source_with_timeout(const char* yaml_source, int timeou
     *timed_out = false;
     parse_timed_out = 0;
 
+#ifdef _WIN32
+    // Windows: no sigaction/alarm, just parse without timeout
+    Input* result = parse_yaml_source(yaml_source);
+    return result;
+#else
     struct sigaction sa, old_sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = timeout_handler;
@@ -333,6 +338,7 @@ static Input* parse_yaml_source_with_timeout(const char* yaml_source, int timeou
 
     sigaction(SIGALRM, &old_sa, NULL);
     return result;
+#endif
 }
 
 // parse YAML source and return Input* (caller should manage lifetime)

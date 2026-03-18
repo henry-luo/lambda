@@ -798,13 +798,28 @@ static MIR_reg_t emit_box_int(MirTranspiler* mt, MIR_reg_t val_reg) {
     return result;
 }
 
+// Zero-extend uint8_t Bool return from a runtime function call.
+// MIR reads full i64 from the return register but C functions returning uint8_t
+// may leave garbage in the upper 56 bits. This masks to the low 8 bits.
+static MIR_reg_t emit_uext8(MirTranspiler* mt, MIR_reg_t val_reg) {
+    MIR_reg_t ext = new_reg(mt, "bext", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UEXT8, MIR_new_reg_op(mt->ctx, ext),
+        MIR_new_reg_op(mt->ctx, val_reg)));
+    return ext;
+}
+
 // Box bool -> Item (inline b2it)
 static MIR_reg_t emit_box_bool(MirTranspiler* mt, MIR_reg_t val_reg) {
     // Bool can be BOOL_FALSE(0), BOOL_TRUE(1), or BOOL_ERROR(2)
+    // Zero-extend from 8 bits: runtime functions return uint8_t Bool, but MIR
+    // reads full i64 from the return register — upper bits may contain garbage.
+    MIR_reg_t masked = new_reg(mt, "bmask", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UEXT8, MIR_new_reg_op(mt->ctx, masked),
+        MIR_new_reg_op(mt->ctx, val_reg)));
     // If val >= BOOL_ERROR (2), return ITEM_ERROR instead of boxing as bool
     MIR_reg_t is_error = new_reg(mt, "berr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, is_error),
-        MIR_new_reg_op(mt->ctx, val_reg), MIR_new_int_op(mt->ctx, 2)));
+        MIR_new_reg_op(mt->ctx, masked), MIR_new_int_op(mt->ctx, 2)));
     MIR_label_t l_error = new_label(mt);
     MIR_label_t l_end = new_label(mt);
     MIR_reg_t result = new_reg(mt, "boxb", MIR_T_I64);
@@ -813,7 +828,7 @@ static MIR_reg_t emit_box_bool(MirTranspiler* mt, MIR_reg_t val_reg) {
     // Normal bool: box as (BOOL_TAG | val)
     uint64_t BOOL_TAG = (uint64_t)LMD_TYPE_BOOL << 56;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)BOOL_TAG), MIR_new_reg_op(mt->ctx, val_reg)));
+        MIR_new_int_op(mt->ctx, (int64_t)BOOL_TAG), MIR_new_reg_op(mt->ctx, masked)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     // Error case: return ITEM_ERROR
     emit_label(mt, l_error);
@@ -1029,7 +1044,7 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
     case LMD_TYPE_FLOAT:
         return emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
     case LMD_TYPE_BOOL:
-        return emit_call_1(mt, "it2b", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
+        return emit_uext8(mt, emit_call_1(mt, "it2b", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg)));
     case LMD_TYPE_STRING:
         return emit_call_1(mt, "it2s", MIR_T_P, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
     case LMD_TYPE_INT64:
@@ -2206,7 +2221,7 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         // Use transpile_box_item to ensure sub-expressions are properly boxed
         // (transpile_expr + emit_box(val, ANY) fails when inner expr returns native values)
         MIR_reg_t boxed_left = transpile_box_item(mt, bi->left);
-        MIR_reg_t truthy = emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+        MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left)));
         MIR_label_t l_false = new_label(mt);
         MIR_label_t l_end = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
@@ -2243,7 +2258,7 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         }
         // Boxed OR: use is_truthy + branch with short-circuit
         MIR_reg_t boxed_left = transpile_box_item(mt, bi->left);
-        MIR_reg_t truthy = emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+        MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left)));
         MIR_label_t l_true = new_label(mt);
         MIR_label_t l_end = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_true),
@@ -2322,8 +2337,8 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             MIR_reg_t result = new_reg(mt, "ct_res", MIR_T_I64);
 
             // Check base type: item_type_id(ct_value) == constrained->base->type_id
-            MIR_reg_t tid_reg = emit_call_1(mt, "item_type_id", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ct_value));
+            MIR_reg_t tid_reg = emit_uext8(mt, emit_call_1(mt, "item_type_id", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ct_value)));
             MIR_reg_t base_match = new_reg(mt, "base_eq", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, base_match),
                 MIR_new_reg_op(mt->ctx, tid_reg),
@@ -2347,8 +2362,8 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             mt->in_pipe = true;
 
             MIR_reg_t constraint_val = transpile_box_item(mt, constrained_node->constraint);
-            MIR_reg_t truthy = emit_call_1(mt, "is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val));
+            MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, truthy)));
 
@@ -2570,7 +2585,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     MIR_reg_t cond_val = cond;
     if (cond_tid != LMD_TYPE_BOOL) {
         MIR_reg_t boxed = emit_box(mt, cond, cond_tid);
-        cond_val = emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        cond_val = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed)));
     }
 
     // Determine result type - check if branches could produce different MIR types
@@ -2704,8 +2719,8 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
         TypeConstrained* constrained = (TypeConstrained*)ct->type;
         if (constrained) {
             // Check base type
-            MIR_reg_t tid_reg = emit_call_1(mt, "item_type_id", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut));
+            MIR_reg_t tid_reg = emit_uext8(mt, emit_call_1(mt, "item_type_id", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut)));
             MIR_reg_t base_match = new_reg(mt, "base_eq", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, base_match),
                 MIR_new_reg_op(mt->ctx, tid_reg),
@@ -2720,8 +2735,8 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
             mt->in_pipe = true;
 
             MIR_reg_t constraint_val = transpile_box_item(mt, ct->constraint);
-            MIR_reg_t truthy = emit_call_1(mt, "is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val));
+            MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val)));
 
             mt->pipe_item_reg = old_pipe_item;
             mt->in_pipe = old_in_pipe;
@@ -2738,17 +2753,17 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
 
     MIR_reg_t match_test;
     if (pat_tid == LMD_TYPE_TYPE) {
-        match_test = emit_call_2(mt, "fn_is", MIR_T_I64,
+        match_test = emit_uext8(mt, emit_call_2(mt, "fn_is", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat)));
     } else if (pat_tid == LMD_TYPE_RANGE) {
-        match_test = emit_call_2(mt, "fn_in", MIR_T_I64,
+        match_test = emit_uext8(mt, emit_call_2(mt, "fn_in", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat)));
     } else {
-        match_test = emit_call_2(mt, "fn_eq", MIR_T_I64,
+        match_test = emit_uext8(mt, emit_call_2(mt, "fn_eq", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_scrut),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_pat)));
     }
 
     MIR_reg_t is_match = new_reg(mt, "ismatch", MIR_T_I64);
@@ -2994,7 +3009,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         MIR_reg_t where_test = where_val;
         if (where_tid != LMD_TYPE_BOOL) {
             MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
-            where_test = emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw));
+            where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
         }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_continue),
             MIR_new_reg_op(mt->ctx, where_test)));
@@ -3141,7 +3156,7 @@ static MIR_reg_t transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
     MIR_reg_t cond_val = cond;
     if (cond_tid != LMD_TYPE_BOOL) {
         MIR_reg_t boxed = emit_box(mt, cond, cond_tid);
-        cond_val = emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        cond_val = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed)));
     }
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, cond_val)));
@@ -3329,8 +3344,9 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // Box the value for error checking
                     MIR_reg_t boxed = emit_box(mt, val, var_tid);
                     // Check if result is an error: item_type_id(boxed) == LMD_TYPE_ERROR
-                    MIR_reg_t type_id = emit_call_1(mt, "item_type_id", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                    // item_type_id returns uint8_t TypeId — zero-extend for clean comparison
+                    MIR_reg_t type_id = emit_uext8(mt, emit_call_1(mt, "item_type_id", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed)));
                     MIR_reg_t is_error = new_reg(mt, "iserr", MIR_T_I64);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_error),
                         MIR_new_reg_op(mt->ctx, type_id),
@@ -3341,11 +3357,15 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     MIR_label_t l_end = new_label(mt);
 
                     // error_var = is_error ? boxed : ITEM_NULL
+                    // value_var = is_error ? ITEM_NULL : boxed
                     MIR_reg_t err_result = new_reg(mt, "errv", MIR_T_I64);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err_result),
                         MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_is_err),
                         MIR_new_reg_op(mt->ctx, is_error)));
+                    // Non-error path: val = boxed (convert native to boxed Item)
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, val),
+                        MIR_new_reg_op(mt->ctx, boxed)));
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
                     emit_label(mt, l_is_err);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err_result),
@@ -3353,8 +3373,17 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // If error: value_var = ITEM_NULL
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, val),
                         MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                    set_var(mt, name_buf, val, MIR_T_I64, LMD_TYPE_ANY);
                     emit_label(mt, l_end);
+                    // After both paths, val is a boxed Item (either boxed value or NULL)
+                    set_var(mt, name_buf, val, MIR_T_I64, LMD_TYPE_ANY);
+
+                    // Update BSS global if module-level (val may have changed to NULL on error)
+                    if (!mt->in_user_func) {
+                        GlobalVarEntry* gvar = find_global_var(mt, name_buf);
+                        if (gvar) {
+                            store_global_var(mt, gvar, val, LMD_TYPE_ANY);
+                        }
+                    }
 
                     char err_name_buf[128];
                     snprintf(err_name_buf, sizeof(err_name_buf), "%.*s",
@@ -5687,6 +5716,14 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 info->is_proc ? "pn_" : "fn_", info->name);
         }
 
+        // For C_RET_RETITEM functions (returning 16-byte struct), use MIR wrapper
+        // that returns Item. RetItem has ABI issues with MIR's i64 return type.
+        if (info->c_ret_type == C_RET_RETITEM) {
+            char mir_name[140];
+            snprintf(mir_name, sizeof(mir_name), "%s_mir", sys_fn_name);
+            memcpy(sys_fn_name, mir_name, sizeof(sys_fn_name));
+        }
+
         // Determine the actual C return type based on the SysFunc enum value.
         // The return_type in SysFuncInfo is the Lambda-level semantic type, NOT the C type.
         // Some funcs with same Lambda return type (e.g., TYPE_STRING) return String* in C
@@ -6487,8 +6524,8 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     MIR_reg_t result_arr = emit_call_0(mt, "array", MIR_T_P);
 
     // Check if collection is a MAP or VMAP (maps need key-based iteration)
-    MIR_reg_t type_id_reg = emit_call_1(mt, "item_type_id", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
+    MIR_reg_t type_id_reg = emit_uext8(mt, emit_call_1(mt, "item_type_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left)));
 
     MIR_reg_t is_map = new_reg(mt, "is_map", MIR_T_I64);
     MIR_reg_t is_map_t2 = new_reg(mt, "is_map_t2", MIR_T_I64);
@@ -6625,8 +6662,8 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
             truthy = right_val;
         } else {
             // Need to box and check truthiness
-            truthy = emit_call_1(mt, "is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right));
+            truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right)));
         }
         MIR_label_t l_skip = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_skip),
@@ -7596,7 +7633,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         AstBinaryNode* pipe = (AstBinaryNode*)node;
         MIR_reg_t data = transpile_box_item(mt, pipe->left);
         MIR_reg_t target = transpile_box_item(mt, pipe->right);
-        const char* fn_name = (pipe->op == OPERATOR_PIPE_APPEND) ? "pn_output_append" : "pn_output2";
+        const char* fn_name = (pipe->op == OPERATOR_PIPE_APPEND) ? "pn_output_append_mir" : "pn_output2_mir";
         return emit_call_2(mt, fn_name, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, data),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, target));

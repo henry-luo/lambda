@@ -44,6 +44,7 @@ void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext
 void store_in_measurement_cache(DomNode* node, int width, int height, int content_width, int content_height);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache();
+void invalidate_measurement_cache_for_node(DomNode* node);
 
 // Enhanced layout functions that use measured sizes
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);

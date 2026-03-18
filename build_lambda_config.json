@@ -358,7 +358,8 @@
                 "mbedcrypto",
                 "zlib",
                 "rpmalloc",
-                "re2"
+                "re2",
+                "pthread"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
@@ -814,7 +815,6 @@
                 }
             ],
             "flags": [
-                "std=c++17",
                 "D_WIN32",
                 "DWINVER=0x0602",
                 "D_WIN32_WINNT=0x0602",

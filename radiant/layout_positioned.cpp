@@ -357,6 +357,31 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     } else if (is_intrinsic_width) {
         content_width = 0;
         log_debug("Using intrinsic sizing for absolutely positioned element: content_width=0 (shrink-to-fit)");
+    } else if (block->fi && block->fi->aspect_ratio > 0 &&
+               !(lycon->block.given_height >= 0) && block->blk && block->blk->given_max_height > 0) {
+        // CSS Sizing Level 4: abs-pos with aspect-ratio, auto width/height, and max-height
+        // Derive width from max-height * aspect-ratio
+        float max_h = block->blk->given_max_height;
+        float content_h = max_h;
+        bool is_border_box = block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        if (is_border_box) {
+            float v_bp = 0;
+            if (block->bound) {
+                v_bp += block->bound->padding.top + block->bound->padding.bottom;
+                if (block->bound->border)
+                    v_bp += block->bound->border->width.top + block->bound->border->width.bottom;
+            }
+            content_h -= v_bp;
+            if (content_h < 0) content_h = 0;
+        }
+        float derived_width = content_h * block->fi->aspect_ratio;
+        if (is_border_box) {
+            content_width = derived_width + h_border_padding;
+        } else {
+            content_width = derived_width;
+        }
+        log_debug("[ABS POS] width from aspect-ratio + max-height: max_h=%.1f, content_h=%.1f, ratio=%.3f, content_width=%.1f",
+                  max_h, content_h, block->fi->aspect_ratio, content_width);
     } else {
         // CSS 2.1 §10.3.7: width is auto, at most one of left/right specified (non-replaced)
         // Use shrink-to-fit width = min(max(preferred_minimum_width, available_width), preferred_width)
@@ -1149,7 +1174,14 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     bool has_flex_calculated_height = is_flex_container && block->height > 0;
     bool has_grid_calculated_height = is_grid_container && block->height > 0;
 
-    if (!(lycon->block.given_height >= 0 || (block->position->has_top && block->position->has_bottom))) {
+    // CRITICAL: Use block->blk->given_height (canonical CSS value) instead of lycon->block.given_height
+    // here, because lycon->block.given_height can be corrupted by child CSS style resolution
+    // inside layout_block_inner_content (children's dom_node_resolve_style writes their own
+    // given_height into lycon->block). block->blk->given_height is set once from CSS parsing
+    // and from calculate_absolute_position for top+bottom constraints; it is not corrupted.
+    // This mirrors the same pattern used in finalize_block_flow.
+    float abs_block_given_height = (block->blk && block->blk->given_height >= 0) ? block->blk->given_height : -1;
+    if (!(abs_block_given_height >= 0 || (block->position->has_top && block->position->has_bottom))) {
         // Don't override flex/grid calculated height with flow-based auto-sizing
         if (has_flex_calculated_height || has_grid_calculated_height) {
             log_debug("auto-sizing height: SKIPPED - %s container already has calculated height %.1f",
