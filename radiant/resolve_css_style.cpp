@@ -6723,6 +6723,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_WRITING_MODE: {
+            if (!block) break;
+            alloc_flex_prop(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val == CSS_VALUE_VERTICAL_LR) {
+                    block->embed->flex->writing_mode = WM_VERTICAL_LR;
+                } else if (val == CSS_VALUE_VERTICAL_RL) {
+                    block->embed->flex->writing_mode = WM_VERTICAL_RL;
+                } else {
+                    block->embed->flex->writing_mode = WM_HORIZONTAL_TB;
+                }
+                log_debug("[CSS] writing-mode: %d", block->embed->flex->writing_mode);
+            }
+            break;
+        }
+
         // Grid Template Properties
         case CSS_PROPERTY_GRID_TEMPLATE_COLUMNS: {
             log_debug("[CSS] Processing grid-template-columns property, view_type=%d, block=%p",

@@ -1467,6 +1467,17 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     float text_width = widths.max_content;
                     float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
 
+                    // In vertical writing modes, text flows top-to-bottom:
+                    // physical width = font_size, physical height = text inline extent
+                    bool is_vertical_wm = flex_prop &&
+                        (flex_prop->writing_mode == WM_VERTICAL_LR || flex_prop->writing_mode == WM_VERTICAL_RL);
+                    if (is_vertical_wm) {
+                        float tmp = text_width;
+                        text_width = text_height;  // font_size
+                        text_height = tmp;         // text max_content becomes height
+                        log_debug("FLEX TEXT: vertical writing mode, swapped to %.1f x %.1f", text_width, text_height);
+                    }
+
                     log_debug("FLEX TEXT: measured text '%.30s' size: %.1f x %.1f", text, text_width, text_height);
 
                     // CSS Flexbox: anonymous text items shrink (flex-shrink: 1 default).
@@ -1615,6 +1626,32 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     log_debug("FLEX TEXT: laying out text '%s' at (%.1f, %.1f)",
                               text, text_x, text_y);
                     layout_flow_node(lycon, text_child);
+
+                    // In vertical writing mode, override the text node dimensions
+                    // since layout_flow_node does not handle vertical text flow
+                    if (is_vertical_wm && text_child->is_text()) {
+                        DomText* dt = (DomText*)text_child;
+                        if (dt->view_type == RDT_VIEW_TEXT) {
+                            ViewText* tv = (ViewText*)dt;
+                            tv->x = text_x;
+                            tv->y = text_y;
+                            tv->width = text_width;
+                            tv->height = text_height;
+                        }
+                        // Override TextRect(s) to reflect vertical text layout:
+                        // Merge all rects into a single rect spanning the full vertical extent
+                        if (dt->rect) {
+                            dt->rect->x = text_x;
+                            dt->rect->y = text_y;
+                            dt->rect->width = text_width;
+                            dt->rect->height = text_height;
+                            dt->rect->start_index = 0;
+                            dt->rect->length = (int)strlen(text);
+                            dt->rect->next = nullptr;  // single rect for vertical text
+                            log_debug("FLEX TEXT: vertical WM override rect: (%.1f, %.1f, %.1f, %.1f)",
+                                      text_x, text_y, text_width, text_height);
+                        }
+                    }
 
                     // Finalize any pending inline content
                     if (!lycon->line.is_line_start) {

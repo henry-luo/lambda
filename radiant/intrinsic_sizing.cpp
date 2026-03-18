@@ -1232,6 +1232,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // Check flex direction for row vs column
+    bool is_vertical_wm = false;
     if (is_flex_container) {
         // Default flex-direction is row
         is_row_flex = true;  // Assume row by default
@@ -1240,6 +1241,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE ||
                           dir == DIR_ROW || dir == DIR_ROW_REVERSE);
             flex_gap = view_block->embed->flex->column_gap;
+            is_vertical_wm = (view_block->embed->flex->writing_mode == WM_VERTICAL_LR ||
+                              view_block->embed->flex->writing_mode == WM_VERTICAL_RL);
         } else if (element->specified_style) {
             // Check specified_style for flex-direction
             CssDeclaration* dir_decl = style_tree_get_declaration(
@@ -1247,6 +1250,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum dir = dir_decl->value->data.keyword;
                 is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+            }
+            // Check for writing-mode
+            CssDeclaration* wm_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_WRITING_MODE);
+            if (wm_decl && wm_decl->value && wm_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum wm = wm_decl->value->data.keyword;
+                is_vertical_wm = (wm == CSS_VALUE_VERTICAL_LR || wm == CSS_VALUE_VERTICAL_RL);
             }
             // Check for gap (try column-gap first, then gap shorthand)
             CssDeclaration* gap_decl = style_tree_get_declaration(
@@ -1258,8 +1268,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 flex_gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
             }
         }
-        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f",
-                  element->node_name(), is_flex_container, is_row_flex, flex_gap);
+        // In vertical writing modes, the physical axis mapping swaps:
+        // column becomes horizontal, row becomes vertical
+        if (is_vertical_wm) {
+            is_row_flex = !is_row_flex;
+            log_debug("measure_element_intrinsic_widths: vertical writing mode, flipped is_row_flex");
+        }
+        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f, vertical_wm=%d",
+                  element->node_name(), is_flex_container, is_row_flex, flex_gap, is_vertical_wm);
     }
 
     // Set up parent context for children to inherit definite height
@@ -1398,6 +1414,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     lycon, normalized_buffer, out_pos, text_transform, font_variant);
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
+
+                // In vertical writing mode, text flows top-to-bottom.
+                // Physical width = font_size (one column of characters),
+                // physical height = text inline extent.
+                if (is_vertical_wm && is_flex_container) {
+                    float font_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                    child_sizes.min_content = font_size;
+                    child_sizes.max_content = font_size;
+                    log_debug("  vertical writing mode: text width -> font_size=%.1f", font_size);
+                }
 
                 // In flex containers, text nodes become anonymous flex items
                 if (is_flex_container) {
