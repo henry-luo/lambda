@@ -76,6 +76,9 @@ public:
     const Input* input() const { return input_; }
     ParseErrorList& errors() { return errors_; }
     const ParseErrorList& errors() const { return errors_; }
+    const char* source() const { return owned_source_; }
+    const char* source_end() const { return owned_source_ + owned_source_len_; }
+    size_t source_length() const { return owned_source_len_; }
 
 
     // Get current location
