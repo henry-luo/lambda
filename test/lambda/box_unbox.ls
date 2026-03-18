@@ -13,7 +13,7 @@ add_f2(1.0, 3.5)
 add_f2(2, 3.5)
 
 let a=123, b=a*2, c=a+2, d=add(1,1)
-(b, c)
+[b, c]
 add_i(b, c)
 add_i(d, 2)
 add_f(b, c)

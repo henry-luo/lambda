@@ -171,7 +171,7 @@ fn check_list(v) => match v {
 }
 
 "Test 14: list type"
-check_list((1, 2, 3))
+check_list([1, 2, 3])
 check_list(42)
 check_list("hi")
 check_list([1, 2])
@@ -184,7 +184,7 @@ fn check_array(v) => match v {
 
 "Test 15: array type"
 check_array([1, 2, 3])
-check_array((1, 2))
+check_array([1, 2])
 check_array("hi")
 
 // Test 16: match with map type pattern
@@ -207,7 +207,7 @@ fn collection_type(v) => match v {
 }
 
 "Test 17: collection types"
-collection_type((1, 2))
+collection_type([1, 2])
 collection_type([1, 2])
 collection_type({a: 1})
 collection_type(42)

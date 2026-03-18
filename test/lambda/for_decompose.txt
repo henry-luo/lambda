@@ -17,10 +17,7 @@
 [['x', 1], ['y', 2]]
 "=== For Expression Spreading ==="
 [0, 10, 20, 30, 99]
-0
-5
-10
-99
+[0, 5, 10, 99]
 [1, 2, 30, 40]
 [2, 4, 6, 8]
 "=== Positional Decomposition (let a, b = expr) ==="

@@ -112,13 +112,13 @@ pub fn process_environmental_data(sensor_readings) {  // [{sensor_id: string, lo
                                         else "moderate"
                 }
                 else null,
-            quiet_hours_compliance: (
+            quiet_hours_compliance: [
                 // Simplified: assume readings between 22:00-06:00 are quiet hours
                 let total_readings = len(valid_readings),
                 let quiet_violations = len(for (reading in valid_readings) 
                     if (reading.measurements.noise_level > 55.0) reading else null),  // assuming all readings for simplicity
                 if (total_readings > 0) ((float_val(total_readings - quiet_violations)) / float_val(total_readings)) * 100.0 else 100.0
-            )
+            ]
         }
     };
     

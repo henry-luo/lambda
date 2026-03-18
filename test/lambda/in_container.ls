@@ -41,8 +41,8 @@ let af = [1.5, 2.5, 3.5]
 6 in 1 to 5
 
 "=== List ==="
-"b" in ("a", "b", "c")
-"d" in ("a", "b", "c")
+"b" in ["a", "b", "c"]
+"d" in ["a", "b", "c"]
 
 "=== String substring ==="
 "ell" in "hello"

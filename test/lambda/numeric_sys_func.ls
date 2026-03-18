@@ -83,14 +83,14 @@ sum([-1, -2, -3])
 sum([-1, -2, -3]) == -6
 
 "sum() function tests - lists"
-sum((1, 2, 3, 4, 5))
-sum((1, 2, 3, 4, 5)) == 15
-sum((1.1, 2.2, 3.3))
-sum((1.1, 2.2, 3.3)) == 6.6
+sum([1, 2, 3, 4, 5])
+sum([1, 2, 3, 4, 5]) == 15
+sum([1.1, 2.2, 3.3])
+sum([1.1, 2.2, 3.3]) == 6.6
 // Empty list test would need special handling
 // sum(()) == 0
-sum((-1, -2, -3))
-sum((-1, -2, -3)) == -6
+sum([-1, -2, -3])
+sum([-1, -2, -3]) == -6
 
 "avg() function tests - arrays"
 avg([1, 2, 3, 4, 5])
@@ -103,14 +103,14 @@ avg([-2, 0, 2])
 avg([-2, 0, 2]) == 0.0
 
 "avg() function tests - lists"
-avg((1, 2, 3, 4, 5))
-avg((1, 2, 3, 4, 5)) == 3.0
-avg((2, 4, 6))
-avg((2, 4, 6)) == 4.0
-avg((1.5, 2.5, 3.5))
-avg((1.5, 2.5, 3.5)) == 2.5
-avg((-2, 0, 2))
-avg((-2, 0, 2)) == 0.0
+avg([1, 2, 3, 4, 5])
+avg([1, 2, 3, 4, 5]) == 3.0
+avg([2, 4, 6])
+avg([2, 4, 6]) == 4.0
+avg([1.5, 2.5, 3.5])
+avg([1.5, 2.5, 3.5]) == 2.5
+avg([-2, 0, 2])
+avg([-2, 0, 2]) == 0.0
 
 "Mixed integer and float operations - arrays"
 min(5, 3.14)
@@ -123,10 +123,10 @@ avg([1, 2.0, 3])
 avg([1, 2.0, 3]) == 2.0
 
 "Mixed integer and float operations - lists"
-sum((1, 2.5, 3))
-sum((1, 2.5, 3)) == 6.5
-avg((1, 2.0, 3))
-avg((1, 2.0, 3)) == 2.0
+sum([1, 2.5, 3])
+sum([1, 2.5, 3]) == 6.5
+avg([1, 2.0, 3])
+avg([1, 2.0, 3]) == 2.0
 
 "Edge cases - arrays"
 abs(-0)
@@ -155,7 +155,7 @@ sum([abs(-1), abs(-2), abs(-3)])
 sum([abs(-1), abs(-2), abs(-3)]) == 6
 avg([round(3.14), floor(3.99), ceil(2.01)])
 avg([round(3.14), floor(3.99), ceil(2.01)]) == 3.0
-sum((abs(-1), abs(-2), abs(-3)))
-sum((abs(-1), abs(-2), abs(-3))) == 6
-avg((round(3.14), floor(3.99), ceil(2.01)))
-avg((round(3.14), floor(3.99), ceil(2.01))) == 3.0
+sum([abs(-1), abs(-2), abs(-3)])
+sum([abs(-1), abs(-2), abs(-3)]) == 6
+avg([round(3.14), floor(3.99), ceil(2.01)])
+avg([round(3.14), floor(3.99), ceil(2.01)]) == 3.0

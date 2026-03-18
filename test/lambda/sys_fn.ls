@@ -5,7 +5,7 @@
 "len of string:"; len("hello")
 "len of utf string:"; len("你好")
 "len of range:"; len(1 to 5)
-"len of list:"; len((1, 2, 3))
+"len of list:"; len([1, 2, 3])
 "len of array:"; len([1, 2, 3])
 "len of map:"; len({'a': "a", 'b': "b"})
 "len of element:"; len(<elmt a:"b"; "text">)

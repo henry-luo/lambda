@@ -3444,15 +3444,22 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 // ============================================================================
 
 static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
-    // Check if any child is a for-expression or spread (needs spread path)
+    // Check if any child is a for-expression, spread, or let binding
     bool has_spreadable = false;
+    bool has_let = false;
     AstNode* scan = arr_node->item;
     while (scan) {
         if (scan->node_type == AST_NODE_FOR_EXPR || scan->node_type == AST_NODE_SPREAD) {
             has_spreadable = true;
         }
+        if (scan->node_type == AST_NODE_ASSIGN) {
+            has_let = true;
+        }
         scan = scan->next;
     }
+
+    // push scope to contain let bindings within the array
+    if (has_let) push_scope(mt);
 
     // Detect homogeneous typed arrays (ArrayInt, ArrayFloat) to match C transpiler behavior.
     // Vector functions (concat, take, drop, reverse, etc.) dispatch based on runtime type_id,
@@ -3462,7 +3469,8 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     bool is_float_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_FLOAT;
 
     // Specialized ArrayFloat path: array_float_new(count) + array_float_set(arr, i, val)
-    if (is_float_array && !has_spreadable && arr_node->item) {
+    // Skip specialized paths when array has let bindings (let nodes are transparent)
+    if (is_float_array && !has_spreadable && !has_let && arr_node->item) {
         int count = (int)arr_type->length;
         MIR_reg_t arr = emit_call_1(mt, "array_float_new", MIR_T_P,
             MIR_T_I64, MIR_new_int_op(mt->ctx, count));
@@ -3488,11 +3496,13 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             idx++;
             item = item->next;
         }
+        if (has_let) pop_scope(mt);
         return arr;  // ArrayFloat* is a container pointer
     }
 
     // Specialized ArrayInt path: array_int_new(count) + array_int_set(arr, i, val)
-    if (is_int_array && !has_spreadable && arr_node->item) {
+    // Skip specialized paths when array has let bindings (let nodes are transparent)
+    if (is_int_array && !has_spreadable && !has_let && arr_node->item) {
         int count = (int)arr_type->length;
         MIR_reg_t arr = emit_call_1(mt, "array_int_new", MIR_T_P,
             MIR_T_I64, MIR_new_int_op(mt->ctx, count));
@@ -3508,6 +3518,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             idx++;
             item = item->next;
         }
+        if (has_let) pop_scope(mt);
         return arr;  // ArrayInt* is a container pointer
     }
 
@@ -3517,12 +3528,20 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     // Handle empty arrays without array_end() which returns ITEM_NULL_SPREADABLE
     if (!arr_node->item) {
         // Array* pointer is already a valid Item (container pointer)
+        if (has_let) pop_scope(mt);
         return arr;
     }
 
     AstNode* item = arr_node->item;
     while (item) {
         MIR_reg_t val = transpile_expr(mt, item);
+
+        // let bindings are transparent - evaluate for side effect but don't push to array
+        if (item->node_type == AST_NODE_ASSIGN) {
+            item = item->next;
+            continue;
+        }
+
         TypeId val_tid = get_effective_type(mt, item);
 
         if (has_spreadable) {
@@ -3564,6 +3583,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         emit_label(mt, l_not_sn);
     }
 
+    if (has_let) pop_scope(mt);
     return arr_result;
 }
 
@@ -3602,7 +3622,7 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
                 }
                 declare = declare->next;
             }
-            MIR_reg_t result = transpile_box_item(mt, last_value);
+            MIR_reg_t result = transpile_expr(mt, last_value);
             pop_scope(mt);
             return result;
         }
@@ -7015,6 +7035,11 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
     // Evaluate expression then box
     MIR_reg_t val = transpile_expr(mt, node);
+
+    // If the expression already emitted a return (e.g. RETURN_STAM in a proc),
+    // the val is a dummy register and any further boxing would be dead code.
+    // Skip boxing to avoid type mismatches (e.g. trying to box an I64 dummy as FLOAT).
+    if (mt->block_returned) return val;
 
     // For BINARY/UNARY nodes: check if the result is already a boxed Item
     // from the runtime fallback path (not native handling).
