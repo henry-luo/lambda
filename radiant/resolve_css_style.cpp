@@ -7099,6 +7099,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-column-end: named line '%s'", n);
                 }
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                // "span N" comes as a list [keyword:span, number:N]
+                bool is_span = false;
+                int span_n = 1;
+                for (size_t i = 0; i < value->data.list.count; i++) {
+                    CssValue* v = value->data.list.values[i];
+                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* ki = css_enum_info(v->data.keyword);
+                        if (ki && ki->name && strcmp(ki->name, "span") == 0) is_span = true;
+                    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                               strcmp(v->data.custom_property.name, "span") == 0) {
+                        is_span = true;
+                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                        span_n = (int)v->data.number.value;
+                    }
+                }
+                if (is_span) {
+                    // CSS spec: grid-column-end: span N → end is "span N" (stored as -N with is_span=true)
+                    span->gi->grid_column_end = -span_n;
+                    span->gi->grid_column_end_is_span = true;
+                    span->gi->has_explicit_grid_column_end = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-column-end: span %d", span_n);
+                }
             }
             break;
         }
@@ -7162,6 +7186,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->gi->has_explicit_grid_row_end = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-row-end: named line '%s'", n);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                // "span N" comes as a list [keyword:span, number:N]
+                bool is_span = false;
+                int span_n = 1;
+                for (size_t i = 0; i < value->data.list.count; i++) {
+                    CssValue* v = value->data.list.values[i];
+                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* ki = css_enum_info(v->data.keyword);
+                        if (ki && ki->name && strcmp(ki->name, "span") == 0) is_span = true;
+                    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                               strcmp(v->data.custom_property.name, "span") == 0) {
+                        is_span = true;
+                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                        span_n = (int)v->data.number.value;
+                    }
+                }
+                if (is_span) {
+                    // CSS spec: grid-row-end: span N → end is "span N" (stored as -N with is_span=true)
+                    span->gi->grid_row_end = -span_n;
+                    span->gi->grid_row_end_is_span = true;
+                    span->gi->has_explicit_grid_row_end = true;
+                    span->gi->is_grid_auto_placed = false;
+                    log_debug("[CSS] grid-row-end: span %d", span_n);
                 }
             }
             break;
@@ -7757,6 +7805,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value,
                     is_form ? span->form->flex_basis : span->fi->flex_basis);
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                // CSS allows unitless 0 as a valid zero length (e.g. flex-basis: 0)
+                float basis_value = (float)value->data.number.value;
+                if (is_form) {
+                    span->form->flex_basis = basis_value;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_basis = basis_value;
+                    span->fi->flex_basis_is_percent = false;
+                }
+                log_debug("[CSS] flex-basis: %.2f (unitless number)", basis_value);
             }
             break;
         }

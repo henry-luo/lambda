@@ -698,10 +698,22 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                 padding_bottom = (int)flex_container->bound->padding.bottom;
             }
             int final_height = total_height + padding_top + padding_bottom;
-            flex_layout->main_axis_size = (float)total_height;  // Content height
-            flex_container->height = (float)final_height;  // Total height including padding
-            log_debug("AUTO-HEIGHT: column flex container height updated to %d (content=%d + padding=%d+%d)",
-                      final_height, total_height, padding_top, padding_bottom);
+            // CSS Flexbox: AUTO-HEIGHT must never shrink a container below the height
+            // already determined by a parent flex layout. This prevents stale measurement
+            // cache values (measured at unconstrained width) from reducing a container's
+            // height when the parent flex legitimately set it to a larger value
+            // (e.g. a nested column flex item in a column flex, where the inner item's
+            // content was measured at width=0 but will be stretched to the parent width).
+            float existing_height = flex_container->height;  // Set by parent flex or prior layout
+            if ((float)final_height < existing_height) {
+                log_debug("AUTO-HEIGHT: NOT shrinking container from %.0f to %d (keeping parent-set height)",
+                          existing_height, final_height);
+            } else {
+                flex_layout->main_axis_size = (float)total_height;  // Content height
+                flex_container->height = (float)final_height;  // Total height including padding
+                log_debug("AUTO-HEIGHT: column flex container height updated to %d (content=%d + padding=%d+%d)",
+                          final_height, total_height, padding_top, padding_bottom);
+            }
         }
     }
 
@@ -1285,7 +1297,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         bool has_explicit_height = (flex_item->blk && flex_item->blk->given_height >= 0);
         // Their dimensions should be constrained by the flex algorithm
         bool is_replaced = (flex_item->display.inner == RDT_DISPLAY_REPLACED);
-        if (!has_explicit_height && !is_replaced && flex_item->content_height > 0) {
+        // Per CSS Sizing Level 4 §7, aspect-ratio fixes box dimensions; content overflows but doesn't resize the box
+        bool has_aspect_ratio = (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f);
+        if (!has_explicit_height && !is_replaced && !has_aspect_ratio && flex_item->content_height > 0) {
             // Calculate total height including padding and border
             float padding_top = 0, padding_bottom = 0, border_top = 0, border_bottom = 0;
             if (flex_item->bound) {
@@ -1698,11 +1712,12 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
     }
 
-    // For column flex, we need to track height changes to shift subsequent items
-    // Create a map of original heights before content layout
+    // Track original heights before content layout.
+    // Used by both COLUMN ADJUST (for non-aspect-ratio items) and
+    // ROW FLEX ASPECT RESTORE (to protect aspect-ratio items in row flex).
     float original_heights[256] = {0};  // Max 256 flex items
     int item_index = 0;
-    if (flex && !is_main_axis_horizontal(flex)) {
+    {
         View* pre_item = flex_container->first_child;
         while (pre_item && item_index < 256) {
             if (pre_item->view_type == RDT_VIEW_BLOCK || pre_item->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -1763,7 +1778,13 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     // Check if this item's height changed from original
                     float original_height = original_heights[adj_index];
                     float new_height = flex_item->height;
-                    if (new_height > original_height + 0.5f) {
+                    // Per CSS Sizing Level 4 §7: aspect-ratio establishes fixed box dimensions;
+                    // content overflows but does NOT resize the box.
+                    if (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f && new_height > original_height + 0.5f) {
+                        log_debug("COLUMN ADJUST: item %s has aspect-ratio=%.3f, restoring height %.1f -> %.1f",
+                                  flex_item->node_name(), flex_item->fi->aspect_ratio, new_height, original_height);
+                        flex_item->height = original_height;
+                    } else if (new_height > original_height + 0.5f) {
                         float height_diff = new_height - original_height;
                         log_debug("COLUMN ADJUST: item %s height diff %.1f (%.1f -> %.1f)",
                                   flex_item->node_name(), height_diff, original_height, new_height);
@@ -1803,6 +1824,33 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                           flex_container->height, new_height, y_shift);
                 flex_container->height = new_height;
             }
+        }
+    }
+
+    // For row flex: restore aspect-ratio items' heights to their pre-content-layout values.
+    // Per CSS Sizing Level 4 §7.2: aspect-ratio fixes box dimensions; content overflows
+    // but does NOT resize the box. Without this, nested flex content layout inflates heights.
+    if (flex && is_main_axis_horizontal(flex)) {
+        View* restore_item = flex_container->first_child;
+        int restore_idx = 0;
+        while (restore_item && restore_idx < 256) {
+            if (restore_item->view_type == RDT_VIEW_BLOCK || restore_item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                restore_item->view_type == RDT_VIEW_LIST_ITEM) {
+                ViewElement* flex_item = (ViewElement*)restore_item;
+                if (flex_item->fi || (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+                    if (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f) {
+                        float original_height = original_heights[restore_idx];
+                        if (original_height > 0.5f && flex_item->height != original_height) {
+                            log_debug("ROW FLEX ASPECT RESTORE: item %s height %.1f -> %.1f (aspect-ratio=%.3f)",
+                                      flex_item->node_name(), flex_item->height, original_height,
+                                      flex_item->fi->aspect_ratio);
+                            flex_item->height = original_height;
+                        }
+                    }
+                    restore_idx++;
+                }
+            }
+            restore_item = restore_item->next();
         }
     }
 
