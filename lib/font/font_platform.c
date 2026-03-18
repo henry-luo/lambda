@@ -215,14 +215,49 @@ void scan_windows_registry_fonts(FontDatabase* db) {
 
         struct stat file_stat;
         if (stat(full_path, &file_stat) == 0) {
-            // add as placeholder entry for lazy parsing
-            FontEntry* entry = arena_alloc(db->arena, sizeof(FontEntry));
-            if (entry) {
-                memset(entry, 0, sizeof(FontEntry));
-                entry->file_path = arena_strdup(db->arena, full_path);
-                entry->is_placeholder = true;
-                arraylist_append(db->all_fonts, entry);
-                added++;
+            // check if this file path is already in the database (from directory scan)
+            bool already_exists = false;
+            for (int i = 0; i < db->all_fonts->length; i++) {
+                FontEntry* existing = (FontEntry*)db->all_fonts->data[i];
+                if (existing && existing->file_path &&
+                    strcasecmp(existing->file_path, full_path) == 0) {
+                    already_exists = true;
+                    break;
+                }
+            }
+            if (!already_exists) {
+                FontEntry* entry = arena_alloc(db->arena, sizeof(FontEntry));
+                if (entry) {
+                    memset(entry, 0, sizeof(FontEntry));
+                    entry->file_path = arena_strdup(db->arena, full_path);
+                    entry->is_placeholder = true;
+                    entry->weight = 400;
+                    entry->style = FONT_SLANT_NORMAL;
+                    entry->format = font_detect_format_ext(full_path);
+                    // extract family name from filename for lazy matching
+                    const char* base = strrchr(full_path, '\\');
+                    if (!base) base = strrchr(full_path, '/');
+                    if (base) base++; else base = full_path;
+                    char buf[256];
+                    strncpy(buf, base, sizeof(buf) - 1);
+                    buf[sizeof(buf) - 1] = '\0';
+                    char* dot = strrchr(buf, '.');
+                    if (dot) *dot = '\0';
+                    // strip common suffixes like -Regular, -Bold, etc.
+                    char* dash = strrchr(buf, '-');
+                    if (dash) {
+                        if (strcasecmp(dash, "-Regular") == 0 || strcasecmp(dash, "-Bold") == 0 ||
+                            strcasecmp(dash, "-Italic") == 0 || strcasecmp(dash, "-BoldItalic") == 0 ||
+                            strcasecmp(dash, "-Light") == 0 || strcasecmp(dash, "-Medium") == 0 ||
+                            strcasecmp(dash, "-Semibold") == 0 || strcasecmp(dash, "-Thin") == 0) {
+                            *dash = '\0';
+                        }
+                    }
+                    entry->family_name = arena_strdup(db->arena, buf);
+                    entry->file_size = (size_t)file_stat.st_size;
+                    arraylist_append(db->all_fonts, entry);
+                    added++;
+                }
             }
         }
     }
