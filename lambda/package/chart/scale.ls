@@ -51,6 +51,15 @@ pub fn ordinal_scale(categories, range_values) {
     { kind: "ordinal", domain: categories, 'range': range_values }
 }
 
+// temporal scale: linear over unix milliseconds with temporal metadata
+pub fn temporal_scale(values, rlo, rhi) {
+    let unix_vals = values | float(datetime(~).unix);
+    let lo = float(min(unix_vals));
+    let hi = float(max(unix_vals));
+    let nice = util.nice_domain(lo, hi);
+    { kind: "temporal", domain: [nice[0], nice[1]], 'range': [float(rlo), float(rhi)] }
+}
+
 // ============================================================
 // Dispatch: scale_apply
 // ============================================================
@@ -102,6 +111,11 @@ pub fn scale_apply(sc, value) {
     } else if sc.kind == "sequential-color" {
         let t = util.inv_lerp(float(sc.domain[0]), float(sc.domain[1]), float(value));
         color.sequential_color(sc.scheme, t)
+    } else if sc.kind == "temporal" {
+        let unix_v = if (value is float or value is int) float(value)
+            else float(datetime(value).unix);
+        let t = util.inv_lerp(sc.domain[0], sc.domain[1], unix_v);
+        util.lerp(sc.range[0], sc.range[1], t)
     } else {
         null
     }
@@ -130,6 +144,8 @@ pub fn scale_ticks(sc, count) {
         sc.domain
     } else if sc.kind == "sequential-color" {
         util.nice_ticks(sc.domain[0], sc.domain[1], count)
+    } else if sc.kind == "temporal" {
+        util.nice_ticks(sc.domain[0], sc.domain[1], count)
     } else {
         []
     }
@@ -141,6 +157,9 @@ pub fn scale_ticks(sc, count) {
 
 pub fn scale_invert(sc, pixel) {
     if sc.kind == "linear" {
+        let t = util.inv_lerp(sc.range[0], sc.range[1], float(pixel));
+        util.lerp(sc.domain[0], sc.domain[1], t)
+    } else if sc.kind == "temporal" {
         let t = util.inv_lerp(sc.range[0], sc.range[1], float(pixel));
         util.lerp(sc.domain[0], sc.domain[1], t)
     } else {
@@ -163,8 +182,7 @@ pub fn infer_scale(channel, data, rlo, rhi) {
             else false;
         linear_scale_nice(values, rlo, rhi, include_zero)
     } else if data_type == "temporal" {
-        let unix_vals = values | float(~);
-        linear_scale_nice(unix_vals, rlo, rhi, false)
+        temporal_scale(values, rlo, rhi)
     } else {
         let cats = util.unique_vals(values);
         band_scale(cats, rlo, rhi, 4.0)

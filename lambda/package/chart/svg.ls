@@ -149,3 +149,29 @@ pub fn translate(x, y) string => "translate(" ++ util.fmt_num(x) ++ ", " ++ util
 pub fn rotate(angle, cx, cy) string {
     "rotate(" ++ util.fmt_num(angle) ++ ", " ++ util.fmt_num(cx) ++ ", " ++ util.fmt_num(cy) ++ ")"
 }
+
+// ============================================================
+// SVG defs, gradients, and clip paths
+// ============================================================
+
+pub fn defs(children) {
+    <defs;
+        for (child in children) child
+    >
+}
+
+pub fn linear_gradient(id: string, x1, y1, x2, y2, stops) {
+    let stop_els = for (s in stops) (
+        let op = if (s.opacity) s.opacity else 1.0,
+        <stop offset: s.offset, 'stop-color': s.color, 'stop-opacity': op>
+    );
+    <linearGradient id: id, x1: x1, y1: y1, x2: x2, y2: y2;
+        for (el in stop_els) el
+    >
+}
+
+pub fn clip_path_el(id: string, children) {
+    <clipPath id: id;
+        for (child in children) child
+    >
+}

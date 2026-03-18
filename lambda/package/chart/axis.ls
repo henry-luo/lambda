@@ -28,8 +28,30 @@ pub default_axis_config = {
 // ============================================================
 
 fn merge_config(config) {
-    if config != null { {*:config, *:default_axis_config} }
+    if config != null { {*:default_axis_config, *:config} }
     else { default_axis_config }
+}
+
+// ============================================================
+// Temporal tick label formatting
+// ============================================================
+
+fn temporal_auto_format(lo_ms, hi_ms) {
+    let span = hi_ms - lo_ms;
+    let ms_day = 86400000.0;
+    let ms_month = ms_day * 30.0;
+    let ms_year = ms_day * 365.0;
+    if (span > ms_year * 2.0) "YYYY"
+    else if (span > ms_month * 2.0) "MMM YYYY"
+    else if (span > ms_day * 2.0) "MMM DD"
+    else if (span > 3600000.0 * 2.0) "hh:mm"
+    else "hh:mm:ss"
+}
+
+fn format_tick_label(sc, tv) {
+    if (sc.kind == "temporal")
+        datetime(int64(tv)).format(temporal_auto_format(sc.domain[0], sc.domain[1]))
+    else string(tv)
 }
 
 // ============================================================
@@ -56,7 +78,7 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
                       'text-anchor': "middle",
                       'font-size': cfg.label_font_size,
                       fill: cfg.label_color;
-                    string(tv)
+                    format_tick_label(sc, tv)
                 >
             >
         else null)
@@ -124,7 +146,7 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
                       'text-anchor': "end",
                       'font-size': cfg.label_font_size,
                       fill: cfg.label_color;
-                    string(tv)
+                    format_tick_label(sc, tv)
                 >
             >
         else null)
@@ -176,7 +198,7 @@ pub fn y_axis_grid(sc, pw, ph, config) {
 pub fn estimate_y_axis_width(sc, config) {
     let cfg = merge_config(config);
     let ticks = scale.scale_ticks(sc, cfg.tick_count);
-    let label_lens = for (tv in ticks) len(string(tv));
+    let label_lens = for (tv in ticks) len(format_tick_label(sc, tv));
     let max_label_len = if (len(label_lens) > 0) max(label_lens) else 3;
     float(max_label_len) * 7.0 + float(cfg.tick_size) + 10.0
 }

@@ -1347,23 +1347,25 @@ Complex marks composed from primitives.
 
 **Deliverable:** Statistical charts: box plots, histograms, heatmaps, error bars, candlesticks.
 
-### Phase C — Temporal & Theming
+### Phase C — Temporal & Theming  ✅ COMPLETE
 
 Time-series support and visual polish.
 
-| Task | Module | Dependencies | Complexity |
-|------|--------|-------------|------------|
-| Temporal scale | `scale.ls` | datetime support | High |
-| Time axis formatting | `axis.ls` | time scale | Medium |
-| Config / theming | `config.ls`, all renderers | — | Medium |
-| SVG gradients | `svg.ls`, `legend.ls` | — | Low |
-| SVG clip paths | `svg.ls` | — | Low |
-| Tooltip generation | `svg.ls`, `mark.ls` | — | Low |
-| Annotation layer | `annotation.ls` | — | Medium |
-| Conditional encoding | `chart.ls` | — | Medium |
-| Detail channel | `parse.ls`, `mark.ls` | — | Low |
+| Task | Module | Dependencies | Status |
+|------|--------|-------------|--------|
+| Temporal scale | `scale.ls` | datetime support | ✅ Done |
+| Time axis formatting | `axis.ls` | time scale | ✅ Done |
+| Config / theming | `config.ls`, all renderers | — | ✅ Done |
+| SVG gradients | `svg.ls`, `legend.ls` | — | ✅ Done |
+| SVG clip paths | `svg.ls` | — | ✅ Done |
+| Tooltip generation | `svg.ls`, `mark.ls` | — | ✅ Done |
+| Annotation layer | `annotation.ls` | — | ✅ Done |
+| Conditional encoding | `chart.ls` | — | ✅ Done |
+| Detail channel | `parse.ls`, `mark.ls` | — | ✅ Done |
 
 **Deliverable:** Time-series charts, dark/light themes, annotated charts, tooltips.
+
+**Tests:** `test_temporal_axis.ls`, `test_theme_dark.ls`, `test_tooltip.ls`, `test_conditional_color.ls`, `test_annotation.ls` — all passing (669/669 total).
 
 ### Phase D — Advanced Transforms
 

@@ -27,9 +27,15 @@ pub fn parse_chart(chart_el) {
     let config_el = find_child(chart_el, 'config', children_count);
     let layer_el = find_child(chart_el, 'layer', children_count);
     let facet_el = find_child(chart_el, 'facet', children_count);
+    let annotation_el = find_child(chart_el, 'annotation', children_count);
 
-    // parse data
-    let data = if (data_el) data_el.values else null;
+    // parse data: support both {values: [...]} and inline <row> children
+    let data = if (data_el and data_el.values) data_el.values
+        else if (data_el and len(data_el) > 0)
+            (for (i in 0 to (len(data_el) - 1),
+                  let child = data_el[i]
+                  where child != null) child)
+        else null;
 
     // parse mark
     let mark = if (mark_el) parse_mark(mark_el) else null;
@@ -51,7 +57,8 @@ pub fn parse_chart(chart_el) {
         transform: transform_el,
         config: config_el,
         layer: layer,
-        facet: facet_el
+        facet: facet_el,
+        annotation: annotation_el
     }
 }
 
@@ -71,8 +78,9 @@ fn find_child(parent_el, tag_name, count) {
 // ============================================================
 
 fn parse_mark(mark_el) {
+    let mk = if (mark_el.kind) mark_el.kind else mark_el['type'];
     {
-        kind: mark_el.kind,
+        kind: mk,
         color: mark_el.color,
         opacity: mark_el.opacity,
         stroke: mark_el.stroke,
@@ -144,7 +152,8 @@ fn parse_channel(ch_el) {
         zero: ch_el.zero,
         scale: ch_el.scale,
         axis: ch_el.axis,
-        legend: ch_el.legend
+        legend: ch_el.legend,
+        condition: ch_el.condition
     }
 }
 

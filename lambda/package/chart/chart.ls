@@ -12,6 +12,8 @@ import svg: .svg
 import color: .color
 import util: .util
 import stack: .stack
+import cfg: .config
+import ann: .annotation
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -30,9 +32,10 @@ pub fn render(chart_el) {
 
 // render from a pre-parsed spec map (no element tree needed)
 pub fn render_spec(spec) {
-    if (spec.layer) render_layered(spec)
-    else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
-    else render_single(spec)
+    let s = if (spec is element) parse.parse_chart(spec) else spec;
+    if (s.layer) render_layered(s)
+    else if (s.mark and s.mark.kind == "arc") render_arc(s)
+    else render_single(s)
 }
 
 // ============================================================
@@ -40,6 +43,11 @@ pub fn render_spec(spec) {
 // ============================================================
 
 fn render_single(spec) {
+    // resolve theme
+    let theme = cfg.resolve_theme(spec.config);
+    let axis_cfg = cfg.axis_config(theme);
+    let legend_cfg = cfg.legend_config(theme);
+
     // resolve data
     let raw_data = if (spec.data) spec.data else [];
 
@@ -65,31 +73,56 @@ fn render_single(spec) {
     let text_ch = parse.get_channel(enc, "text");
     let x_offset_ch = parse.get_channel(enc, "x_offset");
     let y2_ch = parse.get_channel(enc, "y2");
+    let detail_ch = parse.get_channel(enc, "detail");
+    let tooltip_ch = parse.get_channel(enc, "tooltip");
 
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
-    let color_field = if (color_ch) color_ch.field else null;
+    let color_field0 = if (color_ch) color_ch.field else null;
     let x_offset_field = if (x_offset_ch) x_offset_ch.field else null;
     let y2_field = if (y2_ch) y2_ch.field else null;
+    let detail_field = if (detail_ch) detail_ch.field else null;
+    let tooltip_field = if (tooltip_ch) tooltip_ch.field else null;
 
     // determine if categorical/quantitative for position scales
     let x_type = if (x_ch) x_ch.dtype else "nominal";
     let y_type = if (y_ch) y_ch.dtype else "quantitative";
 
     // detect and apply stacking
-    let stack_mode = detect_stack_mode(mark_type, y_ch, color_field, x_offset_field);
-    let data = if (stack_mode and x_field and y_field and color_field)
-        stack.apply_stack(data_transformed, y_field, color_field, x_field, stack_mode)
+    let stack_mode = detect_stack_mode(mark_type, y_ch, color_field0, x_offset_field);
+    let data_stacked = if (stack_mode and x_field and y_field and color_field0)
+        stack.apply_stack(data_transformed, y_field, color_field0, x_field, stack_mode)
     else data_transformed;
+
+    // conditional color encoding: add _cond_color field
+    let has_condition = color_ch and color_ch.condition and not color_ch.field;
+    let data = if (has_condition)
+        (let cond = color_ch.condition,
+         let default_val = if (color_ch.value) color_ch.value else color.default_color,
+         let cond_field = cond.field,
+         for (d in data_stacked) (
+             let fv = d[cond_field],
+             let cv = if (cond.equal != null) (if (fv == cond.equal) cond.value else default_val)
+                 else if (cond.gt != null) (if (float(fv) > float(cond.gt)) cond.value else default_val)
+                 else if (cond.lt != null) (if (float(fv) < float(cond.lt)) cond.value else default_val)
+                 else default_val,
+             let pairs = for (k, val in d) for (x in [string(k), val]) x,
+             map([*pairs, "_cond_color", cv])
+         ))
+    else data_stacked;
+
+    let color_field = if (has_condition) "_cond_color" else color_field0;
 
     // x_offset categories for grouped bars
     let x_offset_cats = if (x_offset_field)
         util.unique_vals(data | ~[x_offset_field])
     else null;
 
-    // build color scale
-    let color_scale = if (color_ch) scale.infer_color_scale(color_ch, data) else null;
-    let color_categories = if (color_ch and (color_ch.dtype == "nominal" or color_ch.dtype == "ordinal"))
+    // build color scale (skip for conditional colors)
+    let color_scale = if (has_condition) null
+        else if (color_ch and color_ch.field) scale.infer_color_scale(color_ch, data)
+        else null;
+    let color_categories = if (not has_condition and color_ch and (color_ch.dtype == "nominal" or color_ch.dtype == "ordinal"))
         util.unique_vals(data | ~[color_field])
     else null;
     let has_legend = color_categories != null and len(color_categories) > 0;
@@ -133,9 +166,19 @@ fn render_single(spec) {
         text_field: if (text_ch) text_ch.field else null,
         is_stacked: stack_mode != null,
         x_offset_field: x_offset_field,
-        x_offset_cats: x_offset_cats
+        x_offset_cats: x_offset_cats,
+        tooltip_field: tooltip_field,
+        detail_field: detail_field
     };
     let marks_el = render_mark(mark_type, data, mark_ctx, mark_spec);
+
+    // render annotations
+    let annotation_el = if (spec.annotation)
+        ann.render_annotations(spec.annotation, x_scale, y_scale, lay.plot_w, lay.plot_h, theme)
+    else null;
+    let marks_with_ann = if (annotation_el)
+        svg.group_class("plot-content", [marks_el, annotation_el])
+    else marks_el;
 
     // render axes
     let x_title = if (x_ch and x_ch.title) x_ch.title
@@ -143,25 +186,25 @@ fn render_single(spec) {
     let y_title = if (y_ch and y_ch.title) y_ch.title
         else if (y_field) y_field else null;
 
-    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, null, x_title) else null;
-    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, null, y_title) else null;
+    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, axis_cfg, x_title) else null;
+    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, axis_cfg, y_title) else null;
 
     // render grid if config requests it
     let grid_config = spec.config;
     let show_grid = if (grid_config and grid_config.axis_grid) grid_config.axis_grid else false;
     let y_grid_el = if (show_grid and y_scale)
-        axis.y_axis_grid(y_scale, lay.plot_w, lay.plot_h, null)
+        axis.y_axis_grid(y_scale, lay.plot_w, lay.plot_h, axis_cfg)
     else null;
 
     // render legend
     let legend_el = if (has_legend)
         (let legend_title = if (color_ch and color_ch.title) color_ch.title
             else if (color_field) color_field else null,
-         leg.color_legend(color_categories, color_scale, legend_title, null))
+         leg.color_legend(color_categories, color_scale, legend_title, legend_cfg))
     else null;
 
     // assemble SVG
-    assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, y_grid_el, legend_el)
+    assemble_svg(spec, lay, marks_with_ann, x_axis_el, y_axis_el, y_grid_el, legend_el, theme)
 }
 
 // ============================================================
@@ -169,6 +212,9 @@ fn render_single(spec) {
 // ============================================================
 
 fn render_layered(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let axis_cfg = cfg.axis_config(theme);
+    let legend_cfg = cfg.legend_config(theme);
     let layers = spec.layer;
     let data = if (spec.data) spec.data else [];
 
@@ -234,19 +280,19 @@ fn render_layered(spec) {
     let y_title = if (y_ch and y_ch.title) y_ch.title
         else if (y_field) y_field else null;
 
-    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, null, x_title) else null;
-    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, null, y_title) else null;
+    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, axis_cfg, x_title) else null;
+    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, axis_cfg, y_title) else null;
 
     // legend
     let legend_el = if (has_legend)
         (let legend_title = if (color_ch and color_ch.title) color_ch.title
             else if (color_field) color_field else null,
-         leg.color_legend(color_categories, color_scale, legend_title, null))
+         leg.color_legend(color_categories, color_scale, legend_title, legend_cfg))
     else null;
 
     // assemble with all layer marks
     let all_marks = svg.group_class("marks layers", layer_marks);
-    assemble_svg(spec, lay, all_marks, x_axis_el, y_axis_el, null, legend_el)
+    assemble_svg(spec, lay, all_marks, x_axis_el, y_axis_el, null, legend_el, theme)
 }
 
 // ============================================================
@@ -254,6 +300,8 @@ fn render_layered(spec) {
 // ============================================================
 
 fn render_arc(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let legend_cfg = cfg.legend_config(theme);
     let raw_data = if (spec.data) spec.data else [];
     let data = transform.apply_transforms(raw_data, spec.transform);
 
@@ -289,13 +337,13 @@ fn render_arc(spec) {
     let legend_el = if (has_legend)
         (let legend_title = if (color_ch and color_ch.title) color_ch.title
             else if (color_field) color_field else null,
-         leg.color_legend(color_categories, color_scale, legend_title, null))
+         leg.color_legend(color_categories, color_scale, legend_title, legend_cfg))
     else null;
 
     // assemble
     let width = int(lay.total_w);
     let height = int(lay.total_h);
-    let bg = <rect width: width, height: height, fill: "white">;
+    let bg = <rect width: width, height: height, fill: theme.background>;
 
     let children0 = [bg, arcs_el];
 
@@ -303,7 +351,7 @@ fn render_arc(spec) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': 16, 'font-weight': "bold", fill: "#333";
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
              spec.title
          >]
     else children0;
@@ -337,8 +385,7 @@ fn build_position_scale(channel, data, rlo, rhi, mark_type: string, is_x: bool) 
                     else false
                 scale.linear_scale_nice(values, rlo, rhi, include_zero)
             } else if data_type == "temporal" {
-                let num_vals = values | float(~)
-                scale.linear_scale_nice(num_vals, rlo, rhi, false)
+                scale.temporal_scale(values, rlo, rhi)
             } else {
                 // nominal or ordinal
                 let cats = util.unique_vals(values)
@@ -469,12 +516,12 @@ fn render_mark(mark_type, data, ctx, mark_spec) {
 // Assemble final SVG from components
 // ============================================================
 
-fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el) {
+fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, theme) {
     let width = int(lay.total_w);
     let height = int(lay.total_h);
 
     // background
-    let bg = <rect width: width, height: height, fill: "white">;
+    let bg = <rect width: width, height: height, fill: theme.background>;
 
     // plot group contents
     let plot_children0 = [marks_el];
@@ -491,7 +538,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': 16, 'font-weight': "bold", fill: "#333";
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
              spec.title
          >]
     else children0;
