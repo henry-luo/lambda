@@ -130,6 +130,7 @@ typedef struct GridContainerLayout : GridProp {
     int content_height;          // Height excluding padding/border
     bool has_explicit_height;    // True if container has CSS height set (not auto)
     bool is_shrink_to_fit_width; // True if container should shrink-to-fit (abs pos, no explicit width)
+    float row_intrinsic_height;  // First-pass row height before pct re-resolution (-1 if not applicable)
 
     // Layout context for intrinsic sizing (set during init_grid_container)
     struct LayoutContext* lycon;

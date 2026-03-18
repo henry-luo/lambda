@@ -620,11 +620,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
         block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
-    }
-    else {
+    } else {
         // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
         block->width = content_width;  block->height = content_height;
     }
+
     log_debug("calculated x,y,wd,hg, content_width, content_height: (%f, %f) size (%f, %f), content (%f, %f) within containing block (%f, %f) size (%f, %f)",
         block->x, block->y, block->width, block->height, lycon->block.content_width, lycon->block.content_height, cb_x, cb_y, cb_width, cb_height);
 }

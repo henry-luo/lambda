@@ -202,6 +202,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
     grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
+    grid_layout->row_intrinsic_height = -1.0f;
     log_debug("GRID: is_shrink_to_fit_width=%d", is_shrink_to_fit_width);
 
     // Set container dimensions
@@ -227,6 +228,24 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (container->bound) {
         grid_layout->content_width -= (container->bound->padding.left + container->bound->padding.right);
         grid_layout->content_height -= (container->bound->padding.top + container->bound->padding.bottom);
+    }
+
+    // Resolve percentage gaps against the container dimensions.
+    // For definite containers, resolve immediately. For indefinite (shrink-to-fit),
+    // the enhanced adapter handles the two-pass resolution.
+    if (grid_layout->column_gap_is_percent) {
+        if (!is_shrink_to_fit_width) {
+            grid_layout->column_gap = grid_layout->content_width * (grid_layout->column_gap / 100.0f);
+            grid_layout->column_gap_is_percent = false;
+        }
+        // For shrink-to-fit: keep percentage value in column_gap, column_gap_is_percent=true
+        // The adapter will use gap=0 for first pass, then resolve against intrinsic width
+    }
+    if (grid_layout->row_gap_is_percent) {
+        if (grid_layout->has_explicit_height) {
+            grid_layout->row_gap = grid_layout->content_height * (grid_layout->row_gap / 100.0f);
+            grid_layout->row_gap_is_percent = false;
+        }
     }
 
     log_debug("GRID CONTENT - content: %dx%d, container: %dx%d\n",
@@ -354,8 +373,30 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     );
 
     // Phase 5: Update grid size after placement (may have grown due to auto-placement)
+    // NOTE: place_items_with_occupancy already sets computed_column_count and computed_row_count
+    // from the occupancy matrix which correctly accounts for negative implicit tracks.
+    // We must NOT let determine_grid_size() shrink these values — it only sees item
+    // end positions and misses the full grid extent when negative implicit tracks exist.
+    // Instead, just ensure the counts are at least as large as what items require.
     log_debug("DEBUG: Phase 5 - Updating grid size after placement");
-    determine_grid_size(grid_layout);
+    {
+        int prev_col_count = grid_layout->computed_column_count;
+        int prev_row_count = grid_layout->computed_row_count;
+        int prev_implicit_cols = grid_layout->implicit_column_count;
+        int prev_implicit_rows = grid_layout->implicit_row_count;
+
+        determine_grid_size(grid_layout);
+
+        // Restore if placement knew about more tracks (e.g. negative implicit)
+        if (grid_layout->computed_column_count < prev_col_count) {
+            grid_layout->computed_column_count = prev_col_count;
+            grid_layout->implicit_column_count = prev_implicit_cols;
+        }
+        if (grid_layout->computed_row_count < prev_row_count) {
+            grid_layout->computed_row_count = prev_row_count;
+            grid_layout->implicit_row_count = prev_implicit_rows;
+        }
+    }
 
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     log_debug("DEBUG: Phase 6 - Resolving track sizes");
@@ -375,10 +416,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
 
-        log_debug("GRID shrink-to-fit: updating container width from %d to %.1f",
-                  container->width, container_width);
-        container->width = (int)container_width;
-        grid_layout->container_width = container->width;
+        container->width = container_width;
+        grid_layout->container_width = (int)container->width;
     }
 
     // Phase 6: Position grid items
@@ -614,40 +653,55 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
                 bool col_start_is_span = item->gi->grid_column_start_is_span;
                 bool col_end_is_span = item->gi->grid_column_end_is_span;
 
+                // Resolve negative line numbers using explicit track count
+                // CSS spec: -1 = last explicit line, -(N+1) = first explicit line
+                int explicit_cols = grid_layout->explicit_column_count;
+                if (explicit_cols == 0) explicit_cols = 1;
+
+                // Resolve negative start line (not span)
+                int resolved_col_start = col_start;
+                if (col_start < 0 && !col_start_is_span) {
+                    resolved_col_start = explicit_cols + col_start + 2;
+                    if (resolved_col_start < 1) resolved_col_start = 1;
+                    log_debug("Resolved negative col_start: %d -> %d (explicit_cols=%d)",
+                              col_start, resolved_col_start, explicit_cols);
+                }
+
+                // Resolve negative end line (not span)
+                int resolved_col_end = col_end;
+                if (col_end < 0 && !col_end_is_span) {
+                    resolved_col_end = explicit_cols + col_end + 2;
+                    if (resolved_col_end < 1) resolved_col_end = 1;
+                    log_debug("Resolved negative col_end: %d -> %d (explicit_cols=%d)",
+                              col_end, resolved_col_end, explicit_cols);
+                }
+
                 if (col_start == 0 && col_end < 0 && col_end_is_span) {
                     // "span N" only - needs auto-placement for start
-                    // Will be handled in auto-place phase
                     item->gi->computed_grid_column_start = 0;
                     item->gi->computed_grid_column_end = col_end;  // Keep span for auto-place
-                } else if (col_start > 0 && col_end < 0 && col_end_is_span) {
-                    // "N / span M" - explicit start, span end
+                } else if (resolved_col_start > 0 && col_end < 0 && col_end_is_span) {
+                    // "N / span M" or "-N / span M"
                     int span = -col_end;
-                    item->gi->computed_grid_column_start = col_start;
-                    item->gi->computed_grid_column_end = col_start + span;
-                } else if (col_start > 0 && col_end < 0 && !col_end_is_span) {
-                    // "N / -M" - explicit start, negative line number end (e.g., 1 / -1)
-                    // Negative line numbers count from the end: -1 = last line
-                    int track_count = grid_layout->computed_column_count;
-                    if (track_count == 0) track_count = grid_layout->explicit_column_count;
-                    if (track_count == 0) track_count = 1;  // At least 1 column
-                    int resolved_end = track_count + col_end + 2;  // +2 because lines are 1-indexed
-                    item->gi->computed_grid_column_start = col_start;
-                    item->gi->computed_grid_column_end = resolved_end;
-                    log_debug("Resolved negative line: col_end=%d -> resolved_end=%d (track_count=%d)",
-                              col_end, resolved_end, track_count);
+                    item->gi->computed_grid_column_start = resolved_col_start;
+                    item->gi->computed_grid_column_end = resolved_col_start + span;
+                } else if (resolved_col_start > 0 && col_end < 0 && !col_end_is_span) {
+                    // "N / -M" or "-N / -M"
+                    item->gi->computed_grid_column_start = resolved_col_start;
+                    item->gi->computed_grid_column_end = resolved_col_end;
                 } else if (col_start < 0 && col_end > 0 && col_start_is_span) {
                     // "span N / M" - span start, explicit end
                     int span = -col_start;
                     item->gi->computed_grid_column_start = col_end - span;
                     item->gi->computed_grid_column_end = col_end;
-                } else if (col_start > 0 && col_end == 0) {
-                    // "N" only - single line, defaults to span 1
-                    item->gi->computed_grid_column_start = col_start;
-                    item->gi->computed_grid_column_end = col_start + 1;
+                } else if (resolved_col_start > 0 && col_end == 0) {
+                    // "N" or "-N" only - single line, defaults to span 1
+                    item->gi->computed_grid_column_start = resolved_col_start;
+                    item->gi->computed_grid_column_end = resolved_col_start + 1;
                 } else {
-                    // Normal explicit positions (both positive or both need resolution)
-                    item->gi->computed_grid_column_start = col_start;
-                    item->gi->computed_grid_column_end = col_end;
+                    // Normal explicit positions (both positive)
+                    item->gi->computed_grid_column_start = resolved_col_start;
+                    item->gi->computed_grid_column_end = resolved_col_end;
                 }
 
                 // Row placement
@@ -656,38 +710,52 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
                 bool row_start_is_span = item->gi->grid_row_start_is_span;
                 bool row_end_is_span = item->gi->grid_row_end_is_span;
 
+                // Resolve negative line numbers using explicit track count
+                int explicit_rows = grid_layout->explicit_row_count;
+                if (explicit_rows == 0) explicit_rows = 1;
+
+                int resolved_row_start = row_start;
+                if (row_start < 0 && !row_start_is_span) {
+                    resolved_row_start = explicit_rows + row_start + 2;
+                    if (resolved_row_start < 1) resolved_row_start = 1;
+                    log_debug("Resolved negative row_start: %d -> %d (explicit_rows=%d)",
+                              row_start, resolved_row_start, explicit_rows);
+                }
+
+                int resolved_row_end = row_end;
+                if (row_end < 0 && !row_end_is_span) {
+                    resolved_row_end = explicit_rows + row_end + 2;
+                    if (resolved_row_end < 1) resolved_row_end = 1;
+                    log_debug("Resolved negative row_end: %d -> %d (explicit_rows=%d)",
+                              row_end, resolved_row_end, explicit_rows);
+                }
+
                 if (row_start == 0 && row_end < 0 && row_end_is_span) {
                     // "span N" only - needs auto-placement for start
                     item->gi->computed_grid_row_start = 0;
                     item->gi->computed_grid_row_end = row_end;  // Keep span for auto-place
-                } else if (row_start > 0 && row_end < 0 && row_end_is_span) {
-                    // "N / span M" - explicit start, span end
+                } else if (resolved_row_start > 0 && row_end < 0 && row_end_is_span) {
+                    // "N / span M" or "-N / span M"
                     int span = -row_end;
-                    item->gi->computed_grid_row_start = row_start;
-                    item->gi->computed_grid_row_end = row_start + span;
-                } else if (row_start > 0 && row_end < 0 && !row_end_is_span) {
-                    // "N / -M" - explicit start, negative line number end (e.g., 1 / -1)
-                    int track_count = grid_layout->computed_row_count;
-                    if (track_count == 0) track_count = grid_layout->explicit_row_count;
-                    if (track_count == 0) track_count = 1;  // At least 1 row
-                    int resolved_end = track_count + row_end + 2;
-                    item->gi->computed_grid_row_start = row_start;
-                    item->gi->computed_grid_row_end = resolved_end;
-                    log_debug("Resolved negative line: row_end=%d -> resolved_end=%d (track_count=%d)",
-                              row_end, resolved_end, track_count);
+                    item->gi->computed_grid_row_start = resolved_row_start;
+                    item->gi->computed_grid_row_end = resolved_row_start + span;
+                } else if (resolved_row_start > 0 && row_end < 0 && !row_end_is_span) {
+                    // "N / -M" or "-N / -M"
+                    item->gi->computed_grid_row_start = resolved_row_start;
+                    item->gi->computed_grid_row_end = resolved_row_end;
                 } else if (row_start < 0 && row_end > 0 && row_start_is_span) {
                     // "span N / M" - span start, explicit end
                     int span = -row_start;
                     item->gi->computed_grid_row_start = row_end - span;
                     item->gi->computed_grid_row_end = row_end;
-                } else if (row_start > 0 && row_end == 0) {
-                    // "N" only - single line, defaults to span 1
-                    item->gi->computed_grid_row_start = row_start;
-                    item->gi->computed_grid_row_end = row_start + 1;
+                } else if (resolved_row_start > 0 && row_end == 0) {
+                    // "N" or "-N" only - single line, defaults to span 1
+                    item->gi->computed_grid_row_start = resolved_row_start;
+                    item->gi->computed_grid_row_end = resolved_row_start + 1;
                 } else {
                     // Normal explicit positions
-                    item->gi->computed_grid_row_start = row_start;
-                    item->gi->computed_grid_row_end = row_end;
+                    item->gi->computed_grid_row_start = resolved_row_start;
+                    item->gi->computed_grid_row_end = resolved_row_end;
                 }
             }
 
