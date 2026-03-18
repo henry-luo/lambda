@@ -29,7 +29,13 @@ extern "C" {
 }
 
 // Thread-local context (defined in runner.cpp)
+// On Windows, __thread variables can't be auto-imported from DLLs,
+// so we define a local copy for the test executable.
+#ifdef _WIN32
+__thread EvalContext* context;
+#else
 extern __thread EvalContext* context;
+#endif
 
 // Test fixture for Path tests
 class PathTest : public ::testing::Test {

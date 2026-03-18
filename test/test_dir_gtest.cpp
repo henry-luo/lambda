@@ -23,7 +23,11 @@ extern "C" {
 }
 
 // Thread-local context (defined in runner.cpp)
+#ifdef _WIN32
+__thread EvalContext* context;
+#else
 extern __thread EvalContext* context;
+#endif
 
 // Test fixture for directory tests
 class InputDirTest : public ::testing::Test {

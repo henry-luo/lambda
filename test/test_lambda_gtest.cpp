@@ -186,9 +186,17 @@ int main(int argc, char **argv) {
     // In filtered mode, keep logging enabled for debugging.
     std::string gtest_filter = GTEST_FLAG_GET(filter);
     if (gtest_filter == "*") {
+#ifdef _WIN32
+        _putenv_s("LAMBDA_NO_LOG", "1");
+#else
         setenv("LAMBDA_NO_LOG", "1", 1);
+#endif
     } else {
+#ifdef _WIN32
+        _putenv_s("LAMBDA_NO_LOG", "");
+#else
         unsetenv("LAMBDA_NO_LOG");
+#endif
     }
 
     return RUN_ALL_TESTS();

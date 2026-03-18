@@ -500,6 +500,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     new_script->reference = strdup(lookup_path);
     // extract directory from script path for script-relative imports
     const char* last_slash = strrchr(lookup_path, '/');
+#ifdef _WIN32
+    const char* last_backslash = strrchr(lookup_path, '\\');
+    if (last_backslash && (!last_slash || last_backslash > last_slash))
+        last_slash = last_backslash;
+#endif
     if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
         char* dir = (char*)malloc(dir_len + 1);
