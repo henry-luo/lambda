@@ -360,8 +360,170 @@ pub fn tick_mark(data, ctx, mark_config) {
 }
 
 // ============================================================
-// Helper: find index of value in category array
+// Box plot (composite mark: rect box + whisker lines + median line + outlier circles)
 // ============================================================
+
+pub fn boxplot_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let color_scale = ctx.color_scale;
+    let color_field = ctx.color_field;
+    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
+    let extent = if (mark_config and mark_config.extent) float(mark_config.extent) else 1.5;
+    let box_w = if (x_scale.bandwidth) x_scale.bandwidth * 0.6 else 20.0;
+
+    // group data by x field
+    let groups = util.unique_vals(data | ~[x_field]);
+    let elements = (for (g in groups) (
+        let items = data that ~[x_field] == g,
+        let vals = (for (d in items) float(d[y_field])),
+        let sorted_vals = (for (v in vals order by v) v),
+        let q1 = math.quantile(sorted_vals, 0.25),
+        let q3 = math.quantile(sorted_vals, 0.75),
+        let med = math.quantile(sorted_vals, 0.5),
+        let iqr = q3 - q1,
+        let lo_fence = q1 - extent * iqr,
+        let hi_fence = q3 + extent * iqr,
+        let whisker_lo = min(sorted_vals that ~ >= lo_fence),
+        let whisker_hi = max(sorted_vals that ~ <= hi_fence),
+        let outliers = sorted_vals that (~ < lo_fence or ~ > hi_fence),
+        let x_pos = float(scale.scale_apply(x_scale, g)),
+        let bw = if (x_scale.bandwidth) x_scale.bandwidth else 30.0,
+        let cx = x_pos + bw / 2.0,
+        let box_x = cx - box_w / 2.0,
+        let fill = if (color_scale and color_field)
+            scale.scale_apply(color_scale, g)
+        else fill_color,
+        let y_q1 = float(scale.scale_apply(y_scale, q1)),
+        let y_q3 = float(scale.scale_apply(y_scale, q3)),
+        let y_med = float(scale.scale_apply(y_scale, med)),
+        let y_wlo = float(scale.scale_apply(y_scale, whisker_lo)),
+        let y_whi = float(scale.scale_apply(y_scale, whisker_hi)),
+        // box rect (q1 to q3)
+        let box_rect = <rect x: box_x, y: y_q3, width: box_w, height: y_q1 - y_q3,
+                             fill: fill, opacity: 0.8, stroke: "#333", 'stroke-width': 1>,
+        // median line
+        let med_line = <line x1: box_x, y1: y_med, x2: box_x + box_w, y2: y_med,
+                             stroke: "#333", 'stroke-width': 2>,
+        // lower whisker
+        let wlo_line = <line x1: cx, y1: y_q1, x2: cx, y2: y_wlo,
+                             stroke: "#333", 'stroke-width': 1>,
+        let wlo_cap = <line x1: cx - box_w / 4.0, y1: y_wlo, x2: cx + box_w / 4.0, y2: y_wlo,
+                            stroke: "#333", 'stroke-width': 1>,
+        // upper whisker
+        let whi_line = <line x1: cx, y1: y_q3, x2: cx, y2: y_whi,
+                             stroke: "#333", 'stroke-width': 1>,
+        let whi_cap = <line x1: cx - box_w / 4.0, y1: y_whi, x2: cx + box_w / 4.0, y2: y_whi,
+                            stroke: "#333", 'stroke-width': 1>,
+        // outlier circles
+        let outlier_els = (for (o in outliers)
+            <circle cx: cx, cy: float(scale.scale_apply(y_scale, o)), r: 3,
+                    fill: "none", stroke: "#333", 'stroke-width': 1>),
+        [wlo_line, wlo_cap, whi_line, whi_cap, box_rect, med_line, *outlier_els]
+    ));
+
+    let all = (for (group in elements) for (el in group) el);
+    svg.group_class("marks boxplots", all)
+}
+
+// ============================================================
+// Error bar mark (vertical line with cap ticks)
+// ============================================================
+
+pub fn errorbar_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
+    let stroke_color = if (mark_config and mark_config.color) mark_config.color else "#333";
+    let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 1.5;
+    let cap_w = 6.0;
+
+    let bars = (for (d in data) (
+        let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+        let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+        let cx = x_pos + bw,
+        let y_lo = float(scale.scale_apply(y_scale, float(d[y_field]))),
+        let y_hi = if (y2_field)
+            float(scale.scale_apply(y_scale, float(d[y2_field])))
+        else y_lo,
+        let stem = <line x1: cx, y1: y_lo, x2: cx, y2: y_hi,
+                         stroke: stroke_color, 'stroke-width': stroke_w>,
+        let cap_lo = <line x1: cx - cap_w, y1: y_lo, x2: cx + cap_w, y2: y_lo,
+                           stroke: stroke_color, 'stroke-width': stroke_w>,
+        let cap_hi = <line x1: cx - cap_w, y1: y_hi, x2: cx + cap_w, y2: y_hi,
+                           stroke: stroke_color, 'stroke-width': stroke_w>,
+        [stem, cap_lo, cap_hi]
+    ));
+
+    let all = (for (group in bars) for (el in group) el);
+    svg.group_class("marks errorbars", all)
+}
+
+// ============================================================
+// Error band mark (filled area between y and y2)
+// ============================================================
+
+pub fn errorband_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
+    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
+    let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 0.3;
+
+    let top_points = (for (d in data) (
+        let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+        let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+        let y_pos = float(scale.scale_apply(y_scale, float(d[y_field]))),
+        [x_pos + bw, y_pos]));
+
+    let bottom_points = if (y2_field)
+        (for (d in data) (
+            let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+            let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+            let y_pos = float(scale.scale_apply(y_scale, float(d[y2_field]))),
+            [x_pos + bw, y_pos]))
+    else top_points;
+
+    let d = svg.area_path(top_points, bottom_points);
+    let band = <path d: d, fill: fill_color, opacity: opacity, stroke: "none">;
+    svg.group_class("marks errorbands", [band])
+}
+
+// ============================================================
+// Rect mark (positioned rectangles for heatmaps)
+// ============================================================
+
+pub fn rect_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let color_scale = ctx.color_scale;
+    let color_field = ctx.color_field;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
+    let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
+
+    let rects = (for (d in data) (
+        let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+        let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
+        let w = abs(if (x_scale.bandwidth) x_scale.bandwidth else 20.0),
+        let h = abs(if (y_scale.bandwidth) y_scale.bandwidth else 20.0),
+        let rect_y = if (y_scale.bandwidth and y_scale.bandwidth < 0.0) y_pos + y_scale.bandwidth else y_pos,
+        let rect_fill = if (color_scale and color_field)
+            scale.scale_apply(color_scale, d[color_field])
+        else fill_color,
+        <rect x: x_pos, y: rect_y, width: w, height: h,
+              fill: rect_fill, opacity: opacity, stroke: "white", 'stroke-width': 0.5>
+    ));
+
+    svg.group_class("marks rects", rects)
+}
 
 fn find_cat_index(cats, val) {
     let matches = (for (i in 0 to (len(cats) - 1))
