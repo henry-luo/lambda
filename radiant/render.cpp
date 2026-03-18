@@ -1679,6 +1679,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 if (root_block->tag_id == HTM_TAG_SVG) {
                     log_debug("render embedded SVG document (no background)");
                     render_inline_svg(rdcon, root_block);
+                } else if (root_block->embed && root_block->embed->img) {
+                    // Image/SVG document root — use render_image_view
+                    render_image_view(rdcon, root_block);
                 } else {
                     // Regular HTML document - render with background
                     render_block_view(rdcon, root_block);
