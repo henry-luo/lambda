@@ -1,0 +1,11 @@
+"1. math functions with prefix"
+4
+0
+1
+[0, 1, 8]
+"2. math constants with prefix"
+3.1415926536
+2.7182818285
+"3. statistics with prefix"
+4
+2.6666666667

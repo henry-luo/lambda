@@ -288,6 +288,35 @@ if (err != null) print("config failed")
 | `fn f()` / `pn p()` | Private function/procedure |
 | `type T = ...` / `type T { ... }` | Private type |
 
+### Built-in Module Imports
+
+Lambda provides built-in modules (`math`, `io`) for mathematical functions and file system operations. These modules support three import styles:
+
+```lambda
+// 1. No import — use full module prefix (default, always available)
+math.sqrt(16)         // 4
+math.pi               // 3.1415926536
+io.copy(@./a, @./b)
+
+// 2. Global import — all functions available without prefix
+import math;
+sqrt(16)              // 4
+pi                    // 3.1415926536
+sin(0)                // 0
+
+// 3. Aliased import — use a custom prefix
+import m:math;
+m.sqrt(16)            // 4
+m.pi                  // 3.1415926536
+m.sin(0)              // 0
+```
+
+| Style | Syntax | Usage | Best For |
+|-------|--------|-------|----------|
+| No import | *(none)* | `math.sqrt(x)` | Clarity, avoiding name conflicts |
+| Global import | `import math;` | `sqrt(x)` | Math-heavy scripts, brevity |
+| Aliased import | `import m:math;` | `m.sqrt(x)` | Short prefix, avoiding conflicts |
+
 ---
 
 ## Error Handling
