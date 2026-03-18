@@ -1,6 +1,6 @@
 (let a=0.5, let b=2, 
-a + 3 * b, a + 1, 0.5 + 3 * 2,
-(2.5 > 1))
+[a + 3 * b, a + 1, 0.5 + 3 * 2,
+(2.5 > 1)])
 "str" ++ "ing"
 'symbol' ++ '-xyz'
 "Numeric exprs: ============"
@@ -17,13 +17,13 @@ let a=0.5, b=2, c = 1e2
 'Type exprs: ============'
 null; int; float; string; bool; symbol; any; function; type;
 type(null); type(123); type(1.23); type("str"); type(true); type('symbol'); type(int);
-type(1 to 10); type([1, 2, 3]); type((3, 4, 5)); type({a: 1, b: 2}); type(<elmt a: 1, b: 2>);
+type(1 to 10); type([1, 2, 3]); type([3, 4, 5]); type({a: 1, b: 2}); type(<elmt a: 1, b: 2>);
 'Len exprs: ============'
 len(null); len(123); len(1.23); len("str"); len(true); len('symbol'); len(int);
-len(1 to 10); len([1, 2, 3]); len((3, 4, 5)); len({a: 1, b: 2}); len(<elmt a: 1, b: 2; "text">);
+len(1 to 10); len([1, 2, 3]); len([3, 4, 5]); len({a: 1, b: 2}); len(<elmt a: 1, b: 2; "text">);
 "Dynamic container exprs: ============"
 let m = {'a': 1, 'b': c + 2, d:[true, null], e: <elmt a: 1, b: 2>, f:int}
-[1, a, 3];  (3, b, 5);  m; 
+[1, a, 3];  [3, b, 5];  m; 
 <elmt a: 1, b: 2, c:{d:1+5.0, e:type(1.0)}>
 {c:1, *:m, g:2} // todo: <elmt c:1, m, d:2>
 "Member exprs: ============"

@@ -2,7 +2,7 @@
 // Layer: 2 | Category: operator | Covers: ? recursive, .? self-inclusive
 
 // ===== Type query on list =====
-let data = (1, "hello", 2, "world", 3.14)
+let data = [1, "hello", 2, "world", 3.14]
 len(data?int)
 len(data?string)
 len(data?float)

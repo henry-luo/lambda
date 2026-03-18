@@ -161,8 +161,8 @@ sort(1 to 5, "descending")
 {r: unique(["a", "b", "a", "c", "b", "c"])}
 {r: unique(["hello", "world", "hello", "foo", "world"])}
 'unique (list input - spreadable)'
-{r: unique((1, 2, 1, 3, 2))}
-unique(("a", "b", "a"))
+{r: unique([1, 2, 1, 3, 2])}
+unique(["a", "b", "a"])
 'unique (array input - non-spreadable)'
 {r: unique([1, 2, 1, 3, 2])}
 

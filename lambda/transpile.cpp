@@ -27,6 +27,7 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
 void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script);
+void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_global);
 
 // forward declarations for direct map/object field access optimization
 static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
@@ -997,6 +998,39 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (is_dynamic_fn_call(item) || binary_already_returns_item(item) || direct_call_returns_item(item)) {
         transpile_expr(tp, item);
         return;
+    }
+
+    // block expression (let_block): emit declarations, then box the body expression
+    // This prevents double-boxing when the body is a dynamic fn_call returning Item
+    // Unwrap PRIMARY wrapper if present (parser wraps let_block in primary_expr)
+    {
+        AstNode* inner = item;
+        if (inner->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)inner;
+            if (pri->expr) inner = pri->expr;
+        }
+        if (inner->node_type == AST_NODE_LIST) {
+            AstListNode* list_node = (AstListNode*)inner;
+            TypeArray* type = list_node->list_type;
+            if (type && type->length == 1 && list_node->declare) {
+                strbuf_append_str(tp->code_buf, "({");
+                AstNode* declare = list_node->declare;
+                while (declare) {
+                    if (declare->node_type == AST_NODE_ASSIGN) {
+                        transpile_assign_expr(tp, (AstNamedNode*)declare, false);
+                        strbuf_append_str(tp->code_buf, "\n");
+                    }
+                    declare = declare->next;
+                }
+                if (list_node->item) {
+                    transpile_box_item(tp, list_node->item);
+                } else {
+                    strbuf_append_str(tp->code_buf, "ITEM_NULL");
+                }
+                strbuf_append_str(tp->code_buf, ";})");
+                return;
+            }
+        }
     }
 
     // Check if this is a reference to a widened var — already stored as Item, skip boxing
@@ -4442,11 +4476,11 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
             declare = declare->next;
         }
         // emit the single value expression as the result
-        // use transpile_box_item to ensure proper Item boxing, since list expressions
-        // are expected to return Item-typed values
+        // use transpile_expr (not transpile_box_item) because the caller already
+        // handles boxing — using transpile_box_item here would cause double boxing
         AstNode *item = list_node->item;
         if (item) {
-            transpile_box_item(tp, item);
+            transpile_expr(tp, item);
             strbuf_append_str(tp->code_buf, ";})");
         } else {
             strbuf_append_str(tp->code_buf, "ITEM_NULL;})");

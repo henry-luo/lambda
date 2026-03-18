@@ -1,7 +1,7 @@
-// Test: List (Tuple) Basic Operations
-// Layer: 3 | Category: datatype | Covers: list literal, type, length
+// Test: Array Basic Operations
+// Layer: 3 | Category: datatype | Covers: array literal, type, length
 
-(1, 2, 3)
-type((1, 2, 3))
-len((1, 2, 3))
-(1, true, 3.14)
+[1, 2, 3]
+type([1, 2, 3])
+len([1, 2, 3])
+[1, true, 3.14]

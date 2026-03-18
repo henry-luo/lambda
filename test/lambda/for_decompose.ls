@@ -48,7 +48,7 @@ let spread_arr = [0, for (v in [1, 2, 3]) v * 10, 99]
 spread_arr
 
 // Spread into list
-let spread_list = (0, for (v in [1, 2]) v * 5, 99)
+let spread_list = [0, for (v in [1, 2]) v * 5, 99]
 spread_list
 
 // Multiple for-expressions spreading
@@ -66,7 +66,7 @@ let a, b, c = [1, 2, 3]
 [a, b, c]
 
 // Decompose list
-let x, y = (10, 20)
+let x, y = [10, 20]
 [x, y]
 
 // Partial decomposition (fewer vars than elements)

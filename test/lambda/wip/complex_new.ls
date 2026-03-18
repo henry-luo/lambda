@@ -30,7 +30,7 @@ pub fn process_multi_format_data(file_paths) {
 
 // 2. Financial Portfolio Analysis
 pub fn analyze_investment_portfolio(holdings) {
-    let asset_analysis = (for (holding in holdings) 
+    let asset_analysis = [for (holding in holdings) 
         let current_value = holding.shares * holding.current_price,
         let gain_loss = current_value - holding.cost_basis,
         {
@@ -40,7 +40,7 @@ pub fn analyze_investment_portfolio(holdings) {
             cost_basis: holding.cost_basis,
             unrealized_gain_loss: gain_loss,
             return_percent: (gain_loss / holding.cost_basis) * 100
-        });
+        }];
     
     let portfolio_metrics = {
         total_value: sum((for (asset in asset_analysis) asset.current_value)),
@@ -61,13 +61,13 @@ pub fn analyze_investment_portfolio(holdings) {
 
 // 3. Text Processing and Analysis
 pub fn analyze_document_corpus(document_paths, max_keywords) {
-    let documents = (for (path in document_paths)
+    let documents = [for (path in document_paths)
         let content = input(path, 'auto'),
         {
             path: path,
             content: content,
             text: (if (content is string) content else string(content))
-        });
+        }];
     
     fn extract_keywords(text, max_count) {
         let words = text.lower().split(" ");
@@ -105,7 +105,7 @@ pub fn analyze_document_corpus(document_paths, max_keywords) {
         }
     }
     
-    let document_analysis = (for (doc in documents)
+    let document_analysis = [for (doc in documents)
         let text = doc.text,
         {
             document: doc.path,
@@ -124,7 +124,7 @@ pub fn analyze_document_corpus(document_paths, max_keywords) {
                            else (if (len(text.split(" ")) > 200) "medium" 
                                 else "low"))
             }
-        });
+        }];
     
     let corpus_metrics = {
         total_documents: len(documents),
@@ -177,7 +177,7 @@ pub fn perform_statistical_analysis(dataset) {
     }
     
     fn perform_hypothesis_test(sample1, sample2, test_type) {
-        (if (test_type == "t_test")
+        [if (test_type == "t_test")
             let mean1 = avg(sample1),
             let mean2 = avg(sample2),
             let diff = abs(mean1 - mean2),
@@ -193,12 +193,12 @@ pub fn perform_statistical_analysis(dataset) {
         else {
             test_type: "Unknown test",
             error: "Unsupported test type: " + test_type
-        })
+        }]
     }
     
     let validation_results = validate_dataset(dataset);
     
-    (if (!validation_results.is_valid)
+    [if (!validation_results.is_valid)
         {
             success: false,
             error: "Dataset validation failed",
@@ -233,7 +233,7 @@ pub fn perform_statistical_analysis(dataset) {
                                   else "no obvious outliers")
             },
             success: true
-        })
+        }]
 }
 
 // 5. Configuration Management System
