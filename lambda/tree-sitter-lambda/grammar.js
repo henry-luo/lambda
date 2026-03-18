@@ -127,7 +127,7 @@ module.exports = grammar({
     [$.dotted_name, $.primary_expr],               // identifier.identifier: shift for dotted_name vs reduce to primary_expr
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
-    [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
+    [$.let_block, $._expr],                        // (let_expr , ...) comma could be let_block or expression list
   ],
 
   precedences: $ => [
@@ -294,7 +294,8 @@ module.exports = grammar({
       $._content_expr
     ),
 
-    list: $ => seq( '(', $._expr, repeat(seq(',', $._expr)), ')' ),
+    // list rule removed — (expr) is now only grouping via _parenthesized_expr
+    // [a, b, c] is the only ordered sequence syntax
 
     // Literals and Containers
     _non_null_literal: $ => choice(
@@ -362,6 +363,11 @@ module.exports = grammar({
       '(', $._expr, ')',
     ),
 
+    // let-block: (let x = a, let y = b, expr) — sequential let bindings returning last expr
+    let_block: $ => seq(
+      '(', repeat1(seq($.let_expr, ',')), $._expr, ')'
+    ),
+
     _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
@@ -386,7 +392,6 @@ module.exports = grammar({
       $.string,
       $.symbol,
       $.binary,
-      $.list,
       $.array,
       $.map,
       $.element,
@@ -400,6 +405,7 @@ module.exports = grammar({
       $.call_expr,
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
+      $.let_block,    // let-block: (let x = a, expr) — sequential let bindings
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_expr,   // ~ or ~# for pipe context
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
@@ -527,7 +533,7 @@ module.exports = grammar({
     // Anonymous Function (arrow expression)
     // Three forms:
     //   Typed params:   (a: int, b: string) => expr  (uses parameter nodes)
-    //   Untyped params: (a, b) => expr               (uses list, AST builder reinterprets)
+    //   Untyped params: (a, b) => expr
     //   No params:      () => expr                   (empty parens)
     fn_expr: $ => prec.right(choice(
       // Typed params: (a: int, b: string) => expr
@@ -535,8 +541,11 @@ module.exports = grammar({
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         optional(field('type', $.return_type)), '=>', field('body', $._expr)
       )),
-      // Untyped params via list: (a, b) => expr
-      seq($.list, optional(field('type', $.return_type)), '=>', field('body', $._expr)),
+      // Untyped params: (a, b) => expr — inline param list (no list rule)
+      seq(
+        '(', $._expr, repeat(seq(',', $._expr)), ')',
+        optional(field('type', $.return_type)), '=>', field('body', $._expr)
+      ),
       // No params: () => expr
       seq('(', ')', optional(field('type', $.return_type)), '=>', field('body', $._expr)),
     )),

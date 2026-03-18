@@ -51,9 +51,7 @@ b'\xDEADBEEF'
 "Alice"
 42
 "# Let statements with maps"
-1
-2
-3
+[1, 2, 3]
 "# Simple if expressions"
 'yes'
 42

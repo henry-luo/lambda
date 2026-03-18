@@ -32,7 +32,7 @@ true
 true
 "Test Unicode:31. index_of UTF-8:"
 7
-"32. slice UTF-8:éllTest string(type(...)):33. int:int34. float:float35. string:string36. bool:bool37. null:null38. array:array39. map:map40. symbol:symbol41. element:element42. list:listTest null handling:43. contains(null, x):"
+"32. slice UTF-8:éllTest string(type(...)):33. int:int34. float:float35. string:string36. bool:bool37. null:null38. array:array39. map:map40. symbol:symbol41. element:element42. list:arrayTest null handling:43. contains(null, x):"
 false
 "44. contains(x, null):"
 false

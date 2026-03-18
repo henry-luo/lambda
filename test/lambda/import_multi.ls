@@ -2,10 +2,10 @@
 import .mod_vars, .mod_compute
 
 // from mod_vars
-(name, version)
+[name, version]
 
 // from mod_compute
-(doubled, total)
+[doubled, total]
 
 // cross-module: mix values from both modules
 name ++ " v" ++ string(version) ++ " has " ++ string(total) ++ " items"

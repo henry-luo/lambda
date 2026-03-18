@@ -5,12 +5,12 @@
 let a = [1, 2, 3]
 [0, *a, 4]
 
-// ===== Spread into list =====
+// ===== Spread into array =====
 let b = [4, 5, 6]
-(1, 2, 3, *b, 7, 8)
+[1, 2, 3, *b, 7, 8]
 
-// ===== Spread list into array =====
-let c = (10, 20, 30)
+// ===== Spread array into array =====
+let c = [10, 20, 30]
 [0, *c, 40]
 
 // ===== Multiple spreads =====
@@ -45,5 +45,5 @@ fn make_array() {
 // ===== Spreadable for in array =====
 [0, for (x in [1, 2]) x * 5, 99]
 
-// ===== Spreadable for in list =====
-(0, for (x in [1, 2]) x * 5, 99)
+// ===== Spreadable for in array =====
+[0, for (x in [1, 2]) x * 5, 99]

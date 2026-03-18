@@ -21,7 +21,6 @@ extern "C" {
 #define SYM_BINARY sym_binary
 
 #define SYM_CONTENT sym_content
-#define SYM_LIST sym_list
 #define SYM_ARRAY sym_array
 #define SYM_MAP_ITEM sym_map_item
 #define SYM_MAP sym_map
@@ -60,6 +59,7 @@ extern "C" {
 #define SYM_MATCH_DEFAULT sym_match_default
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
+#define SYM_LET_BLOCK sym_let_block
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
 #define SYM_WHILE_STAM sym_while_stam

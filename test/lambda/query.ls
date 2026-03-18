@@ -2,7 +2,7 @@
 
 // === 1. Basic type query on list ===
 "--- type query ---"
-let data = (1, "hello", 2, "world", 3.14)
+let data = [1, "hello", 2, "world", 3.14]
 len(data?int)          // 2 (finds 1, 2)
 len(data?string)       // 2 (finds "hello", "world")
 len(data?float)        // 3 (int is subtype of float, finds 1, 2, 3.14)

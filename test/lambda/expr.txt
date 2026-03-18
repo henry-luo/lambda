@@ -1,18 +1,7 @@
 22
 "hello world"
 'great'
-6.5
-100.5
-10.4
-2.5
-2
-27
-8
-true
-true
-false
-"helloworld"
-'great'
+[6.5, 100.5, 10.4, 2.5, 2, 27, 8, true, true, false, "helloworld", 'great']
 "Test for statement:"
 124
 "ha!ha!ha!"
@@ -28,8 +17,7 @@ false
 'world'
 t'2025-05-01'
 b'\xA0FE'
-120
-0.01
+[120, 0.01]
 [121]
 [true, 124]
 {
@@ -37,11 +25,7 @@ b'\xA0FE'
   b: 0.5
 }
 "Test unary operators:"
-127
-false
-true
-2
--2
+[127, false, true, 2, -2]
 error
 inf
 -inf
@@ -67,9 +51,7 @@ nan
 []
 [12]
 [1, 2, 3]
-1
-[2, 3]
-4
+[1, [2, 3], 4]
 [1, [2, 3, 4, 5], 6]
 2
 3
@@ -101,9 +83,9 @@ false
 1.9
 1.5
 2.1
-[1, "great!", 0.5]
+[1, ["great", "!"], 0.5]
 [5.6, 2.4, 3.8, 3, 4.2]
-[1, 2, "great"]
+[[1, 2, "great"]]
 "Test datetime support:"
 t'2025-01-01'
 t'2025-01-02'

@@ -6,7 +6,7 @@ type.null
 array
 map
 element
-list
+array
 range
 symbol
 'div'

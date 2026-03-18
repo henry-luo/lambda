@@ -27,6 +27,9 @@ AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 // Forward declarations for pipe expression building
 AstNode* build_current_expr(Transpiler* tp, TSNode node);
 
+// Forward declaration for let_block (uses build_let_expr defined later)
+AstNode* build_let_expr(Transpiler* tp, TSNode let_node);
+
 // Forward declaration for builtin module resolution
 static const char* resolve_builtin_module(Transpiler* tp, StrView* name);
 
@@ -729,34 +732,112 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     tp->current_scope->last = entry;
 }
 
+// let_block: (let x = a, let y = b, expr) — sequential let bindings returning last expr
+AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
+    log_debug("build let_block expr");
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, block_node, sizeof(AstListNode));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
+    ast_node->list_type = type;
+
+    // push scope for let bindings
+    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    scope->parent = tp->current_scope;
+    tp->current_scope = scope;
+    ast_node->vars = scope;
+
+    // process children: let_expr nodes are declarations, last non-let child is the body
+    AstNode* prev_declare = NULL;
+    AstNode* body = NULL;
+    TSNode child = ts_node_named_child(block_node, 0);
+    while (!ts_node_is_null(child)) {
+        TSSymbol sym = ts_node_symbol(child);
+        TSNode next = ts_node_next_named_sibling(child);
+        if (sym == sym_let_expr) {
+            AstNode* decl = build_let_expr(tp, child);
+            if (decl) {
+                if (!prev_declare)
+                    ast_node->declare = decl;
+                else
+                    prev_declare->next = decl;
+                prev_declare = decl;
+            }
+        } else {
+            // last expression is the body
+            body = build_expr(tp, child);
+        }
+        child = next;
+    }
+
+    ast_node->item = body;
+    type->length = body ? 1 : 0;
+    ast_node->type = body ? body->type : alloc_type(tp->pool, LMD_TYPE_NULL, sizeof(Type));
+
+    // pop scope
+    tp->current_scope = scope->parent;
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
     log_debug("build array expr");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     TypeArray* type = (TypeArray*)ast_node->type;
+
+    // check if array has let expressions - push scope to contain their bindings
+    bool has_let = false;
+    {
+        TSNode scan = ts_node_named_child(array_node, 0);
+        while (!ts_node_is_null(scan)) {
+            if (ts_node_symbol(scan) == sym_let_expr) {
+                has_let = true;
+                break;
+            }
+            scan = ts_node_next_named_sibling(scan);
+        }
+    }
+    NameScope* saved_scope = tp->current_scope;
+    if (has_let) {
+        NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        scope->parent = tp->current_scope;
+        tp->current_scope = scope;
+    }
+
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  Type* nested_type = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
         if (item) {
             if (!prev_item) {
-                ast_node->item = item;  nested_type = item->type;
+                ast_node->item = item;
+                // let bindings are transparent - they don't contribute array elements
+                if (item->node_type != AST_NODE_ASSIGN) {
+                    nested_type = item->type;
+                    type->length++;
+                }
                 log_debug("DEBUG: First array item type_id: %d", item->type ? item->type->type_id : -1);
             }
             else {
                 prev_item->next = item;
-                log_debug("DEBUG: Array item type_id: %d, nested_type_id: %d",
-                    item->type ? item->type->type_id : -1, nested_type ? nested_type->type_id : -1);
-                if (nested_type && item->type->type_id != nested_type->type_id) {
-                    log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
-                    nested_type = NULL;  // type mismatch, reset the nested type to NULL
+                // let bindings are transparent - skip for type/length tracking
+                if (item->node_type != AST_NODE_ASSIGN) {
+                    log_debug("DEBUG: Array item type_id: %d, nested_type_id: %d",
+                        item->type ? item->type->type_id : -1, nested_type ? nested_type->type_id : -1);
+                    if (nested_type && item->type->type_id != nested_type->type_id) {
+                        log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
+                        nested_type = NULL;
+                    }
+                    type->length++;
                 }
             }
             prev_item = item;
-            type->length++;
         }
         child = ts_node_next_named_sibling(child);
     }
+
+    if (has_let) {
+        tp->current_scope = saved_scope;
+    }
+
     type->nested = nested_type;
     log_debug("DEBUG: Final array nested_type_id: %d", nested_type ? nested_type->type_id : -1);
     return (AstNode*)ast_node;
@@ -2937,7 +3018,16 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else {  // OPERATOR_JOIN, etc.
         type_id = LMD_TYPE_ANY;
     }
-    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    if (type_id >= LMD_TYPE_CONTAINER) {
+        // reuse existing type from the branch that determined the type_id
+        // to preserve full struct layout (TypeMap, TypeArray, etc.)
+        Type* reuse_type = (type_id == right_type && ast_node->right->type) ?
+            ast_node->right->type : (type_id == left_type && ast_node->left->type) ?
+            ast_node->left->type : NULL;
+        ast_node->type = reuse_type ? reuse_type : &TYPE_ANY;
+    } else {
+        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    }
     log_debug("end build binary expr");
     return (AstNode*)ast_node;
 }
@@ -3108,8 +3198,15 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         need_any_type = true;
     }
 
-    TypeId type_id = need_any_type ? LMD_TYPE_ANY : std::max(then_type_id, else_type_id);
-    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    if (need_any_type) {
+        ast_node->type = &TYPE_ANY;
+    } else if (then_type_id >= LMD_TYPE_CONTAINER) {
+        // reuse branch type to preserve full struct (TypeMap, TypeArray, etc.)
+        ast_node->type = ast_node->then->type;
+    } else {
+        TypeId type_id = std::max(then_type_id, else_type_id);
+        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    }
     log_debug("end build if expr");
     return (AstNode*)ast_node;
 }
@@ -3190,8 +3287,14 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
     ast_node->arm_count = arm_count;
 
     // result type: if all arms have same type, use it; otherwise ANY
-    TypeId type_id = need_any_type ? LMD_TYPE_ANY : result_type_id;
-    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    if (need_any_type) {
+        ast_node->type = &TYPE_ANY;
+    } else if (result_type_id >= LMD_TYPE_CONTAINER && first_arm && first_arm->type) {
+        // reuse arm type to preserve full struct (TypeMap, TypeArray, etc.)
+        ast_node->type = first_arm->type;
+    } else {
+        ast_node->type = alloc_type(tp->pool, result_type_id, sizeof(Type));
+    }
 
     log_debug("end build match expr: %d arms", arm_count);
     return (AstNode*)ast_node;
@@ -6072,27 +6175,29 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     AstNamedNode* prev_param = NULL;  int param_count = 0;  int required_count = 0;
     bool seen_optional = false;  // track if we've seen an optional param
 
-    // for anonymous fn_expr with list-based params: (a, b) => expr
-    // the grammar parses untyped arrow functions as fn_expr → list => body
-    // where list contains identifier expressions to be treated as parameters
+    // for anonymous fn_expr with untyped params: (a, b) => expr
+    // the grammar parses untyped arrow functions as fn_expr → expr... => body
+    // where the unnamed expr children (identifiers) before body are treated as parameters
     if (!is_named) {
-        TSNode first_child = ts_node_named_child(func_node, 0);
-        if (!ts_node_is_null(first_child) && ts_node_symbol(first_child) == SYM_LIST) {
-            log_debug("fn_expr: list-based params detected (untyped arrow function)");
-            TSNode list_child = ts_node_named_child(first_child, 0);
-            while (!ts_node_is_null(list_child)) {
-                // unwrap primary_expr wrapper to get the actual identifier
-                TSNode param_node = list_child;
+        // iterate named children that have no field (untyped params are unfielded exprs)
+        TSTreeCursor pre_cursor = ts_tree_cursor_new(func_node);
+        bool has_pre = ts_tree_cursor_goto_first_child(&pre_cursor);
+        while (has_pre) {
+            TSSymbol pre_field = ts_tree_cursor_current_field_id(&pre_cursor);
+            TSNode child = ts_tree_cursor_current_node(&pre_cursor);
+            if (pre_field == 0 && ts_node_is_named(child)) {
+                // unnamed named child — could be an untyped param identifier
+                TSNode param_node = child;
                 TSSymbol child_sym = ts_node_symbol(param_node);
                 while (child_sym == sym_primary_expr) {
                     param_node = ts_node_named_child(param_node, 0);
                     child_sym = ts_node_symbol(param_node);
                 }
-                log_debug("fn_expr: list child symbol=%d", child_sym);
+                log_debug("fn_expr: unnamed child symbol=%d", child_sym);
                 if (child_sym == sym_identifier) {
                     AstNamedNode* param = (AstNamedNode*)alloc_ast_node(tp,
-                        AST_NODE_PARAM, list_child, sizeof(AstNamedNode));
-                    StrView name_str = ts_node_source(tp, list_child);
+                        AST_NODE_PARAM, child, sizeof(AstNamedNode));
+                    StrView name_str = ts_node_source(tp, child);
                     param->name = name_pool_create_strview(tp->name_pool, name_str);
 
                     TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
@@ -6100,7 +6205,6 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
                     param_type->full_type = NULL;
                     param->type = (Type*)param_type;
                     push_name(tp, param, NULL);
-                    // In pn (procedural) functions, parameters are mutable
                     if (is_proc) {
                         NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
                         if (entry) entry->is_mutable = true;
@@ -6116,15 +6220,11 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
                     prev_param = param;  param_count++;  required_count++;
                     log_debug("fn_expr: added untyped param '%.*s'",
                         (int)name_str.length, name_str.str);
-                } else {
-                    StrView src = ts_node_source(tp, list_child);
-                    record_semantic_error(tp, list_child, ERR_SYNTAX_ERROR,
-                        "arrow function parameter must be an identifier, got '%.*s'",
-                        (int)src.length, src.str);
                 }
-                list_child = ts_node_next_named_sibling(list_child);
             }
+            has_pre = ts_tree_cursor_goto_next_sibling(&pre_cursor);
         }
+        ts_tree_cursor_delete(&pre_cursor);
     }
 
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
@@ -6698,6 +6798,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_current_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
+    case SYM_LET_BLOCK:
+        return build_let_block(tp, expr_node);
     case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
         return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
@@ -6770,8 +6872,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_elmt(tp, expr_node);
     case SYM_CONTENT:
         return build_content(tp, expr_node, true, false);
-    case SYM_LIST:
-        return build_list(tp, expr_node);
+    // SYM_LIST removed — list syntax no longer exists
     case SYM_IDENT:
         return build_identifier(tp, expr_node);
     case SYM_FUNC_STAM:

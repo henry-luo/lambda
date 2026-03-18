@@ -7,7 +7,7 @@
 // ========================================
 
 // Test 1: Basic float array construction with parentheses syntax
-let float_list = (1.5, 2.7, 3.14)
+let float_list = [1.5, 2.7, 3.14]
 float_list
 
 // Test 2: Basic float array construction with bracket syntax

@@ -1,5 +1,5 @@
 type a = array, b = int, c = map
-type d = (string, int)
+type d = [string, int]
 type e = [bool, int, null]
 type f = {b:bool, c:int}
 type g = map, h = datetime

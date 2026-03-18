@@ -65,7 +65,7 @@ let complex_map = {
 };
 
 // Let expressions with lists
-(let lst = (1, 2, 3), lst)
+(let lst = [1, 2, 3], lst)
 
 // === IF EXPRESSION vs STATEMENT TESTS ===
 "# Simple if expressions"
@@ -198,7 +198,7 @@ if (numbers[0] > 0) {
  else true)
 
 "# For with different collection types"
-(for (item in (1, "two", 3.0)) item)  // list
+(for (item in [1, "two", 3.0]) item)  // list
 (for (val in [null, true, false, 123]) val)  // array
 
 "=== EDGE CASES AND ERROR CONDITIONS ==="
