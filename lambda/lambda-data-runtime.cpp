@@ -8,7 +8,7 @@ extern "C" void* heap_data_alloc(size_t size);
 extern "C" void* heap_data_calloc(size_t size);
 
 extern __thread EvalContext* context;
-void array_set(Array* arr, int index, Item itm);
+void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 Item typeditem_to_item(TypedItem *titem);
@@ -65,7 +65,7 @@ Array* array_fill(Array* arr, int count, ...) {
     return arr;
 }
 
-Item array_get(Array *array, int index) {
+Item array_get(Array *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     if (index < 0 || index >= array->length) {
         return ItemNull;  // return null instead of error
@@ -96,7 +96,7 @@ ArrayInt* array_int() {
 }
 
 // used when there's no interleaving with transpiled code
-ArrayInt* array_int_new(int length) {
+ArrayInt* array_int_new(int64_t length) {
     ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;
     arr->length = length;  arr->capacity = length;
@@ -118,13 +118,13 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
     return arr;
 }
 
-Item array_int_get(ArrayInt *array, int index) {
+Item array_int_get(ArrayInt *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
     if (array->type_id != LMD_TYPE_ARRAY_INT)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
-        log_debug("array_int_get: index out of bounds: %d", index);
+        log_debug("array_int_get: index out of bounds: %lld", (long long)index);
         return ItemNull;  // return null instead of error
     }
     int64_t val = array->items[index];
@@ -134,8 +134,8 @@ Item array_int_get(ArrayInt *array, int index) {
 
 // Fast path: return raw int64_t without boxing — for use when result type is known int
 // Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int_get_raw(ArrayInt *array, int index) {
-    if (!array || (unsigned)index >= (unsigned)array->length) return 0;
+int64_t array_int_get_raw(ArrayInt *array, int64_t index) {
+    if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
     return array->items[index];
 }
 
@@ -146,7 +146,7 @@ ArrayInt64* array_int64() {
 }
 
 // used when there's no interleaving with transpiled code
-ArrayInt64* array_int64_new(int length) {
+ArrayInt64* array_int64_new(int64_t length) {
     ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
     arr->type_id = LMD_TYPE_ARRAY_INT64;
     arr->length = length;  arr->capacity = length;
@@ -168,13 +168,13 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
     return arr;
 }
 
-Item array_int64_get(ArrayInt64* array, int index) {
+Item array_int64_get(ArrayInt64* array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
     if (array->type_id != LMD_TYPE_ARRAY_INT64)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
-        log_debug("array_int64_get: index out of bounds: %d", index);
+        log_debug("array_int64_get: index out of bounds: %lld", (long long)index);
         return ItemNull;
     }
     return push_l(array->items[index]);
@@ -182,8 +182,8 @@ Item array_int64_get(ArrayInt64* array, int index) {
 
 // Fast path: return raw int64_t without boxing
 // Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int64_get_raw(ArrayInt64 *array, int index) {
-    if (!array || (unsigned)index >= (unsigned)array->length) return 0;
+int64_t array_int64_get_raw(ArrayInt64 *array, int64_t index) {
+    if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
     return array->items[index];
 }
 
@@ -194,7 +194,7 @@ ArrayFloat* array_float() {
 }
 
 // used when there's no interleaving with transpiled code
-ArrayFloat* array_float_new(int length) {
+ArrayFloat* array_float_new(int64_t length) {
     ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
     arr->length = length;  arr->capacity = length;
@@ -217,27 +217,27 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
     return arr;
 }
 
-Item array_float_get(ArrayFloat* array, int index) {
+Item array_float_get(ArrayFloat* array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
     if (array->type_id != LMD_TYPE_ARRAY_FLOAT)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
-        log_debug("array_float_get: index out of bounds: %d", index);
+        log_debug("array_float_get: index out of bounds: %lld", (long long)index);
         return ItemNull;
     }
     return push_d(array->items[index]);
 }
 
 // fast path — only used for immutable arrays where type widening cannot occur
-double array_float_get_value(ArrayFloat *arr, int index) {
+double array_float_get_value(ArrayFloat *arr, int64_t index) {
     if (!arr || index < 0 || index >= arr->length) {
         return NAN;  // Return NaN for invalid access
     }
     return arr->items[index];
 }
 
-void array_float_set(ArrayFloat *arr, int index, double value) {
+void array_float_set(ArrayFloat *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
@@ -248,7 +248,7 @@ void array_float_set(ArrayFloat *arr, int index, double value) {
     }
 }
 
-void array_int_set(ArrayInt *arr, int index, int64_t value) {
+void array_int_set(ArrayInt *arr, int64_t index, int64_t value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;
     }
@@ -259,7 +259,7 @@ void array_int_set(ArrayInt *arr, int index, int64_t value) {
 }
 
 // set with item value
-void array_float_set_item(ArrayFloat *arr, int index, Item value) {
+void array_float_set_item(ArrayFloat *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
@@ -453,7 +453,7 @@ Item list_fill(List *list, int count, ...) {
     return list_end(list);
 }
 
-Item list_get(List *list, int index) {
+Item list_get(List *list, int64_t index) {
     if (!list || ((uintptr_t)list >> 56)) { return ItemNull; }
     if (index < 0 || index >= list->length) { return ItemNull; }
     Item item = list->items[index];
@@ -471,7 +471,7 @@ Item list_get(List *list, int index) {
     }
 }
 
-Map* map(int type_index) {
+Map* map(int64_t type_index) {
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -484,7 +484,7 @@ Map* map(int type_index) {
 // The data buffer is placed immediately after the Map struct,
 // eliminating the separate heap_data_calloc call.
 // This is used for all static maps where byte_size is known at transpile time.
-Map* map_with_data(int type_index) {
+Map* map_with_data(int64_t type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
     int64_t byte_size = map_type->byte_size;
@@ -622,7 +622,7 @@ Item map_get(Map* map, Item key) {
     return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
-Element* elmt(int type_index) {
+Element* elmt(int64_t type_index) {
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -631,7 +631,7 @@ Element* elmt(int type_index) {
     return elmt;
 }
 
-Object* object(int type_index) {
+Object* object(int64_t type_index) {
     Object *obj = (Object *)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
     obj->type_id = LMD_TYPE_OBJECT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -646,7 +646,7 @@ Object* object(int type_index) {
 
 // Allocate object struct + data buffer in a single GC allocation.
 // Same approach as map_with_data — data placed immediately after the struct.
-Object* object_with_data(int type_index) {
+Object* object_with_data(int64_t type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     Type* stored = (Type*)(type_list->data[type_index]);
     TypeObject *obj_type = (stored->type_id == LMD_TYPE_TYPE)
@@ -779,7 +779,7 @@ Item elmt_get(Element* elmt, Item key) {
     return ItemNull;
 }
 
-Item item_at(Item data, int index) {
+Item item_at(Item data, int64_t index) {
     if (!data.item) { return ItemNull; }
 
     // note: for out of bound access, we return null instead of error
@@ -848,7 +848,7 @@ Item item_at(Item data, int index) {
             String* interned = get_ascii_char_string((unsigned char)chars[byte_offset]);
             if (interned) return {.item = s2it(interned)};
         }
-        String *ch_str = heap_strcpy((char*)(chars + byte_offset), (int)ch_len);
+        String *ch_str = heap_strcpy((char*)(chars + byte_offset), ch_len);
         return {.item = s2it(ch_str)};
     }
     case LMD_TYPE_PATH: {
@@ -1114,14 +1114,14 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         if (key_filter == 1) {
             // INT: children only
-            return list_get(data.element, (int)idx);
+            return list_get(data.element, idx);
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
             Symbol* key_sym = (Symbol*)keys->data[idx];
             return item_attr(data, key_sym->chars);
         }
-        return list_get(data.element, (int)(idx - key_count));
+        return list_get(data.element, idx - key_count);
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
         if (idx < key_count) {
@@ -1131,7 +1131,7 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         return ItemNull;
     }
     // array/list/range: use item_at
-    return item_at(data, (int)idx);
+    return item_at(data, idx);
 }
 
 // ============================================================================
@@ -1174,7 +1174,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         else                                        length = item.array_float->length;
 
         if (element_type_id == LMD_TYPE_INT) {
-            ArrayInt* typed = array_int_new((int)length);
+            ArrayInt* typed = array_int_new(length);
             for (int64_t i = 0; i < length; i++) {
                 if (item_tid == LMD_TYPE_ARRAY_INT)        typed->items[i] = item.array_int->items[i];
                 else if (item_tid == LMD_TYPE_ARRAY_INT64) typed->items[i] = item.array_int64->items[i];
@@ -1183,7 +1183,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
-            ArrayFloat* typed = array_float_new((int)length);
+            ArrayFloat* typed = array_float_new(length);
             for (int64_t i = 0; i < length; i++) {
                 if (item_tid == LMD_TYPE_ARRAY_FLOAT)      typed->items[i] = item.array_float->items[i];
                 else if (item_tid == LMD_TYPE_ARRAY_INT)    typed->items[i] = (double)item.array_int->items[i];
@@ -1192,7 +1192,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             return typed;
         }
         else if (element_type_id == LMD_TYPE_INT64) {
-            ArrayInt64* typed = array_int64_new((int)length);
+            ArrayInt64* typed = array_int64_new(length);
             for (int64_t i = 0; i < length; i++) {
                 if (item_tid == LMD_TYPE_ARRAY_INT64)      typed->items[i] = item.array_int64->items[i];
                 else if (item_tid == LMD_TYPE_ARRAY_INT)    typed->items[i] = item.array_int->items[i];
@@ -1209,7 +1209,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         int64_t length = arr->length;
 
         if (element_type_id == LMD_TYPE_INT) {
-            ArrayInt* typed = array_int_new((int)length);
+            ArrayInt* typed = array_int_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {
@@ -1221,7 +1221,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
-            ArrayFloat* typed = array_float_new((int)length);
+            ArrayFloat* typed = array_float_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
@@ -1238,7 +1238,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             return typed;
         }
         else if (element_type_id == LMD_TYPE_INT64) {
-            ArrayInt64* typed = array_int64_new((int)length);
+            ArrayInt64* typed = array_int64_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {

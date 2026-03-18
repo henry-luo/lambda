@@ -694,7 +694,7 @@ static Item resolve_file_content(Path* path, const char* file_path);
 static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive);
 
 // Extern declaration for heap_strcpy (defined in lambda-mem.cpp)
-extern String* heap_strcpy(char* src, int len);
+extern String* heap_strcpy(char* src, int64_t len);
 
 /**
  * Resolve path content for iteration.

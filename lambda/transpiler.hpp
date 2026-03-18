@@ -15,7 +15,7 @@ typedef struct Heap {
 void heap_init();
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
-extern "C" String* heap_strcpy(char* src, int len);  // callable from C code (path.c)
+extern "C" String* heap_strcpy(char* src, int64_t len);  // callable from C code (path.c)
 extern "C" void heap_gc_collect(void);                // trigger GC collection from runtime
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
