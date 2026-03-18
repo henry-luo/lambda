@@ -306,11 +306,12 @@ inline void distribute_space_to_tracks(
  * Contains the min/max content sizes and which tracks the item spans.
  */
 struct GridItemContribution {
-    float min_content_contribution;    // Item's min-content size in this axis
+    float min_content_contribution;    // Item's min-content size in this axis (actual text min-content)
     float max_content_contribution;    // Item's max-content size in this axis
     size_t track_start;                // First track index spanned (0-based)
     size_t track_span;                 // Number of tracks spanned
     bool crosses_flexible_track;       // Whether item spans any flexible (fr) track
+    bool is_scroll_container;          // overflow != visible → automatic minimum size is 0 (CSS Grid §6.6)
     ViewBlock* item;                   // Reference to the item for debugging
 };
 
@@ -345,13 +346,16 @@ inline float spanned_tracks_size(
  * @param span Number of tracks spanned
  * @param space_to_distribute The extra space to distribute
  * @param contribution_type Whether this is for min or max content
+ * @param include_min_content_max_tracks If true, min-content MAX tracks are eligible for
+ *        Maximum distribution (used for scroll-container items whose minimum_contribution=0)
  */
 inline void increase_sizes_for_spanning_item(
     std::vector<EnhancedGridTrack>& tracks,
     size_t start_index,
     size_t span,
     float space_to_distribute,
-    IntrinsicContributionType contribution_type
+    IntrinsicContributionType contribution_type,
+    bool include_min_content_max_tracks = false
 ) {
     if (space_to_distribute <= 0 || span == 0) return;
 
@@ -381,9 +385,17 @@ inline void increase_sizes_for_spanning_item(
     };
 
     // Build the full eligible set (used for Phase 1 or as fallback)
+    // CSS Grid §11.5.7: "content-based" (intrinsic) max sizing functions include
+    // max-content, auto, and fit-content(). min-content max tracks are normally excluded
+    // from max-content distribution UNLESS the item is a scroll container (whose automatic
+    // minimum is zero) — in that case, min-content MAX tracks must participate so they
+    // receive the item's max-content contribution rather than staying at zero.
     auto max_type_filter = [&](const EnhancedGridTrack& track) {
         if (contribution_type != IntrinsicContributionType::Maximum) return true;
         auto max_type = track.max_track_sizing_function.type;
+        if (include_min_content_max_tracks && max_type == SizingFunctionType::MinContent) {
+            return true;  // scroll-container items: include min-content MAX tracks
+        }
         return max_type == SizingFunctionType::MaxContent ||
                max_type == SizingFunctionType::Auto ||
                max_type == SizingFunctionType::FitContentPx ||
@@ -605,15 +617,17 @@ inline void resolve_intrinsic_track_sizes(
         if (contrib.crosses_flexible_track) continue;
 
         float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
-        // CSS §12.5.1: Phase 1 generally uses min-content contribution so that Phase 2 can
-        // distribute the extra max-content to tracks with MaxContent/Auto max sizing.
+        // CSS §12.5.1 Phase 1: Use the "automatic minimum size" (minimum_contribution).
+        // For scroll containers (overflow != visible), the automatic minimum size is 0.
+        // The real min-content is used later in Phase 1b for min-content MIN tracks.
         //
         // EXCEPTION: When ALL spanned tracks have MaxContent min sizing AND none of them
         // has a Phase-2-eligible max (MaxContent or Auto), Phase 2 will not grow these
         // tracks at all. In that case, use max-content in Phase 1 so the track reaches its
         // correct size. This handles degenerate minmax(max-content, min-content) tracks
         // where the effective sizing IS max-content but Phase 2 won't fire.
-        float p1_contrib = contrib.min_content_contribution;
+        float minimum_contribution = contrib.is_scroll_container ? 0.0f : contrib.min_content_contribution;
+        float p1_contrib = minimum_contribution;
         {
             size_t p1_end = std::min(contrib.track_start + contrib.track_span, tracks.size());
             bool all_max_content_min = true;
@@ -654,37 +668,52 @@ inline void resolve_intrinsic_track_sizes(
     // Flush planned increases to base sizes
     flush_planned_base_size_increases(tracks);
 
-    // Phase 2: Size tracks to max-content contributions (for tracks with max-content/auto sizing)
-    // NOTE: Items crossing flexible tracks are skipped here too
-    // IMPORTANT: min-content tracks should NOT receive max-content contributions
+    // Phase 2: Size tracks to max-content contributions.
+    // For scroll-container items (overflow != visible), their Phase 1 "automatic minimum" is 0
+    // so we must include min-content MAX tracks in Phase 2 distribution; otherwise those tracks
+    // would never receive any contribution and the min-content track would collapse to 0.
+    // For non-scroll-container items, min-content MAX tracks must NOT receive max-content
+    // contributions here (they were already correctly sized in Phase 1 via min_content_contribution).
+    // NOTE: Items crossing flexible tracks are skipped here too.
     for (const auto& contrib : contributions) {
         if (contrib.track_span == 0) continue;
 
         // Skip items that cross flexible tracks
         if (contrib.crosses_flexible_track) continue;
 
-        // Check if ANY track in the span has max-content or auto max sizing
-        // If all tracks are min-content, skip this contribution (min-content tracks are already sized)
+        // Check if ANY track in the span is eligible for Phase 2 distribution.
+        // For scroll containers: eligible = intrinsic max tracks (min-content, max-content, auto, fit-content)
+        // For others: eligible = max-content/auto/fit-content MAX tracks (NOT min-content MAX)
         size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
-        bool has_max_content_track = false;
+        bool has_eligible_track = false;
         for (size_t i = contrib.track_start; i < end; ++i) {
-            // Check if track's max sizing function is max-content or auto (which becomes max-content)
-            // Also include Percentage: with indefinite container it resolves to auto
             auto max_type = tracks[i].max_track_sizing_function.type;
-            if (max_type == SizingFunctionType::MaxContent ||
-                max_type == SizingFunctionType::Auto ||
-                max_type == SizingFunctionType::FitContentPx ||
-                max_type == SizingFunctionType::FitContentPercent ||
-                max_type == SizingFunctionType::Percent) {
-                has_max_content_track = true;
-                break;
+            if (contrib.is_scroll_container) {
+                // For scroll containers, ALL intrinsic max tracks are eligible
+                if (max_type == SizingFunctionType::MinContent ||
+                    max_type == SizingFunctionType::MaxContent ||
+                    max_type == SizingFunctionType::Auto ||
+                    max_type == SizingFunctionType::FitContentPx ||
+                    max_type == SizingFunctionType::FitContentPercent ||
+                    max_type == SizingFunctionType::Percent) {
+                    has_eligible_track = true;
+                    break;
+                }
+            } else {
+                // For non-scroll containers, only max-content/auto/fit-content MAX tracks
+                // (min-content MAX tracks already accounted for via Phase 1 distribution)
+                if (max_type == SizingFunctionType::MaxContent ||
+                    max_type == SizingFunctionType::Auto ||
+                    max_type == SizingFunctionType::FitContentPx ||
+                    max_type == SizingFunctionType::FitContentPercent ||
+                    max_type == SizingFunctionType::Percent) {
+                    has_eligible_track = true;
+                    break;
+                }
             }
         }
 
-        if (!has_max_content_track) {
-            // All tracks are min-content or fixed sized, skip max-content contribution
-            continue;
-        }
+        if (!has_eligible_track) continue;
 
         float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
         float extra_space = contrib.max_content_contribution - current_size;
@@ -695,7 +724,8 @@ inline void resolve_intrinsic_track_sizes(
                 contrib.track_start,
                 contrib.track_span,
                 extra_space,
-                IntrinsicContributionType::Maximum
+                IntrinsicContributionType::Maximum,
+                contrib.is_scroll_container  // include min-content MAX tracks for scroll containers
             );
         }
     }

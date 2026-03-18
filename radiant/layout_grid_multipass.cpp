@@ -611,11 +611,29 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     bool has_explicit_width = false, has_explicit_height = false;
     if (item->blk) {
         if (item->blk->given_width > 0) {
-            *min_width = *max_width = (int)item->blk->given_width;
+            int w = (int)item->blk->given_width;
+            // CSS Box Model: border-box cannot be smaller than padding+border
+            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                float h_pb = item->bound->padding.left + item->bound->padding.right;
+                if (item->bound->border) {
+                    h_pb += item->bound->border->width.left + item->bound->border->width.right;
+                }
+                if (w < (int)h_pb) w = (int)h_pb;
+            }
+            *min_width = *max_width = w;
             has_explicit_width = true;
         }
         if (item->blk->given_height > 0) {
-            *min_height = *max_height = (int)item->blk->given_height;
+            int h = (int)item->blk->given_height;
+            // CSS Box Model: border-box cannot be smaller than padding+border
+            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                float v_pb = item->bound->padding.top + item->bound->padding.bottom;
+                if (item->bound->border) {
+                    v_pb += item->bound->border->width.top + item->bound->border->width.bottom;
+                }
+                if (h < (int)v_pb) h = (int)v_pb;
+            }
+            *min_height = *max_height = h;
             has_explicit_height = true;
         }
 

@@ -1,5 +1,6 @@
 #include "grid.hpp"
 #include "intrinsic_sizing.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -557,6 +558,58 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         }
         if (item->blk->given_max_height > 0 && is_row_axis) {
             sizes.max_content = fmin(sizes.max_content, item->blk->given_max_height);
+        }
+    }
+
+    // CSS Grid §6.4: if the item has aspect-ratio and no explicit height,
+    // use (effective_column_width / aspect_ratio) as the row contribution.
+    if (is_row_axis && item->specified_style) {
+        bool has_explicit_height = (item->blk && item->blk->given_height > 0);
+        if (!has_explicit_height) {
+            float aspect_ratio = 0.0f;
+            CssDeclaration* aspect_decl = style_tree_get_declaration(
+                item->specified_style, CSS_PROPERTY_ASPECT_RATIO);
+            if (aspect_decl && aspect_decl->value) {
+                if (aspect_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                    aspect_ratio = (float)aspect_decl->value->data.number.value;
+                } else if (aspect_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                           aspect_decl->value->data.list.count >= 2) {
+                    double numerator = 0, denominator = 0;
+                    bool got_num = false, got_den = false;
+                    for (int k = 0; k < aspect_decl->value->data.list.count && !got_den; k++) {
+                        CssValue* v = aspect_decl->value->data.list.values[k];
+                        if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
+                            if (!got_num) { numerator = v->data.number.value; got_num = true; }
+                            else          { denominator = v->data.number.value; got_den = true; }
+                        }
+                    }
+                    if (got_num && got_den && denominator > 0) aspect_ratio = (float)(numerator / denominator);
+                    else if (got_num) aspect_ratio = (float)numerator;
+                }
+            }
+            if (aspect_ratio > 0.0f) {
+                // Compute the effective track width (after column sizing)
+                float track_width = 0.0f;
+                if (item->gi && lycon && lycon->grid_container) {
+                    GridContainerLayout* grid = lycon->grid_container;
+                    int col_start = item->gi->computed_grid_column_start - 1;
+                    int col_end   = item->gi->computed_grid_column_end   - 1;
+                    if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
+                        for (int c = col_start; c < col_end; c++) {
+                            track_width += grid->computed_columns[c].computed_size;
+                            if (c < col_end - 1) track_width += grid->column_gap;
+                        }
+                    }
+                }
+                if (track_width <= 0.0f) track_width = (float)(item->width > 0 ? item->width : 0);
+                if (track_width > 0.0f) {
+                    float h_from_ratio = track_width / aspect_ratio;
+                    sizes.min_content = h_from_ratio;
+                    sizes.max_content = h_from_ratio;
+                    log_debug("calc_grid_intrinsic: aspect-ratio %.3f track_w=%.1f -> h=%.1f for %s",
+                              aspect_ratio, track_width, h_from_ratio, item->node_name());
+                }
+            }
         }
     }
 
