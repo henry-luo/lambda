@@ -29,7 +29,7 @@ extern Item parse_json_to_item(Input* input, const char* json_string);
 #endif
 
 extern void* heap_alloc(int size, TypeId type_id);
-extern void fn_array_set(Array* arr, int index, Item value);
+extern void fn_array_set(Array* arr, int64_t index, Item value);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_prototype(Item object);
 

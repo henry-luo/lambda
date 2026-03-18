@@ -1,0 +1,16 @@
+"1. math functions with alias"
+4
+0
+1
+[0, 1, 8]
+"2. math constants with alias"
+3.1415926536
+2.7182818285
+"3. statistics with alias"
+4
+2.6666666667
+"4. trigonometric with alias"
+[0, 0, 0]
+"5. use in expressions"
+6.2831853072
+2

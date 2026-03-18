@@ -1,0 +1,16 @@
+"1. math functions without prefix"
+4
+0
+1
+[0, 1, 8]
+"2. math constants without prefix"
+3.1415926536
+2.7182818285
+"3. statistics without prefix"
+4
+2.6666666667
+"4. trigonometric without prefix"
+[0, 0, 0]
+"5. use in expressions"
+6.2831853072
+2

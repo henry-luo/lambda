@@ -21,7 +21,7 @@ extern "C" {
     void list_push(List *list, Item item);
     void* heap_calloc(size_t size, TypeId type_id);
     void* heap_data_calloc(size_t size);
-    String* heap_strcpy(char* src, int len);
+    String* heap_strcpy(char* src, int64_t len);
 }
 extern void* heap_alloc(int size, TypeId type_id);
 extern __thread EvalContext* context;

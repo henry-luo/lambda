@@ -446,7 +446,7 @@ List* list_arena(Arena* arena) {
     return list;
 }
 
-void array_set(Array* arr, int index, Item itm) {
+void array_set(Array* arr, int64_t index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
     switch (type_id) {

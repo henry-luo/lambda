@@ -1119,9 +1119,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // U+200B ZWSP is a line-break opportunity per Unicode Line Breaking Algorithm
                 // U+FEFF BOM/ZWNBSP and U+200C/U+200D ZWJ/ZWNJ are NOT break opportunities
                 if (codepoint == 0x200B && wrap_lines) {
-                    // ZWSP: record as break opportunity with zero width
+                    // ZWSP: record as break opportunity with zero width.
+                    // Set last_space to point to the final byte of the ZWSP sequence (str - 1)
+                    // so that: (a) last_space < next_ch (H5) is TRUE when overflow is checked,
+                    // and (b) str = last_space + 1 correctly resumes at the next character.
                     str = next_ch;
-                    lycon->line.last_space = str;
+                    lycon->line.last_space = str - 1;
                     lycon->line.last_space_pos = rect->width;
                     lycon->line.last_space_is_hyphen = false;
                     lycon->line.is_line_start = false;
