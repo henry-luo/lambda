@@ -20,22 +20,28 @@ import ann: .annotation
 // ============================================================
 
 pub fn render(chart_el) {
-    let spec = parse.parse_chart(chart_el);
-
-    // handle layer composition
-    if (spec.layer) render_layered(spec)
-    // handle arc/pie chart (no x/y axes)
-    else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
-    // standard single-view chart
-    else render_single(spec)
+    let tag = name(chart_el);
+    if (tag == 'hconcat' or tag == 'vconcat')
+        render_concat(parse.parse_concat(chart_el))
+    else if (tag == 'repeat')
+        render_repeat(parse.parse_repeat(chart_el))
+    else
+        dispatch(parse.parse_chart(chart_el))
 }
 
 // render from a pre-parsed spec map (no element tree needed)
 pub fn render_spec(spec) {
-    let s = if (spec is element) parse.parse_chart(spec) else spec;
-    if (s.layer) render_layered(s)
-    else if (s.mark and s.mark.kind == "arc") render_arc(s)
-    else render_single(s)
+    if (spec is element) render(spec)
+    else if (spec.concat) render_concat(spec)
+    else if (spec.repeat_row or spec.repeat_column) render_repeat(spec)
+    else dispatch(spec)
+}
+
+fn dispatch(spec) {
+    if (spec.facet) render_faceted(spec)
+    else if (spec.layer) render_layered(spec)
+    else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
+    else render_single(spec)
 }
 
 // ============================================================
@@ -550,4 +556,170 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     else children1;
 
     svg.svg_root(width, height, children)
+}
+
+// ============================================================
+// Faceted chart rendering (small multiples)
+// ============================================================
+
+fn render_faceted(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let raw_data = if (spec.data) spec.data else [];
+    let data = transform.apply_transforms(raw_data, spec.transform);
+    let facet = spec.facet;
+
+    let facet_field = if (facet.field) facet.field else null;
+    let columns = if (facet.columns) facet.columns else 3;
+
+    // partition data by facet field
+    let facet_keys = util.unique_vals(data | ~[facet_field]);
+    let n = len(facet_keys);
+
+    // compute facet grid layout
+    let sub_w = float(spec.width);
+    let sub_h = float(spec.height);
+    let spacing = if (facet.spacing) facet.spacing else 20;
+    let flay = layout.compute_facet_layout(n, columns, sub_w, sub_h, spacing, spec.title, spec.padding);
+
+    // render each facet cell
+    let cells = (for (i in 0 to (n - 1),
+         let fk = facet_keys[i],
+         let cell_data = data that ~[facet_field] == fk,
+         let cell_spec = {*:spec, data: cell_data, facet: null, title: null},
+         let cell_svg = dispatch(cell_spec),
+         let pos = layout.facet_cell_pos(flay, i))
+        <g transform: svg.translate(pos.x, pos.y + flay.header_h);
+            <text x: sub_w / 2.0, y: -4.0,
+                  'text-anchor': "middle", 'font-size': 12, 'font-weight': "bold",
+                  fill: theme.title_color;
+                string(fk)
+            >
+            cell_svg
+        >
+    );
+
+    // background + title + cells
+    let bg = <rect width: int(flay.total_w), height: int(flay.total_h), fill: theme.background>;
+    let children0 = [bg, *cells];
+    let children = if (spec.title)
+        [*children0,
+         <text x: flay.total_w / 2.0, y: float(spec.padding.top) + 16.0,
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
+             spec.title
+         >]
+    else children0;
+
+    svg.svg_root(int(flay.total_w), int(flay.total_h), children)
+}
+
+// ============================================================
+// Concat composition (hconcat / vconcat)
+// ============================================================
+
+fn render_concat(spec) {
+    let direction = spec.concat;
+    let spacing = float(spec.spacing);
+    let subs = spec.children;
+    let n = len(subs);
+
+    // render each child chart independently (skip if already SVG)
+    let sub_svgs = for (s in subs)
+        if (s is element and name(s) == 'svg') s
+        else render_spec(s);
+
+    // compute sizes from rendered SVGs
+    let is_h = direction == "horizontal";
+    let sizes = for (s in sub_svgs) {
+        w: if (s.width) float(s.width) else 400.0,
+        h: if (s.height) float(s.height) else 300.0
+    };
+
+    // accumulate offsets
+    let items = position_subs(sizes, is_h, spacing, 0, 0.0, []);
+
+    // total dimensions
+    let total_w = if (is_h)
+        max(for (p in items) p.x + p.w)
+    else
+        max(for (p in items) p.w);
+    let total_h = if (is_h)
+        max(for (p in items) p.h)
+    else
+        max(for (p in items) p.y + p.h);
+
+    // wrap each sub-svg in a translated group
+    let groups = for (i in 0 to (n - 1))
+        <g transform: svg.translate(items[i].x, items[i].y);
+            sub_svgs[i]
+        >;
+
+    let bg = <rect width: int(total_w), height: int(total_h), fill: "white">;
+    svg.svg_root(int(total_w), int(total_h), [bg, *groups])
+}
+
+// recursive helper: accumulate positions for concat children
+fn position_subs(sizes, is_h, spacing, idx, offset, acc) {
+    if (idx >= len(sizes)) acc
+    else (
+        let s = sizes[idx],
+        let entry = if (is_h)
+            {x: offset, y: 0.0, w: s.w, h: s.h}
+        else
+            {x: 0.0, y: offset, w: s.w, h: s.h},
+        let next_offset = if (is_h) offset + s.w + spacing
+            else offset + s.h + spacing,
+        position_subs(sizes, is_h, spacing, idx + 1, next_offset, [*acc, entry])
+    )
+}
+
+// ============================================================
+// Repeat composition (parameterized chart grid)
+// ============================================================
+
+fn render_repeat(spec) {
+    let row_fields = if (spec.repeat_row) spec.repeat_row else [""];
+    let col_fields = if (spec.repeat_column) spec.repeat_column else [""];
+    let tmpl = spec.template;
+
+    let n_rows = len(row_fields);
+    let n_cols = len(col_fields);
+    let n_total = n_rows * n_cols;
+
+    // generate all charts in row-major order using flat index
+    let sub_charts = for (i in 0 to (n_total - 1),
+                          let ri = int(i / n_cols),
+                          let ci = i % n_cols,
+                          let rf = row_fields[ri],
+                          let cf = col_fields[ci])
+        substitute_and_render(tmpl, rf, cf);
+
+    // build each row as an hconcat of its column charts
+    let rows_svgs = for (ri in 0 to (n_rows - 1),
+                         let row_charts = for (ci in 0 to (n_cols - 1)) sub_charts[ri * n_cols + ci],
+                         let row_spec = {concat: "horizontal", spacing: 10.0, children: row_charts})
+        render_concat(row_spec);
+
+    if (n_rows == 1) rows_svgs[0]
+    else render_concat({concat: "vertical", spacing: 10.0, children: rows_svgs})
+}
+
+// substitute {repeat: "row"} and {repeat: "column"} in template and render
+fn substitute_and_render(tmpl, row_field, col_field) {
+    let spec = parse.parse_chart(tmpl);
+    let enc = spec.encoding;
+    let new_enc = substitute_encoding(enc, row_field, col_field);
+    let new_spec = {*:spec, encoding: new_enc};
+    dispatch(new_spec)
+}
+
+fn substitute_encoding(enc, row_field, col_field) {
+    let new_x = if (enc.x and enc.x.field and enc.x.field.repeat)
+        (let rf = if (enc.x.field.repeat == "column") col_field else row_field,
+         {*:enc.x, field: rf})
+    else enc.x;
+    let new_y = if (enc.y and enc.y.field and enc.y.field.repeat)
+        (let rf = if (enc.y.field.repeat == "column") col_field else row_field,
+         {*:enc.y, field: rf})
+    else enc.y;
+    {*:enc, x: new_x, y: new_y}
 }

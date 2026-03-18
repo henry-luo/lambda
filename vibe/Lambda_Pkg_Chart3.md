@@ -1324,9 +1324,9 @@ Foundation for multi-series and multi-view charts.
 | Stacking engine | `stack.ls` | — | Medium | ✅ Done |
 | Stacked bar mark | `mark.ls` | stack.ls | Low | ✅ Done |
 | Stacked area mark | `mark.ls` | stack.ls | Low | ✅ Done |
-| Facet composition | `chart.ls`, `layout.ls`, `parse.ls` | — | High | ❌ |
-| hconcat / vconcat | `chart.ls`, `layout.ls`, `parse.ls` | — | Medium | ❌ |
-| Repeat composition | `chart.ls`, `parse.ls` | concat | Medium | ❌ |
+| Facet composition | `chart.ls`, `layout.ls`, `parse.ls` | — | High | ✅ Done |
+| hconcat / vconcat | `chart.ls`, `layout.ls`, `parse.ls` | — | Medium | ✅ Done |
+| Repeat composition | `chart.ls`, `parse.ls` | concat | Medium | ✅ Done |
 | Grouped bar (x_offset) | `mark.ls`, `parse.ls` | — | Medium | ✅ Done |
 
 **Deliverable:** Stacked bar, stacked area, grouped bar, faceted small multiples, dashboard layouts.
@@ -1452,9 +1452,9 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | Stacked bar mark | ✅ Done | `bar()` in `mark.ls` uses `_y0`/`_y1` fields for stacked positioning |
 | Stacked area mark | ✅ Done | `area_mark()` in `mark.ls` uses `_y0`/`_y1` for stacked area baselines |
 | Grouped bar (x_offset) | ✅ Done | `x_offset` channel parsed in `parse.ls` and `vega.ls`; `bar()` subdivides band width by group count |
-| Facet composition | ❌ Not started | |
-| hconcat / vconcat | ❌ Not started | |
-| Repeat composition | ❌ Not started | |
+| Facet composition | ✅ Done | `render_faceted()` in `chart.ls`: data partitioned by field, grid layout via `compute_facet_layout()` in `layout.ls`, header labels, sub-chart dispatch |
+| hconcat / vconcat | ✅ Done | `render_concat()` in `chart.ls`: children rendered independently, positions accumulated via `position_subs()` helper, SVG translate |
+| Repeat composition | ✅ Done | `render_repeat()` in `chart.ls`: flat cartesian product via index math, `substitute_encoding()` replaces `{repeat: "column"/"row"}` field refs; `<row>/<column>` child syntax |
 
 ### Phase B — Statistical & Composite Marks
 

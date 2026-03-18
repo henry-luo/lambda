@@ -180,3 +180,54 @@ pub fn get_channel(encoding, channel_name: string) {
 pub fn has_channel(encoding, channel_name: string) bool {
     encoding[channel_name] != null
 }
+
+// ============================================================
+// Parse concat composition (<hconcat> or <vconcat>)
+// ============================================================
+
+pub fn parse_concat(concat_el) {
+    let direction = if (name(concat_el) == 'hconcat') "horizontal" else "vertical";
+    let spacing = if (concat_el.spacing) concat_el.spacing else 20;
+    let count = len(concat_el);
+    let children = (for (i in 0 to (count - 1),
+                         let child = concat_el[i]
+                         where child != null) parse_top(child));
+    {
+        concat: direction,
+        spacing: spacing,
+        children: children
+    }
+}
+
+// ============================================================
+// Parse repeat composition (<repeat>)
+// ============================================================
+
+pub fn parse_repeat(repeat_el) {
+    let count = len(repeat_el);
+    let children = for (i in 0 to (count - 1),
+                        let child = repeat_el[i]
+                        where child != null) child;
+    let row_el = (for (c in children where name(c) == 'row') c);
+    let col_el = (for (c in children where name(c) == 'column') c);
+    let row_fields = if (len(row_el) > 0) row_el[0][0] else null;
+    let col_fields = if (len(col_el) > 0) col_el[0][0] else null;
+    let template = (for (c in children where name(c) == 'chart') c);
+    let tmpl = if (len(template) > 0) template[0] else null;
+    {
+        repeat_row: row_fields,
+        repeat_column: col_fields,
+        template: tmpl
+    }
+}
+
+// ============================================================
+// Top-level parse: detects chart, hconcat, vconcat, or repeat
+// ============================================================
+
+pub fn parse_top(el) {
+    let tag = name(el);
+    if (tag == 'hconcat' or tag == 'vconcat') parse_concat(el)
+    else if (tag == 'repeat') parse_repeat(el)
+    else parse_chart(el)
+}
