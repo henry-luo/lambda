@@ -1484,7 +1484,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT) {
                 write_node_source(tp, pri_node->node);
-                // int32 literals don't use 'L' suffix
+                strbuf_append_str(tp->code_buf, "LL");  // Lambda INT is 56-bit; ensure C2MIR uses long long
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT64) {
                 write_node_source(tp, pri_node->node);
@@ -2445,7 +2445,20 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 if (is_range) {
                     strbuf_append_str(tp->code_buf, "=idx;\n");
                 } else if (is_any_array) {
-                    strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
+                    // generic Array with non-native nested type stores Item values; unbox if type is known
+                    bool arr_stores_items = is_generic_array &&
+                        nested_type_id != LMD_TYPE_INT && nested_type_id != LMD_TYPE_INT64 &&
+                        nested_type_id != LMD_TYPE_FLOAT;
+                    if (arr_stores_items && item_type->type_id != LMD_TYPE_ANY) {
+                        const TypeBoxInfo* info = get_box_info(item_type->type_id);
+                        if (info && info->unbox_fn) {
+                            strbuf_append_format(tp->code_buf, "=%s(arr->items[idx]);\n", info->unbox_fn);
+                        } else {
+                            strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
+                        }
+                    } else {
+                        strbuf_append_str(tp->code_buf, "=arr->items[idx];\n");
+                    }
                 } else {
                     strbuf_append_str(tp->code_buf, "=item_at(it,idx);\n");
                 }

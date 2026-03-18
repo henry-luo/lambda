@@ -353,7 +353,6 @@ const char* fn_to_cstr(Item itm) {
 } // extern "C"
 
 void expand_list(List *list, Arena* arena = nullptr) {
-    log_item({.list = list}, "list to expand");
     list->capacity = list->capacity ? list->capacity * 2 : 8;
 
     // Determine which allocator to use
@@ -416,7 +415,6 @@ void expand_list(List *list, Arena* arena = nullptr) {
             }
         }
     }
-    log_item({.list = list}, "list_expanded");
 }
 
 Array* array_pooled(Pool *pool) {
