@@ -107,6 +107,11 @@ fn parse_encoding(encoding_el) {
     let theta_el = find_child(encoding_el, 'theta', count);
     let text_el = find_child(encoding_el, 'text', count);
     let stroke_el = find_child(encoding_el, 'stroke', count);
+    let x_offset_el = find_child(encoding_el, 'x_offset', count);
+    let x2_el = find_child(encoding_el, 'x2', count);
+    let y2_el = find_child(encoding_el, 'y2', count);
+    let detail_el = find_child(encoding_el, 'detail', count);
+    let tooltip_el = find_child(encoding_el, 'tooltip', count);
     {
         x: if (x_el) parse_channel(x_el) else null,
         y: if (y_el) parse_channel(y_el) else null,
@@ -115,7 +120,12 @@ fn parse_encoding(encoding_el) {
         opacity: if (opacity_el) parse_channel(opacity_el) else null,
         theta: if (theta_el) parse_channel(theta_el) else null,
         text: if (text_el) parse_channel(text_el) else null,
-        stroke: if (stroke_el) parse_channel(stroke_el) else null
+        stroke: if (stroke_el) parse_channel(stroke_el) else null,
+        x_offset: if (x_offset_el) parse_channel(x_offset_el) else null,
+        x2: if (x2_el) parse_channel(x2_el) else null,
+        y2: if (y2_el) parse_channel(y2_el) else null,
+        detail: if (detail_el) parse_channel(detail_el) else null,
+        tooltip: if (tooltip_el) parse_channel(tooltip_el) else null
     }
 }
 

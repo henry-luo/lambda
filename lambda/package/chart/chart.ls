@@ -11,6 +11,7 @@ import layout: .layout
 import svg: .svg
 import color: .color
 import util: .util
+import stack: .stack
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -43,7 +44,7 @@ fn render_single(spec) {
     let raw_data = if (spec.data) spec.data else [];
 
     // apply transforms
-    let data = transform.apply_transforms(raw_data, spec.transform);
+    let data_transformed = transform.apply_transforms(raw_data, spec.transform);
 
     let enc = spec.encoding;
     let mark_spec = spec.mark;
@@ -56,14 +57,27 @@ fn render_single(spec) {
     let size_ch = parse.get_channel(enc, "size");
     let opacity_ch = parse.get_channel(enc, "opacity");
     let text_ch = parse.get_channel(enc, "text");
+    let x_offset_ch = parse.get_channel(enc, "x_offset");
 
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
     let color_field = if (color_ch) color_ch.field else null;
+    let x_offset_field = if (x_offset_ch) x_offset_ch.field else null;
 
     // determine if categorical/quantitative for position scales
     let x_type = if (x_ch) x_ch.dtype else "nominal";
     let y_type = if (y_ch) y_ch.dtype else "quantitative";
+
+    // detect and apply stacking
+    let stack_mode = detect_stack_mode(mark_type, y_ch, color_field, x_offset_field);
+    let data = if (stack_mode and x_field and y_field and color_field)
+        stack.apply_stack(data_transformed, y_field, color_field, x_field, stack_mode)
+    else data_transformed;
+
+    // x_offset categories for grouped bars
+    let x_offset_cats = if (x_offset_field)
+        util.unique_vals(data | ~[x_offset_field])
+    else null;
 
     // build color scale
     let color_scale = if (color_ch) scale.infer_color_scale(color_ch, data) else null;
@@ -74,12 +88,16 @@ fn render_single(spec) {
 
     // compute layout (need rough scales first for axis size estimation)
     let temp_x_scale = build_position_scale(x_ch, data, 0.0, float(spec.width), mark_type, true);
-    let temp_y_scale = build_position_scale(y_ch, data, float(spec.height), 0.0, mark_type, false);
+    let temp_y_scale = if (stack_mode)
+        build_stacked_y_scale(data, float(spec.height), 0.0, stack_mode)
+    else build_position_scale(y_ch, data, float(spec.height), 0.0, mark_type, false);
     let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
 
     // rebuild scales with actual plot dimensions
     let x_scale = build_position_scale(x_ch, data, 0.0, lay.plot_w, mark_type, true);
-    let y_scale = build_position_scale(y_ch, data, lay.plot_h, 0.0, mark_type, false);
+    let y_scale = if (stack_mode)
+        build_stacked_y_scale(data, lay.plot_h, 0.0, stack_mode)
+    else build_position_scale(y_ch, data, lay.plot_h, 0.0, mark_type, false);
 
     // build size scale if needed
     let size_scale = if (size_ch and size_ch.field)
@@ -103,7 +121,10 @@ fn render_single(spec) {
         opacity_scale: opacity_scale,
         opacity_field: if (opacity_ch) opacity_ch.field else null,
         x_field: x_field, y_field: y_field,
-        text_field: if (text_ch) text_ch.field else null
+        text_field: if (text_ch) text_ch.field else null,
+        is_stacked: stack_mode != null,
+        x_offset_field: x_offset_field,
+        x_offset_cats: x_offset_cats
     };
     let marks_el = render_mark(mark_type, data, mark_ctx, mark_spec);
 
@@ -321,6 +342,26 @@ fn build_position_scale(channel, data, rlo, rhi, mark_type: string, is_x: bool) 
             }
         }
     }
+}
+
+// ============================================================
+// Stacking helpers
+// ============================================================
+
+fn detect_stack_mode(mark_type, y_ch, color_field, x_offset_field) {
+    let s = if (y_ch) y_ch.stack else null
+    if (s == "zero" or s == "normalize" or s == "center") s
+    else if (s == false or s == "none") null
+    else if ((mark_type == "bar" or mark_type == "area") and color_field and not x_offset_field) "zero"
+    else null
+}
+
+fn build_stacked_y_scale(data, rlo, rhi, mode) {
+    let y0_vals = data | float(~["_y0"])
+    let y1_vals = data | float(~["_y1"])
+    let all_vals = [*y0_vals, *y1_vals]
+    let include_zero = mode != "center"
+    scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
 }
 
 // ============================================================

@@ -21,6 +21,10 @@ pub fn bar(data, ctx, mark_config) {
     let opacity_field = ctx.opacity_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let is_stacked = if (ctx.is_stacked) ctx.is_stacked else false;
+    let x_offset_field = if (ctx.x_offset_field) ctx.x_offset_field else null;
+    let x_offset_cats = if (ctx.x_offset_cats) ctx.x_offset_cats else null;
+    let n_groups = if (x_offset_cats) len(x_offset_cats) else 1;
     let fill = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let base_opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let rx = if (mark_config and mark_config.corner_radius) mark_config.corner_radius else 0;
@@ -29,16 +33,29 @@ pub fn bar(data, ctx, mark_config) {
         let x_val = d[x_field],
         let y_val = float(d[y_field]),
         let x_pos = float(scale.scale_apply(x_scale, x_val)),
-        let y_pos = float(scale.scale_apply(y_scale, y_val)),
+        let raw_bar_w = if (x_scale.bandwidth) x_scale.bandwidth else 20.0,
+        let sub_gap = if (n_groups > 1) 2.0 else 0.0,
+        let bar_w = if (n_groups > 1)
+            (raw_bar_w - sub_gap * float(n_groups - 1)) / float(n_groups)
+        else raw_bar_w,
+        let offset_idx = if (x_offset_field and x_offset_cats)
+            find_cat_index(x_offset_cats, d[x_offset_field])
+        else 0,
+        let x_final = x_pos + float(offset_idx) * (bar_w + sub_gap),
+        let y1_pos = if (is_stacked)
+            float(scale.scale_apply(y_scale, float(d["_y1"])))
+        else float(scale.scale_apply(y_scale, y_val)),
+        let y0_pos = if (is_stacked)
+            float(scale.scale_apply(y_scale, float(d["_y0"])))
+        else plot_h,
+        let bar_h = y0_pos - y1_pos,
         let bar_fill = if (color_scale and color_field)
             scale.scale_apply(color_scale, d[color_field])
         else fill,
         let bar_opacity = if (opacity_scale and opacity_field)
             float(scale.scale_apply(opacity_scale, float(d[opacity_field])))
         else base_opacity,
-        let bar_w = if (x_scale.bandwidth) x_scale.bandwidth else 20.0,
-        let bar_h = plot_h - y_pos,
-        <rect x: x_pos, y: y_pos, width: bar_w, height: bar_h,
+        <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
               fill: bar_fill, opacity: bar_opacity, rx: rx>
     ));
 
@@ -132,6 +149,7 @@ pub fn area_mark(data, ctx, mark_config) {
     let color_field = ctx.color_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let is_stacked = if (ctx.is_stacked) ctx.is_stacked else false;
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 0.5;
 
@@ -147,13 +165,18 @@ pub fn area_mark(data, ctx, mark_config) {
     let area_elements = (for (s in series) (
         let top_points = (for (d in s.items) (
             let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
-            let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
+            let y_pos = if (is_stacked)
+                float(scale.scale_apply(y_scale, float(d["_y1"])))
+            else float(scale.scale_apply(y_scale, d[y_field])),
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
             [x_pos + bw, y_pos])),
         let bottom_points = (for (d in s.items) (
             let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
-            [x_pos + bw, plot_h])),
+            let y_bottom = if (is_stacked)
+                float(scale.scale_apply(y_scale, float(d["_y0"])))
+            else plot_h,
+            [x_pos + bw, y_bottom])),
         let d = svg.area_path(top_points, bottom_points),
         <path d: d, fill: s.color, opacity: opacity, stroke: "none">
     ));
@@ -334,4 +357,14 @@ pub fn tick_mark(data, ctx, mark_config) {
     ));
 
     svg.group_class("marks ticks", ticks)
+}
+
+// ============================================================
+// Helper: find index of value in category array
+// ============================================================
+
+fn find_cat_index(cats, val) {
+    let matches = (for (i in 0 to (len(cats) - 1))
+        if (cats[i] == val) i else null) that (~ != null)
+    if (len(matches) > 0) matches[0] else 0
 }
