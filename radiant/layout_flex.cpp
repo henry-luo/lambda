@@ -1058,6 +1058,51 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
     log_info("Phase 4: All flex lengths resolved");
 
+    // Phase 4b: Update container main axis size for shrink-to-fit row flex containers.
+    // The SHRINK-TO-FIT RECALC earlier computed container width from item widths BEFORE
+    // Phase 4 ran. Phase 4 clamps items to their automatic minimum (e.g. min-content for
+    // flex-basis:0 items), which can increase item sizes. We must recompute the container
+    // width here so it equals the sum of final item main sizes (+ padding+border).
+    // Only applies to: row flex, indefinite main axis (no explicit width), not wrapping.
+    if (is_main_axis_horizontal(flex_layout) && flex_layout->main_axis_is_indefinite &&
+        flex_layout->wrap == CSS_VALUE_NOWRAP) {
+        float total_final_width = 0.0f;
+        int final_item_count = 0;
+        for (int i = 0; i < line_count; i++) {
+            FlexLineInfo* line = &flex_layout->lines[i];
+            for (int j = 0; j < line->item_count; j++) {
+                ViewElement* item = (ViewElement*)line->items[j]->as_element();
+                if (item) {
+                    total_final_width += (float)item->width;
+                    if (item->bound) {
+                        total_final_width += item->bound->margin.left + item->bound->margin.right;
+                    }
+                    final_item_count++;
+                }
+            }
+        }
+        // Add column gaps between items
+        if (final_item_count > 1) {
+            total_final_width += flex_layout->column_gap * (final_item_count - 1);
+        }
+        // Only update if the final sum is larger than the current container width
+        // (items can only be clamped upward by min-content, never reduced by Phase 4 here)
+        float padding_border_h = 0.0f;
+        if (container->bound) {
+            padding_border_h = container->bound->padding.left + container->bound->padding.right;
+            if (container->bound->border) {
+                padding_border_h += container->bound->border->width.left + container->bound->border->width.right;
+            }
+        }
+        float new_container_width = total_final_width + padding_border_h;
+        if (new_container_width > container->width) {
+            log_debug("Phase 4b: shrink-to-fit width updated %.1f -> %.1f (sum of final item widths=%.1f + padding+border=%.1f)",
+                      container->width, new_container_width, total_final_width, padding_border_h);
+            flex_layout->main_axis_size = total_final_width;
+            container->width = (int)new_container_width;
+        }
+    }
+
     // Phase 4.5: Determine hypothetical cross sizes for each item
     // CSS Flexbox §9.4: After main sizes are resolved, determine cross sizes
     log_debug("Phase 4.5: About to determine hypothetical cross sizes");
@@ -1659,23 +1704,36 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // This is used when this flex container participates in parent's baseline alignment
     if (line_count > 0 && container->embed && container->embed->flex) {
         FlexLineInfo* first_line = &flex_layout->lines[0];
-        // Check if first line has baseline-aligned items
-        bool has_baseline_child = false;
-        for (int i = 0; i < first_line->item_count; i++) {
-            ViewElement* item = (ViewElement*)first_line->items[i]->as_element();
-            if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
-                has_baseline_child = true;
-                break;
+
+        // Check if first line has baseline-aligned items (via align-self:baseline or container align-items:baseline)
+        bool has_baseline_child = (flex_layout->align_items == ALIGN_BASELINE);
+        if (!has_baseline_child) {
+            for (int i = 0; i < first_line->item_count; i++) {
+                ViewElement* item = (ViewElement*)first_line->items[i]->as_element();
+                if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
+                    has_baseline_child = true;
+                    break;
+                }
             }
         }
-        // Also check container's align-items: baseline
-        if (!has_baseline_child && flex_layout->align_items == ALIGN_BASELINE) {
-            has_baseline_child = true;
+
+        // Compute the first line's baseline: the max baseline of all items participating
+        // in baseline alignment in the first line. This is needed so parent containers
+        // that have this flex container as a flex item can correctly compute alignment.
+        int computed_first_baseline = 0;
+        if (has_baseline_child && is_main_axis_horizontal(flex_layout)) {
+            computed_first_baseline = (int)find_max_baseline(first_line, flex_layout->align_items);
+        } else if (first_line->item_count > 0) {
+            // Default: use the first line's cross size (height) as the baseline
+            // This is the CSS spec fallback: synthesize baseline from the bottom of the content box
+            // For now, use first line cross size as a reasonable default
+            computed_first_baseline = (int)first_line->cross_size;
         }
-        container->embed->flex->first_baseline = first_line->baseline;
+        first_line->baseline = computed_first_baseline;
+        container->embed->flex->first_baseline = computed_first_baseline;
         container->embed->flex->has_baseline_child = has_baseline_child;
         log_debug("Phase 9.5: Stored first_baseline=%d, has_baseline_child=%d",
-                  first_line->baseline, has_baseline_child);
+                  computed_first_baseline, has_baseline_child);
     }
 
     // Note: wrap-reverse item positioning is now handled in align_items_cross_axis
