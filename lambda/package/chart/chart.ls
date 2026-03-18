@@ -44,25 +44,33 @@ fn render_single(spec) {
     let raw_data = if (spec.data) spec.data else [];
 
     // apply transforms
-    let data_transformed = transform.apply_transforms(raw_data, spec.transform);
+    let data_transformed0 = transform.apply_transforms(raw_data, spec.transform);
 
     let enc = spec.encoding;
     let mark_spec = spec.mark;
     let mark_type = if (mark_spec) mark_spec.kind else "point";
 
     // extract encoding channels
-    let x_ch = parse.get_channel(enc, "x");
-    let y_ch = parse.get_channel(enc, "y");
+    let x_ch0 = parse.get_channel(enc, "x");
+    let y_ch0 = parse.get_channel(enc, "y");
+
+    // histogram auto-transform: if x has bin:true and y has aggregate:"count"
+    let hist = apply_histogram_transform(data_transformed0, x_ch0, y_ch0);
+    let data_transformed = hist.data;
+    let x_ch = hist.x_ch;
+    let y_ch = hist.y_ch;
     let color_ch = parse.get_channel(enc, "color");
     let size_ch = parse.get_channel(enc, "size");
     let opacity_ch = parse.get_channel(enc, "opacity");
     let text_ch = parse.get_channel(enc, "text");
     let x_offset_ch = parse.get_channel(enc, "x_offset");
+    let y2_ch = parse.get_channel(enc, "y2");
 
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
     let color_field = if (color_ch) color_ch.field else null;
     let x_offset_field = if (x_offset_ch) x_offset_ch.field else null;
+    let y2_field = if (y2_ch) y2_ch.field else null;
 
     // determine if categorical/quantitative for position scales
     let x_type = if (x_ch) x_ch.dtype else "nominal";
@@ -90,14 +98,14 @@ fn render_single(spec) {
     let temp_x_scale = build_position_scale(x_ch, data, 0.0, float(spec.width), mark_type, true);
     let temp_y_scale = if (stack_mode)
         build_stacked_y_scale(data, float(spec.height), 0.0, stack_mode)
-    else build_position_scale(y_ch, data, float(spec.height), 0.0, mark_type, false);
+    else build_position_scale_y2(y_ch, data, float(spec.height), 0.0, mark_type, y2_field);
     let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
 
     // rebuild scales with actual plot dimensions
     let x_scale = build_position_scale(x_ch, data, 0.0, lay.plot_w, mark_type, true);
     let y_scale = if (stack_mode)
         build_stacked_y_scale(data, lay.plot_h, 0.0, stack_mode)
-    else build_position_scale(y_ch, data, lay.plot_h, 0.0, mark_type, false);
+    else build_position_scale_y2(y_ch, data, lay.plot_h, 0.0, mark_type, y2_field);
 
     // build size scale if needed
     let size_scale = if (size_ch and size_ch.field)
@@ -121,6 +129,7 @@ fn render_single(spec) {
         opacity_scale: opacity_scale,
         opacity_field: if (opacity_ch) opacity_ch.field else null,
         x_field: x_field, y_field: y_field,
+        y2_field: y2_field,
         text_field: if (text_ch) text_ch.field else null,
         is_stacked: stack_mode != null,
         x_offset_field: x_offset_field,
@@ -333,14 +342,55 @@ fn build_position_scale(channel, data, rlo, rhi, mark_type: string, is_x: bool) 
             } else {
                 // nominal or ordinal
                 let cats = util.unique_vals(values)
-                if (mark_type == "bar" and is_x)
+                if ((mark_type == "bar" or mark_type == "rect" or mark_type == "boxplot") and is_x)
                     scale.band_scale(cats, rlo, rhi, 4.0)
-                else if (mark_type == "bar" and not is_x)
+                else if ((mark_type == "bar" or mark_type == "rect") and not is_x)
                     scale.band_scale(cats, rlo, rhi, 4.0)
                 else
                     scale.point_scale(cats, rlo, rhi, 20.0)
             }
         }
+    }
+}
+
+// ============================================================
+// Histogram auto-transform (bin + count)
+// ============================================================
+
+fn apply_histogram_transform(data, x_ch, y_ch) {
+    let has_bin = x_ch and x_ch.bin == true;
+    let has_count = y_ch and y_ch.aggregate == "count";
+    if (not has_bin or not has_count) {
+        {data: data, x_ch: x_ch, y_ch: y_ch}
+    } else {
+        let field = x_ch.field;
+        let bin_field = field ++ "_bin";
+        let bin_end = bin_field ++ "_end";
+        let maxbins = if (x_ch.bin != true and x_ch.bin.maxbins) x_ch.bin.maxbins else 10;
+        // apply binning
+        let values = data | float(~[field]);
+        let vmin = min(values);
+        let vmax = max(values);
+        let range_span = vmax - vmin;
+        let step = util.nice_num(range_span / float(maxbins), true);
+        let binned = for (d in data) (
+            let v = float(d[field]),
+            let bs = floor(v / step) * step,
+            let be = bs + step,
+            // add both fields in one map() call to avoid chained add_field issue
+            let pairs = for (k, val in d) for (x in [k, val]) x,
+            map([*pairs, bin_field, bs, bin_end, be])
+        );
+        // aggregate: count per bin
+        let bin_keys = util.unique_vals(binned | string(~[bin_field]));
+        let counted = for (bk in bin_keys) (
+            let items = binned that string(~[bin_field]) == bk,
+            map([bin_field, items[0][bin_field], bin_end, items[0][bin_end], "_count", len(items)])
+        );
+        // override channels: x→nominal on bin_field, y→quantitative on _count
+        let new_x = {*: x_ch, field: bin_field, dtype: "ordinal", bin: null};
+        let new_y = {*: y_ch, field: "_count", dtype: "quantitative", aggregate: null};
+        {data: counted, x_ch: new_x, y_ch: new_y}
     }
 }
 
@@ -364,6 +414,25 @@ fn build_stacked_y_scale(data, rlo, rhi, mode) {
     scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
 }
 
+// build y scale that also considers y2_field for dual-value marks
+fn build_position_scale_y2(y_ch, data, rlo, rhi, mark_type, y2_field) {
+    if (not y2_field) build_position_scale(y_ch, data, rlo, rhi, mark_type, false)
+    else if (not y_ch) null
+    else {
+        let field_name = y_ch.field
+        if not field_name { null }
+        else {
+            let y_vals = data | float(~[field_name])
+            let y2_vals = data | float(~[y2_field])
+            let all_vals = [*y_vals, *y2_vals]
+            let include_zero = if (mark_type == "bar") true
+                else if (y_ch.zero != null) y_ch.zero
+                else false
+            scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
+        }
+    }
+}
+
 // ============================================================
 // Dispatch mark rendering
 // ============================================================
@@ -383,6 +452,14 @@ fn render_mark(mark_type, data, ctx, mark_spec) {
         mark.rule_mark(data, ctx, mark_spec)
     else if (mark_type == "tick")
         mark.tick_mark(data, ctx, mark_spec)
+    else if (mark_type == "boxplot")
+        mark.boxplot_mark(data, ctx, mark_spec)
+    else if (mark_type == "errorbar")
+        mark.errorbar_mark(data, ctx, mark_spec)
+    else if (mark_type == "errorband")
+        mark.errorband_mark(data, ctx, mark_spec)
+    else if (mark_type == "rect")
+        mark.rect_mark(data, ctx, mark_spec)
     else
         // default: point
         mark.point_mark(data, ctx, mark_spec)
