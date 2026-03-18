@@ -1454,6 +1454,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     }
     else {
         log_debug("view has no child");
+        // If this block has an embedded image but no children (e.g. SVG/image doc root),
+        // render the image content directly
+        if (block->embed && block->embed->img) {
+            render_image_content(rdcon, block);
+        }
     }
 
     // render scrollbars
