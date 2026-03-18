@@ -1454,11 +1454,6 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     }
     else {
         log_debug("view has no child");
-        // If this block has an embedded image but no children (e.g. SVG/image doc root),
-        // render the image content directly
-        if (block->embed && block->embed->img) {
-            render_image_content(rdcon, block);
-        }
     }
 
     // render scrollbars
@@ -2162,7 +2157,12 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("Render root view");
-        render_block_view(&rdcon, (ViewBlock*)root_view);
+        ViewBlock* root_block = (ViewBlock*)root_view;
+        if (root_block->embed && root_block->embed->img) {
+            render_image_view(&rdcon, root_block);
+        } else {
+            render_block_view(&rdcon, root_block);
+        }
         // render positioned children
         if (((ViewBlock*)root_view)->position) {
             log_debug("render absolute/fixed positioned children of root view");
