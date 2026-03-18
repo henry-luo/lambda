@@ -671,6 +671,16 @@ typedef struct Transpiler : Script {
 
     // Variadic function body context: when true, return/raise must emit restore_vargs
     bool in_variadic_body;
+
+    // Built-in module global imports: when true, functions from this module
+    // can be called without prefix (e.g., `import math;` allows `sqrt(x)`)
+    bool builtin_import_math;
+    bool builtin_import_io;
+
+    // Built-in module aliased imports: non-null when module imported with alias
+    // (e.g., `import m:math;` sets builtin_alias_math to "m")
+    String* builtin_alias_math;
+    String* builtin_alias_io;
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

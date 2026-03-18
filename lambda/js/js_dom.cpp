@@ -1165,7 +1165,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         if (node->is_text()) {
             DomText* text_node = node->as_text();
             if (text_node->text && text_node->length > 0) {
-                String* s = heap_strcpy((char*)text_node->text, (int)text_node->length);
+                String* s = heap_strcpy((char*)text_node->text, text_node->length);
                 return (Item){.item = s2it(s)};
             }
             return (Item){.item = s2it(heap_create_name(""))};
@@ -1281,7 +1281,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         const char* new_text = fn_to_cstr(value);
         if (new_text) {
             size_t len = strlen(new_text);
-            String* s = heap_strcpy((char*)new_text, (int)len);
+            String* s = heap_strcpy((char*)new_text, len);
             text_node->native_string = s;
             text_node->text = s->chars;
             text_node->length = len;
@@ -1714,7 +1714,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                         memcpy(combined + text->length, next_text->text, next_text->length);
                     combined[new_len] = '\0';
                     // update main text node
-                    String* s = heap_strcpy(combined, (int)new_len);
+                    String* s = heap_strcpy(combined, new_len);
                     text->native_string = s;
                     text->text = s->chars;
                     text->length = new_len;

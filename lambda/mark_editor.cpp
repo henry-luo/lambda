@@ -1614,7 +1614,7 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
 // ARRAY OPERATIONS
 //==============================================================================
 
-Item MarkEditor::array_set(Item array, int index, Item value) {
+Item MarkEditor::array_set(Item array, int64_t index, Item value) {
     TypeId array_type = get_type_id(array);
 
     if (array_type == LMD_TYPE_ARRAY) {
@@ -1657,7 +1657,7 @@ Item MarkEditor::array_set(Item array, int index, Item value) {
     return ItemError;
 }
 
-Item MarkEditor::array_insert(Item array, int index, Item value) {
+Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
     TypeId array_type = get_type_id(array);
 
     if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT || array_type == LMD_TYPE_LIST) {
@@ -1731,7 +1731,7 @@ Item MarkEditor::array_insert(Item array, int index, Item value) {
     return ItemError;
 }
 
-Item MarkEditor::array_delete(Item array, int index) {
+Item MarkEditor::array_delete(Item array, int64_t index) {
     TypeId array_type = get_type_id(array);
 
     if (array_type == LMD_TYPE_ARRAY) {

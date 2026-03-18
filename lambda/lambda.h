@@ -471,7 +471,7 @@ struct Container {
 #endif
 
 Range* range();
-long range_get(Range *range, int index);
+long range_get(Range *range, int64_t index);
 
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
@@ -557,7 +557,7 @@ void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for ma
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings
-String* heap_strcpy(char* src, int len);
+String* heap_strcpy(char* src, int64_t len);
 // Symbol creation for runtime symbols
 Symbol* heap_create_symbol(const char* symbol, size_t len);
 #ifdef __cplusplus
@@ -869,37 +869,37 @@ typedef struct Context {
     ArrayInt64* array_int64();
     ArrayFloat* array_float();
 
-    ArrayInt* array_int_new(int length);
-    ArrayInt64* array_int64_new(int length);
-    ArrayFloat* array_float_new(int length);
+    ArrayInt* array_int_new(int64_t length);
+    ArrayInt64* array_int64_new(int64_t length);
+    ArrayFloat* array_float_new(int64_t length);
 
-    void array_float_set(ArrayFloat *arr, int index, double value);
-    void array_int_set(ArrayInt *arr, int index, int64_t value);
+    void array_float_set(ArrayFloat *arr, int64_t index, double value);
+    void array_int_set(ArrayInt *arr, int64_t index, int64_t value);
 
-    Map* map(int type_index);
-    Map* map_with_data(int type_index);
-    Element* elmt(int type_index);
-    Object* object(int type_index);
-    Object* object_with_data(int type_index);
+    Map* map(int64_t type_index);
+    Map* map_with_data(int64_t type_index);
+    Element* elmt(int64_t type_index);
+    Object* object(int64_t type_index);
+    Object* object_with_data(int64_t type_index);
     Object* object_fill(Object* obj, ...);
 
     // these getters use runtime num_stack
-    Item array_get(Array *array, int index);
-    Item array_int_get(ArrayInt *array, int index);
-    Item array_int64_get(ArrayInt64* array, int index);
-    Item array_float_get(ArrayFloat* array, int index);
+    Item array_get(Array *array, int64_t index);
+    Item array_int_get(ArrayInt *array, int64_t index);
+    Item array_int64_get(ArrayInt64* array, int64_t index);
+    Item array_float_get(ArrayFloat* array, int64_t index);
     // fast-path getters: return native types, skip boxing
-    int64_t array_int_get_raw(ArrayInt *array, int index);
-    int64_t array_int64_get_raw(ArrayInt64 *array, int index);
-    double array_float_get_value(ArrayFloat *arr, int index);
-    Item list_get(List *list, int index);
+    int64_t array_int_get_raw(ArrayInt *array, int64_t index);
+    int64_t array_int64_get_raw(ArrayInt64 *array, int64_t index);
+    double array_float_get_value(ArrayFloat *arr, int64_t index);
+    Item list_get(List *list, int64_t index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
     void object_type_set_method(int64_t type_index, const char* method_name,
                                 fn_ptr func_ptr, int64_t arity, int64_t is_proc);
     void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func);
-    Item item_at(Item data, int index);
+    Item item_at(Item data, int64_t index);
     Item item_attr(Item data, const char* key);  // get attribute by name
     struct _ArrayList* item_keys(Item data);     // get list of attribute names
 
@@ -1155,8 +1155,8 @@ typedef struct Context {
     Function* to_fn(fn_ptr ptr);
     Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
     Type* base_type(TypeId type_id);
-    Type* const_type(int type_index);
-    TypePattern* const_pattern(int pattern_index);  // retrieve compiled pattern by index
+    Type* const_type(int64_t type_index);
+    TypePattern* const_pattern(int64_t pattern_index);  // retrieve compiled pattern by index
 
     // returns the type of the item
     Type* fn_type(Item item);
@@ -1225,7 +1225,7 @@ typedef struct Context {
     int64_t fn_shr(int64_t a, int64_t b);
 
     // compound assignment support (procedural only)
-    void fn_array_set(Array* arr, int index, Item value);
+    void fn_array_set(Array* arr, int64_t index, Item value);
     void fn_map_set(Item map, Item key, Item value);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)

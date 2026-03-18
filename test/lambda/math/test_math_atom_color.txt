@@ -1,0 +1,15 @@
+"===== MATH ATOM COLOR TESTS =====1. textcolor type:mord2. textcolor has el:"
+true
+"3. textcolor has style:"
+true
+"4. hex color has el:"
+true
+"5. color type:mord6. colorbox type:ord7. colorbox has bg:"
+true
+"8. colorbox has padding:"
+true
+"9. colorbox extra width:"
+true
+"10. null content type:ord11. no color has el:"
+true
+"===== ALL MATH ATOM COLOR TESTS DONE ====="

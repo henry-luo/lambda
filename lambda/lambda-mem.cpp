@@ -167,7 +167,7 @@ extern "C" void* heap_data_calloc(size_t size) {
 // create a content string by copying from source (NOT pooled - arena allocated)
 // use this for user content, text data, or any non-structural strings
 // declared extern "C" to allow calling from C code (path.c)
-extern "C" String* heap_strcpy(char* src, int len) {
+extern "C" String* heap_strcpy(char* src, int64_t len) {
     String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
     memcpy(str->chars, src, len);  // Safe copy with explicit length
     str->chars[len] = '\0';        // Explicit null termination

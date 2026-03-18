@@ -1,0 +1,7 @@
+"===== LATEX TO_HTML TESTS =====1. span:<span 0="hello">hello</span>2. class:<div class="foo" 0="text">text</div>3. br:<br>4. hr:<hr>5. nested:<div 0="&lt;p &quot;inner&quot;&gt;"><p 0="inner">inner</p></div>6. style:<span style="color:red" 0="styled">styled</span>7. string:plain text8. escape lt:"
+true
+"9. escape amp:"
+true
+"10. empty div:<div></div>11. multi:<p 0="a" 1="&lt;em &quot;b&quot;&gt;" 2="c">a<em 0="b">b</em>c</p>12. id attr:"
+true
+"===== ALL LATEX TO_HTML TESTS DONE ====="

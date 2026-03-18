@@ -1,0 +1,29 @@
+"===== MATH OPTIMIZE TESTS =====1. null:"
+true
+"2. single el:x3. single height:"
+0.7
+"4. single type:mord5. merged child count:"
+1
+"6. merged text:"
+<span class: "mord"
+  "xy">
+"7. no merge count:"
+1
+"8. styled no merge:"
+1
+"9. preserve height:"
+0.8
+"10. preserve depth:"
+0.2
+"11. preserve width:"
+0.6
+"12. preserve italic:"
+0.1
+"13. preserve skew:"
+0.05
+"14. triple merge count:"
+1
+"15. triple merge text:"
+<span class: "mord"
+  "abc">
+"===== ALL MATH OPTIMIZE TESTS DONE ====="

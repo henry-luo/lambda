@@ -27,6 +27,9 @@ AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 // Forward declarations for pipe expression building
 AstNode* build_current_expr(Transpiler* tp, TSNode node);
 
+// Forward declaration for builtin module resolution
+static const char* resolve_builtin_module(Transpiler* tp, StrView* name);
+
 // Forward declaration for type building (used by query expressions)
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
 
@@ -1007,8 +1010,10 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     return (AstNode*)sym_node;
                 }
 
-                // Check for math module constants: math.pi, math.e
-                if (ns_ident->name->len == 4 && memcmp(ns_ident->name->chars, "math", 4) == 0) {
+                // Check for math module constants: math.pi, math.e (also via alias)
+                StrView ns_view = {ns_ident->name->chars, (size_t)ns_ident->name->len};
+                const char* ns_resolved = resolve_builtin_module(tp, &ns_view);
+                if (ns_resolved && strcmp(ns_resolved, "math") == 0) {
                     double const_val = 0.0;
                     bool is_math_const = false;
                     if (id_node->name->len == 2 && memcmp(id_node->name->chars, "pi", 2) == 0) {
@@ -1180,6 +1185,21 @@ static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
     return false;
 }
 
+// Check if an identifier matches a built-in module name or a registered alias for one.
+// Returns the real module name ("math" or "io") if matched, or NULL if not a builtin module.
+static const char* resolve_builtin_module(Transpiler* tp, StrView* name) {
+    if (strview_equal(name, "math")) return "math";
+    if (strview_equal(name, "io")) return "io";
+    // check aliases
+    if (tp->builtin_alias_math && (int)name->length == tp->builtin_alias_math->len
+        && strncmp(name->str, tp->builtin_alias_math->chars, name->length) == 0)
+        return "math";
+    if (tp->builtin_alias_io && (int)name->length == tp->builtin_alias_io->len
+        && strncmp(name->str, tp->builtin_alias_io->chars, name->length) == 0)
+        return "io";
+    return NULL;
+}
+
 AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     log_debug("build call expr: %d", symbol);
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp,
@@ -1234,9 +1254,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     TypeId obj_type_id = LMD_TYPE_ANY;
 
     // Check if this is a built-in module call (e.g., fs.copy())
-    // Built-in modules are identified by name and don't require building the object
+    // Built-in modules are identified by name (or alias) and don't require building the object
     bool is_builtin_module_call = false;
     StrView module_name = {0};
+    const char* resolved_module = NULL;  // real module name (e.g., "math" even when alias is "m")
     if (is_method_call && !ts_node_is_null(object_node)) {
         // Check if object is a simple identifier that matches a built-in module
         TSSymbol obj_symbol = ts_node_symbol(object_node);
@@ -1244,9 +1265,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             TSNode inner = ts_node_child(object_node, 0);
             if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
                 module_name = ts_node_source(tp, inner);
-                // Check for known built-in modules, but only if no user-defined
-                // qualified name (e.g., from aliased import) matches module.method
-                if (strview_equal(&module_name, "io") || strview_equal(&module_name, "math")) {
+                resolved_module = resolve_builtin_module(tp, &module_name);
+                if (resolved_module) {
                     // Check if module.method is already defined via aliased import
                     char qbuf[256];
                     snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
@@ -1256,17 +1276,19 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                     NameEntry* qualified = lookup_name(tp, qview);
                     if (qualified == NULL) {
                         is_builtin_module_call = true;
-                        log_debug("builtin module call detected: %.*s.%.*s()",
+                        log_debug("builtin module call detected: %.*s.%.*s() -> %s",
                             (int)module_name.length, module_name.str,
-                            (int)method_name.length, method_name.str);
+                            (int)method_name.length, method_name.str, resolved_module);
                     } else {
                         log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                        resolved_module = NULL;
                     }
                 }
             }
         } else if (obj_symbol == sym_identifier) {
             module_name = ts_node_source(tp, object_node);
-            if (strview_equal(&module_name, "io") || strview_equal(&module_name, "math")) {
+            resolved_module = resolve_builtin_module(tp, &module_name);
+            if (resolved_module) {
                 char qbuf[256];
                 snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                     (int)module_name.length, module_name.str,
@@ -1275,11 +1297,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 NameEntry* qualified = lookup_name(tp, qview);
                 if (qualified == NULL) {
                     is_builtin_module_call = true;
-                    log_debug("builtin module call detected: %.*s.%.*s()",
+                    log_debug("builtin module call detected: %.*s.%.*s() -> %s",
                         (int)module_name.length, module_name.str,
-                        (int)method_name.length, method_name.str);
+                        (int)method_name.length, method_name.str, resolved_module);
                 } else {
                     log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                    resolved_module = NULL;
                 }
             }
         }
@@ -1342,14 +1365,15 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     StrView func_name = ts_node_source(tp, function_node);
     SysFuncInfo* sys_func_info = NULL;
 
-    // For built-in module calls, construct the full function name (e.g., fs_copy)
+    // For built-in module calls, construct the full function name (e.g., math_sqrt)
+    // Use resolved_module (real name) instead of module_name (may be alias)
     if (is_aliased_import_call) {
         // Already resolved above - skip sys func and regular call resolution
     }
     else if (is_builtin_module_call) {
         char full_name[128];
-        snprintf(full_name, sizeof(full_name), "%.*s_%.*s",
-            (int)module_name.length, module_name.str,
+        snprintf(full_name, sizeof(full_name), "%s_%.*s",
+            resolved_module,
             (int)method_name.length, method_name.str);
         StrView full_name_view = {full_name, strlen(full_name)};
         sys_func_info = get_sys_func_info(&full_name_view, arg_count);
@@ -1419,6 +1443,28 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             log_debug("pipe inject: lookup %.*s with %d args (was %d)",
                 (int)func_name.length, func_name.str, lookup_arg_count, arg_count);
             ast_node->pipe_inject = true;
+        }
+        // Global import fallback: if `import math;` or `import io;` was used,
+        // try prefixing the function name with the module name (e.g., sqrt -> math_sqrt)
+        if (!sys_func_info) {
+            const char* modules[] = { NULL, NULL };
+            int mod_count = 0;
+            if (tp->builtin_import_math) modules[mod_count++] = "math";
+            if (tp->builtin_import_io)   modules[mod_count++] = "io";
+            for (int mi = 0; mi < mod_count && !sys_func_info; mi++) {
+                char prefixed[128];
+                snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
+                    modules[mi], (int)func_name.length, func_name.str);
+                StrView prefixed_view = {prefixed, strlen(prefixed)};
+                sys_func_info = get_sys_func_info(&prefixed_view, lookup_arg_count);
+                if (sys_func_info) {
+                    log_debug("global import resolved: %.*s -> %s",
+                        (int)func_name.length, func_name.str, sys_func_info->name);
+                    if (tp->pipe_inject_args > 0) {
+                        ast_node->pipe_inject = true;
+                    }
+                }
+            }
         }
     }
 
@@ -1627,6 +1673,29 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             field_node->field = (AstNode*)ast_node;
             field_node->type = &TYPE_ANY;
             return (AstNode*)field_node;
+        }
+        // Global import: resolve math constants (pi, e) when `import math;` is active
+        if (tp->builtin_import_math) {
+            double const_val = 0.0;
+            bool is_math_const = false;
+            if (var_name.length == 2 && memcmp(var_name.str, "pi", 2) == 0) {
+                const_val = 3.14159265358979323846;
+                is_math_const = true;
+            } else if (var_name.length == 1 && var_name.str[0] == 'e') {
+                const_val = 2.71828182845904523536;
+                is_math_const = true;
+            }
+            if (is_math_const) {
+                TypeFloat* ft = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+                ft->double_val = const_val;
+                arraylist_append(tp->const_list, &ft->double_val);
+                ft->const_index = tp->const_list->length - 1;
+                ft->is_const = 1;  ft->is_literal = 1;
+                AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, id_node, sizeof(AstPrimaryNode));
+                pn->type = (Type*)ft;
+                log_debug("global import math constant resolved: %.*s", (int)var_name.length, var_name.str);
+                return (AstNode*)pn;
+            }
         }
         // ident is used for member access, thus we return TYPE_ANY
         ast_node->type = &TYPE_ANY;
@@ -6970,13 +7039,33 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     ts_tree_cursor_delete(&cursor);
     if (ast_node->module.length) {
         // Check for built-in module imports (e.g., `import math`, `import io`)
-        // These modules are recognized at call sites by the AST builder
-        // and do not require loading an external script file.
-        if (strview_equal(&ast_node->module, "math") ||
-            strview_equal(&ast_node->module, "io")) {
-            log_debug("built-in module import: %.*s (no file loading needed)",
-                (int)ast_node->module.length, ast_node->module.str);
-            return NULL;  // no-op: built-in modules are resolved at call sites
+        // Three modes:
+        //   1. No import statement: use as math.sqrt(x) — already works at call sites
+        //   2. Global import: `import math;` — allows sqrt(x) without prefix
+        //   3. Aliased import: `import m:math;` — allows m.sqrt(x) with alias prefix
+        if (strview_equal(&ast_node->module, "math")) {
+            if (ast_node->alias) {
+                tp->builtin_alias_math = ast_node->alias;
+                log_debug("built-in module aliased import: %.*s:%.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)ast_node->module.length, ast_node->module.str);
+            } else {
+                tp->builtin_import_math = true;
+                log_debug("built-in module global import: math");
+            }
+            return NULL;  // no AST node needed: resolved at call sites
+        }
+        if (strview_equal(&ast_node->module, "io")) {
+            if (ast_node->alias) {
+                tp->builtin_alias_io = ast_node->alias;
+                log_debug("built-in module aliased import: %.*s:%.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)ast_node->module.length, ast_node->module.str);
+            } else {
+                tp->builtin_import_io = true;
+                log_debug("built-in module global import: io");
+            }
+            return NULL;  // no AST node needed: resolved at call sites
         }
 
         // Check if module is a bare URI (symbol literal like 'http://...')

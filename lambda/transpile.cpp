@@ -2748,7 +2748,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "      int64_t pipe_len = fn_len(pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "      for (int64_t pipe_i = 0; pipe_i < pipe_len; pipe_i++) {\n");
     strbuf_append_str(tp->code_buf, "        Item pipe_index = i2it(pipe_i);\n");
-    strbuf_append_str(tp->code_buf, "        Item pipe_item = item_at(pipe_collection, (int)pipe_i);\n");
+    strbuf_append_str(tp->code_buf, "        Item pipe_item = item_at(pipe_collection, pipe_i);\n");
 
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter
@@ -5248,7 +5248,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         // ANY index into an unknown object type.
         // Before falling back to fn_index, check if the field expression is an INDEX_EXPR
         // into a typed int array — if so, field is guaranteed to produce an integer Item,
-        // and we can use item_at(obj, (int)it2i(field)) instead of expensive fn_index.
+        // and we can use item_at(obj, it2i(field)) instead of expensive fn_index.
         if (field_type == LMD_TYPE_ANY && (object_type == LMD_TYPE_ANY || object_type == LMD_TYPE_NULL)) {
             bool field_known_int = false;
             AstNode* field_expr = field_node->field;
@@ -5272,7 +5272,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
             if (field_known_int) {
                 strbuf_append_str(tp->code_buf, "item_at(");
                 transpile_box_item(tp, field_node->object);
-                strbuf_append_str(tp->code_buf, ",(int)it2i(");
+                strbuf_append_str(tp->code_buf, ",it2i(");
                 transpile_expr(tp, field_node->field);
                 strbuf_append_str(tp->code_buf, "))");
                 return;

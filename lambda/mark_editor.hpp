@@ -243,17 +243,17 @@ public:
     /**
      * Update array element at index
      */
-    Item array_set(Item array, int index, Item value);
+    Item array_set(Item array, int64_t index, Item value);
     
     /**
      * Insert element at index
      */
-    Item array_insert(Item array, int index, Item value);
+    Item array_insert(Item array, int64_t index, Item value);
     
     /**
      * Delete element at index
      */
-    Item array_delete(Item array, int index);
+    Item array_delete(Item array, int64_t index);
     
     /**
      * Append element to end

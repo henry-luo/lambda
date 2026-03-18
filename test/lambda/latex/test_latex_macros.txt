@@ -1,0 +1,23 @@
+"===== LATEX MACROS TESTS =====1. def count:"
+1
+"2. def name:hello3. def params 0:"
+0
+"4. params 1:"
+1
+"5. body text:"
+true
+"6. opt params:"
+1
+"7. default_arg:default8. multi count:"
+2
+"9. multi first:a10. multi second:b11. find existing:"
+false
+"12. find name:13. find missing:"
+true
+"14. empty defs:"
+0
+"15. sub is array:"
+true
+"16. sub length:"
+4
+"===== ALL LATEX MACROS TESTS DONE ====="

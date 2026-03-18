@@ -66,6 +66,13 @@ len("hello")       // 5
 
 Basic mathematical operations.
 
+> **Import Styles:** The `math` module supports three import styles:
+> - **No import** (default): `math.sqrt(x)`, `math.pi` — always available
+> - **Global import** (`import math;`): `sqrt(x)`, `pi` — all functions available without prefix
+> - **Aliased import** (`import m:math;`): `m.sqrt(x)`, `m.pi` — use custom prefix
+>
+> Standalone functions like `abs`, `round`, `floor`, `ceil`, `sign`, `min`, `max`, `sum` are always available without any prefix or import.
+
 ### Scalar Math
 
 | Function | Description | Example | Result |
@@ -800,6 +807,11 @@ pn process_items(items) {
 ### io Module Functions
 
 The `io` module provides procedural functions for file system operations.
+
+> **Import Styles:** The `io` module supports three import styles:
+> - **No import** (default): `io.copy(@./a, @./b)` — always available
+> - **Global import** (`import io;`): `copy(@./a, @./b)` — all functions without prefix
+> - **Aliased import** (`import f:io;`): `f.copy(@./a, @./b)` — use custom prefix
 
 #### io.copy(source, destination)
 

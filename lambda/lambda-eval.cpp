@@ -34,7 +34,7 @@ extern String STR_ERROR;
 extern "C" Item path_resolve_for_iteration(Path* path);
 
 // forward declaration from lambda-data.cpp
-void array_set(Array* arr, int index, Item itm);
+void array_set(Array* arr, int64_t index, Item itm);
 
 // External path functions for path ++ operation
 extern "C" Pool* eval_context_get_pool(EvalContext* ctx);
@@ -1492,19 +1492,19 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
     } else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr = data.array_int;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int_get(arr, (int)i);
+            Item val = array_int_get(arr, i);
             query_collect(val, type_val, true, result, depth + 1);
         }
     } else if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = data.array_int64;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int64_get(arr, (int)i);
+            Item val = array_int64_get(arr, i);
             query_collect(val, type_val, true, result, depth + 1);
         }
     } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* arr = data.array_float;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_float_get(arr, (int)i);
+            Item val = array_float_get(arr, i);
             query_collect(val, type_val, true, result, depth + 1);
         }
     }
@@ -1589,7 +1589,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
     } else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr = data.array_int;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int_get(arr, (int)i);
+            Item val = array_int_get(arr, i);
             if (fn_is(val, type_val) == BOOL_TRUE) {
                 array_push(result, val);
             }
@@ -1597,7 +1597,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
     } else if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = data.array_int64;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int64_get(arr, (int)i);
+            Item val = array_int64_get(arr, i);
             if (fn_is(val, type_val) == BOOL_TRUE) {
                 array_push(result, val);
             }
@@ -1605,7 +1605,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
     } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* arr = data.array_float;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_float_get(arr, (int)i);
+            Item val = array_float_get(arr, i);
             if (fn_is(val, type_val) == BOOL_TRUE) {
                 array_push(result, val);
             }
@@ -1908,7 +1908,7 @@ Type* base_type(TypeId type_id) {
         &LIT_TYPE_ERROR : ((TypeInfo*)context->type_info)[type_id].lit_type;
 }
 
-Type* const_type(int type_index) {
+Type* const_type(int64_t type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     if (type_index < 0 || type_index >= type_list->length) {
         return &LIT_TYPE_ERROR;
@@ -1917,7 +1917,7 @@ Type* const_type(int type_index) {
     return type;
 }
 
-TypePattern* const_pattern(int pattern_index) {
+TypePattern* const_pattern(int64_t pattern_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     if (pattern_index < 0 || pattern_index >= type_list->length) {
         log_error("const_pattern: invalid index %d", pattern_index);
@@ -3701,7 +3701,7 @@ Item fn_chr(Item cp_item) {
         return {.item = s2it(empty)};  // invalid code point (e.g., surrogate)
     }
 
-    String* result = heap_strcpy(buf, (int)len);
+    String* result = heap_strcpy(buf, len);
     return {.item = s2it(result)};
 }
 
@@ -4400,13 +4400,13 @@ static void convert_specialized_to_generic(Array* arr) {
 
 // array indexed assignment: arr[i] = val
 // Handles Array, ArrayInt, ArrayInt64, ArrayFloat
-void fn_array_set(Array* arr, int index, Item value) {
+void fn_array_set(Array* arr, int64_t index, Item value) {
     if (!arr || ((uintptr_t)arr >> 56)) {
         static int _err_count = 0;
         _err_count++;
         if (_err_count <= 10) {
-            log_error("fn_array_set: null or invalid array pointer (ptr=%p, idx=%d, val_type=%d, count=%d)",
-                      (void*)arr, index, get_type_id(value), _err_count);
+            log_error("fn_array_set: null or invalid array pointer (ptr=%p, idx=%lld, val_type=%d, count=%d)",
+                      (void*)arr, (long long)index, get_type_id(value), _err_count);
         }
         return;
     }
@@ -4414,9 +4414,9 @@ void fn_array_set(Array* arr, int index, Item value) {
 
     // support negative indexing
     int64_t len = arr->length;
-    if (index < 0) index = (int)len + index;
-    if (index < 0 || index >= (int)len) {
-        log_error("fn_array_set: index %d out of bounds (length %lld)", index, len);
+    if (index < 0) index = len + index;
+    if (index < 0 || index >= len) {
+        log_error("fn_array_set: index %lld out of bounds (length %lld)", (long long)index, len);
         return;
     }
 
