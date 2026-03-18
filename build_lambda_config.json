@@ -826,6 +826,7 @@
                 "DTVG_STATIC"
             ],
             "linker_flags": [
+                "Wl,--stack,8388608",
                 "Wl,--subsystem,console",
                 "static-libgcc",
                 "static-libstdc++",

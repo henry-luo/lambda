@@ -59,6 +59,24 @@ static bool file_exists(const std::string& path) {
     return false;
 }
 
+// Returns platform-specific expected path (.win.expected / .linux.expected / .mac.expected)
+// if one exists, otherwise the generic .expected path.
+static std::string platform_expected(const std::string& base_expected) {
+    // base_expected ends with ".expected"
+    std::string stem = base_expected.substr(0, base_expected.length() - 9); // strip ".expected"
+#if defined(_WIN32)
+    std::string plat = stem + ".win.expected";
+#elif defined(__linux__)
+    std::string plat = stem + ".linux.expected";
+#elif defined(__APPLE__)
+    std::string plat = stem + ".mac.expected";
+#else
+    std::string plat = "";
+#endif
+    if (!plat.empty() && file_exists(plat)) return plat;
+    return base_expected;
+}
+
 static void trim_trailing_whitespace(char* str) {
     if (!str) return;
     size_t len = strlen(str);
@@ -211,6 +229,7 @@ static void discover_tests_recursive(const char* dir_path, std::vector<StdTestIn
             discover_tests_recursive(full_path.c_str(), tests);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".ls") {
             std::string expected = full_path.substr(0, full_path.size() - 3) + ".expected";
+            expected = platform_expected(expected);
             if (file_exists(expected)) {
                 StdTestInfo info;
                 info.script_path = full_path;
@@ -240,6 +259,7 @@ static void discover_tests_recursive(const char* dir_path, std::vector<StdTestIn
             discover_tests_recursive(full_path.c_str(), tests);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".ls") {
             std::string expected = full_path.substr(0, full_path.size() - 3) + ".expected";
+            expected = platform_expected(expected);
             if (file_exists(expected)) {
                 StdTestInfo info;
                 info.script_path = full_path;
