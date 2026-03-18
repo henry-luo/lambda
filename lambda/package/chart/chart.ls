@@ -237,7 +237,11 @@ fn render_layered(spec) {
 
     let x_ch = parse.get_channel(enc, "x");
     let y_ch = parse.get_channel(enc, "y");
-    let color_ch = parse.get_channel(enc, "color");
+    // color channel: use parent encoding first, else pick from first layer that has color
+    let parent_color_ch = parse.get_channel(enc, "color");
+    let all_layer_color_chs = for (ls in layer_specs, let l_enc = ls.encoding) parse.get_channel(l_enc, "color");
+    let first_layer_color_ch = (all_layer_color_chs that (~ != null))[0];
+    let color_ch = if (parent_color_ch) parent_color_ch else first_layer_color_ch;
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
     let color_field = if (color_ch) color_ch.field else null;
@@ -250,11 +254,41 @@ fn render_layered(spec) {
     let has_legend = color_categories != null and len(color_categories) > 0;
 
     let temp_x_scale = build_position_scale(x_ch, all_data, 0.0, float(spec.width), mark_type, true);
-    let temp_y_scale = build_position_scale(y_ch, all_data, float(spec.height), 0.0, mark_type, false);
+
+    // build combined y-scale covering all layers' y and y2 values
+    let y2_count = sum(for (ls in layer_specs,
+                            let l_enc = ls.encoding,
+                            let l_y2_ch = parse.get_channel(l_enc, "y2"))
+        if (l_y2_ch) 1 else 0);
+    let use_combined_y = y2_count > 0;
+    let layer_y_mins = for (ls in layer_specs,
+                            let l_enc = ls.encoding,
+                            let l_y_ch = parse.get_channel(l_enc, "y"),
+                            let l_y2_ch = parse.get_channel(l_enc, "y2"),
+                            let ly_f = if (l_y_ch) l_y_ch.field else null,
+                            let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
+                            let y_vals = if (ly_f) (all_data | float(~[ly_f])) else [0.0],
+                            let y2_vals = if (ly2_f) (all_data | float(~[ly2_f])) else y_vals)
+        min([min(y_vals), min(y2_vals)]);
+    let layer_y_maxs = for (ls in layer_specs,
+                            let l_enc = ls.encoding,
+                            let l_y_ch = parse.get_channel(l_enc, "y"),
+                            let l_y2_ch = parse.get_channel(l_enc, "y2"),
+                            let ly_f = if (l_y_ch) l_y_ch.field else null,
+                            let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
+                            let y_vals = if (ly_f) (all_data | float(~[ly_f])) else [0.0],
+                            let y2_vals = if (ly2_f) (all_data | float(~[ly2_f])) else y_vals)
+        max([max(y_vals), max(y2_vals)]);
+
+    let temp_y_scale = if (use_combined_y)
+        scale.linear_scale_nice([min(layer_y_mins), max(layer_y_maxs)], float(spec.height), 0.0, false)
+    else build_position_scale(y_ch, all_data, float(spec.height), 0.0, mark_type, false);
     let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
 
     let x_scale = build_position_scale(x_ch, all_data, 0.0, lay.plot_w, mark_type, true);
-    let y_scale = build_position_scale(y_ch, all_data, lay.plot_h, 0.0, mark_type, false);
+    let y_scale = if (use_combined_y)
+        scale.linear_scale_nice([min(layer_y_mins), max(layer_y_maxs)], lay.plot_h, 0.0, false)
+    else build_position_scale(y_ch, all_data, lay.plot_h, 0.0, mark_type, false);
 
     // render each layer's marks
     let layer_marks = (for (ls in layer_specs)
@@ -263,18 +297,21 @@ fn render_layered(spec) {
          let l_mark_type = if (l_mark) l_mark.kind else "line",
          let l_color_ch = parse.get_channel(l_enc, "color"),
          let l_color_field = if (l_color_ch) l_color_ch.field else color_field,
+         let l_color_scale = if (l_color_ch) scale.infer_color_scale(l_color_ch, ls.data) else color_scale,
          let l_size_ch = parse.get_channel(l_enc, "size"),
          let l_x_ch = parse.get_channel(l_enc, "x"),
          let l_y_ch = parse.get_channel(l_enc, "y"),
+         let l_y2_ch = parse.get_channel(l_enc, "y2"),
          let l_text_ch = parse.get_channel(l_enc, "text"),
          let lx = if (l_x_ch) l_x_ch.field else x_field,
          let ly = if (l_y_ch) l_y_ch.field else y_field,
+         let ly2 = if (l_y2_ch) l_y2_ch.field else null,
          let l_ctx = {
              x_scale: x_scale, y_scale: y_scale,
              plot_w: lay.plot_w, plot_h: lay.plot_h,
-             color_scale: color_scale, color_field: l_color_field,
+             color_scale: l_color_scale, color_field: l_color_field,
              size_scale: null, size_field: null,
-             x_field: lx, y_field: ly,
+             x_field: lx, y_field: ly, y2_field: ly2,
              text_field: if (l_text_ch) l_text_ch.field else null
          },
          render_mark(l_mark_type, ls.data, l_ctx, l_mark))

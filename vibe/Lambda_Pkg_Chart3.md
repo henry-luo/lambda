@@ -1335,15 +1335,15 @@ Foundation for multi-series and multi-view charts.
 
 Complex marks composed from primitives.
 
-| Task | Module | Dependencies | Complexity | Status |
-|------|--------|-------------|------------|--------|
-| Box plot | `mark.ls` | aggregate (q1/q3) | Medium | ✅ Done |
-| Error bar | `mark.ls` | — (uses y/y2) | Low | ✅ Done |
-| Error band | `mark.ls` | — (uses area) | Low | ✅ Done |
-| Histogram (bin + count) | `chart.ls` | bin transform | Low | ✅ Done |
-| Heatmap (rect mark) | `mark.ls` | diverging color | Low | ✅ Done |
-| Candlestick | layer (rule + bar) | y2 wiring | Low | ❌ |
-| Bubble chart | `mark.ls`, `chart.ls` | size scale wiring | Low | ✅ Done |
+| Task                    | Module                | Dependencies      | Complexity | Status |
+| ----------------------- | --------------------- | ----------------- | ---------- | ------ |
+| Box plot                | `mark.ls`             | aggregate (q1/q3) | Medium     | ✅ Done |
+| Error bar               | `mark.ls`             | — (uses y/y2)     | Low        | ✅ Done |
+| Error band              | `mark.ls`             | — (uses area)     | Low        | ✅ Done |
+| Histogram (bin + count) | `chart.ls`            | bin transform     | Low        | ✅ Done |
+| Heatmap (rect mark)     | `mark.ls`             | diverging color   | Low        | ✅ Done |
+| Candlestick             | layer (rule + bar)    | y2 wiring         | Low        | ✅ Done |
+| Bubble chart            | `mark.ls`, `chart.ls` | size scale wiring | Low        | ✅ Done |
 
 **Deliverable:** Statistical charts: box plots, histograms, heatmaps, error bars, candlesticks.
 
@@ -1467,7 +1467,7 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | Heatmap (rect mark) | ✅ Done | `rect_mark()` in `mark.ls` — positioned rectangles using band scale widths for both x and y. Sequential color scale for quantitative fill. Both x/y forced to band scale for ordinal types. |
 | Bubble chart | ✅ Done | Existing `point_mark()` with `size` encoding channel. Size scale (20–200 range) maps data field to circle area via `linear_scale_nice`. |
 | y2 channel wiring | ✅ Done | `chart.ls render_single()` extracts `y2_ch`, passes `y2_field` in `mark_ctx`. `build_position_scale_y2()` extends y-domain to encompass both y and y2 values. |
-| Candlestick | ❌ Not started | Requires layer composition with dual rect + rule marks |
+| Candlestick | ✅ Done | Requires layer composition with dual rect + rule marks |
 
 ### Phase A Files Changed
 

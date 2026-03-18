@@ -83,7 +83,8 @@ fn convert_mark(mark_json) {
             size: mark_json.size,
             shape: mark_json.shape,
             font_size: vl_key(mark_json, "fontSize", "font_size"),
-            stroke_dash: vl_key(mark_json, "strokeDash", "stroke_dash")
+            stroke_dash: vl_key(mark_json, "strokeDash", "stroke_dash"),
+            width: mark_json.width
         })
     else null)
 }

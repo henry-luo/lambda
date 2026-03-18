@@ -195,14 +195,19 @@ pub fn infer_color_scale(channel, data) {
     let values = data | ~[field_name];
     let scheme_name = if (channel.scale and channel.scale.scheme) channel.scale.scheme
         else null;
+    let explicit_domain = if (channel.scale and channel.scale.domain) channel.scale.domain
+        else null;
+    let explicit_range = if (channel.scale and channel.scale.range) channel.scale.range
+        else null;
 
-    if data_type == "quantitative" {
-        let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.blues;
-        let ext = util.extent(values);
-        { kind: "sequential-color", domain: [ext[0], ext[1]], scheme: scheme }
-    } else {
-        let cats = util.unique_vals(values);
-        let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.category10;
-        ordinal_scale(cats, scheme)
-    }
+    if (explicit_domain and explicit_range)
+        ordinal_scale(explicit_domain, explicit_range)
+    else if (data_type == "quantitative")
+        (let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.blues,
+        let ext = util.extent(values),
+        { kind: "sequential-color", domain: [ext[0], ext[1]], scheme: scheme })
+    else
+        (let cats = util.unique_vals(values),
+        let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.category10,
+        ordinal_scale(cats, scheme))
 }

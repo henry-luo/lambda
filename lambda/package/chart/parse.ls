@@ -95,7 +95,8 @@ fn parse_mark(mark_el) {
         size: mark_el.size,
         shape: mark_el.shape,
         font_size: mark_el.font_size,
-        stroke_dash: mark_el.stroke_dash
+        stroke_dash: mark_el.stroke_dash,
+        width: mark_el.width
     }
 }
 
