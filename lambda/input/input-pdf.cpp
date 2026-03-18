@@ -112,7 +112,7 @@ static Array* parse_pdf_array(InputContext& ctx, const char **pdf) {
     while (**pdf && **pdf != ']' && item_count < 10000) { // increased limit for real PDFs
         Item obj = parse_pdf_object(ctx, pdf, 1);
         if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
-            array_append(arr, obj, ctx.input()->pool);
+            array_append(arr, obj, ctx.input()->pool, ctx.input()->arena);
             item_count++;
         }
         skip_pdf_whitespace_and_comments(pdf);
@@ -520,8 +520,17 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     // Parse the object content
     Item content = parse_pdf_object(ctx, pdf, 1);
 
-    // Skip to endobj (optional - for safety)
-    const char* endobj_pos = strstr(*pdf, "endobj");
+    // Binary-safe bounded search for "endobj"
+    const char* endobj_pos = nullptr;
+    if (*pdf < ctx.source_end()) {
+        size_t remaining = (size_t)(ctx.source_end() - *pdf);
+        for (size_t i = 0; i + 6 <= remaining; i++) {
+            if (strncmp(*pdf + i, "endobj", 6) == 0) {
+                endobj_pos = *pdf + i;
+                break;
+            }
+        }
+    }
     if (endobj_pos) {
         *pdf = endobj_pos + 6; // skip "endobj"
     }
@@ -589,6 +598,14 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     // since stream data can contain null bytes
     const char* end_stream = nullptr;
     const char* search_start = *pdf;
+    // Clamp search to actual remaining buffer size to prevent overread
+    size_t actual_remaining = 0;
+    if (*pdf < ctx.source_end()) {
+        actual_remaining = (size_t)(ctx.source_end() - *pdf);
+    }
+    if (bytes_remaining > actual_remaining) {
+        bytes_remaining = actual_remaining;
+    }
     size_t max_search = bytes_remaining > 100000 ? 100000 : bytes_remaining;
     for (size_t i = 0; i + 9 <= max_search; i++) {
         if (strncmp(search_start + i, "endstream", 9) == 0) {
@@ -781,7 +798,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                 }
 
                                                 Item entry_item = {.item = (uint64_t)entry_map};
-                                                array_append(entries, entry_item, ctx.input()->pool);
+                                                array_append(entries, entry_item, ctx.input()->pool, ctx.input()->arena);
                                             }
                                         }
                                         entry_count++;
@@ -985,8 +1002,9 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
 
     MarkBuilder& builder = ctx.builder;
 
-    const char* pdf = pdf_string;
-    const char* pdf_file_end = pdf_string + pdf_length; // track actual end of binary content
+    // Use the owned (null-terminated) copy so all pointer arithmetic stays in bounds
+    const char* pdf = ctx.source();
+    const char* pdf_file_end = ctx.source_end();
 
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
@@ -1047,6 +1065,9 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
             skip_pdf_whitespace_and_comments(&pdf);
             if (!*pdf) break;
 
+            // Bounds check: make sure pdf is still within the source buffer
+            if (pdf >= pdf_file_end) break;
+
             Item obj = {.item = ITEM_NULL};
             const char* position_before_parse = pdf;
 
@@ -1080,7 +1101,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
             }
 
             if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
-                array_append(objects, obj, input->pool);
+                array_append(objects, obj, input->pool, input->arena);
                 obj_count++;
                 consecutive_errors = 0; // Reset error counter on success
             } else {
@@ -1102,7 +1123,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
             const char* startxref_pos = nullptr;
             int search_limit = 1024; // search last 1KB for startxref
             
-            while (scan_back >= pdf_string && search_limit > 0) {
+            while (scan_back >= ctx.source() && search_limit > 0) {
                 if (*scan_back == 's' && (size_t)(pdf_file_end - scan_back) >= 9 && 
                     strncmp(scan_back, "startxref", 9) == 0) {
                     startxref_pos = scan_back;
@@ -1119,11 +1140,11 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                 if (offset_ptr < pdf_file_end && isdigit(*offset_ptr)) {
                     long xref_offset = strtol(offset_ptr, nullptr, 10);
                     log_debug("Found startxref at offset %lld, pointing to xref at %ld\n", 
-                              (long long)(startxref_pos - pdf_string), xref_offset);
+                              (long long)(startxref_pos - ctx.source()), xref_offset);
                     
                     // Jump to xref position
                     if (xref_offset >= 0 && xref_offset < (long)pdf_length) {
-                        const char* xref_pos = pdf_string + xref_offset;
+                        const char* xref_pos = ctx.source() + xref_offset;
                         
                         // Parse xref table
                         if (strncmp(xref_pos, "xref", 4) == 0) {
@@ -1135,7 +1156,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                                 // Look for trailer right after xref
                                 while (xref_parse_pos < pdf_file_end && isspace(*xref_parse_pos)) xref_parse_pos++;
                                 log_debug("After xref, looking for trailer at offset %lld, first chars: '%.20s'\n", 
-                                          (long long)(xref_parse_pos - pdf_string), xref_parse_pos);
+                                          (long long)(xref_parse_pos - ctx.source()), xref_parse_pos);
                                 if ((size_t)(pdf_file_end - xref_parse_pos) >= 7 && 
                                     strncmp(xref_parse_pos, "trailer", 7) == 0) {
                                     trailer = parse_pdf_trailer(ctx, &xref_parse_pos);
@@ -1251,7 +1272,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                             String* xref_feature = builder.createString("cross_reference_table");
                             if (xref_feature) {
                                 Item xref_feature_item = {.item = s2it(xref_feature)};
-                                array_append(features_array, xref_feature_item, input->pool);
+                                array_append(features_array, xref_feature_item, input->pool, input->arena);
                             }
                         }
 
@@ -1259,14 +1280,14 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                             String* trailer_feature = builder.createString("trailer");
                             if (trailer_feature) {
                                 Item trailer_feature_item = {.item = s2it(trailer_feature)};
-                                array_append(features_array, trailer_feature_item, input->pool);
+                                array_append(features_array, trailer_feature_item, input->pool, input->arena);
                             }
                         }
 
                         String* objects_feature = builder.createName("indirect_objects");
                         if (objects_feature) {
                             Item objects_feature_item = {.item = s2it(objects_feature)};
-                            array_append(features_array, objects_feature_item, input->pool);
+                            array_append(features_array, objects_feature_item, input->pool, input->arena);
                         }
 
                         Item features_item = {.item = (uint64_t)features_array};

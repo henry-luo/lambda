@@ -192,7 +192,7 @@ bool pdf_extract_media_box(Map* page_dict, Map* pdf_data, double* media_box) {
 }/**
  * Recursively traverse Pages tree and collect page dictionaries
  */
-static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Pool* pool) {
+static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Pool* pool, Arena* arena) {
     if (node_item.item == ITEM_NULL) return;
 
     // Resolve if indirect reference
@@ -225,7 +225,7 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
             fprintf(stderr, "Found Page node (no Type field but has Contents/MediaBox), adding to collection\n");
 
             // Use array_append to add the item
-            array_append(pages_array, node_item, pool);
+            array_append(pages_array, node_item, pool, arena);
             return;
         }
 
@@ -258,12 +258,12 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
 
         // Recurse into each kid
         for (int i = 0; i < kids_array->length; i++) {
-            collect_pages(pdf_data, kids_array->items[i], pages_array, pool);
+            collect_pages(pdf_data, kids_array->items[i], pages_array, pool, arena);
         }
     } else if (strcmp(type_str->chars, "Page") == 0) {
         // This is a leaf Page node - add to array
         log_debug("Found Page node, adding to collection");
-        array_append(pages_array, node_item, pool);
+        array_append(pages_array, node_item, pool, arena);
     } else {
         log_warn("Unknown Type in Pages tree: %s", type_str->chars);
     }
@@ -346,7 +346,7 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
             return 0;
         }
 
-        collect_pages(pdf_data, {.item = (uint64_t)pages_dict}, pages_array, temp_pool);
+        collect_pages(pdf_data, {.item = (uint64_t)pages_dict}, pages_array, temp_pool, arena_create_default(temp_pool));
         int count = pages_array->length;
         fprintf(stderr, "Counted %d pages by tree traversal (array length=%d, capacity=%d)\n", count, pages_array->length, pages_array->capacity);
         log_info("Counted %d pages by tree traversal", count);
@@ -366,6 +366,8 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
  */
 PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
     if (!pdf_data || page_index < 0) return nullptr;
+
+    Arena* arena = arena_create_default(pool);
 
     log_info("Extracting info for page %d", page_index + 1);
 
@@ -401,7 +403,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
     Array* pages_array = array_pooled(pool);
     if (!pages_array) return nullptr;
 
-    collect_pages(pdf_data, pages_item, pages_array, pool);
+    collect_pages(pdf_data, pages_item, pages_array, pool, arena);
 
     if (page_index >= pages_array->length) {
         log_error("Page index %d out of range (have %d pages)", page_index, pages_array->length);
@@ -488,7 +490,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
                     Item stream_item = contents_array->items[i];
                     stream_item = pdf_resolve_reference(pdf_data, stream_item, pool);
                     if (stream_item.item != ITEM_NULL && stream_item.type_id() != LMD_TYPE_NULL) {
-                        array_append(page_info->content_streams, stream_item, pool);
+                        array_append(page_info->content_streams, stream_item, pool, arena);
                     }
                 }
                 log_debug("Page %d has %d content streams", page_index + 1, contents_array->length);
@@ -510,7 +512,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
         }
         if (type_str && strcmp(type_str->chars, "stream") == 0) {
             // Single stream
-            array_append(page_info->content_streams, contents_item, pool);
+            array_append(page_info->content_streams, contents_item, pool, arena);
             log_debug("Page %d has 1 content stream", page_index + 1);
             return page_info;
         } else {
@@ -521,7 +523,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
                     Item stream_item = contents_array->items[i];
                     stream_item = pdf_resolve_reference(pdf_data, stream_item, pool);
                     if (stream_item.item != ITEM_NULL) {
-                        array_append(page_info->content_streams, stream_item, pool);
+                        array_append(page_info->content_streams, stream_item, pool, arena);
                     }
                 }
                 log_debug("Page %d has %d content streams", page_index + 1, contents_array->length);
