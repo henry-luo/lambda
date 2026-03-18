@@ -214,6 +214,38 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
             item_height = (int)item->blk->given_height;
         }
 
+        // CSS Box Model: border-box minimum — the box cannot be smaller than padding+border
+        if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+            float h_pad_border = item->bound->padding.left + item->bound->padding.right;
+            float v_pad_border = item->bound->padding.top + item->bound->padding.bottom;
+            if (item->bound->border) {
+                h_pad_border += item->bound->border->width.left + item->bound->border->width.right;
+                v_pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
+            }
+            if (item_width < (int)h_pad_border) {
+                item_width = (int)h_pad_border;
+            }
+            if (item_height < (int)v_pad_border) {
+                item_height = (int)v_pad_border;
+            }
+        }
+
+        // Apply min-width/max-width and min-height/max-height constraints
+        if (item->blk) {
+            if (item->blk->given_max_width > 0 && item_width > (int)item->blk->given_max_width) {
+                item_width = (int)item->blk->given_max_width;
+            }
+            if (item->blk->given_min_width > 0 && item_width < (int)item->blk->given_min_width) {
+                item_width = (int)item->blk->given_min_width;
+            }
+            if (item->blk->given_max_height > 0 && item_height > (int)item->blk->given_max_height) {
+                item_height = (int)item->blk->given_max_height;
+            }
+            if (item->blk->given_min_height > 0 && item_height < (int)item->blk->given_min_height) {
+                item_height = (int)item->blk->given_min_height;
+            }
+        }
+
         // Apply container offset (borders and padding)
         int container_offset_x = 0;
         int container_offset_y = 0;
@@ -466,12 +498,27 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 log_debug("align_grid_item: computed from max_height=%.1f: width=%.1f, height=%.1f",
                           max_height, item->width, item->height);
             } else {
-                // No constraints - use available height to determine width
-                // (common case: grid cell gives height, aspect-ratio determines width)
-                item->width = available_height * aspect_ratio;
-                item->height = available_height;
-                log_debug("align_grid_item: computed from available_height=%d: width=%.1f, height=%.1f",
-                          available_height, item->width, item->height);
+                // No explicit size, no max constraints.
+                // CSS Grid: with default stretch alignment, determine which axis takes priority.
+                // If min-height is specified (block-axis constraint), anchor the block axis first
+                // and derive inline from it (height → width). This transfers the block constraint
+                // through the aspect-ratio to produce the correct minimum inline size.
+                // Otherwise use the inline axis first (width → height), per CSS Grid §6.6.
+                float min_h = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
+                float min_w = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
+                if (min_h > 0 && min_w == 0) {
+                    // Block-axis minimum: anchor at available_height (stretch), derive width
+                    item->height = (float)available_height;
+                    item->width = item->height * aspect_ratio;
+                    log_debug("align_grid_item: aspect-ratio block-primary (min-height=%.1f): width=%.1f, height=%.1f",
+                              min_h, item->width, item->height);
+                } else {
+                    // Inline-axis priority: anchor at available_width (stretch), derive height
+                    item->width = (float)available_width;
+                    item->height = (float)available_width / aspect_ratio;
+                    log_debug("align_grid_item: aspect-ratio from available_width=%d: width=%.1f, height=%.1f",
+                              available_width, item->width, item->height);
+                }
             }
         }
 
@@ -483,6 +530,17 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if (max_height > 0 && item->height > max_height) {
             item->height = max_height;
             item->width = max_height * aspect_ratio;
+        }
+        // Apply min-width/min-height constraints (min wins over max per CSS spec)
+        float min_width = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
+        float min_height = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
+        if (min_width > 0 && item->width < min_width) {
+            item->width = min_width;
+            item->height = min_width / aspect_ratio;
+        }
+        if (min_height > 0 && item->height < min_height) {
+            item->height = min_height;
+            item->width = min_height * aspect_ratio;
         }
     }
 

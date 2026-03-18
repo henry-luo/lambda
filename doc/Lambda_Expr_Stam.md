@@ -509,6 +509,29 @@ users that (age >= min_age)
 | `{a: 1, b: 2}` (map) | Each value | Key ('a', 'b') | Collection of results |
 | `42` (scalar) | The value itself | N/A | Single result |
 
+### Spreading in Array Literals
+
+Pipe (`|`) and filter (`that`) expressions inside array literals produce **spreadable results** — their array output is automatically flattened into the enclosing array, just like for-expressions and the spread operator:
+
+```lambda
+// Pipe spreads into enclosing array
+[1, [2, 3] | ~, 4, 5]                    // [1, 2, 3, 4, 5]
+[0, [1, 2, 3] | ~ * 10, 99]              // [0, 10, 20, 30, 99]
+
+// That/filter spreads into enclosing array
+[1, [1, 5, 7, 10, 15] that (~ > 5), 99]  // [1, 7, 10, 15, 99]
+
+// Non-array pipe results are pushed normally
+fn double(x: int) { x * 2 }
+[1, 5 | double, 4]                        // [1, 10, 4]
+
+// Mixed: for-expr + pipe + that
+[for (x in [1, 2]) x, [3, 4] | ~ * 10, [5, 6, 7] that (~ > 5)]  // [1, 2, 30, 40, 6, 7]
+```
+
+> **Rationale:** This is consistent with for-expression and spread behavior — collection-producing
+> sub-expressions flatten into the enclosing array literal, giving a uniform "inline expansion" semantics.
+
 ---
 
 ## Query Expressions
@@ -658,7 +681,7 @@ When `else` is omitted (block form only), the result is `null`.
 
 ### For Expressions
 
-For expressions produce **spreadable arrays** that automatically flatten when nested in collections:
+For expressions produce **spreadable arrays** that automatically flatten when nested in collections (pipe and filter expressions also spread — see [Pipe § Spreading in Array Literals](#spreading-in-array-literals)):
 
 ```lambda
 // Basic iteration - produces spreadable array

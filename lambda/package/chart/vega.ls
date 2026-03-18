@@ -106,7 +106,14 @@ fn convert_encoding(enc) {
         opacity: if (enc.opacity) convert_channel(enc.opacity) else null,
         theta: if (enc.theta) convert_channel(enc.theta) else null,
         text: if (enc.text) convert_channel(enc.text) else null,
-        stroke: if (enc.stroke) convert_channel(enc.stroke) else null
+        stroke: if (enc.stroke) convert_channel(enc.stroke) else null,
+        x_offset: if (enc.xOffset) convert_channel(enc.xOffset)
+            else if (enc.x_offset) convert_channel(enc.x_offset)
+            else null,
+        x2: if (enc.x2) convert_channel(enc.x2) else null,
+        y2: if (enc.y2) convert_channel(enc.y2) else null,
+        detail: if (enc.detail) convert_channel(enc.detail) else null,
+        tooltip: if (enc.tooltip) convert_channel(enc.tooltip) else null
     }
 }
 
@@ -120,7 +127,7 @@ fn convert_channel(ch) {
         format: ch.format,
         sort: ch.sort,
         aggregate: ch.aggregate,
-        stack: ch.stack,
+        stack: if (ch.stack == false) "none" else ch.stack,
         bin: ch.bin,
         zero: ch.zero,
         scale: ch.scale,

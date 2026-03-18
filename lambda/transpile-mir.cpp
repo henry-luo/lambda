@@ -3446,17 +3446,22 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     // Check if any child is a for-expression, spread, or let binding
     bool has_spreadable = false;
+    bool has_pipe_spread = false;  // pipe expressions spread their array results in array literals
     bool has_let = false;
     AstNode* scan = arr_node->item;
     while (scan) {
         if (scan->node_type == AST_NODE_FOR_EXPR || scan->node_type == AST_NODE_SPREAD) {
             has_spreadable = true;
         }
+        if (scan->node_type == AST_NODE_PIPE) {
+            has_pipe_spread = true;
+        }
         if (scan->node_type == AST_NODE_ASSIGN) {
             has_let = true;
         }
         scan = scan->next;
     }
+    bool any_spread = has_spreadable || has_pipe_spread;
 
     // push scope to contain let bindings within the array
     if (has_let) push_scope(mt);
@@ -3470,7 +3475,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     // Specialized ArrayFloat path: array_float_new(count) + array_float_set(arr, i, val)
     // Skip specialized paths when array has let bindings (let nodes are transparent)
-    if (is_float_array && !has_spreadable && !has_let && arr_node->item) {
+    if (is_float_array && !any_spread && !has_let && arr_node->item) {
         int count = (int)arr_type->length;
         MIR_reg_t arr = emit_call_1(mt, "array_float_new", MIR_T_P,
             MIR_T_I64, MIR_new_int_op(mt->ctx, count));
@@ -3502,7 +3507,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     // Specialized ArrayInt path: array_int_new(count) + array_int_set(arr, i, val)
     // Skip specialized paths when array has let bindings (let nodes are transparent)
-    if (is_int_array && !has_spreadable && !has_let && arr_node->item) {
+    if (is_int_array && !any_spread && !has_let && arr_node->item) {
         int count = (int)arr_type->length;
         MIR_reg_t arr = emit_call_1(mt, "array_int_new", MIR_T_P,
             MIR_T_I64, MIR_new_int_op(mt->ctx, count));
@@ -3544,7 +3549,13 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
         TypeId val_tid = get_effective_type(mt, item);
 
-        if (has_spreadable) {
+        if (item->node_type == AST_NODE_PIPE) {
+            // pipe/that/where exprs in array literals spread their array results
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            emit_call_void_2(mt, "array_push_spread_all",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        } else if (has_spreadable) {
             // When any child is spreadable, use array_push_spread for ALL children
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
             emit_call_void_2(mt, "array_push_spread",
@@ -3569,7 +3580,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     // If array contains spreadable children (for-expressions) and all produce
     // empty results, array_end returns ITEM_NULL_SPREADABLE. For top-level
     // array literals [for ...], convert to proper empty array.
-    if (has_spreadable) {
+    if (any_spread) {
         uint64_t NULL_SPREAD = (uint64_t)LMD_TYPE_NULL << 56 | 1;
         MIR_reg_t is_sn = new_reg(mt, "sn2", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_sn),

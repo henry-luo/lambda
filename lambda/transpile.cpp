@@ -4395,7 +4395,8 @@ void transpile_items(Transpiler* tp, AstNode *item) {
 // check if any item in the list/array needs spreading (for-expression or spread operator)
 static bool has_spreadable_item(AstNode *item) {
     while (item) {
-        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD) {
+        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD
+            || item->node_type == AST_NODE_PIPE) {
             return true;
         }
         item = item->next;
@@ -4409,12 +4410,16 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
 
-    // for arrays with spreadable items (for-expressions), use push path
+    // for arrays with spreadable items (for-expressions, spread, pipe), use push path
     if (!is_int_array && !is_int64_array && !is_float_array && has_spreadable_item(array_node->item)) {
         strbuf_append_str(tp->code_buf, "({\n Array* arr = array();\n");
         AstNode* item = array_node->item;
         while (item) {
-            strbuf_append_str(tp->code_buf, " array_push_spread(arr, ");
+            // pipe items spread any array result; for-expr/spread use conditional spread
+            const char* push_fn = (item->node_type == AST_NODE_PIPE)
+                ? " array_push_spread_all(arr, "
+                : " array_push_spread(arr, ";
+            strbuf_append_str(tp->code_buf, push_fn);
             transpile_box_item(tp, item);
             strbuf_append_str(tp->code_buf, ");\n");
             item = item->next;

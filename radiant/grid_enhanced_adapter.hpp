@@ -741,7 +741,7 @@ inline std::vector<GridItemContribution> collect_item_contributions(
         ViewBlock* item = items[i];
         if (!item || !item->gi) continue;
 
-        GridItemContribution contrib;
+        GridItemContribution contrib = {};
         contrib.item = item;
 
         // Get item's placement (1-based line numbers from GridItemProp)
@@ -797,11 +797,11 @@ inline std::vector<GridItemContribution> collect_item_contributions(
             }
 
             // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
-            // inline axis have automatic minimum size = 0. The min-content track contribution
-            // must therefore be 0 — the track is not required to accommodate their contents.
-            // (The max-content contribution is unchanged: the track may still grow if space allows.)
+            // inline axis have automatic minimum size = 0. The min-content contribution
+            // (actual text content) is preserved for Phase 2 (content-based minimums) and
+            // Phase 5 (growth limits). Only Phase 1 uses the automatic minimum (= 0).
             if (item->scroller && item->scroller->overflow_x != CSS_VALUE_VISIBLE) {
-                contrib.min_content_contribution = 0.0f;
+                contrib.is_scroll_container = true;
             }
         } else {
             // Row axis
@@ -843,9 +843,10 @@ inline std::vector<GridItemContribution> collect_item_contributions(
             }
 
             // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
-            // block axis have automatic minimum size = 0.
+            // block axis have automatic minimum size = 0. Preserve the real min-content for
+            // Phase 2; only Phase 1 uses the automatic minimum (= 0) via is_scroll_container.
             if (item->scroller && item->scroller->overflow_y != CSS_VALUE_VISIBLE) {
-                contrib.min_content_contribution = 0.0f;
+                contrib.is_scroll_container = true;
             }
         }
 
@@ -928,30 +929,12 @@ inline void run_enhanced_track_sizing(
             }
         }
 
-        // Log track types before sizing
-        for (size_t i = 0; i < col_tracks.size(); i++) {
-            log_debug("  col_track[%zu] before: base_size=%.1f",
-                      i, col_tracks[i].base_size);
-        }
-
         // 11.4 Initialize Track Sizes
         initialize_track_sizes(col_tracks, col_available);
-
-        for (size_t i = 0; i < col_tracks.size(); i++) {
-            log_debug("  col_track[%zu] after init: base_size=%.1f, growth_limit=%.1f",
-                      i, col_tracks[i].base_size, col_tracks[i].growth_limit);
-        }
 
         // 11.5 Resolve Intrinsic Track Sizes
         std::vector<GridItemContribution> col_contributions =
             collect_item_contributions(grid_layout, items, item_count, true /* is_column_axis */);
-        log_debug("  col_contributions.size=%zu", col_contributions.size());
-        for (size_t ci = 0; ci < col_contributions.size(); ci++) {
-            log_debug("  col_contrib[%zu]: track_start=%zu, span=%zu, min=%.1f, max=%.1f",
-                      ci, col_contributions[ci].track_start, col_contributions[ci].track_span,
-                      col_contributions[ci].min_content_contribution,
-                      col_contributions[ci].max_content_contribution);
-        }
 
         // When the container has definite width, cap auto track growth limits to prevent
         // Phase 2 (max-content sizing) from overflowing the container.
@@ -982,14 +965,16 @@ inline void run_enhanced_track_sizing(
 
                 if (per_auto > 0.0f) {
                     // Find per-track min-content and max-content floors from single-span items
+                    // For scroll containers, the effective minimum is 0 (CSS Grid §6.6)
                     std::vector<float> track_min_floor(col_tracks.size(), 0.0f);
                     std::vector<float> track_max_floor(col_tracks.size(), 0.0f);
                     for (const auto& contrib : col_contributions) {
                         if (contrib.track_span == 1) {
                             size_t ti = contrib.track_start;
                             if (ti < track_min_floor.size()) {
-                                track_min_floor[ti] = std::max(track_min_floor[ti],
-                                                               contrib.min_content_contribution);
+                                float effective_min = contrib.is_scroll_container ? 0.0f
+                                                                                  : contrib.min_content_contribution;
+                                track_min_floor[ti] = std::max(track_min_floor[ti], effective_min);
                                 track_max_floor[ti] = std::max(track_max_floor[ti],
                                                                contrib.max_content_contribution);
                             }
@@ -1010,11 +995,6 @@ inline void run_enhanced_track_sizing(
                             if (max_fl > per_auto && floor <= per_auto) {
                                 // Cap: max-content exceeds equal share but min-content fits
                                 track.growth_limit = per_auto;
-                                log_debug("  col_track[%zu] auto-cap: growth_limit=%.1f (max_floor=%.1f > per_auto=%.1f)",
-                                          i, track.growth_limit, max_fl, per_auto);
-                            } else {
-                                log_debug("  col_track[%zu] no-cap: floor=%.1f, max_floor=%.1f, per_auto=%.1f",
-                                          i, floor, max_fl, per_auto);
                             }
                         }
                     }
@@ -1032,11 +1012,6 @@ inline void run_enhanced_track_sizing(
         // 11.7 Expand Flexible Tracks
         expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available,
                                col_contributions, grid_layout->column_gap);
-
-        for (size_t i = 0; i < col_tracks.size(); i++) {
-            log_debug("  col_track[%zu] after expand: base_size=%.1f",
-                      i, col_tracks[i].base_size);
-        }
 
         // 11.8 Stretch auto Tracks
         stretch_auto_tracks(col_tracks, 0.0f, col_available);
