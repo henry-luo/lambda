@@ -712,9 +712,46 @@ static void scan_directory_recursive(FontDatabase* db, const char* dir_path, int
 }
 #else
 static void scan_directory_recursive(FontDatabase* db, const char* dir_path, int max_depth) {
-    (void)db; (void)dir_path; (void)max_depth;
-    // TODO: Windows directory scanning with FindFirstFile/FindNextFile
-    log_debug("font_database: Windows directory scanning not implemented yet");
+    if (max_depth <= 0) return;
+
+    char search_path[MAX_FONT_FILE_PATH];
+    snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
+
+    WIN32_FIND_DATAA ffd;
+    HANDLE hFind = FindFirstFileA(search_path, &ffd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        // skip . and ..
+        if (ffd.cFileName[0] == '.') continue;
+
+        char full_path[MAX_FONT_FILE_PATH];
+        snprintf(full_path, sizeof(full_path), "%s\\%s", dir_path, ffd.cFileName);
+
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (!should_skip_directory(ffd.cFileName)) {
+                scan_directory_recursive(db, full_path, max_depth - 1);
+            }
+        } else {
+            if (is_font_file(ffd.cFileName)) {
+                LARGE_INTEGER file_size;
+                file_size.LowPart = ffd.nFileSizeLow;
+                file_size.HighPart = ffd.nFileSizeHigh;
+                if (is_valid_font_file_size((size_t)file_size.QuadPart)) {
+                    FontEntry* placeholder = create_font_placeholder(full_path, db->pool, db->arena);
+                    if (placeholder) {
+                        placeholder->file_size = (size_t)file_size.QuadPart;
+                        arraylist_append(db->all_fonts, placeholder);
+                    }
+                }
+            }
+        }
+
+        // stop if we have enough fonts discovered
+        if (db->all_fonts->length > 500) break;
+    } while (FindNextFileA(hFind, &ffd) != 0);
+
+    FindClose(hFind);
 }
 #endif
 

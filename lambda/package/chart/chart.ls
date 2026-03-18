@@ -12,25 +12,34 @@ import svg: .svg
 import color: .color
 import util: .util
 import stack: .stack
+import cfg: .config
+import ann: .annotation
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
 // ============================================================
 
 pub fn render(chart_el) {
-    let spec = parse.parse_chart(chart_el);
-
-    // handle layer composition
-    if (spec.layer) render_layered(spec)
-    // handle arc/pie chart (no x/y axes)
-    else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
-    // standard single-view chart
-    else render_single(spec)
+    let tag = name(chart_el);
+    if (tag == 'hconcat' or tag == 'vconcat')
+        render_concat(parse.parse_concat(chart_el))
+    else if (tag == 'repeat')
+        render_repeat(parse.parse_repeat(chart_el))
+    else
+        dispatch(parse.parse_chart(chart_el))
 }
 
 // render from a pre-parsed spec map (no element tree needed)
 pub fn render_spec(spec) {
-    if (spec.layer) render_layered(spec)
+    if (spec is element) render(spec)
+    else if (spec.concat) render_concat(spec)
+    else if (spec.repeat_row or spec.repeat_column) render_repeat(spec)
+    else dispatch(spec)
+}
+
+fn dispatch(spec) {
+    if (spec.facet) render_faceted(spec)
+    else if (spec.layer) render_layered(spec)
     else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
     else render_single(spec)
 }
@@ -40,48 +49,86 @@ pub fn render_spec(spec) {
 // ============================================================
 
 fn render_single(spec) {
+    // resolve theme
+    let theme = cfg.resolve_theme(spec.config);
+    let axis_cfg = cfg.axis_config(theme);
+    let legend_cfg = cfg.legend_config(theme);
+
     // resolve data
     let raw_data = if (spec.data) spec.data else [];
 
     // apply transforms
-    let data_transformed = transform.apply_transforms(raw_data, spec.transform);
+    let data_transformed0 = transform.apply_transforms(raw_data, spec.transform);
 
     let enc = spec.encoding;
     let mark_spec = spec.mark;
     let mark_type = if (mark_spec) mark_spec.kind else "point";
 
     // extract encoding channels
-    let x_ch = parse.get_channel(enc, "x");
-    let y_ch = parse.get_channel(enc, "y");
+    let x_ch0 = parse.get_channel(enc, "x");
+    let y_ch0 = parse.get_channel(enc, "y");
+
+    // histogram auto-transform: if x has bin:true and y has aggregate:"count"
+    let hist = apply_histogram_transform(data_transformed0, x_ch0, y_ch0);
+    let data_transformed = hist.data;
+    let x_ch = hist.x_ch;
+    let y_ch = hist.y_ch;
     let color_ch = parse.get_channel(enc, "color");
     let size_ch = parse.get_channel(enc, "size");
     let opacity_ch = parse.get_channel(enc, "opacity");
     let text_ch = parse.get_channel(enc, "text");
     let x_offset_ch = parse.get_channel(enc, "x_offset");
+    let y2_ch = parse.get_channel(enc, "y2");
+    let detail_ch = parse.get_channel(enc, "detail");
+    let tooltip_ch = parse.get_channel(enc, "tooltip");
 
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
-    let color_field = if (color_ch) color_ch.field else null;
+    let color_field0 = if (color_ch) color_ch.field else null;
     let x_offset_field = if (x_offset_ch) x_offset_ch.field else null;
+    let y2_field = if (y2_ch) y2_ch.field else null;
+    let detail_field = if (detail_ch) detail_ch.field else null;
+    let tooltip_field = if (tooltip_ch) tooltip_ch.field else null;
 
     // determine if categorical/quantitative for position scales
     let x_type = if (x_ch) x_ch.dtype else "nominal";
     let y_type = if (y_ch) y_ch.dtype else "quantitative";
 
     // detect and apply stacking
-    let stack_mode = detect_stack_mode(mark_type, y_ch, color_field, x_offset_field);
-    let data = if (stack_mode and x_field and y_field and color_field)
-        stack.apply_stack(data_transformed, y_field, color_field, x_field, stack_mode)
+    let stack_mode = detect_stack_mode(mark_type, y_ch, color_field0, x_offset_field);
+    let data_stacked = if (stack_mode and x_field and y_field and color_field0)
+        stack.apply_stack(data_transformed, y_field, color_field0, x_field, stack_mode)
     else data_transformed;
+
+    // conditional color encoding: add _cond_color field
+    let has_condition = color_ch and color_ch.condition and not color_ch.field;
+    let data = if (has_condition)
+        (let cond = color_ch.condition,
+         let default_val = if (color_ch.value) color_ch.value else color.default_color,
+         let cond_field = cond.field,
+         for (d in data_stacked) (
+             let fv = d[cond_field],
+             let cv = if (cond.equal != null) (if (fv == cond.equal) cond.value else default_val)
+                 else if (cond.gt != null) (if (float(fv) > float(cond.gt)) cond.value else default_val)
+                 else if (cond.lt != null) (if (float(fv) < float(cond.lt)) cond.value else default_val)
+                 else default_val,
+             let pairs = for (k, val in d) for (x in [string(k), val]) x,
+             map([*pairs, "_cond_color", cv])
+         ))
+    else data_stacked;
+
+    let color_field = if (has_condition) "_cond_color" else color_field0;
 
     // x_offset categories for grouped bars
     let x_offset_cats = if (x_offset_field)
         util.unique_vals(data | ~[x_offset_field])
     else null;
 
-    // build color scale
-    let color_scale = if (color_ch) scale.infer_color_scale(color_ch, data) else null;
-    let color_categories = if (color_ch and (color_ch.dtype == "nominal" or color_ch.dtype == "ordinal"))
+    // build color scale (skip for conditional colors)
+    let color_scale = if (has_condition) null
+        else if (color_ch and color_ch.field) scale.infer_color_scale(color_ch, data)
+        else null;
+    let color_categories = if (not has_condition and color_ch and (color_ch.dtype == "nominal" or color_ch.dtype == "ordinal"))
         util.unique_vals(data | ~[color_field])
     else null;
     let has_legend = color_categories != null and len(color_categories) > 0;
@@ -90,14 +137,14 @@ fn render_single(spec) {
     let temp_x_scale = build_position_scale(x_ch, data, 0.0, float(spec.width), mark_type, true);
     let temp_y_scale = if (stack_mode)
         build_stacked_y_scale(data, float(spec.height), 0.0, stack_mode)
-    else build_position_scale(y_ch, data, float(spec.height), 0.0, mark_type, false);
+    else build_position_scale_y2(y_ch, data, float(spec.height), 0.0, mark_type, y2_field);
     let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
 
     // rebuild scales with actual plot dimensions
     let x_scale = build_position_scale(x_ch, data, 0.0, lay.plot_w, mark_type, true);
     let y_scale = if (stack_mode)
         build_stacked_y_scale(data, lay.plot_h, 0.0, stack_mode)
-    else build_position_scale(y_ch, data, lay.plot_h, 0.0, mark_type, false);
+    else build_position_scale_y2(y_ch, data, lay.plot_h, 0.0, mark_type, y2_field);
 
     // build size scale if needed
     let size_scale = if (size_ch and size_ch.field)
@@ -121,12 +168,23 @@ fn render_single(spec) {
         opacity_scale: opacity_scale,
         opacity_field: if (opacity_ch) opacity_ch.field else null,
         x_field: x_field, y_field: y_field,
+        y2_field: y2_field,
         text_field: if (text_ch) text_ch.field else null,
         is_stacked: stack_mode != null,
         x_offset_field: x_offset_field,
-        x_offset_cats: x_offset_cats
+        x_offset_cats: x_offset_cats,
+        tooltip_field: tooltip_field,
+        detail_field: detail_field
     };
     let marks_el = render_mark(mark_type, data, mark_ctx, mark_spec);
+
+    // render annotations
+    let annotation_el = if (spec.annotation)
+        ann.render_annotations(spec.annotation, x_scale, y_scale, lay.plot_w, lay.plot_h, theme)
+    else null;
+    let marks_with_ann = if (annotation_el)
+        svg.group_class("plot-content", [marks_el, annotation_el])
+    else marks_el;
 
     // render axes
     let x_title = if (x_ch and x_ch.title) x_ch.title
@@ -134,25 +192,25 @@ fn render_single(spec) {
     let y_title = if (y_ch and y_ch.title) y_ch.title
         else if (y_field) y_field else null;
 
-    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, null, x_title) else null;
-    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, null, y_title) else null;
+    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, axis_cfg, x_title) else null;
+    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, axis_cfg, y_title) else null;
 
     // render grid if config requests it
     let grid_config = spec.config;
     let show_grid = if (grid_config and grid_config.axis_grid) grid_config.axis_grid else false;
     let y_grid_el = if (show_grid and y_scale)
-        axis.y_axis_grid(y_scale, lay.plot_w, lay.plot_h, null)
+        axis.y_axis_grid(y_scale, lay.plot_w, lay.plot_h, axis_cfg)
     else null;
 
     // render legend
     let legend_el = if (has_legend)
         (let legend_title = if (color_ch and color_ch.title) color_ch.title
             else if (color_field) color_field else null,
-         leg.color_legend(color_categories, color_scale, legend_title, null))
+         leg.color_legend(color_categories, color_scale, legend_title, legend_cfg))
     else null;
 
     // assemble SVG
-    assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, y_grid_el, legend_el)
+    assemble_svg(spec, lay, marks_with_ann, x_axis_el, y_axis_el, y_grid_el, legend_el, theme)
 }
 
 // ============================================================
@@ -160,6 +218,9 @@ fn render_single(spec) {
 // ============================================================
 
 fn render_layered(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let axis_cfg = cfg.axis_config(theme);
+    let legend_cfg = cfg.legend_config(theme);
     let layers = spec.layer;
     let data = if (spec.data) spec.data else [];
 
@@ -176,7 +237,11 @@ fn render_layered(spec) {
 
     let x_ch = parse.get_channel(enc, "x");
     let y_ch = parse.get_channel(enc, "y");
-    let color_ch = parse.get_channel(enc, "color");
+    // color channel: use parent encoding first, else pick from first layer that has color
+    let parent_color_ch = parse.get_channel(enc, "color");
+    let all_layer_color_chs = for (ls in layer_specs, let l_enc = ls.encoding) parse.get_channel(l_enc, "color");
+    let first_layer_color_ch = (all_layer_color_chs that (~ != null))[0];
+    let color_ch = if (parent_color_ch) parent_color_ch else first_layer_color_ch;
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
     let color_field = if (color_ch) color_ch.field else null;
@@ -189,11 +254,41 @@ fn render_layered(spec) {
     let has_legend = color_categories != null and len(color_categories) > 0;
 
     let temp_x_scale = build_position_scale(x_ch, all_data, 0.0, float(spec.width), mark_type, true);
-    let temp_y_scale = build_position_scale(y_ch, all_data, float(spec.height), 0.0, mark_type, false);
+
+    // build combined y-scale covering all layers' y and y2 values
+    let y2_count = sum(for (ls in layer_specs,
+                            let l_enc = ls.encoding,
+                            let l_y2_ch = parse.get_channel(l_enc, "y2"))
+        if (l_y2_ch) 1 else 0);
+    let use_combined_y = y2_count > 0;
+    let layer_y_mins = for (ls in layer_specs,
+                            let l_enc = ls.encoding,
+                            let l_y_ch = parse.get_channel(l_enc, "y"),
+                            let l_y2_ch = parse.get_channel(l_enc, "y2"),
+                            let ly_f = if (l_y_ch) l_y_ch.field else null,
+                            let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
+                            let y_vals = if (ly_f) (all_data | float(~[ly_f])) else [0.0],
+                            let y2_vals = if (ly2_f) (all_data | float(~[ly2_f])) else y_vals)
+        min([min(y_vals), min(y2_vals)]);
+    let layer_y_maxs = for (ls in layer_specs,
+                            let l_enc = ls.encoding,
+                            let l_y_ch = parse.get_channel(l_enc, "y"),
+                            let l_y2_ch = parse.get_channel(l_enc, "y2"),
+                            let ly_f = if (l_y_ch) l_y_ch.field else null,
+                            let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
+                            let y_vals = if (ly_f) (all_data | float(~[ly_f])) else [0.0],
+                            let y2_vals = if (ly2_f) (all_data | float(~[ly2_f])) else y_vals)
+        max([max(y_vals), max(y2_vals)]);
+
+    let temp_y_scale = if (use_combined_y)
+        scale.linear_scale_nice([min(layer_y_mins), max(layer_y_maxs)], float(spec.height), 0.0, false)
+    else build_position_scale(y_ch, all_data, float(spec.height), 0.0, mark_type, false);
     let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
 
     let x_scale = build_position_scale(x_ch, all_data, 0.0, lay.plot_w, mark_type, true);
-    let y_scale = build_position_scale(y_ch, all_data, lay.plot_h, 0.0, mark_type, false);
+    let y_scale = if (use_combined_y)
+        scale.linear_scale_nice([min(layer_y_mins), max(layer_y_maxs)], lay.plot_h, 0.0, false)
+    else build_position_scale(y_ch, all_data, lay.plot_h, 0.0, mark_type, false);
 
     // render each layer's marks
     let layer_marks = (for (ls in layer_specs)
@@ -202,18 +297,21 @@ fn render_layered(spec) {
          let l_mark_type = if (l_mark) l_mark.kind else "line",
          let l_color_ch = parse.get_channel(l_enc, "color"),
          let l_color_field = if (l_color_ch) l_color_ch.field else color_field,
+         let l_color_scale = if (l_color_ch) scale.infer_color_scale(l_color_ch, ls.data) else color_scale,
          let l_size_ch = parse.get_channel(l_enc, "size"),
          let l_x_ch = parse.get_channel(l_enc, "x"),
          let l_y_ch = parse.get_channel(l_enc, "y"),
+         let l_y2_ch = parse.get_channel(l_enc, "y2"),
          let l_text_ch = parse.get_channel(l_enc, "text"),
          let lx = if (l_x_ch) l_x_ch.field else x_field,
          let ly = if (l_y_ch) l_y_ch.field else y_field,
+         let ly2 = if (l_y2_ch) l_y2_ch.field else null,
          let l_ctx = {
              x_scale: x_scale, y_scale: y_scale,
              plot_w: lay.plot_w, plot_h: lay.plot_h,
-             color_scale: color_scale, color_field: l_color_field,
+             color_scale: l_color_scale, color_field: l_color_field,
              size_scale: null, size_field: null,
-             x_field: lx, y_field: ly,
+             x_field: lx, y_field: ly, y2_field: ly2,
              text_field: if (l_text_ch) l_text_ch.field else null
          },
          render_mark(l_mark_type, ls.data, l_ctx, l_mark))
@@ -225,19 +323,19 @@ fn render_layered(spec) {
     let y_title = if (y_ch and y_ch.title) y_ch.title
         else if (y_field) y_field else null;
 
-    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, null, x_title) else null;
-    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, null, y_title) else null;
+    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, axis_cfg, x_title) else null;
+    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, axis_cfg, y_title) else null;
 
     // legend
     let legend_el = if (has_legend)
         (let legend_title = if (color_ch and color_ch.title) color_ch.title
             else if (color_field) color_field else null,
-         leg.color_legend(color_categories, color_scale, legend_title, null))
+         leg.color_legend(color_categories, color_scale, legend_title, legend_cfg))
     else null;
 
     // assemble with all layer marks
     let all_marks = svg.group_class("marks layers", layer_marks);
-    assemble_svg(spec, lay, all_marks, x_axis_el, y_axis_el, null, legend_el)
+    assemble_svg(spec, lay, all_marks, x_axis_el, y_axis_el, null, legend_el, theme)
 }
 
 // ============================================================
@@ -245,6 +343,8 @@ fn render_layered(spec) {
 // ============================================================
 
 fn render_arc(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let legend_cfg = cfg.legend_config(theme);
     let raw_data = if (spec.data) spec.data else [];
     let data = transform.apply_transforms(raw_data, spec.transform);
 
@@ -280,13 +380,13 @@ fn render_arc(spec) {
     let legend_el = if (has_legend)
         (let legend_title = if (color_ch and color_ch.title) color_ch.title
             else if (color_field) color_field else null,
-         leg.color_legend(color_categories, color_scale, legend_title, null))
+         leg.color_legend(color_categories, color_scale, legend_title, legend_cfg))
     else null;
 
     // assemble
     let width = int(lay.total_w);
     let height = int(lay.total_h);
-    let bg = <rect width: width, height: height, fill: "white">;
+    let bg = <rect width: width, height: height, fill: theme.background>;
 
     let children0 = [bg, arcs_el];
 
@@ -294,7 +394,7 @@ fn render_arc(spec) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': 16, 'font-weight': "bold", fill: "#333";
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
              spec.title
          >]
     else children0;
@@ -328,19 +428,59 @@ fn build_position_scale(channel, data, rlo, rhi, mark_type: string, is_x: bool) 
                     else false
                 scale.linear_scale_nice(values, rlo, rhi, include_zero)
             } else if data_type == "temporal" {
-                let num_vals = values | float(~)
-                scale.linear_scale_nice(num_vals, rlo, rhi, false)
+                scale.temporal_scale(values, rlo, rhi)
             } else {
                 // nominal or ordinal
                 let cats = util.unique_vals(values)
-                if (mark_type == "bar" and is_x)
+                if ((mark_type == "bar" or mark_type == "rect" or mark_type == "boxplot") and is_x)
                     scale.band_scale(cats, rlo, rhi, 4.0)
-                else if (mark_type == "bar" and not is_x)
+                else if ((mark_type == "bar" or mark_type == "rect") and not is_x)
                     scale.band_scale(cats, rlo, rhi, 4.0)
                 else
                     scale.point_scale(cats, rlo, rhi, 20.0)
             }
         }
+    }
+}
+
+// ============================================================
+// Histogram auto-transform (bin + count)
+// ============================================================
+
+fn apply_histogram_transform(data, x_ch, y_ch) {
+    let has_bin = x_ch and x_ch.bin == true;
+    let has_count = y_ch and y_ch.aggregate == "count";
+    if (not has_bin or not has_count) {
+        {data: data, x_ch: x_ch, y_ch: y_ch}
+    } else {
+        let field = x_ch.field;
+        let bin_field = field ++ "_bin";
+        let bin_end = bin_field ++ "_end";
+        let maxbins = if (x_ch.bin != true and x_ch.bin.maxbins) x_ch.bin.maxbins else 10;
+        // apply binning
+        let values = data | float(~[field]);
+        let vmin = min(values);
+        let vmax = max(values);
+        let range_span = vmax - vmin;
+        let step = util.nice_num(range_span / float(maxbins), true);
+        let binned = for (d in data) (
+            let v = float(d[field]),
+            let bs = floor(v / step) * step,
+            let be = bs + step,
+            // add both fields in one map() call to avoid chained add_field issue
+            let pairs = for (k, val in d) for (x in [k, val]) x,
+            map([*pairs, bin_field, bs, bin_end, be])
+        );
+        // aggregate: count per bin
+        let bin_keys = util.unique_vals(binned | string(~[bin_field]));
+        let counted = for (bk in bin_keys) (
+            let items = binned that string(~[bin_field]) == bk,
+            map([bin_field, items[0][bin_field], bin_end, items[0][bin_end], "_count", len(items)])
+        );
+        // override channels: x→nominal on bin_field, y→quantitative on _count
+        let new_x = {*: x_ch, field: bin_field, dtype: "ordinal", bin: null};
+        let new_y = {*: y_ch, field: "_count", dtype: "quantitative", aggregate: null};
+        {data: counted, x_ch: new_x, y_ch: new_y}
     }
 }
 
@@ -364,6 +504,25 @@ fn build_stacked_y_scale(data, rlo, rhi, mode) {
     scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
 }
 
+// build y scale that also considers y2_field for dual-value marks
+fn build_position_scale_y2(y_ch, data, rlo, rhi, mark_type, y2_field) {
+    if (not y2_field) build_position_scale(y_ch, data, rlo, rhi, mark_type, false)
+    else if (not y_ch) null
+    else {
+        let field_name = y_ch.field
+        if not field_name { null }
+        else {
+            let y_vals = data | float(~[field_name])
+            let y2_vals = data | float(~[y2_field])
+            let all_vals = [*y_vals, *y2_vals]
+            let include_zero = if (mark_type == "bar") true
+                else if (y_ch.zero != null) y_ch.zero
+                else false
+            scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
+        }
+    }
+}
+
 // ============================================================
 // Dispatch mark rendering
 // ============================================================
@@ -383,6 +542,14 @@ fn render_mark(mark_type, data, ctx, mark_spec) {
         mark.rule_mark(data, ctx, mark_spec)
     else if (mark_type == "tick")
         mark.tick_mark(data, ctx, mark_spec)
+    else if (mark_type == "boxplot")
+        mark.boxplot_mark(data, ctx, mark_spec)
+    else if (mark_type == "errorbar")
+        mark.errorbar_mark(data, ctx, mark_spec)
+    else if (mark_type == "errorband")
+        mark.errorband_mark(data, ctx, mark_spec)
+    else if (mark_type == "rect")
+        mark.rect_mark(data, ctx, mark_spec)
     else
         // default: point
         mark.point_mark(data, ctx, mark_spec)
@@ -392,12 +559,12 @@ fn render_mark(mark_type, data, ctx, mark_spec) {
 // Assemble final SVG from components
 // ============================================================
 
-fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el) {
+fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, theme) {
     let width = int(lay.total_w);
     let height = int(lay.total_h);
 
     // background
-    let bg = <rect width: width, height: height, fill: "white">;
+    let bg = <rect width: width, height: height, fill: theme.background>;
 
     // plot group contents
     let plot_children0 = [marks_el];
@@ -414,7 +581,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': 16, 'font-weight': "bold", fill: "#333";
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
              spec.title
          >]
     else children0;
@@ -426,4 +593,170 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el) {
     else children1;
 
     svg.svg_root(width, height, children)
+}
+
+// ============================================================
+// Faceted chart rendering (small multiples)
+// ============================================================
+
+fn render_faceted(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let raw_data = if (spec.data) spec.data else [];
+    let data = transform.apply_transforms(raw_data, spec.transform);
+    let facet = spec.facet;
+
+    let facet_field = if (facet.field) facet.field else null;
+    let columns = if (facet.columns) facet.columns else 3;
+
+    // partition data by facet field
+    let facet_keys = util.unique_vals(data | ~[facet_field]);
+    let n = len(facet_keys);
+
+    // compute facet grid layout
+    let sub_w = float(spec.width);
+    let sub_h = float(spec.height);
+    let spacing = if (facet.spacing) facet.spacing else 20;
+    let flay = layout.compute_facet_layout(n, columns, sub_w, sub_h, spacing, spec.title, spec.padding);
+
+    // render each facet cell
+    let cells = (for (i in 0 to (n - 1),
+         let fk = facet_keys[i],
+         let cell_data = data that ~[facet_field] == fk,
+         let cell_spec = {*:spec, data: cell_data, facet: null, title: null},
+         let cell_svg = dispatch(cell_spec),
+         let pos = layout.facet_cell_pos(flay, i))
+        <g transform: svg.translate(pos.x, pos.y + flay.header_h);
+            <text x: sub_w / 2.0, y: -4.0,
+                  'text-anchor': "middle", 'font-size': 12, 'font-weight': "bold",
+                  fill: theme.title_color;
+                string(fk)
+            >
+            cell_svg
+        >
+    );
+
+    // background + title + cells
+    let bg = <rect width: int(flay.total_w), height: int(flay.total_h), fill: theme.background>;
+    let children0 = [bg, *cells];
+    let children = if (spec.title)
+        [*children0,
+         <text x: flay.total_w / 2.0, y: float(spec.padding.top) + 16.0,
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
+             spec.title
+         >]
+    else children0;
+
+    svg.svg_root(int(flay.total_w), int(flay.total_h), children)
+}
+
+// ============================================================
+// Concat composition (hconcat / vconcat)
+// ============================================================
+
+fn render_concat(spec) {
+    let direction = spec.concat;
+    let spacing = float(spec.spacing);
+    let subs = spec.children;
+    let n = len(subs);
+
+    // render each child chart independently (skip if already SVG)
+    let sub_svgs = for (s in subs)
+        if (s is element and name(s) == 'svg') s
+        else render_spec(s);
+
+    // compute sizes from rendered SVGs
+    let is_h = direction == "horizontal";
+    let sizes = for (s in sub_svgs) {
+        w: if (s.width) float(s.width) else 400.0,
+        h: if (s.height) float(s.height) else 300.0
+    };
+
+    // accumulate offsets
+    let items = position_subs(sizes, is_h, spacing, 0, 0.0, []);
+
+    // total dimensions
+    let total_w = if (is_h)
+        max(for (p in items) p.x + p.w)
+    else
+        max(for (p in items) p.w);
+    let total_h = if (is_h)
+        max(for (p in items) p.h)
+    else
+        max(for (p in items) p.y + p.h);
+
+    // wrap each sub-svg in a translated group
+    let groups = for (i in 0 to (n - 1))
+        <g transform: svg.translate(items[i].x, items[i].y);
+            sub_svgs[i]
+        >;
+
+    let bg = <rect width: int(total_w), height: int(total_h), fill: "white">;
+    svg.svg_root(int(total_w), int(total_h), [bg, *groups])
+}
+
+// recursive helper: accumulate positions for concat children
+fn position_subs(sizes, is_h, spacing, idx, offset, acc) {
+    if (idx >= len(sizes)) acc
+    else (
+        let s = sizes[idx],
+        let entry = if (is_h)
+            {x: offset, y: 0.0, w: s.w, h: s.h}
+        else
+            {x: 0.0, y: offset, w: s.w, h: s.h},
+        let next_offset = if (is_h) offset + s.w + spacing
+            else offset + s.h + spacing,
+        position_subs(sizes, is_h, spacing, idx + 1, next_offset, [*acc, entry])
+    )
+}
+
+// ============================================================
+// Repeat composition (parameterized chart grid)
+// ============================================================
+
+fn render_repeat(spec) {
+    let row_fields = if (spec.repeat_row) spec.repeat_row else [""];
+    let col_fields = if (spec.repeat_column) spec.repeat_column else [""];
+    let tmpl = spec.template;
+
+    let n_rows = len(row_fields);
+    let n_cols = len(col_fields);
+    let n_total = n_rows * n_cols;
+
+    // generate all charts in row-major order using flat index
+    let sub_charts = for (i in 0 to (n_total - 1),
+                          let ri = int(i / n_cols),
+                          let ci = i % n_cols,
+                          let rf = row_fields[ri],
+                          let cf = col_fields[ci])
+        substitute_and_render(tmpl, rf, cf);
+
+    // build each row as an hconcat of its column charts
+    let rows_svgs = for (ri in 0 to (n_rows - 1),
+                         let row_charts = for (ci in 0 to (n_cols - 1)) sub_charts[ri * n_cols + ci],
+                         let row_spec = {concat: "horizontal", spacing: 10.0, children: row_charts})
+        render_concat(row_spec);
+
+    if (n_rows == 1) rows_svgs[0]
+    else render_concat({concat: "vertical", spacing: 10.0, children: rows_svgs})
+}
+
+// substitute {repeat: "row"} and {repeat: "column"} in template and render
+fn substitute_and_render(tmpl, row_field, col_field) {
+    let spec = parse.parse_chart(tmpl);
+    let enc = spec.encoding;
+    let new_enc = substitute_encoding(enc, row_field, col_field);
+    let new_spec = {*:spec, encoding: new_enc};
+    dispatch(new_spec)
+}
+
+fn substitute_encoding(enc, row_field, col_field) {
+    let new_x = if (enc.x and enc.x.field and enc.x.field.repeat)
+        (let rf = if (enc.x.field.repeat == "column") col_field else row_field,
+         {*:enc.x, field: rf})
+    else enc.x;
+    let new_y = if (enc.y and enc.y.field and enc.y.field.repeat)
+        (let rf = if (enc.y.field.repeat == "column") col_field else row_field,
+         {*:enc.y, field: rf})
+    else enc.y;
+    {*:enc, x: new_x, y: new_y}
 }

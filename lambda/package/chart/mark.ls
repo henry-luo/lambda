@@ -21,6 +21,7 @@ pub fn bar(data, ctx, mark_config) {
     let opacity_field = ctx.opacity_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
     let is_stacked = if (ctx.is_stacked) ctx.is_stacked else false;
     let x_offset_field = if (ctx.x_offset_field) ctx.x_offset_field else null;
     let x_offset_cats = if (ctx.x_offset_cats) ctx.x_offset_cats else null;
@@ -28,12 +29,15 @@ pub fn bar(data, ctx, mark_config) {
     let fill = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let base_opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let rx = if (mark_config and mark_config.corner_radius) mark_config.corner_radius else 0;
+    let tooltip_field = if (ctx.tooltip_field) ctx.tooltip_field else null;
 
     let bars = (for (d in data) (
         let x_val = d[x_field],
         let y_val = float(d[y_field]),
         let x_pos = float(scale.scale_apply(x_scale, x_val)),
-        let raw_bar_w = if (x_scale.bandwidth) x_scale.bandwidth else 20.0,
+        let y2_pos = if (y2_field) float(scale.scale_apply(y_scale, float(d[y2_field]))) else null,
+        let raw_bar_w = if (mark_config and mark_config.width) float(mark_config.width)
+            else if (x_scale.bandwidth) x_scale.bandwidth else 20.0,
         let sub_gap = if (n_groups > 1) 2.0 else 0.0,
         let bar_w = if (n_groups > 1)
             (raw_bar_w - sub_gap * float(n_groups - 1)) / float(n_groups)
@@ -44,19 +48,30 @@ pub fn bar(data, ctx, mark_config) {
         let x_final = x_pos + float(offset_idx) * (bar_w + sub_gap),
         let y1_pos = if (is_stacked)
             float(scale.scale_apply(y_scale, float(d["_y1"])))
+        else if (y2_field)
+            min(float(scale.scale_apply(y_scale, y_val)), y2_pos)
         else float(scale.scale_apply(y_scale, y_val)),
         let y0_pos = if (is_stacked)
             float(scale.scale_apply(y_scale, float(d["_y0"])))
+        else if (y2_field)
+            max(float(scale.scale_apply(y_scale, y_val)), y2_pos)
         else plot_h,
         let bar_h = y0_pos - y1_pos,
         let bar_fill = if (color_scale and color_field)
             scale.scale_apply(color_scale, d[color_field])
+        else if (color_field and d[color_field]) d[color_field]
         else fill,
         let bar_opacity = if (opacity_scale and opacity_field)
             float(scale.scale_apply(opacity_scale, float(d[opacity_field])))
         else base_opacity,
-        <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
-              fill: bar_fill, opacity: bar_opacity, rx: rx>
+        if (tooltip_field)
+            <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
+                  fill: bar_fill, opacity: bar_opacity, rx: rx;
+                <title; string(d[tooltip_field])>
+            >
+        else
+            <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
+                  fill: bar_fill, opacity: bar_opacity, rx: rx>
     ));
 
     svg.group_class("marks bars", bars)
@@ -100,19 +115,25 @@ pub fn line_mark(data, ctx, mark_config) {
     let color_field = ctx.color_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let detail_field = if (ctx.detail_field) ctx.detail_field else null;
     let stroke_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 2.0;
     let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let show_points = if (mark_config and mark_config.point) mark_config.point else false;
 
-    // group by color field if present
-    let series = if (color_field)
-        (let groups = util.unique_vals(data | ~[color_field]),
-        (for (g in groups) {
-            key: g,
-            items: data that ~[color_field] == g,
-            color: if (color_scale) scale.scale_apply(color_scale, g) else stroke_color
-        }))
+    // group by detail field first, then color field
+    let group_field = if (detail_field) detail_field else color_field;
+    let series = if (group_field)
+        (let groups = util.unique_vals(data | ~[group_field]),
+        (for (g in groups) (
+            let group_items = data that ~[group_field] == g,
+            {
+                key: g,
+                items: group_items,
+                color: if (color_scale and color_field)
+                    scale.scale_apply(color_scale, group_items[0][color_field])
+                else stroke_color
+            })))
     else [{key: null, items: data, color: stroke_color}];
 
     let line_elements = (for (s in series) (
@@ -149,17 +170,24 @@ pub fn area_mark(data, ctx, mark_config) {
     let color_field = ctx.color_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let detail_field = if (ctx.detail_field) ctx.detail_field else null;
     let is_stacked = if (ctx.is_stacked) ctx.is_stacked else false;
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 0.5;
 
-    let series = if (color_field)
-        (let groups = util.unique_vals(data | ~[color_field]),
-        (for (g in groups) {
-            key: g,
-            items: data that ~[color_field] == g,
-            color: if (color_scale) scale.scale_apply(color_scale, g) else fill_color
-        }))
+    // group by detail field first, then color field
+    let group_field = if (detail_field) detail_field else color_field;
+    let series = if (group_field)
+        (let groups = util.unique_vals(data | ~[group_field]),
+        (for (g in groups) (
+            let group_items = data that ~[group_field] == g,
+            {
+                key: g,
+                items: group_items,
+                color: if (color_scale and color_field)
+                    scale.scale_apply(color_scale, group_items[0][color_field])
+                else fill_color
+            })))
     else [{key: null, items: data, color: fill_color}];
 
     let area_elements = (for (s in series) (
@@ -199,6 +227,7 @@ pub fn point_mark(data, ctx, mark_config) {
     let opacity_field = ctx.opacity_field;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let tooltip_field = if (ctx.tooltip_field) ctx.tooltip_field else null;
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let base_opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
     let base_size = if (mark_config and mark_config.size) mark_config.size else 30;
@@ -211,6 +240,7 @@ pub fn point_mark(data, ctx, mark_config) {
         let bw_y = if (y_scale.bandwidth) y_scale.bandwidth / 2.0 else 0.0,
         let pt_fill = if (color_scale and color_field)
             scale.scale_apply(color_scale, d[color_field])
+        else if (color_field and d[color_field]) d[color_field]
         else fill_color,
         let pt_r = if (size_scale and size_field)
             (let sv = float(d[size_field]),
@@ -219,9 +249,16 @@ pub fn point_mark(data, ctx, mark_config) {
         let pt_opacity = if (opacity_scale and opacity_field)
             float(scale.scale_apply(opacity_scale, float(d[opacity_field])))
         else base_opacity,
-        <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
-                fill: pt_fill, opacity: pt_opacity,
-                stroke: "white", 'stroke-width': 0.5>
+        if (tooltip_field)
+            <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
+                    fill: pt_fill, opacity: pt_opacity,
+                    stroke: "white", 'stroke-width': 0.5;
+                <title; string(d[tooltip_field])>
+            >
+        else
+            <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
+                    fill: pt_fill, opacity: pt_opacity,
+                    stroke: "white", 'stroke-width': 0.5>
     ));
 
     svg.group_class("marks points", points)
@@ -305,6 +342,7 @@ pub fn rule_mark(data, ctx, mark_config) {
     let plot_h = ctx.plot_h;
     let x_field = ctx.x_field;
     let y_field = ctx.y_field;
+    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
     let stroke_color = if (mark_config and mark_config.color) mark_config.color else "#888";
     let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 1.0;
     let dash = if (mark_config and mark_config.stroke_dash) mark_config.stroke_dash else null;
@@ -328,6 +366,13 @@ pub fn rule_mark(data, ctx, mark_config) {
                       'stroke-dasharray': dash>
             else
                 svg.line(x_pos, 0, x_pos, plot_h, stroke_color, stroke_w))
+        else if (x_field and y_field and y2_field)
+            // segment rule: vertical line from y to y2 at x position (e.g. high-low whisker)
+            (let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+            let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+            let y0_px = float(scale.scale_apply(y_scale, float(d[y_field]))),
+            let y2_px = float(scale.scale_apply(y_scale, float(d[y2_field]))),
+            svg.line(x_pos + bw, y0_px, x_pos + bw, y2_px, stroke_color, stroke_w))
         else null
     ) that (~ != null);
 
@@ -360,8 +405,171 @@ pub fn tick_mark(data, ctx, mark_config) {
 }
 
 // ============================================================
-// Helper: find index of value in category array
+// Box plot (composite mark: rect box + whisker lines + median line + outlier circles)
 // ============================================================
+
+pub fn boxplot_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let color_scale = ctx.color_scale;
+    let color_field = ctx.color_field;
+    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
+    let extent = if (mark_config and mark_config.extent) float(mark_config.extent) else 1.5;
+    let box_w = if (x_scale.bandwidth) x_scale.bandwidth * 0.6 else 20.0;
+
+    // group data by x field
+    let groups = util.unique_vals(data | ~[x_field]);
+    let elements = (for (g in groups) (
+        let items = data that ~[x_field] == g,
+        let vals = (for (d in items) float(d[y_field])),
+        let sorted_vals = (for (v in vals order by v) v),
+        let q1 = math.quantile(sorted_vals, 0.25),
+        let q3 = math.quantile(sorted_vals, 0.75),
+        let med = math.quantile(sorted_vals, 0.5),
+        let iqr = q3 - q1,
+        let lo_fence = q1 - extent * iqr,
+        let hi_fence = q3 + extent * iqr,
+        let whisker_lo = min(sorted_vals that ~ >= lo_fence),
+        let whisker_hi = max(sorted_vals that ~ <= hi_fence),
+        let outliers = sorted_vals that (~ < lo_fence or ~ > hi_fence),
+        let x_pos = float(scale.scale_apply(x_scale, g)),
+        let bw = if (x_scale.bandwidth) x_scale.bandwidth else 30.0,
+        let cx = x_pos + bw / 2.0,
+        let box_x = cx - box_w / 2.0,
+        let fill = if (color_scale and color_field)
+            scale.scale_apply(color_scale, g)
+        else fill_color,
+        let y_q1 = float(scale.scale_apply(y_scale, q1)),
+        let y_q3 = float(scale.scale_apply(y_scale, q3)),
+        let y_med = float(scale.scale_apply(y_scale, med)),
+        let y_wlo = float(scale.scale_apply(y_scale, whisker_lo)),
+        let y_whi = float(scale.scale_apply(y_scale, whisker_hi)),
+        // box rect (q1 to q3)
+        let box_rect = <rect x: box_x, y: y_q3, width: box_w, height: y_q1 - y_q3,
+                             fill: fill, opacity: 0.8, stroke: "#333", 'stroke-width': 1>,
+        // median line
+        let med_line = <line x1: box_x, y1: y_med, x2: box_x + box_w, y2: y_med,
+                             stroke: "#333", 'stroke-width': 2>,
+        // lower whisker
+        let wlo_line = <line x1: cx, y1: y_q1, x2: cx, y2: y_wlo,
+                             stroke: "#333", 'stroke-width': 1>,
+        let wlo_cap = <line x1: cx - box_w / 4.0, y1: y_wlo, x2: cx + box_w / 4.0, y2: y_wlo,
+                            stroke: "#333", 'stroke-width': 1>,
+        // upper whisker
+        let whi_line = <line x1: cx, y1: y_q3, x2: cx, y2: y_whi,
+                             stroke: "#333", 'stroke-width': 1>,
+        let whi_cap = <line x1: cx - box_w / 4.0, y1: y_whi, x2: cx + box_w / 4.0, y2: y_whi,
+                            stroke: "#333", 'stroke-width': 1>,
+        // outlier circles
+        let outlier_els = (for (o in outliers)
+            <circle cx: cx, cy: float(scale.scale_apply(y_scale, o)), r: 3,
+                    fill: "none", stroke: "#333", 'stroke-width': 1>),
+        [wlo_line, wlo_cap, whi_line, whi_cap, box_rect, med_line, *outlier_els]
+    ));
+
+    let all = (for (group in elements) for (el in group) el);
+    svg.group_class("marks boxplots", all)
+}
+
+// ============================================================
+// Error bar mark (vertical line with cap ticks)
+// ============================================================
+
+pub fn errorbar_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
+    let stroke_color = if (mark_config and mark_config.color) mark_config.color else "#333";
+    let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 1.5;
+    let cap_w = 6.0;
+
+    let bars = (for (d in data) (
+        let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+        let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+        let cx = x_pos + bw,
+        let y_lo = float(scale.scale_apply(y_scale, float(d[y_field]))),
+        let y_hi = if (y2_field)
+            float(scale.scale_apply(y_scale, float(d[y2_field])))
+        else y_lo,
+        let stem = <line x1: cx, y1: y_lo, x2: cx, y2: y_hi,
+                         stroke: stroke_color, 'stroke-width': stroke_w>,
+        let cap_lo = <line x1: cx - cap_w, y1: y_lo, x2: cx + cap_w, y2: y_lo,
+                           stroke: stroke_color, 'stroke-width': stroke_w>,
+        let cap_hi = <line x1: cx - cap_w, y1: y_hi, x2: cx + cap_w, y2: y_hi,
+                           stroke: stroke_color, 'stroke-width': stroke_w>,
+        [stem, cap_lo, cap_hi]
+    ));
+
+    let all = (for (group in bars) for (el in group) el);
+    svg.group_class("marks errorbars", all)
+}
+
+// ============================================================
+// Error band mark (filled area between y and y2)
+// ============================================================
+
+pub fn errorband_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
+    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
+    let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 0.3;
+
+    let top_points = (for (d in data) (
+        let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+        let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+        let y_pos = float(scale.scale_apply(y_scale, float(d[y_field]))),
+        [x_pos + bw, y_pos]));
+
+    let bottom_points = if (y2_field)
+        (for (d in data) (
+            let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+            let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
+            let y_pos = float(scale.scale_apply(y_scale, float(d[y2_field]))),
+            [x_pos + bw, y_pos]))
+    else top_points;
+
+    let d = svg.area_path(top_points, bottom_points);
+    let band = <path d: d, fill: fill_color, opacity: opacity, stroke: "none">;
+    svg.group_class("marks errorbands", [band])
+}
+
+// ============================================================
+// Rect mark (positioned rectangles for heatmaps)
+// ============================================================
+
+pub fn rect_mark(data, ctx, mark_config) {
+    let x_scale = ctx.x_scale;
+    let y_scale = ctx.y_scale;
+    let color_scale = ctx.color_scale;
+    let color_field = ctx.color_field;
+    let x_field = ctx.x_field;
+    let y_field = ctx.y_field;
+    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
+    let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
+
+    let rects = (for (d in data) (
+        let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
+        let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
+        let w = abs(if (x_scale.bandwidth) x_scale.bandwidth else 20.0),
+        let h = abs(if (y_scale.bandwidth) y_scale.bandwidth else 20.0),
+        let rect_y = if (y_scale.bandwidth and y_scale.bandwidth < 0.0) y_pos + y_scale.bandwidth else y_pos,
+        let rect_fill = if (color_scale and color_field)
+            scale.scale_apply(color_scale, d[color_field])
+        else if (color_field and d[color_field]) d[color_field]
+        else fill_color,
+        <rect x: x_pos, y: rect_y, width: w, height: h,
+              fill: rect_fill, opacity: opacity, stroke: "white", 'stroke-width': 0.5>
+    ));
+
+    svg.group_class("marks rects", rects)
+}
 
 fn find_cat_index(cats, val) {
     let matches = (for (i in 0 to (len(cats) - 1))

@@ -112,3 +112,42 @@ pub fn compute_arc_layout(spec, has_color_legend: bool, color_categories) {
         total_h: height
     }
 }
+
+// ============================================================
+// Layout for faceted charts — grid of sub-charts
+// ============================================================
+
+pub fn compute_facet_layout(n_facets, columns, sub_w, sub_h, spacing, title, padding) {
+    let cols = if (columns and columns > 0) columns else n_facets;
+    let rows = int(ceil(float(n_facets) / float(cols)));
+    let sp = if (spacing) float(spacing) else 20.0;
+    let pad = if (padding) padding else {top: 20, right: 20, bottom: 20, left: 20};
+    let header_h = 18.0;
+    let title_h = if (title) 24.0 else 0.0;
+
+    let total_w = float(pad.left) + float(cols) * float(sub_w) + float(cols - 1) * sp + float(pad.right);
+    let total_h = float(pad.top) + title_h + float(rows) * (float(sub_h) + header_h) + float(rows - 1) * sp + float(pad.bottom);
+
+    {
+        rows: rows,
+        cols: cols,
+        sub_w: float(sub_w),
+        sub_h: float(sub_h),
+        spacing: sp,
+        header_h: header_h,
+        title_h: title_h,
+        offset_x: float(pad.left),
+        offset_y: float(pad.top) + title_h,
+        total_w: total_w,
+        total_h: total_h
+    }
+}
+
+// position of the i-th facet cell (0-based)
+pub fn facet_cell_pos(facet_layout, index) {
+    let col = index % facet_layout.cols;
+    let row = int(floor(float(index) / float(facet_layout.cols)));
+    let x = facet_layout.offset_x + float(col) * (facet_layout.sub_w + facet_layout.spacing);
+    let y = facet_layout.offset_y + float(row) * (facet_layout.sub_h + facet_layout.header_h + facet_layout.spacing);
+    {x: x, y: y}
+}

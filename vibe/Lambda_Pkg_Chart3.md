@@ -1324,9 +1324,9 @@ Foundation for multi-series and multi-view charts.
 | Stacking engine | `stack.ls` | — | Medium | ✅ Done |
 | Stacked bar mark | `mark.ls` | stack.ls | Low | ✅ Done |
 | Stacked area mark | `mark.ls` | stack.ls | Low | ✅ Done |
-| Facet composition | `chart.ls`, `layout.ls`, `parse.ls` | — | High | ❌ |
-| hconcat / vconcat | `chart.ls`, `layout.ls`, `parse.ls` | — | Medium | ❌ |
-| Repeat composition | `chart.ls`, `parse.ls` | concat | Medium | ❌ |
+| Facet composition | `chart.ls`, `layout.ls`, `parse.ls` | — | High | ✅ Done |
+| hconcat / vconcat | `chart.ls`, `layout.ls`, `parse.ls` | — | Medium | ✅ Done |
+| Repeat composition | `chart.ls`, `parse.ls` | concat | Medium | ✅ Done |
 | Grouped bar (x_offset) | `mark.ls`, `parse.ls` | — | Medium | ✅ Done |
 
 **Deliverable:** Stacked bar, stacked area, grouped bar, faceted small multiples, dashboard layouts.
@@ -1335,35 +1335,37 @@ Foundation for multi-series and multi-view charts.
 
 Complex marks composed from primitives.
 
-| Task | Module | Dependencies | Complexity |
-|------|--------|-------------|------------|
-| Box plot | `mark.ls` | aggregate (q1/q3) | Medium |
-| Error bar | `mark.ls` | — (uses y/y2) | Low |
-| Error band | `mark.ls` | — (uses area) | Low |
-| Histogram (bin + count) | `chart.ls` | bin transform | Low |
-| Heatmap (rect mark) | `mark.ls` | diverging color | Low |
-| Candlestick | layer (rule + bar) | y2 wiring | Low |
-| Bubble chart | `mark.ls`, `chart.ls` | size scale wiring | Low |
+| Task                    | Module                | Dependencies      | Complexity | Status |
+| ----------------------- | --------------------- | ----------------- | ---------- | ------ |
+| Box plot                | `mark.ls`             | aggregate (q1/q3) | Medium     | ✅ Done |
+| Error bar               | `mark.ls`             | — (uses y/y2)     | Low        | ✅ Done |
+| Error band              | `mark.ls`             | — (uses area)     | Low        | ✅ Done |
+| Histogram (bin + count) | `chart.ls`            | bin transform     | Low        | ✅ Done |
+| Heatmap (rect mark)     | `mark.ls`             | diverging color   | Low        | ✅ Done |
+| Candlestick             | layer (rule + bar)    | y2 wiring         | Low        | ✅ Done |
+| Bubble chart            | `mark.ls`, `chart.ls` | size scale wiring | Low        | ✅ Done |
 
 **Deliverable:** Statistical charts: box plots, histograms, heatmaps, error bars, candlesticks.
 
-### Phase C — Temporal & Theming
+### Phase C — Temporal & Theming  ✅ COMPLETE
 
 Time-series support and visual polish.
 
-| Task | Module | Dependencies | Complexity |
-|------|--------|-------------|------------|
-| Temporal scale | `scale.ls` | datetime support | High |
-| Time axis formatting | `axis.ls` | time scale | Medium |
-| Config / theming | `config.ls`, all renderers | — | Medium |
-| SVG gradients | `svg.ls`, `legend.ls` | — | Low |
-| SVG clip paths | `svg.ls` | — | Low |
-| Tooltip generation | `svg.ls`, `mark.ls` | — | Low |
-| Annotation layer | `annotation.ls` | — | Medium |
-| Conditional encoding | `chart.ls` | — | Medium |
-| Detail channel | `parse.ls`, `mark.ls` | — | Low |
+| Task | Module | Dependencies | Status |
+|------|--------|-------------|--------|
+| Temporal scale | `scale.ls` | datetime support | ✅ Done |
+| Time axis formatting | `axis.ls` | time scale | ✅ Done |
+| Config / theming | `config.ls`, all renderers | — | ✅ Done |
+| SVG gradients | `svg.ls`, `legend.ls` | — | ✅ Done |
+| SVG clip paths | `svg.ls` | — | ✅ Done |
+| Tooltip generation | `svg.ls`, `mark.ls` | — | ✅ Done |
+| Annotation layer | `annotation.ls` | — | ✅ Done |
+| Conditional encoding | `chart.ls` | — | ✅ Done |
+| Detail channel | `parse.ls`, `mark.ls` | — | ✅ Done |
 
 **Deliverable:** Time-series charts, dark/light themes, annotated charts, tooltips.
+
+**Tests:** `test_temporal_axis.ls`, `test_theme_dark.ls`, `test_tooltip.ls`, `test_conditional_color.ls`, `test_annotation.ls` — all passing (669/669 total).
 
 ### Phase D — Advanced Transforms
 
@@ -1450,11 +1452,24 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | Stacked bar mark | ✅ Done | `bar()` in `mark.ls` uses `_y0`/`_y1` fields for stacked positioning |
 | Stacked area mark | ✅ Done | `area_mark()` in `mark.ls` uses `_y0`/`_y1` for stacked area baselines |
 | Grouped bar (x_offset) | ✅ Done | `x_offset` channel parsed in `parse.ls` and `vega.ls`; `bar()` subdivides band width by group count |
-| Facet composition | ❌ Not started | |
-| hconcat / vconcat | ❌ Not started | |
-| Repeat composition | ❌ Not started | |
+| Facet composition | ✅ Done | `render_faceted()` in `chart.ls`: data partitioned by field, grid layout via `compute_facet_layout()` in `layout.ls`, header labels, sub-chart dispatch |
+| hconcat / vconcat | ✅ Done | `render_concat()` in `chart.ls`: children rendered independently, positions accumulated via `position_subs()` helper, SVG translate |
+| Repeat composition | ✅ Done | `render_repeat()` in `chart.ls`: flat cartesian product via index math, `substitute_encoding()` replaces `{repeat: "column"/"row"}` field refs; `<row>/<column>` child syntax |
 
-### Files Changed
+### Phase B — Statistical & Composite Marks
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Box plot | ✅ Done | `boxplot_mark()` in `mark.ls` — groups by x_field, computes Q1/Q3/median/whiskers via `math.quantile()`, renders IQR box + whisker caps + median line + outlier circles. Configurable `extent` (default 1.5× IQR). |
+| Error bar | ✅ Done | `errorbar_mark()` in `mark.ls` — reads `y_field` and `y2_field` from ctx, renders vertical line + two horizontal cap lines (6px wide) per data point. |
+| Error band | ✅ Done | `errorband_mark()` in `mark.ls` — reads `y_field` and `y2_field`, renders filled area path between upper and lower bounds. Default opacity 0.3. |
+| Histogram (bin + count) | ✅ Done | `apply_histogram_transform()` in `chart.ls` — auto-detects `x.bin:true` + `y.aggregate:"count"`, applies `nice_num()` stepped binning and group-count aggregation, overrides x/y channels to binned ordinal field. |
+| Heatmap (rect mark) | ✅ Done | `rect_mark()` in `mark.ls` — positioned rectangles using band scale widths for both x and y. Sequential color scale for quantitative fill. Both x/y forced to band scale for ordinal types. |
+| Bubble chart | ✅ Done | Existing `point_mark()` with `size` encoding channel. Size scale (20–200 range) maps data field to circle area via `linear_scale_nice`. |
+| y2 channel wiring | ✅ Done | `chart.ls render_single()` extracts `y2_ch`, passes `y2_field` in `mark_ctx`. `build_position_scale_y2()` extends y-domain to encompass both y and y2 values. |
+| Candlestick | ✅ Done | Requires layer composition with dual rect + rule marks |
+
+### Phase A Files Changed
 
 | File | Change | Details |
 |------|--------|---------|
@@ -1464,7 +1479,15 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | `lambda/package/chart/parse.ls` | **Modified** | `parse_encoding()` now extracts `x_offset`, `x2`, `y2`, `detail`, `tooltip` channels via `find_child()`. |
 | `lambda/package/chart/vega.ls` | **Modified** | `convert_encoding()` maps Vega-Lite `xOffset`/`x_offset`, `x2`, `y2`, `detail`, `tooltip` channels. `convert_channel()` converts `stack: false` → `"none"` for explicit stack disable. |
 
-### Tests Added
+### Phase B Files Changed
+
+| File | Change | Details |
+|------|--------|---------|
+| `lambda/package/chart/chart.ls` | **Modified** | Added `y2_ch` extraction and `y2_field` in mark context. Added `apply_histogram_transform()` for auto bin+count detection. Added `build_position_scale_y2()` for dual-value y-domain. Extended `build_position_scale()` to use band scales for `rect` and `boxplot` marks. Updated `render_mark()` dispatch with boxplot, errorbar, errorband, rect. |
+| `lambda/package/chart/mark.ls` | **Modified** | Added `boxplot_mark()` (~55 lines), `errorbar_mark()` (~25 lines), `errorband_mark()` (~25 lines), `rect_mark()` (~25 lines) — all new mark rendering functions after `tick_mark`, before `find_cat_index`. Fixed `rect_mark` y-positioning for inverted band scales. |
+| `lambda/package/chart/transform.ls` | **Modified** | Made `add_field()` public (`pub fn`) for use by histogram transform in chart.ls. |
+
+### Phase A Tests Added
 
 | Test | Description |
 |------|-------------|
@@ -1472,15 +1495,27 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | `test/lambda/chart/test_grouped_bar_chart.ls` | Grouped bar with `xOffset` channel and `stack: false`, side-by-side bars |
 | `test/lambda/chart/test_stacked_area_chart.ls` | Stacked area with 3 months × 2 products, stacked baselines |
 
+### Phase B Tests Added
+
+| Test | Description |
+|------|-------------|
+| `test/lambda/chart/test_boxplot.ls` | Box plot with 2 groups (A, B) showing IQR boxes, whiskers, median lines, and outlier detection |
+| `test/lambda/chart/test_errorbar.ls` | Error bar with 4 experiments showing y-to-y2 range lines with cap ticks |
+| `test/lambda/chart/test_histogram.ls` | Histogram with 12 scores, auto-bins via `bin:true` + `aggregate:"count"`, produces 9 ordered bins |
+| `test/lambda/chart/test_heatmap.ls` | Heatmap (rect mark) with 3×3 day×hour grid, sequential color scale on count field |
+| `test/lambda/chart/test_bubble_chart.ls` | Bubble chart (point mark with size encoding) — GDP vs life expectancy with population-scaled circles |
+
 ### Test Results
 
-All **649 baseline tests pass** (643 pre-existing + 6 new across MIR-direct and C2MIR backends). Zero regressions.
+All **659 baseline tests pass** (649 Phase A + 10 new Phase B across MIR-direct and C2MIR backends). Zero regressions.
 
 ### Implementation Notes
 
 - **Auto-stacking behavior**: Bar and area marks with a `color` encoding automatically stack to `"zero"` mode, matching Vega-Lite defaults. This is disabled when `x_offset` is present (grouped bars) or when `stack: false`/`"none"` is explicitly set on the y-channel.
 - **Map spread syntax**: Lambda uses `{*:map1, *:map2}` for map merging (not `{*map1, key: val}`). The `add_stack_fields()` function creates a separate `{_y0: y0, _y1: y1}` map and spreads it with the original row.
 - **Stack detection**: `detect_stack_mode()` in `chart.ls` checks `y_ch.stack` for explicit modes, falls back to `"zero"` auto-detection for bar/area with color encoding but no x_offset.
+- **Chained add_field bug**: Discovered that chaining `add_field(add_field(d, k1, v1), k2, v2)` loses the first field due to `for (k, v in map)` iteration not properly enumerating keys on maps created via `map([...])`. Workaround: build all fields in a single `map([*pairs, k1, v1, k2, v2])` call. Applied in histogram transform.
+- **Inverted band scale**: Y-axis band scales produce negative bandwidth when domain goes from high→low. `rect_mark` adjusts y-position by adding negative bandwidth and uses `abs()` for height.
 
 ---
 
