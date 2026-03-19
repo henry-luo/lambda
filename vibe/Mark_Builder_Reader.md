@@ -2063,6 +2063,71 @@ if (reader.isString()) {
 
 ---
 
+## Post-Implementation: ElementReader Memory Optimization
+
+**Date:** March 2026  
+**Status:** Applied
+
+### Context
+
+`ElementReader` is a **frequently-copied value type** — returned by value from `asElement()`, `findChild()`, `findChildElement()`, and iterator `next()` out-params. Its struct size directly impacts copy cost.
+
+The original design cached 6 fields:
+
+```cpp
+const Element* element_;         // 8 bytes - source pointer
+const TypeElmt* element_type_;   // 8 bytes - cached void* cast
+const char* tag_name_;           // 8 bytes - derived from element_type_->name.str
+int64_t tag_name_len_;           // 8 bytes - derived from element_type_->name.length
+int64_t child_count_;            // 8 bytes - derived from element_->length (Element : List)
+int64_t attr_count_;             // 8 bytes - derived from element_type_->length
+// Total: 48 bytes
+```
+
+### Analysis
+
+The 4 derived fields (`tag_name_`, `tag_name_len_`, `child_count_`, `attr_count_`) can be recomputed trivially from `element_` and `element_type_` at each call site:
+
+| Cached field | Direct equivalent | Extra cost |
+|---|---|---|
+| `tag_name_` | `element_type_->name.str` | 1 field read |
+| `tag_name_len_` | `element_type_->name.length` | 1 field read |
+| `child_count_` | `element_->length` (`Element : List`) | 1 field read |
+| `attr_count_` | `element_type_->length` (`TypeElmt : TypeMap`) | 1 field read |
+
+All 4 are single field reads with zero computation — the caching provides no meaningful performance benefit.
+
+**Why keep `element_type_`?**  
+`element_type_` is `(const TypeElmt*)element_->type` — a `void*` cast that appears at 6+ call sites in `mark_reader.cpp`, including guards like:
+```cpp
+if (!element_ || !element_type_ || !key) return false;
+const TypeMap* map_type = (const TypeMap*)element_type_;
+```
+Removing it would require all attribute accessor methods to repeat the cast inline. The 8-byte cost is worthwhile for the code clarity and named access it provides.
+
+### Decision
+
+Remove the 4 derived fields. Keep `element_type_` as the only cached field beside `element_`.
+
+```cpp
+// After: 16 bytes (67% reduction)
+const Element* element_;         // 8 bytes
+const TypeElmt* element_type_;   // 8 bytes
+```
+
+Accessors become direct reads:
+
+```cpp
+const char* tagName() const { return element_type_ ? element_type_->name.str : nullptr; }
+int64_t tagNameLen() const { return element_type_ ? element_type_->name.length : 0; }
+int64_t childCount() const { return element_ ? element_->length : 0; }
+int64_t attrCount() const { return element_type_ ? element_type_->length : 0; }
+```
+
+The constructor simplifies to initializing just the two pointers — no derived field caching logic needed.
+
+---
+
 ## Conclusion
 
 The proposed MarkBuilder and MarkReader APIs provide a modern, type-safe, and ergonomic interface for working with Lambda's Mark data model. By addressing current pain points in input parsers and formatters, this API will:
