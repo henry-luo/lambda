@@ -1,23 +1,36 @@
 # Lambda Script
 
-A general-purpose, cross-platform, functional scripting language and document processing engine.
-
-Built from scratch in C/C++ with a custom and light-weight runtime (only **9 MB**), Tree-sitter parsing, MIR-based JIT compilation.
+A general-purpose, cross-platform, functional scripting language and document processing engine, with a light-weight **9 MB** runtime, built from scratch in C/C++.
 
 Lambda is designed for two things at once:
 
-1) a small, expressive functional language for transforming data and documents, and
-2) an end-to-end document pipeline (parse → normalize → validate/transform → layout → render/view).
+1) an expressive functional language for transforming data and documents, and
+2) an end-to-end document pipeline (parse → validate/transform → layout → render/view).
 
-Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) can be parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG layout engine.
+Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) are parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG layout engine.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
 > A stable subset of the literal data model is separately formalised and released as
 > [Mark Notation](https://github.com/henry-luo/mark).
 
+## Demo
+
+<p align="center">
+  <img src="doc/demo.png" width="49%" />
+  <img src="doc/demo2.png" width="49%" />
+</p>
+<p align="center">
+  <img src="doc/demo3.png" width="80%" />
+</p>
+
+**Try it:** download the Lambda binary from the [Releases](https://github.com/henry-luo/lambda/releases) page, unzip, and run:
+```bash
+lambda view
+```
+
 ## Features
 
-#### Lambda script (pure functional runtime)
+**Lambda script (pure functional runtime)**
 - **Pure-functional core** with immutable data structures (lists, arrays, maps, elements) and first-class functions and types.
 - **Expressive pipe operator** (`|`) for fluent set-oriented data transformation pipelines with inline mapping and filtering.
 - **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
@@ -25,18 +38,18 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **Interactive REPL** for exploration and debugging.
 - **Optional MIR JIT** execution path for performance-sensitive workloads.
 
-#### Markup input parsing & formatting
+**Markup input parsing & formatting**
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
 - **One universal representation**: parse disparate syntaxes into a common Lambda/Mark node tree.
 - **Conversion pipeline**: convert between formats using `lambda convert` (auto-detect input formats when possible).
-- **Document-centric tooling**: designed to treat “documents as data”, not just as text.
+- **Document-centric tooling**: designed to treat "documents as data", not just as text.
 
-#### Type system & schema validation
+**Type system & schema validation**
 - **Rich type system** with type inference and explicit type annotations, similar to that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 - **Format-aware validation** helpers that unwrap/normalize documents before validation.
 
-#### Radiant HTML/CSS/SVG layout, rendering & viewer
+**Radiant HTML/CSS/SVG layout, rendering & viewer**
 - **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
 - **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
 - **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
@@ -119,34 +132,6 @@ let card = <div class: "card";
 format(card, 'html')
 ```
 
-### Built-in Multi-Format I/O
-
-```lambda
-// Read any format
-let data = input("config.yaml", 'yaml')
-let doc = input("article.md", 'markdown')
-
-// Convert between formats
-format(data, 'json')
-
-// Write to file (in procedural functions)
-data |> "/tmp/output.json"
-```
-
-## Demo
-<p align="center">
-  <img src="doc/demo.png" width="49%" />
-  <img src="doc/demo2.png" width="49%" />
-</p>
-
-### Run the demo
-
-1. Download the Lambda binary for your platform from the GitHub Releases page, and unzip it.
-2. Run:
-   ```bash
-   ./lambda.exe view
-   ```
-
 ## Quick Start
 
 ### Install From Source
@@ -173,7 +158,6 @@ data |> "/tmp/output.json"
    ```bash
    make build
    ```
-#### Build System
 
 Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
 
@@ -184,37 +168,22 @@ make test              # Run unit test
 make clean             # Clean build artifacts
 ```
 
-### Running
-
-The build produces a runnable executable at the repo root: `lambda.exe`.
-
-**Show help:**
-```bash
-./lambda.exe --help
-```
-
-**Interactive REPL:**
-```bash
-./lambda.exe
-```
-
-**Run a script:**
-```bash
-./lambda.exe script.ls
-```
-
 ### CLI Commands
 
+The build produces a runnable executable at the repo root: `lambda`.
+
 ```bash
-./lambda.exe <script.ls>                       # functional script
-./lambda.exe run <script.ls>                   # procedural script
-./lambda.exe validate <file> [-s <schema.ls>]
-./lambda.exe convert <input> [-f <from>] -t <to> -o <output>
-./lambda.exe render <input> -o <output.svg|pdf|png|jpg> [options]
-./lambda.exe view [file.pdf|file.html|file.md|file.wiki|file.xml|file.tex|file.ls]
+lambda                                          # interactive REPL
+lambda <script.ls>                              # run a functional script
+lambda run <script.ls>                          # run a procedural script
+lambda validate <file> [-s <schema.ls>]         # validate against a schema
+lambda convert <input> -t <to> -o <output>      # format conversion
+lambda render <input> -o <output.svg|pdf|png>   # render to image
+lambda view [file.html|file.md|file.ls|...]     # open in interactive viewer
+lambda --help                                   # show help
 ```
 
-Tip: `./lambda.exe <command> --help` prints detailed options and examples.
+Tip: `lambda <command> --help` prints detailed options and examples.
 
 ## Examples
 
@@ -239,32 +208,6 @@ for (row in csv) {
 λ> for (u in data.users) { if (u.active) u.name }
 ["Alice", "Bob", "Charlie"]
 ```
-
-## Documentation
-
-### Language Reference
-
-| Document                                            | Description                                         |
-| --------------------------------------------------- | --------------------------------------------------- |
-| [Cheatsheet](doc/Lambda_Cheatsheet.md)              | Quick reference for syntax and common patterns      |
-| [Lambda Reference](doc/Lambda_Reference.md)         | Language overview, modules, I/O, and error handling |
-| [CLI Reference](doc/Lambda_CLI.md)                  | Commands, flags, and usage for the Lambda CLI       |
-| [Data & Collections](doc/Lambda_Data.md)            | Literals, arrays, lists, maps, elements, and ranges |
-| [Type System](doc/Lambda_Type.md)                   | Types, unions, patterns, and type declarations      |
-| [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, control flow, and comprehensions  |
-| [Functions](doc/Lambda_Func.md)                     | Function declarations, closures, and procedures     |
-| [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O)  |
-| [Validator Guide](doc/Lambda_Validator_Guide.md)    | Schema-based validation for data structures         |
-| [Doc Schema](doc/Doc_Schema.md)                     | Schema for lightweight markup (Markdown, Wiki, RST) |
-
-### Developer Documentation
-
-| Document                                              | Description                                                            |
-| ----------------------------------------------------- | ---------------------------------------------------------------------- |
-| [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
-| [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                |
-| [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                     |
-| [Radiant Layout Design](doc/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                       |
 
 ## Benchmark Results
 
@@ -292,6 +235,32 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | **CSS 2.1** (W3C test suite) | **98.2%** | 1,788 / 1,821 baseline tests passing |
 | **CommonMark** | **100%** | 662 / 662 specification tests passing |
 | **YAML 1.2** (official test suite) | **100%** | 231 / 231 tests passing |
+
+## Documentation
+
+### Language Reference
+
+| Document                                            | Description                                         |
+| --------------------------------------------------- | --------------------------------------------------- |
+| [Cheatsheet](doc/Lambda_Cheatsheet.md)              | Quick reference for syntax and common patterns      |
+| [Lambda Reference](doc/Lambda_Reference.md)         | Language overview, modules, I/O, and error handling |
+| [CLI Reference](doc/Lambda_CLI.md)                  | Commands, flags, and usage for the Lambda CLI       |
+| [Data & Collections](doc/Lambda_Data.md)            | Literals, arrays, lists, maps, elements, and ranges |
+| [Type System](doc/Lambda_Type.md)                   | Types, unions, patterns, and type declarations      |
+| [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, control flow, and comprehensions  |
+| [Functions](doc/Lambda_Func.md)                     | Function declarations, closures, and procedures     |
+| [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O)  |
+| [Validator Guide](doc/Lambda_Validator_Guide.md)    | Schema-based validation for data structures         |
+| [Doc Schema](doc/Doc_Schema.md)                     | Schema for lightweight markup (Markdown, Wiki, RST) |
+
+### Developer Documentation
+
+| Document                                              | Description                                                            |
+| ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
+| [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                |
+| [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                     |
+| [Radiant Layout Design](doc/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                       |
 
 ## Platform Support
 
