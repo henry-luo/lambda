@@ -828,7 +828,7 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
     // Diagnostic: dump column sizes
     for (int i = 0; i < grid_layout->computed_column_count; i++) {
         GridTrack* track = &grid_layout->computed_columns[i];
-        log_warn("[GRID SIZING] col[%d]: base=%.1f gl=%.1f computed=%d flex=%d",
+        log_debug("[GRID SIZING] col[%d]: base=%.1f gl=%.1f computed=%d flex=%d",
                  i, track->base_size, track->growth_limit, track->computed_size, track->is_flexible);
     }
 
@@ -916,11 +916,11 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
     }
 
     // Diagnostic: dump column sizes after enhanced track sizing
-    log_warn("[GRID SIZING ENHANCED] computed_column_count=%d content_width=%d sizing_width=%.1f",
+    log_debug("[GRID SIZING ENHANCED] computed_column_count=%d content_width=%d sizing_width=%.1f",
              grid_layout->computed_column_count, grid_layout->content_width, sizing_width);
     for (int i = 0; i < grid_layout->computed_column_count; i++) {
         GridTrack* track = &grid_layout->computed_columns[i];
-        log_warn("[GRID SIZING ENHANCED] col[%d]: base=%.1f gl=%.1f computed=%d flex=%d",
+        log_debug("[GRID SIZING ENHANCED] col[%d]: base=%.1f gl=%.1f computed=%d flex=%d",
                  i, track->base_size, track->growth_limit, track->computed_size, track->is_flexible);
     }
 

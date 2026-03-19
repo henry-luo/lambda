@@ -2609,8 +2609,61 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                   element->node_name(), line_count, height);
     } else {
         // Calculate children's heights (original logic for non-grid or single-column)
+
+        // Determine the element's own content width for children's percentage resolution.
+        // The `width` parameter is the available width from the parent (containing block),
+        // but if this element has an explicit CSS width, children resolve percentages
+        // against this element's content width, not the grandparent's.
+        float content_w = width;
+        if (element->specified_style) {
+            CssDeclaration* w_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_WIDTH);
+            if (w_decl && w_decl->value) {
+                if (w_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE && width > 0) {
+                    content_w = (float)(w_decl->value->data.percentage.value / 100.0) * width;
+                } else if (w_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    content_w = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, w_decl->value);
+                }
+            }
+        }
+
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-            float child_height = calculate_max_content_height(lycon, child, width);
+            float child_height = calculate_max_content_height(lycon, child, content_w);
+
+            // For grid/flex containers, child margins don't collapse —
+            // add child's margin-top/bottom (percentage resolves against containing block width)
+            if ((is_grid_container || is_flex_container) && child->is_element() && content_w > 0) {
+                DomElement* child_elem = child->as_element();
+                if (child_elem->specified_style) {
+                    float mt = 0, mb = 0;
+                    CssDeclaration* mt_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_TOP);
+                    if (mt_decl && mt_decl->value) {
+                        if (mt_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE)
+                            mt = (float)(mt_decl->value->data.percentage.value / 100.0) * content_w;
+                        else if (mt_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                            mt = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, mt_decl->value);
+                    }
+                    CssDeclaration* mb_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_BOTTOM);
+                    if (mb_decl && mb_decl->value) {
+                        if (mb_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE)
+                            mb = (float)(mb_decl->value->data.percentage.value / 100.0) * content_w;
+                        else if (mb_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                            mb = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_BOTTOM, mb_decl->value);
+                    }
+                    if (mt == 0 && mb == 0) {
+                        CssDeclaration* m_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN);
+                        if (m_decl && m_decl->value) {
+                            if (m_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                float m = (float)(m_decl->value->data.percentage.value / 100.0) * content_w;
+                                mt = mb = m;
+                            } else if (m_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                float m = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, m_decl->value);
+                                mt = mb = m;
+                            }
+                        }
+                    }
+                    child_height += mt + mb;
+                }
+            }
 
             if (is_grid_column_flow || is_flex_row || has_only_inline_content) {
                 // Items are laid out horizontally - take max height
@@ -2626,31 +2679,57 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     float pad_top = 0, pad_bottom = 0;
     float border_top = 0, border_bottom = 0;
 
-    if (view->bound) {
-        if (view->bound->padding.top >= 0) pad_top = view->bound->padding.top;
-        if (view->bound->padding.bottom >= 0) pad_bottom = view->bound->padding.bottom;
-        if (view->bound->border) {
-            border_top = view->bound->border->width.top;
-            border_bottom = view->bound->border->width.bottom;
+    // CSS percentage padding (top/bottom) resolves against the containing block's WIDTH.
+    // During intrinsic sizing, view->bound may have padding=0 from stylesheet defaults
+    // while specified_style has an unresolved percentage override. Check specified_style
+    // for percentage padding FIRST, since percentages must be resolved against 'width'.
+    bool resolved_pad_from_pct = false;
+    if (element->specified_style && width > 0) {
+        CssDeclaration* pt = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_TOP);
+        if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            pad_top = (float)(pt->value->data.percentage.value / 100.0) * width;
+            resolved_pad_from_pct = true;
         }
-    } else if (element->specified_style) {
-        // Fallback: read padding from CSS styles if bound hasn't been allocated yet
-        CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
-        if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            // Single padding value (shorthand)
-            float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
-            pad_top = pad_bottom = pad;
-        } else {
-            // Check individual padding properties
-            CssDeclaration* pt = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_TOP);
-            if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_LENGTH) {
-                pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
-            }
-            CssDeclaration* pb = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
-            if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_LENGTH) {
-                pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, pb->value);
+        CssDeclaration* pb = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
+        if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            pad_bottom = (float)(pb->value->data.percentage.value / 100.0) * width;
+            resolved_pad_from_pct = true;
+        }
+        if (!resolved_pad_from_pct) {
+            CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
+            if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                float pad = (float)(pad_decl->value->data.percentage.value / 100.0) * width;
+                pad_top = pad_bottom = pad;
+                resolved_pad_from_pct = true;
             }
         }
+    }
+
+    if (!resolved_pad_from_pct) {
+        if (view->bound) {
+            if (view->bound->padding.top >= 0) pad_top = view->bound->padding.top;
+            if (view->bound->padding.bottom >= 0) pad_bottom = view->bound->padding.bottom;
+        } else if (element->specified_style) {
+            CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
+            if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+                pad_top = pad_bottom = pad;
+            } else {
+                CssDeclaration* pt = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_TOP);
+                if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
+                }
+                CssDeclaration* pb = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
+                if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, pb->value);
+                }
+            }
+        }
+    }
+
+    if (view->bound && view->bound->border) {
+        border_top = view->bound->border->width.top;
+        border_bottom = view->bound->border->width.bottom;
     }
 
     height += pad_top + pad_bottom + border_top + border_bottom;

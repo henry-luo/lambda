@@ -24,7 +24,12 @@ namespace radiant {
 
 // Forward declarations
 struct LayoutContext;
+} // namespace radiant
+
+// ViewBlock is defined in view.hpp (global namespace)
 struct ViewBlock;
+
+namespace radiant {
 
 // ============================================================================
 // SpaceDistribution - Result of space distribution calculation

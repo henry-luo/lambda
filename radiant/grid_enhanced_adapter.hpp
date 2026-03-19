@@ -85,8 +85,11 @@ inline MinTrackSizingFunction convert_to_min_sizing(GridTrackSize* old_size) {
             return MinTrackSizingFunction::Auto();
 
         case GRID_TRACK_SIZE_FIT_CONTENT:
-            // fit-content min = min-content
-            return MinTrackSizingFunction::MinContent();
+            // CSS Grid §7.2.3.2: fit-content(N) = min(max-content, max(auto, N))
+            // The MIN sizing function is auto, not min-content.
+            // This distinction matters for scroll containers: auto min = 0,
+            // while min-content min would always use the text min-content width.
+            return MinTrackSizingFunction::Auto();
 
         case GRID_TRACK_SIZE_MINMAX:
             // Recurse on min_size
@@ -631,7 +634,7 @@ inline void place_items_with_occupancy(
     for (int i = 0; i < item_count; i++) {
         item_infos.push_back(extract_grid_item_info(items[i], i, explicit_col_count, explicit_row_count));
         GridItemInfo& info = item_infos.back();
-        log_warn("[GRID EXTRACT] item %d: col start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d | row start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d",
+        log_debug("[GRID EXTRACT] item %d: col start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d | row start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d",
                  i, info.column.start, info.column.end, info.column.span, info.column.is_definite,
                  info.column.has_negative_start, info.column.has_negative_end,
                  info.row.start, info.row.end, info.row.span, info.row.is_definite,
@@ -693,12 +696,12 @@ inline void place_items_with_occupancy(
     // Apply results back to ViewBlocks with offset for negative implicit tracks
     int neg_col_offset = final_col_counts.negative_implicit;
     int neg_row_offset = final_row_counts.negative_implicit;
-    log_warn("[GRID PLACEMENT] neg_col_offset=%d neg_row_offset=%d final_cols: neg=%d exp=%d pos=%d, final_rows: neg=%d exp=%d pos=%d",
+    log_debug("[GRID PLACEMENT] neg_col_offset=%d neg_row_offset=%d final_cols: neg=%d exp=%d pos=%d, final_rows: neg=%d exp=%d pos=%d",
              neg_col_offset, neg_row_offset,
              final_col_counts.negative_implicit, final_col_counts.explicit_count, final_col_counts.positive_implicit,
              final_row_counts.negative_implicit, final_row_counts.explicit_count, final_row_counts.positive_implicit);
     for (size_t i = 0; i < item_infos.size(); i++) {
-        log_warn("[GRID PLACEMENT] item %zu: resolved col=[%d,%d] row=[%d,%d] -> computed col=[%d,%d] row=[%d,%d]",
+        log_debug("[GRID PLACEMENT] item %zu: resolved col=[%d,%d] row=[%d,%d] -> computed col=[%d,%d] row=[%d,%d]",
                  i,
                  item_infos[i].resolved_column.start.value, item_infos[i].resolved_column.end.value,
                  item_infos[i].resolved_row.start.value, item_infos[i].resolved_row.end.value,
@@ -1041,25 +1044,25 @@ inline void run_enhanced_track_sizing(
             }
         }
 
-        // Diagnostic: track config after init
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
-            log_warn("[GRID COL] post-init col[%zu]: base=%.2f gl=%.2f min_type=%d max_type=%d",
+            log_debug("[GRID COL] post-init col[%zu]: base=%.2f gl=%.2f min_type=%d max_type=%d",
                      _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit,
                      (int)col_tracks[_di].min_track_sizing_function.type,
                      (int)col_tracks[_di].max_track_sizing_function.type);
 
         if (!col_contributions.empty()) {
-            log_warn("[GRID COL] %zu contributions", col_contributions.size());
+            log_debug("[GRID COL] %zu contributions", col_contributions.size());
             for (size_t ci = 0; ci < col_contributions.size(); ci++)
-                log_warn("[GRID COL] contrib[%zu]: track=%zu span=%zu min=%.1f max=%.1f",
+                log_debug("[GRID COL] contrib[%zu]: track=%zu span=%zu min=%.1f max=%.1f scroll=%d",
                          ci, col_contributions[ci].track_start, (size_t)col_contributions[ci].track_span,
                          col_contributions[ci].min_content_contribution,
-                         col_contributions[ci].max_content_contribution);
+                         col_contributions[ci].max_content_contribution,
+                         col_contributions[ci].is_scroll_container);
             resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap);
         }
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
-            log_warn("[GRID COL] post-resolve col[%zu]: base=%.2f gl=%.2f",
+            log_debug("[GRID COL] post-resolve col[%zu]: base=%.2f gl=%.2f",
                      _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
         // 11.6 Maximize Tracks
@@ -1145,10 +1148,15 @@ inline void run_enhanced_track_sizing(
             if (!col_contributions.empty()) {
                 resolve_intrinsic_track_sizes(col_tracks2, col_contributions, resolved_col_gap);
             }
-            maximize_tracks(col_tracks2, col_available2, col_available2);
+            // For shrink-to-fit containers: use indefinite semantics for maximize
+            // so that only finite-gl tracks grow to their gl (no free-space distribution).
+            float max_avail = (container_width < 0) ? -1.0f : col_available2;
+            maximize_tracks(col_tracks2, max_avail, max_avail);
             expand_flexible_tracks(col_tracks2, 0.0f, col_available2, col_available2,
                                    col_contributions, resolved_col_gap);
-            stretch_auto_tracks(col_tracks2, 0.0f, col_available2);
+            // For shrink-to-fit: no stretching (container size = content, no free space)
+            if (container_width >= 0)
+                stretch_auto_tracks(col_tracks2, 0.0f, col_available2);
             compute_track_offsets(col_tracks2, resolved_col_gap);
             copy_enhanced_tracks_to_old(col_tracks2, grid_layout->computed_columns,
                                          grid_layout->computed_column_count);
