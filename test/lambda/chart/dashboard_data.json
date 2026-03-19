@@ -1,0 +1,343 @@
+{
+  "title": "Lambda Chart Dashboard",
+  "subtitle": "A showcase of chart types supported by lambda.package.chart",
+  "columns": 3,
+  "charts": [
+    {
+      "label": "Bar Chart",
+      "title": "Sales by Category",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "bar"},
+      "data": {
+        "values": [
+          {"category": "Electronics", "sales": 142},
+          {"category": "Clothing",    "sales": 98},
+          {"category": "Food",        "sales": 210},
+          {"category": "Sports",      "sales": 75},
+          {"category": "Books",       "sales": 55}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "category", "type": "nominal"},
+        "y": {"field": "sales",    "type": "quantitative"},
+        "color": {"field": "category", "type": "nominal"}
+      }
+    },
+    {
+      "label": "Stacked Bar Chart",
+      "title": "Quarterly Revenue by Region",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "bar"},
+      "data": {
+        "values": [
+          {"quarter": "Q1", "region": "North", "revenue": 120},
+          {"quarter": "Q1", "region": "South", "revenue": 85},
+          {"quarter": "Q1", "region": "West",  "revenue": 60},
+          {"quarter": "Q2", "region": "North", "revenue": 145},
+          {"quarter": "Q2", "region": "South", "revenue": 110},
+          {"quarter": "Q2", "region": "West",  "revenue": 75},
+          {"quarter": "Q3", "region": "North", "revenue": 130},
+          {"quarter": "Q3", "region": "South", "revenue": 95},
+          {"quarter": "Q3", "region": "West",  "revenue": 90},
+          {"quarter": "Q4", "region": "North", "revenue": 160},
+          {"quarter": "Q4", "region": "South", "revenue": 125},
+          {"quarter": "Q4", "region": "West",  "revenue": 105}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "quarter", "type": "ordinal"},
+        "y": {"field": "revenue", "type": "quantitative"},
+        "color": {"field": "region", "type": "nominal"}
+      }
+    },
+    {
+      "label": "Grouped Bar Chart",
+      "title": "Product Performance",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "bar"},
+      "data": {
+        "values": [
+          {"category": "Jan", "product": "A", "units": 42},
+          {"category": "Jan", "product": "B", "units": 28},
+          {"category": "Feb", "product": "A", "units": 55},
+          {"category": "Feb", "product": "B", "units": 38},
+          {"category": "Mar", "product": "A", "units": 48},
+          {"category": "Mar", "product": "B", "units": 62},
+          {"category": "Apr", "product": "A", "units": 70},
+          {"category": "Apr", "product": "B", "units": 45}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "category", "type": "nominal"},
+        "y": {"field": "units",    "type": "quantitative", "stack": false},
+        "xOffset": {"field": "product", "type": "nominal"},
+        "color": {"field": "product", "type": "nominal"}
+      }
+    },
+    {
+      "label": "Line Chart",
+      "title": "Monthly Active Users",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "line", "point": true},
+      "data": {
+        "values": [
+          {"month": "Jan", "platform": "Web",    "users": 1200},
+          {"month": "Feb", "platform": "Web",    "users": 1350},
+          {"month": "Mar", "platform": "Web",    "users": 1500},
+          {"month": "Apr", "platform": "Web",    "users": 1420},
+          {"month": "May", "platform": "Web",    "users": 1680},
+          {"month": "Jun", "platform": "Web",    "users": 1900},
+          {"month": "Jan", "platform": "Mobile", "users": 800},
+          {"month": "Feb", "platform": "Mobile", "users": 950},
+          {"month": "Mar", "platform": "Mobile", "users": 1100},
+          {"month": "Apr", "platform": "Mobile", "users": 1250},
+          {"month": "May", "platform": "Mobile", "users": 1400},
+          {"month": "Jun", "platform": "Mobile", "users": 1600}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "month",    "type": "nominal"},
+        "y": {"field": "users",    "type": "quantitative"},
+        "color": {"field": "platform", "type": "nominal"},
+        "detail": {"field": "platform"}
+      }
+    },
+    {
+      "label": "Stacked Area Chart",
+      "title": "Revenue by Product Line",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "area"},
+      "data": {
+        "values": [
+          {"month": "Jan", "product": "Hardware", "revenue": 300},
+          {"month": "Feb", "product": "Hardware", "revenue": 320},
+          {"month": "Mar", "product": "Hardware", "revenue": 280},
+          {"month": "Apr", "product": "Hardware", "revenue": 360},
+          {"month": "May", "product": "Hardware", "revenue": 400},
+          {"month": "Jun", "product": "Hardware", "revenue": 380},
+          {"month": "Jan", "product": "Software", "revenue": 200},
+          {"month": "Feb", "product": "Software", "revenue": 240},
+          {"month": "Mar", "product": "Software", "revenue": 260},
+          {"month": "Apr", "product": "Software", "revenue": 290},
+          {"month": "May", "product": "Software", "revenue": 320},
+          {"month": "Jun", "product": "Software", "revenue": 350},
+          {"month": "Jan", "product": "Services", "revenue": 150},
+          {"month": "Feb", "product": "Services", "revenue": 160},
+          {"month": "Mar", "product": "Services", "revenue": 180},
+          {"month": "Apr", "product": "Services", "revenue": 170},
+          {"month": "May", "product": "Services", "revenue": 200},
+          {"month": "Jun", "product": "Services", "revenue": 220}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "month",   "type": "nominal"},
+        "y": {"field": "revenue", "type": "quantitative"},
+        "color": {"field": "product", "type": "nominal"}
+      }
+    },
+    {
+      "label": "Scatter / Bubble Chart",
+      "title": "Ad Spend vs. Conversions",
+      "width": 300,
+      "height": 270,
+      "mark": "point",
+      "data": {
+        "values": [
+          {"spend": 500,  "conversions": 120, "channel": "Search",   "reach": 12},
+          {"spend": 800,  "conversions": 200, "channel": "Social",   "reach": 20},
+          {"spend": 300,  "conversions": 80,  "channel": "Email",    "reach":  8},
+          {"spend": 1200, "conversions": 350, "channel": "Search",   "reach": 30},
+          {"spend": 600,  "conversions": 160, "channel": "Display",  "reach": 15},
+          {"spend": 950,  "conversions": 280, "channel": "Social",   "reach": 25},
+          {"spend": 400,  "conversions": 95,  "channel": "Email",    "reach": 10},
+          {"spend": 700,  "conversions": 190, "channel": "Display",  "reach": 18},
+          {"spend": 1100, "conversions": 310, "channel": "Search",   "reach": 28},
+          {"spend": 550,  "conversions": 140, "channel": "Social",   "reach": 14}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "spend",       "type": "quantitative"},
+        "y": {"field": "conversions", "type": "quantitative"},
+        "color": {"field": "channel", "type": "nominal"},
+        "size":  {"field": "reach",   "type": "quantitative"}
+      }
+    },
+    {
+      "label": "Pie Chart",
+      "title": "Market Share",
+      "width": 280,
+      "height": 270,
+      "mark": {"type": "arc"},
+      "data": {
+        "values": [
+          {"segment": "Alpha Corp",  "share": 38},
+          {"segment": "Beta Inc",    "share": 24},
+          {"segment": "Gamma LLC",   "share": 18},
+          {"segment": "Delta Co",    "share": 12},
+          {"segment": "Others",      "share": 8}
+        ]
+      },
+      "encoding": {
+        "theta": {"field": "share",   "type": "quantitative"},
+        "color": {"field": "segment", "type": "nominal"}
+      }
+    },
+    {
+      "label": "Donut Chart",
+      "title": "Expense Breakdown",
+      "width": 280,
+      "height": 270,
+      "mark": {"type": "arc", "innerRadius": 60},
+      "data": {
+        "values": [
+          {"category": "Salaries",    "amount": 450},
+          {"category": "Marketing",   "amount": 180},
+          {"category": "Operations",  "amount": 120},
+          {"category": "R&D",         "amount": 200},
+          {"category": "Admin",       "amount": 90}
+        ]
+      },
+      "encoding": {
+        "theta": {"field": "amount",   "type": "quantitative"},
+        "color": {"field": "category", "type": "nominal"}
+      }
+    },
+    {
+      "label": "Heatmap",
+      "title": "Support Tickets by Day & Hour",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "rect"},
+      "data": {
+        "values": [
+          {"day": "Mon", "hour": "9am",  "tickets": 5},
+          {"day": "Mon", "hour": "12pm", "tickets": 14},
+          {"day": "Mon", "hour": "3pm",  "tickets": 9},
+          {"day": "Mon", "hour": "6pm",  "tickets": 3},
+          {"day": "Tue", "hour": "9am",  "tickets": 7},
+          {"day": "Tue", "hour": "12pm", "tickets": 18},
+          {"day": "Tue", "hour": "3pm",  "tickets": 12},
+          {"day": "Tue", "hour": "6pm",  "tickets": 4},
+          {"day": "Wed", "hour": "9am",  "tickets": 6},
+          {"day": "Wed", "hour": "12pm", "tickets": 20},
+          {"day": "Wed", "hour": "3pm",  "tickets": 15},
+          {"day": "Wed", "hour": "6pm",  "tickets": 5},
+          {"day": "Thu", "hour": "9am",  "tickets": 8},
+          {"day": "Thu", "hour": "12pm", "tickets": 16},
+          {"day": "Thu", "hour": "3pm",  "tickets": 11},
+          {"day": "Thu", "hour": "6pm",  "tickets": 2},
+          {"day": "Fri", "hour": "9am",  "tickets": 4},
+          {"day": "Fri", "hour": "12pm", "tickets": 10},
+          {"day": "Fri", "hour": "3pm",  "tickets": 7},
+          {"day": "Fri", "hour": "6pm",  "tickets": 1}
+        ]
+      },
+      "encoding": {
+        "x":     {"field": "day",     "type": "ordinal"},
+        "y":     {"field": "hour",    "type": "ordinal"},
+        "color": {"field": "tickets", "type": "quantitative"}
+      }
+    },
+    {
+      "label": "Box Plot",
+      "title": "Score Distribution by Team",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "boxplot"},
+      "data": {
+        "values": [
+          {"team": "Alpha", "score": 62},
+          {"team": "Alpha", "score": 68},
+          {"team": "Alpha", "score": 74},
+          {"team": "Alpha", "score": 79},
+          {"team": "Alpha", "score": 85},
+          {"team": "Alpha", "score": 91},
+          {"team": "Alpha", "score": 55},
+          {"team": "Beta",  "score": 70},
+          {"team": "Beta",  "score": 75},
+          {"team": "Beta",  "score": 80},
+          {"team": "Beta",  "score": 83},
+          {"team": "Beta",  "score": 88},
+          {"team": "Beta",  "score": 95},
+          {"team": "Beta",  "score": 65},
+          {"team": "Gamma", "score": 50},
+          {"team": "Gamma", "score": 58},
+          {"team": "Gamma", "score": 65},
+          {"team": "Gamma", "score": 72},
+          {"team": "Gamma", "score": 78},
+          {"team": "Gamma", "score": 84},
+          {"team": "Gamma", "score": 45}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "team",  "type": "nominal"},
+        "y": {"field": "score", "type": "quantitative"}
+      }
+    },
+    {
+      "label": "Histogram",
+      "title": "Response Time Distribution",
+      "width": 300,
+      "height": 270,
+      "mark": {"type": "bar"},
+      "data": {
+        "values": [
+          {"ms": 42},  {"ms": 55},  {"ms": 61},  {"ms": 68},  {"ms": 72},
+          {"ms": 75},  {"ms": 78},  {"ms": 80},  {"ms": 82},  {"ms": 85},
+          {"ms": 88},  {"ms": 90},  {"ms": 93},  {"ms": 95},  {"ms": 98},
+          {"ms": 102}, {"ms": 108}, {"ms": 115}, {"ms": 125}, {"ms": 140}
+        ]
+      },
+      "encoding": {
+        "x": {"field": "ms", "bin": true, "type": "quantitative"},
+        "y": {"aggregate": "count", "type": "quantitative"}
+      }
+    },
+    {
+      "label": "Candlestick Chart",
+      "title": "Stock Price — OHLC",
+      "width": 300,
+      "height": 270,
+      "data": {
+        "values": [
+          {"date": "Mon", "open": 100.0, "high": 115.0, "low": 95.0,  "close": 110.0, "direction": "up"},
+          {"date": "Tue", "open": 110.0, "high": 118.0, "low": 105.0, "close": 108.0, "direction": "down"},
+          {"date": "Wed", "open": 108.0, "high": 120.0, "low": 102.0, "close": 117.0, "direction": "up"},
+          {"date": "Thu", "open": 117.0, "high": 122.0, "low": 110.0, "close": 112.0, "direction": "down"},
+          {"date": "Fri", "open": 112.0, "high": 125.0, "low": 108.0, "close": 122.0, "direction": "up"}
+        ]
+      },
+      "layer": [
+        {
+          "mark": {"type": "rule"},
+          "encoding": {
+            "x":  {"field": "date", "type": "ordinal"},
+            "y":  {"field": "low",  "type": "quantitative"},
+            "y2": {"field": "high"}
+          }
+        },
+        {
+          "mark": {"type": "bar", "width": 10},
+          "encoding": {
+            "x":  {"field": "date",  "type": "ordinal"},
+            "y":  {"field": "open",  "type": "quantitative"},
+            "y2": {"field": "close"},
+            "color": {
+              "field": "direction",
+              "type": "nominal",
+              "scale": {
+                "domain": ["up", "down"],
+                "range":  ["#26a69a", "#ef5350"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

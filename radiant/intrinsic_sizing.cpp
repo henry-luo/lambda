@@ -920,6 +920,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
             return sizes;
         }
+        else if (elem_tag == HTM_TAG_SVG) {
+            // SVG intrinsic width from attributes or viewBox
+            float svg_width = 300.0f;  // CSS default
+            const char* attr_w = element->get_attribute("width");
+            if (attr_w) {
+                float w = (float)atof(attr_w);
+                if (w > 0) svg_width = w;
+            } else {
+                const char* viewbox = element->get_attribute("viewBox");
+                if (viewbox) {
+                    float vb_x, vb_y, vb_w, vb_h;
+                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0) {
+                        svg_width = vb_w;
+                    }
+                }
+            }
+            sizes.min_content = (int)(svg_width + 0.5f);
+            sizes.max_content = (int)(svg_width + 0.5f);
+            log_debug("  -> replaced SVG intrinsic width: %.0f", svg_width);
+            return sizes;
+        }
         else if (elem_tag == HTM_TAG_HR) {
             // HR stretches to available width, min is 0
             sizes.min_content = 0;
@@ -928,6 +949,28 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
         // Form controls (INPUT, SELECT, TEXTAREA, BUTTON) fall through to
         // normal measurement — they already have intrinsic sizing via FormControlProp
+    }
+
+    // SVG fallback: handle SVG elements even when display.inner is not yet resolved
+    if (element->tag() == HTM_TAG_SVG) {
+        float svg_width = 300.0f;
+        const char* attr_w = element->get_attribute("width");
+        if (attr_w) {
+            float w = (float)atof(attr_w);
+            if (w > 0) svg_width = w;
+        } else {
+            const char* viewbox = element->get_attribute("viewBox");
+            if (viewbox) {
+                float vb_x, vb_y, vb_w, vb_h;
+                if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0) {
+                    svg_width = vb_w;
+                }
+            }
+        }
+        sizes.min_content = (int)(svg_width + 0.5f);
+        sizes.max_content = (int)(svg_width + 0.5f);
+        log_debug("  -> SVG (tag-based) intrinsic width: %.0f", svg_width);
+        return sizes;
     }
 
     // ========================================================================
@@ -2299,6 +2342,87 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
             return 150.0f;  // CSS default 300x150
         }
+        else if (elem_tag == HTM_TAG_SVG) {
+            // SVG replaced element: determine intrinsic height from attributes/viewBox
+            float svg_width = 300.0f;   // CSS default
+            float svg_height = 150.0f;  // CSS default
+            bool has_w = false, has_h = false;
+
+            const char* attr_w = element->get_attribute("width");
+            const char* attr_h = element->get_attribute("height");
+            if (attr_w) { float w = (float)atof(attr_w); if (w > 0) { svg_width = w; has_w = true; } }
+            if (attr_h) { float h = (float)atof(attr_h); if (h > 0) { svg_height = h; has_h = true; } }
+
+            if (!has_w && !has_h) {
+                // try viewBox
+                const char* viewbox = element->get_attribute("viewBox");
+                if (viewbox) {
+                    float vb_x, vb_y, vb_w, vb_h;
+                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4) {
+                        if (vb_w > 0 && vb_h > 0) { svg_width = vb_w; svg_height = vb_h; has_w = true; has_h = true; }
+                    }
+                }
+            } else if (has_w && !has_h) {
+                // width only - try viewBox for aspect ratio
+                const char* viewbox = element->get_attribute("viewBox");
+                if (viewbox) {
+                    float vb_x, vb_y, vb_w, vb_h;
+                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
+                        svg_height = svg_width * vb_h / vb_w;
+                    }
+                }
+            } else if (!has_w && has_h) {
+                // height only - try viewBox for aspect ratio
+                const char* viewbox = element->get_attribute("viewBox");
+                if (viewbox) {
+                    float vb_x, vb_y, vb_w, vb_h;
+                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
+                        svg_width = svg_height * vb_w / vb_h;
+                    }
+                }
+            }
+
+            // scale height if width is constrained
+            if (width > 0 && width < svg_width && svg_width > 0) {
+                svg_height = width * svg_height / svg_width;
+            }
+
+            log_debug("calculate_max_content_height: SVG intrinsic height=%.1f", svg_height);
+            return svg_height;
+        }
+    }
+
+    // SVG fallback: handle SVG elements even when display.inner is not yet resolved
+    if (element->tag() == HTM_TAG_SVG) {
+        float svg_width = 300.0f;
+        float svg_height = 150.0f;
+        const char* attr_w = element->get_attribute("width");
+        const char* attr_h = element->get_attribute("height");
+        bool has_w = false, has_h = false;
+        if (attr_w) { float w = (float)atof(attr_w); if (w > 0) { svg_width = w; has_w = true; } }
+        if (attr_h) { float h = (float)atof(attr_h); if (h > 0) { svg_height = h; has_h = true; } }
+        if (!has_w && !has_h) {
+            const char* viewbox = element->get_attribute("viewBox");
+            if (viewbox) {
+                float vb_x, vb_y, vb_w, vb_h;
+                if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
+                    svg_width = vb_w; svg_height = vb_h;
+                }
+            }
+        } else if (has_w && !has_h) {
+            const char* viewbox = element->get_attribute("viewBox");
+            if (viewbox) {
+                float vb_x, vb_y, vb_w, vb_h;
+                if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
+                    svg_height = svg_width * vb_h / vb_w;
+                }
+            }
+        }
+        if (width > 0 && width < svg_width && svg_width > 0) {
+            svg_height = width * svg_height / svg_width;
+        }
+        log_debug("calculate_max_content_height: SVG (tag-based) intrinsic height=%.1f", svg_height);
+        return svg_height;
     }
 
     // Check if this is a grid container - need to detect column count
