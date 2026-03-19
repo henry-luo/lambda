@@ -6,16 +6,16 @@
     {
       "label": "Bar Chart",
       "title": "Sales by Category",
-      "width": 300,
+      "width": 350,
       "height": 270,
       "mark": {"type": "bar"},
       "data": {
         "values": [
-          {"category": "Electronics", "sales": 142},
-          {"category": "Clothing",    "sales": 98},
-          {"category": "Food",        "sales": 210},
-          {"category": "Sports",      "sales": 75},
-          {"category": "Books",       "sales": 55}
+          {"category": "Electr.", "sales": 142},
+          {"category": "Cloth.",  "sales": 98},
+          {"category": "Food",    "sales": 210},
+          {"category": "Sports",  "sales": 75},
+          {"category": "Books",   "sales": 55}
         ]
       },
       "encoding": {
@@ -80,7 +80,7 @@
     {
       "label": "Line Chart",
       "title": "Monthly Active Users",
-      "width": 300,
+      "width": 320,
       "height": 270,
       "mark": {"type": "line", "point": true},
       "data": {
@@ -109,7 +109,7 @@
     {
       "label": "Stacked Area Chart",
       "title": "Revenue by Product Line",
-      "width": 300,
+      "width": 340,
       "height": 270,
       "mark": {"type": "area"},
       "data": {
@@ -143,21 +143,20 @@
     {
       "label": "Scatter / Bubble Chart",
       "title": "Ad Spend vs. Conversions",
-      "width": 300,
+      "width": 350,
       "height": 270,
       "mark": "point",
       "data": {
         "values": [
           {"spend": 500,  "conversions": 120, "channel": "Search",   "reach": 12},
           {"spend": 800,  "conversions": 200, "channel": "Social",   "reach": 20},
-          {"spend": 300,  "conversions": 80,  "channel": "Email",    "reach":  8},
           {"spend": 1200, "conversions": 350, "channel": "Search",   "reach": 30},
           {"spend": 600,  "conversions": 160, "channel": "Display",  "reach": 15},
           {"spend": 950,  "conversions": 280, "channel": "Social",   "reach": 25},
           {"spend": 400,  "conversions": 95,  "channel": "Email",    "reach": 10},
           {"spend": 700,  "conversions": 190, "channel": "Display",  "reach": 18},
-          {"spend": 1100, "conversions": 310, "channel": "Search",   "reach": 28},
-          {"spend": 550,  "conversions": 140, "channel": "Social",   "reach": 14}
+          {"spend": 1100, "conversions": 310, "channel": "Search",   "reach": 28}
+  
         ]
       },
       "encoding": {
@@ -300,7 +299,7 @@
     },
     {
       "label": "Candlestick Chart",
-      "title": "Stock Price — OHLC",
+      "title": "Stock Price - OHLC",
       "width": 300,
       "height": 270,
       "data": {

@@ -364,8 +364,12 @@ fn render_arc(spec) {
 
     // layout
     let lay = layout.compute_arc_layout(spec, has_legend, color_categories);
-    let inner_r = if (mark_spec.inner_radius) float(mark_spec.inner_radius) else 0.0;
     let outer_r = if (mark_spec.outer_radius) float(mark_spec.outer_radius) else lay.radius;
+    let inner_r = if (mark_spec.inner_radius)
+        (let raw_ir = float(mark_spec.inner_radius),
+         // clamp to at most 75% of outer radius to ensure visible ring width
+         if (raw_ir >= outer_r * 0.75) outer_r * 0.6 else raw_ir)
+    else 0.0;
 
     // render arcs
     let arc_ctx = {
