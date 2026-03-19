@@ -1901,6 +1901,17 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         tvg_paint_set_transform(svg_scene, &rdcon->transform);
     }
 
+    // apply clip region (e.g. iframe content box, overflow:hidden)
+    Bound* clip = &rdcon->block.clip;
+    float clip_w = clip->right - clip->left;
+    float clip_h = clip->bottom - clip->top;
+    if (clip_w > 0 && clip_h > 0) {
+        Tvg_Paint clip_rect = tvg_shape_new();
+        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip_w, clip_h, 0, 0, true);
+        tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
+        tvg_paint_set_mask_method(svg_scene, clip_rect, TVG_MASK_METHOD_ALPHA);
+    }
+
     // render immediately to buffer (same pattern as SVG images)
     tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
     tvg_canvas_push(rdcon->canvas, svg_scene);
