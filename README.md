@@ -36,7 +36,6 @@ lambda view
 - **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
 - **Powerful for-expressions** with `where`, `order by`, `limit`, `offset` clauses for SQL-like data querying.
 - **Interactive REPL** for exploration and debugging.
-- **Optional MIR JIT** execution path for performance-sensitive workloads.
 
 **Markup input parsing & formatting**
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
@@ -51,15 +50,37 @@ lambda view
 
 **Radiant HTML/CSS/SVG layout, rendering & viewer**
 - **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
-- **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
-- **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
 - **Unified interactive viewer** via `lambda view`:
    - HTML / XML (treated as HTML with CSS styling)
    - Markdown / Wiki (rendered with styling)
    - LaTeX (`.tex`) via conversion to HTML
    - Lambda script (`.ls`) evaluated to HTML and rendered (think of PHP)
+- **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
 
 ## Language Highlights
+
+#### Elements (Markup Literals)
+
+First-class markup syntax for document generation:
+
+```lambda
+let card = <div class: "card";
+    <h2; "Title">
+    <p; "Content here.">
+>
+format(card, 'html')
+```
+
+#### Vector Arithmetic
+
+Scalar operations automatically broadcast over collections:
+
+```lambda
+1 + [2, 3]           // [3, 4]       — scalar + array
+[1, 2] * 2           // [2, 4]       — array * scalar
+[1, 2] + [3, 4]      // [4, 6]       — element-wise
+[1, 2] ^ 2           // [1, 4]       — element-wise power
+```
 
 #### Pipe Operator & Data Pipelines
 
@@ -77,17 +98,6 @@ users | ~.name                       // ["Alice", "Bob", "Carol"]
 
 // Chain operations: filter → map → aggregate
 users where ~.age >= 18 | ~.name | len   // count adult names
-```
-
-#### Vector Arithmetic
-
-Scalar operations automatically broadcast over collections:
-
-```lambda
-1 + [2, 3]           // [3, 4]       — scalar + array
-[1, 2] * 2           // [2, 4]       — array * scalar
-[1, 2] + [3, 4]      // [4, 6]       — element-wise
-[1, 2] ^ 2           // [1, 4]       — element-wise power
 ```
 
 #### For-Expressions with SQL-like Clauses
@@ -116,20 +126,37 @@ let items: [string] = ["a", "b"]
 type Result = int | error
 type Name = string?
 
+// Element type patterns
+type Link = <a href: string; string>
+type Article = <article title: string; string, Section*>
+
 // Function types
 fn add(a: int, b: int) int => a + b
 ```
 
-#### Elements (Markup Literals)
+#### Pattern-based Matching & Query
 
-First-class markup syntax for document generation:
+Match expressions support value, range, type, and constrained patterns:
 
 ```lambda
-let card = <div class: "card";
-    <h2; "Title">
-    <p; "Content here.">
->
-format(card, 'html')
+fn describe(x) => match x {
+    case null:             "nothing"
+    case 0:                "zero"              // literal value
+    case 1 to 9:           "small number"      // range
+    case int that (~ > 9): "big number"        // type + constraint
+    case string:           "text: " ++ ~       // type
+    case [int]:            "int array"         // collection type
+    default:               "something else"
+}
+```
+
+The `?` query operator searches data trees by type or structure, similar to jQuery:
+
+```lambda
+html?<img>                    // all <img> descendants
+html?<div class: string>      // <div>s with a class attribute
+data?{status: "ok"}           // maps where status == "ok"
+html[body][div]?<a>           // direct path then recursive search
 ```
 
 ## Quick Start
