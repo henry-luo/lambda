@@ -6,15 +6,16 @@ import math
 with open("test/benchmark/benchmark_results_v3.json") as f:
     data = json.load(f)
 
-# Round 2 data (from Overall_Result2.md)
-R2_MIR = {
-    "r7rs": {"fib": 2.1, "fibfp": 3.6, "tak": 0.15, "cpstak": 0.31, "sum": 0.27, "sumfp": 0.067, "nqueens": 6.5, "fft": 0.19, "mbrot": 0.60, "ack": 10.3},
-    "awfy": {"sieve": 0.053, "permute": 0.066, "queens": 0.15, "towers": 0.22, "bounce": 0.20, "list": 0.023, "storage": 0.32, "mandelbrot": 32.0, "nbody": 1.3, "richards": 56.7, "json": 0.028, "deltablue": 6.1, "havlak": 339, "cd": 445},
-    "beng": {"binarytrees": 8.0, "fannkuch": 0.74, "fasta": 1.1, "knucleotide": 2.9, "mandelbrot": 22.4, "nbody": 2.8, "pidigits": 0.43, "regexredux": 1.2, "revcomp": 1.9, "spectralnorm": 13.1},
-    "kostya": {"brainfuck": 164, "matmul": 8.7, "primes": 7.3, "base64": 222, "levenshtein": 8.5, "json_gen": 64.7, "collatz": 302},
-    "larceny": {"triangl": 187, "array1": 0.56, "deriv": 20.0, "diviter": 272, "divrec": 0.82, "gcbench": 472, "paraffins": 0.33, "pnpoly": 58.9, "primes": 0.47, "puzzle": 3.9, "quicksort": 2.9, "ray": 7.2},
+# Round 3 data (from Overall_Result3.md, before R4 LMD_TYPE_LIST removal)
+R3_MIR = {
+    "r7rs": {"fib": 2.5, "fibfp": 3.7, "tak": 0.15, "cpstak": 0.30, "sum": 0.27, "sumfp": 0.067, "nqueens": 6.7, "fft": 0.18, "mbrot": 0.59, "ack": 9.8},
+    "awfy": {"sieve": 0.052, "permute": 0.064, "queens": 0.15, "towers": 0.22, "bounce": 0.19, "list": 0.032, "storage": 0.33, "mandelbrot": 32.0, "nbody": 47, "richards": 253, "json": 3.3, "deltablue": 99, "havlak": 183, "cd": 528},
+    "beng": {"binarytrees": 7.3, "fannkuch": 0.76, "fasta": 1.1, "knucleotide": 2.9, "mandelbrot": 142, "nbody": 47, "pidigits": 0.46, "regexredux": 1.2, "revcomp": 1.8, "spectralnorm": 13},
+    "kostya": {"brainfuck": 165, "matmul": 8.8, "primes": 7.3, "base64": 220, "levenshtein": 7.7, "json_gen": 64, "collatz": 301},
+    "larceny": {"triangl": 179, "array1": 0.55, "deriv": 20, "diviter": 272, "divrec": 0.84, "gcbench": 469, "paraffins": 0.33, "pnpoly": 59, "primes": 7.2, "puzzle": 3.8, "quicksort": 3.1, "ray": 7.1},
+    "jetstream": {"nbody": 47, "cube3d": 49, "navier_stokes": 823, "richards": 259, "splay": 165, "deltablue": 17, "hashmap": 106, "crypto_sha1": 17, "raytrace3d": 348},
 }
-R2_LJS = {
+R3_LJS = {
     "r7rs": {"fib": 1.1, "fibfp": 1.2, "tak": 0.11, "cpstak": 0.22, "sum": 16.5, "sumfp": 1.7, "nqueens": 0.013, "fft": 2.4, "mbrot": None, "ack": 8.6},
     "awfy": {"sieve": 0.009, "permute": 0.008, "queens": 0.007, "towers": 0.006, "bounce": None, "list": 0.008, "storage": None, "mandelbrot": None, "nbody": 0.11, "richards": 0.008, "json": None, "deltablue": None, "havlak": None, "cd": None},
     "beng": {"binarytrees": 18.8, "fannkuch": None, "fasta": 1.1, "knucleotide": 0.054, "mandelbrot": None, "nbody": 134, "pidigits": 0.015, "regexredux": 0.083, "revcomp": 0.001, "spectralnorm": 19.2},
@@ -85,11 +86,11 @@ def w(s=""):
 # ============================================================
 # Build the document
 # ============================================================
-w("# Lambda Benchmark Results: 6 Suites × 6 Engines (Round 3)")
+w("# Lambda Benchmark Results: 6 Suites × 6 Engines (Round 4)")
 w()
-w("**Date:** 2026-03-09  ")
+w("**Date:** 2026-03-19  ")
 w("**Platform:** Apple Silicon MacBook Air (M4, aarch64), macOS  ")
-w("**Lambda version:** release build (8.3 MB, stripped, `-O2`)  ")
+w("**Lambda version:** release build (8.4 MB, stripped, `-O2`)  ")
 w("**Node.js:** v22.13.0 (V8 JIT)  ")
 w("**QuickJS:** v2025-09-13 (interpreter)  ")
 w("**Python:** 3.13.3 (CPython)  ")
@@ -411,99 +412,82 @@ w("---")
 # Improvement over Round 2
 # ============================================================
 w()
-w("## Improvement over Round 2")
+w("## Improvement over Round 3")
 w()
-w("### MIR Direct Performance Changes (R2 → R3)")
+w("### MIR Direct Performance Changes (R3 → R4)")
 w()
 
 # Compute improvements
 improvements = []
-for suite in ["r7rs", "awfy", "beng", "kostya", "larceny"]:
-    if suite not in R2_MIR or suite not in data:
+for suite in ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream"]:
+    if suite not in R3_MIR or suite not in data:
         continue
     for bench_name in data[suite]:
-        r2_v = R2_MIR.get(suite, {}).get(bench_name)
-        r3_v = data[suite][bench_name].get("mir")
-        if r2_v and r3_v and r2_v > 0 and r3_v > 0:
-            speedup = r2_v / r3_v
-            improvements.append((suite, bench_name, r2_v, r3_v, speedup))
+        r3_v = R3_MIR.get(suite, {}).get(bench_name)
+        r4_v = data[suite][bench_name].get("mir")
+        if r3_v and r4_v and r3_v > 0 and r4_v > 0:
+            speedup = r3_v / r4_v
+            improvements.append((suite, bench_name, r3_v, r4_v, speedup))
 
 # Sort by speedup descending
 improvements.sort(key=lambda x: x[4], reverse=True)
 
-w("| Benchmark | Suite | R2 (ms) | R3 (ms) | Speedup |")
+w("| Benchmark | Suite | R3 (ms) | R4 (ms) | Speedup |")
 w("|-----------|-------|--------:|--------:|--------:|")
 
-for suite, bench, r2, r3, sp in improvements:
+for suite, bench, r3, r4, sp in improvements:
     if sp > 1.05:  # >5% improvement
-        w(f"| {bench} | {SUITE_LABELS[suite]} | {fmt(r2)} | {fmt(r3)} | **{sp:.2f}×** |")
+        w(f"| {bench} | {SUITE_LABELS[suite]} | {fmt(r3)} | {fmt(r4)} | **{sp:.2f}×** |")
 
 w()
 
-# Overall MIR improvement geo mean (excluding json which changed workload)
-valid_impr = [(s, b, r2, r3, sp) for s, b, r2, r3, sp in improvements if not (s == "awfy" and b == "json")]
+# Overall MIR improvement geo mean
+valid_impr = [(s, b, r3, r4, sp) for s, b, r3, r4, sp in improvements]
 geo_impr = geo_mean([sp for _, _, _, _, sp in valid_impr])
-w(f"**Overall MIR improvement (geo mean, {len(valid_impr)} benchmarks): {geo_impr:.1f}% faster**")
-w(f"(excluding AWFY/json which had a workload change)")
+w(f"**Overall MIR improvement (geo mean, {len(valid_impr)} benchmarks): {(geo_impr-1)*100:.1f}% faster**")
 w()
 
-# R2 vs R3 suite geo means
+# R3 vs R4 suite geo means
 w("### Suite-Level Comparison (MIR/Node.js Geometric Mean)")
 w()
-w("| Suite | R2 Geo Mean | R3 Geo Mean | Change |")
+w("| Suite | R3 Geo Mean | R4 Geo Mean | Change |")
 w("|-------|------------:|------------:|--------|")
 
-r2_gm = {"r7rs": 0.47, "awfy": 0.61, "beng": 0.72, "kostya": 2.07, "larceny": 1.25}
-for suite in ["r7rs", "awfy", "beng", "kostya", "larceny"]:
-    mn = []
+# Compute R3 geo means dynamically from R3_MIR data + current Node.js values
+for suite in ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream"]:
+    mn_r3 = []
+    mn_r4 = []
     for bench_name, bench_data in data.get(suite, {}).items():
-        mir_v = bench_data.get("mir")
+        r3_v = R3_MIR.get(suite, {}).get(bench_name)
+        r4_v = bench_data.get("mir")
         node_v = bench_data.get("nodejs")
-        if mir_v and node_v and mir_v > 0 and node_v > 0:
-            mn.append(mir_v / node_v)
-    gm = geo_mean(mn) if mn else None
-    r2 = r2_gm[suite]
-    if gm:
-        if gm < r2:
-            change = f"↑ improved ({r2/gm:.0f}% better)"
-        elif gm > r2:
-            change = f"↓ ({gm/r2:.0f}% worse)*"
+        if r3_v and node_v and r3_v > 0 and node_v > 0:
+            mn_r3.append(r3_v / node_v)
+        if r4_v and node_v and r4_v > 0 and node_v > 0:
+            mn_r4.append(r4_v / node_v)
+    gm_r3 = geo_mean(mn_r3) if mn_r3 else None
+    gm_r4 = geo_mean(mn_r4) if mn_r4 else None
+    if gm_r3 and gm_r4:
+        if gm_r4 < gm_r3:
+            change = f"↑ improved ({gm_r3/gm_r4:.0f}% better)"
+        elif gm_r4 > gm_r3:
+            change = f"↓ ({gm_r4/gm_r3:.0f}% worse)"
         else:
             change = "→ unchanged"
-        w(f"| {SUITE_LABELS[suite]} | {r2:.2f}x | {gm:.2f}x | {change} |")
+        w(f"| {SUITE_LABELS[suite]} | {gm_r3:.2f}x | {gm_r4:.2f}x | {change} |")
 
 w()
-w("*AWFY geo mean change is primarily due to the `json` benchmark workload being corrected (R2: 0.028ms → R3: 3.3ms).")
+
+# LambdaJS: not re-run in R4, just note current status
+w("### Lambda JS Engine — R4 Status")
 w()
-
-# LambdaJS improvements
-w("### Lambda JS Engine Improvements (R2 → R3)")
-w()
-w("| Benchmark | Suite | R2 (ms) | R3 (ms) | Change |")
-w("|-----------|-------|--------:|--------:|--------|")
-
-ljs_improvements = []
-for suite in ["r7rs", "awfy", "beng", "kostya", "larceny"]:
-    if suite not in R2_LJS or suite not in data:
-        continue
-    for bench_name in data[suite]:
-        r2_v = R2_LJS.get(suite, {}).get(bench_name)
-        r3_v = data[suite][bench_name].get("lambdajs")
-        if r2_v is None and r3_v is not None and r3_v > 0:
-            ljs_improvements.append((suite, bench_name, None, r3_v, "NEW"))
-        elif r2_v and r3_v and r2_v > 0 and r3_v > 0:
-            sp = r2_v / r3_v
-            if sp > 1.2:
-                ljs_improvements.append((suite, bench_name, r2_v, r3_v, f"{sp:.1f}× faster"))
-            elif sp < 0.5:
-                ljs_improvements.append((suite, bench_name, r2_v, r3_v, f"{1/sp:.1f}× slower*"))
-
-for suite, bench, r2, r3, change in sorted(ljs_improvements, key=lambda x: x[0]):
-    r2_str = fmt(r2) if r2 else "---"
-    w(f"| {bench} | {SUITE_LABELS[suite]} | {r2_str} | {fmt(r3)} | {change} |")
-
-w()
-w("*Workload or test changes between rounds may account for some differences.")
+w("LambdaJS was not re-run in R4 (only MIR and C2MIR engines were benchmarked).")
+w("LambdaJS results are carried over from R3. Current R3 coverage:")
+w("- **AWFY**: All 14 benchmarks passing (bounce, storage, json, deltablue, havlak, cd included)")
+w("- **R7RS**: All 10 benchmarks (except mbrot)")
+w("- **BENG**: binarytrees, fannkuch, fasta, knucleotide, mandelbrot, nbody, pidigits, regexredux, revcomp, spectralnorm")
+w("- **KOSTYA**: brainfuck, matmul, primes, levenshtein, json_gen, collatz")
+w("- **LARCENY**: All 12 benchmarks")
 
 w()
 w("---")
@@ -646,42 +630,44 @@ w()
 w("### 4. Weaknesses: OOP-heavy and allocation-intensive code")
 w()
 w("Node.js V8's optimizing JIT (TurboFan) significantly outperforms Lambda on:")
-w("- **Class-heavy benchmarks**: richards (5.1x AWFY), cd (14.3x) — V8's hidden classes and inline caches")
-w("- **Heavy allocation/GC**: gcbench (20.3x), base64 (12.5x) — V8's generational GC advantage")
-w("- **JetStream suite (7.92x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate")
+w("- **Class-heavy benchmarks**: richards (5.29x AWFY), cd (5.94x) — V8's hidden classes and inline caches")
+w("- **Heavy allocation/GC**: gcbench (19x), base64 (12.5x) — V8's generational GC advantage")
+w("- **JetStream suite (7.28x)**: Complex OOP-style benchmarks where V8's mature optimizations dominate")
 w()
 
 w("### 5. JetStream: New frontier for optimization")
 w()
-w("The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR at **7.92× slower** than Node.js (geo mean).")
+w("The JetStream benchmarks (ported from Apple's JS benchmark suite) show Lambda MIR running slower than Node.js on all 9 benchmarks (geo mean ~7×).")
 w("Workloads are now synchronized to the original heavy JetStream workloads.")
 w("Key remaining bottlenecks:")
-w("- **navier_stokes (56×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern")
+w("- **navier_stokes (57×)**: Heavy array-based PDE solver — needs typed array optimization for this pattern")
 w("- **richards (31×)**: OOP task scheduler — 50 iterations × 1000 COUNT exposes class/method dispatch overhead")
-w("- **raytrace3d (20×)**: Object-heavy 3D computation — property access patterns")
-w("- **nbody (8.6×)**: Numeric simulation — 36000 advance steps per run")
-w("- **splay (7.8×)**: Red-black tree operations — property access patterns")
-w("- **deltablue (1.7×)**: Constraint solver — close to competitive at 20 iterations")
+w("- **raytrace3d (18×)**: Object-heavy 3D computation — property access patterns")
+w("- **splay (8×)**: Red-black tree operations — property access patterns")
+w("- **nbody (8.5×)**: Numeric simulation — 36000 advance steps per run")
+w("- **deltablue (1.6×)**: Constraint solver — close to competitive at 20 iterations")
+w("- **cube3d (1.3×)**: 3D rendering — much improved from R3 (49ms → 24ms)")
 w("These represent clear optimization targets for future MIR engine improvements.")
 w()
 
-w("### 6. MIR JIT improvements from Round 2")
+w("### 6. MIR JIT improvements from Round 3 (LMD_TYPE_LIST removal)")
 w()
-w("MIR Direct shows measurable improvements across the board:")
-w("- **havlak**: 339 → 183ms (**1.85× faster**) — graph algorithm optimization")
-w("- **nbody (BENG)**: 2.8 → 1.3ms (**2.15× faster**) — continued typed-array optimization")
-w("- **deltablue**: 6.1 → 5.3ms (**1.15× faster**) — macro benchmark improvement")
-w("- **gcbench**: 472 → 500ms — slight regression due to GC tuning trade-offs")
+w("Removing `LMD_TYPE_LIST` and unifying list/array handling delivered significant improvements:")
+w("- **havlak**: 183 → 61ms (**3.0× faster**) — graph traversal, list-heavy data structure")
+w("- **cd**: 528 → 220ms (**2.4× faster**) — collision detection with many list operations")
+w("- **json**: 3.3 → 1.5ms (**2.2× faster**) — JSON macro benchmark")
+w("- **cube3d**: 49 → 24ms (**2.0× faster**) — 3D rendering with array operations")
+w("- **storage**: 0.33 → 0.19ms (**1.7× faster**) — storage micro-benchmark")
+w("- **deltablue**: 99 → 64ms (**1.5× faster**) — constraint solver macro benchmark")
+w("- **list**: 0.032 → 0.023ms (**1.4× faster**) — list micro-benchmark")
 w(f"- **Overall**: ~{(geo_impr-1)*100:.0f}% faster across {len(valid_impr)} comparable benchmarks")
 w()
 
-w("### 7. Lambda JS engine growth")
+w("### 7. Lambda JS engine")
 w()
-w("LambdaJS continues expanding benchmark coverage:")
-w("- **New passing benchmarks**: BENG/fannkuch, BENG/mandelbrot, KOSTYA/collatz")
-w("- **BENG/nbody**: 134 → 11.8ms (11.4× faster)")
-w("- **KOSTYA/primes**: 19.4 → 8.5ms (2.3× faster)")
-w("- **KOSTYA/levenshtein**: 30.7 → 14.2ms (2.2× faster)")
+w("LambdaJS results are unchanged from R3 (not re-run in R4). R3 coverage:")
+w("- All AWFY benchmarks pass including bounce, storage, json, deltablue, havlak, and cd")
+w("- BENG/fannkuch, BENG/mandelbrot, KOSTYA/collatz passing")
 w()
 
 w("### 8. QuickJS comparison")
@@ -693,8 +679,8 @@ w()
 w("### 9. C2MIR vs MIR Direct")
 w()
 w("The two Lambda JIT paths produce similar results. Notable differences:")
-w("- C2MIR slightly faster on: havlak (145 vs 177ms), richards (49 vs 56ms)")
-w("- MIR Direct faster on: matmul (8.7 vs 129ms), cube3d (49 vs 141ms)")
+w("- C2MIR slightly faster on: r7rs/sum (0.27 vs 1.8ms), nqueens (6.7 vs 6.6ms)")
+w("- MIR Direct faster on: matmul (8.8 vs 128ms), cube3d (24 vs 81ms), list (0.023 vs 0.62ms)")
 w("- MIR Direct has lower compilation overhead and is the default path")
 w()
 
@@ -716,13 +702,14 @@ w("- **Self-reported exec time** measures only the computation, excluding proces
 w("- **AWFY JS benchmarks** use the official source from `ref/are-we-fast-yet/benchmarks/JavaScript/`. AWFY Python benchmarks use the official Python port with harness.")
 w("- **AWFY Python micro-benchmarks** (sieve, permute, queens, etc.) show extreme Lambda advantage because CPython interprets tight loops ~10,000× slower than JIT-compiled code.")
 w("- **AWFY Python** benchmarks use the official Python port with harness. Class names: NBody, DeltaBlue, CD (not capitalize()).")
-w("- **LambdaJS** now passes all AWFY benchmarks including bounce, storage, json, deltablue, havlak, and cd (previously failing due to missing ES6 class features).")
+w("- **LambdaJS** now passes all AWFY benchmarks including bounce, storage, json, deltablue, havlak, and cd (results from R3, not re-run in R4).")
 w("- **QuickJS** fails on ack (R7RS) due to stack overflow on deep recursion.")
 w("- **JetStream** benchmarks run on MIR, C2MIR, Node.js, and Python (for deltablue, richards, nbody). No LambdaJS/QuickJS ports.")
 w("- **Python** benchmarks not available for: AWFY/cd, JetStream/cube3d, JetStream/navier_stokes, JetStream/splay, JetStream/hashmap, JetStream/crypto_sha1, JetStream/raytrace3d.")
 w("- All times in **milliseconds** unless noted with 's' suffix (seconds).")
-w("- The `json` AWFY benchmark workload was corrected between R2 and R3 (R2: 0.028ms was a minimal-workload test).")
-w("- **Workload synchronization**: Duplicate benchmark names across suites now use identical heavy workloads synchronized to original JetStream — AWFY/BENG/JetStream mandelbrot N=500, nbody 36000 steps, richards 50×COUNT=1000, deltablue 20×chain(100), Larceny/Kostya primes sieve(1M).")
+w("- **KOSTYA/json_gen** benchmark was broken in an earlier commit (commit f2f0c3fd9, incorrect string syntax); fixed in this round. Results are now correct (~65ms).")
+w("- **LMD_TYPE_LIST removal (R4)**: `LMD_TYPE_LIST` was replaced by `LMD_TYPE_ARRAY` throughout the runtime. All list/array operations now use a unified type, improving performance on OOP-heavy and collection-intensive benchmarks.")
+w("- **Workload synchronization**: Duplicate benchmark names across suites use identical heavy workloads synchronized to original JetStream — AWFY/BENG/JetStream mandelbrot N=500, nbody 36000 steps, richards 50×COUNT=1000, deltablue 20×chain(100), Larceny/Kostya primes sieve(1M).")
 
 output = "\n".join(lines)
 with open("test/benchmark/Overall_Result3.md", "w") as f:
