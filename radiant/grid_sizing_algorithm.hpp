@@ -677,7 +677,7 @@ inline void resolve_intrinsic_track_sizes(
         float extra_space = p1_contrib - current_size;
 
         if (extra_space > 0) {
-            log_debug("[GRID PHASE1] distributing: track=%zu span=%zu p1_contrib=%.1f current=%.1f extra=%.1f",
+            log_debug("grid phase1 distributing: track=%zu span=%zu p1_contrib=%.1f current=%.1f extra=%.1f",
                      contrib.track_start, contrib.track_span, p1_contrib, current_size, extra_space);
             increase_sizes_for_spanning_item(
                 tracks,
@@ -794,7 +794,7 @@ inline void resolve_intrinsic_track_sizes(
                 }
             }
             float limited_max = std::min(contrib.max_content_contribution, spanned_fc_limit);
-            log_debug("[GRID PHASE2b-SC] track=%zu span=%zu max=%f fc_limit=%f limited=%f",
+            log_debug("grid phase2b-SC: track=%zu span=%zu max=%f fc_limit=%f limited=%f",
                      contrib.track_start, contrib.track_span,
                      contrib.max_content_contribution, spanned_fc_limit, limited_max);
             if (limited_max <= 0) continue;
@@ -844,7 +844,7 @@ inline void resolve_intrinsic_track_sizes(
 
             float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
             float extra_space = contrib.max_content_contribution - current_size;
-            log_debug("[GRID PHASE2b] item track=%zu span=%zu max_content=%.1f current=%.1f extra=%.1f",
+            log_debug("grid phase2b item: track=%zu span=%zu max_content=%.1f current=%.1f extra=%.1f",
                      contrib.track_start, contrib.track_span,
                      contrib.max_content_contribution, current_size, extra_space);
             if (extra_space <= 0) continue;
@@ -949,19 +949,33 @@ inline void resolve_intrinsic_track_sizes(
         }
     }
 
-    // Clamp fit-content track growth_limits to base_size, UNLESS a non-flex-crossing
-    // span item includes this track. FC tracks spanned only by flex-crossing items
-    // should not grow (the flex tracks absorb the content), but FC tracks spanned by
-    // non-flex-crossing items need their gl kept for maximize_tracks to grow them.
+    // Clamp fit-content track growth_limits based on remaining content from spanning items.
+    // FC tracks should only grow in maximize_tracks to absorb content not already covered
+    // by other tracks in the same span. Cap FC gl so it only grows to cover remaining content.
     {
-        // Build a set of FC track indices that have non-flex-crossing span coverage
-        std::vector<bool> fc_has_non_flex_span(tracks.size(), false);
+        // For each FC track, compute max additional growth needed from spanning items
+        std::vector<float> fc_max_growth(tracks.size(), -1.0f); // -1 = no span coverage
         for (const auto& contrib : contributions) {
             if (contrib.track_span <= 1) continue;
             if (contrib.crosses_flexible_track) continue;
             size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+
+            // Sum ALL base_sizes in this span (including FC tracks)
+            float span_base_sum = 0;
             for (size_t i = contrib.track_start; i < end; ++i) {
-                fc_has_non_flex_span[i] = true;
+                span_base_sum += tracks[i].base_size;
+            }
+            // Remaining content after all current bases and gaps
+            float remaining = contrib.max_content_contribution - span_base_sum;
+            if (contrib.track_span > 1) remaining -= (contrib.track_span - 1) * gap;
+            remaining = std::max(0.0f, remaining);
+
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto mt = tracks[i].max_track_sizing_function.type;
+                if (mt == SizingFunctionType::FitContentPx ||
+                    mt == SizingFunctionType::FitContentPercent) {
+                    fc_max_growth[i] = std::max(fc_max_growth[i], remaining);
+                }
             }
         }
         for (size_t i = 0; i < tracks.size(); ++i) {
@@ -970,10 +984,15 @@ inline void resolve_intrinsic_track_sizes(
             if (mt != SizingFunctionType::FitContentPx &&
                 mt != SizingFunctionType::FitContentPercent) continue;
             if (track.growth_limit <= track.base_size) continue;
-            // Keep gl if a non-flex-crossing span item covers this track and base=0
-            // (maximize_tracks will grow it). Clamp otherwise.
-            if (track.base_size == 0 && fc_has_non_flex_span[i]) continue;
-            track.growth_limit = track.base_size;
+
+            if (fc_max_growth[i] >= 0) {
+                // Cap gl so FC grows at most to cover remaining content
+                float max_gl = track.base_size + std::min(track.growth_limit - track.base_size, fc_max_growth[i]);
+                track.growth_limit = std::max(track.base_size, max_gl);
+            } else {
+                // No span coverage: clamp to base
+                track.growth_limit = track.base_size;
+            }
         }
     }
 
