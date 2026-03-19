@@ -3517,6 +3517,28 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block);
 
+    // CSS 2.1 §10.3.4: For block-level replaced elements (SVG, IMG) with auto margins,
+    // the intrinsic width is determined inside layout_block_inner_content (e.g., layout_inline_svg).
+    // Re-compute auto margins now that the actual width is known.
+    // Skip floats and inline-level elements — their auto margins resolve to 0 (CSS 2.1 §10.3.5, §10.3.2).
+    if (block->bound && block->display.inner == RDT_DISPLAY_REPLACED && !is_float &&
+        block->display.outer != CSS_VALUE_INLINE_BLOCK && block->display.outer != CSS_VALUE_INLINE &&
+        (block->bound->margin.left_type == CSS_VALUE_AUTO || block->bound->margin.right_type == CSS_VALUE_AUTO)) {
+        float margin_available = pa_block->content_width;
+        float old_margin_left = block->bound->margin.left;
+        if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO) {
+            float m = max((margin_available - block->width) / 2, 0.0f);
+            block->bound->margin.left = block->bound->margin.right = m;
+            log_debug("re-finalized replaced element auto margins: left=right=%f (avail=%f, width=%f)",
+                      m, margin_available, block->width);
+        } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
+            block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
+        } else {
+            block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
+        }
+        block->x += block->bound->margin.left - old_margin_left;
+    }
+
     // check for margin collapsing with children
     // CSS 2.2 Section 8.3.1: Margins collapse when parent has no border/padding
     // This applies when block->bound is NULL (no border/padding/margin) OR

@@ -3367,6 +3367,17 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             log_info("[Lambda Script] Script returned SVG string, wrapping in HTML for rendering");
             return write_svg_wrapped_html(result_str->chars);
         }
+        // Handle HTML strings: script returned a full HTML document as a string
+        if (result_str && result_str->len >= 5 &&
+                (strncmp(result_str->chars, "<html", 5) == 0 ||
+                 (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
+            log_info("[Lambda Script] Script returned HTML string, loading as HTML document");
+            const char* temp_html_path = "./temp/lambda_script_view.html";
+            write_text_file(temp_html_path, result_str->chars);
+            runtime_cleanup(&runtime);
+            Url* cwd = get_current_dir();
+            return load_html_doc(cwd, (char*)temp_html_path, viewport_width, viewport_height);
+        }
     }
 
     // Check if the script returned a complete HTML document

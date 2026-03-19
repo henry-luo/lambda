@@ -463,6 +463,32 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     else if (tag == HTM_TAG_H4) elem_height = 20;
                     else if (tag == HTM_TAG_H5 || tag == HTM_TAG_H6) elem_height = 18;
                     else if (tag == HTM_TAG_P) elem_height = 36;  // Typically 2-3 lines
+                    else if (tag == HTM_TAG_SVG) {
+                        // Inline SVG: use height HTML attribute or intrinsic size
+                        const char* attr_h = elem ? elem->get_attribute("height") : nullptr;
+                        if (attr_h) {
+                            int h = atoi(attr_h);
+                            if (h > 0) {
+                                elem_height = h;
+                                has_explicit_height_css = true;
+                                log_debug("SVG height from attribute: %d", elem_height);
+                            }
+                        }
+                        if (!has_explicit_height_css && elem && elem->specified_style) {
+                            CssDeclaration* height_decl = style_tree_get_declaration(
+                                elem->specified_style, CSS_PROPERTY_HEIGHT);
+                            if (height_decl && height_decl->value &&
+                                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                elem_height = (int)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                                                         height_decl->value);
+                                has_explicit_height_css = true;
+                                log_debug("SVG height from CSS: %d", elem_height);
+                            }
+                        }
+                        if (!has_explicit_height_css) {
+                            elem_height = 150;  // HTML default SVG height
+                        }
+                    }
                     else if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_IMG ||
                              tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS) {
                         // Replaced elements - use explicit CSS dimensions if available

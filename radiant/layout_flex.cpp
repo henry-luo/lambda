@@ -4590,8 +4590,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 
         if (top_auto || bottom_auto) {
             // Handle auto margins in cross axis
-            int container_cross_size = is_main_axis_horizontal(flex_layout) ?
-                                     flex_layout->cross_axis_size : flex_layout->main_axis_size;
+            // cross_axis_size always holds the cross-axis dimension (width for column flex,
+            // height for row flex) - use it unconditionally here.
+            int container_cross_size = (int)flex_layout->cross_axis_size;
 
             if (top_auto && bottom_auto) {
                 // Center item with auto margins on both sides
