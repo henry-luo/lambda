@@ -72,18 +72,18 @@ IS_CLANG64 := $(shell [ "$(MSYSTEM_DETECTED)" = "CLANG64" ] && echo "yes" || ech
 IS_MSYS2 := $(shell [ -n "$(MSYSTEM_DETECTED)" ] && echo "yes" || echo "no")
 
 # Detect C/C++ compilers
-# On MSYS2/Windows, prefer MINGW64 GCC over CLANG64 to avoid Universal CRT
+# On MSYS2/Windows, prefer CLANG64 Clang (matches premake5.win.lua flags)
 # Force explicit paths for MSYS environment compatibility
-ifeq ($(shell test -f /mingw64/bin/gcc && echo yes),yes)
-	CC := /mingw64/bin/gcc
-	CXX := /mingw64/bin/g++
-	AR := /mingw64/bin/ar
-	RANLIB := /mingw64/bin/ranlib
-else ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
+ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
 	CC := /clang64/bin/clang
 	CXX := /clang64/bin/clang++
 	AR := /clang64/bin/ar
 	RANLIB := /clang64/bin/ranlib
+else ifeq ($(shell test -f /mingw64/bin/gcc && echo yes),yes)
+	CC := /mingw64/bin/gcc
+	CXX := /mingw64/bin/g++
+	AR := /mingw64/bin/ar
+	RANLIB := /mingw64/bin/ranlib
 else ifeq ($(OS),Linux)
 	CC := clang
 	CXX := clang++
@@ -612,7 +612,11 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 #   5. LTO enabled (-flto)
 release: build-release
 
-build-release: clean-all $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
+build-release:
+	@$(MAKE) clean-all
+	@$(MAKE) build-release-compile
+
+build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call mingw64_env_check)
