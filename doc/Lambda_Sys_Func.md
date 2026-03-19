@@ -6,15 +6,13 @@ This document provides comprehensive documentation for all built-in system funct
 
 1. [Type Functions](#type-functions)
 2. [Mathematical Functions](#mathematical-functions)
-3. [Statistical Functions](#statistical-functions)
-4. [Date/Time Functions](#datetime-functions)
-5. [String Functions](#string-functions)
-6. [Collection Functions](#collection-functions)
-7. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
-8. [Variadic Argument Functions](#variadic-argument-functions)
-9. [Input and Format Functions](#io-functions)
-10. [Procedural Functions](#procedural-functions)
-11. [Error Handling](#error-handling)
+3. [String Functions](#string-functions)
+4. [Collection Functions](#collection-functions)
+5. [Date/Time Functions](#datetime-functions)
+6. [Variadic Argument Functions](#variadic-argument-functions)
+7. [Input/Output Functions](#inputoutput-functions)
+8. [Error Handling](#error-handling)
+9. [Quick Reference Table](#quick-reference-table)
 
 ---
 
@@ -41,7 +39,7 @@ Functions for type conversion and inspection.
 |----------|-------------|---------|--------|
 | `type(x)` | Get type of value | `type(42)` | `'int` |
 | `name(x)` | Get name of element, function, or type | `name(<div>)` | `'div` |
-| `len(x)` | Get length of collection | `len([1, 2, 3])` | `3` |
+| `len(x)` | Get length of collection or string | `len([1, 2, 3])` | `3` |
 
 ```lambda
 // Type conversion examples
@@ -64,26 +62,27 @@ len("hello")       // 5
 
 ## Mathematical Functions
 
-Basic mathematical operations.
-
 > **Import Styles:** The `math` module supports three import styles:
 > - **No import** (default): `math.sqrt(x)`, `math.pi` — always available
 > - **Global import** (`import math;`): `sqrt(x)`, `pi` — all functions available without prefix
 > - **Aliased import** (`import m:math;`): `m.sqrt(x)`, `m.pi` — use custom prefix
 >
-> Standalone functions like `abs`, `round`, `floor`, `ceil`, `sign`, `min`, `max`, `sum` are always available without any prefix or import.
+> Standalone functions like `abs`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `sum`, `avg` are always available without any prefix or import.
 
-### Scalar Math
+### Rounding & Sign (global)
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `abs(x)` | Absolute value | `abs(-5)` | `5` |
-| `round(x)` | Round to nearest integer | `round(3.7)` | `4` |
-| `floor(x)` | Round down | `floor(3.7)` | `3` |
-| `ceil(x)` | Round up | `ceil(3.2)` | `4` |
-| `sign(x)` | Sign of number (-1, 0, 1) | `sign(-5)` | `-1` |
+These functions work on both scalars and collections (element-wise).
 
-### Aggregating Functions
+| Function   | Description          | Scalar Example    | Result | Vector Example          | Result       |
+| ---------- | -------------------- | ----------------- | ------ | ----------------------- | ------------ |
+| `abs(x)`   | Absolute value       | `abs(-5)`         | `5`    | `abs([-1, 2, -3])`      | `[1, 2, 3]`  |
+| `round(x)` | Round to nearest     | `round(3.7)`      | `4`    | `round([1.4, 1.6])`     | `[1, 2]`     |
+| `floor(x)` | Round down           | `floor(3.7)`      | `3`    | `floor([1.7, 2.3])`     | `[1, 2]`     |
+| `ceil(x)`  | Round up             | `ceil(3.2)`       | `4`    | `ceil([1.2, 2.8])`      | `[2, 3]`     |
+| `trunc(x)` | Truncate toward zero | `trunc(3.7)`      | `3`    | `trunc([-3.7, 3.7])`    | `[-3, 3]`    |
+| `sign(x)`  | Sign (-1, 0, 1)      | `sign(-5)`        | `-1`   | `sign([-5, 0, 3])`      | `[-1, 0, 1]` |
+
+### Aggregation (global)
 
 | Function      | Description           | Example             | Result |
 | ------------- | --------------------- | ------------------- | ------ |
@@ -91,8 +90,8 @@ Basic mathematical operations.
 | `min(vec)`    | Minimum in collection | `min([3, 1, 2])`    | `1`    |
 | `max(a, b)`   | Maximum of two values | `max(3, 5)`         | `5`    |
 | `max(vec)`    | Maximum in collection | `max([3, 1, 2])`    | `3`    |
-| `argmin(vec)` | Index of minimum      | `argmin([3, 1, 2])` | `1`    |
-| `argmax(vec)` | Index of maximum      | `argmax([3, 1, 2])` | `0`    |
+| `argmin(vec)` | Index of minimum      | `argmin([5, 2, 8, 1])` | `3` |
+| `argmax(vec)` | Index of maximum      | `argmax([5, 2, 8, 1])` | `2` |
 | `sum(vec)`    | Sum of elements       | `sum([1, 2, 3])`    | `6`    |
 | `avg(vec)`    | Arithmetic mean       | `avg([1, 2, 3])`    | `2.0`  |
 
@@ -101,6 +100,7 @@ abs(-5)                 // 5
 round(3.7)              // 4
 floor(3.7)              // 3
 ceil(3.2)               // 4
+trunc(-3.7)             // -3
 sign(-5)                // -1
 
 min(3, 5)               // 3
@@ -114,9 +114,70 @@ sum([1, 2, 3, 4])       // 10
 avg([1, 2, 3, 4])       // 2.5
 ```
 
-## Statistical Functions
+### math Module
 
-Functions for statistical analysis on collections, under `math` module.
+#### Constants
+
+| Constant | Description | Value |
+|----------|-------------|-------|
+| `math.pi` | Pi (π) | `3.1415926536` |
+| `math.e` | Euler's number (e) | `2.7182818285` |
+
+#### Trigonometric
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.sin(x)` | Sine | `math.sin([0, 1.57...])` | `[0, 1]` |
+| `math.cos(x)` | Cosine | `math.cos([0, 1.57...])` | `[1, 0]` |
+| `math.tan(x)` | Tangent | `math.tan([0, 0.785...])` | `[0, 1]` |
+
+#### Inverse Trigonometric
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.asin(x)` | Inverse sine (arcsin) | `math.asin(1)` | `1.5707963268` |
+| `math.acos(x)` | Inverse cosine (arccos) | `math.acos(1)` | `0` |
+| `math.atan(x)` | Inverse tangent (arctan) | `math.atan(1)` | `0.7853981634` |
+| `math.atan2(y, x)` | Two-argument arctan | `math.atan2(1, 1)` | `0.7853981634` |
+
+#### Hyperbolic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.sinh(x)` | Hyperbolic sine | `math.sinh(1)` | `1.1752011936` |
+| `math.cosh(x)` | Hyperbolic cosine | `math.cosh(0)` | `1` |
+| `math.tanh(x)` | Hyperbolic tangent | `math.tanh(1)` | `0.761594156` |
+
+#### Inverse Hyperbolic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.asinh(x)` | Inverse hyperbolic sine | `math.asinh(1)` | `0.881373587` |
+| `math.acosh(x)` | Inverse hyperbolic cosine | `math.acosh(2)` | `1.3169578969` |
+| `math.atanh(x)` | Inverse hyperbolic tangent | `math.atanh(0.5)` | `0.5493061443` |
+
+#### Exponential / Logarithmic
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.exp(x)` | Exponential (e^x) | `math.exp([0, 1, 2])` | `[1, e, e²]` |
+| `math.exp2(x)` | Base-2 exponential (2^x) | `math.exp2(3)` | `8` |
+| `math.expm1(x)` | exp(x) - 1 (precise for small x) | `math.expm1(0)` | `0` |
+| `math.log(x)` | Natural logarithm | `math.log([1, 2.718...])` | `[0, 1]` |
+| `math.log2(x)` | Base-2 logarithm | `math.log2(8)` | `3` |
+| `math.log10(x)` | Base-10 logarithm | `math.log10([1, 10, 100])` | `[0, 1, 2]` |
+| `math.log1p(x)` | log(1 + x) (precise for small x) | `math.log1p(0)` | `0` |
+
+#### Power / Root
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.pow(b, e)` | Power (b^e) | `math.pow(2, 10)` | `1024` |
+| `math.sqrt(x)` | Square root | `math.sqrt([1, 4, 9])` | `[1, 2, 3]` |
+| `math.cbrt(x)` | Cube root | `math.cbrt(27)` | `3` |
+| `math.hypot(x, y)` | Hypotenuse √(x²+y²) | `math.hypot(3, 4)` | `5` |
+
+#### Statistical
 
 | Function                | Description         | Example                         | Result      |
 | ----------------------- | ------------------- | ------------------------------- | ----------- |
@@ -131,100 +192,16 @@ Functions for statistical analysis on collections, under `math` module.
 | `math.dot(a, b)`        | Dot product         | `math.dot([1,2,3], [4,5,6])`    | `32`        |
 | `math.norm(vec)`        | Euclidean norm      | `math.norm([3, 4])`             | `5`         |
 
-```lambda
-math.mean([1, 2, 3, 4])          // 2.5
-math.median([1, 3, 2, 4, 5])     // 3
-math.variance([1, 2, 3])         // 0.666...
-math.deviation([1, 2, 3])        // 0.816...
-math.quantile([1, 2, 3, 4], 0.5) // 2.5
-math.prod([2, 3, 4])             // 24
+#### Random
 
-// Cumulative & linear algebra
-math.cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
-math.cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
-math.dot([1, 2, 3], [4, 5, 6])  // 32 (1*4 + 2*5 + 3*6)
-math.norm([3, 4])               // 5 (sqrt(9 + 16))
-```
-
----
-
-## Element-wise Math Functions
-
-Functions that apply to each element of a collection and return a collection of the same size. Also work on scalar values.
-
-### Constants
-
-| Constant | Description | Value |
-|----------|-------------|-------|
-| `math.pi` | Pi (π) | `3.1415926536` |
-| `math.e` | Euler's number (e) | `2.7182818285` |
-
-### Trigonometric
+Pure functional pseudo-random number generator using the SplitMix64 algorithm. Takes an integer seed and returns a list `[value, new_seed]` where `value` is a float in [0.0, 1.0).
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `math.sin(x)` | Sine | `math.sin([0, 1.57...])` | `[0, 1]` |
-| `math.cos(x)` | Cosine | `math.cos([0, 1.57...])` | `[1, 0]` |
-| `math.tan(x)` | Tangent | `math.tan([0, 0.785...])` | `[0, 1]` |
-
-### Inverse Trigonometric
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.asin(x)` | Inverse sine (arcsin) | `math.asin(1)` | `1.5707963268` |
-| `math.acos(x)` | Inverse cosine (arccos) | `math.acos(1)` | `0` |
-| `math.atan(x)` | Inverse tangent (arctan) | `math.atan(1)` | `0.7853981634` |
-| `math.atan2(y, x)` | Two-argument arctan | `math.atan2(1, 1)` | `0.7853981634` |
-
-### Hyperbolic
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.sinh(x)` | Hyperbolic sine | `math.sinh(1)` | `1.1752011936` |
-| `math.cosh(x)` | Hyperbolic cosine | `math.cosh(0)` | `1` |
-| `math.tanh(x)` | Hyperbolic tangent | `math.tanh(1)` | `0.761594156` |
-
-### Inverse Hyperbolic
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.asinh(x)` | Inverse hyperbolic sine | `math.asinh(1)` | `0.881373587` |
-| `math.acosh(x)` | Inverse hyperbolic cosine | `math.acosh(2)` | `1.3169578969` |
-| `math.atanh(x)` | Inverse hyperbolic tangent | `math.atanh(0.5)` | `0.5493061443` |
-
-### Exponential / Logarithmic
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.exp(x)` | Exponential (e^x) | `math.exp([0, 1, 2])` | `[1, e, e²]` |
-| `math.exp2(x)` | Base-2 exponential (2^x) | `math.exp2(3)` | `8` |
-| `math.expm1(x)` | exp(x) - 1 (precise for small x) | `math.expm1(0)` | `0` |
-| `math.log(x)` | Natural logarithm | `math.log([1, 2.718...])` | `[0, 1]` |
-| `math.log2(x)` | Base-2 logarithm | `math.log2(8)` | `3` |
-| `math.log10(x)` | Base-10 logarithm | `math.log10([1, 10, 100])` | `[0, 1, 2]` |
-| `math.log1p(x)` | log(1 + x) (precise for small x) | `math.log1p(0)` | `0` |
-
-### Power / Root
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.pow(b, e)` | Power (b^e) | `math.pow(2, 10)` | `1024` |
-| `math.sqrt(x)` | Square root | `math.sqrt([1, 4, 9])` | `[1, 2, 3]` |
-| `math.cbrt(x)` | Cube root | `math.cbrt(27)` | `3` |
-| `math.hypot(x, y)` | Hypotenuse √(x²+y²) | `math.hypot(3, 4)` | `5` |
-
-### Rounding / Sign
-
-| Function        | Description          | Example                   | Result       |
-| --------------- | -------------------- | ------------------------- | ------------ |
-| `abs(x)`        | Absolute value       | `abs([-1, 2, -3])`        | `[1, 2, 3]`  |
-| `round(x)`      | Round                | `round([1.4, 1.6])`       | `[1, 2]`     |
-| `floor(x)`      | Floor                | `floor([1.7, 2.3])`       | `[1, 2]`     |
-| `ceil(x)`       | Ceiling              | `ceil([1.2, 2.8])`        | `[2, 3]`     |
-| `trunc(x)`      | Truncate toward zero | `trunc([-3.7, 3.7])`      | `[-3, 3]`    |
-| `sign(x)`       | Sign (-1, 0, 1)      | `sign([-5, 0, 3])`        | `[-1, 0, 1]` |
+| `math.random(seed)` | Generate random float and new seed | `let x, s = math.random(42)` | `[0.7415..., -7046...]` |
 
 ```lambda
+// math module examples
 math.pi                         // 3.1415926536
 math.e                          // 2.7182818285
 math.sin([0, 3.14159/2])        // [0, 1]
@@ -237,68 +214,24 @@ math.log2(8)                    // 3
 math.pow(2, 10)                 // 1024
 math.cbrt(27)                   // 3
 math.hypot(3, 4)                // 5
-math.log1p(0)                   // 0
-trunc(3.7)                      // 3
 
-abs([-1, 2, -3])                // [1, 2, 3]
-sign([-5, 0, 3])                // [-1, 0, 1]
-```
+// statistical
+math.mean([1, 2, 3, 4])         // 2.5
+math.median([1, 3, 2, 4, 5])    // 3
+math.variance([1, 2, 3])        // 0.666...
+math.deviation([1, 2, 3])       // 0.816...
+math.quantile([1, 2, 3, 4], 0.5) // 2.5
+math.prod([2, 3, 4])            // 24
+math.cumsum([1, 2, 3, 4])       // [1, 3, 6, 10]
+math.cumprod([1, 2, 3, 4])      // [1, 2, 6, 24]
+math.dot([1, 2, 3], [4, 5, 6])  // 32
+math.norm([3, 4])               // 5
 
-### Random Number Generation
-
-Pure functional pseudo-random number generator using the SplitMix64 algorithm. Takes an integer seed and returns a list `[value, new_seed]` where `value` is a float in [0.0, 1.0).
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `math.random(seed)` | Generate random float and new seed | `let x, s = math.random(42)` | `[0.7415..., -7046...]` |
-
-```lambda
-// basic usage — returns [float_value, new_seed]
+// random
 let x, seed1 = math.random(42)
-x          // 0.7415648788 (float in [0.0, 1.0))
-
-// chain the seed for subsequent values
+x                                // 0.7415648788 (float in [0.0, 1.0))
 let x2, seed2 = math.random(seed1)
-let x3, seed3 = math.random(seed2)
-
-// deterministic: same seed always produces same result
-let a, _ = math.random(42)   // always 0.7415648788
-
-// generate a random integer in [0, n)
-let r, s = math.random(seed)
-let dice = floor(r * 6) + 1   // random 1-6
-```
-
----
-
-## Date/Time Functions
-
-Functions for date and time operations.
-
-### Current Time
-
-| Function      | Description                                 | Example                  | Result                   |
-| ------------- | ------------------------------------------- | ------------------------ | ------------------------ |
-| `datetime()`  | Current date and time                       | `datetime()`             | `t'2025-01-23T14:30:00'` |
-| `datetime(x)` | Parse as datetime                           | `datetime("2025-01-01")` | `t'2025-01-01'`          |
-| `today()`     | Current date                                | `today()`                | `t'2025-01-23'`          |
-| `now()`       | Current timestamp (proc)                    | `now()`                  | `t'2025-01-23T14:30:00'` |
-| `justnow()`   | Time when current script evaluation started | `justnow()`              | `t'14:30:00'`            |
-
-### Date/Time Extraction
-
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `date(dt)` | Extract date part | `date(t'2025-01-01T14:30')` | `t'2025-01-01'` |
-| `time(dt)` | Extract time part | `time(t'2025-01-01T14:30')` | `t'14:30:00'` |
-
-```lambda
-datetime()                 // Current date and time
-today()                    // Current date
-justnow()                  // Current time
-
-date(t'2025-01-01T14:30')  // t'2025-01-01'
-time(t'2025-01-01T14:30')  // t'14:30:00'
+let dice = floor(x * 6) + 1     // random 1-6
 ```
 
 ---
@@ -450,17 +383,23 @@ ord(chr(65))         // 65
 
 Functions for working with arrays, lists, and other collections.
 
-### Basic Operations
+### Query & Test
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `len(x)` | Length of collection | `len([1, 2, 3])` | `3` |
-| `slice(vec, i, j)` | Extract slice [i, j) | `slice([1,2,3,4], 1, 3)` | `[2, 3]` |
-| `set(vec)` | Remove duplicates | `set([1, 1, 2, 2, 3])` | `[1, 2, 3]` |
 | `all(vec)` | All elements truthy? | `all([true, true, false])` | `false` |
 | `any(vec)` | Any element truthy? | `any([false, false, true])` | `true` |
 
-### Vector Manipulation
+### Extraction
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `slice(vec, i, j)` | Extract slice [i, j) | `slice([1,2,3,4], 1, 3)` | `[2, 3]` |
+| `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` |
+| `drop(vec, n)` | Drop first n elements | `drop([1, 2, 3], 1)` | `[2, 3]` |
+
+### Transformation
 
 | Function             | Description                         | Example                                | Result             |
 | -------------------- | ----------------------------------- | -------------------------------------- | ------------------ |
@@ -470,20 +409,29 @@ Functions for working with arrays, lists, and other collections.
 | `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
 | `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
-| `take(vec, n)`       | First n elements                    | `take([1, 2, 3], 2)`                   | `[1, 2]`           |
-| `drop(vec, n)`       | Drop first n elements               | `drop([1, 2, 3], 1)`                   | `[2, 3]`           |
+| `set(vec)`           | Remove duplicates                   | `set([1, 1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
 
-### Vector Construction
+### Construction
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `fill(n, value)` | Vector of n copies | `fill(3, 5)` | `[5, 5, 5]` |
 | `range(start, end, step)` | Range with step | `range(0, 10, 2)` | `[0, 2, 4, 6, 8]` |
 
+### Reduction
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `reduce(vec, fn)` | Reduce with binary function | `reduce([1,2,3], (a,b) => a+b)` | `6` |
+
+Reduce a collection to a single value by applying a binary function cumulatively. Uses the first element as the initial accumulator.
+
 ```lambda
 slice([1, 2, 3, 4], 1, 3)  // [2, 3]
-set([1, 1, 2, 2, 3])       // [1, 2, 3]
+take([1, 2, 3, 4], 2)      // [1, 2]
+drop([1, 2, 3, 4], 2)      // [3, 4]
+
 all([true, true, false])   // false
 any([false, false, true])  // true
 
@@ -491,55 +439,54 @@ reverse([1, 2, 3])         // [3, 2, 1]
 sort([3, 1, 2])            // [1, 2, 3]
 sort([1, 2, 3], 'desc)     // [3, 2, 1]
 
-// Sort by key function — 2nd arg is fn
+// Sort by key function
 let users = [{name: "Bob", age: 30}, {name: "Alice", age: 25}]
 sort(users, ~.age)         // sorted by age ascending
-sort(users, ~.name)        // sorted by name ascending
-
-// Sort with options map — direction + key
 sort(users, {dir: 'desc, by: ~.age})   // sorted by age descending
 
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
-take([1, 2, 3, 4], 2)      // [1, 2]
-drop([1, 2, 3, 4], 2)      // [3, 4]
 zip([1, 2], ["a", "b"])    // [(1, "a"), (2, "b")]
 
 fill(3, 0)                 // [0, 0, 0]
 range(0, 10, 2)            // [0, 2, 4, 6, 8]
+
+reduce([1, 2, 3, 4], (a, b) => a + b)     // 10 (sum)
+reduce([1, 2, 3, 4, 5], (a, b) => a * b)  // 120 (product)
 ```
+
+> **Note**: `reduce` requires at least one element. If only one element, it is returned directly without calling the function.
 
 ---
 
-## Aggregation & Reduction Functions
+## Date/Time Functions
 
-Functions that reduce collections to single values.
+Functions for date and time operations.
+
+### Current Time
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `sum(vec)` | Sum of elements | `sum([1, 2, 3])` | `6` |
-| `avg(vec)` | Arithmetic mean | `avg([1, 2, 3])` | `2.0` |
-| `min(vec)` | Minimum | `min([3, 1, 2])` | `1` |
-| `max(vec)` | Maximum | `max([3, 1, 2])` | `3` |
-| `all(vec)` | All truthy? | `all([true, true])` | `true` |
-| `any(vec)` | Any truthy? | `any([false, true])` | `true` |
-| `len(vec)` | Count elements | `len([1, 2, 3])` | `3` |
-| `reduce(vec, fn)` | Reduce with binary function | `reduce([1,2,3], (a,b) => a+b)` | `6` |
+| `datetime()` | Current date and time | `datetime()` | `t'2025-01-23T14:30:00'` |
+| `datetime(x)` | Parse as datetime | `datetime("2025-01-01")` | `t'2025-01-01'` |
+| `today()` | Current date | `today()` | `t'2025-01-23'` |
+| `now()` | Current timestamp (proc) | `now()` | `t'2025-01-23T14:30:00'` |
+| `justnow()` | Time when current script evaluation started | `justnow()` | `t'14:30:00'` |
 
-### reduce(vec, fn)
+### Date/Time Extraction
 
-Reduce a collection to a single value by applying a binary function cumulatively. Uses the first element as the initial accumulator.
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `date(dt)` | Extract date part | `date(t'2025-01-01T14:30')` | `t'2025-01-01'` |
+| `time(dt)` | Extract time part | `time(t'2025-01-01T14:30')` | `t'14:30:00'` |
 
 ```lambda
-reduce([1, 2, 3, 4], (a, b) => a + b)     // 10 (sum)
-reduce([1, 2, 3, 4, 5], (a, b) => a * b)   // 120 (product)
-reduce([42], (a, b) => a + b)               // 42 (single element)
+datetime()                 // Current date and time
+today()                    // Current date
+justnow()                  // Current time
 
-// Sort and reduce
-let nums = [5, 3, 8, 1]
-reduce(sort(nums), (acc, x) => acc * 10 + x)   // 1358
+date(t'2025-01-01T14:30')  // t'2025-01-01'
+time(t'2025-01-01T14:30')  // t'14:30:00'
 ```
-
-> **Note**: Collection must have at least one element. If only one element, it is returned directly without calling the function.
 
 ---
 
@@ -699,12 +646,11 @@ let pretty_json = format(data, {type: 'json, indent: 2})
 let compact_json = format(data, {type: 'json, compact: true})
 ```
 
----
-## Procedural I/O Functions
+### Procedural I/O Functions
 
 Functions that have side effects (I/O, state changes). These are only available in procedural functions (`pn`).
 
-### Overview
+#### Overview
 
 | Function | Description | Example |
 |----------|-------------|---------|
@@ -724,7 +670,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
-### print(x)
+#### print(x)
 
 Prints a value to the console (stdout).
 
@@ -734,7 +680,7 @@ print(42)
 print([1, 2, 3])
 ```
 
-### output(data, target) / output(data, target, format)
+#### output(data, target) / output(data, target, format)
 
 Writes data to a file or URL. The format can be auto-detected from the target extension or explicitly specified.
 
@@ -769,11 +715,11 @@ pn save_data() {
 | `toml` | `.toml` | TOML format |
 | `ini` | `.ini` | INI configuration format |
 
-### Pipe Output Operators: |> and |>>
+#### Pipe Output Operators: |> and |>>
 
 Lambda provides pipe output operators for convenient file writing in procedural functions.
 
-#### |> (Write/Truncate)
+##### |> (Write/Truncate)
 
 The `|>` operator writes data to a target, truncating existing content:
 
@@ -787,7 +733,7 @@ pn generate_report() {
 }
 ```
 
-#### |>> (Append)
+##### |>> (Append)
 
 The `|>>` operator appends data to a target:
 
@@ -804,7 +750,7 @@ pn process_items(items) {
 }
 ```
 
-### io Module Functions
+#### io Module Functions
 
 The `io` module provides procedural functions for file system operations.
 
@@ -813,7 +759,7 @@ The `io` module provides procedural functions for file system operations.
 > - **Global import** (`import io;`): `copy(@./a, @./b)` — all functions without prefix
 > - **Aliased import** (`import f:io;`): `f.copy(@./a, @./b)` — use custom prefix
 
-#### io.copy(source, destination)
+##### io.copy(source, destination)
 
 Copy a file or directory to a new location.
 
@@ -824,7 +770,7 @@ pn backup_config() {
 }
 ```
 
-#### io.move(source, destination)
+##### io.move(source, destination)
 
 Move or rename a file or directory.
 
@@ -834,7 +780,7 @@ pn archive_logs() {
 }
 ```
 
-#### io.delete(target)
+##### io.delete(target)
 
 Delete a file or directory.
 
@@ -845,7 +791,7 @@ pn cleanup() {
 }
 ```
 
-#### io.mkdir(path)
+##### io.mkdir(path)
 
 Create a directory (and parent directories if needed).
 
@@ -857,7 +803,7 @@ pn setup_project() {
 }
 ```
 
-#### io.touch(path)
+##### io.touch(path)
 
 Create an empty file or update its modification timestamp.
 
@@ -867,7 +813,7 @@ pn mark_complete() {
 }
 ```
 
-#### io.symlink(target, link_path)
+##### io.symlink(target, link_path)
 
 Create a symbolic link.
 
@@ -877,7 +823,7 @@ pn setup_links() {
 }
 ```
 
-#### io.chmod(path, mode)
+##### io.chmod(path, mode)
 
 Change file permissions (Unix-style).
 
@@ -888,7 +834,7 @@ pn make_executable() {
 }
 ```
 
-#### io.rename(source, destination)
+##### io.rename(source, destination)
 
 Rename a file or directory (alias for move within same directory).
 
@@ -898,7 +844,7 @@ pn rename_file() {
 }
 ```
 
-#### io.fetch(url, options)
+##### io.fetch(url, options)
 
 Perform HTTP requests with full control over method, headers, and body.
 
@@ -919,7 +865,7 @@ pn api_operations() {
 }
 ```
 
-### cmd(command, args...)
+#### cmd(command, args...)
 
 Execute a shell command and return the result.
 
@@ -933,7 +879,7 @@ pn run_commands() {
 }
 ```
 
-### clock()
+#### clock()
 
 Returns the current value of a monotonic clock as a `float` in seconds. Useful for measuring elapsed time in benchmarks and performance profiling. The returned value has nanosecond precision and is not related to wall-clock time.
 
@@ -1024,26 +970,41 @@ if (result is error) {
 | `math.pi` | - | Pi (π) constant |
 | `math.e` | - | Euler's number constant |
 
-### Statistical Functions
+### Aggregation Functions (Global)
 | Function | Args | Description |
 |----------|------|-------------|
-| `sum` | 1 | Sum |
-| `avg` | 1 | Average |
-| `mean` | 1 | Mean (alias) |
-| `median` | 1 | Median |
-| `variance` | 1 | Variance |
-| `deviation` | 1 | Std deviation |
-| `quantile` | 2 | Quantile |
-| `prod` | 1 | Product |
-| `cumsum` | 1 | Cumulative sum |
-| `cumprod` | 1 | Cumulative product |
-| `dot` | 2 | Dot product |
-| `norm` | 1 | Euclidean norm |
 | `min` | 1-2 | Minimum |
 | `max` | 1-2 | Maximum |
 | `argmin` | 1 | Index of min |
 | `argmax` | 1 | Index of max |
-| `reduce` | 2 | Reduce with binary fn |
+| `sum` | 1 | Sum |
+| `avg` | 1 | Average |
+
+### Statistical Functions (math Module)
+| Function | Args | Description |
+|----------|------|-------------|
+| `math.mean` | 1 | Mean |
+| `math.median` | 1 | Median |
+| `math.variance` | 1 | Variance |
+| `math.deviation` | 1 | Std deviation |
+| `math.quantile` | 2 | Quantile |
+| `math.prod` | 1 | Product |
+| `math.cumsum` | 1 | Cumulative sum |
+| `math.cumprod` | 1 | Cumulative product |
+| `math.dot` | 2 | Dot product |
+| `math.norm` | 1 | Euclidean norm |
+| `math.random` | 0-2 | Random number |
+
+### String Functions
+| Function | Args | Description |
+|----------|------|-------------|
+| `replace` | 3 | Replace pattern/substring in string |
+| `split` | 2-3 | Split string by pattern/substring |
+| `join` | 2 | Join list of strings with separator |
+| `find` | 2 | Find all pattern/substring matches |
+| `ord` | 1 | Unicode code point of first character |
+| `chr` | 1 | Character from Unicode code point |
+| `normalize` | 1 | Normalize string |
 
 ### Collection Functions
 | Function | Args | Description |
@@ -1060,6 +1021,17 @@ if (result is error) {
 | `zip` | 2 | Zip vectors |
 | `fill` | 2 | Fill vector |
 | `range` | 3 | Range with step |
+| `reduce` | 2 | Reduce with binary fn |
+
+### Date/Time Functions
+| Function | Args | Description |
+|----------|------|-------------|
+| `datetime` | 0-1 | Date and time |
+| `date` | 1 | Extract date |
+| `time` | 1 | Extract time |
+| `today` | 0 | Current date (proc) |
+| `now` | 0 | Current time (proc) |
+| `justnow` | 0 | Time only |
 
 ### I/O Functions (Pure)
 | Function | Args | Description |
@@ -1088,29 +1060,8 @@ if (result is error) {
 | `cmd` | 1+ | Shell command |
 | `clock` | 0 | Monotonic clock (seconds) |
 
-### Date/Time Functions
-| Function | Args | Description |
-|----------|------|-------------|
-| `datetime` | 0-1 | Date and time |
-| `date` | 1 | Extract date |
-| `time` | 1 | Extract time |
-| `today` | 0 | Current date (proc) |
-| `now` | 0 | Current time (proc) |
-| `justnow` | 0 | Time only |
-
 ### Other Functions
 | Function | Args | Description |
 |----------|------|-------------|
 | `error` | 1 | Create error |
-| `normalize` | 1 | Normalize string |
 | `varg` | 0-1 | Variadic args |
-
-### String Functions
-| Function | Args | Description |
-|----------|------|-------------|
-| `replace` | 3 | Replace pattern/substring in string |
-| `split` | 2-3 | Split string by pattern/substring |
-| `join` | 2 | Join list of strings with separator |
-| `find` | 2 | Find all pattern/substring matches |
-| `ord` | 1 | Unicode code point of first character |
-| `chr` | 1 | Character from Unicode code point |
