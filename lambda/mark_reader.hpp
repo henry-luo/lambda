@@ -284,16 +284,12 @@ public:
 
 /**
  * Pure stack-based element reader (no pool allocation)
- * Stores element pointer and cached metadata directly as members
+ * Two-pointer struct: element data + cached type pointer (void* cast)
  */
 class ElementReader {
 private:
     const Element* element_;         // Underlying element (read-only)
-    const TypeElmt* element_type_;   // Cached element type info
-    const char* tag_name_;           // Cached tag name (null-terminated)
-    int64_t tag_name_len_;           // Tag name length
-    int64_t child_count_;            // Number of child items
-    int64_t attr_count_;             // Number of attributes
+    const TypeElmt* element_type_;   // Cached element type info (void* cast from element_->type)
 
 public:
     // Lifecycle
@@ -310,11 +306,11 @@ public:
     ElementReader& operator=(ElementReader&&) = default;
 
     // Element properties
-    const char* tagName() const { return tag_name_; }
-    int64_t tagNameLen() const { return tag_name_len_; }
+    const char* tagName() const { return element_type_ ? element_type_->name.str : nullptr; }
+    int64_t tagNameLen() const { return element_type_ ? (int64_t)element_type_->name.length : 0; }
     bool hasTag(const char* tag_name) const;
-    int64_t childCount() const { return child_count_; }
-    int64_t attrCount() const { return attr_count_; }
+    int64_t childCount() const { return element_ ? ((const List*)element_)->length : 0; }
+    int64_t attrCount() const { return element_type_ ? ((const TypeMap*)element_type_)->length : 0; }
     bool isEmpty() const;
     bool isTextOnly() const;
 

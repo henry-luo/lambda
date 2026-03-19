@@ -13,7 +13,6 @@ class MarkBuilder;
 class ElementBuilder;
 class MapBuilder;
 class ArrayBuilder;
-class ListBuilder;
 
 /**
  * MarkBuilder - Fluent API for constructing Mark documents in input parsers
@@ -66,9 +65,9 @@ public:
     MarkBuilder(const MarkBuilder&) = delete;
     MarkBuilder& operator=(const MarkBuilder&) = delete;
 
-    // movable (for return value optimization)
-    MarkBuilder(MarkBuilder&&) = default;
-    MarkBuilder& operator=(MarkBuilder&&) = default;
+    // non-movable (never used in practice - always stack-allocated in place)
+    MarkBuilder(MarkBuilder&&) = delete;
+    MarkBuilder& operator=(MarkBuilder&&) = delete;
 
     // ============================================================================
     // Name Creation Methods (always use name_pool for deduplication)
@@ -153,12 +152,6 @@ public:
      */
     ArrayBuilder array();
 
-    /**
-     * Create list builder
-     * Returned by value - stack-allocated
-     */
-    ListBuilder list();
-
     // ============================================================================
     // Direct Item Creation (convenience - arena-allocates final data immediately)
     // ============================================================================
@@ -177,11 +170,6 @@ public:
      * Create an empty array
      */
     Item createArray();
-
-    /**
-     * Create an empty list
-     */
-    Item createList();
 
     /**
      * Create primitive Items
@@ -307,8 +295,6 @@ private:
     MarkBuilder* builder_;      // parent builder
     String* tag_name_;          // element tag name
     Element* elmt_;             // element being built (pool-allocated)
-    // TypeMap* attr_type_;        // attribute type descriptor
-    ElementBuilder* parent_;    // for nested elements (stack reference)
 
     friend class MarkBuilder;
 
@@ -323,11 +309,11 @@ public:
      */
     ~ElementBuilder();
 
-    // copyable and movable (for value semantics)
-    ElementBuilder(const ElementBuilder&) = default;
-    ElementBuilder& operator=(const ElementBuilder&) = default;
-    ElementBuilder(ElementBuilder&&) = default;
-    ElementBuilder& operator=(ElementBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    ElementBuilder(const ElementBuilder&) = delete;
+    ElementBuilder& operator=(const ElementBuilder&) = delete;
+    ElementBuilder(ElementBuilder&&) = delete;
+    ElementBuilder& operator=(ElementBuilder&&) = delete;
 
     // ============================================================================
     // Attribute Setters (return reference for chaining)
@@ -410,22 +396,6 @@ public:
     ElementBuilder& children(std::initializer_list<Item> items);
 
     // ============================================================================
-    // Nested Element Building
-    // ============================================================================
-
-    /**
-     * Begin a nested child element
-     * Returns new ElementBuilder by value (stack-allocated)
-     */
-    ElementBuilder beginChild(const char* tag_name);
-
-    /**
-     * End nested element and return to parent
-     * Returns reference to parent for chaining
-     */
-    ElementBuilder& end();
-
-    // ============================================================================
     // Finalization (returns final Element from arena)
     // ============================================================================
 
@@ -463,11 +433,11 @@ public:
      */
     ~MapBuilder();
 
-    // copyable and movable (for value semantics)
-    MapBuilder(const MapBuilder&) = default;
-    MapBuilder& operator=(const MapBuilder&) = default;
-    MapBuilder(MapBuilder&&) = default;
-    MapBuilder& operator=(MapBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    MapBuilder(const MapBuilder&) = delete;
+    MapBuilder& operator=(const MapBuilder&) = delete;
+    MapBuilder(MapBuilder&&) = delete;
+    MapBuilder& operator=(MapBuilder&&) = delete;
 
     // ============================================================================
     // Key-Value Setters (return reference for chaining)
@@ -564,11 +534,11 @@ public:
      */
     ~ArrayBuilder();
 
-    // copyable and movable (for value semantics)
-    ArrayBuilder(const ArrayBuilder&) = default;
-    ArrayBuilder& operator=(const ArrayBuilder&) = default;
-    ArrayBuilder(ArrayBuilder&&) = default;
-    ArrayBuilder& operator=(ArrayBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    ArrayBuilder(const ArrayBuilder&) = delete;
+    ArrayBuilder& operator=(const ArrayBuilder&) = delete;
+    ArrayBuilder(ArrayBuilder&&) = delete;
+    ArrayBuilder& operator=(ArrayBuilder&&) = delete;
 
     // ============================================================================
     // Append Operations (return reference for chaining)
@@ -611,86 +581,6 @@ public:
     /**
      * Build and return the final Array Item
      * Array was pool-allocated via array_pooled during construction
-     */
-    Item final();
-};
-
-/**
- * ListBuilder - Fluent API for constructing List nodes
- *
- * MEMORY MODEL: Stack-allocated value type
- * - Automatically destroyed when scope ends
- * - List is allocated from pool with dynamic resizing
- *
- * DIFFERENCE from ArrayBuilder:
- * - List uses list_push() which flattens nested lists and skips nulls
- * - Array uses array_append() which preserves nested arrays and nulls
- */
-class ListBuilder {
-private:
-    MarkBuilder* builder_;      // parent builder
-    List* list_;                // list being built
-
-    friend class MarkBuilder;
-
-    /**
-     * Private constructor - use MarkBuilder::list() instead
-     */
-    explicit ListBuilder(MarkBuilder* builder);
-
-public:
-    /**
-     * Destructor - automatic cleanup
-     */
-    ~ListBuilder();
-
-    // copyable and movable (for value semantics)
-    ListBuilder(const ListBuilder&) = default;
-    ListBuilder& operator=(const ListBuilder&) = default;
-    ListBuilder(ListBuilder&&) = default;
-    ListBuilder& operator=(ListBuilder&&) = default;
-
-    // ============================================================================
-    // Push Operations (return reference for chaining)
-    // ============================================================================
-
-    /**
-     * Push an Item to the list
-     * Note: Nulls are skipped, nested lists are flattened
-     */
-    ListBuilder& push(Item item);
-
-    /**
-     * Push string value (convenience)
-     */
-    ListBuilder& push(const char* str);
-
-    /**
-     * Push integer value (convenience)
-     */
-    ListBuilder& push(int64_t value);
-
-    /**
-     * Push float value (convenience)
-     */
-    ListBuilder& push(double value);
-
-    /**
-     * Push boolean value (convenience)
-     */
-    ListBuilder& push(bool value);
-
-    /**
-     * Push multiple items from initializer list
-     */
-    ListBuilder& pushItems(std::initializer_list<Item> items);
-
-    // ============================================================================
-    // Finalization (returns final List)
-    // ============================================================================
-
-    /**
-     * Build and return the final List Item
      */
     Item final();
 };

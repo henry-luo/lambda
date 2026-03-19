@@ -185,10 +185,6 @@ ArrayBuilder MarkBuilder::array() {
     return ArrayBuilder(this);
 }
 
-ListBuilder MarkBuilder::list() {
-    return ListBuilder(this);
-}
-
 //------------------------------------------------------------------------------
 // Direct Item Creation
 //------------------------------------------------------------------------------
@@ -203,10 +199,6 @@ Item MarkBuilder::createMap() {
 
 Item MarkBuilder::createArray() {
     return array().final();
-}
-
-Item MarkBuilder::createList() {
-    return list().final();
 }
 
 Item MarkBuilder::createInt(int64_t value) {
@@ -295,7 +287,6 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     : builder_(builder)
     , tag_name_(builder->createName(tag_name))  // element names are structural identifiers - always pooled
     , elmt_(nullptr)
-    , parent_(nullptr)
 {
     Input* input = builder_->input();
     Element* element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
@@ -404,24 +395,6 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 }
 
 //------------------------------------------------------------------------------
-// Nested Element Building
-//------------------------------------------------------------------------------
-
-ElementBuilder ElementBuilder::beginChild(const char* tag_name) {
-    ElementBuilder child_builder = builder_->element(tag_name);
-    child_builder.parent_ = this;
-    return child_builder;
-}
-
-ElementBuilder& ElementBuilder::end() {
-    if (parent_) {
-        // add this element as child to parent
-        parent_->child(final());
-        return *parent_;
-    }
-    return *this;
-}
-
 Item ElementBuilder::final() {
     // Set content_length to match the number of children in the element
     // This is required for the formatter to properly access children
@@ -582,57 +555,6 @@ ArrayBuilder& ArrayBuilder::appendItems(std::initializer_list<Item> items) {
 Item ArrayBuilder::final() {
     // Array is already built - just wrap it in an Item
     return (Item){.array = array_};
-}
-
-//==============================================================================
-// ListBuilder Implementation
-//==============================================================================
-
-ListBuilder::ListBuilder(MarkBuilder* builder)
-    : builder_(builder)
-    , list_(nullptr)
-{
-    // allocate List from arena for MarkBuilder
-    list_ = list_arena(builder_->arena());
-}
-
-ListBuilder::~ListBuilder() {
-    // list_ is arena-allocated, no cleanup needed
-}
-
-ListBuilder& ListBuilder::push(Item item) {
-    if (list_) {
-        list_push(list_, item);
-    }
-    return *this;
-}
-
-ListBuilder& ListBuilder::push(const char* str) {
-    return push(builder_->createStringItem(str));
-}
-
-ListBuilder& ListBuilder::push(int64_t value) {
-    return push(builder_->createInt(value));
-}
-
-ListBuilder& ListBuilder::push(double value) {
-    return push(builder_->createFloat(value));
-}
-
-ListBuilder& ListBuilder::push(bool value) {
-    return push(builder_->createBool(value));
-}
-
-ListBuilder& ListBuilder::pushItems(std::initializer_list<Item> items) {
-    for (const Item& item : items) {
-        push(item);
-    }
-    return *this;
-}
-
-Item ListBuilder::final() {
-    // List is already built - just wrap it in an Item
-    return (Item){.list = list_};
 }
 
 // ============================================================================

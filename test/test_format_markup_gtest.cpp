@@ -64,96 +64,96 @@ protected:
 
     // Build a simple document with a heading and paragraph
     Item build_heading_paragraph() {
-        return mb_->element("html")
-            .beginChild("h1").text("Hello World").end()
-            .beginChild("p").text("This is a paragraph.").end()
-            .final();
+        ElementBuilder html = mb_->element("html");
+        html.child(mb_->element("h1").text("Hello World").final());
+        html.child(mb_->element("p").text("This is a paragraph.").final());
+        return html.final();
     }
 
     // Build a document with bold, italic, code inline
     Item build_inline_formatting() {
-        return mb_->element("html")
-            .beginChild("p")
-                .text("Text with ")
-                .beginChild("strong").text("bold").end()
-                .text(" and ")
-                .beginChild("em").text("italic").end()
-                .text(" and ")
-                .beginChild("code").text("code").end()
-                .text(".")
-            .end()
-            .final();
+        ElementBuilder p = mb_->element("p");
+        p.text("Text with ");
+        p.child(mb_->element("strong").text("bold").final());
+        p.text(" and ");
+        p.child(mb_->element("em").text("italic").final());
+        p.text(" and ");
+        p.child(mb_->element("code").text("code").final());
+        p.text(".");
+        ElementBuilder html = mb_->element("html");
+        html.child(p.final());
+        return html.final();
     }
 
     // Build a document with a link
     Item build_link() {
-        return mb_->element("html")
-            .beginChild("p")
-                .text("Click ")
-                .beginChild("a").attr("href", "https://example.com").text("here").end()
-                .text(".")
-            .end()
-            .final();
+        ElementBuilder p = mb_->element("p");
+        p.text("Click ");
+        p.child(mb_->element("a").attr("href", "https://example.com").text("here").final());
+        p.text(".");
+        ElementBuilder html = mb_->element("html");
+        html.child(p.final());
+        return html.final();
     }
 
     // Build an unordered list
     Item build_unordered_list() {
-        return mb_->element("html")
-            .beginChild("ul")
-                .beginChild("li").text("Item one").end()
-                .beginChild("li").text("Item two").end()
-                .beginChild("li").text("Item three").end()
-            .end()
-            .final();
+        ElementBuilder ul = mb_->element("ul");
+        ul.child(mb_->element("li").text("Item one").final());
+        ul.child(mb_->element("li").text("Item two").final());
+        ul.child(mb_->element("li").text("Item three").final());
+        ElementBuilder html = mb_->element("html");
+        html.child(ul.final());
+        return html.final();
     }
 
     // Build an ordered list
     Item build_ordered_list() {
-        return mb_->element("html")
-            .beginChild("ol")
-                .beginChild("li").text("First").end()
-                .beginChild("li").text("Second").end()
-            .end()
-            .final();
+        ElementBuilder ol = mb_->element("ol");
+        ol.child(mb_->element("li").text("First").final());
+        ol.child(mb_->element("li").text("Second").final());
+        ElementBuilder html = mb_->element("html");
+        html.child(ol.final());
+        return html.final();
     }
 
     // Build a code block
     Item build_code_block() {
-        return mb_->element("html")
-            .beginChild("pre").attr("language", "python").text("print('hello')").end()
-            .final();
+        ElementBuilder html = mb_->element("html");
+        html.child(mb_->element("pre").attr("language", "python").text("print('hello')").final());
+        return html.final();
     }
 
     // Build a blockquote
     Item build_blockquote() {
-        return mb_->element("html")
-            .beginChild("blockquote")
-                .beginChild("p").text("Quoted text.").end()
-            .end()
-            .final();
+        ElementBuilder blockquote = mb_->element("blockquote");
+        blockquote.child(mb_->element("p").text("Quoted text.").final());
+        ElementBuilder html = mb_->element("html");
+        html.child(blockquote.final());
+        return html.final();
     }
 
     // Build a horizontal rule
     Item build_hr() {
-        return mb_->element("html")
-            .beginChild("hr").end()
-            .final();
+        ElementBuilder html = mb_->element("html");
+        html.child(mb_->element("hr").final());
+        return html.final();
     }
 
     // Build a simple table
     Item build_table() {
-        return mb_->element("html")
-            .beginChild("table")
-                .beginChild("tr")
-                    .beginChild("th").text("Name").end()
-                    .beginChild("th").text("Age").end()
-                .end()
-                .beginChild("tr")
-                    .beginChild("td").text("Alice").end()
-                    .beginChild("td").text("30").end()
-                .end()
-            .end()
-            .final();
+        ElementBuilder tr1 = mb_->element("tr");
+        tr1.child(mb_->element("th").text("Name").final());
+        tr1.child(mb_->element("th").text("Age").final());
+        ElementBuilder tr2 = mb_->element("tr");
+        tr2.child(mb_->element("td").text("Alice").final());
+        tr2.child(mb_->element("td").text("30").final());
+        ElementBuilder table = mb_->element("table");
+        table.child(tr1.final());
+        table.child(tr2.final());
+        ElementBuilder html = mb_->element("html");
+        html.child(table.final());
+        return html.final();
     }
 };
 
@@ -450,30 +450,30 @@ TEST_F(FormatMarkupTest, TextileHR) {
 // ==============================================================================
 
 TEST_F(FormatMarkupTest, TextileCite) {
-    Item item = mb_->element("html")
-        .beginChild("cite").text("A book title").end()
-        .final();
+    ElementBuilder html = mb_->element("html");
+    html.child(mb_->element("cite").text("A book title").final());
+    Item item = html.final();
     const char* out = format_with_rules(pool_, item, &TEXTILE_RULES);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(strstr(out, "??A book title??"), nullptr) << "Output: " << out;
 }
 
 TEST_F(FormatMarkupTest, TextileSpan) {
-    Item item = mb_->element("html")
-        .beginChild("span").text("styled text").end()
-        .final();
+    ElementBuilder html = mb_->element("html");
+    html.child(mb_->element("span").text("styled text").final());
+    Item item = html.final();
     const char* out = format_with_rules(pool_, item, &TEXTILE_RULES);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(strstr(out, "%styled text%"), nullptr) << "Output: " << out;
 }
 
 TEST_F(FormatMarkupTest, TextileDefinitionList) {
-    Item item = mb_->element("html")
-        .beginChild("dl")
-            .beginChild("dt").text("Term").end()
-            .beginChild("dd").text("Definition").end()
-        .end()
-        .final();
+    ElementBuilder dl = mb_->element("dl");
+    dl.child(mb_->element("dt").text("Term").final());
+    dl.child(mb_->element("dd").text("Definition").final());
+    ElementBuilder html = mb_->element("html");
+    html.child(dl.final());
+    Item item = html.final();
     const char* out = format_with_rules(pool_, item, &TEXTILE_RULES);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(strstr(out, "- Term"), nullptr) << "Output: " << out;

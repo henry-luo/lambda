@@ -45,7 +45,8 @@ pub fn bar(data, ctx, mark_config) {
         let offset_idx = if (x_offset_field and x_offset_cats)
             find_cat_index(x_offset_cats, d[x_offset_field])
         else 0,
-        let x_final = x_pos + float(offset_idx) * (bar_w + sub_gap),
+        let center_x = if (x_scale.bandwidth) x_pos + x_scale.bandwidth / 2.0 else x_pos,
+        let x_final = center_x - raw_bar_w / 2.0 + float(offset_idx) * (bar_w + sub_gap),
         let y1_pos = if (is_stacked)
             float(scale.scale_apply(y_scale, float(d["_y1"])))
         else if (y2_field)

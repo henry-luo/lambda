@@ -20,26 +20,14 @@
 #include <cstdint>
 
 extern "C" {
+#include "../lambda/lambda.h"
 #include "../lib/gc_heap.h"
 #include "../lib/gc_object_zone.h"
 #include "../lib/gc_data_zone.h"
 #include "../lib/mempool.h"
 }
 
-// ============================================================================
-// Type tag constants matching Lambda's EnumTypeId values (from lambda.h)
-// ============================================================================
-#define TEST_TYPE_RAW_POINTER 0
-#define TEST_TYPE_NULL     1
-#define TEST_TYPE_BOOL     2
-#define TEST_TYPE_INT      3
-#define TEST_TYPE_INT64    4
-#define TEST_TYPE_FLOAT    5
-#define TEST_TYPE_STRING  10
-#define TEST_TYPE_LIST    12
-#define TEST_TYPE_ARRAY   17
-#define TEST_TYPE_MAP     18
-#define TEST_TYPE_FUNC    23
+// Use LMD_TYPE_* enum values from lambda.h directly — no local aliases needed.
 
 // ============================================================================
 // Test Fixture
@@ -65,10 +53,10 @@ protected:
     void* make_list(int64_t length, int64_t capacity) {
         // List layout: { type_id(1), flags(1), pad(6), Item* items(8@8),
         //                length(8@16), extra(8@24), capacity(8@32) }
-        void* obj = gc_heap_calloc(gc, 40, TEST_TYPE_LIST);
+        void* obj = gc_heap_calloc(gc, 40, LMD_TYPE_ARRAY);
         EXPECT_NE(obj, nullptr);
         uint8_t* p = (uint8_t*)obj;
-        *(uint8_t*)(p + 0) = TEST_TYPE_LIST;  // type_id
+        *(uint8_t*)(p + 0) = LMD_TYPE_ARRAY;  // type_id
 
         // allocate items from data zone
         size_t items_size = capacity * sizeof(uint64_t);
@@ -87,7 +75,7 @@ protected:
         size_t len = strlen(text);
         // String: { len(4), chars[len+1] }
         size_t total = sizeof(int32_t) + len + 1;
-        void* obj = gc_heap_alloc(gc, total, TEST_TYPE_STRING);
+        void* obj = gc_heap_alloc(gc, total, LMD_TYPE_STRING);
         EXPECT_NE(obj, nullptr);
         uint8_t* p = (uint8_t*)obj;
         *(int32_t*)p = (int32_t)len;
@@ -103,12 +91,12 @@ protected:
 
     // Helper: tag a pointer as a String Item (tagged pointer with type byte in MSB)
     uint64_t string_item(void* ptr) {
-        return ((uint64_t)TEST_TYPE_STRING << 56) | ((uint64_t)(uintptr_t)ptr & 0x00FFFFFFFFFFFFFF);
+        return ((uint64_t)LMD_TYPE_STRING << 56) | ((uint64_t)(uintptr_t)ptr & 0x00FFFFFFFFFFFFFF);
     }
 
     // Helper: tag a raw int as an INT Item (inline value in lower 56 bits)
     uint64_t int_item(int val) {
-        return ((uint64_t)TEST_TYPE_INT << 56) | (uint64_t)(uint32_t)val;
+        return ((uint64_t)LMD_TYPE_INT << 56) | (uint64_t)(uint32_t)val;
     }
 };
 
@@ -117,21 +105,21 @@ protected:
 // ============================================================================
 
 TEST_F(GCHeapTest, AllocBasic) {
-    void* ptr = gc_heap_alloc(gc, 32, TEST_TYPE_STRING);
+    void* ptr = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     ASSERT_NE(ptr, nullptr);
     EXPECT_EQ(gc->object_count, 1u);
 
     // verify header
     gc_header_t* header = gc_get_header(ptr);
     ASSERT_NE(header, nullptr);
-    EXPECT_EQ(header->type_tag, TEST_TYPE_STRING);
+    EXPECT_EQ(header->type_tag, LMD_TYPE_STRING);
     EXPECT_EQ(header->marked, 0);
     EXPECT_EQ(header->gc_flags, 0);
     EXPECT_EQ(header->alloc_size, 32u);
 }
 
 TEST_F(GCHeapTest, CallocZeroed) {
-    void* ptr = gc_heap_calloc(gc, 64, TEST_TYPE_ARRAY);
+    void* ptr = gc_heap_calloc(gc, 64, LMD_TYPE_ARRAY);
     ASSERT_NE(ptr, nullptr);
 
     // verify memory is zeroed
@@ -142,9 +130,9 @@ TEST_F(GCHeapTest, CallocZeroed) {
 }
 
 TEST_F(GCHeapTest, AllocMultiple) {
-    void* a = gc_heap_alloc(gc, 16, TEST_TYPE_INT64);
-    void* b = gc_heap_alloc(gc, 48, TEST_TYPE_STRING);
-    void* c = gc_heap_alloc(gc, 128, TEST_TYPE_LIST);
+    void* a = gc_heap_alloc(gc, 16, LMD_TYPE_INT64);
+    void* b = gc_heap_alloc(gc, 48, LMD_TYPE_STRING);
+    void* c = gc_heap_alloc(gc, 128, LMD_TYPE_ARRAY);
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
     ASSERT_NE(c, nullptr);
@@ -158,7 +146,7 @@ TEST_F(GCHeapTest, AllocMultiple) {
 }
 
 TEST_F(GCHeapTest, OwnershipQuery) {
-    void* ptr = gc_heap_alloc(gc, 32, TEST_TYPE_STRING);
+    void* ptr = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     ASSERT_NE(ptr, nullptr);
     EXPECT_TRUE(gc_is_managed(gc, ptr));
 
@@ -514,7 +502,7 @@ TEST_F(GCHeapTest, ReentrancyGuard) {
 // ============================================================================
 
 TEST_F(GCHeapTest, ExplicitFreeReducesCount) {
-    void* ptr = gc_heap_alloc(gc, 32, TEST_TYPE_STRING);
+    void* ptr = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     EXPECT_EQ(gc->object_count, 1u);
 
     gc_heap_pool_free(gc, ptr);
@@ -526,8 +514,8 @@ TEST_F(GCHeapTest, ExplicitFreeReducesCount) {
 }
 
 TEST_F(GCHeapTest, FreedObjectsCleanedInSweep) {
-    void* a = gc_heap_alloc(gc, 32, TEST_TYPE_STRING);
-    void* b = gc_heap_alloc(gc, 32, TEST_TYPE_STRING);
+    void* a = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    void* b = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     gc_heap_pool_free(gc, a);
 
     // root b so it survives
@@ -621,10 +609,10 @@ TEST_F(GCHeapTest, StressAllocCollect) {
 //                    fn_type*(8@8), ptr*(8@16), closure_env*(8@24), name*(8@32) }
 // Total: 40 bytes
 static void* make_closure(GCHeapTest* t, gc_heap_t* gc, int cap_count, uint64_t* env_items_out[]) {
-    void* fn = gc_heap_calloc(gc, 40, TEST_TYPE_FUNC);
+    void* fn = gc_heap_calloc(gc, 40, LMD_TYPE_FUNC);
     EXPECT_NE(fn, nullptr);
     uint8_t* p = (uint8_t*)fn;
-    *(uint8_t*)(p + 0) = TEST_TYPE_FUNC;       // type_id
+    *(uint8_t*)(p + 0) = LMD_TYPE_FUNC;        // type_id
     *(uint8_t*)(p + 1) = 0;                     // arity
     *(uint8_t*)(p + 2) = (uint8_t)cap_count;    // closure_field_count
 
@@ -751,9 +739,9 @@ TEST_F(GCHeapTest, ClosureCycleSurvivesWhenRooted) {
 
 TEST_F(GCHeapTest, ClosureNoEnvSafe) {
     // Function with closure_field_count=0 and closure_env as a boxed Item (bound method pattern)
-    void* fn = gc_heap_calloc(gc, 40, TEST_TYPE_FUNC);
+    void* fn = gc_heap_calloc(gc, 40, LMD_TYPE_FUNC);
     uint8_t* p = (uint8_t*)fn;
-    *(uint8_t*)(p + 0) = TEST_TYPE_FUNC;
+    *(uint8_t*)(p + 0) = LMD_TYPE_FUNC;
     *(uint8_t*)(p + 2) = 0;  // closure_field_count = 0
     // Set closure_env to a non-null value (boxed Item, not a real env)
     *(void**)(p + 24) = (void*)(uintptr_t)0xDEADBEEF;
@@ -774,8 +762,7 @@ TEST_F(GCHeapTest, ClosureNoEnvSafe) {
 // ============================================================================
 
 // VMap layout: { type_id(2@0), pad(6), data*(8@8), vtable*(8@16) } = 24 bytes
-// type_id is Container.id which is uint16_t, matching type_tag 19 (LMD_TYPE_VMAP)
-#define TEST_TYPE_VMAP 19
+// type_id is Container.id which is uint16_t, matching LMD_TYPE_VMAP = 18
 
 // Test-local state for VMap callback verification
 static int s_vmap_trace_calls = 0;
@@ -824,9 +811,9 @@ static void reset_vmap_test_state() {
 // Helper: create a fake VMap with a malloc'd data block
 // The data block is an array of 2 uint64_t Items (simulating key/value pairs).
 static void* make_vmap(GCHeapTest* /*t*/, gc_heap_t* gc, uint64_t item0, uint64_t item1) {
-    void* obj = gc_heap_calloc(gc, 24, TEST_TYPE_VMAP);
+    void* obj = gc_heap_calloc(gc, 24, LMD_TYPE_VMAP);
     uint8_t* p = (uint8_t*)obj;
-    *(uint16_t*)(p + 0) = TEST_TYPE_VMAP;  // Container type_id
+    *(uint16_t*)(p + 0) = LMD_TYPE_VMAP;  // Container type_id
 
     // Allocate fake "data" via malloc (simulates HashMapData*)
     uint64_t* fake_data = (uint64_t*)calloc(2, sizeof(uint64_t));
@@ -925,9 +912,9 @@ TEST_F(GCHeapTest, VMapNullDataSafe) {
     gc->vmap_trace = test_vmap_trace;
     gc->vmap_destroy = test_vmap_destroy;
 
-    void* obj = gc_heap_calloc(gc, 24, TEST_TYPE_VMAP);
+    void* obj = gc_heap_calloc(gc, 24, LMD_TYPE_VMAP);
     uint8_t* p = (uint8_t*)obj;
-    *(uint16_t*)(p + 0) = TEST_TYPE_VMAP;
+    *(uint16_t*)(p + 0) = LMD_TYPE_VMAP;
     *(void**)(p + 8) = nullptr;   // NULL data
     *(void**)(p + 16) = nullptr;
 
@@ -947,9 +934,9 @@ TEST_F(GCHeapTest, VMapNoCallbacksSafe) {
     EXPECT_EQ(gc->vmap_destroy, nullptr);
 
     void* fake_data = calloc(2, sizeof(uint64_t));
-    void* obj = gc_heap_calloc(gc, 24, TEST_TYPE_VMAP);
+    void* obj = gc_heap_calloc(gc, 24, LMD_TYPE_VMAP);
     uint8_t* p = (uint8_t*)obj;
-    *(uint16_t*)(p + 0) = TEST_TYPE_VMAP;
+    *(uint16_t*)(p + 0) = LMD_TYPE_VMAP;
     *(void**)(p + 8) = fake_data;
     *(void**)(p + 16) = nullptr;
 

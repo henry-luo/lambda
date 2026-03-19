@@ -391,40 +391,12 @@ void ArrayReader::Iterator::reset() {
 // ==============================================================================
 
 ElementReader::ElementReader()
-    : element_(nullptr), element_type_(nullptr), tag_name_(nullptr),
-      tag_name_len_(0), child_count_(0), attr_count_(0) {
+    : element_(nullptr), element_type_(nullptr) {
 }
 
 ElementReader::ElementReader(const Element* element)
-    : element_(element) {
-    if (element) {
-        element_type_ = (const TypeElmt*)element->type;
-
-        if (element_type_) {
-            tag_name_ = element_type_->name.str;
-            tag_name_len_ = element_type_->name.length;
-        } else {
-            tag_name_ = nullptr;
-            tag_name_len_ = 0;
-        }
-
-        // Cache child count (Element inherits from List)
-        const List* list = (const List*)element;
-        child_count_ = list->length;
-
-        // Cache attribute count from the map shape
-        attr_count_ = 0;
-        if (element_type_) {
-            const TypeMap* map_type = (const TypeMap*)element_type_;
-            attr_count_ = map_type->length;
-        }
-    } else {
-        element_type_ = nullptr;
-        tag_name_ = nullptr;
-        tag_name_len_ = 0;
-        child_count_ = 0;
-        attr_count_ = 0;
-    }
+    : element_(element)
+    , element_type_(element ? (const TypeElmt*)element->type : nullptr) {
 }
 
 ElementReader::ElementReader(Item item) {
@@ -436,18 +408,16 @@ ElementReader::ElementReader(Item item) {
 }
 
 bool ElementReader::hasTag(const char* tag_name) const {
-    if (!tag_name_ || !tag_name) return false;
-    return strcmp(tag_name_, tag_name) == 0;
+    if (!element_type_ || !element_type_->name.str || !tag_name) return false;
+    return strcmp(element_type_->name.str, tag_name) == 0;
 }
 
 bool ElementReader::isEmpty() const {
     if (!element_) return true;
 
     // Check if has no children
-    if (child_count_ == 0) return true;
-
-    // Check if all children are empty strings
     const List* list = (const List*)element_;
+    if (list->length == 0) return true;
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
         TypeId type = get_type_id(child);
@@ -468,9 +438,10 @@ bool ElementReader::isEmpty() const {
 }
 
 bool ElementReader::isTextOnly() const {
-    if (!element_ || child_count_ == 0) return false;
+    if (!element_) return false;
 
     const List* list = (const List*)element_;
+    if (list->length == 0) return false;
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
         TypeId type = get_type_id(child);
@@ -484,7 +455,9 @@ bool ElementReader::isTextOnly() const {
 }
 
 ItemReader ElementReader::childAt(int64_t index) const {
-    if (!element_ || index < 0 || index >= child_count_) {
+    if (!element_) return ItemReader();
+    const List* list = (const List*)element_;
+    if (index < 0 || index >= list->length) {
         return ItemReader();
     }
     Item child = ((const List*)element_)->items[index];
@@ -545,7 +518,7 @@ bool ElementReader::hasChildElements() const {
     if (!element_) return false;
 
     const List* list = (const List*)element_;
-    for (int64_t i = 0; i < child_count_; i++) {
+    for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
         if (get_type_id(child) == LMD_TYPE_ELEMENT) {
             return true;
