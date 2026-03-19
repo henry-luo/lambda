@@ -204,6 +204,12 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_ceil", FPTR(fn_ceil), "ceil", NPTR(ceil), true, 1},
 
+    {SYSFUNC_TRUNC, "trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_trunc", FPTR(fn_trunc), "trunc", NPTR(trunc), true, 1},
+
+    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
+
     // ========================================================================
     // I/O functions — can_raise=true for functions that may fail
     // ========================================================================
@@ -404,17 +410,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_CBRT, "math_cbrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_cbrt", FPTR(fn_math_cbrt), "cbrt", NPTR(cbrt), true, 1},
 
-    {SYSFUNC_TRUNC, "math_trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_trunc", FPTR(fn_math_trunc), "trunc", NPTR(trunc), true, 1},
-
     {SYSFUNC_HYPOT, "math_hypot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_hypot", FPTR(fn_math_hypot), "hypot", NPTR(hypot), true, 2},
 
     {SYSFUNC_LOG1P, "math_log1p", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_log1p", FPTR(fn_math_log1p), "log1p", NPTR(log1p), true, 1},
-
-    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
 
     // random number generation (pure functional, SplitMix64)
     {SYSFUNC_RANDOM, "math_random", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
