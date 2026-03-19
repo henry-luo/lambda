@@ -1,7 +1,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/stat.h>
-
 #include "input.hpp"
 #include "input-parsers.h"
 #include "../lambda-decimal.hpp"

@@ -755,9 +755,10 @@ extern "C" Item input_markup_modular(Input* input, const char* content) {
     cfg.collect_metadata = true;
     cfg.resolve_refs = true;
 
-    // Create and run parser
-    MarkupParser parser(input, cfg);
-    Item result = parser.parseContent(content);
+    // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
+    MarkupParser* parser = new MarkupParser(input, cfg);
+    Item result = parser->parseContent(content);
+    delete parser;
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_modular: parsing failed");
@@ -790,15 +791,16 @@ extern "C" Item input_markup_commonmark(Input* input, const char* content) {
 
 
 
-    // Create and run parser
-    MarkupParser parser(input, cfg);
+    // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
+    MarkupParser* parser = new MarkupParser(input, cfg);
     
-    Item result = parser.parseContent(content);
+    Item result = parser->parseContent(content);
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_commonmark: parsing failed");
     }
 
+    delete parser;
     return result;
 }
 
@@ -850,13 +852,14 @@ extern "C" Item input_markup_with_format(Input* input, const char* content, Mark
     cfg.collect_metadata = true;
     cfg.resolve_refs = true;
 
-    // Create and run parser
-    MarkupParser parser(input, cfg);
-    Item result = parser.parseContent(content);
+    // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
+    MarkupParser* parser = new MarkupParser(input, cfg);
+    Item result = parser->parseContent(content);
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_with_format: parsing failed");
     }
 
+    delete parser;
     return result;
 }
