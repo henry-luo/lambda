@@ -215,14 +215,14 @@ Functions that apply to each element of a collection and return a collection of 
 
 ### Rounding / Sign
 
-| Function | Description | Example | Result |
-|----------|-------------|---------|--------|
-| `abs(x)` | Absolute value | `abs([-1, 2, -3])` | `[1, 2, 3]` |
-| `round(x)` | Round | `round([1.4, 1.6])` | `[1, 2]` |
-| `floor(x)` | Floor | `floor([1.7, 2.3])` | `[1, 2]` |
-| `ceil(x)` | Ceiling | `ceil([1.2, 2.8])` | `[2, 3]` |
-| `math.trunc(x)` | Truncate toward zero | `math.trunc([-3.7, 3.7])` | `[-3, 3]` |
-| `sign(x)` | Sign (-1, 0, 1) | `sign([-5, 0, 3])` | `[-1, 0, 1]` |
+| Function        | Description          | Example                   | Result       |
+| --------------- | -------------------- | ------------------------- | ------------ |
+| `abs(x)`        | Absolute value       | `abs([-1, 2, -3])`        | `[1, 2, 3]`  |
+| `round(x)`      | Round                | `round([1.4, 1.6])`       | `[1, 2]`     |
+| `floor(x)`      | Floor                | `floor([1.7, 2.3])`       | `[1, 2]`     |
+| `ceil(x)`       | Ceiling              | `ceil([1.2, 2.8])`        | `[2, 3]`     |
+| `trunc(x)`      | Truncate toward zero | `trunc([-3.7, 3.7])`      | `[-3, 3]`    |
+| `sign(x)`       | Sign (-1, 0, 1)      | `sign([-5, 0, 3])`        | `[-1, 0, 1]` |
 
 ```lambda
 math.pi                         // 3.1415926536
@@ -238,7 +238,7 @@ math.pow(2, 10)                 // 1024
 math.cbrt(27)                   // 3
 math.hypot(3, 4)                // 5
 math.log1p(0)                   // 0
-math.trunc(3.7)                 // 3
+trunc(3.7)                      // 3
 
 abs([-1, 2, -3])                // [1, 2, 3]
 sign([-5, 0, 3])                // [-1, 0, 1]
@@ -996,10 +996,10 @@ if (result is error) {
 | `floor` | 1 | Round down |
 | `ceil` | 1 | Round up |
 | `sign` | 1 | Sign (-1, 0, 1) |
+| `trunc` | 1 | Truncate toward zero |
 | `math.sqrt` | 1 | Square root |
 | `math.cbrt` | 1 | Cube root |
 | `math.hypot` | 2 | Hypotenuse √(x²+y²) |
-| `math.trunc` | 1 | Truncate toward zero |
 | `math.pow` | 2 | Power (b^e) |
 | `math.log` | 1 | Natural log |
 | `math.log2` | 1 | Base-2 log |

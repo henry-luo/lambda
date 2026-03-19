@@ -1332,14 +1332,14 @@ Item fn_math_cbrt(Item item) {
 }
 
 // trunc(vec) - element-wise truncation toward zero
-Item fn_math_trunc(Item item) {
+Item fn_trunc(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
         return push_d(trunc(val));
     }
-    return vec_unary_math(item, trunc, "fn_math_trunc");
+    return vec_unary_math(item, trunc, "fn_trunc");
 }
 
 // hypot(y, x) - Euclidean distance sqrt(y*y + x*x)

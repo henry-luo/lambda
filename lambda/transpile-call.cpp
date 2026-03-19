@@ -481,9 +481,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 return;
             }
 
-            // Integer floor/ceil/round (identity for integers)
+            // Integer floor/ceil/round/trunc (identity for integers)
             if ((fn_id == SYSFUNC_FLOOR || fn_id == SYSFUNC_CEIL ||
-                 fn_id == SYSFUNC_ROUND) && is_integer_type(arg_type)) {
+                 fn_id == SYSFUNC_ROUND || fn_id == SYSFUNC_TRUNC) && is_integer_type(arg_type)) {
                 // For integers, floor/ceil/round is identity - just return the value boxed
                 strbuf_append_str(tp->code_buf, "i2it((int64_t)(");
                 transpile_expr(tp, first_arg);

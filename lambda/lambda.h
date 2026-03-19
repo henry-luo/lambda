@@ -1058,7 +1058,7 @@ typedef struct Context {
     // power/root
     Item fn_math_pow(Item a, Item b);
     Item fn_math_cbrt(Item a);
-    Item fn_math_trunc(Item a);
+    Item fn_trunc(Item a);
     Item fn_math_hypot(Item a, Item b);
     Item fn_math_log1p(Item a);
     Item fn_sign(Item a);

@@ -1,18 +1,18 @@
 // Test math constants: math.pi, math.e
-// Test new math functions: math.trunc, math.hypot, math.log1p
+// Test new math functions: trunc, math.hypot, math.log1p
 
 // Section 1: Math constants
 "1. Math constants"
 [math.pi, math.e]
 
-// Section 2: math.trunc - truncate toward zero
-"2. math.trunc"
+// Section 2: trunc - truncate toward zero
+"2. trunc"
 [
-    math.trunc(3.7),       // 3
-    math.trunc(-3.7),      // -3 (NOT -4 like floor)
-    math.trunc(0),         // 0
-    math.trunc(2.0),       // 2
-    math.trunc(-0.5)       // 0
+    trunc(3.7),       // 3
+    trunc(-3.7),      // -3 (NOT -4 like floor)
+    trunc(0),         // 0
+    trunc(2.0),       // 2
+    trunc(-0.5)       // 0
 ]
 
 // Section 3: math.hypot - Euclidean distance
@@ -34,11 +34,11 @@
 
 // Section 5: Vector element-wise
 "5. Vector element-wise"
-math.trunc([3.7, -3.7, 0.5, -0.5])
+trunc([3.7, -3.7, 0.5, -0.5])
 math.log1p([0, 1, -0.5])
 
 // Section 6: Typed arguments (native optimization path)
-fn typed_trunc(x: float) { math.trunc(x) }
+fn typed_trunc(x: float) { trunc(x) }
 fn typed_hypot(a: float, b: float) { math.hypot(a, b) }
 fn typed_log1p(x: float) { math.log1p(x) }
 
