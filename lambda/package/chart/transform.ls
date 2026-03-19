@@ -220,6 +220,6 @@ fn apply_flatten(data, flat_el) {
 // ============================================================
 
 pub fn add_field(row, field_name, value) {
-    let existing_pairs = for (k, v in row) for (x in [k, v]) x;
+    let existing_pairs = for (k, v in row) for (x in [string(k), v]) x;
     map([*existing_pairs, field_name, value])
 }

@@ -825,6 +825,13 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
 
     log_debug("Columns fully sized, now sizing rows\n");
 
+    // Diagnostic: dump column sizes
+    for (int i = 0; i < grid_layout->computed_column_count; i++) {
+        GridTrack* track = &grid_layout->computed_columns[i];
+        log_debug("grid sizing col[%d]: base=%.1f gl=%.1f computed=%d flex=%d",
+                 i, track->base_size, track->growth_limit, track->computed_size, track->is_flexible);
+    }
+
     // ========================================================
     // Phase 3: Complete row sizing (columns are now known)
     // ========================================================
@@ -892,14 +899,30 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
     // out_col_intrinsic_width receives the first-pass (pct-as-auto) width when pct tracks
     // are re-resolved for an indefinite container — used to cap container size below.
     float col_intrinsic_width = 0.0f;
+    float row_intrinsic_height = 0.0f;
     radiant::grid_adapter::run_enhanced_track_sizing(
         grid_layout,
         grid_layout->grid_items,
         grid_layout->item_count,
         sizing_width,
         static_cast<float>(grid_layout->content_height),
-        &col_intrinsic_width
+        &col_intrinsic_width,
+        &row_intrinsic_height
     );
+
+    // Store row intrinsic height for container height capping
+    if (row_intrinsic_height > 0.0f) {
+        grid_layout->row_intrinsic_height = row_intrinsic_height;
+    }
+
+    // Diagnostic: dump column sizes after enhanced track sizing
+    log_debug("grid sizing enhanced: computed_column_count=%d content_width=%d sizing_width=%.1f",
+             grid_layout->computed_column_count, grid_layout->content_width, sizing_width);
+    for (int i = 0; i < grid_layout->computed_column_count; i++) {
+        GridTrack* track = &grid_layout->computed_columns[i];
+        log_debug("grid sizing enhanced col[%d]: base=%.1f gl=%.1f computed=%d flex=%d",
+                 i, track->base_size, track->growth_limit, track->computed_size, track->is_flexible);
+    }
 
     // For shrink-to-fit containers, update content_width based on resolved track sizes.
     // When percentage tracks exist, the container's intrinsic width (first-pass) is used
@@ -914,12 +937,13 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         if (grid_layout->computed_column_count > 1) {
             total_column_width += grid_layout->column_gap * (grid_layout->computed_column_count - 1);
         }
-        // Cap at the intrinsic (pre-pct-re-resolution) width when pct tracks would inflate it
-        if (col_intrinsic_width > 0.0f && col_intrinsic_width < total_column_width) {
+        // Cap at the intrinsic (pre-pct-re-resolution) width when pct tracks would inflate it.
+        // Also use the intrinsic width when pct tracks caused columns to shrink below it —
+        // the container's shrink-to-fit width is the max-content of its tracks in the first pass.
+        if (col_intrinsic_width > 0.0f && col_intrinsic_width != total_column_width) {
             total_column_width = col_intrinsic_width;
         }
         grid_layout->content_width = (int)total_column_width;
-        log_debug("GRID shrink-to-fit: updated content_width to %d\n", grid_layout->content_width);
     }
 
     log_debug("Track sizes resolved (enhanced algorithm)\n");

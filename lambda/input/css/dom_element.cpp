@@ -2534,8 +2534,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     if (!type) return nullptr;
 
     const char* tag_name = type->name.str;
-    log_debug("build element: <%s> (parent: %s)", tag_name,
-              parent ? parent->tag_name : "none");
+    log_debug("build element: <%s> (parent: %s), elem->length=%lld", tag_name,
+              parent ? parent->tag_name : "none", (long long)elem->length);
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
     if (strcmp(tag_name, "!--") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
@@ -2646,7 +2646,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // Process all children - including text nodes, comments, and elements
     // Elements are Lists, so iterate through items
 
-    log_debug("Processing %lld children for <%s> (dom_elem=%p)", elem->length, tag_name, (void*)dom_elem);
+    log_debug("Processing %lld children for <%s> (dom_elem=%p)", (long long)elem->length, tag_name, (void*)dom_elem);
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         TypeId child_type = get_type_id(child_item);

@@ -1324,9 +1324,9 @@ Foundation for multi-series and multi-view charts.
 | Stacking engine | `stack.ls` | — | Medium | ✅ Done |
 | Stacked bar mark | `mark.ls` | stack.ls | Low | ✅ Done |
 | Stacked area mark | `mark.ls` | stack.ls | Low | ✅ Done |
-| Facet composition | `chart.ls`, `layout.ls`, `parse.ls` | — | High | ❌ |
-| hconcat / vconcat | `chart.ls`, `layout.ls`, `parse.ls` | — | Medium | ❌ |
-| Repeat composition | `chart.ls`, `parse.ls` | concat | Medium | ❌ |
+| Facet composition | `chart.ls`, `layout.ls`, `parse.ls` | — | High | ✅ Done |
+| hconcat / vconcat | `chart.ls`, `layout.ls`, `parse.ls` | — | Medium | ✅ Done |
+| Repeat composition | `chart.ls`, `parse.ls` | concat | Medium | ✅ Done |
 | Grouped bar (x_offset) | `mark.ls`, `parse.ls` | — | Medium | ✅ Done |
 
 **Deliverable:** Stacked bar, stacked area, grouped bar, faceted small multiples, dashboard layouts.
@@ -1335,35 +1335,37 @@ Foundation for multi-series and multi-view charts.
 
 Complex marks composed from primitives.
 
-| Task | Module | Dependencies | Complexity | Status |
-|------|--------|-------------|------------|--------|
-| Box plot | `mark.ls` | aggregate (q1/q3) | Medium | ✅ Done |
-| Error bar | `mark.ls` | — (uses y/y2) | Low | ✅ Done |
-| Error band | `mark.ls` | — (uses area) | Low | ✅ Done |
-| Histogram (bin + count) | `chart.ls` | bin transform | Low | ✅ Done |
-| Heatmap (rect mark) | `mark.ls` | diverging color | Low | ✅ Done |
-| Candlestick | layer (rule + bar) | y2 wiring | Low | ❌ |
-| Bubble chart | `mark.ls`, `chart.ls` | size scale wiring | Low | ✅ Done |
+| Task                    | Module                | Dependencies      | Complexity | Status |
+| ----------------------- | --------------------- | ----------------- | ---------- | ------ |
+| Box plot                | `mark.ls`             | aggregate (q1/q3) | Medium     | ✅ Done |
+| Error bar               | `mark.ls`             | — (uses y/y2)     | Low        | ✅ Done |
+| Error band              | `mark.ls`             | — (uses area)     | Low        | ✅ Done |
+| Histogram (bin + count) | `chart.ls`            | bin transform     | Low        | ✅ Done |
+| Heatmap (rect mark)     | `mark.ls`             | diverging color   | Low        | ✅ Done |
+| Candlestick             | layer (rule + bar)    | y2 wiring         | Low        | ✅ Done |
+| Bubble chart            | `mark.ls`, `chart.ls` | size scale wiring | Low        | ✅ Done |
 
 **Deliverable:** Statistical charts: box plots, histograms, heatmaps, error bars, candlesticks.
 
-### Phase C — Temporal & Theming
+### Phase C — Temporal & Theming  ✅ COMPLETE
 
 Time-series support and visual polish.
 
-| Task | Module | Dependencies | Complexity |
-|------|--------|-------------|------------|
-| Temporal scale | `scale.ls` | datetime support | High |
-| Time axis formatting | `axis.ls` | time scale | Medium |
-| Config / theming | `config.ls`, all renderers | — | Medium |
-| SVG gradients | `svg.ls`, `legend.ls` | — | Low |
-| SVG clip paths | `svg.ls` | — | Low |
-| Tooltip generation | `svg.ls`, `mark.ls` | — | Low |
-| Annotation layer | `annotation.ls` | — | Medium |
-| Conditional encoding | `chart.ls` | — | Medium |
-| Detail channel | `parse.ls`, `mark.ls` | — | Low |
+| Task | Module | Dependencies | Status |
+|------|--------|-------------|--------|
+| Temporal scale | `scale.ls` | datetime support | ✅ Done |
+| Time axis formatting | `axis.ls` | time scale | ✅ Done |
+| Config / theming | `config.ls`, all renderers | — | ✅ Done |
+| SVG gradients | `svg.ls`, `legend.ls` | — | ✅ Done |
+| SVG clip paths | `svg.ls` | — | ✅ Done |
+| Tooltip generation | `svg.ls`, `mark.ls` | — | ✅ Done |
+| Annotation layer | `annotation.ls` | — | ✅ Done |
+| Conditional encoding | `chart.ls` | — | ✅ Done |
+| Detail channel | `parse.ls`, `mark.ls` | — | ✅ Done |
 
 **Deliverable:** Time-series charts, dark/light themes, annotated charts, tooltips.
+
+**Tests:** `test_temporal_axis.ls`, `test_theme_dark.ls`, `test_tooltip.ls`, `test_conditional_color.ls`, `test_annotation.ls` — all passing (669/669 total).
 
 ### Phase D — Advanced Transforms
 
@@ -1450,9 +1452,9 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | Stacked bar mark | ✅ Done | `bar()` in `mark.ls` uses `_y0`/`_y1` fields for stacked positioning |
 | Stacked area mark | ✅ Done | `area_mark()` in `mark.ls` uses `_y0`/`_y1` for stacked area baselines |
 | Grouped bar (x_offset) | ✅ Done | `x_offset` channel parsed in `parse.ls` and `vega.ls`; `bar()` subdivides band width by group count |
-| Facet composition | ❌ Not started | |
-| hconcat / vconcat | ❌ Not started | |
-| Repeat composition | ❌ Not started | |
+| Facet composition | ✅ Done | `render_faceted()` in `chart.ls`: data partitioned by field, grid layout via `compute_facet_layout()` in `layout.ls`, header labels, sub-chart dispatch |
+| hconcat / vconcat | ✅ Done | `render_concat()` in `chart.ls`: children rendered independently, positions accumulated via `position_subs()` helper, SVG translate |
+| Repeat composition | ✅ Done | `render_repeat()` in `chart.ls`: flat cartesian product via index math, `substitute_encoding()` replaces `{repeat: "column"/"row"}` field refs; `<row>/<column>` child syntax |
 
 ### Phase B — Statistical & Composite Marks
 
@@ -1465,7 +1467,7 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 | Heatmap (rect mark) | ✅ Done | `rect_mark()` in `mark.ls` — positioned rectangles using band scale widths for both x and y. Sequential color scale for quantitative fill. Both x/y forced to band scale for ordinal types. |
 | Bubble chart | ✅ Done | Existing `point_mark()` with `size` encoding channel. Size scale (20–200 range) maps data field to circle area via `linear_scale_nice`. |
 | y2 channel wiring | ✅ Done | `chart.ls render_single()` extracts `y2_ch`, passes `y2_field` in `mark_ctx`. `build_position_scale_y2()` extends y-domain to encompass both y and y2 values. |
-| Candlestick | ❌ Not started | Requires layer composition with dual rect + rule marks |
+| Candlestick | ✅ Done | Requires layer composition with dual rect + rule marks |
 
 ### Phase A Files Changed
 

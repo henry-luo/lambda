@@ -85,8 +85,11 @@ inline MinTrackSizingFunction convert_to_min_sizing(GridTrackSize* old_size) {
             return MinTrackSizingFunction::Auto();
 
         case GRID_TRACK_SIZE_FIT_CONTENT:
-            // fit-content min = min-content
-            return MinTrackSizingFunction::MinContent();
+            // CSS Grid §7.2.3.2: fit-content(N) = min(max-content, max(auto, N))
+            // The MIN sizing function is auto, not min-content.
+            // This distinction matters for scroll containers: auto min = 0,
+            // while min-content min would always use the text min-content width.
+            return MinTrackSizingFunction::Auto();
 
         case GRID_TRACK_SIZE_MINMAX:
             // Recurse on min_size
@@ -630,6 +633,12 @@ inline void place_items_with_occupancy(
     int explicit_row_count = grid_layout->explicit_row_count;
     for (int i = 0; i < item_count; i++) {
         item_infos.push_back(extract_grid_item_info(items[i], i, explicit_col_count, explicit_row_count));
+        GridItemInfo& info = item_infos.back();
+        log_debug("[GRID EXTRACT] item %d: col start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d | row start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d",
+                 i, info.column.start, info.column.end, info.column.span, info.column.is_definite,
+                 info.column.has_negative_start, info.column.has_negative_end,
+                 info.row.start, info.row.end, info.row.span, info.row.is_definite,
+                 info.row.has_negative_start, info.row.has_negative_end);
     }
 
     // Step 1: Calculate initial grid extent from definite positive positions
@@ -687,7 +696,19 @@ inline void place_items_with_occupancy(
     // Apply results back to ViewBlocks with offset for negative implicit tracks
     int neg_col_offset = final_col_counts.negative_implicit;
     int neg_row_offset = final_row_counts.negative_implicit;
+    log_debug("[GRID PLACEMENT] neg_col_offset=%d neg_row_offset=%d final_cols: neg=%d exp=%d pos=%d, final_rows: neg=%d exp=%d pos=%d",
+             neg_col_offset, neg_row_offset,
+             final_col_counts.negative_implicit, final_col_counts.explicit_count, final_col_counts.positive_implicit,
+             final_row_counts.negative_implicit, final_row_counts.explicit_count, final_row_counts.positive_implicit);
     for (size_t i = 0; i < item_infos.size(); i++) {
+        log_debug("[GRID PLACEMENT] item %zu: resolved col=[%d,%d] row=[%d,%d] -> computed col=[%d,%d] row=[%d,%d]",
+                 i,
+                 item_infos[i].resolved_column.start.value, item_infos[i].resolved_column.end.value,
+                 item_infos[i].resolved_row.start.value, item_infos[i].resolved_row.end.value,
+                 item_infos[i].resolved_column.start.value + neg_col_offset + 1,
+                 item_infos[i].resolved_column.end.value + neg_col_offset + 1,
+                 item_infos[i].resolved_row.start.value + neg_row_offset + 1,
+                 item_infos[i].resolved_row.end.value + neg_row_offset + 1);
         apply_placement_to_item(items[i], item_infos[i], neg_col_offset, neg_row_offset);
     }
 
@@ -879,7 +900,8 @@ inline void run_enhanced_track_sizing(
     int item_count,
     float container_width,
     float container_height,
-    float* out_col_intrinsic_width = nullptr)
+    float* out_col_intrinsic_width = nullptr,
+    float* out_row_intrinsic_height = nullptr)
 {
     if (!grid_layout) return;
 
@@ -898,9 +920,18 @@ inline void run_enhanced_track_sizing(
     log_debug("  converted col_tracks.size=%zu, row_tracks.size=%zu",
               col_tracks.size(), row_tracks.size());
 
+    // Handle percentage column gaps: save the percentage and use gap=0 for the first pass
+    float col_gap_pct = 0.0f;
+    bool has_pct_col_gap = grid_layout->column_gap_is_percent;
+    float effective_col_gap = grid_layout->column_gap;
+    if (has_pct_col_gap) {
+        col_gap_pct = grid_layout->column_gap;  // save percentage value (e.g., 20.0)
+        effective_col_gap = 0.0f;  // first pass uses gap=0
+    }
+
     // Calculate gap-adjusted available space (gaps reduce available space for tracks)
     float col_gap_total = (grid_layout->computed_column_count > 1)
-        ? (grid_layout->computed_column_count - 1) * grid_layout->column_gap
+        ? (grid_layout->computed_column_count - 1) * effective_col_gap
         : 0.0f;
     float row_gap_total = (grid_layout->computed_row_count > 1)
         ? (grid_layout->computed_row_count - 1) * grid_layout->row_gap
@@ -916,15 +947,26 @@ inline void run_enhanced_track_sizing(
     if (!col_tracks.empty()) {
         // CSS Grid §12.5: For indefinite containers, percentage tracks are treated as auto
         // during intrinsic sizing, then re-resolved against the determined container width.
-        // Identify and temporarily convert pct tracks to Auto for the first pass.
-        struct PctColInfo { int idx; float pct; };
+        // This covers: bare % tracks, fit-content(%), and minmax(*, %) tracks.
+        enum class PctKind : uint8_t { BarePercent, FitContentPercent, MaxPercent };
+        struct PctColInfo { int idx; float pct; PctKind kind; MinTrackSizingFunction orig_min; };
         std::vector<PctColInfo> pct_col_infos;
         if (col_available < 0.0f) {
             for (int i = 0; i < (int)col_tracks.size(); i++) {
-                if (col_tracks[i].min_track_sizing_function.type == SizingFunctionType::Percent) {
-                    pct_col_infos.push_back({i, col_tracks[i].min_track_sizing_function.value});
-                    col_tracks[i].min_track_sizing_function = MinTrackSizingFunction::Auto();
-                    col_tracks[i].max_track_sizing_function = MaxTrackSizingFunction::Auto();
+                auto& t = col_tracks[i];
+                if (t.min_track_sizing_function.type == SizingFunctionType::Percent) {
+                    // Bare "20%" track or minmax(20%, ...) where both min and max are %
+                    pct_col_infos.push_back({i, t.min_track_sizing_function.value, PctKind::BarePercent, t.min_track_sizing_function});
+                    t.min_track_sizing_function = MinTrackSizingFunction::Auto();
+                    t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
+                } else if (t.max_track_sizing_function.type == SizingFunctionType::FitContentPercent) {
+                    // fit-content(50%) → treat as minmax(min-content, max-content) in first pass
+                    pct_col_infos.push_back({i, t.max_track_sizing_function.value, PctKind::FitContentPercent, t.min_track_sizing_function});
+                    t.max_track_sizing_function = MaxTrackSizingFunction::MaxContent();
+                } else if (t.max_track_sizing_function.type == SizingFunctionType::Percent) {
+                    // minmax(auto/min-content/etc, 20%) → treat max as auto in first pass
+                    pct_col_infos.push_back({i, t.max_track_sizing_function.value, PctKind::MaxPercent, t.min_track_sizing_function});
+                    t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
                 }
             }
         }
@@ -1002,64 +1044,120 @@ inline void run_enhanced_track_sizing(
             }
         }
 
+        for (size_t _di = 0; _di < col_tracks.size(); _di++)
+            log_debug("[GRID COL] post-init col[%zu]: base=%.2f gl=%.2f min_type=%d max_type=%d",
+                     _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit,
+                     (int)col_tracks[_di].min_track_sizing_function.type,
+                     (int)col_tracks[_di].max_track_sizing_function.type);
+
         if (!col_contributions.empty()) {
-            resolve_intrinsic_track_sizes(col_tracks, col_contributions, grid_layout->column_gap);
+            log_debug("[GRID COL] %zu contributions", col_contributions.size());
+            for (size_t ci = 0; ci < col_contributions.size(); ci++)
+                log_debug("[GRID COL] contrib[%zu]: track=%zu span=%zu min=%.1f max=%.1f scroll=%d",
+                         ci, col_contributions[ci].track_start, (size_t)col_contributions[ci].track_span,
+                         col_contributions[ci].min_content_contribution,
+                         col_contributions[ci].max_content_contribution,
+                         col_contributions[ci].is_scroll_container);
+            resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap);
         }
+
+        for (size_t _di = 0; _di < col_tracks.size(); _di++)
+            log_debug("[GRID COL] post-resolve col[%zu]: base=%.2f gl=%.2f",
+                     _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
         // 11.6 Maximize Tracks
         maximize_tracks(col_tracks, col_available, col_available);
 
+        for (size_t _di = 0; _di < col_tracks.size(); _di++)
+            log_debug("  DBG post-maximize col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
+
         // 11.7 Expand Flexible Tracks
         expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available,
-                               col_contributions, grid_layout->column_gap);
+                               col_contributions, effective_col_gap);
+
+        for (size_t _di = 0; _di < col_tracks.size(); _di++)
+            log_debug("  DBG post-expand col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
         // 11.8 Stretch auto Tracks
         stretch_auto_tracks(col_tracks, 0.0f, col_available);
 
+        for (size_t _di = 0; _di < col_tracks.size(); _di++)
+            log_debug("  DBG post-stretch col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
+
         // Compute track positions
-        compute_track_offsets(col_tracks, grid_layout->column_gap);
+        compute_track_offsets(col_tracks, effective_col_gap);
 
         // IMPORTANT: Copy column results back BEFORE sizing rows
         // Row sizing needs to know the final column widths to calculate item heights
         copy_enhanced_tracks_to_old(col_tracks, grid_layout->computed_columns,
                                      grid_layout->computed_column_count);
 
-        // === Second pass: re-resolve percentage tracks ===
-        // After the first pass (where pct were treated as auto), we know the container width.
-        // Re-resolve pct tracks to their actual percentage values and re-run all phases.
-        if (!pct_col_infos.empty()) {
+        // === Second pass: re-resolve percentage tracks and/or percentage gaps ===
+        // After the first pass (where pct were treated as auto, pct gaps as 0),
+        // we know the container width. Re-resolve and re-run all phases.
+        bool needs_second_pass = !pct_col_infos.empty() || has_pct_col_gap;
+        if (needs_second_pass) {
             // Compute first-pass total width (sum of track base_sizes + gaps)
             float first_total = col_gap_total;
             for (const auto& t : col_tracks) first_total += t.base_size;
 
             // Expose the intrinsic width for the caller so it can cap container size
             if (out_col_intrinsic_width) *out_col_intrinsic_width = first_total;
+            log_debug("PCT/GAP second pass: first_total=%.1f, %zu pct tracks, pct_gap=%d",
+                      first_total, pct_col_infos.size(), has_pct_col_gap);
 
-            // Run second pass with col_available = first_total (now a definite container).
-            // This makes percentage tracks expand correctly while respecting intrinsic limits.
-            float col_available2 = first_total - col_gap_total;
+            // Resolve the percentage gap against the intrinsic width
+            float resolved_col_gap = effective_col_gap;
+            if (has_pct_col_gap) {
+                resolved_col_gap = first_total * (col_gap_pct / 100.0f);
+                grid_layout->column_gap = resolved_col_gap;
+                grid_layout->column_gap_is_percent = false;
+            }
+
+            // Recompute gap total and available space with resolved gap
+            float col_gap_total2 = (grid_layout->computed_column_count > 1)
+                ? (grid_layout->computed_column_count - 1) * resolved_col_gap
+                : 0.0f;
+            float col_available2 = first_total - col_gap_total2;
 
             // Re-create col_tracks from the original track definitions
             std::vector<EnhancedGridTrack> col_tracks2 =
                 convert_tracks_to_enhanced(grid_layout->computed_columns,
                                            grid_layout->computed_column_count);
-            // Override pct tracks with their resolved Length values
+            // Override pct tracks with their resolved values based on kind
             for (const auto& pti : pct_col_infos) {
                 float resolved = first_total * (pti.pct / 100.0f);
-                col_tracks2[pti.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
-                col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                switch (pti.kind) {
+                    case PctKind::BarePercent:
+                        col_tracks2[pti.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
+                        col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        break;
+                    case PctKind::FitContentPercent:
+                        col_tracks2[pti.idx].min_track_sizing_function = pti.orig_min;
+                        col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::FitContentPx(resolved);
+                        break;
+                    case PctKind::MaxPercent:
+                        col_tracks2[pti.idx].min_track_sizing_function = pti.orig_min;
+                        col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        break;
+                }
             }
 
-            // Re-run all phases with pct tracks now definite and col_available = first_total
+            // Re-run all phases with pct tracks now definite and resolved gap
             initialize_track_sizes(col_tracks2, col_available2);
             if (!col_contributions.empty()) {
-                resolve_intrinsic_track_sizes(col_tracks2, col_contributions, grid_layout->column_gap);
+                resolve_intrinsic_track_sizes(col_tracks2, col_contributions, resolved_col_gap);
             }
-            maximize_tracks(col_tracks2, col_available2, col_available2);
+            // For shrink-to-fit containers: use indefinite semantics for maximize
+            // so that only finite-gl tracks grow to their gl (no free-space distribution).
+            float max_avail = (container_width < 0) ? -1.0f : col_available2;
+            maximize_tracks(col_tracks2, max_avail, max_avail);
             expand_flexible_tracks(col_tracks2, 0.0f, col_available2, col_available2,
-                                   col_contributions, grid_layout->column_gap);
-            stretch_auto_tracks(col_tracks2, 0.0f, col_available2);
-            compute_track_offsets(col_tracks2, grid_layout->column_gap);
+                                   col_contributions, resolved_col_gap);
+            // For shrink-to-fit: no stretching (container size = content, no free space)
+            if (container_width >= 0)
+                stretch_auto_tracks(col_tracks2, 0.0f, col_available2);
+            compute_track_offsets(col_tracks2, resolved_col_gap);
             copy_enhanced_tracks_to_old(col_tracks2, grid_layout->computed_columns,
                                          grid_layout->computed_column_count);
         }
@@ -1067,6 +1165,33 @@ inline void run_enhanced_track_sizing(
 
     // === Run track sizing for rows ===
     if (!row_tracks.empty()) {
+        // CSS Grid §12.5: For indefinite containers, percentage row tracks are treated as auto
+        // during intrinsic sizing, then re-resolved against the determined container height.
+        enum class RowPctKind : uint8_t { BarePercent, FitContentPercent, MaxPercent };
+        struct PctRowInfo { int idx; float pct; RowPctKind kind; MinTrackSizingFunction orig_min; };
+        std::vector<PctRowInfo> pct_row_infos;
+        bool needs_row_second_pass = false;
+
+        if (row_available < 0.0f) {
+            for (int i = 0; i < (int)row_tracks.size(); i++) {
+                auto& t = row_tracks[i];
+                if (t.min_track_sizing_function.type == SizingFunctionType::Percent) {
+                    pct_row_infos.push_back({i, t.min_track_sizing_function.value, RowPctKind::BarePercent, t.min_track_sizing_function});
+                    t.min_track_sizing_function = MinTrackSizingFunction::Auto();
+                    t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
+                    needs_row_second_pass = true;
+                } else if (t.max_track_sizing_function.type == SizingFunctionType::FitContentPercent) {
+                    pct_row_infos.push_back({i, t.max_track_sizing_function.value, RowPctKind::FitContentPercent, t.min_track_sizing_function});
+                    t.max_track_sizing_function = MaxTrackSizingFunction::MaxContent();
+                    needs_row_second_pass = true;
+                } else if (t.max_track_sizing_function.type == SizingFunctionType::Percent) {
+                    pct_row_infos.push_back({i, t.max_track_sizing_function.value, RowPctKind::MaxPercent, t.min_track_sizing_function});
+                    t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
+                    needs_row_second_pass = true;
+                }
+            }
+        }
+
         // 11.4 Initialize Track Sizes
         initialize_track_sizes(row_tracks, row_available);
 
@@ -1091,12 +1216,55 @@ inline void run_enhanced_track_sizing(
             stretch_auto_tracks(row_tracks, 0.0f, row_available);
         }
 
-        // Compute track positions
-        compute_track_offsets(row_tracks, grid_layout->row_gap);
+        // Second pass for percentage row tracks in indefinite containers
+        if (needs_row_second_pass) {
+            float first_row_total = (grid_layout->computed_row_count > 1)
+                ? (grid_layout->computed_row_count - 1) * grid_layout->row_gap : 0.0f;
+            for (const auto& t : row_tracks) first_row_total += t.base_size;
 
-        // Copy row results back
-        copy_enhanced_tracks_to_old(row_tracks, grid_layout->computed_rows,
-                                     grid_layout->computed_row_count);
+            // Expose the intrinsic row height for the caller (container height should not exceed this)
+            if (out_row_intrinsic_height) *out_row_intrinsic_height = first_row_total;
+
+            // Re-resolve percentage row tracks against first-pass intrinsic height
+            std::vector<EnhancedGridTrack> row_tracks2 = row_tracks;
+            for (const auto& pri : pct_row_infos) {
+                float resolved = first_row_total * (pri.pct / 100.0f);
+                switch (pri.kind) {
+                    case RowPctKind::BarePercent:
+                        row_tracks2[pri.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
+                        row_tracks2[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        break;
+                    case RowPctKind::FitContentPercent:
+                        row_tracks2[pri.idx].min_track_sizing_function = pri.orig_min;
+                        row_tracks2[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::FitContentPx(resolved);
+                        break;
+                    case RowPctKind::MaxPercent:
+                        row_tracks2[pri.idx].min_track_sizing_function = pri.orig_min;
+                        row_tracks2[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        break;
+                }
+            }
+
+            float row_available2 = first_row_total;
+            initialize_track_sizes(row_tracks2, row_available2);
+            if (!row_contributions.empty()) {
+                resolve_intrinsic_track_sizes(row_tracks2, row_contributions, grid_layout->row_gap);
+            }
+            maximize_tracks(row_tracks2, row_available2, row_available2);
+            expand_flexible_tracks(row_tracks2, 0.0f, row_available2, row_available2,
+                                   row_contributions, grid_layout->row_gap);
+            stretch_auto_tracks(row_tracks2, 0.0f, row_available2);
+            compute_track_offsets(row_tracks2, grid_layout->row_gap);
+            copy_enhanced_tracks_to_old(row_tracks2, grid_layout->computed_rows,
+                                         grid_layout->computed_row_count);
+        } else {
+            // Compute track positions
+            compute_track_offsets(row_tracks, grid_layout->row_gap);
+
+            // Copy row results back
+            copy_enhanced_tracks_to_old(row_tracks, grid_layout->computed_rows,
+                                         grid_layout->computed_row_count);
+        }
     }
 }
 

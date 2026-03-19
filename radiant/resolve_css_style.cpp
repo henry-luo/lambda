@@ -6662,6 +6662,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Display may not be resolved yet, so we store it in both places
             alloc_grid_prop(lycon, block);
             block->embed->grid->row_gap = gap_value;
+            block->embed->grid->row_gap_is_percent = is_percent;
             log_debug("[CSS] row-gap applied: %.2f (stored in both flex and grid)", gap_value);
             break;
         }
@@ -6698,6 +6699,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Always apply to grid (for grid containers)
             alloc_grid_prop(lycon, block);
             block->embed->grid->column_gap = gap_value;
+            block->embed->grid->column_gap_is_percent = is_percent;
 
             // Also apply to multi-column layout
             // Create multicol struct if it doesn't exist (column-gap may be processed before column-count)
@@ -6759,6 +6761,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (grid->grid_template_columns) {
                     destroy_grid_track_list(grid->grid_template_columns);
                     grid->grid_template_columns = NULL;
+                }
+                break;
+            }
+
+            // Handle single keyword track sizes (min-content, max-content, auto)
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                log_debug("[CSS] grid-template-columns: handling single KEYWORD value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    if (!grid->grid_template_columns) {
+                        grid->grid_template_columns = create_grid_track_list(1);
+                    } else {
+                        grid->grid_template_columns->track_count = 0;
+                    }
+                    grid->grid_template_columns->tracks[0] = ts;
+                    grid->grid_template_columns->track_count = 1;
+                    log_debug("[CSS] grid-template-columns: parsed single keyword track");
                 }
                 break;
             }
@@ -6843,6 +6862,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (grid->grid_template_rows) {
                     destroy_grid_track_list(grid->grid_template_rows);
                     grid->grid_template_rows = NULL;
+                }
+                break;
+            }
+
+            // Handle single keyword track sizes (min-content, max-content, auto)
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                log_debug("[CSS] grid-template-rows: handling single KEYWORD value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    if (!grid->grid_template_rows) {
+                        grid->grid_template_rows = create_grid_track_list(1);
+                    } else {
+                        grid->grid_template_rows->track_count = 0;
+                    }
+                    grid->grid_template_rows->tracks[0] = ts;
+                    grid->grid_template_rows->track_count = 1;
+                    log_debug("[CSS] grid-template-rows: parsed single keyword track");
                 }
                 break;
             }

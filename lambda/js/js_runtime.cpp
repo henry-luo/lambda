@@ -2288,4 +2288,3 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
     }
     return ItemNull;
 }
-

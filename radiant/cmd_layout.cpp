@@ -1666,12 +1666,16 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
+    log_debug("[DOM] About to call build_dom_tree_from_element, html_root=%p, length=%lld",
+             (void*)html_root, (long long)html_root->length);
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
         return nullptr;
     }
+    log_debug("[DOM] dom_root=%p, first_child=%p, tag=%s",
+             (void*)dom_root, (void*)dom_root->first_child, dom_root->tag_name);
 
     auto t_dom = high_resolution_clock::now();
     log_info("[TIMING] load: build DOM tree: %.1fms", duration<double, std::milli>(t_dom - t_debug).count());

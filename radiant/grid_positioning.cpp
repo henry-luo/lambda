@@ -369,6 +369,133 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
     log_debug("Aligning grid items\n");
 
+    // Pre-pass: baseline alignment for rows with align-items: baseline
+    bool has_baseline_alignment = radiant::alignment_is_baseline(grid_layout->align_items);
+    if (!has_baseline_alignment) {
+        for (int i = 0; i < grid_layout->item_count; i++) {
+            ViewBlock* item = grid_layout->grid_items[i];
+            if (item && item->gi) {
+                int resolved = radiant::resolve_align_self(
+                    item->gi->align_self_grid, grid_layout->align_items);
+                if (radiant::alignment_is_baseline(resolved)) {
+                    has_baseline_alignment = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (has_baseline_alignment && grid_layout->computed_row_count > 0) {
+        int row_count = grid_layout->computed_row_count;
+        float* row_max_baseline = (float*)calloc(row_count, sizeof(float));
+        float* row_max_below = (float*)calloc(row_count, sizeof(float));
+
+        // First pass: compute baselines and find per-row max above/below baseline
+        for (int i = 0; i < grid_layout->item_count; i++) {
+            ViewBlock* item = grid_layout->grid_items[i];
+            if (!item || !item->gi) continue;
+
+            int resolved = radiant::resolve_align_self(
+                item->gi->align_self_grid, grid_layout->align_items);
+            if (!radiant::alignment_is_baseline(resolved)) continue;
+
+            int row_idx = item->gi->computed_grid_row_start - 1;
+            if (row_idx < 0 || row_idx >= row_count) continue;
+
+            float baseline = radiant::compute_element_first_baseline(
+                (radiant::LayoutContext*)grid_layout->lycon, item, true);
+            if (baseline < 0) baseline = item->height;
+
+            float below = item->height - baseline;
+            if (baseline > row_max_baseline[row_idx])
+                row_max_baseline[row_idx] = baseline;
+            if (below > row_max_below[row_idx])
+                row_max_below[row_idx] = below;
+        }
+
+        // Check if any row needs to grow for baseline alignment
+        bool rows_changed = false;
+        for (int r = 0; r < row_count; r++) {
+            float needed = row_max_baseline[r] + row_max_below[r];
+            if (needed > grid_layout->computed_rows[r].computed_size + 0.5f) {
+                grid_layout->computed_rows[r].computed_size = (int)(needed + 0.5f);
+                rows_changed = true;
+            }
+        }
+
+        // If rows grew, re-position all items to account for new row positions
+        if (rows_changed) {
+            float row_gap = grid_layout->row_gap;
+            // Get container padding/border offset
+            float content_top_offset = 0;
+            if (grid_layout->item_count > 0 && grid_layout->grid_items[0]) {
+                ViewBlock* container = (ViewBlock*)((View*)grid_layout->grid_items[0])->parent;
+                if (container) {
+                    if (container->bound) {
+                        content_top_offset += container->bound->padding.top;
+                        if (container->bound->border)
+                            content_top_offset += container->bound->border->width.top;
+                    }
+                }
+            }
+
+            // Recompute row offsets
+            float row_offset = 0;
+            for (int r = 0; r < row_count; r++) {
+                grid_layout->computed_rows[r].base_size = (int)row_offset;
+                row_offset += grid_layout->computed_rows[r].computed_size + row_gap;
+            }
+
+            // Re-position items based on new row offsets
+            for (int i = 0; i < grid_layout->item_count; i++) {
+                ViewBlock* item = grid_layout->grid_items[i];
+                if (!item || !item->gi) continue;
+
+                int row_idx = item->gi->computed_grid_row_start - 1;
+                if (row_idx < 0 || row_idx >= row_count) continue;
+
+                item->gi->track_base_y = (int)(grid_layout->computed_rows[row_idx].base_size
+                                               + content_top_offset);
+
+                // Recompute track_area_height for multi-row items
+                int row_end_idx = item->gi->computed_grid_row_end - 1;
+                if (row_end_idx >= row_count) row_end_idx = row_count - 1;
+                if (row_end_idx < row_idx) row_end_idx = row_idx;
+                float area_h = 0;
+                for (int r = row_idx; r < row_end_idx; r++) {
+                    area_h += grid_layout->computed_rows[r].computed_size;
+                    if (r < row_end_idx - 1) area_h += row_gap;
+                }
+                item->gi->track_area_height = (int)area_h;
+            }
+        }
+
+        // Apply baseline shifts to track_base_y
+        for (int i = 0; i < grid_layout->item_count; i++) {
+            ViewBlock* item = grid_layout->grid_items[i];
+            if (!item || !item->gi) continue;
+
+            int resolved = radiant::resolve_align_self(
+                item->gi->align_self_grid, grid_layout->align_items);
+            if (!radiant::alignment_is_baseline(resolved)) continue;
+
+            int row_idx = item->gi->computed_grid_row_start - 1;
+            if (row_idx < 0 || row_idx >= row_count) continue;
+
+            float baseline = radiant::compute_element_first_baseline(
+                (radiant::LayoutContext*)grid_layout->lycon, item, true);
+            if (baseline < 0) baseline = item->height;
+
+            float shift = row_max_baseline[row_idx] - baseline;
+            if (shift > 0.01f) {
+                item->gi->track_base_y += (int)shift;
+            }
+        }
+
+        free(row_max_baseline);
+        free(row_max_below);
+    }
+
     for (int i = 0; i < grid_layout->item_count; i++) {
         align_grid_item(grid_layout->grid_items[i], grid_layout);
     }

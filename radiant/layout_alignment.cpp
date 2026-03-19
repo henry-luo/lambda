@@ -208,15 +208,27 @@ float compute_element_first_baseline(
     ViewBlock* element,
     bool is_row_direction
 ) {
-    // TODO: Implement proper baseline calculation
-    // For now, return a simple approximation based on font metrics
-    // This should walk the element tree to find the first text baseline
-
     if (!element) return -1.0f;
 
-    // Simple heuristic: use the ascender of default font as baseline
-    // Real implementation should find first inline content baseline
-    return -1.0f;  // No baseline
+    // CSS 2.1 §10.8.1: The baseline of a box is the baseline of the first in-flow
+    // child that has one, or the bottom content edge if there is no such child.
+    // For flex containers, the baseline is the first flex item's baseline.
+    // For block boxes with no in-flow content, use the bottom content edge (= height).
+
+    // Try to find the first in-flow child with a baseline
+    View* child = (View*)element->first_placed_child();
+    if (child && child->view_type >= RDT_VIEW_INLINE_BLOCK) {
+        // Recurse into the first block-level child
+        float child_baseline = compute_element_first_baseline(
+            lycon, (ViewBlock*)child, is_row_direction);
+        if (child_baseline >= 0) {
+            return child->y + child_baseline;
+        }
+    }
+
+    // No child with baseline: use the element's height as baseline
+    // (equivalent to the bottom content edge of an empty block)
+    return element->height;
 }
 
 float compute_element_last_baseline(

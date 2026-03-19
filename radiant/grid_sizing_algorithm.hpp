@@ -405,19 +405,37 @@ inline void increase_sizes_for_spanning_item(
 
     // Helper lambda: run the "fill smallest first" distribution loop on a set of tracks
     bool is_phase1 = (contribution_type == IntrinsicContributionType::Minimum);
-    auto phase1_no_cap = [&](const EnhancedGridTrack& track) -> bool {
-        if (!is_phase1) return false;
+    // CSS Grid §11.5: base_size increases should NOT be capped at growth_limit
+    // for tracks with intrinsic min sizing functions. After distribution, the
+    // invariant "growth_limit >= base_size" is enforced, raising growth_limit.
+    // Phase 1: fit-content max tracks, min-content/max-content min tracks uncapped.
+    // Phase 2: all tracks with intrinsic min (auto, min-content, max-content) uncapped,
+    //          because base_size must reach the item's max-content contribution.
+    auto no_cap = [&](const EnhancedGridTrack& track) -> bool {
         if (std::isinf(track.growth_limit)) return true;
-        // CSS Grid §12.5.1.3: during Phase 1 spanning distribution, fit-content tracks act
-        // like auto tracks — uncapped. The fit-content argument only limits the Phase 2 max.
-        // The actual growth limit is min(max-content, max(auto-min, arg)); when the spanning
-        // item raises the auto-min above the argument, the cap rises with it.
-        // Returning true (uncapped) here; the growth_limit invariant will update the cap after.
-        auto max_type = track.max_track_sizing_function.type;
-        if (max_type == SizingFunctionType::FitContentPx ||
-            max_type == SizingFunctionType::FitContentPercent) return true;
-        auto mt = track.min_track_sizing_function.type;
-        return mt == SizingFunctionType::MinContent || mt == SizingFunctionType::MaxContent;
+        if (is_phase1) {
+            auto max_type = track.max_track_sizing_function.type;
+            if (max_type == SizingFunctionType::FitContentPx ||
+                max_type == SizingFunctionType::FitContentPercent) return true;
+            auto mt = track.min_track_sizing_function.type;
+            return mt == SizingFunctionType::MinContent || mt == SizingFunctionType::MaxContent;
+        } else {
+            // Phase 2 (Maximum): only max-content MIN tracks are uncapped.
+            // minmax(max-content, <percentage>) needs base_size to reach max-content
+            // even when growth_limit is set by the percentage. Auto and min-content
+            // min tracks must remain capped at growth_limit during Phase 2.
+            auto mt = track.min_track_sizing_function.type;
+            return mt == SizingFunctionType::MaxContent;
+        }
+    };
+
+    // Compute the effective cap for a track during distribution.
+    // Uses the no_cap logic to determine if the track should be capped at its growth_limit
+    // or allowed to grow without limit.
+    auto effective_cap = [&](const EnhancedGridTrack& track) -> float {
+        if (no_cap(track)) return std::numeric_limits<float>::infinity();
+        return std::isinf(track.growth_limit) ? std::numeric_limits<float>::infinity()
+                                              : track.growth_limit;
     };
 
     auto distribute = [&](std::vector<size_t> eligible_indices, float space) -> float {
@@ -440,9 +458,9 @@ inline void increase_sizes_for_spanning_item(
                 float total_given = 0.0f;
                 for (size_t idx : min_tracks) {
                     auto& track = tracks[idx];
-                    float room = phase1_no_cap(track) ? per_track
-                                 : (std::isinf(track.growth_limit) ? per_track
-                                    : std::max(0.0f, track.growth_limit - track.base_size));
+                    float cap = effective_cap(track);
+                    float room = std::isinf(cap) ? per_track
+                                 : std::max(0.0f, cap - track.base_size);
                     float given = std::min(per_track, room);
                     track.base_size += given;
                     total_given += given;
@@ -454,21 +472,24 @@ inline void increase_sizes_for_spanning_item(
                 float gap_amount = second_min_base - min_base;
                 float total_needed = gap_amount * min_tracks.size();
                 if (total_needed <= remaining) {
+                    float total_actually_given = 0.0f;
                     for (size_t idx : min_tracks) {
                         auto& track = tracks[idx];
-                        if (phase1_no_cap(track) || std::isinf(track.growth_limit))
-                            track.base_size = second_min_base;
-                        else
-                            track.base_size = std::min(second_min_base, track.growth_limit);
+                        float cap = effective_cap(track);
+                        float new_base = std::isinf(cap) ? second_min_base
+                                         : std::min(second_min_base, cap);
+                        float given = new_base - track.base_size;
+                        track.base_size = new_base;
+                        total_actually_given += given;
                     }
-                    remaining -= total_needed;
+                    remaining -= total_actually_given;
                 } else {
                     float per_track = remaining / min_tracks.size();
                     for (size_t idx : min_tracks) {
                         auto& track = tracks[idx];
-                        float room = phase1_no_cap(track) ? per_track
-                                     : (std::isinf(track.growth_limit) ? per_track
-                                        : std::max(0.0f, track.growth_limit - track.base_size));
+                        float cap = effective_cap(track);
+                        float room = std::isinf(cap) ? per_track
+                                     : std::max(0.0f, cap - track.base_size);
                         track.base_size += std::min(per_track, room);
                     }
                     remaining = 0;
@@ -476,9 +497,10 @@ inline void increase_sizes_for_spanning_item(
             }
             eligible_indices.erase(
                 std::remove_if(eligible_indices.begin(), eligible_indices.end(),
-                               [&tracks](size_t idx) {
-                                   return !std::isinf(tracks[idx].growth_limit) &&
-                                          tracks[idx].base_size >= tracks[idx].growth_limit - 0.01f;
+                               [&tracks, &effective_cap](size_t idx) {
+                                   float cap = effective_cap(tracks[idx]);
+                                   return !std::isinf(cap) &&
+                                          tracks[idx].base_size >= cap - 0.01f;
                                }),
                 eligible_indices.end());
         }
@@ -655,6 +677,8 @@ inline void resolve_intrinsic_track_sizes(
         float extra_space = p1_contrib - current_size;
 
         if (extra_space > 0) {
+            log_debug("grid phase1 distributing: track=%zu span=%zu p1_contrib=%.1f current=%.1f extra=%.1f",
+                     contrib.track_start, contrib.track_span, p1_contrib, current_size, extra_space);
             increase_sizes_for_spanning_item(
                 tracks,
                 contrib.track_start,
@@ -668,12 +692,87 @@ inline void resolve_intrinsic_track_sizes(
     // Flush planned increases to base sizes
     flush_planned_base_size_increases(tracks);
 
-    // Phase 2: Size tracks to max-content contributions.
-    // For scroll-container items (overflow != visible), their Phase 1 "automatic minimum" is 0
-    // so we must include min-content MAX tracks in Phase 2 distribution; otherwise those tracks
-    // would never receive any contribution and the min-content track would collapse to 0.
-    // For non-scroll-container items, min-content MAX tracks must NOT receive max-content
-    // contributions here (they were already correctly sized in Phase 1 via min_content_contribution).
+    // Phase 2a (Taffy "content-based minimums"):
+    // For scroll-container items: distribute min_content_contribution to tracks with a
+    // min-content or max-content MIN sizing function. This ensures min-content MIN tracks
+    // receive at least the item's min-content size (their own sizing function requirement).
+    // Non-scroll containers: skip (their min-content is already handled in Phase 1).
+    //
+    // Two-tier distribution for scroll containers:
+    //   Tier 1: Distribute min_content to non-fit-content-max tracks (MinContent/MaxContent MAX).
+    //           These tracks absorb the item's min-content contribution first.
+    //   Tier 2: Distribute remaining max_content to fit-content-max tracks,
+    //           each capped at its fit-content argument.
+    // This matches browser behavior where min-content tracks receive their full contribution
+    // before fit-content tracks get their share.
+    for (const auto& contrib : contributions) {
+        if (contrib.track_span == 0) continue;
+        if (contrib.crosses_flexible_track) continue;
+        if (!contrib.is_scroll_container) continue;
+        if (contrib.min_content_contribution <= 0) continue;
+
+        size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+        // Check if any spanned track has a min-content or max-content MIN sizing function
+        bool has_eligible = false;
+        for (size_t i = contrib.track_start; i < end; ++i) {
+            auto min_type = tracks[i].min_track_sizing_function.type;
+            if (min_type == SizingFunctionType::MinContent ||
+                min_type == SizingFunctionType::MaxContent) {
+                has_eligible = true;
+                break;
+            }
+        }
+        if (!has_eligible) continue;
+
+        float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
+        float extra_space = contrib.min_content_contribution - current_size;
+        if (extra_space <= 0) continue;
+
+        // Tier 1: distribute min_content to non-fit-content-max tracks
+        {
+            std::vector<size_t> tier1;
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto min_type = tracks[i].min_track_sizing_function.type;
+                auto max_type = tracks[i].max_track_sizing_function.type;
+                bool is_truly_flexible = tracks[i].is_flexible() &&
+                                         tracks[i].max_track_sizing_function.flex_factor() > 0;
+                if (is_truly_flexible) continue;
+                if ((min_type == SizingFunctionType::MinContent ||
+                     min_type == SizingFunctionType::MaxContent) &&
+                    max_type != SizingFunctionType::FitContentPx &&
+                    max_type != SizingFunctionType::FitContentPercent) {
+                    tier1.push_back(i);
+                }
+            }
+            if (!tier1.empty()) {
+                float per = extra_space / (float)tier1.size();
+                for (size_t idx : tier1) {
+                    tracks[idx].base_size += per;
+                }
+            }
+        }
+
+        // Note: fit-content tracks are NOT given base_size here. They get their value
+        // from maximize_tracks (§11.6) growing them to their growth_limit (= fit-content limit).
+        // This prevents fit-content tracks from "stealing" space from other tracks when
+        // the item spans many columns.
+
+        // Ensure growth_limit >= base_size invariant
+        for (size_t i = contrib.track_start; i < end; ++i) {
+            if (tracks[i].growth_limit < tracks[i].base_size) {
+                tracks[i].growth_limit = tracks[i].base_size;
+            }
+        }
+    }
+
+    flush_planned_base_size_increases(tracks);
+
+    // Phase 2b / Phase 2 (Taffy "max-content minimums" / §11.5 step 3):
+    // Distribute max-content contributions to tracks that have an AUTO or intrinsic MAX
+    // sizing function (NOT min-content MAX, which was handled in Phase 2a or Phase 1).
+    // For scroll containers: use limited_max_content = min(max_content, spanned_fit_content_limit)
+    // and distribute to auto-min tracks that are not min-content MAX.
+    // For non-scroll containers: distribute max_content to auto/max-content/fit-content MAX tracks.
     // NOTE: Items crossing flexible tracks are skipped here too.
     for (const auto& contrib : contributions) {
         if (contrib.track_span == 0) continue;
@@ -681,27 +780,57 @@ inline void resolve_intrinsic_track_sizes(
         // Skip items that cross flexible tracks
         if (contrib.crosses_flexible_track) continue;
 
-        // Check if ANY track in the span is eligible for Phase 2 distribution.
-        // For scroll containers: eligible = intrinsic max tracks (min-content, max-content, auto, fit-content)
-        // For others: eligible = max-content/auto/fit-content MAX tracks (NOT min-content MAX)
         size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
-        bool has_eligible_track = false;
-        for (size_t i = contrib.track_start; i < end; ++i) {
-            auto max_type = tracks[i].max_track_sizing_function.type;
-            if (contrib.is_scroll_container) {
-                // For scroll containers, ALL intrinsic max tracks are eligible
-                if (max_type == SizingFunctionType::MinContent ||
-                    max_type == SizingFunctionType::MaxContent ||
-                    max_type == SizingFunctionType::Auto ||
-                    max_type == SizingFunctionType::FitContentPx ||
-                    max_type == SizingFunctionType::FitContentPercent ||
-                    max_type == SizingFunctionType::Percent) {
-                    has_eligible_track = true;
+
+        if (contrib.is_scroll_container) {
+            // For scroll containers: distribute limited_max_content to auto-min/not-min-content-MAX tracks.
+            // Compute spanned_fit_content_limit = minimum fit-content limit across all spanned tracks.
+            float spanned_fc_limit = std::numeric_limits<float>::infinity();
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto max_type = tracks[i].max_track_sizing_function.type;
+                if (max_type == SizingFunctionType::FitContentPx) {
+                    spanned_fc_limit = std::min(spanned_fc_limit,
+                                                tracks[i].max_track_sizing_function.value);
+                }
+            }
+            float limited_max = std::min(contrib.max_content_contribution, spanned_fc_limit);
+            log_debug("grid phase2b-SC: track=%zu span=%zu max=%f fc_limit=%f limited=%f",
+                     contrib.track_start, contrib.track_span,
+                     contrib.max_content_contribution, spanned_fc_limit, limited_max);
+            if (limited_max <= 0) continue;
+
+            // Check any auto-min (not min-content MAX) track is eligible
+            bool has_eligible = false;
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto min_type = tracks[i].min_track_sizing_function.type;
+                auto max_type = tracks[i].max_track_sizing_function.type;
+                // auto-min AND not min-content MAX (cf. Taffy has_auto_min_track_sizing_function)
+                if (min_type == SizingFunctionType::Auto &&
+                    max_type != SizingFunctionType::MinContent) {
+                    has_eligible = true;
                     break;
                 }
-            } else {
-                // For non-scroll containers, only max-content/auto/fit-content MAX tracks
-                // (min-content MAX tracks already accounted for via Phase 1 distribution)
+            }
+            if (!has_eligible) continue;
+
+            float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
+            float extra_space = limited_max - current_size;
+            if (extra_space <= 0) continue;
+
+            increase_sizes_for_spanning_item(
+                tracks,
+                contrib.track_start,
+                contrib.track_span,
+                extra_space,
+                IntrinsicContributionType::Maximum,
+                false  // for scroll containers Phase 2b: do NOT include min-content MAX (handled in 2a)
+            );
+
+        } else {
+            // For non-scroll containers: distribute max_content to auto/max-content/fit-content MAX tracks.
+            bool has_eligible_track = false;
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto max_type = tracks[i].max_track_sizing_function.type;
                 if (max_type == SizingFunctionType::MaxContent ||
                     max_type == SizingFunctionType::Auto ||
                     max_type == SizingFunctionType::FitContentPx ||
@@ -711,35 +840,157 @@ inline void resolve_intrinsic_track_sizes(
                     break;
                 }
             }
-        }
+            if (!has_eligible_track) continue;
 
-        if (!has_eligible_track) continue;
+            float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
+            float extra_space = contrib.max_content_contribution - current_size;
+            log_debug("grid phase2b item: track=%zu span=%zu max_content=%.1f current=%.1f extra=%.1f",
+                     contrib.track_start, contrib.track_span,
+                     contrib.max_content_contribution, current_size, extra_space);
+            if (extra_space <= 0) continue;
 
-        float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
-        float extra_space = contrib.max_content_contribution - current_size;
-
-        if (extra_space > 0) {
             increase_sizes_for_spanning_item(
                 tracks,
                 contrib.track_start,
                 contrib.track_span,
                 extra_space,
                 IntrinsicContributionType::Maximum,
-                contrib.is_scroll_container  // include min-content MAX tracks for scroll containers
+                false  // non-scroll: never include min-content MAX in Phase 2
             );
+
         }
     }
 
-    // After Phase 2: clamp fit-content track growth_limits to their actual base_size.
-    // fit-content(X) = min(max-content, max(min-content, X)). Phase 2 already grew base_size
-    // to the item's actual max-content (bounded by the fit-content limit). If max-content < X,
-    // growth_limit stays at X, and maximize_tracks would grow the track to X incorrectly.
-    // Setting growth_limit = base_size prevents maximize_tracks from over-growing fit-content tracks.
+    // §11.5 Step 2.4: Intrinsic maximums — increase growth_limit for intrinsic MAX tracks.
+    // §11.5 Step 2.5: Max-content maximums — increase growth_limit for max-content MAX tracks.
+    // These steps set finite growth_limits so that maximize_tracks (§11.6) can grow tracks
+    // in indefinite containers. Without them, growth_limits stay infinite and maximize skips
+    // them (it only grows finite-gl tracks in indefinite contexts).
+    // Key: infinite growth_limits are treated as base_size for computing effective current size.
+    for (const auto& contrib : contributions) {
+        if (contrib.track_span == 0) continue;
+        if (contrib.crosses_flexible_track) continue;
+
+        size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+
+        // Compute effective growth_limit sum across ALL spanned tracks.
+        // ∞ gl → base_size per CSS Grid §11.5: "treat a growth limit of infinity as
+        // the track's base size for the purpose of this computation."
+        // Additionally, fit-content tracks with base=0 (no item contributions) use
+        // effective gl=0 so they don't "claim" space from other tracks' growth allocation.
+        auto effective_gl_sum = [&]() -> float {
+            float sum = 0.0f;
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto mt = tracks[i].max_track_sizing_function.type;
+                bool is_fc = (mt == SizingFunctionType::FitContentPx ||
+                              mt == SizingFunctionType::FitContentPercent);
+                if (is_fc && tracks[i].base_size == 0) {
+                    // Fit-content track with no contributions: don't count its gl
+                    sum += 0.0f;
+                } else if (std::isinf(tracks[i].growth_limit)) {
+                    sum += tracks[i].base_size;
+                } else {
+                    sum += tracks[i].growth_limit;
+                }
+            }
+            // Include gaps between spanned tracks (same as spanned_tracks_size)
+            if (contrib.track_span > 1) {
+                sum += (contrib.track_span - 1) * gap;
+            }
+            return sum;
+        };
+
+        // Helper: distribute space to growth_limits of eligible tracks
+        auto distribute_to_gl = [&](float space, std::function<bool(const EnhancedGridTrack&)> is_eligible) {
+            if (space <= 0.01f) return;
+            // Build eligible list
+            std::vector<size_t> eligible;
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                if (is_eligible(tracks[i])) eligible.push_back(i);
+            }
+            if (eligible.empty()) return;
+            // Distribute evenly (simple equal distribution for growth_limits)
+            float per_track = space / static_cast<float>(eligible.size());
+            for (size_t idx : eligible) {
+                auto& track = tracks[idx];
+                float eff_gl = std::isinf(track.growth_limit)
+                                   ? track.base_size : track.growth_limit;
+                track.growth_limit = eff_gl + per_track;
+            }
+        };
+
+        // Step 2.4: Intrinsic maximums — distribute min-content to intrinsic MAX tracks
+        // Intrinsic MAX = auto, min-content, max-content, fit-content
+        {
+            float extra = contrib.min_content_contribution - effective_gl_sum();
+            distribute_to_gl(extra, [](const EnhancedGridTrack& t) {
+                auto mt = t.max_track_sizing_function.type;
+                return mt == SizingFunctionType::Auto ||
+                       mt == SizingFunctionType::MinContent ||
+                       mt == SizingFunctionType::MaxContent ||
+                       mt == SizingFunctionType::FitContentPx ||
+                       mt == SizingFunctionType::FitContentPercent;
+            });
+        }
+
+        // Step 2.5: Max-content maximums — distribute max-content to max-content MAX tracks
+        {
+            float extra = contrib.max_content_contribution - effective_gl_sum();
+            distribute_to_gl(extra, [](const EnhancedGridTrack& t) {
+                return t.max_track_sizing_function.type == SizingFunctionType::MaxContent;
+            });
+        }
+    }
+
+    // After growth_limit distribution: ensure growth_limit >= base_size
     for (auto& track : tracks) {
-        auto mt = track.max_track_sizing_function.type;
-        if (mt == SizingFunctionType::FitContentPx ||
-            mt == SizingFunctionType::FitContentPercent) {
-            if (track.growth_limit > track.base_size) {
+        if (!std::isinf(track.growth_limit) && track.growth_limit < track.base_size) {
+            track.growth_limit = track.base_size;
+        }
+    }
+
+    // Clamp fit-content track growth_limits based on remaining content from spanning items.
+    // FC tracks should only grow in maximize_tracks to absorb content not already covered
+    // by other tracks in the same span. Cap FC gl so it only grows to cover remaining content.
+    {
+        // For each FC track, compute max additional growth needed from spanning items
+        std::vector<float> fc_max_growth(tracks.size(), -1.0f); // -1 = no span coverage
+        for (const auto& contrib : contributions) {
+            if (contrib.track_span <= 1) continue;
+            if (contrib.crosses_flexible_track) continue;
+            size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+
+            // Sum ALL base_sizes in this span (including FC tracks)
+            float span_base_sum = 0;
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                span_base_sum += tracks[i].base_size;
+            }
+            // Remaining content after all current bases and gaps
+            float remaining = contrib.max_content_contribution - span_base_sum;
+            if (contrib.track_span > 1) remaining -= (contrib.track_span - 1) * gap;
+            remaining = std::max(0.0f, remaining);
+
+            for (size_t i = contrib.track_start; i < end; ++i) {
+                auto mt = tracks[i].max_track_sizing_function.type;
+                if (mt == SizingFunctionType::FitContentPx ||
+                    mt == SizingFunctionType::FitContentPercent) {
+                    fc_max_growth[i] = std::max(fc_max_growth[i], remaining);
+                }
+            }
+        }
+        for (size_t i = 0; i < tracks.size(); ++i) {
+            auto& track = tracks[i];
+            auto mt = track.max_track_sizing_function.type;
+            if (mt != SizingFunctionType::FitContentPx &&
+                mt != SizingFunctionType::FitContentPercent) continue;
+            if (track.growth_limit <= track.base_size) continue;
+
+            if (fc_max_growth[i] >= 0) {
+                // Cap gl so FC grows at most to cover remaining content
+                float max_gl = track.base_size + std::min(track.growth_limit - track.base_size, fc_max_growth[i]);
+                track.growth_limit = std::max(track.base_size, max_gl);
+            } else {
+                // No span coverage: clamp to base
                 track.growth_limit = track.base_size;
             }
         }
@@ -853,10 +1104,32 @@ inline void maximize_tracks(
     // to that limit — this is how the grid contributes its max-content to its container.
     // (Flex tracks are sized in §11.7; their growth_limit is infinity here.)
     if (axis_inner_size < 0 && axis_available_space < 0) {
-        for (auto& track : tracks) {
-            if (!track.is_flexible() && !std::isinf(track.growth_limit)) {
-                track.base_size = track.growth_limit;
+        // Check if any non-fit-content track has a finite growth_limit
+        // (set by step 2.5 growth_limit distribution). If so, fit-content tracks with
+        // base=0 should NOT grow — their space was already accounted for in step 2.5.
+        bool has_non_fc_finite_gl = false;
+        for (const auto& track : tracks) {
+            if (track.is_flexible() || std::isinf(track.growth_limit)) continue;
+            auto mt = track.max_track_sizing_function.type;
+            if (mt != SizingFunctionType::FitContentPx &&
+                mt != SizingFunctionType::FitContentPercent &&
+                mt != SizingFunctionType::Length &&
+                mt != SizingFunctionType::Percent) {
+                has_non_fc_finite_gl = true;
+                break;
             }
+        }
+        for (auto& track : tracks) {
+            if (track.is_flexible() || std::isinf(track.growth_limit)) continue;
+            // Skip fit-content tracks with no contributions if other tracks claimed
+            // growth via step 2.5 — their gl space was not counted in step 2.5.
+            auto mt = track.max_track_sizing_function.type;
+            if (has_non_fc_finite_gl && track.base_size == 0 &&
+                (mt == SizingFunctionType::FitContentPx ||
+                 mt == SizingFunctionType::FitContentPercent)) {
+                continue;
+            }
+            track.base_size = track.growth_limit;
         }
         return;
     }
