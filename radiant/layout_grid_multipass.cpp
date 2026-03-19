@@ -250,9 +250,25 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
 
         // Update container height if needed
         if (required_height > grid_container->height) {
-            log_info("GRID: Updating container height from %.1f to %.1f (based on item extents)",
-                     grid_container->height, required_height);
-            grid_container->height = required_height;
+            // When percentage row tracks overflow the intrinsic height, cap the
+            // container height at the intrinsic row height (items overflow the container)
+            if (grid_layout->row_intrinsic_height > 0.0f) {
+                float capped_height = grid_layout->row_intrinsic_height;
+                if (grid_container->bound) {
+                    capped_height += grid_container->bound->padding.top + grid_container->bound->padding.bottom;
+                    if (grid_container->bound->border) {
+                        capped_height += grid_container->bound->border->width.top +
+                                         grid_container->bound->border->width.bottom;
+                    }
+                }
+                if (capped_height > grid_container->height) {
+                    grid_container->height = capped_height;
+                }
+            } else {
+                log_info("GRID: Updating container height from %.1f to %.1f (based on item extents)",
+                         grid_container->height, required_height);
+                grid_container->height = required_height;
+            }
 
             // Also fix any item with negative y position (pushed above due to centering)
             // by shifting all items down
@@ -289,6 +305,13 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         // Add gaps between rows
         total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
 
+        // When percentage row tracks were re-resolved against intrinsic height,
+        // the resolved tracks may overflow the intrinsic height. Use the intrinsic
+        // height to cap the container so it matches browser behavior.
+        if (grid_layout->row_intrinsic_height > 0.0f) {
+            total_row_height = grid_layout->row_intrinsic_height;
+        }
+
         // Add padding and border
         float container_height = total_row_height;
         if (grid_container->bound) {
@@ -310,6 +333,13 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
 
     // ========================================================================
     // Update container width based on grid content (for shrink-to-fit containers)
+    // NOTE: layout_grid_container (Pass 2) already sets the container width for
+    // shrink-to-fit grids using the correct first-pass intrinsic width (before
+    // percentage re-resolution). This secondary update is only needed as a
+    // fallback when layout_grid_container didn't handle it (e.g., empty grid).
+    // When percentage tracks exist, the container width must be the first-pass
+    // max-content width, NOT the sum of resolved column sizes (which would be
+    // smaller due to percentage clamping).
     // ========================================================================
     if (grid_layout && grid_layout->computed_column_count > 0) {
         // Check if container is shrink-to-fit (absolutely positioned with no explicit width)
@@ -325,17 +355,11 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
 
-        if (is_shrink_to_fit) {
-            // Calculate total width from column sizes plus gaps
-            float total_column_width = 0;
-            for (int i = 0; i < grid_layout->computed_column_count; i++) {
-                total_column_width += grid_layout->computed_columns[i].base_size;
-            }
-            // Add gaps between columns
-            total_column_width += grid_layout->column_gap * (grid_layout->computed_column_count - 1);
-
-            // Add padding and border
-            float container_width = total_column_width;
+        if (is_shrink_to_fit && grid_layout->is_shrink_to_fit_width) {
+            // layout_grid_container already set the correct width in Pass 2
+            // (including the first-pass intrinsic width for pct tracks).
+            // Use grid_layout->content_width which is already correct.
+            float container_width = (float)grid_layout->content_width;
             if (grid_container->bound) {
                 container_width += grid_container->bound->padding.left + grid_container->bound->padding.right;
                 if (grid_container->bound->border) {
@@ -343,11 +367,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                                        grid_container->bound->border->width.right;
                 }
             }
-
-            log_info("GRID: Updating container width from %d to %.1f (columns=%.1f, gaps=%.1f)",
-                     grid_container->width, container_width, total_column_width,
-                     grid_layout->column_gap * (grid_layout->computed_column_count - 1));
-            grid_container->width = (int)container_width;
+            grid_container->width = container_width;
         }
     }
 
@@ -741,6 +761,12 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     BlockContext pa_block = lycon->block;
     Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;
+
+    // Update font context to use the grid item's own computed font
+    // This ensures text nodes inside the item inherit the correct font-size
+    if (grid_item->font && lycon->ui_context) {
+        setup_font(lycon->ui_context, &lycon->font, grid_item->font);
+    }
 
     // Calculate content area dimensions accounting for box model
     int content_width = grid_item->width;

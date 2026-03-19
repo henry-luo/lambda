@@ -1010,6 +1010,8 @@ typedef struct GridProp {
     // Grid gap properties
     float row_gap;
     float column_gap;
+    bool row_gap_is_percent;
+    bool column_gap_is_percent;
 
     // Grid template properties
     GridTrackList* grid_template_rows;

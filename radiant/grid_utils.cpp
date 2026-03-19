@@ -147,9 +147,12 @@ int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value,
     // If line value is provided, use it
     if (line_value != 0) {
         if (line_value < 0) {
-            // Negative values count from the end
-            int track_count = is_row ? grid_layout->computed_row_count : grid_layout->computed_column_count;
-            return track_count + line_value + 2; // +2 because lines are 1-indexed and we want the line after the last track
+            // Negative values count from the end of the explicit grid
+            int track_count = is_row ? grid_layout->explicit_row_count : grid_layout->explicit_column_count;
+            if (track_count == 0) track_count = 1;
+            int resolved = track_count + line_value + 2;
+            if (resolved < 1) resolved = 1;
+            return resolved;
         }
         return line_value;
     }
