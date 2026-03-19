@@ -2695,10 +2695,17 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
             // Collect heights and compute row-by-row max
             float* child_heights = (float*)alloca(child_count * sizeof(float));
+            float col_share = width / grid_column_count;
             int idx = 0;
             for (DomNode* c = element->first_child; c; c = c->next_sibling) {
                 if (c->is_element()) {
-                    child_heights[idx++] = calculate_max_content_height(lycon, c, width / grid_column_count);
+                    // Auto columns can't shrink below their min-content width,
+                    // so use max(share, min_content) to get the actual column width.
+                    float child_w = col_share;
+                    DomElement* ce = (DomElement*)c;
+                    IntrinsicSizes cs = measure_element_intrinsic_widths(lycon, ce);
+                    if (cs.min_content > child_w) child_w = cs.min_content;
+                    child_heights[idx++] = calculate_max_content_height(lycon, c, child_w);
                 }
             }
 

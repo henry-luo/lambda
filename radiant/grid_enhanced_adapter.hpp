@@ -1058,7 +1058,7 @@ inline void run_enhanced_track_sizing(
                          col_contributions[ci].min_content_contribution,
                          col_contributions[ci].max_content_contribution,
                          col_contributions[ci].is_scroll_container);
-            resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap);
+            resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap, col_available);
         }
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
@@ -1072,8 +1072,15 @@ inline void run_enhanced_track_sizing(
             log_debug("  DBG post-maximize col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
         // 11.7 Expand Flexible Tracks
+        float fr_intrinsic_total = 0.0f;
         expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available,
-                               col_contributions, effective_col_gap);
+                               col_contributions, effective_col_gap,
+                               &fr_intrinsic_total);
+        // For indefinite containers: the intrinsic total from Pass 1 determines the
+        // container width, even though Pass 2 may redistribute tracks differently.
+        if (fr_intrinsic_total > 0.0f && out_col_intrinsic_width) {
+            *out_col_intrinsic_width = fr_intrinsic_total;
+        }
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
             log_debug("  DBG post-expand col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
@@ -1146,7 +1153,7 @@ inline void run_enhanced_track_sizing(
             // Re-run all phases with pct tracks now definite and resolved gap
             initialize_track_sizes(col_tracks2, col_available2);
             if (!col_contributions.empty()) {
-                resolve_intrinsic_track_sizes(col_tracks2, col_contributions, resolved_col_gap);
+                resolve_intrinsic_track_sizes(col_tracks2, col_contributions, resolved_col_gap, col_available);
             }
             // For shrink-to-fit containers: use indefinite semantics for maximize
             // so that only finite-gl tracks grow to their gl (no free-space distribution).
@@ -1200,7 +1207,7 @@ inline void run_enhanced_track_sizing(
         std::vector<GridItemContribution> row_contributions =
             collect_item_contributions(grid_layout, items, item_count, false /* is_column_axis */);
         if (!row_contributions.empty()) {
-            resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap);
+            resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, row_available);
         }
 
         // Only do maximize/expand/stretch if we have definite space
@@ -1248,7 +1255,7 @@ inline void run_enhanced_track_sizing(
             float row_available2 = first_row_total;
             initialize_track_sizes(row_tracks2, row_available2);
             if (!row_contributions.empty()) {
-                resolve_intrinsic_track_sizes(row_tracks2, row_contributions, grid_layout->row_gap);
+                resolve_intrinsic_track_sizes(row_tracks2, row_contributions, grid_layout->row_gap, row_available);
             }
             maximize_tracks(row_tracks2, row_available2, row_available2);
             expand_flexible_tracks(row_tracks2, 0.0f, row_available2, row_available2,
