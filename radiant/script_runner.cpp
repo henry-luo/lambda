@@ -93,8 +93,6 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
     if (is_body_element(elem)) {
         const char* onload = extract_element_attribute(elem, "onload", nullptr);
         if (onload && onload[0]) {
-            log_debug("script_runner: found body onload='%s'", onload);
-
             // Handle setTimeout('code', delay) in body onload — extract inner code
             // Pattern: setTimeout('code()', delay) or setTimeout("code()", delay)
             const char* st = strstr(onload, "setTimeout(");
@@ -108,7 +106,6 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
                     while (*p && *p != quote) p++;
                     if (*p == quote) {
                         int code_len = (int)(p - code_start);
-                        log_debug("script_runner: extracted setTimeout code: '%.*s'", code_len, code_start);
                         strbuf_append_str_n(onload_buf, code_start, code_len);
                         strbuf_append_str(onload_buf, "\n");
                     } else {
@@ -136,7 +133,6 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             strcasecmp(type_attr, "application/javascript") != 0 &&
             strcasecmp(type_attr, "text/ecmascript") != 0 &&
             strcasecmp(type_attr, "application/ecmascript") != 0) {
-            log_debug("script_runner: skipping <script type='%s'>", type_attr);
             return;
         }
         // check for src attribute - external scripts not supported yet
