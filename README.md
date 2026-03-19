@@ -266,6 +266,33 @@ for (row in csv) {
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                     |
 | [Radiant Layout Design](doc/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                       |
 
+## Benchmark Results
+
+Lambda's MIR JIT compiler is benchmarked across 6 standard benchmark suites (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream) — 56 unique benchmarks in total — against Node.js (V8 JIT), QuickJS, and CPython.
+
+| vs. Engine       |        Geo. Mean Ratio | Lambda Wins | Total |
+| ---------------- | ---------------------: | :---------: | :---: |
+| **Node.js (V8)** |              **1.05×** |     28      |  56   |
+| **QuickJS**      | **0.12×** (8× faster)  |     49      |  53   |
+| **CPython 3.13** | **0.08×** (13× faster) |     47      |  55   |
+
+> Ratio < 1.0 = Lambda is faster.
+
+**Highlights:**
+- Competitive with Node.js V8 overall. Excels on tight numeric loops and recursive workloads (R7RS: 0.44×, AWFY micro: 0.05–0.30×).
+- **13× faster than CPython** across the board (wins 47/55 benchmarks).
+
+See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
+
+## Standards Conformance
+
+| Standard | Pass Rate | Details |
+|----------|----------:|---------|
+| **HTML5** (html5lib/WPT) | **100%** | 1,560+ test cases from 63 html5lib test files |
+| **CSS 2.1** (W3C test suite) | **98.2%** | 1,788 / 1,821 baseline tests passing |
+| **CommonMark** | **100%** | 662 / 662 specification tests passing |
+| **YAML 1.2** (official test suite) | **100%** | 231 / 231 tests passing |
+
 ## Platform Support
 
 | Platform | Status | Notes                       |
