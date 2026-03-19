@@ -495,6 +495,11 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                             }
                         }
                         width = (float)(span_width - box_adjustment);
+                        // Add a small subpixel margin to compensate for integer truncation
+                        // of track sizes: if a track was 173.28px→173, content becomes 153px,
+                        // but text measured at 153.28px would spuriously wrap. The +0.5px
+                        // tolerance avoids false wrapping due to float→int rounding loss.
+                        if (width > 10) width += 0.5f;
                         if (width < 10) width = 10;
                         log_debug("Row sizing: using column span width %.1f for %s (cols %d-%d)",
                                   width, item->node_name(), col_start + 1, col_end);

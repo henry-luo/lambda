@@ -811,7 +811,11 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     }
 
     // Set up line formatting context
+    // Add a small subpixel tolerance to the right boundary to compensate for integer truncation
+    // of float track widths (e.g. 173.28px -> 173px causes 153.28px text to spuriously wrap).
+    // This only affects grid item layout, not float/normal flow layouts.
     line_init(lycon, content_x_offset, content_x_offset + content_width);
+    lycon->line.right += 0.5f;
 
     // Check if this grid item is itself a grid or flex container (nested)
     if (grid_item->display.inner == CSS_VALUE_GRID) {
