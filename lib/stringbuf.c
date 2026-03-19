@@ -545,6 +545,7 @@ String* stringbuf_to_string(StringBuf *sb) {
     if (!sb || !sb->str) return NULL;
 
     // Ensure the String structure is properly set up
+    sb->str->type_id = STRING_TYPE_ID;
     sb->str->len = sb->length;
 
     // Return the String and reset the StringBuf

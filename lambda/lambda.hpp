@@ -169,16 +169,18 @@ typedef struct Item {
     // get chars/len for string-like types (STRING, SYMBOL, BINARY)
     // Symbol has the same leading layout: len, then chars (with ns in between)
     inline const char* get_chars() const {
-        if (this->_type_id == LMD_TYPE_STRING || this->_type_id == LMD_TYPE_BINARY) {
-            return ((String*)this->string_ptr)->chars;
+        TypeId tid = *((TypeId*)(uintptr_t)this->item);
+        if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_BINARY) {
+            return ((String*)(uintptr_t)this->item)->chars;
         }
-        return ((Symbol*)this->symbol_ptr)->chars;
+        return ((Symbol*)(uintptr_t)this->item)->chars;
     }
     inline uint32_t get_len() const {
-        if (this->_type_id == LMD_TYPE_STRING || this->_type_id == LMD_TYPE_BINARY) {
-            return ((String*)this->string_ptr)->len;
+        TypeId tid = *((TypeId*)(uintptr_t)this->item);
+        if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_BINARY) {
+            return ((String*)(uintptr_t)this->item)->len;
         }
-        return ((Symbol*)this->symbol_ptr)->len;
+        return ((Symbol*)(uintptr_t)this->item)->len;
     }
 
     // get int56 value sign-extended to int64
@@ -223,8 +225,10 @@ struct ConstItem {
     }
 
     inline String* string() const {
-        Item* itm = (Item*)this;
-        return (itm->_type_id == LMD_TYPE_STRING) ? (String*)itm->string_ptr : nullptr;
+        // items with non-zero high byte are tagged scalars (null, bool, int, etc.), not pointers
+        if ((this->item >> 56) || !this->item) return nullptr;
+        TypeId tid = *((TypeId*)(uintptr_t)this->item);
+        return (tid == LMD_TYPE_STRING) ? (String*)(uintptr_t)this->item : nullptr;
     }
 };
 

@@ -891,10 +891,9 @@ static MIR_reg_t emit_box_dtime_value(MirTranspiler* mt, MIR_reg_t val_reg) {
 }
 
 // Box string pointer -> Item (inline s2it)
-// s2it(ptr) = ptr ? (STRING_TAG | (uint64_t)ptr) : ITEM_NULL
+// s2it(ptr) = ptr (direct pointer; type_id is in String struct at offset 0)
 static MIR_reg_t emit_box_string(MirTranspiler* mt, MIR_reg_t ptr_reg) {
     MIR_reg_t result = new_reg(mt, "boxs", MIR_T_I64);
-    uint64_t STR_TAG = (uint64_t)LMD_TYPE_STRING << 56;
     uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
 
     MIR_label_t l_notnull = new_label(mt);
@@ -906,8 +905,8 @@ static MIR_reg_t emit_box_string(MirTranspiler* mt, MIR_reg_t ptr_reg) {
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     emit_label(mt, l_notnull);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)STR_TAG), MIR_new_reg_op(mt->ctx, ptr_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, ptr_reg)));
     emit_label(mt, l_end);
     return result;
 }
@@ -915,7 +914,6 @@ static MIR_reg_t emit_box_string(MirTranspiler* mt, MIR_reg_t ptr_reg) {
 // Box symbol pointer -> Item (inline y2it)
 static MIR_reg_t emit_box_symbol(MirTranspiler* mt, MIR_reg_t ptr_reg) {
     MIR_reg_t result = new_reg(mt, "boxy", MIR_T_I64);
-    uint64_t SYM_TAG = (uint64_t)LMD_TYPE_SYMBOL << 56;
     uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
 
     MIR_label_t l_notnull = new_label(mt);
@@ -927,8 +925,8 @@ static MIR_reg_t emit_box_symbol(MirTranspiler* mt, MIR_reg_t ptr_reg) {
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     emit_label(mt, l_notnull);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)SYM_TAG), MIR_new_reg_op(mt->ctx, ptr_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, ptr_reg)));
     emit_label(mt, l_end);
     return result;
 }
@@ -965,7 +963,6 @@ static MIR_reg_t emit_box_decimal(MirTranspiler* mt, MIR_reg_t val_reg) {
 // Box Binary* pointer -> Item (inline)
 static MIR_reg_t emit_box_binary(MirTranspiler* mt, MIR_reg_t val_reg) {
     MIR_reg_t result = new_reg(mt, "boxx", MIR_T_I64);
-    uint64_t BIN_TAG = (uint64_t)LMD_TYPE_BINARY << 56;
     uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
     MIR_label_t l_nn = new_label(mt);
     MIR_label_t l_end = new_label(mt);
@@ -975,8 +972,8 @@ static MIR_reg_t emit_box_binary(MirTranspiler* mt, MIR_reg_t val_reg) {
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     emit_label(mt, l_nn);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)BIN_TAG), MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, val_reg)));
     emit_label(mt, l_end);
     return result;
 }
@@ -1326,23 +1323,8 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
         emit_label(mt, l_end);
         return result;
     }
-    case LMD_TYPE_BINARY: {
-        MIR_reg_t result = new_reg(mt, "boxx", MIR_T_I64);
-        uint64_t BIN_TAG = (uint64_t)LMD_TYPE_BINARY << 56;
-        uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-        MIR_label_t l_nn = new_label(mt);
-        MIR_label_t l_end = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
-            MIR_new_reg_op(mt->ctx, ptr)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-        emit_label(mt, l_nn);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)BIN_TAG), MIR_new_reg_op(mt->ctx, ptr)));
-        emit_label(mt, l_end);
-        return result;
-    }
+    case LMD_TYPE_BINARY:
+        return emit_box_binary(mt, ptr);
     default:
         // Direct cast for containers
         return ptr;
@@ -4625,9 +4607,10 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     MIR_reg_t boxed_field;
     if (field->node_type == AST_NODE_IDENT) {
         // IDENT node has no type info for member fields — use name pool String* directly
+        // Direct pointer: str->type_id is set, no tag orring needed
         AstIdentNode* ident = (AstIdentNode*)field;
         String* str = ident->name; // persistent name pool pointer
-        uint64_t str_item = ((uint64_t)LMD_TYPE_STRING << 56) | (uint64_t)(uintptr_t)str;
+        uint64_t str_item = (uint64_t)(uintptr_t)str;
         boxed_field = new_reg(mt, "fld", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, boxed_field),
             MIR_new_int_op(mt->ctx, (int64_t)str_item)));

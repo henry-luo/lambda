@@ -97,6 +97,7 @@ Symbol* MarkBuilder::createSymbol(const char* symbol) {
 Symbol* MarkBuilder::createSymbol(const char* symbol, size_t len) {
     if (!symbol || len == 0) return nullptr;
     Symbol* sym = (Symbol*)arena_alloc(arena_, sizeof(Symbol) + len + 1);
+    sym->type_id = LMD_TYPE_SYMBOL;
     sym->len = len;
     sym->ns = nullptr;
     memcpy(sym->chars, symbol, len);
@@ -122,6 +123,7 @@ String* MarkBuilder::createString(const char* str, size_t len) {
 
     // Allocate from arena (fast sequential allocation, no deduplication)
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
+    s->type_id = LMD_TYPE_STRING;
     s->len = len;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     memcpy(s->chars, str, len);
@@ -819,6 +821,7 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         // Binary data is stored like String but with different type_id
         String* copied = createString(bin->chars, bin->len);
         if (!copied) return createNull();
+        copied->type_id = LMD_TYPE_BINARY;
         return {.item = x2it(copied)};
     }
 
@@ -956,7 +959,9 @@ Item MarkBuilder::deep_copy_internal(Item item) {
                 String* str = *(String**)dst_ptr;
                 if (str) {
                     Item copied = createStringItem(str->chars, str->len);
-                    *(String**)dst_ptr = copied.get_string();
+                    String* copied_str = copied.get_string();
+                    if (copied_str && ftype == LMD_TYPE_BINARY) copied_str->type_id = LMD_TYPE_BINARY;
+                    *(String**)dst_ptr = copied_str;
                 }
                 break;
             }

@@ -684,8 +684,8 @@ RetItem pn_fetch(Item url, Item options) {
     log_debug("pn_fetch called");
     // Validate URL parameter
     String* url_str;
-    if (url._type_id != LMD_TYPE_STRING && url._type_id != LMD_TYPE_SYMBOL) {
-        log_debug("fetch url must be a string or symbol, got type %s", get_type_name(url._type_id));
+    if (get_type_id(url) != LMD_TYPE_STRING && get_type_id(url) != LMD_TYPE_SYMBOL) {
+        log_debug("fetch url must be a string or symbol, got type %s", get_type_name(get_type_id(url)));
         return item_to_ri(ItemError);
     }
     url_str = fn_string(url);
@@ -718,7 +718,7 @@ RetItem pn_fetch(Item url, Item options) {
         // Extract method
         Item method_key = create_string_item("method");
         Item method_item = map_get(options_map, method_key);
-        if (method_item.item && (method_item._type_id == LMD_TYPE_STRING || method_item._type_id == LMD_TYPE_SYMBOL)) {
+        if (method_item.item && (get_type_id(method_item) == LMD_TYPE_STRING || get_type_id(method_item) == LMD_TYPE_SYMBOL)) {
             config.method = method_item.get_chars();
         }
 
@@ -726,7 +726,7 @@ RetItem pn_fetch(Item url, Item options) {
         Item body_key = create_string_item("body");
         Item body_item = map_get(options_map, body_key);
         if (body_item.item) {
-            if (body_item._type_id == LMD_TYPE_STRING || body_item._type_id == LMD_TYPE_SYMBOL) {
+            if (get_type_id(body_item) == LMD_TYPE_STRING || get_type_id(body_item) == LMD_TYPE_SYMBOL) {
                 config.body = body_item.get_chars();
                 config.body_size = body_item.get_len();
             } else {

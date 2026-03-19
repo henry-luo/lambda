@@ -2,7 +2,7 @@
   "r7rs": {
     "fib": {
       "category": "recursive",
-      "mir": 2.453,
+      "mir": 2.26,
       "c2mir": 2.137,
       "lambdajs": 0.986375,
       "quickjs": 18.464,
@@ -11,7 +11,7 @@
     },
     "fibfp": {
       "category": "recursive",
-      "mir": 3.742,
+      "mir": 3.74,
       "c2mir": 3.522,
       "lambdajs": 1.043666671875,
       "quickjs": 18.885,
@@ -20,7 +20,7 @@
     },
     "tak": {
       "category": "recursive",
-      "mir": 0.153,
+      "mir": 0.17,
       "c2mir": 0.164,
       "lambdajs": 0.102625,
       "quickjs": 2.883,
@@ -29,7 +29,7 @@
     },
     "cpstak": {
       "category": "closure",
-      "mir": 0.303,
+      "mir": 0.326,
       "c2mir": 0.339,
       "lambdajs": 0.2206666640625,
       "quickjs": 5.653,
@@ -38,7 +38,7 @@
     },
     "sum": {
       "category": "iterative",
-      "mir": 0.27,
+      "mir": 0.276,
       "c2mir": 1.764,
       "lambdajs": 94.1580833359375,
       "quickjs": 31.874,
@@ -47,7 +47,7 @@
     },
     "sumfp": {
       "category": "iterative",
-      "mir": 0.067,
+      "mir": 0.071,
       "c2mir": 0.331,
       "lambdajs": 13.7067083359375,
       "quickjs": 3.796,
@@ -56,7 +56,7 @@
     },
     "nqueens": {
       "category": "backtrack",
-      "mir": 6.655,
+      "mir": 6.616,
       "c2mir": 6.595,
       "lambdajs": 6.8272083359375,
       "quickjs": 9.733,
@@ -65,7 +65,7 @@
     },
     "fft": {
       "category": "numeric",
-      "mir": 0.179,
+      "mir": 0.202,
       "c2mir": 1.033,
       "lambdajs": 9.8065416640625,
       "quickjs": 2.833,
@@ -74,7 +74,7 @@
     },
     "mbrot": {
       "category": "numeric",
-      "mir": 0.59,
+      "mir": 0.644,
       "c2mir": 0.743,
       "lambdajs": 55.3126666640625,
       "quickjs": 18.422,
@@ -83,7 +83,7 @@
     },
     "ack": {
       "category": "recursive",
-      "mir": 9.85,
+      "mir": 11.197,
       "c2mir": 9.846,
       "lambdajs": 8.1183333359375,
       "quickjs": null,
@@ -94,7 +94,7 @@
   "awfy": {
     "sieve": {
       "category": "micro",
-      "mir": 0.052,
+      "mir": 0.058,
       "c2mir": 0.052,
       "lambdajs": 0.772125,
       "quickjs": 0.602,
@@ -103,7 +103,7 @@
     },
     "permute": {
       "category": "micro",
-      "mir": 0.064,
+      "mir": 0.065,
       "c2mir": 0.068,
       "lambdajs": 12.8387083359375,
       "quickjs": 1.6,
@@ -112,7 +112,7 @@
     },
     "queens": {
       "category": "micro",
-      "mir": 0.146,
+      "mir": 0.154,
       "c2mir": 0.138,
       "lambdajs": 10.5904166640625,
       "quickjs": 1.087,
@@ -121,7 +121,7 @@
     },
     "towers": {
       "category": "micro",
-      "mir": 0.216,
+      "mir": 0.235,
       "c2mir": 0.112,
       "lambdajs": 23.2489583359375,
       "quickjs": 2.349,
@@ -130,7 +130,7 @@
     },
     "bounce": {
       "category": "micro",
-      "mir": 0.194,
+      "mir": 0.242,
       "c2mir": 0.139,
       "lambdajs": 10.2807916640625,
       "quickjs": 0.96,
@@ -139,7 +139,7 @@
     },
     "list": {
       "category": "micro",
-      "mir": 0.023,
+      "mir": 0.025,
       "c2mir": 0.621,
       "lambdajs": 7.8761666640625,
       "quickjs": 0.921,
@@ -148,7 +148,7 @@
     },
     "storage": {
       "category": "micro",
-      "mir": 0.194,
+      "mir": 0.214,
       "c2mir": 0.317,
       "lambdajs": 6.2319583359375,
       "quickjs": 2.691,
@@ -157,7 +157,7 @@
     },
     "mandelbrot": {
       "category": "compute",
-      "mir": 31.61,
+      "mir": 35.424,
       "c2mir": 54.51,
       "lambdajs": 279.45,
       "quickjs": 888.468,
@@ -166,7 +166,7 @@
     },
     "nbody": {
       "category": "compute",
-      "mir": 46.865,
+      "mir": 52.181,
       "c2mir": 84.204,
       "lambdajs": 2055.95175,
       "quickjs": 166.959,
@@ -175,7 +175,7 @@
     },
     "richards": {
       "category": "macro",
-      "mir": 252.576,
+      "mir": 291.415,
       "c2mir": 218.783,
       "lambdajs": 3313.34145832813,
       "quickjs": 194.481,
@@ -184,7 +184,7 @@
     },
     "json": {
       "category": "macro",
-      "mir": 1.5,
+      "mir": 1.751,
       "c2mir": 2.15,
       "lambdajs": 159.730583335937,
       "quickjs": 11.669,
@@ -193,7 +193,7 @@
     },
     "deltablue": {
       "category": "macro",
-      "mir": 64.108,
+      "mir": 73.742,
       "c2mir": 78.054,
       "lambdajs": 934.975916671875,
       "quickjs": 113.121,
@@ -202,7 +202,7 @@
     },
     "havlak": {
       "category": "macro",
-      "mir": 60.929,
+      "mir": 70.629,
       "c2mir": 81.75,
       "lambdajs": 39660.3929583281,
       "quickjs": 4085.097,
@@ -211,7 +211,7 @@
     },
     "cd": {
       "category": "macro",
-      "mir": 219.944,
+      "mir": 251.795,
       "c2mir": 358.352,
       "lambdajs": 11660.8717083359,
       "quickjs": 1062.803,
@@ -222,7 +222,7 @@
   "beng": {
     "binarytrees": {
       "category": "allocation",
-      "mir": 7.273,
+      "mir": 8.193,
       "c2mir": 7.686,
       "lambdajs": 114.013541664063,
       "quickjs": 27.936,
@@ -231,7 +231,7 @@
     },
     "fannkuch": {
       "category": "permutation",
-      "mir": 0.755,
+      "mir": 0.905,
       "c2mir": 1.117,
       "lambdajs": 1.6274166640625,
       "quickjs": 7.31,
@@ -240,7 +240,7 @@
     },
     "fasta": {
       "category": "generation",
-      "mir": 1.126,
+      "mir": 1.221,
       "c2mir": 0.841,
       "lambdajs": 3.8855,
       "quickjs": 10.74,
@@ -249,7 +249,7 @@
     },
     "knucleotide": {
       "category": "hashing",
-      "mir": 2.875,
+      "mir": 3.406,
       "c2mir": 3.81,
       "lambdajs": 0.088083328125,
       "quickjs": null,
@@ -258,7 +258,7 @@
     },
     "mandelbrot": {
       "category": "numeric",
-      "mir": 142.474,
+      "mir": 160.517,
       "c2mir": 238.313,
       "lambdajs": 2849.73591666406,
       "quickjs": 697.866,
@@ -267,7 +267,7 @@
     },
     "nbody": {
       "category": "numeric",
-      "mir": 47.089,
+      "mir": 53.215,
       "c2mir": 84.822,
       "lambdajs": 1748.722,
       "quickjs": 154.905,
@@ -276,7 +276,7 @@
     },
     "pidigits": {
       "category": "bignum",
-      "mir": 0.462,
+      "mir": 0.506,
       "c2mir": 0.297,
       "lambdajs": 0.083375,
       "quickjs": 0.156,
@@ -285,7 +285,7 @@
     },
     "regexredux": {
       "category": "regex",
-      "mir": 1.248,
+      "mir": 1.41,
       "c2mir": 1.432,
       "lambdajs": 0.095125,
       "quickjs": null,
@@ -294,7 +294,7 @@
     },
     "revcomp": {
       "category": "string",
-      "mir": 1.846,
+      "mir": 2.067,
       "c2mir": 1.834,
       "lambdajs": 0.001625,
       "quickjs": null,
@@ -303,7 +303,7 @@
     },
     "spectralnorm": {
       "category": "numeric",
-      "mir": 13.017,
+      "mir": 14.427,
       "c2mir": 10.221,
       "lambdajs": 79.966625,
       "quickjs": 63.747,
@@ -314,7 +314,7 @@
   "kostya": {
     "brainfuck": {
       "category": "interpreter",
-      "mir": 165.231,
+      "mir": 189.776,
       "c2mir": 279.537,
       "lambdajs": 2309.743,
       "quickjs": 906.104,
@@ -323,7 +323,7 @@
     },
     "matmul": {
       "category": "numeric",
-      "mir": 8.758,
+      "mir": 9.506,
       "c2mir": 128.389,
       "lambdajs": 2832.007,
       "quickjs": 545.924,
@@ -332,7 +332,7 @@
     },
     "primes": {
       "category": "numeric",
-      "mir": 7.279,
+      "mir": 8.457,
       "c2mir": 10.266,
       "lambdajs": 25.290625,
       "quickjs": 97.309,
@@ -341,7 +341,7 @@
     },
     "base64": {
       "category": "string",
-      "mir": 219.817,
+      "mir": 264.206,
       "c2mir": 221.309,
       "lambdajs": 900.399041664062,
       "quickjs": 182.45,
@@ -350,7 +350,7 @@
     },
     "levenshtein": {
       "category": "string",
-      "mir": 7.699,
+      "mir": 8.971,
       "c2mir": 13.463,
       "lambdajs": 71.330625,
       "quickjs": 55.12,
@@ -359,7 +359,7 @@
     },
     "json_gen": {
       "category": "data",
-      "mir": 64.78,
+      "mir": 70.611,
       "c2mir": 67.226,
       "lambdajs": 79.4235,
       "quickjs": 21.227,
@@ -368,7 +368,7 @@
     },
     "collatz": {
       "category": "numeric",
-      "mir": 300.787,
+      "mir": 328.423,
       "c2mir": 339.761,
       "lambdajs": 18532.6052083281,
       "quickjs": 6217.803,
@@ -379,7 +379,7 @@
   "larceny": {
     "triangl": {
       "category": "search",
-      "mir": 178.528,
+      "mir": 201.029,
       "c2mir": 1105.38,
       "lambdajs": 6816.69020833594,
       "quickjs": 2229.426,
@@ -388,7 +388,7 @@
     },
     "array1": {
       "category": "array",
-      "mir": 0.547,
+      "mir": 0.62,
       "c2mir": 5.78,
       "lambdajs": 0.554958328125,
       "quickjs": 36.909,
@@ -397,7 +397,7 @@
     },
     "deriv": {
       "category": "symbolic",
-      "mir": 20.092,
+      "mir": 23.334,
       "c2mir": 20.621,
       "lambdajs": 893.7985,
       "quickjs": 69.215,
@@ -406,7 +406,7 @@
     },
     "diviter": {
       "category": "iterative",
-      "mir": 271.504,
+      "mir": 292.221,
       "c2mir": 271.292,
       "lambdajs": 61969.2635833359,
       "quickjs": 26852.822,
@@ -415,7 +415,7 @@
     },
     "divrec": {
       "category": "recursive",
-      "mir": 0.845,
+      "mir": 0.92,
       "c2mir": 7.353,
       "lambdajs": 0.820625,
       "quickjs": 38.272,
@@ -424,7 +424,7 @@
     },
     "gcbench": {
       "category": "allocation",
-      "mir": 468.515,
+      "mir": 444.976,
       "c2mir": 438.727,
       "lambdajs": 2864.28208333594,
       "quickjs": 667.433,
@@ -433,7 +433,7 @@
     },
     "paraffins": {
       "category": "combinat",
-      "mir": 0.326,
+      "mir": 0.355,
       "c2mir": 0.92,
       "lambdajs": 6.1160833359375,
       "quickjs": 2.837,
@@ -442,7 +442,7 @@
     },
     "pnpoly": {
       "category": "numeric",
-      "mir": 58.511,
+      "mir": 68.532,
       "c2mir": 52.619,
       "lambdajs": 312.200166664063,
       "quickjs": 206.262,
@@ -451,7 +451,7 @@
     },
     "primes": {
       "category": "iterative",
-      "mir": 7.162,
+      "mir": 8.226,
       "c2mir": 9.69,
       "lambdajs": 25.5154583359375,
       "quickjs": 97.374,
@@ -460,7 +460,7 @@
     },
     "puzzle": {
       "category": "search",
-      "mir": 3.756,
+      "mir": 4.22,
       "c2mir": 16.834,
       "lambdajs": 81.66475,
       "quickjs": 29.209,
@@ -469,7 +469,7 @@
     },
     "quicksort": {
       "category": "sorting",
-      "mir": 3.116,
+      "mir": 3.724,
       "c2mir": 6.813,
       "lambdajs": 55.195458328125,
       "quickjs": 19.12,
@@ -478,7 +478,7 @@
     },
     "ray": {
       "category": "numeric",
-      "mir": 7.1,
+      "mir": 7.352,
       "c2mir": 6.896,
       "lambdajs": 39.916875,
       "quickjs": 14.251,
@@ -489,7 +489,7 @@
   "jetstream": {
     "nbody": {
       "category": "numeric",
-      "mir": 47.158,
+      "mir": 53.816,
       "c2mir": 84.928,
       "lambdajs": 1862.657,
       "quickjs": null,
@@ -498,7 +498,7 @@
     },
     "cube3d": {
       "category": "3d",
-      "mir": 23.524,
+      "mir": 26.323,
       "c2mir": 81.107,
       "lambdajs": 20.79,
       "quickjs": 228.5,
@@ -507,7 +507,7 @@
     },
     "navier_stokes": {
       "category": "numeric",
-      "mir": 823.242,
+      "mir": 931.895,
       "c2mir": 808.502,
       "lambdajs": 0.228,
       "quickjs": 95.1,
@@ -516,7 +516,7 @@
     },
     "richards": {
       "category": "macro",
-      "mir": 259.38,
+      "mir": 295.016,
       "c2mir": 244.978,
       "lambdajs": 566.228,
       "quickjs": null,
@@ -525,7 +525,7 @@
     },
     "splay": {
       "category": "data",
-      "mir": 164.758,
+      "mir": 186.212,
       "c2mir": null,
       "lambdajs": 48.877,
       "quickjs": 198.7,
@@ -534,7 +534,7 @@
     },
     "deltablue": {
       "category": "macro",
-      "mir": 17.399,
+      "mir": 19.756,
       "c2mir": 18.004,
       "lambdajs": 47.905,
       "quickjs": null,
@@ -543,7 +543,7 @@
     },
     "hashmap": {
       "category": "data",
-      "mir": 106.171,
+      "mir": 124.031,
       "c2mir": 105.82,
       "lambdajs": null,
       "quickjs": 323.2,
@@ -552,7 +552,7 @@
     },
     "crypto_sha1": {
       "category": "crypto",
-      "mir": 16.546,
+      "mir": 18.234,
       "c2mir": 20.282,
       "lambdajs": 143.563,
       "quickjs": 222.1,
@@ -561,7 +561,7 @@
     },
     "raytrace3d": {
       "category": "3d",
-      "mir": 348.372,
+      "mir": 375.074,
       "c2mir": 435.134,
       "lambdajs": 719.71,
       "quickjs": 170.5,

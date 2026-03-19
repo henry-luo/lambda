@@ -12,6 +12,7 @@ String* create_string(Pool* pool, const char* str) {
     String* string = (String*)pool_calloc(pool, sizeof(String) + len + 1);
     if (!string) return NULL;
 
+    string->type_id = STRING_TYPE_ID;
     string->len = (uint32_t)len;
     string->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     str_copy(string->chars, len + 1, str, len);
@@ -27,6 +28,7 @@ String* string_from_strview(StrView view, Pool* pool) {
     String* string = (String*)pool_calloc(pool, sizeof(String) + view.length + 1);
     if (!string) return NULL;
 
+    string->type_id = STRING_TYPE_ID;
     string->len = (uint32_t)view.length;
     if (view.length > 0) {
         string->is_ascii = str_is_ascii(view.str, view.length) ? 1 : 0;

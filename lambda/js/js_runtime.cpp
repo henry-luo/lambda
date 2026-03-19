@@ -724,7 +724,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
         Item result = ItemNull;
-        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+        if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();
             int key_len = (int)key.get_len();
             result = js_map_get_fast(object.map, key_str, key_len);
@@ -738,7 +738,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         // Getter property fallback: check for __get_<propName> on object or prototype
         // Only check for getter if the key doesn't start with '_' (private properties
         // never have getters) and is short enough to be a getter name
-        if (result.item == ItemNull.item && key._type_id == LMD_TYPE_STRING) {
+        if (result.item == ItemNull.item && get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
                 char getter_key[256];

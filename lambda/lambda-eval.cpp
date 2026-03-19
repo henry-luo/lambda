@@ -346,8 +346,8 @@ String *str_repeat(String *str, int64_t times) {
 // Unicode string normalization function
 Item fn_normalize(Item str_item, Item type_item) {
     // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
-    if (str_item._type_id != LMD_TYPE_STRING) {
-        log_debug("normalize: first argument must be a string, got type: %s", get_type_name(str_item._type_id));
+    if (get_type_id(str_item) != LMD_TYPE_STRING) {
+        log_debug("normalize: first argument must be a string, got type: %s", get_type_name(get_type_id(str_item)));
         return ItemError;
     }
 
@@ -359,7 +359,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     // Default to NFC if no type specified or invalid type
     int options = UTF8PROC_STABLE | UTF8PROC_COMPOSE;
 
-    if (type_item._type_id == LMD_TYPE_STRING) {
+    if (get_type_id(type_item) == LMD_TYPE_STRING) {
         String* type_str = type_item.get_string();
         if (type_str && type_str->len > 0) {
             if (strncmp(type_str->chars, "nfd", 3) == 0) {
@@ -1136,6 +1136,26 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         return BOOL_ERROR;
     }
 
+    // When both _type_id are 0 (RAW_POINTER), resolve actual types.
+    // String/Symbol/Binary and containers all have _type_id == 0 but are different types.
+    if (a_item._type_id == LMD_TYPE_RAW_POINTER && b_item._type_id == LMD_TYPE_RAW_POINTER) {
+        TypeId a_tid = get_type_id(a_item);
+        TypeId b_tid = get_type_id(b_item);
+        if (a_tid != b_tid) {
+            // cross-type sequence comparison
+            bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY_INT ||
+                             a_tid == LMD_TYPE_ARRAY_INT64 || a_tid == LMD_TYPE_ARRAY_FLOAT ||
+                             a_tid == LMD_TYPE_RANGE);
+            bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY_INT ||
+                             b_tid == LMD_TYPE_ARRAY_INT64 || b_tid == LMD_TYPE_ARRAY_FLOAT ||
+                             b_tid == LMD_TYPE_RANGE);
+            if (a_is_seq && b_is_seq) {
+                return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
+            }
+            return BOOL_ERROR;
+        }
+    }
+
     if (a_item._type_id == LMD_TYPE_NULL) {
         return BOOL_TRUE; // null == null
     }
@@ -1159,7 +1179,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         return (datetime_compare(&dt_a, &dt_b) == 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_BINARY) {
+    else if (get_type_id(a_item) == LMD_TYPE_STRING || get_type_id(a_item) == LMD_TYPE_BINARY) {
         // pointer identity fast-path (interned strings, same allocation)
         if (a_item.string_ptr == b_item.string_ptr) return BOOL_TRUE;
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
@@ -1167,7 +1187,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         bool result = (len_a == len_b && memcmp(chars_a, chars_b, len_a) == 0);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(a_item) == LMD_TYPE_SYMBOL) {
         // for symbols, also compare namespace
         Symbol* sym_a = (Symbol*)a_item.symbol_ptr;
         Symbol* sym_b = (Symbol*)b_item.symbol_ptr;
@@ -1294,14 +1314,16 @@ Bool fn_ne(Item a_item, Item b_item) {
 
 // 3-state value/ordered comparison
 Bool fn_lt(Item a_item, Item b_item) {
-    if (a_item._type_id != b_item._type_id) {
+    TypeId a_tid = get_type_id(a_item);
+    TypeId b_tid = get_type_id(b_item);
+    if (a_tid != b_tid) {
         // null comparison with any type returns false for ordered comparisons
-        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
+        if (a_tid == LMD_TYPE_NULL || b_tid == LMD_TYPE_NULL) {
             return BOOL_FALSE;
         }
         // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
+        if (LMD_TYPE_INT <= a_tid && a_tid <= LMD_TYPE_NUMBER &&
+            LMD_TYPE_INT <= b_tid && b_tid <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1309,49 +1331,51 @@ Bool fn_lt(Item a_item, Item b_item) {
         return BOOL_ERROR;
     }
 
-    if (a_item._type_id == LMD_TYPE_NULL) {
+    if (a_tid == LMD_TYPE_NULL) {
         return BOOL_FALSE;  // null < null = false
     }
-    else if (a_item._type_id == LMD_TYPE_BOOL) {
+    else if (a_tid == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
-    else if (a_item._type_id == LMD_TYPE_INT) {
+    else if (a_tid == LMD_TYPE_INT) {
         return (a_item.get_int56() < b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_INT64) {
+    else if (a_tid == LMD_TYPE_INT64) {
         return (a_item.get_int64() < b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_FLOAT) {
+    else if (a_tid == LMD_TYPE_FLOAT) {
         return (a_item.get_double() < b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_DECIMAL) {
+    else if (a_tid == LMD_TYPE_DECIMAL) {
         int cmp = decimal_cmp_items(a_item, b_item);
         return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_DTIME) {
+    else if (a_tid == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         return (datetime_compare(&dt_a, &dt_b) < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
-        a_item._type_id == LMD_TYPE_BINARY) {
+    else if (a_tid == LMD_TYPE_STRING || a_tid == LMD_TYPE_SYMBOL ||
+        a_tid == LMD_TYPE_BINARY) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
         bool result = strcmp(chars_a, chars_b) < 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
-    log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
+    log_error("unknown comparing type: %s", get_type_name(a_tid));
     return BOOL_ERROR;
 }
 
 // 3-state value/ordered comparison
 Bool fn_gt(Item a_item, Item b_item) {
-    if (a_item._type_id != b_item._type_id) {
+    TypeId a_tid = get_type_id(a_item);
+    TypeId b_tid = get_type_id(b_item);
+    if (a_tid != b_tid) {
         // null comparison with any type returns false for ordered comparisons
-        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
+        if (a_tid == LMD_TYPE_NULL || b_tid == LMD_TYPE_NULL) {
             return BOOL_FALSE;
         }
         // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
+        if (LMD_TYPE_INT <= a_tid && a_tid <= LMD_TYPE_NUMBER &&
+            LMD_TYPE_INT <= b_tid && b_tid <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1359,36 +1383,36 @@ Bool fn_gt(Item a_item, Item b_item) {
         return BOOL_ERROR;
     }
 
-    if (a_item._type_id == LMD_TYPE_NULL) {
+    if (a_tid == LMD_TYPE_NULL) {
         return BOOL_FALSE;  // null > null = false
     }
-    else if (a_item._type_id == LMD_TYPE_BOOL) {
+    else if (a_tid == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
-    else if (a_item._type_id == LMD_TYPE_INT) {
+    else if (a_tid == LMD_TYPE_INT) {
         return (a_item.get_int56() > b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_INT64) {
+    else if (a_tid == LMD_TYPE_INT64) {
         return (a_item.get_int64() > b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_FLOAT) {
+    else if (a_tid == LMD_TYPE_FLOAT) {
         return (a_item.get_double() > b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_DECIMAL) {
+    else if (a_tid == LMD_TYPE_DECIMAL) {
         int cmp = decimal_cmp_items(a_item, b_item);
         return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_DTIME) {
+    else if (a_tid == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         return (datetime_compare(&dt_a, &dt_b) > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
-        a_item._type_id == LMD_TYPE_BINARY) {
+    else if (a_tid == LMD_TYPE_STRING || a_tid == LMD_TYPE_SYMBOL ||
+        a_tid == LMD_TYPE_BINARY) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
         bool result = strcmp(chars_a, chars_b) > 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
-    log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
+    log_error("unknown comparing type: %s", get_type_name(a_tid));
     return BOOL_ERROR;
 }
 
@@ -1656,13 +1680,13 @@ Item fn_child_query(Item data, Item type_val) {
 }
 
 Bool fn_in(Item a_item, Item b_item) {
-    if (b_item._type_id) { // b is scalar
-        if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
-            String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
-            return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
-        }
+    TypeId b_tid = get_type_id(b_item);
+    TypeId a_tid = get_type_id(a_item);
+    if (b_tid == LMD_TYPE_STRING && a_tid == LMD_TYPE_STRING) {
+        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
+        return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
     }
-    else { // b is container
+    if (b_tid >= LMD_TYPE_RANGE) { // b is container type
         TypeId b_type = b_item.container->type_id;
         if (b_type == LMD_TYPE_ARRAY) {
             List *list = b_item.list;
@@ -1773,10 +1797,10 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-String STR_NULL = {.len = 4, .is_ascii = 1, .chars = "null"};
-String STR_TRUE = {.len = 4, .is_ascii = 1, .chars = "true"};
-String STR_FALSE = {.len = 5, .is_ascii = 1, .chars = "false"};
-String STR_ERROR = {.len = 7, .is_ascii = 1, .chars = "<error>"};
+String STR_NULL = {.type_id = LMD_TYPE_STRING, .is_ascii = 1, .len = 4, .chars = "null"};
+String STR_TRUE = {.type_id = LMD_TYPE_STRING, .is_ascii = 1, .len = 4, .chars = "true"};
+String STR_FALSE = {.type_id = LMD_TYPE_STRING, .is_ascii = 1, .len = 5, .chars = "false"};
+String STR_ERROR = {.type_id = LMD_TYPE_STRING, .is_ascii = 1, .len = 7, .chars = "<error>"};
 
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
@@ -2503,6 +2527,10 @@ Item fn_index(Item item, Item index_item) {
             }
             return ItemNull;
         }
+        // string/symbol: delegate to member access (now that _type_id is 0 for direct pointers)
+        if (index_type == LMD_TYPE_STRING || index_type == LMD_TYPE_SYMBOL) {
+            return fn_member(item, index_item);
+        }
         // for VMap, support arbitrary key types (int, float, etc.)
         TypeId item_type = get_type_id(item);
         if (item_type == LMD_TYPE_VMAP) {
@@ -2538,7 +2566,7 @@ Item fn_member(Item item, Item key) {
             }
 
             // path metadata and structural property access
-            if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+            if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
                 String* key_str = key.get_string();
                 if (key_str) {
                     const char* k = key_str->chars;
@@ -2719,7 +2747,8 @@ Item fn_member(Item item, Item key) {
         // First try field access
         bool is_found = false;
         char* key_str = NULL;
-        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+        TypeId key_tid2 = get_type_id(key);
+        if (key_tid2 == LMD_TYPE_STRING || key_tid2 == LMD_TYPE_SYMBOL) {
             key_str = (char*)key.get_chars();
         }
         if (key_str) {
@@ -2774,7 +2803,8 @@ Item fn_member(Item item, Item key) {
     }
     case LMD_TYPE_ARRAY: {
         // Handle built-in properties for List type
-        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+        TypeId key_tid3 = get_type_id(key);
+        if (key_tid3 == LMD_TYPE_STRING || key_tid3 == LMD_TYPE_SYMBOL) {
             const char* k = key.get_chars();
             if (k && strcmp(k, "length") == 0) {
                 List *list = item.list;

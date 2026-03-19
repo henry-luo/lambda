@@ -650,10 +650,11 @@ Item map_get(Map* map, Item key) {
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+    TypeId key_tid = get_type_id(key);
+    if (key_tid == LMD_TYPE_STRING || key_tid == LMD_TYPE_SYMBOL) {
         key_str = (char*)key.get_chars();
     } else {
-        log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
+        log_error("map_get: key must be string or symbol, got type %s", get_type_name(key_tid));
         return ItemNull;  // only string or symbol keys are supported
     }
     return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
@@ -719,10 +720,11 @@ Item object_get(Object* obj, Item key) {
     if (!obj || !key.item) { return ItemNull; }
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+    TypeId key_tid = get_type_id(key);
+    if (key_tid == LMD_TYPE_STRING || key_tid == LMD_TYPE_SYMBOL) {
         key_str = (char*)key.get_chars();
     } else {
-        log_error("object_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
+        log_error("object_get: key must be string or symbol, got type %s", get_type_name(key_tid));
         return ItemNull;
     }
     return _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
@@ -790,7 +792,8 @@ Item elmt_get(Element* elmt, Item key) {
     if (!elmt || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+    TypeId key_tid = get_type_id(key);
+    if (key_tid == LMD_TYPE_STRING || key_tid == LMD_TYPE_SYMBOL) {
         key_str = (char*)key.get_chars();
     } else {
         return ItemNull;  // only string or symbol keys are supported

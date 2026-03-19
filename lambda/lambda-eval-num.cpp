@@ -1548,7 +1548,7 @@ Item fn_pos(Item item) {
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // For decimal, unary + returns the same value
     }
-    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
@@ -1601,7 +1601,7 @@ Item fn_neg(Item item) {
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         return decimal_neg(item, context);
     }
-    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
@@ -1667,7 +1667,7 @@ Item fn_int(Item item) {
         }
         return {.item = i2it((int32_t)result)};
     }
-    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
@@ -1716,7 +1716,7 @@ int64_t fn_int64(Item item) {
         // Convert decimal to int64 using centralized function
         return decimal_to_int64(item);
     }
-    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
@@ -1756,7 +1756,7 @@ Item fn_decimal(Item item) {
     else if (item._type_id == LMD_TYPE_FLOAT) {
         return decimal_from_double(item.get_double(), context);
     }
-    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
@@ -1784,10 +1784,10 @@ Item fn_decimal(Item item) {
 Item fn_binary(Item item) {
     GUARD_ERROR1(item);
     // Convert item to binary (string) type
-    if (item._type_id == LMD_TYPE_STRING) {
+    if (get_type_id(item) == LMD_TYPE_STRING) {
         return item;  // Already a string (binary is stored as string)
     }
-    else if (item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_SYMBOL) {
         // Convert symbol to string
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
@@ -1889,10 +1889,10 @@ extern "C" Symbol* fn_symbol(Item item) {
         log_debug("fn_symbol: error item received");
         return NULL;
     }
-    if (item._type_id == LMD_TYPE_SYMBOL) {
+    if (get_type_id(item) == LMD_TYPE_SYMBOL) {
         return item.get_symbol();  // Already a symbol
     }
-    else if (item._type_id == LMD_TYPE_STRING) {
+    else if (get_type_id(item) == LMD_TYPE_STRING) {
         // Convert string to symbol
         String* str = item.get_string();
         if (!str) {
@@ -1979,7 +1979,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     const char* name_str = nullptr;
     size_t name_len = 0;
 
-    if (name_item._type_id == LMD_TYPE_STRING) {
+    if (get_type_id(name_item) == LMD_TYPE_STRING) {
         String* str = name_item.get_string();
         if (!str) {
             log_error("fn_symbol2: null name string");
@@ -1988,7 +1988,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
         name_str = str->chars;
         name_len = str->len;
     }
-    else if (name_item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(name_item) == LMD_TYPE_SYMBOL) {
         Symbol* sym = name_item.get_symbol();
         if (!sym) {
             log_error("fn_symbol2: null name symbol");
@@ -2063,7 +2063,7 @@ Item fn_float(Item item) {
         *val = dval;
         return (Item) { .item = d2it(val) };
     }
-    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
+    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {

@@ -342,10 +342,13 @@ typedef struct Item Item;
 #endif
 
 // a fat string with prefixed length and flags
+// type_id is now at offset 0 (matches Container layout: direct C pointer, no high-byte tagging)
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
-    uint32_t len;       // byte length of the string
+    uint8_t type_id;    // LMD_TYPE_STRING or LMD_TYPE_BINARY — at offset 0 for direct-pointer dispatch
     uint8_t is_ascii;   // 1 if all bytes < 0x80, 0 otherwise (enables O(1) indexing)
+    uint8_t _pad[2];    // explicit padding to align len at offset 4
+    uint32_t len;       // byte length of the string
     char chars[];       // UTF-8 string data (null-terminated)
 } String;
 #define STRING_STRUCT_DEFINED
@@ -354,11 +357,13 @@ typedef struct String {
 typedef struct Target Target;  // forward declaration for Symbol.ns
 
 typedef struct Symbol {
+    uint8_t type_id;    // LMD_TYPE_SYMBOL — at offset 0 for direct-pointer dispatch
+    uint8_t _pad[3];    // explicit padding to align len at offset 4
     uint32_t len;       // symbol name length
     Target* ns;         // namespace target (NULL for unqualified symbols)
     char chars[];       // symbol name characters
 } Symbol;
-typedef String Binary;  // Binary is just a String
+typedef String Binary;  // Binary is just a String (distinguished by type_id = LMD_TYPE_BINARY)
 
 // Array and List struct defintions needed for for-loop
 struct Container {
@@ -614,9 +619,11 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
 #define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): ITEM_NULL)
-#define s2it(str_ptr)        ((str_ptr)? ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr)): ITEM_NULL)
-#define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)
-#define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): ITEM_NULL)
+// String/Symbol/Binary: direct C pointer (no high-byte type tag) — type_id is in struct at offset 0
+// Returns uint64_t (plain pointer) for compatibility with {.item = s2it(ptr)} patterns
+#define s2it(str_ptr)        ((str_ptr) ? (uint64_t)(uintptr_t)(str_ptr) : ITEM_NULL)
+#define y2it(sym_ptr)        ((sym_ptr) ? (uint64_t)(uintptr_t)(sym_ptr) : ITEM_NULL)
+#define x2it(bin_ptr)        ((bin_ptr) ? (uint64_t)(uintptr_t)(bin_ptr) : ITEM_NULL)
 #define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): ITEM_NULL)
 
 // ============================================================================

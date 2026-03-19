@@ -27,6 +27,7 @@ static bool ascii_char_table_initialized = false;
 static void init_ascii_char_table() {
     for (int i = 0; i < 128; i++) {
         String* s = (String*)(ascii_char_storage + i * ASCII_CHAR_ENTRY_SIZE);
+        s->type_id = LMD_TYPE_STRING;
         s->len = 1;
         s->is_ascii = 1;
         s->chars[0] = (char)i;
@@ -115,6 +116,8 @@ void* heap_alloc(int size, TypeId type_id) {
         log_error("failed to allocate memory for heap entry");
         return NULL;
     }
+    // set struct type_id field at offset 0 — required for direct-pointer types (String, Symbol, Binary)
+    *((TypeId*)data) = type_id;
     return data;
 }
 

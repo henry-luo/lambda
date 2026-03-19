@@ -388,6 +388,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 
     // Store source pattern for debugging
     pattern->source = (String*)pool_calloc(pool, sizeof(String) + regex->length + 1);
+    pattern->source->type_id = LMD_TYPE_STRING;
     pattern->source->len = regex->length;
     memcpy(pattern->source->chars, regex->str, regex->length + 1);
 

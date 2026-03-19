@@ -1077,6 +1077,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     sym_type->is_literal = 1;
                     // Allocate Symbol struct (has ns field)
                     Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
+                    sym->type_id = LMD_TYPE_SYMBOL;
                     sym->ns = ns_entry->target;  // set namespace target
                     sym->len = total_len;
                     memcpy(sym->chars, buf, total_len);
@@ -1893,6 +1894,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         str->chars[content_len] = '\0';
         str->len = content_len;
         str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
+        str->type_id = LMD_TYPE_BINARY;
 
         arraylist_append(tp->const_list, str);
         str_type->const_index = tp->const_list->length - 1;
@@ -1939,6 +1941,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         if (symbol == SYM_SYMBOL) {
             // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
+            sym->type_id = LMD_TYPE_SYMBOL;
             sym->ns = NULL;
             memcpy(sym->chars, content_start, content_len);
             sym->chars[content_len] = '\0';
@@ -1950,6 +1953,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
             str->chars[content_len] = '\0';
             str->len = content_len;
             str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
+            str->type_id = LMD_TYPE_STRING;
         }
         str_type->string = str;
     }
@@ -2130,6 +2134,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
         // Convert StringBuf to String
         str = stringbuf_to_string(str_buf);
+        str->type_id = LMD_TYPE_STRING;  // set type_id (not set by stringbuf_to_string)
         str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
         log_debug("final string: %.*s", str->len, str->chars);
 
@@ -2143,6 +2148,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         if (symbol == SYM_SYMBOL) {
             int slen = str->len;
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
+            sym->type_id = LMD_TYPE_SYMBOL;
             sym->ns = NULL;
             memcpy(sym->chars, str->chars, slen);
             sym->chars[slen] = '\0';

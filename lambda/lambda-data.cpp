@@ -270,7 +270,7 @@ bool it2b(Item itm) {
         double d = itm.get_double();
         return !isnan(d) && d != 0.0;
     }
-    else if (itm._type_id == LMD_TYPE_STRING) {
+    else if (get_type_id(itm) == LMD_TYPE_STRING) {
         String* str = itm.get_string();
         return str && str->len > 0;
     }
@@ -320,11 +320,12 @@ int64_t it2l(Item itm) {
 }
 
 String* it2s(Item itm) {
-    if (itm._type_id == LMD_TYPE_STRING) {
+    TypeId tid = get_type_id(itm);
+    if (tid == LMD_TYPE_STRING) {
         return itm.get_string();
     }
-    if (itm._type_id == LMD_TYPE_ERROR) {
-        static String str_err = {.len = 7, .is_ascii = 1, .chars = "<error>"};
+    if (tid == LMD_TYPE_ERROR) {
+        static String str_err = {.type_id = LMD_TYPE_STRING, .is_ascii = 1, .len = 7, .chars = "<error>"};
         return &str_err;
     }
     // For other types, we'd need to convert to string
@@ -336,7 +337,7 @@ String* it2s(Item itm) {
 // Returns the chars pointer from a string/symbol
 // For other types, returns empty string (path segments must be strings)
 const char* fn_to_cstr(Item itm) {
-    TypeId type_id = itm._type_id;
+    TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         return itm.get_chars();
     }
@@ -997,16 +998,17 @@ ConstItem Map::get(const Item key) const {
     bool is_found;
     char *key_str = NULL;
     Target* key_ns = NULL;
-    if (key._type_id == LMD_TYPE_STRING) {
-        String* str = (String*)key.string_ptr;
+    TypeId key_tid = get_type_id(key);
+    if (key_tid == LMD_TYPE_STRING) {
+        String* str = key.get_string();
         key_str = str->chars;
         // strings don't have namespace
-    } else if (key._type_id == LMD_TYPE_SYMBOL) {
-        Symbol* sym = (Symbol*)key.symbol_ptr;
+    } else if (key_tid == LMD_TYPE_SYMBOL) {
+        Symbol* sym = key.get_symbol();
         key_str = sym->chars;
         key_ns = sym->ns;
     } else {
-        log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key._type_id));
+        log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key_tid));
         return null_result;  // only string or symbol keys are supported
     }
     return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found, key_ns);
@@ -1058,12 +1060,13 @@ ConstItem Element::get_attr(const Item key) const {
     bool is_found;
     char *key_str = NULL;
     Target* key_ns = NULL;
-    if (key._type_id == LMD_TYPE_STRING) {
-        String* str = (String*)key.string_ptr;
+    TypeId key_tid2 = get_type_id(key);
+    if (key_tid2 == LMD_TYPE_STRING) {
+        String* str = key.get_string();
         key_str = str->chars;
         // strings don't have namespace
-    } else if (key._type_id == LMD_TYPE_SYMBOL) {
-        Symbol* sym = (Symbol*)key.symbol_ptr;
+    } else if (key_tid2 == LMD_TYPE_SYMBOL) {
+        Symbol* sym = key.get_symbol();
         key_str = sym->chars;
         key_ns = sym->ns;
     } else {
