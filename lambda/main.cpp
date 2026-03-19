@@ -1786,6 +1786,7 @@ int main(int argc, char *argv[]) {
             free(temp_file_path);
         }
 
+        fprintf(stderr, "view command completed with result: %d\n", exit_code);
         log_debug("view command completed with result: %d", exit_code);
         log_finish();
         return exit_code;

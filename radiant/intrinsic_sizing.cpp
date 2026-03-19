@@ -62,6 +62,11 @@ static float get_border_width_from_css(LayoutContext* lycon, DomElement* element
 }
 
 // ============================================================================
+// Forward declarations for functions defined in other files
+// ============================================================================
+CssEnum get_white_space_value(DomNode* node);
+
+// ============================================================================
 // Text Measurement (Core Implementation)
 // ============================================================================
 
@@ -1415,6 +1420,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
+                // white-space: nowrap/pre prevents line breaks, so min-content = max-content
+                {
+                    CssEnum ws = get_white_space_value(child);
+                    if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
+                        child_sizes.min_content = child_sizes.max_content;
+                    }
+                }
+
                 // In vertical writing mode, text flows top-to-bottom.
                 // Physical width = font_size (one column of characters),
                 // physical height = text inline extent.
@@ -2140,11 +2153,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             float text_width = widths.max_content;
 
             // Calculate number of lines (rounded up)
+            // white-space: nowrap/pre prevents text wrapping → always 1 line
             // Use min_content (widest word/break unit) to estimate word-boundary waste:
             // text wraps at word boundaries, so each line's effective width is
             // floor(available_width / word_width) * word_width, not the full available_width.
             int num_lines = 1;
-            if (text_width > width) {
+            CssEnum ws_val = get_white_space_value(node);
+            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width) {
                 float effective_width = width;
                 if (widths.min_content > 0 && widths.min_content <= width) {
                     int units_per_line = (int)(width / widths.min_content);
@@ -2171,6 +2186,33 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     float height = 0;
     ViewBlock* view = (ViewBlock*)element;
+
+    // Set up element's own font context for accurate text measurement.
+    // child text nodes inherit lycon->font, so we must set the element's font
+    // before processing children (mirrors the logic in measure_element_intrinsic_widths).
+    FontBox saved_font_h = lycon->font;
+    bool height_font_changed = false;
+    if (view->font && lycon->ui_context) {
+        setup_font(lycon->ui_context, &lycon->font, view->font);
+        height_font_changed = true;
+    } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
+        CssDeclaration* font_size_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_FONT_SIZE);
+        if (font_size_decl && font_size_decl->value &&
+            font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
+                                                       font_size_decl->value);
+            if (resolved_size > 0 && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
+                FontProp* tfp = alloc_font_prop(lycon);
+                if (tfp) {
+                    tfp->family = lycon->font.style ? lycon->font.style->family : nullptr;
+                    tfp->font_size = resolved_size;
+                    setup_font(lycon->ui_context, &lycon->font, tfp);
+                    height_font_changed = true;
+                }
+            }
+        }
+    }
 
     // Check for explicit height from CSS (e.g., iframe with height: 580px)
     if (view->blk && view->blk->given_height > 0) {
@@ -2734,6 +2776,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     height += pad_top + pad_bottom + border_top + border_bottom;
 
+    if (height_font_changed) lycon->font = saved_font_h;
     return height;
 }
 
