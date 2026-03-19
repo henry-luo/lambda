@@ -66,9 +66,9 @@ public:
     MarkBuilder(const MarkBuilder&) = delete;
     MarkBuilder& operator=(const MarkBuilder&) = delete;
 
-    // movable (for return value optimization)
-    MarkBuilder(MarkBuilder&&) = default;
-    MarkBuilder& operator=(MarkBuilder&&) = default;
+    // non-movable (never used in practice - always stack-allocated in place)
+    MarkBuilder(MarkBuilder&&) = delete;
+    MarkBuilder& operator=(MarkBuilder&&) = delete;
 
     // ============================================================================
     // Name Creation Methods (always use name_pool for deduplication)
@@ -307,8 +307,6 @@ private:
     MarkBuilder* builder_;      // parent builder
     String* tag_name_;          // element tag name
     Element* elmt_;             // element being built (pool-allocated)
-    // TypeMap* attr_type_;        // attribute type descriptor
-    ElementBuilder* parent_;    // for nested elements (stack reference)
 
     friend class MarkBuilder;
 
@@ -323,11 +321,11 @@ public:
      */
     ~ElementBuilder();
 
-    // copyable and movable (for value semantics)
-    ElementBuilder(const ElementBuilder&) = default;
-    ElementBuilder& operator=(const ElementBuilder&) = default;
-    ElementBuilder(ElementBuilder&&) = default;
-    ElementBuilder& operator=(ElementBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    ElementBuilder(const ElementBuilder&) = delete;
+    ElementBuilder& operator=(const ElementBuilder&) = delete;
+    ElementBuilder(ElementBuilder&&) = delete;
+    ElementBuilder& operator=(ElementBuilder&&) = delete;
 
     // ============================================================================
     // Attribute Setters (return reference for chaining)
@@ -410,22 +408,6 @@ public:
     ElementBuilder& children(std::initializer_list<Item> items);
 
     // ============================================================================
-    // Nested Element Building
-    // ============================================================================
-
-    /**
-     * Begin a nested child element
-     * Returns new ElementBuilder by value (stack-allocated)
-     */
-    ElementBuilder beginChild(const char* tag_name);
-
-    /**
-     * End nested element and return to parent
-     * Returns reference to parent for chaining
-     */
-    ElementBuilder& end();
-
-    // ============================================================================
     // Finalization (returns final Element from arena)
     // ============================================================================
 
@@ -463,11 +445,11 @@ public:
      */
     ~MapBuilder();
 
-    // copyable and movable (for value semantics)
-    MapBuilder(const MapBuilder&) = default;
-    MapBuilder& operator=(const MapBuilder&) = default;
-    MapBuilder(MapBuilder&&) = default;
-    MapBuilder& operator=(MapBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    MapBuilder(const MapBuilder&) = delete;
+    MapBuilder& operator=(const MapBuilder&) = delete;
+    MapBuilder(MapBuilder&&) = delete;
+    MapBuilder& operator=(MapBuilder&&) = delete;
 
     // ============================================================================
     // Key-Value Setters (return reference for chaining)
@@ -564,11 +546,11 @@ public:
      */
     ~ArrayBuilder();
 
-    // copyable and movable (for value semantics)
-    ArrayBuilder(const ArrayBuilder&) = default;
-    ArrayBuilder& operator=(const ArrayBuilder&) = default;
-    ArrayBuilder(ArrayBuilder&&) = default;
-    ArrayBuilder& operator=(ArrayBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    ArrayBuilder(const ArrayBuilder&) = delete;
+    ArrayBuilder& operator=(const ArrayBuilder&) = delete;
+    ArrayBuilder(ArrayBuilder&&) = delete;
+    ArrayBuilder& operator=(ArrayBuilder&&) = delete;
 
     // ============================================================================
     // Append Operations (return reference for chaining)
@@ -644,11 +626,11 @@ public:
      */
     ~ListBuilder();
 
-    // copyable and movable (for value semantics)
-    ListBuilder(const ListBuilder&) = default;
-    ListBuilder& operator=(const ListBuilder&) = default;
-    ListBuilder(ListBuilder&&) = default;
-    ListBuilder& operator=(ListBuilder&&) = default;
+    // non-copyable, non-movable (C++17 guaranteed copy elision handles all return-by-value cases)
+    ListBuilder(const ListBuilder&) = delete;
+    ListBuilder& operator=(const ListBuilder&) = delete;
+    ListBuilder(ListBuilder&&) = delete;
+    ListBuilder& operator=(ListBuilder&&) = delete;
 
     // ============================================================================
     // Push Operations (return reference for chaining)

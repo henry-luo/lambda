@@ -295,7 +295,6 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     : builder_(builder)
     , tag_name_(builder->createName(tag_name))  // element names are structural identifiers - always pooled
     , elmt_(nullptr)
-    , parent_(nullptr)
 {
     Input* input = builder_->input();
     Element* element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
@@ -404,24 +403,6 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 }
 
 //------------------------------------------------------------------------------
-// Nested Element Building
-//------------------------------------------------------------------------------
-
-ElementBuilder ElementBuilder::beginChild(const char* tag_name) {
-    ElementBuilder child_builder = builder_->element(tag_name);
-    child_builder.parent_ = this;
-    return child_builder;
-}
-
-ElementBuilder& ElementBuilder::end() {
-    if (parent_) {
-        // add this element as child to parent
-        parent_->child(final());
-        return *parent_;
-    }
-    return *this;
-}
-
 Item ElementBuilder::final() {
     // Set content_length to match the number of children in the element
     // This is required for the formatter to properly access children
