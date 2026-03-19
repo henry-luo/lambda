@@ -82,21 +82,21 @@ The Lambda language documentation is organized into focused sub-documents for ea
 
 #### Data Types (see [Lambda_Data.md](Lambda_Data.md))
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `int` | 56-bit signed integer | `42`, `-123` |
-| `float` | 64-bit floating point | `3.14`, `1e-10` |
-| `string` | UTF-8 text | `"hello"` |
-| `symbol` | Interned identifier | `'json` |
-| `bool` | Boolean | `true`, `false` |
-| `path` | File path or URL | `/etc.hosts`, `https.api.com` |
-| `list` | Immutable tuple | `(1, 2, 3)` |
-| `array` | Mutable array | `[1, 2, 3]` |
-| `int[]` | Typed int array | `var a: int[] = [1, 2]` |
-| `float[]` | Typed float array | `var b: float[] = [0.1]` |
-| `map` | Key-value mapping | `{name: "Alice"}` |
-| `object` | Nominally-typed map with methods | `{Point x: 1, y: 2}` |
-| `element` | Markup element | `<div; "content">` |
+| Type      | Description                      | Example                       |
+| --------- | -------------------------------- | ----------------------------- |
+| `int`     | 56-bit signed integer            | `42`, `-123`                  |
+| `float`   | 64-bit floating point            | `3.14`, `1e-10`               |
+| `string`  | UTF-8 text                       | `"hello"`                     |
+| `symbol`  | Interned identifier              | `'json`                       |
+| `bool`    | Boolean                          | `true`, `false`               |
+| `path`    | File path or URL                 | `/etc.hosts`, `https.api.com` |
+| `list`    | Immutable tuple                  | `(1, 2, 3)`                   |
+| `array`   | Mutable array                    | `[1, 2, 3]`                   |
+| `int[]`   | Typed int array                  | `var a: int[] = [1, 2]`       |
+| `float[]` | Typed float array                | `var b: float[] = [0.1]`      |
+| `map`     | Key-value mapping                | `{name: "Alice"}`             |
+| `object`  | Nominally-typed map with methods | `{Point x: 1, y: 2}`          |
+| `element` | Markup element                   | `<div "content">`             |
 
 #### Type System (see [Lambda_Type.md](Lambda_Type.md))
 

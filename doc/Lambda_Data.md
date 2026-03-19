@@ -794,19 +794,19 @@ Structured markup elements with attributes and content, used for document proces
 <div id: "main", class: "container">
 
 // Element with content (after semicolon)
-<p; "Hello, world!">
+<p "Hello, world!">
 
 // Element with attributes and content
-<div class: "header";
-    "Page Title";
-    <span; "Subtitle">
+<div class: "header"
+    "Page Title"
+    <span "Subtitle">
 >
 
 // Complex elements
-<article title: "My Article", author: "John Doe";
-    <h1; "Introduction">
-    <p; "This is the first paragraph.">
-    <p; "This is the second paragraph.">
+<article title: "My Article", author: "John Doe"
+    <h1 "Introduction">
+    <p "This is the first paragraph.">
+    <p "This is the second paragraph.">
 >
 ```
 
@@ -923,19 +923,19 @@ users | ~.name              // ["Alice", "Bob", ...]
 
 ### Spread Operator
 
-The spread operator (`...`) expands collections:
+The spread operator `*` expands collections:
 
 ```lambda
 // Array spread
 let a = [1, 2, 3]
-let b = [0, ...a, 4]        // [0, 1, 2, 3, 4]
+let b = [0, *a, 4]        // [0, 1, 2, 3, 4]
 
 // Map spread (merge)
 let base = {x: 1, y: 2}
-let extended = {...base, z: 3}  // {x: 1, y: 2, z: 3}
+let extended = {*base, z: 3}  // {x: 1, y: 2, z: 3}
 
 // Override values
-let updated = {...base, x: 10}  // {x: 10, y: 2}
+let updated = {*base, x: 10}  // {x: 10, y: 2}
 ```
 
 ### Concatenation
@@ -946,9 +946,6 @@ let updated = {...base, x: 10}  // {x: 10, y: 2}
 
 // String concatenation
 "hello" ++ " " ++ "world"   // "hello world"
-
-// List concatenation
-(1, 2) ++ (3, 4)            // (1, 2, 3, 4)
 
 // Path concatenation
 /home.user ++ "config"      // /home.user.config

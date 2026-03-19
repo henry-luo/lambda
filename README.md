@@ -72,9 +72,9 @@ lambda view
 First-class markup syntax for document generation:
 
 ```lambda
-let card = <div class: "card";
-    <h2; "Title">
-    <p; "Content here.">
+let card = <div class: "card"
+    <h2 "Title">
+    <p "Content here.">
 >
 format(card, 'html')
 ```
@@ -235,7 +235,7 @@ for (row in csv) {
 }
 ```
 
-### Interactive Analysis
+### Interactive/CLI Analysis
 ```lambda
 λ> let data = input("sample.json", 'json')
 λ> data.users.length
