@@ -1146,10 +1146,13 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             } else {
                 // Parent exists but has no definite height - percentage resolves differently:
                 // Per CSS 2.1 §10.7: max-height percentage → 'none', min-height percentage → '0'
-                // height percentage → 'auto' (treated as 0)
+                // Per CSS 2.1 §10.5: height percentage → 'auto'
                 if (effective_property == CSS_PROPERTY_MAX_HEIGHT) {
                     log_debug("percentage max-height %.2f%% resolves to 'none' (parent has no definite height)", percentage);
                     result = NAN;  // NAN → treated as 'none' (-1) by max-height handler
+                } else if (effective_property == CSS_PROPERTY_HEIGHT) {
+                    log_debug("percentage height %.2f%% resolves to 'auto' (parent has no definite height)", percentage);
+                    result = NAN;  // NAN → treated as -1 (auto) by height handler
                 } else {
                     log_debug("percentage height value %.2f%% resolves to 0 (parent has no definite height)", percentage);
                     result = 0.0f;
@@ -3059,6 +3062,42 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         log_debug("[CSS] Text-align: inherit with no parent, using START");
                     }
                 }
+                else if (align_value == CSS_VALUE_MATCH_PARENT) {
+                    // match-parent: inherit parent's text-align, but resolve start/end
+                    // against parent's direction value
+                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                    CssEnum inherited_align = CSS_VALUE_START;
+                    CssEnum parent_dir = CSS_VALUE_LTR;
+
+                    // Find parent's computed text-align
+                    for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
+                        if (p->blk && p->blk->text_align != CSS_VALUE__UNDEF &&
+                            p->blk->text_align != CSS_VALUE_INHERIT &&
+                            p->blk->text_align != CSS_VALUE_MATCH_PARENT) {
+                            inherited_align = p->blk->text_align;
+                            break;
+                        }
+                    }
+
+                    // Find parent's direction
+                    for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
+                        if (p->blk && (p->blk->direction == CSS_VALUE_LTR || p->blk->direction == CSS_VALUE_RTL)) {
+                            parent_dir = p->blk->direction;
+                            break;
+                        }
+                    }
+
+                    // Resolve start/end against parent's direction
+                    if (inherited_align == CSS_VALUE_START) {
+                        block->blk->text_align = (parent_dir == CSS_VALUE_RTL) ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
+                    } else if (inherited_align == CSS_VALUE_END) {
+                        block->blk->text_align = (parent_dir == CSS_VALUE_RTL) ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
+                    } else {
+                        block->blk->text_align = inherited_align;
+                    }
+                    log_debug("[CSS] Text-align: match-parent resolved to %d (parent dir=%d)", block->blk->text_align, parent_dir);
+                }
                 else if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     const CssEnumInfo* info = css_enum_info(align_value);
@@ -3595,6 +3634,54 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->margin.right = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE_END, value);
                 span->bound->margin.right_specificity = specificity;
                 span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MARGIN_TRIM: {
+            log_debug("[CSS] Processing margin-trim property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    break;
+                }
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val == CSS_VALUE_NONE) {
+                    block->blk->margin_trim = 0;
+                } else if (val == CSS_VALUE_BLOCK) {
+                    block->blk->margin_trim = MARGIN_TRIM_BLOCK_START | MARGIN_TRIM_BLOCK_END;
+                } else if (val == CSS_VALUE_INLINE) {
+                    block->blk->margin_trim = MARGIN_TRIM_INLINE_START | MARGIN_TRIM_INLINE_END;
+                } else if (val == CSS_VALUE_BLOCK_START) {
+                    block->blk->margin_trim = MARGIN_TRIM_BLOCK_START;
+                } else if (val == CSS_VALUE_BLOCK_END) {
+                    block->blk->margin_trim = MARGIN_TRIM_BLOCK_END;
+                } else if (val == CSS_VALUE_INLINE_START) {
+                    block->blk->margin_trim = MARGIN_TRIM_INLINE_START;
+                } else if (val == CSS_VALUE_INLINE_END) {
+                    block->blk->margin_trim = MARGIN_TRIM_INLINE_END;
+                }
+                log_debug("[CSS] margin-trim: 0x%02X", block->blk->margin_trim);
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Multi-value: e.g., "block-start block-end"
+                uint8_t trim = 0;
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* v = value->data.list.values[i];
+                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum val = v->data.keyword;
+                        if (val == CSS_VALUE_BLOCK) trim |= MARGIN_TRIM_BLOCK_START | MARGIN_TRIM_BLOCK_END;
+                        else if (val == CSS_VALUE_INLINE) trim |= MARGIN_TRIM_INLINE_START | MARGIN_TRIM_INLINE_END;
+                        else if (val == CSS_VALUE_BLOCK_START) trim |= MARGIN_TRIM_BLOCK_START;
+                        else if (val == CSS_VALUE_BLOCK_END) trim |= MARGIN_TRIM_BLOCK_END;
+                        else if (val == CSS_VALUE_INLINE_START) trim |= MARGIN_TRIM_INLINE_START;
+                        else if (val == CSS_VALUE_INLINE_END) trim |= MARGIN_TRIM_INLINE_END;
+                    }
+                }
+                block->blk->margin_trim = trim;
+                log_debug("[CSS] margin-trim (multi): 0x%02X", trim);
             }
             break;
         }
@@ -5883,6 +5970,53 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_INSET: {
+            log_debug("[CSS] Processing inset shorthand");
+            if (!block) break;
+            if (!block->position) {
+                block->position = alloc_position_prop(lycon);
+            }
+            // inset follows the same 1-4 value expansion as margin/padding
+            float sides[4] = {0, 0, 0, 0};       // top, right, bottom, left
+            float pcts[4] = {NAN, NAN, NAN, NAN}; // percentage values
+            bool is_auto[4] = {false, false, false, false};
+            int count = 1;
+
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (int i = 0; i < count && i < 4; i++) {
+                    if (values[i]->type == CSS_VALUE_TYPE_KEYWORD) {
+                        is_auto[i] = true;
+                    } else {
+                        sides[i] = resolve_length_value(lycon, CSS_PROPERTY_INSET, values[i]);
+                        if (values[i]->type == CSS_VALUE_TYPE_PERCENTAGE)
+                            pcts[i] = values[i]->data.percentage.value;
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                is_auto[0] = true;
+            } else {
+                sides[0] = resolve_length_value(lycon, CSS_PROPERTY_INSET, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE)
+                    pcts[0] = value->data.percentage.value;
+            }
+            // CSS shorthand expansion: 1→all, 2→tb/lr, 3→t/lr/b, 4→t/r/b/l
+            switch (count) {
+            case 1: sides[1]=sides[2]=sides[3]=sides[0]; pcts[1]=pcts[2]=pcts[3]=pcts[0]; is_auto[1]=is_auto[2]=is_auto[3]=is_auto[0]; break;
+            case 2: sides[2]=sides[0]; sides[3]=sides[1]; pcts[2]=pcts[0]; pcts[3]=pcts[1]; is_auto[2]=is_auto[0]; is_auto[3]=is_auto[1]; break;
+            case 3: sides[3]=sides[1]; pcts[3]=pcts[1]; is_auto[3]=is_auto[1]; break;
+            }
+
+            if (!is_auto[0]) { block->position->top = sides[0]; block->position->top_percent = pcts[0]; block->position->has_top = true; } else { block->position->has_top = false; }
+            if (!is_auto[1]) { block->position->right = sides[1]; block->position->right_percent = pcts[1]; block->position->has_right = true; } else { block->position->has_right = false; }
+            if (!is_auto[2]) { block->position->bottom = sides[2]; block->position->bottom_percent = pcts[2]; block->position->has_bottom = true; } else { block->position->has_bottom = false; }
+            if (!is_auto[3]) { block->position->left = sides[3]; block->position->left_percent = pcts[3]; block->position->has_left = true; } else { block->position->has_left = false; }
+
+            log_debug("[CSS] inset: top=%.2f right=%.2f bottom=%.2f left=%.2f", sides[0], sides[1], sides[2], sides[3]);
+            break;
+        }
+
         case CSS_PROPERTY_TOP: {
             log_debug("[CSS] Processing top property");
             if (!block) break;
@@ -6393,13 +6527,55 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
-        case CSS_PROPERTY_WORD_WRAP: {
-            log_debug("[CSS] Processing word-wrap property");
+        case CSS_PROPERTY_LINE_BREAK: {
+            log_debug("[CSS] Processing line-break property");
             if (!block || !block->blk) {
                 if (block) {
                     block->blk = alloc_block_prop(lycon);
                 } else {
-                    log_debug("[CSS] word-wrap: Cannot apply to inline element without block context");
+                    log_debug("[CSS] line-break: Cannot apply to inline element without block context");
+                    break;
+                }
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->blk->line_break = val;
+                    log_debug("[CSS] line-break: %s -> 0x%04X",
+                             css_enum_info(value->data.keyword)->name, val);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TAB_SIZE: {
+            log_debug("[CSS] Processing tab-size property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    log_debug("[CSS] tab-size: Cannot apply to inline element without block context");
+                    break;
+                }
+            }
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int ts = (int)value->data.number.value;
+                if (ts >= 0) {
+                    block->blk->tab_size = ts;
+                    log_debug("[CSS] tab-size: %d", ts);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WORD_WRAP:
+        case CSS_PROPERTY_OVERFLOW_WRAP: {
+            log_debug("[CSS] Processing overflow-wrap/word-wrap property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    log_debug("[CSS] overflow-wrap: Cannot apply to inline element without block context");
                     break;
                 }
             }
@@ -6407,8 +6583,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    // Note: Adding word_wrap field to BlockProp would be needed
-                    log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)",
+                    block->blk->overflow_wrap = val;
+                    log_debug("[CSS] overflow-wrap: %s -> 0x%04X",
                         css_enum_info(value->data.keyword)->name, val);
                 }
             }
@@ -9367,6 +9543,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");
             return;
+        }
+
+        case CSS_PROPERTY_OBJECT_FIT: {
+            log_debug("[CSS] Processing object-fit property");
+            if (!block) break;
+            if (!block->embed) {
+                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val == CSS_VALUE_FILL || val == CSS_VALUE_CONTAIN ||
+                    val == CSS_VALUE_COVER || val == CSS_VALUE_NONE ||
+                    val == CSS_VALUE_SCALE_DOWN) {
+                    block->embed->object_fit = val;
+                    log_debug("[CSS] object-fit: %s -> 0x%04X",
+                        css_enum_info(val)->name, val);
+                }
+            }
+            break;
         }
 
         default:

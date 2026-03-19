@@ -136,6 +136,42 @@ static inline CssEnum get_word_break(LayoutContext* lycon) {
     return CSS_VALUE_NORMAL;  // Default to normal
 }
 
+/**
+ * Get line-break property from the layout context.
+ * Checks block property for the current element or parent elements.
+ */
+static inline CssEnum get_line_break(LayoutContext* lycon) {
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->blk && elem->blk->line_break != 0) {
+                return elem->blk->line_break;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_AUTO;
+}
+
+/**
+ * Get overflow-wrap property from the layout context.
+ * Checks block property for the current element or parent elements.
+ */
+static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->blk && elem->blk->overflow_wrap != 0) {
+                return elem->blk->overflow_wrap;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NORMAL;
+}
+
 // ============================================================================
 // CSS white-space Property Helpers
 // ============================================================================
@@ -913,8 +949,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     // Get word-break property for CJK line breaking
     CssEnum word_break = get_word_break(lycon);
-    bool break_all = (word_break == CSS_VALUE_BREAK_ALL);  // Can break between any characters
-    bool keep_all = (word_break == CSS_VALUE_KEEP_ALL);    // Don't break CJK between letters
+    CssEnum line_break_val = get_line_break(lycon);
+    // line-break: anywhere allows break at any typographic letter unit (CSS Text 3 §5.2)
+    bool break_all = (word_break == CSS_VALUE_BREAK_ALL || line_break_val == CSS_VALUE_ANYWHERE);
+    bool keep_all = (word_break == CSS_VALUE_KEEP_ALL && line_break_val != CSS_VALUE_ANYWHERE);
+
+    // Get overflow-wrap property for emergency word breaking
+    // line-break: anywhere also implies overflow-wrap: anywhere behavior
+    CssEnum overflow_wrap = get_overflow_wrap(lycon);
+    bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD || overflow_wrap == CSS_VALUE_ANYWHERE
+                       || line_break_val == CSS_VALUE_ANYWHERE);
 
     // Get text-transform property
     CssEnum text_transform = get_text_transform(lycon);
@@ -1085,6 +1129,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
+            // Tab characters with preserved whitespace: use tab-size * space_width
+            // Only when whitespace is preserved (pre, pre-wrap, break-spaces)
+            if (codepoint == '\t' && !collapse_spaces) {
+                DomElement* block_elem = lycon->view->is_element() ? static_cast<DomElement*>(lycon->view) : nullptr;
+                int ts = 8;
+                if (block_elem && block_elem->blk && block_elem->blk->tab_size > 0) {
+                    ts = block_elem->blk->tab_size;
+                }
+                wd = lycon->font.style->space_width * ts;
+            }
             // Apply word-spacing to space characters
             wd += lycon->font.style->word_spacing;
             // CSS 2.1 §16.4: letter-spacing applies to every character
@@ -1279,6 +1333,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     while (prev && prev->next != rect) prev = prev->next;
                     if (prev) prev->next = nullptr;
                 }
+                line_break(lycon);
+                goto LAYOUT_TEXT;
+            }
+            // overflow-wrap: break-word/anywhere — emergency mid-word break
+            // when no other break opportunity exists
+            else if (break_word && !lycon->line.is_line_start) {
+                log_debug("overflow-wrap: emergency mid-word break");
+                rect->width -= wd;  // undo the char that overflowed
+                output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
                 line_break(lycon);
                 goto LAYOUT_TEXT;
             }

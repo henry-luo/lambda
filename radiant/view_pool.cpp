@@ -195,6 +195,8 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->direction = lycon->block.direction;  // inherit from parent (CSS 2.1 §9.2.1)
     prop->text_transform = (CssEnum)0;  // 0 = not set, will be inherited if needed
     prop->word_break = (CssEnum)0;      // 0 = not set, treat as CSS_VALUE_NORMAL
+    prop->overflow_wrap = (CssEnum)0;    // 0 = not set, treat as CSS_VALUE_NORMAL
+    prop->tab_size = 8;                  // CSS default tab-size is 8
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
     prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
     prop->given_width = prop->given_height = -1;  // -1 for not specified

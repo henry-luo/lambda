@@ -1564,6 +1564,41 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;
     rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
     rect.width = view->width * s;  rect.height = view->height * s;
+
+    // Apply object-fit: compute actual image render rect
+    CssEnum object_fit = view->embed->object_fit;
+    Rect img_rect = rect;  // default: fill (stretch to container)
+    if (object_fit && object_fit != CSS_VALUE_FILL && img->width > 0 && img->height > 0) {
+        float img_w = (float)img->width;
+        float img_h = (float)img->height;
+        float box_w = rect.width;
+        float box_h = rect.height;
+        float scale_x = box_w / img_w;
+        float scale_y = box_h / img_h;
+        float scale;
+
+        if (object_fit == CSS_VALUE_CONTAIN) {
+            scale = (scale_x < scale_y) ? scale_x : scale_y;
+        } else if (object_fit == CSS_VALUE_COVER) {
+            scale = (scale_x > scale_y) ? scale_x : scale_y;
+        } else if (object_fit == CSS_VALUE_NONE) {
+            scale = 1.0f * s;
+        } else if (object_fit == CSS_VALUE_SCALE_DOWN) {
+            // scale-down: use the smaller of none (1x) or contain
+            float contain_scale = (scale_x < scale_y) ? scale_x : scale_y;
+            scale = (contain_scale < s) ? contain_scale : s;
+        } else {
+            scale = scale_x; // fallback: fill-like
+        }
+
+        float rendered_w = img_w * scale;
+        float rendered_h = img_h * scale;
+        // center in the content box (default object-position: 50% 50%)
+        img_rect.x = rect.x + (box_w - rendered_w) * 0.5f;
+        img_rect.y = rect.y + (box_h - rendered_h) * 0.5f;
+        img_rect.width = rendered_w;
+        img_rect.height = rendered_h;
+    }
     log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
               img->url && img->url->href ? img->url->href->chars : "unknown",
               img->format, img->width, img->height,
@@ -1572,15 +1607,15 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
               rdcon->block.clip.right, rdcon->block.clip.bottom);
     if (img->format == IMAGE_FORMAT_SVG) {
         // render the SVG image
-        log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
+        log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         if (!img->pixels) {
             render_svg(img);
         }
         Tvg_Paint pic = load_picture(img);
         if (pic) {
             tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-            tvg_picture_set_size(pic, rect.width, rect.height);
-            tvg_paint_translate(pic, rect.x, rect.y);
+            tvg_picture_set_size(pic, img_rect.width, img_rect.height);
+            tvg_paint_translate(pic, img_rect.x, img_rect.y);
             // clip the svg picture
             Tvg_Paint clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
             tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
@@ -1593,8 +1628,8 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             log_debug("failed to load svg picture");
         }
     } else {
-        log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
-        blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
+        log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
+        blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
     }
 
     // Render blue selection overlay if image is within a cross-view selection

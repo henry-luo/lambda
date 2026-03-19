@@ -291,6 +291,13 @@ typedef enum { VIS_VISIBLE, VIS_HIDDEN, VIS_COLLAPSE } Visibility;
 typedef enum { POS_STATIC, POS_ABSOLUTE } PositionType;
 typedef enum { WM_HORIZONTAL_TB, WM_VERTICAL_RL, WM_VERTICAL_LR } WritingMode;
 typedef enum { TD_LTR, TD_RTL } TextDirection;
+
+// margin-trim bitmask flags (CSS Box Level 4)
+#define MARGIN_TRIM_BLOCK_START   0x01
+#define MARGIN_TRIM_BLOCK_END     0x02
+#define MARGIN_TRIM_INLINE_START  0x04
+#define MARGIN_TRIM_INLINE_END    0x08
+
 typedef enum AlignType {
     ALIGN_AUTO = CSS_VALUE_AUTO,
     ALIGN_START = CSS_VALUE_FLEX_START,
@@ -892,6 +899,10 @@ typedef struct BlockProp {
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
+    CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
+    CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
+    int tab_size;           // CSS tab-size (number of spaces, default 8)
+    uint8_t margin_trim;     // bitmask: MARGIN_TRIM_BLOCK_START|END|INLINE_START|END
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     CssEnum given_height_type;
@@ -1038,6 +1049,7 @@ typedef struct EmbedProp {
     DomDocument* doc;   // iframe document
     FlexProp* flex;
     GridProp* grid;
+    CssEnum object_fit; // CSS_VALUE_FILL (default), CSS_VALUE_CONTAIN, CSS_VALUE_COVER, CSS_VALUE_NONE, CSS_VALUE_SCALE_DOWN
     // Math layout data (legacy - will be removed when migrating to RDT_VIEW_TEXNODE)
     void* math_box;              // legacy: was MathBox* - deprecated
     Item math_node;              // source Lambda math node

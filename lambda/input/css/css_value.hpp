@@ -55,6 +55,7 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_BGROUND_CLIP,        // border-box, padding-box, content-box
     CSS_VALUE_GROUP_BGROUND_BLEND,       // multiply, overlay, normal
     CSS_VALUE_GROUP_BGROUND_REPEAT,      // repeat, no-repeat, round, space
+    CSS_VALUE_GROUP_OBJECT_FIT,             // fill, contain, cover, none, scale-down
     CSS_VALUE_GROUP_TABLE_LAYOUT,        // auto, fixed
     CSS_VALUE_GROUP_BORDER_COLLAPSE,     // collapse, separate
     CSS_VALUE_GROUP_EMPTY_CELLS,         // show, hide
@@ -484,6 +485,9 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_AUTO_FIT,
     // font-variant values
     CSS_VALUE_SMALL_CAPS,
+    // object-fit values
+    CSS_VALUE_FILL,
+    CSS_VALUE_SCALE_DOWN,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

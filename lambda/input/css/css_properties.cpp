@@ -66,6 +66,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_MARGIN_INLINE, "margin-inline", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_INLINE_START, "margin-inline-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_INLINE_END, "margin-inline-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_MARGIN_TRIM, "margin-trim", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
 
     // Padding Properties
     {CSS_PROPERTY_PADDING_TOP, "padding-top", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},

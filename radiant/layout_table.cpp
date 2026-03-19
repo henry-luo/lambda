@@ -4181,6 +4181,26 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     // CRITICAL FIX: Set line.left and advance_x to content_start_x to apply padding offset
     lycon->block.content_width = content_width;
     lycon->block.content_height = content_height;
+
+    // CSS 2.2 §10.5: If the cell has an explicit CSS height, set given_height in the
+    // block context so children with percentage heights can resolve against it.
+    // This only sets given_height (for % resolution via resolve_length_value's
+    // given_height fallback), NOT content_height (which affects available_space).
+    if (tcell->is_element()) {
+        DomElement* cell_elem = tcell->as_element();
+        if (cell_elem->specified_style) {
+            CssDeclaration* h_decl = style_tree_get_declaration(
+                cell_elem->specified_style, CSS_PROPERTY_HEIGHT);
+            if (h_decl && h_decl->value && h_decl->value->type != CSS_VALUE_TYPE_PERCENTAGE) {
+                float explicit_h = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, h_decl->value);
+                if (explicit_h > 0) {
+                    lycon->block.given_height = explicit_h;
+                    log_debug("[TABLE CELL] Set given_height=%.1f for %% resolution", explicit_h);
+                }
+            }
+        }
+    }
+
     lycon->block.advance_y = content_start_y;  // Start Y position after border+padding
     lycon->line.left = content_start_x;        // Text starts after padding!
     lycon->line.right = content_start_x + content_width;  // Text ends before right padding

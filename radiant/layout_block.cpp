@@ -1031,6 +1031,33 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("finalize block flow: has_embed=%d, has_flex=%d, is_table=%d, block=%s",
                   has_embed, has_flex, is_table, block->node_name());
         if (!has_flex && !is_table) {
+            // margin-trim: block-end — trim last in-flow child's bottom margin
+            if (block->blk && (block->blk->margin_trim & MARGIN_TRIM_BLOCK_END)) {
+                View* last_in_flow = nullptr;
+                View* ch = (View*)block->first_child;
+                while (ch) {
+                    if (ch->view_type && ch->is_block()) {
+                        ViewBlock* vb = (ViewBlock*)ch;
+                        bool out_of_flow = (vb->view_type == RDT_VIEW_INLINE_BLOCK) ||
+                            (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                             vb->position->position == CSS_VALUE_FIXED || element_has_float(vb)));
+                        if (!out_of_flow) last_in_flow = ch;
+                    } else if (ch->view_type) {
+                        last_in_flow = ch;
+                    }
+                    ch = (View*)ch->next_sibling;
+                }
+                if (last_in_flow && last_in_flow->is_block()) {
+                    ViewBlock* last = (ViewBlock*)last_in_flow;
+                    if (last->bound && last->bound->margin.bottom != 0) {
+                        log_debug("margin-trim: zeroed last child's margin-bottom=%f (block-end)", last->bound->margin.bottom);
+                        lycon->block.advance_y -= last->bound->margin.bottom;
+                        flow_height -= last->bound->margin.bottom;
+                        last->bound->margin.bottom = 0;
+                    }
+                }
+            }
+
             // CSS 2.1 §10.6.3 + erratum q313: When computing auto height, exclude
             // the last child's bottom margin that will collapse with the parent's
             // bottom margin BEFORE applying min/max-height constraints.
@@ -3113,6 +3140,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 block->bound->margin.left, pa_block->content_width, block->width, block->bound->margin.right);
         }
         log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
+
+        // margin-trim: inline — parent trims children's inline margins
+        if (block->parent && block->parent->is_block()) {
+            ViewBlock* mt_pa = (ViewBlock*)block->parent;
+            if (mt_pa->blk) {
+                if (mt_pa->blk->margin_trim & MARGIN_TRIM_INLINE_START)
+                    block->bound->margin.left = 0;
+                if (mt_pa->blk->margin_trim & MARGIN_TRIM_INLINE_END)
+                    block->bound->margin.right = 0;
+            }
+        }
+
         float y_before_margin = block->y;
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
@@ -4617,6 +4656,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 bool parent_child_collapsed = false;
 
                 if (first_in_flow_child == block) {  // first in-flow child
+                    // margin-trim: block-start — parent trims first child's top margin
+                    ViewBlock* mt_parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
+                    if (mt_parent && mt_parent->blk && (mt_parent->blk->margin_trim & MARGIN_TRIM_BLOCK_START)) {
+                        block->y -= block->bound->margin.top;
+                        block->bound->margin.top = 0;
+                        log_debug("margin-trim: zeroed first child's margin-top (block-start)");
+                    }
+
                     // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
                     // skip parent-child margin collapse.
                     bool has_clearance = (lycon->block.saved_clear_y >= 0);
