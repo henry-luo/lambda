@@ -185,10 +185,6 @@ ArrayBuilder MarkBuilder::array() {
     return ArrayBuilder(this);
 }
 
-ListBuilder MarkBuilder::list() {
-    return ListBuilder(this);
-}
-
 //------------------------------------------------------------------------------
 // Direct Item Creation
 //------------------------------------------------------------------------------
@@ -203,10 +199,6 @@ Item MarkBuilder::createMap() {
 
 Item MarkBuilder::createArray() {
     return array().final();
-}
-
-Item MarkBuilder::createList() {
-    return list().final();
 }
 
 Item MarkBuilder::createInt(int64_t value) {
@@ -563,57 +555,6 @@ ArrayBuilder& ArrayBuilder::appendItems(std::initializer_list<Item> items) {
 Item ArrayBuilder::final() {
     // Array is already built - just wrap it in an Item
     return (Item){.array = array_};
-}
-
-//==============================================================================
-// ListBuilder Implementation
-//==============================================================================
-
-ListBuilder::ListBuilder(MarkBuilder* builder)
-    : builder_(builder)
-    , list_(nullptr)
-{
-    // allocate List from arena for MarkBuilder
-    list_ = list_arena(builder_->arena());
-}
-
-ListBuilder::~ListBuilder() {
-    // list_ is arena-allocated, no cleanup needed
-}
-
-ListBuilder& ListBuilder::push(Item item) {
-    if (list_) {
-        list_push(list_, item);
-    }
-    return *this;
-}
-
-ListBuilder& ListBuilder::push(const char* str) {
-    return push(builder_->createStringItem(str));
-}
-
-ListBuilder& ListBuilder::push(int64_t value) {
-    return push(builder_->createInt(value));
-}
-
-ListBuilder& ListBuilder::push(double value) {
-    return push(builder_->createFloat(value));
-}
-
-ListBuilder& ListBuilder::push(bool value) {
-    return push(builder_->createBool(value));
-}
-
-ListBuilder& ListBuilder::pushItems(std::initializer_list<Item> items) {
-    for (const Item& item : items) {
-        push(item);
-    }
-    return *this;
-}
-
-Item ListBuilder::final() {
-    // List is already built - just wrap it in an Item
-    return (Item){.list = list_};
 }
 
 // ============================================================================
