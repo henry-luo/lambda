@@ -1,5 +1,13 @@
 # Lambda Script
 
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![Platform](https://img.shields.io/badge/Platform-macOS%20|%20Linux%20|%20Windows-brightgreen)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
+![Runtime: 9 MB](https://img.shields.io/badge/Runtime-9%20MB-orange)
+![HTML5: 100%](https://img.shields.io/badge/HTML5-100%25-success)
+![CommonMark: 100%](https://img.shields.io/badge/CommonMark-100%25-success)
+![YAML 1.2: 100%](https://img.shields.io/badge/YAML_1.2-100%25-success)
+
 A general-purpose, cross-platform, functional scripting language and document processing engine, with a light-weight **9 MB** runtime, built from scratch in C/C++.
 
 Lambda is designed for two things at once:
