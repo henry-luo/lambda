@@ -124,9 +124,9 @@ static void format_number_clean(StringBuf* output, double value) {
         // Integer - output without decimal
         stringbuf_append_format(output, "%d", (int)value);
     } else {
-        // Decimal - output with appropriate precision
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%.6g", value);
+        // Decimal - output with appropriate precision (preserve up to 12 significant digits)
+        char num_buf[48];
+        snprintf(num_buf, sizeof(num_buf), "%.12g", value);
         stringbuf_append_str(output, num_buf);
     }
 }

@@ -417,19 +417,22 @@ static const CssEnumInfo css_value_definitions[] = {
     {"overlay", 7, CSS_VALUE_OVERLAY, CSS_VALUE_GROUP_BGROUND_BLEND},
     {"round", 5, CSS_VALUE_ROUND, CSS_VALUE_GROUP_BGROUND_REPEAT},
     {"space", 5, CSS_VALUE_SPACE, CSS_VALUE_GROUP_BGROUND_REPEAT},
-    // object-fit values
-    {"fill", 4, CSS_VALUE_FILL, CSS_VALUE_GROUP_OBJECT_FIT},
-    {"scale-down", 10, CSS_VALUE_SCALE_DOWN, CSS_VALUE_GROUP_OBJECT_FIT},
+    // Table properties (must match enum order: COLLAPSE_TABLE, SEPARATE, HIDE, SHOW)
     {"collapse-table", 14, CSS_VALUE_COLLAPSE_TABLE, CSS_VALUE_GROUP_BORDER_COLLAPSE},
     {"separate", 8, CSS_VALUE_SEPARATE, CSS_VALUE_GROUP_BORDER_COLLAPSE},
     {"hide", 4, CSS_VALUE_HIDE, CSS_VALUE_GROUP_EMPTY_CELLS},
     {"show", 4, CSS_VALUE_SHOW, CSS_VALUE_GROUP_EMPTY_CELLS},
+    // Grid layout
     {"fit-content", 11, CSS_VALUE_FIT_CONTENT, CSS_VALUE_GROUP_SIZE},
     {"fr", 2, CSS_VALUE_FR, CSS_VALUE_GROUP_MISC},
     {"dense", 5, CSS_VALUE_DENSE, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
     {"auto-fill", 9, CSS_VALUE_AUTO_FILL, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
     {"auto-fit", 8, CSS_VALUE_AUTO_FIT, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
+    // font-variant values
     {"small-caps", 10, CSS_VALUE_SMALL_CAPS, CSS_VALUE_GROUP_MISC},
+    // object-fit values (must match enum order: FILL, SCALE_DOWN after SMALL_CAPS)
+    {"fill", 4, CSS_VALUE_FILL, CSS_VALUE_GROUP_OBJECT_FIT},
+    {"scale-down", 10, CSS_VALUE_SCALE_DOWN, CSS_VALUE_GROUP_OBJECT_FIT},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 
