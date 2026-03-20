@@ -31,7 +31,8 @@ pub fn render_children_of(node, info) {
 }
 
 fn render_text(t) {
-    if (len(trim(t)) == 0) null
+    if (t == " " or t == "\n") " "
+    else if (len(trim(t)) == 0) null
     else {
         // convert ligatures that tree-sitter didn't handle (e.g., in command arguments)
         let t1 = replace(t, "---", "\u2014")
@@ -92,6 +93,7 @@ fn render_element(el, info) {
         case 'underline': render_styled(el, info, "u")
         case 'texttt': render_code(el, info)
         case 'verb': render_verb(el)
+        case 'verb_command': render_verb_command(el)
 
         // ---- font families ----
         case 'textsf': render_font(el, info, "latex-sf")
@@ -242,6 +244,7 @@ fn render_element(el, info) {
         // ---- special characters ----
         case 'control_symbol': render_control_symbol(el)
         case 'controlspace_command': " "
+        case 'space_cmd': " "
         case 'char_command': render_char_command(el)
         case 'caret_char': render_caret_char(el)
 
@@ -460,18 +463,64 @@ fn build_heading_el(level, id, num_span, children) {
 // ============================================================
 
 fn render_paragraph(el, info) {
-    // check for leading font/alignment declaration
-    let decl_tag = find_leading_decl(el, 0, len(el))
-    if (decl_tag != null) { render_paragraph_with_decl(el, info, decl_tag) }
+    // check for parbreak symbols inside paragraph — split into multiple <p> tags
+    if (has_parbreak(el, 0, len(el))) {
+        let groups = split_at_parbreaks(el, info)
+        if (len(groups) == 0) null
+        else if (len(groups) == 1) groups[0]
+        else groups
+    }
     else {
-        let items = render_children(el, 0, info)
-        if (len(items) == 0) { null }
-        else if (has_block_child(items)) {
-            let parts = split_around_blocks(items)
-            if (len(parts) == 1) parts[0]
-            else parts
+        // check for leading font/alignment declaration
+        let decl_tag = find_leading_decl(el, 0, len(el))
+        if (decl_tag != null) { render_paragraph_with_decl(el, info, decl_tag) }
+        else {
+            let items = render_children(el, 0, info)
+            if (len(items) == 0) { null }
+            else if (has_block_child(items)) {
+                let parts = split_around_blocks(items)
+                if (len(parts) == 1) parts[0]
+                else parts
+            }
+            else { <p; for c in items { c }> }
         }
-        else { <p; for c in items { c }> }
+    }
+}
+
+fn has_parbreak(el, i, n) {
+    if (i >= n) false
+    else if (el[i] is symbol and string(el[i]) == "parbreak") true
+    else has_parbreak(el, i + 1, n)
+}
+
+fn split_at_parbreaks(el, info) {
+    split_parbreaks_rec(el, 0, len(el), [], [], info)
+}
+
+fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
+    if (i >= n) {
+        // flush remaining children as a paragraph
+        if (len(current_children) > 0) {
+            let items = current_children that (~ != null)
+            if (len(items) > 0) acc ++ [<p; for c in items { c }>]
+            else acc
+        }
+        else acc
+    }
+    else if (el[i] is symbol and string(el[i]) == "parbreak") {
+        // flush current group and start new one
+        if (len(current_children) > 0) {
+            let items = current_children that (~ != null)
+            if (len(items) > 0) {
+                split_parbreaks_rec(el, i + 1, n, [], acc ++ [<p; for c in items { c }>], info)
+            }
+            else { split_parbreaks_rec(el, i + 1, n, [], acc, info) }
+        }
+        else { split_parbreaks_rec(el, i + 1, n, [], acc, info) }
+    }
+    else {
+        let rendered = render_node(el[i], info)
+        split_parbreaks_rec(el, i + 1, n, current_children ++ [rendered], acc, info)
     }
 }
 
@@ -578,6 +627,18 @@ fn render_code(el, info) {
 fn render_verb(el) {
     let t = util.text_of(el)
     <code class: "latex-code"; t>
+}
+
+// verb_command: raw token text like "\verb|hello|" — extract content between delimiters
+fn render_verb_command(el) {
+    let raw = util.text_of(el)
+    // format: \verb<delim><content><delim> — skip "\verb" (5 chars), then delimiter
+    let body = slice(raw, 5, len(raw))
+    if (len(body) >= 2) {
+        let content = slice(body, 1, len(body) - 1)
+        <code class: "latex-code"; content>
+    }
+    else { <code class: "latex-code"; body> }
 }
 
 fn render_font(el, info, css_class) {
