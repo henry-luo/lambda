@@ -1598,9 +1598,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                       min_width, max_width);
 
             // For height, calculate from children or use cached value
-            // Check if this item is a grid container - the measurement cache may be wrong
-            // because measure_flex_child_content stacks grid children as if they are block
-            // children (summing heights), but grid arranges them in columns (max row height).
             bool item_is_grid_container = (item->display.inner == CSS_VALUE_GRID);
             if (!item_is_grid_container && item->specified_style) {
                 CssDeclaration* disp_decl = style_tree_get_declaration(
@@ -1617,10 +1614,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 min_height = max_height = cached->measured_height;
                 log_debug("calculate_item_intrinsic_sizes: using cached height: %.1f", min_height);
             } else {
-                // Calculate height from max-content height function
-                // For grid containers this correctly computes row heights; for others it
-                // matches what the cache would give when the cache is not available.
-                float available_width = 10000.0f;  // Large enough for max-content pass
+                float available_width = 10000.0f;
                 min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
                 log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f (is_grid=%d)", min_height, item_is_grid_container);
             }

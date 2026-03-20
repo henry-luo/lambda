@@ -24,6 +24,9 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 // External function for grid layout (from layout_grid_multipass.cpp)
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 
+// External function for table layout (from layout_table.cpp)
+void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+
 // External functions for pseudo-element handling (from layout_block.cpp)
 extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
 extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
@@ -1137,6 +1140,37 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
         log_leave();
         log_info(">>> NESTED GRID COMPLETE: item=%p", flex_item);
+    } else if (flex_item->display.inner == CSS_VALUE_TABLE) {
+        // Table as flex item: flex algorithm already determined width/height.
+        // Call the table layout algorithm to lay out row groups, rows, and cells.
+        log_info(">>> NESTED TABLE DETECTED: item=%p (%s) has display.inner=TABLE",
+                 flex_item, flex_item->node_name());
+        log_info(">>> SIZEOF: FlexItemProp=%zu, TableProp=%zu, TableCellProp=%zu, InlineProp=%zu",
+                 sizeof(FlexItemProp), sizeof(TableProp), sizeof(TableCellProp), sizeof(InlineProp));
+        log_enter();
+        log_debug(">>> NESTED TABLE: flex_item->width=%.1f, flex_item->height=%.1f before table layout",
+                  flex_item->width, flex_item->height);
+        // CRITICAL: The flex measurement phase called alloc_flex_item_prop() which overwrote
+        // table->tb with a FlexItemProp* (they share the same union). Before calling table layout,
+        // re-allocate table->tb as a proper TableProp so layout_table_content works correctly.
+        {
+            ViewTable* tbl = (ViewTable*)flex_item;
+            tbl->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
+            tbl->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
+            tbl->tb->border_spacing_h = 0;
+            tbl->tb->border_spacing_v = 0;
+            tbl->tb->border_collapse = false;
+            tbl->tb->is_annoy_tbody = 0;
+            tbl->tb->is_annoy_tr = 0;
+            tbl->tb->is_annoy_td = 0;
+            tbl->tb->is_annoy_colgroup = 0;
+            flex_item->item_prop_type = DomElement::ITEM_PROP_TABLE;
+        }
+        // layout_table_content reads lycon->view to find the table; set it to flex_item
+        lycon->view = flex_item;
+        layout_table_content(lycon, flex_item, flex_item->display);
+        log_leave();
+        log_info(">>> NESTED TABLE COMPLETE: item=%p", flex_item);
     } else if (flex_item->display.inner == RDT_DISPLAY_REPLACED) {
         // Replaced elements as flex items (iframe, img, etc.) need special handling
         // They don't have children to lay out - they need their embedded content loaded
@@ -1839,10 +1873,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // Layout content within each flex item with their final sizes
     View* child = flex_container->first_child;
     while (child) {
-        // Include block, inline-block, and list-item flex items
+        // Include block, inline-block, list-item, and table flex items
         // CSS treats list-item as block-level for flex layout purposes
         if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
-            child->view_type == RDT_VIEW_LIST_ITEM) {
+            child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_TABLE) {
             ViewBlock* flex_item = (ViewBlock*)child;
             log_debug("Final layout for flex item %p: %.1fx%.1f", flex_item, flex_item->width, flex_item->height);
 

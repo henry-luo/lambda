@@ -686,18 +686,37 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     log_debug("measure_element_intrinsic: tag=%s, outer=%d", element->node_name(),
               ((ViewBlock*)element)->display.outer);
 
+    // Detect table elements early (needed to skip explicit width shortcut for tables)
+    bool is_table_display = false;
+    {
+        ViewBlock* tview = (ViewBlock*)element;
+        if (tview->display.inner == CSS_VALUE_TABLE) is_table_display = true;
+        if (!is_table_display && element->tag() == HTM_TAG_TABLE) is_table_display = true;
+        if (!is_table_display && element->specified_style) {
+            CssDeclaration* dd = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_DISPLAY);
+            if (dd && dd->value && dd->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum dv = dd->value->data.keyword;
+                if (dv == CSS_VALUE_TABLE || dv == CSS_VALUE_INLINE_TABLE) is_table_display = true;
+            }
+        }
+    }
+
     // Check for explicit CSS width first
     // When content_only is true, skip this early return to measure content-only min-content.
     // This is needed for CSS Flexbox §4.5 content_size_suggestion which represents the
     // min-content of the element's content, NOT the specified CSS width.
-    if (element->specified_style && !content_only) {
+    // CSS Tables §4.1: Table content-box inline size is never smaller than its minimum
+    // content inline size, so tables skip the explicit width shortcut and measure content.
+    if (element->specified_style && !content_only && !is_table_display) {
         CssDeclaration* width_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_WIDTH);
         if (width_decl && width_decl->value &&
-            width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
+             (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
+              width_decl->value->data.number.value == 0))) {
             int explicit_width = (int)resolve_length_value(lycon, CSS_PROPERTY_WIDTH,
                                                             width_decl->value);
-            if (explicit_width > 0) {
+            if (explicit_width >= 0) {
                 // CSS width property sets content width by default (box-sizing: content-box)
                 // We need to add padding and border for the total intrinsic width
                 // Check box-sizing first
@@ -2043,7 +2062,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.max_content = max_border_box;
             log_debug("  -> max-width constraint: clamped max_content to %.1f", sizes.max_content);
         }
-        if (sizes.min_content > max_border_box) {
+        // CSS Tables §4.1: Table content-box inline size is never smaller than its
+        // minimum content inline size, so don't clamp min_content for tables.
+        if (!is_table_display && sizes.min_content > max_border_box) {
             sizes.min_content = max_border_box;
         }
     }

@@ -771,6 +771,10 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             if (result) { return result; }
         }
         else if (node->is_element()) {
+            // CSS §9.3.1: <br> creates a forced line break — content after it
+            // starts on a new line, so it cannot contribute to filling the current line.
+            // Stop lookahead here to avoid false-positive wraps before <br>.
+            if (node->tag() == HTM_TAG_BR) { return RDT_LINE_NOT_FILLED; }
             CssEnum outer_display = resolve_display_value(node).outer;
             if (outer_display == CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
             else if (outer_display == CSS_VALUE_INLINE) {
