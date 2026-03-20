@@ -12,8 +12,8 @@ This document covers Lambda's type system, including first-class types, type hie
 ## Table of Contents
 
 1. [Type System Overview](#type-system-overview)
-2. [First-Class Types](#first-class-types)
-3. [Type Hierarchy](#type-hierarchy)
+2. [Type Hierarchy](#type-hierarchy)
+3. [First-Class Types](#first-class-types)
 4. [Basic Types](#basic-types)
 5. [Collection Types](#collection-types)
 6. [Function Types](#function-types)
@@ -41,6 +41,25 @@ Lambda Script features a **strong, static type system** with inference. Types ar
 2. **Expressiveness**: Rich type constructs for complex data modeling
 3. **Ergonomics**: Type inference reduces annotation burden
 4. **Documents as Data**: Types model structured documents naturally
+
+---
+
+## Type Hierarchy
+
+Lambda's type system forms a hierarchy with `any` at the top and `null` at the bottom:
+
+![Type Hierarchy](type_hierarchy.svg)
+
+### Subtype Relations
+
+| Subtype    | Supertype   | Example                       |
+| ---------- | ----------- | ----------------------------- |
+| `int`      | `number`    | `42 is number` → `true`       |
+| `float`    | `number`    | `3.14 is number` → `true`     |
+| `range`    | `container` | `(1 to 10) is range` → `true` |
+| `int[]`    | `any[]`     | `[1,2,3] is any[]` → `true`   |
+| `null`     | `T?`        | `null is int?` → `true`       |
+| every type | `any`       | `"hello" is any` → `true`     |
 
 ---
 
@@ -82,44 +101,6 @@ type(42) == int           // true
 type(123) != string       // true
 type([1,2]) == array      // true
 ```
-
----
-
-## Type Hierarchy
-
-Lambda's type system forms a hierarchy with `any` at the top and `null` at the bottom:
-
-```mermaid
-flowchart TD
-    any --> scalar
-    any --> collection
-    any --> type
-    any --> function
-    scalar --> bool
-    scalar --> number
-    scalar --> string
-    scalar --> symbol
-    scalar --> datetime
-    scalar --> binary
-    number --> int
-    number --> float
-    collection --> range
-    collection --> array
-    collection --> map
-    collection --> element
-    function --> fn
-```
-
-### Subtype Relations
-
-| Subtype | Supertype | Example |
-|---------|-----------|---------|
-| `int` | `number` | `42 is number` → `true` |
-| `float` | `number` | `3.14 is number` → `true` |
-| `range` | `collection` | `(1 to 10) is range` → `true` |
-| `int[]` | `any[]` | `[1,2,3] is any[]` → `true` |
-| `null` | `T?` | `null is int?` → `true` |
-| Every type | `any` | `"hello" is any` → `true` |
 
 ---
 

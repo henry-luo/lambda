@@ -1,0 +1,106 @@
+digraph TypeHierarchy {
+    // Layout
+    rankdir=TB;
+    nodesep=0.3;
+    ranksep=0.4;
+    
+    // Global node style
+    node [
+        shape=box,
+        style="rounded,filled",
+        fontname="Helvetica",
+        fontsize=11,
+        height=0.3,
+        margin="0.08,0.04"
+    ];
+    
+    edge [
+        arrowsize=0.6,
+        color="#666666"
+    ];
+
+    // Top type
+    any [fillcolor="#E8F0FE", color="#4285F4", penwidth=1.5];
+
+    // Invisible waypoint nodes for straight any→scalar center line
+    dot1 [shape=point, width=0.01, height=0.01, style=invis];
+    dot2 [shape=point, width=0.01, height=0.01, style=invis];
+
+    // Level 1 children of any
+    scalar [fillcolor="#FFF3E0", color="#FB8C00"];
+    container [fillcolor="#E8F5E9", color="#43A047"];
+    type [fillcolor="#F3E5F5", color="#8E24AA"];
+    function [fillcolor="#FDE0DC", color="#E53935"];
+    error [fillcolor="#FFEBEE", color="#C62828"];
+
+    // Scalar subtypes
+    null [fillcolor="#FFF8E1", color="#F9A825"];
+    bool [fillcolor="#FFF8E1", color="#F9A825"];
+    number [fillcolor="#FFF3E0", color="#FB8C00"];
+    string [fillcolor="#FFF8E1", color="#F9A825"];
+    symbol [fillcolor="#FFF8E1", color="#F9A825"];
+    datetime [fillcolor="#FFF8E1", color="#F9A825"];
+    binary [fillcolor="#FFF8E1", color="#F9A825"];
+    path [fillcolor="#FFF8E1", color="#F9A825"];
+
+    // Number subtypes
+    int [fillcolor="#FFFDE7", color="#FDD835"];
+    float [fillcolor="#FFFDE7", color="#FDD835"];
+
+    // Container subtypes
+    range [fillcolor="#E8F5E9", color="#66BB6A"];
+    array [fillcolor="#E8F5E9", color="#66BB6A"];
+    map [fillcolor="#E8F5E9", color="#66BB6A"];
+    element [fillcolor="#E8F5E9", color="#66BB6A"];
+
+    // Function subtypes
+    fn [fillcolor="#FDE0DC", color="#EF5350"];
+    pn [fillcolor="#FDE0DC", color="#EF5350"];
+
+    // Center line: any → dot1 → dot2 → scalar (straight vertical)
+    any -> dot1 [arrowhead=none, weight=100];
+    dot1 -> dot2 [arrowhead=none, weight=100];
+    dot2 -> scalar [weight=100];
+
+    // Left branch: container
+    any -> container;
+    container -> range;
+    container -> array;
+    container -> map;
+    container -> element;
+
+    // Right branches: type, function, error
+    any -> function;
+    any -> type;
+    any -> error;
+    function -> fn;
+    function -> pn;
+    
+    // Scalar -> subtypes
+    scalar -> null;
+    scalar -> bool;
+    scalar -> number;
+    scalar -> string;
+    scalar -> symbol;
+    scalar -> datetime;
+    scalar -> binary;
+    scalar -> path;
+
+    // Number subtypes
+    number -> int;
+    number -> float;
+
+    // Rank hints — left | center | right at each level
+    {rank=same; container; dot1; function; type; error}
+    {rank=same; range; array; map; element; dot2; pn; fn}
+    {rank=same; scalar}
+    {rank=same; null; bool; number; string; symbol; datetime; binary; path}
+    {rank=same; int; float}
+
+    // Invisible ordering edges to keep container LEFT, type/func/error RIGHT of center
+    container -> dot1 [style=invis];
+    dot1 -> type [style=invis];
+    range -> dot2 [style=invis];
+    dot2 -> pn [style=invis];
+    pn -> fn [style=invis];
+}

@@ -91,7 +91,7 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 10 / 3             // Division: 3.333...
 10 div 3           // Integer division: 3
 17 % 5             // Modulo: 2
-2 ** 3              // Exponentiation: 8
+2 ** 3             // Exponentiation: 8
 ```
 
 ### Unary Operators

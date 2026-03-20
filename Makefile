@@ -345,7 +345,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    generate-premake clean-premake build-test build-test-linux \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-c2mir
+	    test-fuzzy test-fuzzy-extended test-c2mir type-chart
 
 # Help target - shows available commands
 help:
@@ -658,6 +658,11 @@ clean-grammar:
 intellisense:
 	@echo "Updating IntelliSense database..."
 	@./utils/update_intellisense.sh
+
+# Generate type hierarchy chart
+type-chart:
+	dot -Tsvg doc/type_hierarchy.dot -o doc/type_hierarchy.svg
+	@echo "Type hierarchy chart generated: doc/type_hierarchy.svg"
 
 # Generate grammar explicitly (useful for development)
 generate-grammar: $(TS_ENUM_H)
