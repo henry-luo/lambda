@@ -34,7 +34,7 @@ digraph TypeHierarchy {
     error [fillcolor="#FFEBEE", color="#C62828"];
 
     // Scalar subtypes
-    null [fillcolor="#FFF8E1", color="#F9A825"];
+    null [fillcolor="#F5F5F5", color="#9E9E9E"];
     bool [fillcolor="#FFF8E1", color="#F9A825"];
     number [fillcolor="#FFF3E0", color="#FB8C00"];
     string [fillcolor="#FFF8E1", color="#F9A825"];
@@ -69,15 +69,16 @@ digraph TypeHierarchy {
     container -> map;
     container -> element;
 
-    // Right branches: type, function, error
+    // Right branches: type, function, error, null
     any -> function;
     any -> type;
     any -> error;
-    function -> fn;
+    any -> null;
     function -> pn;
+    function -> fn;
+    
     
     // Scalar -> subtypes
-    scalar -> null;
     scalar -> bool;
     scalar -> number;
     scalar -> string;
@@ -91,16 +92,24 @@ digraph TypeHierarchy {
     number -> float;
 
     // Rank hints — left | center | right at each level
-    {rank=same; container; dot1; function; type; error}
-    {rank=same; range; array; map; element; dot2; pn; fn}
+    {rank=same; null; container; dot1; function; type; error}
+    {rank=same; range; array; map; element; dot2; fn; pn}
     {rank=same; scalar}
-    {rank=same; null; bool; number; string; symbol; datetime; binary; path}
+    {rank=same; bool; number; string; symbol; datetime; binary; path}
     {rank=same; int; float}
 
-    // Invisible ordering edges to keep container LEFT, type/func/error RIGHT of center
+    // Invisible ordering edges for left-to-right positioning
+    // Level 1: null | container | [dot1] | type | function | error
+    null -> container [style=invis];
     container -> dot1 [style=invis];
     dot1 -> type [style=invis];
-    range -> dot2 [style=invis];
-    dot2 -> pn [style=invis, minlen=3];
-    pn -> fn [style=invis];
+    type -> function [style=invis];
+    function -> error [style=invis];
+    // Level 2: range | array | map | element | [dot2] | pn | fn
+    range -> array [style=invis];
+    array -> map [style=invis];
+    map -> element [style=invis];
+    element -> dot2 [style=invis];
+    dot2 -> fn [style=invis, minlen=3];
+    fn -> pn [style=invis];
 }
