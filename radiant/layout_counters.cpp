@@ -298,6 +298,49 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
     }
 }
 
+void counter_set(CounterContext* ctx, const char* counter_spec) {
+    if (!ctx || !ctx->current_scope || !counter_spec) return;
+
+    log_debug("[Counters] counter-set: %s", counter_spec);
+
+    char** names = nullptr;
+    int* values = nullptr;
+    int count = 0;
+
+    parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena);
+
+    for (int i = 0; i < count; i++) {
+        // CSS Lists 3 §5.2: counter-set sets the value of the innermost counter
+        // of the given name. If no counter of the given name exists on the element,
+        // a new counter is created with the specified value.
+        // Unlike counter-reset, this does NOT create a new scope.
+        CounterValue search_key = {names[i], 0};
+        CounterValue* cv = nullptr;
+        CounterScope* scope = ctx->current_scope;
+
+        // search scope chain for existing counter
+        while (scope && !cv) {
+            cv = (CounterValue*)hashmap_get(scope->counters, &search_key);
+            if (cv) break;
+            scope = scope->parent;
+        }
+
+        if (cv) {
+            // set existing counter to specified value
+            cv->value = values[i];
+            log_debug("[Counters]   Set '%s' = %d (existing)", names[i], values[i]);
+        } else {
+            // create new counter in current scope with specified value
+            CounterValue new_counter;
+            new_counter.name = names[i];
+            new_counter.value = values[i];
+
+            hashmap_set(ctx->current_scope->counters, &new_counter);
+            log_debug("[Counters]   Set '%s' = %d (new)", names[i], values[i]);
+        }
+    }
+}
+
 int counter_get_value(CounterContext* ctx, const char* name) {
     if (!ctx || !ctx->current_scope || !name) return 0;
 

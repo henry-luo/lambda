@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
 #include "layout_table.hpp"
+#include "layout_counters.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font/font.h"
@@ -444,7 +445,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
 
-    // CSS Counter handling (CSS 2.1 Section 12.4)
+    // CSS Counter handling (CSS 2.1 Section 12.4, CSS Lists 3)
     // Apply counter operations for this inline element
     if (lycon->counter_context && span->blk) {
         // Apply counter-reset if specified
@@ -457,6 +458,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (span->blk->counter_increment) {
             log_debug("    [Inline] Applying counter-increment: %s", span->blk->counter_increment);
             counter_increment(lycon->counter_context, span->blk->counter_increment);
+        }
+
+        // Apply counter-set if specified (CSS Lists 3)
+        // Processed after counter-reset and counter-increment per spec
+        if (span->blk->counter_set) {
+            log_debug("    [Inline] Applying counter-set: %s", span->blk->counter_set);
+            counter_set(lycon->counter_context, span->blk->counter_set);
         }
     }
 

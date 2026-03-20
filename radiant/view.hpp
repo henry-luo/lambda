@@ -894,8 +894,10 @@ typedef struct BlockProp {
     CssEnum list_style_type;
     CssEnum list_style_position;  // inside, outside
     char* list_style_image;         // URL or none
+    char* list_style_type_string;   // custom string marker (CSS Lists 3 §4.1)
     char* counter_reset;            // counter names and values
     char* counter_increment;        // counter names and values
+    char* counter_set;              // counter names and values (CSS Lists 3)
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL

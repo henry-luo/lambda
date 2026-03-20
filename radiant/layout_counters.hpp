@@ -80,6 +80,16 @@ void counter_reset(CounterContext* ctx, const char* counter_spec);
 void counter_increment(CounterContext* ctx, const char* counter_spec);
 
 /**
+ * Set counter(s) - implements counter-set property (CSS Lists 3)
+ * Unlike counter-reset, does not create a new scope.
+ * Sets the value of the innermost counter of the given name,
+ * or creates a new counter at the specified value if none exists.
+ * @param ctx Counter context
+ * @param counter_spec String like "chapter 7 section 3" or "none"
+ */
+void counter_set(CounterContext* ctx, const char* counter_spec);
+
+/**
  * Get current value of a counter
  * @param ctx Counter context
  * @param name Counter name

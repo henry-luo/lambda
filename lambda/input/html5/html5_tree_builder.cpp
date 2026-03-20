@@ -225,6 +225,14 @@ Element* html5_parse(Input* input, const char* html) {
     parser->pos = 0;
     parser->tokenizer_state = HTML5_TOK_DATA;
 
+    // HTML5 §13.2.3.1: Skip leading UTF-8 BOM (U+FEFF = EF BB BF)
+    if (parser->length >= 3 &&
+        (unsigned char)html[0] == 0xEF &&
+        (unsigned char)html[1] == 0xBB &&
+        (unsigned char)html[2] == 0xBF) {
+        parser->pos = 3;
+    }
+
     // create document root
     MarkBuilder builder(input);
     parser->document = builder.element("#document").final().element;
