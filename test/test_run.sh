@@ -372,14 +372,22 @@ run_test_with_timeout() {
 
     echo "📋 Running $base_name..." >&2
 
+    # Per-test timeout overrides (some tests run many sub-scripts and need more time)
+    local test_timeout="$TIMEOUT_DURATION"
+    case "$base_name" in
+        test_c2mir_gtest|test_lambda_gtest)
+            test_timeout="600s"  # 188+ scripts via subprocess, ~3s each
+            ;;
+    esac
+
     # Handle custom test runner differently
     if [ "$base_name" = "lambda_test_runner" ]; then
         # Custom Lambda Test Runner - use its own output format
         if [ "$RAW_OUTPUT" = true ]; then
-            timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" --verbose
+            timeout "$test_timeout" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" --verbose
             local exit_code=$?
         else
-            timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" > /dev/null 2>&1
+            timeout "$test_timeout" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" > /dev/null 2>&1
             local exit_code=$?
         fi
 
@@ -405,17 +413,17 @@ run_test_with_timeout() {
             if [ "$RAW_OUTPUT" = true ]; then
                 # Raw mode: show output directly and redirect JSON to file
                 if [ -n "$gtest_filter" ]; then
-                    ASAN_OPTIONS="$asan_opts" timeout "$TIMEOUT_DURATION" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file_win"
+                    ASAN_OPTIONS="$asan_opts" timeout "$test_timeout" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file_win"
                 else
-                    ASAN_OPTIONS="$asan_opts" timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file_win"
+                    ASAN_OPTIONS="$asan_opts" timeout "$test_timeout" "./$test_exe" --gtest_output=json:"$json_file_win"
                 fi
                 local exit_code=$?
             else
                 # Normal mode: capture console output and redirect JSON to file
                 if [ -n "$gtest_filter" ]; then
-                    ASAN_OPTIONS="$asan_opts" timeout "$TIMEOUT_DURATION" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file_win" >/dev/null 2>&1
+                    ASAN_OPTIONS="$asan_opts" timeout "$test_timeout" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file_win" >/dev/null 2>&1
                 else
-                    ASAN_OPTIONS="$asan_opts" timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file_win" >/dev/null 2>&1
+                    ASAN_OPTIONS="$asan_opts" timeout "$test_timeout" "./$test_exe" --gtest_output=json:"$json_file_win" >/dev/null 2>&1
                 fi
                 local exit_code=$?
             fi
@@ -423,10 +431,10 @@ run_test_with_timeout() {
             # Custom standalone test - parse output manually
             local temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
             if [ "$RAW_OUTPUT" = true ]; then
-                timeout "$TIMEOUT_DURATION" "./$test_exe" | tee "$temp_output"
+                timeout "$test_timeout" "./$test_exe" | tee "$temp_output"
                 local exit_code=$?
             else
-                timeout "$TIMEOUT_DURATION" "./$test_exe" > "$temp_output" 2>&1
+                timeout "$test_timeout" "./$test_exe" > "$temp_output" 2>&1
                 local exit_code=$?
             fi
 
@@ -454,11 +462,11 @@ run_test_with_timeout() {
             # Standard Criterion-based tests
             if [ "$RAW_OUTPUT" = true ]; then
                 # Raw mode: show output directly without JSON redirect
-                timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file"
+                timeout "$test_timeout" "./$test_exe" --json="$json_file"
                 local exit_code=$?
             else
                 # Normal mode: capture output for processing
-                timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file" >/dev/null 2>&1
+                timeout "$test_timeout" "./$test_exe" --json="$json_file" >/dev/null 2>&1
                 local exit_code=$?
             fi
         fi
@@ -468,7 +476,7 @@ run_test_with_timeout() {
         echo "✅ $base_name completed successfully" >&2
     else
         if [ $exit_code -eq 124 ]; then
-            echo "⏰ $base_name timed out after ${TIMEOUT_DURATION}s" >&2
+            echo "⏰ $base_name timed out after ${test_timeout}" >&2
             echo '{"passed": 0, "failed": 1, "tests": [{"name": "timeout_error", "status": "failed", "message": "Test timed out"}]}' > "$json_file"
         else
             echo "⚠️  $base_name completed with exit code $exit_code" >&2

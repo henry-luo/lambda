@@ -333,6 +333,7 @@ char*               font_cache_make_key(Arena* arena, const char* family,
 
 // font_fallback.c
 const char**        font_get_generic_family(const char* family);
+const char**        font_get_aliases(const char* family);
 FontHandle*         font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style);
 FontHandle*         font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                                   uint32_t codepoint);

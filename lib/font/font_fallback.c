@@ -79,6 +79,48 @@ const char** font_get_generic_family(const char* family) {
 }
 
 // ============================================================================
+// Font alias table — metric-compatible substitutions
+// Maps common fonts to their open-source equivalents (Liberation, DejaVu, etc.)
+// Used when the requested font is not installed on the system.
+// ============================================================================
+
+static const struct {
+    const char* name;
+    const char* aliases[4];
+} font_alias_table[] = {
+    // Liberation fonts are metrically compatible with their MS counterparts
+    {"Times New Roman",   {"Liberation Serif", "DejaVu Serif", "Nimbus Roman", NULL}},
+    {"Times",             {"Liberation Serif", "DejaVu Serif", "Nimbus Roman", NULL}},
+    {"Arial",             {"Liberation Sans", "DejaVu Sans", "Nimbus Sans", NULL}},
+    {"Helvetica",         {"Liberation Sans", "DejaVu Sans", "Nimbus Sans", NULL}},
+    {"Helvetica Neue",    {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {"Courier New",       {"Liberation Mono", "DejaVu Sans Mono", "Nimbus Mono PS", NULL}},
+    {"Courier",           {"Liberation Mono", "DejaVu Sans Mono", "Nimbus Mono PS", NULL}},
+    {"Georgia",           {"Liberation Serif", "DejaVu Serif", NULL, NULL}},
+    {"Verdana",           {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {"Trebuchet MS",      {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {"Palatino",          {"Liberation Serif", "DejaVu Serif", NULL, NULL}},
+    {"Palatino Linotype", {"Liberation Serif", "DejaVu Serif", NULL, NULL}},
+    {"Book Antiqua",      {"Liberation Serif", "DejaVu Serif", NULL, NULL}},
+    {"Tahoma",            {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {"Lucida Grande",     {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {"Impact",            {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {"Comic Sans MS",     {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
+    {NULL, {NULL, NULL, NULL, NULL}}
+};
+
+const char** font_get_aliases(const char* family) {
+    if (!family) return NULL;
+    for (int i = 0; font_alias_table[i].name; i++) {
+        if (str_ieq(font_alias_table[i].name, strlen(font_alias_table[i].name),
+                     family, strlen(family))) {
+            return font_alias_table[i].aliases;
+        }
+    }
+    return NULL;
+}
+
+// ============================================================================
 // Fallback font resolution — walk a configured list of fallback families
 // ============================================================================
 
