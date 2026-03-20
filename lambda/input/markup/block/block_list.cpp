@@ -813,6 +813,9 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
+    // Save initial position to detect if we actually consumed any lines
+    size_t initial_line = parser->current_line;
+
     const char* first_line = parser->lines[parser->current_line];
     char marker = get_list_marker(first_line);
     
@@ -1486,6 +1489,13 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 }
             }
         }
+    }
+
+    // If we didn't consume any lines, return ITEM_UNDEFINED to prevent infinite loops.
+    // This can happen when the format adapter (e.g., WikiAdapter) detects a list item
+    // but the generic list parser doesn't recognize the marker (e.g., "** nested" in wiki).
+    if (parser->current_line == initial_line) {
+        return Item{.item = ITEM_UNDEFINED};
     }
 
     // Add class="contains-task-list" to the list if it has task items
