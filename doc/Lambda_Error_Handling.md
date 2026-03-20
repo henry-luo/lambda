@@ -340,7 +340,7 @@ Errors are categorized by numeric code ranges:
 | 206 | `argument_count_mismatch` | Wrong number of arguments |
 | 228 | `unhandled_error` | Error from can-raise function not handled |
 | 301 | `null_reference` | Null dereference |
-| 302 | `index_out_of_bounds` | Array/list index out of range |
+| 302 | `index_out_of_bounds` | Array index out of range |
 | 304 | `division_by_zero` | Division or modulo by zero |
 | 318 | `user_error` | User-defined error via `error()` |
 | 401 | `file_not_found` | File does not exist |

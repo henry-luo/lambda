@@ -25,7 +25,6 @@ This document covers Lambda's literal values, collection types, and expressions 
    - [Boolean and Null Literals](#boolean-and-null-literals)
 3. [Path Literals](#path-literals)
 4. [Collections](#collections)
-   - [Lists](#lists)
    - [Arrays](#arrays)
    - [Maps](#maps)
    - [Elements](#elements)
@@ -57,8 +56,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 
 | Type       | Description                 | Example                                 |
 | ---------- | --------------------------- | --------------------------------------- |
-| `list`     | Immutable ordered sequences | `(1, 2, 3)`                             |
-| `array`    | Mutable ordered collections | `[1, 2, 3]`                             |
+| `array`    | Ordered collections         | `[1, 2, 3]`                             |
 | `map`      | Key-value mappings          | `{key: "value"}`                        |
 | `element`  | Structured markup elements  | `<tag attr: value; content>`            |
 | `range`    | Numeric ranges              | `1 to 10`                               |
@@ -651,46 +649,9 @@ let path_dirs = split(sys.proc.self.env.PATH, ":")
 
 ## Collections
 
-### Lists
-
-Immutable ordered sequences (tuples):
-
-```lambda
-// List creation
-(1, 2, 3)
-("hello", "world")
-(true, 42, "mixed")
-
-// Empty list
-()
-
-// Single-element list
-(42,)
-
-// Nested lists
-((1, 2), (3, 4), (5, 6))
-```
-
-#### List Access
-
-```lambda
-let lst = (1, 2, 3);
-lst[0]    // First element: 1
-lst[1]    // Second element: 2
-```
-
-#### List Operations
-
-```lambda
-len(lst)           // Length: 3
-head(lst)          // First: 1
-tail(lst)          // Rest: (2, 3)
-lst ++ (4, 5)      // Concatenate: (1, 2, 3, 4, 5)
-```
-
 ### Arrays
 
-Mutable ordered collections:
+Ordered collections:
 
 ```lambda
 // Array creation
@@ -1029,9 +990,6 @@ symbol("hello")             // 'hello
 
 // To array
 array((1, 2, 3))            // [1, 2, 3]
-
-// To list
-list([1, 2, 3])             // (1, 2, 3)
 ```
 
 ---

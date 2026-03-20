@@ -32,7 +32,7 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 
 Lambda Script is designed around functional programming principles with modern syntax. Programs consist of expressions that evaluate to values, with support for:
 
-- Immutable data structures (lists, arrays, maps, elements)
+- Immutable data structures (arrays, maps, elements)
 - First-class functions and closures
 - Pattern matching and destructuring
 - Comprehensive type system with inference
@@ -56,7 +56,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | Document | Description |
 |----------|-------------|
 | **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, identifiers, names, symbols, namespaces |
-| **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, lists, maps, elements, ranges, and data composition expressions |
+| **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, maps, elements, ranges, and data composition expressions |
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
@@ -90,8 +90,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | `symbol`  | Interned identifier              | `'json`                       |
 | `bool`    | Boolean                          | `true`, `false`               |
 | `path`    | File path or URL                 | `/etc.hosts`, `https.api.com` |
-| `list`    | Immutable tuple                  | `(1, 2, 3)`                   |
-| `array`   | Mutable array                    | `[1, 2, 3]`                   |
+| `array`   | Ordered collection                   | `[1, 2, 3]`                   |
 | `int[]`   | Typed int array                  | `var a: int[] = [1, 2]`       |
 | `float[]` | Typed float array                | `var b: float[] = [0.1]`      |
 | `map`     | Key-value mapping                | `{name: "Alice"}`             |

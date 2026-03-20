@@ -104,7 +104,6 @@ flowchart TD
     number --> int
     number --> float
     collection --> range
-    collection --> list
     collection --> array
     collection --> map
     collection --> element
@@ -240,7 +239,7 @@ Lambda has two forms for array types:
 [bool+]            // Non-empty array of booleans
 ```
 
-> **Note:** `[int]` (without `*` or `+`) means a list of exactly 1 int, not an array of ints.
+> **Note:** `[int]` (without `*` or `+`) means a tuple of exactly 1 int, not an array of ints.
 
 **Form 2: Occurrence suffix** — a type followed by `[]` or `[n]`:
 
@@ -268,7 +267,7 @@ let matrix: int[][] = [[1, 2], [3, 4]]
 let names: [string+] = ["Alice", "Bob"]
 ```
 
-### List Types (Tuples)
+### Tuple Types
 
 ```lambda
 // Fixed-length tuples with specific types

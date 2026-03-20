@@ -26,7 +26,6 @@ string  symbol  binary  datetime
 ```lambda
 range, 1 to 10          // Range (inclusive both ends)
 array, [123, true]      // Array of values
-list, (0.5, "string")   // List
 map, {key: 'symbol'}    // Map
 object, {point x: 1, y: 2}  // Object (nominally-typed)
 element, <div class: bold; "text" <br>>  // Element
@@ -156,7 +155,6 @@ date(2025, 4, 26)  time(10, 30, 45)
 **Collections:**
 ```lambda
 [1, 2, 3]         // Array
-(1, "two", 3.0)   // List
 {a: 1, b: 2}      // Map
 <div id: "main">  // Element
 ```
@@ -233,7 +231,7 @@ let a = [1, 2, 3]
 
 `==` performs **structural deep equality** on all types:
 ```lambda
-[1, 2] == [1, 2]             // true  (list/array)
+[1, 2] == [1, 2]             // true  (array)
 {a: 1, b: 2} == {b: 2, a: 1} // true  (map, order-independent)
 [1] == [1.0]                  // true  (numeric promotion)
 (1 to 3) == [1, 2, 3]         // true  (cross-type sequence)

@@ -337,7 +337,7 @@ find("hello world hello", "lo")
 // [{value: "lo", index: 3}, {value: "lo", index: 14}]
 
 find("no-match", digits)
-// [] (empty list)
+// [] (empty array)
 
 // Extract just matching values via pipe
 find("a1b22", digits) | ~.value     // ["1", "22"]
@@ -381,7 +381,7 @@ ord(chr(65))         // 65
 
 ## Collection Functions
 
-Functions for working with arrays, lists, and other collections.
+Functions for working with arrays and other collections.
 
 ### Query & Test
 
