@@ -112,14 +112,15 @@ When `grammar.js` is modified, `parser.c` and `ts-enum.h` are regenerated before
 
 ### Specific Test Suites
 
-| Target | Description |
-|--------|-------------|
-| `test-lambda` | Run Lambda runtime tests only. |
-| `test-library` | Run library tests only. |
-| `test-input` | Run input processing tests (MIME detection & math). |
-| `test-validator` | Run validator tests only. |
-| `test-mir` | Run MIR JIT tests only. |
-| `test-std` | Run Lambda Standard Tests (custom test runner). |
+| Target           | Description                                         |
+| ---------------- | --------------------------------------------------- |
+| `test-lambda`    | Run Lambda runtime tests only.                      |
+| `test-library`   | Run library tests only.                             |
+| `test-input`     | Run input processing tests (MIME detection & math). |
+| `test-validator` | Run validator tests only.                           |
+| `test-mir`       | Run MIR JIT tests only.                             |
+| `test-c2mir`     | Run Lambda baseline tests with legacy C2MIR JIT path (`--c2mir` flag). |
+| `test-std`       | Run Lambda Standard Tests (custom test runner).     |
 
 ### TeX / LaTeX Tests
 
@@ -192,15 +193,16 @@ make test-math-single test=frac    # single math test
 
 ## Layout Engine Targets
 
-| Target | Description |
-|--------|-------------|
-| `test-layout` | Run Lambda CSS layout integration tests. Accepts `suite=`, `test=`, `pattern=` parameters. |
-| `layout` | Alias for `test-layout`. |
-| `capture-layout` | Extract browser layout references using Puppeteer. Requires `test=<name>` or `suite=<name>`. |
+| Target           | Description                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `test-layout`    | Run Lambda CSS layout integration tests. Accepts `suite=`, `test=`, `pattern=` parameters.                        |
+| `layout`         | Alias for `test-layout`.                                                                                          |
+| `capture-layout` | Extract browser layout references using Puppeteer. Requires `test=<name>` or `suite=<name>`.                      |
 | `compare-layout` | Run Radiant layout and compare with browser reference. Usage: `make compare-layout test=<name> [category=<cat>]`. |
-| `resolve` | Compare Lambda CSS resolved properties against browser reference data. Usage: `make resolve TEST=<name>`. |
-| `resolve-all` | Run CSS resolution verification on all baseline tests. |
-| `layout-devtool` | Launch the Layout DevTool Electron app from `utils/layout-devtool`. |
+| `resolve`        | Compare Lambda CSS resolved properties against browser reference data. Usage: `make resolve TEST=<name>`.         |
+| `resolve-all`    | Run CSS resolution verification on all baseline tests.                                                            |
+| `layout-devtool` | Launch the Layout DevTool Electron app from `utils/layout-devtool`.                                               |
+| `download`       | Download a web page to `test/layout/data/page/`. Usage: `make download <url>`.                                    |
 
 ### Layout Examples
 
@@ -269,16 +271,15 @@ make format                                                 # auto-format code
 
 ## Utility Targets
 
-| Target | Description |
-|--------|-------------|
-| `run` | Build and run `lambda.exe` interactively (REPL). |
-| `install` | Copy `lambda.exe` to `/usr/local/bin/Lambda`. |
-| `uninstall` | Remove from `/usr/local/bin/Lambda`. |
-| `intellisense` | Update VS Code IntelliSense database (`compile_commands.json`). |
-| `count-loc` | Count lines of code in the repository. |
-| `cheatsheet` | Regenerate `Lambda_Cheatsheet.pdf` from Markdown (requires `pandoc`, `xelatex`). |
-| `info` | Print project configuration info. |
-| `download` | Download a web page to `test/layout/data/page/`. Usage: `make download <url>`. |
+| Target         | Description                                                                      |
+| -------------- | -------------------------------------------------------------------------------- |
+| `run`          | Build and run `lambda.exe` interactively (REPL).                                 |
+| `install`      | Copy `lambda.exe` to `/usr/local/bin/Lambda`.                                    |
+| `uninstall`    | Remove from `/usr/local/bin/Lambda`.                                             |
+| `intellisense` | Update VS Code IntelliSense database (`compile_commands.json`).                  |
+| `count-loc`    | Count lines of code in the repository.                                           |
+| `cheatsheet`   | Regenerate `Lambda_Cheatsheet.pdf` from Markdown (requires `pandoc`, `xelatex`). |
+| `info`         | Print project configuration info.                                                |
 
 ---
 

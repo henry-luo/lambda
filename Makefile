@@ -345,7 +345,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    generate-premake clean-premake build-test build-test-linux \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-fuzz
+	    test-fuzzy test-fuzzy-extended test-fuzz test-c2mir
 
 # Help target - shows available commands
 help:
@@ -402,6 +402,7 @@ help:
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
 	@echo "  test-mir      - Run MIR JIT tests only"
+	@echo "  test-c2mir    - Run Lambda baseline tests with legacy C2MIR JIT path"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-verbose  - Run tests with verbose output"
@@ -725,6 +726,17 @@ test-lambda-baseline: build-test
 	@echo "Running LAMBDA baseline test suite..."
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --target=lambda --category=baseline --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-c2mir: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		LAMBDA_USE_C2MIR=1 ./test/test_run.sh --target=lambda --category=baseline --parallel; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
