@@ -1649,6 +1649,29 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
 
+    // Set up viewport-level scrolling when document content exceeds the viewport height.
+    // This enables mouse wheel scrolling for long documents that don't have explicit CSS
+    // overflow properties on the root element. Only applies to auto-height root elements.
+    if (!root_has_explicit_height && html->height > physical_height) {
+        float content_height = html->height;
+        html->content_height = content_height;
+        html->height = physical_height;   // constrain root block to viewport height
+        if (!html->scroller) {
+            html->scroller = alloc_scroll_prop(lycon);
+        }
+        html->scroller->overflow_y = CSS_VALUE_AUTO;
+        html->scroller->has_vt_scroll = true;
+        html->scroller->has_vt_overflow = true;
+        html->scroller->has_clip = true;
+        html->scroller->clip.left = 0;
+        html->scroller->clip.top = 0;
+        html->scroller->clip.right = html->width;
+        html->scroller->clip.bottom = physical_height;
+        html->scroller->pane->v_max_scroll = content_height - physical_height;
+        log_info("viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f",
+            content_height, physical_height, html->scroller->pane->v_max_scroll);
+    }
+
     auto t_finalize = high_resolution_clock::now();
     log_info("[TIMING] layout: finalize_block_flow: %.1fms", duration<double, std::milli>(t_finalize - t_layout_block).count());
 }
