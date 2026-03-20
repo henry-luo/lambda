@@ -93,8 +93,8 @@ pub fn font_class(font_name) {
 // ============================================================
 
 pub fn get_stylesheet() {
-    let s = ".ML__latex{display:inline-block;direction:ltr;text-align:left;text-indent:0;text-rendering:auto;font-family:inherit;font-style:normal;letter-spacing:normal;line-height:1.2;word-wrap:normal;word-spacing:normal;white-space:nowrap;width:min-content}" ++
-    ".ML__base{display:inline-block;position:relative;padding:0;margin:0;box-sizing:content-box;border:0;outline:0;vertical-align:baseline;text-decoration:none;width:min-content}" ++
+    let s = ".ML__latex{display:inline-block;direction:ltr;text-align:left;text-indent:0;text-rendering:auto;font-family:inherit;font-style:normal;letter-spacing:normal;line-height:1.2;word-wrap:normal;word-spacing:normal;white-space:nowrap}" ++
+    ".ML__base{display:inline-block;position:relative;padding:0;margin:0;box-sizing:content-box;border:0;outline:0;vertical-align:baseline;text-decoration:none}" ++
     ".ML__strut,.ML__strut--bottom{display:inline-block;min-height:0.5em}" ++
     ".ML__mathit{font-family:KaTeX_Math;font-style:italic}" ++
     ".ML__cmr{font-family:KaTeX_Main;font-style:normal}" ++
@@ -109,21 +109,11 @@ pub fn get_stylesheet() {
     ".ML__bold{font-weight:700}" ++
     ".ML__it{font-style:italic}" ++
     ".ML__mfrac{display:inline-block}" ++
-    ".ML__frac-line{width:100%;min-height:1px}" ++
-    ".ML__frac-line:after{content:'';display:block;margin-top:max(-1px,-0.04em);min-height:max(1px,0.04em);background:currentColor;box-sizing:content-box;transform:translate(0,0)}" ++
+    ".ML__frac-line{display:block;width:100%;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
     ".ML__sqrt{display:inline-block}" ++
     ".ML__sqrt-sign{display:inline-block;position:relative}" ++
-    ".ML__sqrt-line{display:inline-block;height:max(1px,0.04em);width:100%}" ++
-    ".ML__sqrt-line:before{content:'';display:block;margin-top:min(-1px,-0.04em);min-height:max(1px,0.04em);background:currentColor;transform:translate(0,0)}" ++
+    ".ML__sqrt-line{display:inline-block;height:1px;width:100%;background:currentColor}" ++
     ".ML__sqrt-index{margin-left:0.27778em;margin-right:-0.55556em}" ++
-    ".ML__latex .ML__vlist-t{display:inline-table;table-layout:fixed;border-collapse:collapse}" ++
-    ".ML__latex .ML__vlist-r{display:table-row}" ++
-    ".ML__latex .ML__vlist{display:table-cell;vertical-align:bottom;position:relative}" ++
-    ".ML__latex .ML__vlist>span{display:block;height:0;position:relative}" ++
-    ".ML__latex .ML__vlist>span>span{display:inline-block}" ++
-    ".ML__latex .ML__vlist>span>.ML__pstrut{overflow:hidden;width:0}" ++
-    ".ML__latex .ML__vlist-t2{margin-right:-2px}" ++
-    ".ML__latex .ML__vlist-s{display:table-cell;vertical-align:bottom;font-size:1px;width:2px;min-width:2px}" ++
     ".ML__msubsup{text-align:left}" ++
     ".ML__left-right{display:inline-block}" ++
     ".ML__small-delim{font-family:KaTeX_Main}" ++

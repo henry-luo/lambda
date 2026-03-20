@@ -105,55 +105,39 @@ pub fn hbox(boxes) {
 }
 
 // ============================================================
-// VBox — vertical stacking using inline-table layout
+// VBox — vertical stacking using inline-block layout
 // ============================================================
 
 // create a vertical box with individually shifted children
 // children: [{box, shift}] where shift is distance from baseline (negative = up)
-// Returns a box wrapping the vlist <span> tree
+// Returns a box wrapping the vertically-stacked content
 // helper: build vbox internals when there are children
 fn build_vbox(children) {
-    let pstrut_size = 2.0 + max((for (c in children) c.box.height + c.box.depth))
     let max_pos = max((for (c in children) 0.0 - c.shift))
     let min_pos = min((for (c in children) 0.0 - c.shift - c.box.height - c.box.depth))
-    let items = (for (c in children,
-                     let top_val = 0.0 - (pstrut_size + (0.0 - c.shift) + c.box.depth))
-        <span style: "top:" ++ util.fmt_em(top_val);
-            <span class: css.PSTRUT,
-                  style: "height:" ++ util.fmt_em(pstrut_size)>
-            c.box.element
-        >)
-    let extends_below = min_pos < 0.0
-    let vlist_el = if (extends_below)
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST,
-                      style: "height:" ++ util.fmt_em(max_pos);
-                    for (item in items) item
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST,
-                      style: "height:" ++ util.fmt_em(0.0 - min_pos);
-                    <span>
-                >
-            >
-        >
-    else
-        <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST,
-                      style: "height:" ++ util.fmt_em(max_pos);
-                    for (item in items) item
-                >
-            >
-        >
+    let max_width = max((for (c in children) c.box.width))
+    let depth = 0.0 - min_pos
+
+    // Reverse children for top-to-bottom order (callers provide bottom-to-top)
+    let reversed = reverse(children)
+
+    // Each child becomes a block-level row, centered
+    let items = (for (c in reversed)
+        <span style: "display:block;text-align:center"; c.box.element>
+    )
+
+    // vertical-align positions the vbox so baseline is correct
+    let va = if (depth > 0.01) util.fmt_em(0.0 - depth) else "middle"
+    let vbox_style = "display:inline-block;vertical-align:" ++ va
+
+    let vbox_el = <span style: vbox_style;
+        for (item in items) item
+    >
     {
-        element: vlist_el,
+        element: vbox_el,
         height: max_pos,
-        depth: 0.0 - min_pos,
-        width: max((for (c in children) c.box.width)),
+        depth: depth,
+        width: max_width,
         type: "ord",
         italic: 0.0,
         skew: 0.0
