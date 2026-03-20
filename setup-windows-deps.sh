@@ -62,11 +62,11 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
 
     # Clean tree-sitter build files
-    if [ -d "lambda/tree-sitter" ]; then
-        cd lambda/tree-sitter
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
+    rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
     # Clean build directories
     rm -rf build_win_native/ build/ build_debug/ 2>/dev/null || true
@@ -322,23 +322,34 @@ fi
 # Build tree-sitter libraries for Windows
 echo "Building tree-sitter libraries for Windows..."
 
-# Build tree-sitter library
+# Build tree-sitter library (amalgamated, no ICU)
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
-    echo "Building tree-sitter library for Windows..."
+    echo "Building tree-sitter library for Windows (amalgamated, no ICU)..."
     cd lambda/tree-sitter
 
     # Clean previous builds
-    make clean || true
+    rm -f libtree-sitter.a tree_sitter.o
 
-    # Build static library for Windows
+    # Build static library using amalgamated single-file approach (no ICU dependency)
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
-        CC="clang" AR="llvm-ar" make libtree-sitter.a
+        clang -c lib/src/lib.c \
+            -Ilib/include \
+            -O3 -Wall -Wextra -std=c11 -fPIC \
+            -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+            -o tree_sitter.o
+        llvm-ar rcs libtree-sitter.a tree_sitter.o
     else
-        CC="gcc" AR="ar" make libtree-sitter.a
+        gcc -c lib/src/lib.c \
+            -Ilib/include \
+            -O3 -Wall -Wextra -std=c11 -fPIC \
+            -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+            -o tree_sitter.o
+        ar rcs libtree-sitter.a tree_sitter.o
     fi
+    rm -f tree_sitter.o
 
     if [ -f "libtree-sitter.a" ]; then
-        echo "✅ Tree-sitter library built successfully"
+        echo "✅ Tree-sitter library built successfully (no ICU)"
     else
         echo "❌ Tree-sitter library build failed"
         cd - > /dev/null

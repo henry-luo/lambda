@@ -44,50 +44,119 @@ The build produces `lambda.exe` in the project root.
 
 ## 2. Setting Up Dependencies
 
-The setup scripts handle all dependency installation automatically. Here is what each platform requires and what the scripts do.
-
-### macOS (`setup-mac-deps.sh`)
-
-Requires **Homebrew**. The script installs:
-
-- **Build tools**: Xcode CLI tools, cmake, pkg-config, meson, ninja
-- **TLS**: mbedtls@3 (for libcurl HTTPS support)
-- **Fonts/graphics**: freetype, expat (for fontconfig), GLFW, ThorVG (built from source)
-- **Compression**: zlib, bzip2, brotli (for WOFF2)
-- **Networking**: libcurl (built from source with mbedTLS), nghttp2, libevent
-- **Unicode**: utf8proc (built from `build_temp/`)
-- **Decimal math**: mpdecimal
-- **Memory**: rpmalloc (built from source in `mac-deps/`)
-- **Images**: libjpeg-turbo (built from `build_temp/`), libpng, libgif
-- **Regex**: RE2 (built from `build_temp/re2-noabsl/`)
-- **JIT**: MIR (built from `build_temp/mir/`)
-- **Tree-sitter**: Core library + Lambda/JavaScript/LaTeX grammars (built from `lambda/tree-sitter*/`)
-- **Node packages**: jsdom (test comparison), puppeteer (browser layout tests)
+The setup scripts handle all dependency installation automatically:
 
 ```bash
-# Full setup
-./setup-mac-deps.sh
-
-# Clean intermediate build artifacts
-./setup-mac-deps.sh --clean
+./setup-mac-deps.sh        # macOS
+./setup-linux-deps.sh      # Linux (Ubuntu/Debian)
+./setup-windows-deps.sh    # Windows (MSYS2)
 ```
 
-### Linux (`setup-linux-deps.sh`)
+Pass `--clean` to any script to remove intermediate build artifacts.
 
-Uses **apt** for system packages, builds remaining dependencies from source.
+### Common Dependencies (All Platforms)
 
-System packages installed via apt:
+These libraries and tools are required on every platform.
+
+#### Build Tools
+
+| Tool | Purpose |
+|------|---------|
+| C/C++ compiler (GCC or Clang) | Build toolchain (C++17) |
+| Make | Build orchestration |
+| CMake | Dependency builds (RE2, ThorVG, etc.) |
+| Python 3 | Premake config generation (`utils/generate_premake.py`) |
+| Premake5 | Generates platform Makefiles from `build_lambda_config.json` |
+| Node.js + npm | Tree-sitter CLI via `npx` for parser generation |
+| pkg-config | Library discovery |
+| Meson + Ninja | ThorVG build |
+| Git | Version control, dependency source cloning |
+| xxd | Binary data embedding |
+| ccache | Compiler cache (auto-used if available) |
+
+#### Runtime Libraries
+
+| Library | Source | Purpose |
+|---------|--------|---------|
+| **tree-sitter** | Built from `lambda/tree-sitter/` | Incremental parser framework. Built using the **amalgamated `lib.c`** approach — compiles to a single object file with **no ICU/Unicode library dependency**. |
+| **tree-sitter-lambda** | Built from `lambda/tree-sitter-lambda/` | Lambda language grammar parser |
+| **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX input parsing |
+| **tree-sitter-latex** | Built from `lambda/tree-sitter-latex/` | LaTeX document parsing |
+| **tree-sitter-latex-math** | Built from `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
+| **MIR** | Built from `mac-deps/mir/` | JIT compiler backend (Medium Internal Representation) |
+| **RE2** | Built from `build_temp/re2-noabsl/` | Regular expression engine (no Abseil dependency) |
+| **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
+| **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
+| **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
+| **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
+| **mbedTLS** | System package | TLS/SSL for libcurl |
+| **zlib** | System package | Gzip compression (HTTP, PDF, etc.) |
+| **bzip2** | System package | Alternative compression format |
+
+#### Radiant Engine Libraries
+
+| Library                 | Purpose                                                  |
+| ----------------------- | -------------------------------------------------------- |
+| **ThorVG** (v1.0-pre34) | Vector graphics rendering (SW engine, built from source) |
+| **FreeType**            | Font rendering                                           |
+| **GLFW**                | OpenGL window and context management                     |
+| **libpng**              | PNG image support                                        |
+| **libjpeg-turbo**       | JPEG image support                                       |
+| **giflib**              | GIF image support                                        |
+| **Brotli**              | WOFF2 font decompression                                 |
+| **WOFF2**               | Web Open Font Format 2 decompression (built from source) |
+
+#### Development / Testing
+
+| Library | Purpose |
+|---------|---------|
+| **Google Test** | C++ unit testing framework |
+| **jsdom** (npm) | JavaScript DOM for test comparison |
+| **Puppeteer** (npm) | Browser automation for layout reference capture |
+
+### macOS-Specific (`setup-mac-deps.sh`)
+
+Requires **Homebrew**. Most libraries installed via `brew install`:
+
 ```
-libcurl4-openssl-dev  libmpdec-dev  libutf8proc-dev  libssl-dev
-zlib1g-dev  libnghttp2-dev  libncurses5-dev  build-essential
-libglfw3-dev  libfreetype6-dev  libfontconfig1-dev  libexpat1-dev
-libpng-dev  libbz2-dev  libturbojpeg0-dev  libgif-dev  gettext
-libgl1-mesa-dev  libglu1-mesa-dev  libegl1-mesa-dev
+mbedtls@3  freetype  expat  glfw  libjpeg-turbo  giflib  libpng
+zlib  bzip2  pkg-config  cmake  meson  ninja  libevent  premake
 ```
 
-### Windows (`setup-windows-deps.sh`)
+Built from source in `mac-deps/`:
+- libcurl (with mbedTLS), nghttp2, ThorVG, Brotli, WOFF2, rpmalloc, MIR
 
-Requires **MSYS2** with the MINGW64 or CLANG64 environment. Uses `pacman` for package management.
+System frameworks: OpenGL, Cocoa, IOKit, CoreFoundation, CoreServices
+
+### Linux-Specific (`setup-linux-deps.sh`)
+
+Uses **apt** for system packages:
+
+```
+build-essential  libcurl4-openssl-dev  libmpdec-dev  libutf8proc-dev
+libssl-dev  zlib1g-dev  libnghttp2-dev  libncurses5-dev  libevent-dev
+libbrotli-dev  libfreetype6-dev  libexpat1-dev
+libglfw3-dev  libpng-dev  libbz2-dev  libturbojpeg0-dev  libgif-dev
+libgl1-mesa-dev  libglu1-mesa-dev  libegl1-mesa-dev  gettext
+```
+
+Built from source in `build_temp/`:
+- Google Test, utf8proc, RE2, ThorVG, WOFF2
+
+### Windows-Specific (`setup-windows-deps.sh`)
+
+Requires **MSYS2** with CLANG64 (preferred) or MINGW64 environment. Uses `pacman`:
+
+```
+base-devel  mingw-w64-*-clang (or -gcc)   mingw-w64-*-cmake
+mingw-w64-*-ninja  mingw-w64-*-mpdecimal  mingw-w64-*-mbedtls
+mingw-w64-*-freetype  mingw-w64-*-glfw    mingw-w64-*-libpng
+mingw-w64-*-libjpeg-turbo  mingw-w64-*-giflib  mingw-w64-*-nodejs
+mingw-w64-*-meson  mingw-w64-*-pkgconf    ccache  git  vim  jq
+```
+
+Built from source in `win-native-deps/`:
+- libcurl (minimal, no HTTP/2), ThorVG, WOFF2
 
 ### Dependency Architecture
 

@@ -86,7 +86,7 @@ build_and_measure "config_no_jemalloc_lexbor.json" "Without jemalloc and lexbor"
 cat build_lambda_config.json.backup | python3 -c "
 import sys, json
 config = json.load(sys.stdin)
-graphics_libs = ['freetype', 'fontconfig', 'ThorVG', 'turbojpeg', 'png', 'glfw']
+graphics_libs = ['freetype', 'ThorVG', 'turbojpeg', 'png', 'glfw']
 for target in config['targets']:
     if target['name'] == 'radiant':
         target['libraries'] = [lib for lib in target['libraries'] if lib not in graphics_libs]
@@ -94,7 +94,7 @@ for target in config['targets']:
 json.dump(config, sys.stdout, indent=2)
 " > config_no_graphics.json
 
-build_and_measure "config_no_graphics.json" "Without graphics libraries (freetype, fontconfig, ThorVG, turbojpeg, png, glfw)"
+build_and_measure "config_no_graphics.json" "Without graphics libraries (freetype, ThorVG, turbojpeg, png, glfw)"
 
 # Create core-only version
 cat build_lambda_config.json.backup | python3 -c "

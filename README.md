@@ -200,7 +200,7 @@ Lambda uses a Premake5-based build system generated from `build_lambda_config.js
 make build             # Incremental build (recommended)
 make release           # Optimized release build
 make test              # Run unit test
-make clean             # Clean build artifacts
+make clean-all         # Clean build artifacts
 ```
 
 ### CLI Commands

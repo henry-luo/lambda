@@ -84,7 +84,7 @@ Radiant’s implementation in this repo lives under `radiant/`:
 Radiant relies on a small set of native libraries (installed via the repo’s setup scripts):
 - **GLFW** (window + OpenGL context)
 - **FreeType** (font metrics and text measurement)
-- **FontConfig** (font discovery/matching)
+
 - **ThorVG** (vector drawing, including SVG-related rendering paths)
 
 For the broader “open many formats” story, the Lambda side provides parsing/conversion.

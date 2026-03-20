@@ -156,14 +156,20 @@ LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
 LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 
-# Build or verify tree-sitter library
+# Build tree-sitter library (amalgamated build, no ICU dependency)
+# Uses lib.c single-file approach - no external ICU/Unicode library needed
 $(TREE_SITTER_LIB):
-	@echo "Building tree-sitter library from source..."
-	@echo "🔧 Compiler: $(CC)"
-	@echo "🔧 CXX: $(CXX)"
-	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
-	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter libtree-sitter.a CC="$(CC)" CXX="$(CXX)" V=1
+	@echo "Building tree-sitter library (amalgamated, no ICU)..."
+	@cd lambda/tree-sitter && \
+	rm -f libtree-sitter.a tree_sitter.o && \
+	$(CC) -c lib/src/lib.c \
+		-Ilib/include \
+		-O3 -Wall -Wextra -std=c11 -fPIC \
+		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+		-o tree_sitter.o && \
+	$(AR) rcs libtree-sitter.a tree_sitter.o && \
+	rm -f tree_sitter.o
+	@echo "✅ tree-sitter library built: lambda/tree-sitter/libtree-sitter.a"
 
 # Build tree-sitter-lambda library (depends on parser generation)
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
@@ -340,34 +346,6 @@ endef
 # Combined tree-sitter libraries target
 tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
-# Build tree-sitter without Unicode/ICU dependencies (minimal build)
-# Uses the amalgamated lib.c file approach recommended by ChatGPT
-build-tree-sitter:
-	@echo "Building minimal tree-sitter without Unicode/ICU dependencies..."
-	@echo "🔧 Using amalgamated build (lib.c) - no Unicode dependencies"
-	@cd lambda/tree-sitter && \
-	echo "🧹 Cleaning previous build..." && \
-	rm -f libtree-sitter-minimal.a tree_sitter.o && \
-	echo "🔧 Compiling amalgamated tree-sitter..." && \
-	env PATH="/mingw64/bin:$$PATH" $(CC) -c lib/src/lib.c \
-		-Ilib/include \
-		-O3 -Wall -Wextra -std=c11 -fPIC \
-		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
-		-o tree_sitter.o && \
-	echo "� Creating static library..." && \
-	env PATH="/mingw64/bin:$$PATH" $(AR) rcs libtree-sitter-minimal.a tree_sitter.o && \
-	echo "🧹 Cleaning object file..." && \
-	rm -f tree_sitter.o && \
-	echo "✅ Minimal tree-sitter library built: lambda/tree-sitter/libtree-sitter-minimal.a" && \
-	ls -la libtree-sitter-minimal.a
-
-# Clean minimal tree-sitter build
-clean-tree-sitter-minimal:
-	@echo "Cleaning minimal tree-sitter build..."
-	@cd lambda/tree-sitter && \
-	rm -f libtree-sitter-minimal.a tree_sitter.o && \
-	echo "✅ Minimal tree-sitter build cleaned."
-
 # Default target
 .DEFAULT_GOAL := build
 
@@ -375,10 +353,10 @@ clean-tree-sitter-minimal:
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
 	    lambda lambda-cli build-cli format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
-	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
-	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
+	    tree-sitter-libs \
+	    verify-windows verify-linux test-windows test-linux \
 	    generate-premake clean-premake build-test build-test-linux \
-	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
+	    build-mingw64 \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended test-fuzz
@@ -418,11 +396,8 @@ help:
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
 	@echo "                     (automatic when grammar.js changes)"
-	@echo "  tree-sitter-libs - Build tree-sitter, tree-sitter-lambda, and tree-sitter-latex libraries"
+	@echo "  tree-sitter-libs - Build all tree-sitter libraries (amalgamated, no ICU)"
 	@echo "                     Automatically regenerates LaTeX parser if grammar.js changes"
-	@echo "  build-tree-sitter - Build tree-sitter without Unicode/ICU dependencies (Windows)"
-	@echo "                      Creates libtree-sitter-minimal.a for Windows builds"
-	@echo "  clean-tree-sitter-minimal - Clean minimal tree-sitter build artifacts"
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run ALL test suites (baseline + extended, alias for test-all)"
@@ -758,21 +733,11 @@ clean-all: clean-premake clean-test
 	@rm -rf $(BUILD_WINDOWS_DIR)
 	@rm -rf $(BUILD_LINUX_DIR)
 	@echo "Cleaning tree-sitter libraries..."
-	@if [ -d "lambda/tree-sitter" ]; then \
-		cd lambda/tree-sitter && $(MAKE) clean; \
-	fi
-	@if [ -d "lambda/tree-sitter-lambda" ]; then \
-		cd lambda/tree-sitter-lambda && $(MAKE) clean; \
-	fi
-	@if [ -d "lambda/tree-sitter-javascript" ]; then \
-		cd lambda/tree-sitter-javascript && rm -f src/*.o *.a *.so *.dylib; \
-	fi
-	@if [ -d "lambda/tree-sitter-latex" ]; then \
-		cd lambda/tree-sitter-latex && rm -f src/*.o *.a *.so *.dylib; \
-	fi
-	@if [ -d "lambda/tree-sitter-latex-math" ]; then \
-		cd lambda/tree-sitter-latex-math && rm -f src/*.o *.a *.so *.dylib; \
-	fi
+	@rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o
+	@rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o
+	@rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o
+	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
+	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
 	@rm -f $(RE2_LIB)
 	@echo "All build directories and tree-sitter libraries cleaned."
 
