@@ -21,8 +21,11 @@ pub fn analyze(ast) {
     let state = {
         docclass: "article",
         title: null,
+        title_el: null,
         author: null,
+        author_el: null,
         date: null,
+        date_el: null,
         counters: {
             part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0,
             paragraph: 0, figure: 0, table: 0, equation: 0, footnote: 0,
@@ -54,8 +57,11 @@ pub fn analyze(ast) {
     {
         docclass: result.docclass,
         title: result.title,
+        title_el: result.title_el,
         author: result.author,
+        author_el: result.author_el,
         date: result.date,
+        date_el: result.date_el,
         headings: result.headings,
         heading_nums: result.heading_nums,
         heading_titles: result.heading_titles,
@@ -165,18 +171,18 @@ fn walk_documentclass(el, state) {
 }
 
 fn walk_title(el, state) {
-    let t = util.text_of(el)
-    {*:state, title: t}
+    let t = util.rich_text_of(el)
+    {*:state, title: t, title_el: el}
 }
 
 fn walk_author(el, state) {
-    let a = util.text_of(el)
-    {*:state, author: a}
+    let a = util.rich_text_of(el)
+    {*:state, author: a, author_el: el}
 }
 
 fn walk_date(el, state) {
-    let d = util.text_of(el)
-    {*:state, date: d}
+    let d = util.rich_text_of(el)
+    {*:state, date: d, date_el: el}
 }
 
 // ============================================================

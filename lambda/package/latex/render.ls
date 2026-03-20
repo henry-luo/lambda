@@ -32,7 +32,12 @@ pub fn render_children_of(node, info) {
 
 fn render_text(t) {
     if (len(trim(t)) == 0) null
-    else t
+    else {
+        // convert ligatures that tree-sitter didn't handle (e.g., in command arguments)
+        let t1 = replace(t, "---", "\u2014")
+        let t2 = replace(t1, "--", "\u2013")
+        t2
+    }
 }
 
 fn render_symbol(s, info) {
@@ -237,6 +242,8 @@ fn render_element(el, info) {
         // ---- special characters ----
         case 'control_symbol': render_control_symbol(el)
         case 'controlspace_command': " "
+        case 'char_command': render_char_command(el)
+        case 'caret_char': render_caret_char(el)
 
         // ---- groups ----
         case 'curly_group': render_group(el, info)
@@ -245,9 +252,9 @@ fn render_element(el, info) {
         case 'text_group': render_group(el, info)
 
         // ---- symbol commands ----
-        case 'LaTeX': "LaTeX"
-        case 'TeX': "TeX"
-        case 'LaTeXe': "LaTeX2e"
+        case 'LaTeX': render_latex_logo()
+        case 'TeX': render_tex_logo()
+        case 'LaTeXe': render_latex2e_logo()
         case 'today': if (info.date != null) info.date else "today"
         case 'ldots': "\u2026"
         case 'dots': "\u2026"
@@ -276,6 +283,9 @@ fn render_element(el, info) {
         case 'L': "\u0141"
         case 'i': "\u0131"
         case 'j': "\u0237"
+
+        // ---- character code commands ----
+        case 'symbol': render_symbol_command(el)
 
         // ---- extended symbols (textgreek, textcomp, gensymb) ----
         default: render_extended_or_generic(el, info)
@@ -374,14 +384,25 @@ fn render_body(el, info) {
 }
 
 fn render_maketitle(info) {
-    let title_el = if (info.title != null) <div class: "title"; info.title> else null
-    let author_el = if (info.author != null) <div class: "author"; info.author> else null
-    let date_el = if (info.date != null) <div class: "date"; info.date> else null
+    let title_div = render_maketitle_div("title", info.title_el, info.title, info)
+    let author_div = render_maketitle_div("author", info.author_el, info.author, info)
+    let date_div = render_maketitle_div("date", info.date_el, info.date, info)
+    let parts = [title_div, author_div, date_div] that (~ != null)
     <header class: "latex-title";
-        if (title_el != null) { title_el }
-        if (author_el != null) { author_el }
-        if (date_el != null) { date_el }
+        for c in parts { c }
     >
+}
+
+// render a preamble field div (title/author/date) using element children if available
+fn render_maketitle_div(css_class, el, fallback_text, info) {
+    if (el != null and el is element) {
+        let items = render_children(el, 0, info)
+        if (len(items) > 0) { <div class: css_class; for c in items { c }> }
+        else if (fallback_text != null) { <div class: css_class; fallback_text> }
+        else { null }
+    }
+    else if (fallback_text != null) { <div class: css_class; fallback_text> }
+    else { null }
 }
 
 fn render_toc(info) {
@@ -1454,6 +1475,106 @@ fn find_footnote_by_key(footnotes, key, i) {
     let entry_key = util.slugify(entry_text)
     if (entry_key == key) entry.number
     else find_footnote_num(footnotes, key, i + 1)
+}
+
+// ============================================================
+// Logo rendering (LaTeX, TeX, LaTeX2e)
+// ============================================================
+
+fn render_latex_logo() {
+    <span class: "latex-logo";
+        "L"
+        <sup "A">
+        "T"
+        <sub "E">
+        "X"
+    >
+}
+
+fn render_tex_logo() {
+    <span class: "tex-logo";
+        "T"
+        <sub "E">
+        "X"
+    >
+}
+
+fn render_latex2e_logo() {
+    <span class: "latex-logo";
+        "L"
+        <sup "A">
+        "T"
+        <sub "E">
+        "X"
+        <span class: "latex-2e"; "2">
+        <i "\u03B5">
+    >
+}
+
+// ============================================================
+// Character code commands (\symbol, \char, ^^)
+// ============================================================
+
+// \symbol{"00A9} or \symbol{169}
+fn render_symbol_command(el) {
+    let arg_text = util.text_of(el)
+    let trimmed = trim(arg_text)
+    let code = parse_char_code(trimmed)
+    if (code > 0) chr(code) else ""
+}
+
+// \char"A9 or \char169 or \char'251
+fn render_char_command(el) {
+    let text = util.text_of(el)
+    // text is the full token, e.g. \char"A9
+    let after = if (starts_with(text, "\\char")) slice(text, 5, len(text)) else text
+    let code = parse_char_code(trim(after))
+    if (code > 0) chr(code) else ""
+}
+
+// ^^A9 or ^^^^00A9
+fn render_caret_char(el) {
+    let text = util.text_of(el)
+    // strip leading ^^ or ^^^^
+    let hex_part = if (starts_with(text, "^^^^")) slice(text, 4, len(text))
+                   else if (starts_with(text, "^^")) slice(text, 2, len(text))
+                   else text
+    let code = hex_to_int(hex_part, 0, len(hex_part), 0)
+    if (code > 0) chr(code) else ""
+}
+
+// parse a char code string: "A9 (hex), 169 (decimal), '251 (octal)
+fn parse_char_code(s) {
+    if (len(s) == 0) 0
+    else if (starts_with(s, "\"")) hex_to_int(s, 1, len(s), 0)
+    else if (starts_with(s, "'")) oct_to_int(s, 1, len(s), 0)
+    else int(s)
+}
+
+fn hex_to_int(s, i, n, acc) {
+    if (i >= n) acc
+    else {
+        let c = s[i]
+        let digit = hex_digit(c)
+        if (digit < 0) acc
+        else hex_to_int(s, i + 1, n, acc * 16 + digit)
+    }
+}
+
+fn hex_digit(c) {
+    if (c >= "0" and c <= "9") ord(c) - ord("0")
+    else if (c >= "a" and c <= "f") ord(c) - ord("a") + 10
+    else if (c >= "A" and c <= "F") ord(c) - ord("A") + 10
+    else -1
+}
+
+fn oct_to_int(s, i, n, acc) {
+    if (i >= n) acc
+    else {
+        let c = s[i]
+        if (c >= "0" and c <= "7") oct_to_int(s, i + 1, n, acc * 8 + (ord(c) - ord("0")))
+        else acc
+    }
 }
 
 // ============================================================

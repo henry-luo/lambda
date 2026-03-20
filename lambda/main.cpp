@@ -676,6 +676,7 @@ int exec_convert(int argc, char* argv[]) {
                 Runtime lambda_runtime;
                 runtime_init(&lambda_runtime);
                 lambda_runtime.current_dir = const_cast<char*>("./");
+                lambda_runtime.import_base_dir = "./";  // resolve imports from project root, not temp/
 
                 // Write the script to a temporary file, then execute it
                 const char* tmp_script_path = "temp/_convert_latex_tmp.ls";

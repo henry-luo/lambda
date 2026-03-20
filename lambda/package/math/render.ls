@@ -367,6 +367,7 @@ fn get_text_from_element(node) {
     if (len(node) > 0 and node[0] is string) string(node[0])
     else if (node.value != null) string(node.value)
     else if (node.text != null) string(node.text)
+    else if (node.name != null) string(node.name)
     else ""
 }
 
