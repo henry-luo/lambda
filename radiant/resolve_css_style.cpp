@@ -5419,6 +5419,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
                 border_width = 3.0f;  // medium
             }
+            // CSS spec: when no color specified, default to currentColor (text color)
+            if (border_color.c == 0 && border_style >= 0 &&
+                border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
+                border_color.c = 0xFF000000;  // opaque black (ABGR) as default currentColor
+            }
             if (border_width >= 0) {
                 span->bound->border->width.top = border_width;
                 span->bound->border->width.right = border_width;

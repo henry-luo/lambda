@@ -1741,6 +1741,12 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
+
+    // Render border/background for inline elements (e.g. <span> with border)
+    if (view_span->bound) {
+        render_bound(rdcon, (ViewBlock*)view_span);
+    }
+
     View* view = view_span->first_child;
     if (view) {
         if (view_span->font) {
