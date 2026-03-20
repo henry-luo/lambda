@@ -235,6 +235,34 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
         }
     }
 
+    // 5.5. font alias substitution (e.g. Times New Roman → Liberation Serif)
+    {
+        const char** aliases = font_get_aliases(style->family);
+        if (aliases) {
+            for (int i = 0; aliases[i]; i++) {
+                FontDatabaseCriteria criteria;
+                memset(&criteria, 0, sizeof(criteria));
+                strncpy(criteria.family_name, aliases[i], sizeof(criteria.family_name) - 1);
+                criteria.weight = (int)style->weight;
+                criteria.style = (style->slant == FONT_SLANT_ITALIC) ? 1 : 0;
+
+                FontDatabaseResult result = font_database_find_best_match_internal(
+                    ctx->database, &criteria);
+                if (result.font && result.font->file_path && result.match_score >= 0.5f) {
+                    int face_index = result.font->is_collection ? result.font->collection_index : 0;
+                    handle = font_load_face_internal(ctx, result.font->file_path, face_index,
+                                                      style->size_px, physical_size,
+                                                      style->weight, style->slant);
+                    if (handle) {
+                        log_info("font_resolve: alias '%s' → '%s'", style->family, aliases[i]);
+                        font_cache_insert(ctx, key, handle);
+                        return handle;
+                    }
+                }
+            }
+        }
+    }
+
     // 6. platform-specific fallback
     {
         char* platform_path = font_platform_find_fallback(style->family);
