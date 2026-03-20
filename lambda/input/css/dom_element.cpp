@@ -2715,6 +2715,60 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                               i, symbol_str->chars, symbol_str->len);
                 }
             }
+        } else if (child_type == LMD_TYPE_ARRAY) {
+            // Array child - flatten into parent (Lambda scripts may produce arrays of elements)
+            Array* arr = child_item.array;
+            if (arr) {
+                log_debug("  Flattening array child at index %lld with %lld items", i, (long long)arr->length);
+                for (int64_t j = 0; j < arr->length; j++) {
+                    Item arr_item = arr->items[j];
+                    TypeId arr_item_type = get_type_id(arr_item);
+                    if (arr_item_type == LMD_TYPE_ELEMENT) {
+                        Element* child_elem = arr_item.element;
+                        build_dom_tree_from_element(child_elem, doc, dom_elem);
+                    } else if (arr_item_type == LMD_TYPE_STRING) {
+                        String* text_str = arr_item.get_string();
+                        if (text_str && text_str->len > 0) {
+                            DomText* text_node = dom_text_create(text_str, dom_elem);
+                            if (text_node) {
+                                dom_append_to_sibling_chain(dom_elem, text_node);
+                            }
+                        }
+                    } else if (arr_item_type == LMD_TYPE_SYMBOL) {
+                        String* symbol_str = arr_item.get_string();
+                        if (symbol_str && symbol_str->len > 0) {
+                            DomText* text_node = dom_text_create_symbol(symbol_str, dom_elem);
+                            if (text_node) {
+                                dom_append_to_sibling_chain(dom_elem, text_node);
+                            }
+                        }
+                    } else if (arr_item_type == LMD_TYPE_ARRAY) {
+                        // nested array - flatten recursively by wrapping in a temporary element iteration
+                        Array* nested = arr_item.array;
+                        if (nested) {
+                            for (int64_t k = 0; k < nested->length; k++) {
+                                Item nested_item = nested->items[k];
+                                TypeId nested_type = get_type_id(nested_item);
+                                if (nested_type == LMD_TYPE_ELEMENT) {
+                                    build_dom_tree_from_element(nested_item.element, doc, dom_elem);
+                                } else if (nested_type == LMD_TYPE_STRING) {
+                                    String* s = nested_item.get_string();
+                                    if (s && s->len > 0) {
+                                        DomText* tn = dom_text_create(s, dom_elem);
+                                        if (tn) dom_append_to_sibling_chain(dom_elem, tn);
+                                    }
+                                } else if (nested_type == LMD_TYPE_SYMBOL) {
+                                    String* s = nested_item.get_string();
+                                    if (s && s->len > 0) {
+                                        DomText* tn = dom_text_create_symbol(s, dom_elem);
+                                        if (tn) dom_append_to_sibling_chain(dom_elem, tn);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

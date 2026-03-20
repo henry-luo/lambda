@@ -2870,7 +2870,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     snprintf(script_buf, sizeof(script_buf),
         "import latex: .lambda.package.latex.latex\n"
         "let ast^err = input(\"%s\", {type: \"latex\"})\n"
-        "latex.render_to_html(ast, {standalone: true})\n",
+        "latex.render(ast, {standalone: true})\n",
         latex_filepath);
 
     // Run the script using the Lambda runtime (MIR JIT for performance)
@@ -2890,46 +2890,35 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    // Extract the HTML string from the script result
-    StrBuf* html_buf = strbuf_new_cap(8192);
-    print_root_item(html_buf, script_result->root);
-    const char* html_doc = html_buf->str;
-    size_t html_len = html_buf->length;
-
-    if (!html_doc || html_len == 0) {
-        log_error("[Lambda LaTeX] Lambda LaTeX package produced empty HTML output");
+    // The script returns a Lambda Element tree (not an HTML string).
+    // Use it directly as input to build_dom_tree_from_element, skipping
+    // the unnecessary serialize→reparse roundtrip.
+    Element* html_root = nullptr;
+    TypeId result_type = get_type_id(script_result->root);
+    if (result_type == LMD_TYPE_ELEMENT) {
+        html_root = script_result->root.element;
+    } else {
+        // Fallback: extract HTML via print_root_item → input_from_source
+        StrBuf* html_buf = strbuf_new_cap(8192);
+        print_root_item(html_buf, script_result->root);
+        const char* html_doc = html_buf->str;
+        size_t html_len = html_buf->length;
+        if (html_doc && html_len > 0) {
+            log_info("[Lambda LaTeX] Lambda package generated HTML (%zu bytes)", html_len);
+            String* html_type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
+            html_type_str->len = 4;
+            str_copy(html_type_str->chars, html_type_str->len + 1, "html", 4);
+            Input* html_input = input_from_source(html_doc, latex_url, html_type_str, nullptr);
+            if (html_input) {
+                html_root = get_html_root_element(html_input);
+            }
+        }
         strbuf_free(html_buf);
-        runtime_cleanup(&latex_runtime);
-        return nullptr;
     }
-
-    // Log preview
-    char html_preview[101];
-    size_t preview_len = html_len < 100 ? html_len : 100;
-    memcpy(html_preview, html_doc, preview_len);
-    html_preview[preview_len] = '\0';
-    log_info("[Lambda LaTeX] Lambda package generated HTML (%zu bytes), starts with: %s", html_len, html_preview);
-
-    // Step 2: Parse the generated HTML for DOM construction
-    log_debug("[Lambda LaTeX] Parsing generated HTML for layout...");
-
-    String* html_type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
-    html_type_str->len = 4;
-    str_copy(html_type_str->chars, html_type_str->len + 1, "html", 4);
-
-    Input* html_input = input_from_source(html_doc, latex_url, html_type_str, nullptr);
-    strbuf_free(html_buf);  // done with the HTML string buffer
-    runtime_cleanup(&latex_runtime);  // done with Lambda runtime
-
-    if (!html_input) {
-        log_error("Failed to parse generated HTML");
-        return nullptr;
-    }
-
-    Element* html_root = get_html_root_element(html_input);
+    runtime_cleanup(&latex_runtime);
 
     if (!html_root) {
-        log_error("Failed to get HTML root element from LaTeX conversion");
+        log_error("[Lambda LaTeX] Failed to get HTML root element from LaTeX conversion");
         return nullptr;
     }
 
@@ -2937,7 +2926,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 3: Create DomDocument and build DomElement tree from HTML Element tree
     log_debug("[Lambda LaTeX] Building DomElement tree from HTML");
-    DomDocument* dom_doc = dom_document_create(html_input);
+    DomDocument* dom_doc = dom_document_create(script_result);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
         return nullptr;
