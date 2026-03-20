@@ -634,7 +634,7 @@ DisplayValue resolve_display_value(void* child) {
                                 log_debug("[CSS] ✅ Returning outer=%d, inner=%d for GRID", display.outer, display.inner);
                                 return display;
                             } else if (keyword == CSS_VALUE_INLINE_GRID) {
-                                display.outer = CSS_VALUE_INLINE;
+                                display.outer = CSS_VALUE_INLINE_BLOCK;
                                 display.inner = CSS_VALUE_GRID;
                                 return display;
                             } else if (keyword == CSS_VALUE_BLOCK) {

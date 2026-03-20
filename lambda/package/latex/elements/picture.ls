@@ -438,12 +438,16 @@ fn make_vector(px, py, dx, dy, length, sw, sc, ht) {
 }
 
 fn line_dx(dx, length) {
-    if (dx != 0.0) { length }
+    if (dx > 0.0) { length }
+    else if (dx < 0.0) { 0.0 - length }
     else { 0.0 }
 }
 
 fn line_dy(dx, dy, length) {
-    if (dx != 0.0) { length * dy / dx }
+    if (dx != 0.0) {
+        let adx = if (dx > 0.0) dx else (0.0 - dx)
+        dy * length / adx
+    }
     else { line_dy_vert(dy, length) }
 }
 

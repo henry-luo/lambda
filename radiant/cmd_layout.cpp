@@ -2932,6 +2932,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
+    // Ensure CSS property system is initialized before building DOM tree,
+    // so that inline style declarations get correct property IDs.
+    css_property_system_init(dom_doc->pool);
+
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree from HTML");
@@ -3455,6 +3459,10 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         runtime_cleanup(&runtime);
         return nullptr;
     }
+
+    // Ensure CSS property system is initialized before building DOM tree,
+    // so that inline style declarations get correct property IDs.
+    css_property_system_init(dom_doc->pool);
 
     DomElement* dom_root = build_dom_tree_from_element(html_elem, dom_doc, nullptr);
     if (!dom_root) {

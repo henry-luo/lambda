@@ -41,13 +41,34 @@ fn render_body(body, context, render_fn, env_name) {
     else context
     let n = len(body)
     let ncols = count_first_row_cols(body, n)
-    let cell_boxes = (for (i in 0 to (n - 1),
-                           let child = body[i]
-                           where not is_sep(child))
-        render_fn(child, cell_ctx))
     let nrows = count_row_seps(body, n) + 1
+    let cell_groups = group_cells(body, 0, n, [], [])
+    let cell_boxes = (for (g in cell_groups) render_cell_group(g, cell_ctx, render_fn))
     let table = build_table(cell_boxes, ncols, nrows, env_name)
     wrap_delimiters(table, env_name)
+}
+
+// Group consecutive non-separator children into cells.
+// Each separator (col_sep or row_sep) marks a cell boundary.
+fn group_cells(body, i, n, cells, current) {
+    if (i >= n) {
+        if (len(current) > 0) cells ++ [current]
+        else cells
+    } else if (is_sep(body[i])) {
+        if (len(current) > 0)
+            group_cells(body, i + 1, n, cells ++ [current], [])
+        else
+            group_cells(body, i + 1, n, cells, [])
+    } else
+        group_cells(body, i + 1, n, cells, current ++ [body[i]])
+}
+
+fn render_cell_group(children, cell_ctx, render_fn) {
+    if (len(children) == 1) render_fn(children[0], cell_ctx)
+    else {
+        let parts = (for (c in children) render_fn(c, cell_ctx))
+        box.hbox(parts)
+    }
 }
 
 // ============================================================
@@ -89,29 +110,21 @@ fn count_row_seps(body, n) {
 }
 
 // ============================================================
-// Table building
+// Table building (nested flexbox: column of row flexes)
 // ============================================================
 
 fn build_table(cell_boxes, ncols, nrows, env_name) {
     let gap = get_row_gap(env_name)
-    let grid_cols = make_grid_cols(ncols, 1, "auto")
     let aligns = get_alignment(env_name, ncols)
     let total_cells = len(cell_boxes)
-    let cell_els = (for (idx in 0 to (total_cells - 1),
-                         let col = idx % ncols,
-                         let align = get_align_char(aligns, col),
-                         let justify = if (align == "l") "start"
-                             else if (align == "r") "end"
-                             else "center")
-        <span style: "justify-self:" ++ justify; cell_boxes[idx].element>)
     let total_h = compute_height(cell_boxes, total_cells, nrows)
     let total_d = compute_depth(cell_boxes, total_cells, nrows)
     let total_w = compute_width(cell_boxes, total_cells)
-    let table_style = "display:inline-grid;grid-template-columns:" ++
-        grid_cols ++ ";row-gap:" ++ gap ++ ";column-gap:0.5em;align-items:baseline;vertical-align:middle"
+    let row_els = build_rows(cell_boxes, ncols, nrows, aligns, 0, [])
+    let table_style = "display:inline-flex;flex-direction:column;vertical-align:middle"
     {
         element: <span class: css.MTABLE, style: table_style;
-            for (el in cell_els) el
+            for el in row_els { el }
         >,
         height: total_h,
         depth: total_d,
@@ -128,9 +141,39 @@ fn get_row_gap(env_name) {
     else "0.5em"
 }
 
-fn make_grid_cols(n, i, acc) {
-    if (i >= n) acc
-    else make_grid_cols(n, i + 1, acc ++ " auto")
+fn build_rows(cell_boxes, ncols, nrows, aligns, row, acc) {
+    if (row >= nrows) acc
+    else {
+        let start = row * ncols
+        let cells_in_row = build_row_cells(cell_boxes, aligns, ncols, start, 0, ncols, [])
+        let row_margin = if (row < nrows - 1) "margin-bottom:" ++ get_row_gap_val(nrows) else ""
+        let row_el = <span style: row_margin; for c in cells_in_row { c }>
+        build_rows(cell_boxes, ncols, nrows, aligns, row + 1, acc ++ [row_el])
+    }
+}
+
+fn get_row_gap_val(nrows) {
+    if (nrows <= 1) "0"
+    else "0.3em"
+}
+
+fn build_row_cells(cell_boxes, aligns, ncols, start, col, total_cols, acc) {
+    if (col >= ncols) acc
+    else {
+        let idx = start + col
+        let total = len(cell_boxes)
+        let align = get_align_char(aligns, col)
+        let text_align = if (align == "l") "left"
+            else if (align == "r") "right"
+            else "center"
+        let col_margin = if (col < total_cols - 1) ";margin-right:0.5em" else ""
+        let cell_style = "text-align:" ++ text_align ++ col_margin
+        let cell_el = if (idx < total)
+            <span style: cell_style; cell_boxes[idx].element>
+        else
+            <span style: cell_style>
+        build_row_cells(cell_boxes, aligns, ncols, start, col + 1, total_cols, acc ++ [cell_el])
+    }
 }
 
 // ============================================================
