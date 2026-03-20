@@ -661,3 +661,108 @@ TEST_F(MarkupRoundtripTest, BasicTextileTest) {
     // Cleanup
     free(content_copy);
 }
+
+// Test MediaWiki parsing from test/input/test.wiki file
+TEST_F(MarkupRoundtripTest, WikiFileTest) {
+    printf("\n=== Testing MediaWiki file parsing ===\n");
+
+    char* wiki_content = read_text_file("test/input/test.wiki");
+    ASSERT_NE(wiki_content, nullptr) << "Failed to read test/input/test.wiki file";
+
+    String* type_str = create_lambda_string("markup");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.wiki");
+
+    char* content_copy = strdup(wiki_content);
+
+    printf("DEBUG: Parsing Wiki content (%zu bytes)...\n", strlen(wiki_content));
+    Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
+    ASSERT_NE(input, nullptr) << "Failed to parse wiki content";
+
+    // Format to JSON to verify structure
+    String* json_type = create_lambda_string("json");
+    String* formatted = format_data(input->root, json_type, NULL, input->pool);
+    ASSERT_NE(formatted, nullptr) << "Failed to format wiki content to JSON";
+    ASSERT_GT(formatted->len, 0) << "Formatted wiki JSON should not be empty";
+
+    printf("Wiki JSON structure (length %zu, first 300 chars): %.300s\n",
+           (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
+
+    if (formatted->chars) {
+        // Should contain headers (wiki uses = Header =)
+        bool has_headers = strstr(formatted->chars, "h1") != NULL ||
+                          strstr(formatted->chars, "h2") != NULL;
+        // Should contain list elements
+        bool has_lists = strstr(formatted->chars, "ul") != NULL ||
+                        strstr(formatted->chars, "ol") != NULL;
+        // Should contain paragraphs
+        bool has_paragraphs = strstr(formatted->chars, "\"$\":\"p\"") != NULL;
+
+        printf("Wiki parsing results - Headers: %s, Lists: %s, Paragraphs: %s\n",
+               has_headers ? "YES" : "NO",
+               has_lists ? "YES" : "NO",
+               has_paragraphs ? "YES" : "NO");
+
+        ASSERT_TRUE(has_headers) << "Wiki should parse headers";
+        ASSERT_TRUE(has_lists) << "Wiki should parse lists";
+    }
+
+    free(wiki_content);
+    free(content_copy);
+}
+
+// Test basic MediaWiki inline content parsing
+TEST_F(MarkupRoundtripTest, BasicWikiTest) {
+    printf("\n=== Testing Basic MediaWiki Parsing ===\n");
+
+    const char* wiki_content =
+        "= Main Header =\n"
+        "\n"
+        "A paragraph with '''bold''' and ''italic'' text.\n"
+        "\n"
+        "== Sub Header ==\n"
+        "\n"
+        "* Item 1\n"
+        "* Item 2\n"
+        "** Nested item\n"
+        "\n"
+        "# Ordered 1\n"
+        "# Ordered 2\n";
+
+    String* type_str = create_lambda_string("markup");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "basic.wiki");
+
+    char* content_copy = strdup(wiki_content);
+
+    Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
+    ASSERT_NE(input, nullptr) << "Failed to parse basic wiki content";
+
+    String* json_type = create_lambda_string("json");
+    String* formatted = format_data(input->root, json_type, NULL, input->pool);
+    ASSERT_NE(formatted, nullptr) << "Failed to format basic wiki to JSON";
+    ASSERT_GT(formatted->len, 0) << "Formatted basic wiki JSON should not be empty";
+
+    printf("Basic Wiki JSON (first 400 chars): %.400s\n",
+           formatted->chars ? formatted->chars : "(null)");
+
+    if (formatted->chars) {
+        bool has_h1 = strstr(formatted->chars, "h1") != NULL;
+        bool has_h2 = strstr(formatted->chars, "h2") != NULL;
+        bool has_ul = strstr(formatted->chars, "ul") != NULL;
+        bool has_ol = strstr(formatted->chars, "ol") != NULL;
+
+        printf("Wiki check - H1: %s, H2: %s, UL: %s, OL: %s\n",
+               has_h1 ? "YES" : "NO",
+               has_h2 ? "YES" : "NO",
+               has_ul ? "YES" : "NO",
+               has_ol ? "YES" : "NO");
+
+        ASSERT_TRUE(has_h1) << "Should parse = Header = as h1";
+        ASSERT_TRUE(has_h2) << "Should parse == Header == as h2";
+        ASSERT_TRUE(has_ul) << "Should parse * items as unordered list";
+        ASSERT_TRUE(has_ol) << "Should parse # items as ordered list";
+    }
+
+    free(content_copy);
+}
