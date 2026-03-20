@@ -14,25 +14,11 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
 
     # Clean tree-sitter build files
-    if [ -d "lambda/tree-sitter" ]; then
-        cd lambda/tree-sitter
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    # Clean tree-sitter-lambda build files
-    if [ -d "lambda/tree-sitter-lambda" ]; then
-        cd lambda/tree-sitter-lambda
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    # Clean tree-sitter-javascript build files
-    if [ -d "lambda/tree-sitter-javascript" ]; then
-        cd lambda/tree-sitter-javascript
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
+    rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
     # Clean build directories
     rm -rf build/ build_debug/ 2>/dev/null || true
@@ -182,17 +168,15 @@ if ! brew list mbedtls@3 >/dev/null 2>&1; then
     fi
 fi
 
-# Check for freetype and expat (needed for FontConfig)
-for dep in freetype expat; do
-    if ! brew list $dep >/dev/null 2>&1; then
-        echo "Installing $dep..."
-        if command -v brew >/dev/null 2>&1; then
-            brew install $dep
-        else
-            echo "Warning: $dep not found. FontConfig may not build correctly."
-        fi
+# Check for freetype
+if ! brew list freetype >/dev/null 2>&1; then
+    echo "Installing freetype..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install freetype
+    else
+        echo "Warning: freetype not found."
     fi
-done
+fi
 
 # Check for xxd (needed for binary data conversion)
 if ! command -v xxd >/dev/null 2>&1; then
@@ -1047,101 +1031,30 @@ build_curl_with_http2_for_mac() {
     return 1
 }
 
-# Function to build FontConfig without libintl/iconv for Mac
-build_fontconfig_minimal_for_mac() {
-    echo "Building FontConfig (minimal, without libintl/iconv) for Mac..."
-
-    # Check if already built
-    if [ -f "/opt/homebrew/lib/libfontconfig_minimal.a" ]; then
-        echo "FontConfig minimal already built"
-        return 0
-    fi
-
-    # Create build temp directory
-    mkdir -p build_temp
-
-    # Download FontConfig if not exists
-    if [ ! -d "build_temp/fontconfig-2.14.2" ]; then
-        echo "Downloading FontConfig 2.14.2..."
-        cd build_temp
-        curl -L "https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.14.2.tar.xz" -o fontconfig-2.14.2.tar.xz
-        tar -xJf fontconfig-2.14.2.tar.xz
-        rm fontconfig-2.14.2.tar.xz
-        cd - > /dev/null
-    fi
-
-    cd build_temp/fontconfig-2.14.2
-
-    # Get FreeType and Expat paths from Homebrew
-    if command -v brew >/dev/null 2>&1; then
-        FREETYPE_PATH=$(brew --prefix freetype)
-        EXPAT_PATH=$(brew --prefix expat)
-        if [ ! -d "$FREETYPE_PATH" ] || [ ! -d "$EXPAT_PATH" ]; then
-            echo "❌ FreeType or Expat not found in Homebrew. Install them with: brew install freetype expat"
-            cd - > /dev/null
-            return 1
-        fi
-    else
-        echo "❌ Homebrew required for FreeType and Expat paths"
-        cd - > /dev/null
-        return 1
-    fi
-
-    # Configure FontConfig without NLS (libintl/iconv)
-    echo "Configuring FontConfig without libintl/iconv support..."
-    echo "FreeType path: $FREETYPE_PATH"
-    echo "Expat path: $EXPAT_PATH"
-
-    export PKG_CONFIG_PATH="$FREETYPE_PATH/lib/pkgconfig:$EXPAT_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
-
-    if ./configure --prefix=/opt/homebrew \
-        --enable-static --disable-shared \
-        --disable-nls \
-        --with-freetype-config="$FREETYPE_PATH/bin/freetype-config" \
-        --with-expat-includes="$EXPAT_PATH/include" \
-        --with-expat-lib="$EXPAT_PATH/lib" \
-        --disable-docs \
-        --disable-dependency-tracking \
-        --sysconfdir=/opt/homebrew/etc \
-        --localstatedir=/opt/homebrew/var \
-        --mandir=/opt/homebrew/share/man; then
-
-        echo "Building FontConfig..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing FontConfig..."
-            if sudo make install; then
-                # Create a symlink with the minimal suffix for clarity
-                sudo ln -sf /opt/homebrew/lib/libfontconfig.a /opt/homebrew/lib/libfontconfig_minimal.a
-                echo "✅ FontConfig (minimal, without libintl/iconv) built successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-
-    echo "❌ FontConfig build failed"
-    cd - > /dev/null
-    return 1
-}
-
 echo "Found native compiler: $(which gcc)"
 
-# Build tree-sitter library for Mac
+# Build tree-sitter library for Mac (amalgamated, no ICU)
 # Note: tree-sitter CLI is not installed globally - it's used via npx in Makefile
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
-    echo "Building tree-sitter library for Mac..."
+    echo "Building tree-sitter library for Mac (amalgamated, no ICU)..."
     cd lambda/tree-sitter
 
     # Clean previous builds
-    make clean || true
+    rm -f libtree-sitter.a tree_sitter.o
 
-    # Build static library for Mac
-    make libtree-sitter.a
+    # Build static library using amalgamated single-file approach (no ICU dependency)
+    cc -c lib/src/lib.c \
+        -Ilib/include \
+        -O3 -Wall -Wextra -std=c11 -fPIC \
+        -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+        -o tree_sitter.o
+    ar rcs libtree-sitter.a tree_sitter.o
+    rm -f tree_sitter.o
 
     cd - > /dev/null
-    echo "Tree-sitter library built successfully"
+    echo "✅ Tree-sitter library built successfully (no ICU)"
 else
-    echo "Tree-sitter library already built for Mac"
+    echo "✅ Tree-sitter library already built for Mac"
 fi
 
 # Build tree-sitter-lambda for Mac
@@ -1343,19 +1256,6 @@ else
     echo "✅ FreeType 2.13.3 setup completed successfully"
 fi
 
-# Build FontConfig without libintl/iconv for Mac (required by Radiant project)
-echo "Setting up FontConfig (minimal, without libintl/iconv)..."
-if [ -f "/opt/homebrew/lib/libfontconfig_minimal.a" ]; then
-    echo "FontConfig minimal already available"
-else
-    if ! build_fontconfig_minimal_for_mac; then
-        echo "❌ FontConfig minimal build failed - required for Radiant project"
-        exit 1
-    else
-        echo "✅ FontConfig minimal built successfully"
-    fi
-fi
-
 # Install Homebrew dependencies that are required by build_lambda_config.json
 echo "Installing Homebrew dependencies..."
 
@@ -1371,11 +1271,9 @@ HOMEBREW_DEPS=(
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: freetype is handled separately to ensure specific version 2.13.3
-# Note: fontconfig is built from source without libintl/iconv (see build_fontconfig_minimal_for_mac)
 RADIANT_DEPS=(
     "glfw"       # OpenGL window and context management
     "libpng"     # PNG image format support
-    "expat"      # XML parser library (dependency of fontconfig)
     "zlib"       # Compression library
     "bzip2"      # Alternative compression library
 )
@@ -1477,8 +1375,6 @@ if command -v brew >/dev/null 2>&1; then
     echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- libpng: $(brew list libpng >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
-    echo "- fontconfig: $([ -f "/opt/homebrew/lib/libfontconfig_minimal.a" ] && echo "✓ Available (minimal)" || echo "✗ Missing")"
-    echo "- expat: $(brew list expat >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- zlib: $(brew list zlib >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- bzip2: $(brew list bzip2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 else

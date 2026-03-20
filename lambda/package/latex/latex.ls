@@ -11,6 +11,7 @@ import analyzer: .analyze
 import macros: .macros
 import dispatcher: .render
 import css: .css
+import math_css: lambda.package.math.css
 import html_ser: .to_html
 
 // ============================================================
@@ -127,6 +128,7 @@ fn render_footnote_item(fn_entry, info) {
 
 fn wrap_standalone(html, info) {
     let stylesheet = css.get_stylesheet()
+    let math_stylesheet = math_css.get_stylesheet()
     let title_text = get_title_or_default(info.title)
 
     <html lang: "en";
@@ -135,6 +137,7 @@ fn wrap_standalone(html, info) {
             <meta name: "viewport", content: "width=device-width, initial-scale=1">
             <title; title_text>
             <style; stylesheet>
+            <style; math_stylesheet>
         >
         <body;
             html

@@ -12,8 +12,8 @@ This document covers Lambda's type system, including first-class types, type hie
 ## Table of Contents
 
 1. [Type System Overview](#type-system-overview)
-2. [First-Class Types](#first-class-types)
-3. [Type Hierarchy](#type-hierarchy)
+2. [Type Hierarchy](#type-hierarchy)
+3. [First-Class Types](#first-class-types)
 4. [Basic Types](#basic-types)
 5. [Collection Types](#collection-types)
 6. [Function Types](#function-types)
@@ -41,6 +41,25 @@ Lambda Script features a **strong, static type system** with inference. Types ar
 2. **Expressiveness**: Rich type constructs for complex data modeling
 3. **Ergonomics**: Type inference reduces annotation burden
 4. **Documents as Data**: Types model structured documents naturally
+
+---
+
+## Type Hierarchy
+
+Lambda's type system forms a hierarchy with `any` at the top and `null` at the bottom:
+
+![Type Hierarchy](type_hierarchy.svg)
+
+### Subtype Relations
+
+| Subtype    | Supertype   | Example                       |
+| ---------- | ----------- | ----------------------------- |
+| `int`      | `number`    | `42 is number` → `true`       |
+| `float`    | `number`    | `3.14 is number` → `true`     |
+| `range`    | `container` | `(1 to 10) is range` → `true` |
+| `int[]`    | `any[]`     | `[1,2,3] is any[]` → `true`   |
+| `null`     | `T?`        | `null is int?` → `true`       |
+| every type | `any`       | `"hello" is any` → `true`     |
 
 ---
 
@@ -82,45 +101,6 @@ type(42) == int           // true
 type(123) != string       // true
 type([1,2]) == array      // true
 ```
-
----
-
-## Type Hierarchy
-
-Lambda's type system forms a hierarchy with `any` at the top and `null` at the bottom:
-
-```mermaid
-flowchart TD
-    any --> scalar
-    any --> collection
-    any --> type
-    any --> function
-    scalar --> bool
-    scalar --> number
-    scalar --> string
-    scalar --> symbol
-    scalar --> datetime
-    scalar --> binary
-    number --> int
-    number --> float
-    collection --> range
-    collection --> list
-    collection --> array
-    collection --> map
-    collection --> element
-    function --> fn
-```
-
-### Subtype Relations
-
-| Subtype | Supertype | Example |
-|---------|-----------|---------|
-| `int` | `number` | `42 is number` → `true` |
-| `float` | `number` | `3.14 is number` → `true` |
-| `range` | `collection` | `(1 to 10) is range` → `true` |
-| `int[]` | `any[]` | `[1,2,3] is any[]` → `true` |
-| `null` | `T?` | `null is int?` → `true` |
-| Every type | `any` | `"hello" is any` → `true` |
 
 ---
 
@@ -240,7 +220,7 @@ Lambda has two forms for array types:
 [bool+]            // Non-empty array of booleans
 ```
 
-> **Note:** `[int]` (without `*` or `+`) means a list of exactly 1 int, not an array of ints.
+> **Note:** `[int]` (without `*` or `+`) means a tuple of exactly 1 int, not an array of ints.
 
 **Form 2: Occurrence suffix** — a type followed by `[]` or `[n]`:
 
@@ -266,19 +246,6 @@ Examples:
 let nums: int[] = [1, 2, 3]
 let matrix: int[][] = [[1, 2], [3, 4]]
 let names: [string+] = ["Alice", "Bob"]
-```
-
-### List Types (Tuples)
-
-```lambda
-// Fixed-length tuples with specific types
-(int, string)              // Pair of int and string
-(int, int, int)            // Triple of ints
-(string, int, bool)        // Mixed types
-
-// Examples
-let point: (int, int) = (10, 20)
-let record: (string, int, bool) = ("Alice", 30, true)
 ```
 
 ### Map Types
@@ -431,41 +398,6 @@ p is map       // true (objects are map-compatible)
 
 // Object update (copy with overrides)
 let p2 = {Point p, x: 10.0}   // copy p, override x
-```
-
-### Map Types
-
-Map type aliases remain available for structural typing:
-
-```lambda
-// Structural map type (type alias — no methods, no nominal checking)
-type Config = {
-    host: string,
-    port: int,
-    timeout?: int,      // Optional
-    debug?: bool        // Optional
-}
-```
-
-### Element Types
-
-```lambda
-// Define document structure types
-type Section = <section heading: string;
-    string            // Section content
->
-
-type Article = <article title: string, author: string;
-    string,           // Intro text
-    Section*          // Zero or more sections
->
-
-// Usage
-let doc: Article = <article title: "Lambda Guide", author: "Team";
-    "Introduction to Lambda Script"
-    <section heading: "Basics"; "Getting started...">
-    <section heading: "Advanced"; "Deep dive...">
->
 ```
 
 ---

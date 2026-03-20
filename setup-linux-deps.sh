@@ -28,8 +28,6 @@ ALL_LIBS=(
 RADIANT_DEPS=(
     "libglfw3-dev"           # OpenGL window and context management
     "libfreetype6-dev"       # FreeType font rendering library
-    "libfontconfig1-dev"     # Font configuration library
-    "libexpat1-dev"          # XML parser library (dependency of fontconfig)
     "libpng-dev"             # PNG image format support
     "libbz2-dev"             # Alternative compression library
     "zlib1g-dev"             # Compression library (already included above)
@@ -46,32 +44,11 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
 
     # Clean tree-sitter build files
-    if [ -d "lambda/tree-sitter" ]; then
-        cd lambda/tree-sitter
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    # Clean tree-sitter-lambda build files
-    if [ -d "lambda/tree-sitter-lambda" ]; then
-        cd lambda/tree-sitter-lambda
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    # Clean tree-sitter-javascript build files
-    if [ -d "lambda/tree-sitter-javascript" ]; then
-        cd lambda/tree-sitter-javascript
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    # Clean tree-sitter-latex build files
-    if [ -d "lambda/tree-sitter-latex" ]; then
-        cd lambda/tree-sitter-latex
-        make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
+    rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
     # Clean build directories
     rm -rf build/ build_debug/ 2>/dev/null || true
@@ -1018,16 +995,22 @@ echo "System: $(uname -a)"
 # Ensure we're in the workspace root for tree-sitter builds
 cd "$SCRIPT_DIR"
 
-# Build tree-sitter for Linux
+# Build tree-sitter for Linux (amalgamated, no ICU)
 # Always rebuild if existing archive is not Linux ELF (e.g. committed from macOS)
 if ! is_elf_archive "lambda/tree-sitter/libtree-sitter.a"; then
     if [ -d "lambda/tree-sitter" ]; then
-        echo "Building tree-sitter for Linux..."
+        echo "Building tree-sitter for Linux (amalgamated, no ICU)..."
         cd lambda/tree-sitter
-        make clean || true
-        make libtree-sitter.a
+        rm -f libtree-sitter.a tree_sitter.o
+        cc -c lib/src/lib.c \
+            -Ilib/include \
+            -O3 -Wall -Wextra -std=c11 -fPIC \
+            -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+            -o tree_sitter.o
+        ar rcs libtree-sitter.a tree_sitter.o
+        rm -f tree_sitter.o
         cd - > /dev/null
-        echo "Tree-sitter built successfully"
+        echo "✅ Tree-sitter built successfully (no ICU)"
     else
         echo "❌ Directory lambda/tree-sitter does not exist. Skipping tree-sitter build."
     fi
@@ -1428,8 +1411,7 @@ echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "
 echo "- libpng: $(dpkg -l | grep -q libpng-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libturbojpeg: $(dpkg -l | grep -q libturbojpeg0-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libgif: $(dpkg -l | grep -q libgif-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- fontconfig: $(dpkg -l | grep -q libfontconfig1-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- expat: $(dpkg -l | grep -q libexpat1-dev && echo "✓ Available" || echo "✗ Missing")"
+
 echo "- zlib: $(dpkg -l | grep -q zlib1g-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- bzip2: $(dpkg -l | grep -q libbz2-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- OpenGL: $(dpkg -l | grep -q libgl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"

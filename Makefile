@@ -65,25 +65,19 @@ endif
 # On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
 PREMAKE5 := $(shell command -v premake5 2>/dev/null || command -v /mingw64/bin/premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
 
-# MINGW64 Environment Detection and Validation
+# MSYS2/Windows Environment Detection
 MSYSTEM_DETECTED := $(shell echo $$MSYSTEM)
-IS_MINGW64 := $(shell [ "$(MSYSTEM_DETECTED)" = "MINGW64" ] && echo "yes" || echo "no")
-IS_CLANG64 := $(shell [ "$(MSYSTEM_DETECTED)" = "CLANG64" ] && echo "yes" || echo "no")
 IS_MSYS2 := $(shell [ -n "$(MSYSTEM_DETECTED)" ] && echo "yes" || echo "no")
 
 # Detect C/C++ compilers
-# On MSYS2/Windows, prefer CLANG64 Clang (matches premake5.win.lua flags)
+# All platforms use Clang by default
+# On MSYS2/Windows: CLANG64 Clang (avoids Universal CRT, uses MSVCRT.dll)
 # Force explicit paths for MSYS environment compatibility
 ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
 	CC := /clang64/bin/clang
 	CXX := /clang64/bin/clang++
 	AR := /clang64/bin/ar
 	RANLIB := /clang64/bin/ranlib
-else ifeq ($(shell test -f /mingw64/bin/gcc && echo yes),yes)
-	CC := /mingw64/bin/gcc
-	CXX := /mingw64/bin/g++
-	AR := /mingw64/bin/ar
-	RANLIB := /mingw64/bin/ranlib
 else ifeq ($(OS),Linux)
 	CC := clang
 	CXX := clang++
@@ -156,14 +150,20 @@ LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
 LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 
-# Build or verify tree-sitter library
+# Build tree-sitter library (amalgamated build, no ICU dependency)
+# Uses lib.c single-file approach - no external ICU/Unicode library needed
 $(TREE_SITTER_LIB):
-	@echo "Building tree-sitter library from source..."
-	@echo "🔧 Compiler: $(CC)"
-	@echo "🔧 CXX: $(CXX)"
-	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
-	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter libtree-sitter.a CC="$(CC)" CXX="$(CXX)" V=1
+	@echo "Building tree-sitter library (amalgamated, no ICU)..."
+	@cd lambda/tree-sitter && \
+	rm -f libtree-sitter.a tree_sitter.o && \
+	$(CC) -c lib/src/lib.c \
+		-Ilib/include \
+		-O3 -Wall -Wextra -std=c11 -fPIC \
+		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+		-o tree_sitter.o && \
+	$(AR) rcs libtree-sitter.a tree_sitter.o && \
+	rm -f tree_sitter.o
+	@echo "✅ tree-sitter library built: lambda/tree-sitter/libtree-sitter.a"
 
 # Build tree-sitter-lambda library (depends on parser generation)
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
@@ -247,15 +247,8 @@ $(RE2_LIB):
 		cmake --build . --target re2 -- -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
-# MINGW64 Environment Validation Functions
-define mingw64_env_check
-	@if [ "$(IS_MSYS2)" = "yes" ] && [ "$(IS_MINGW64)" != "yes" ]; then \
-		echo "⚠️  Warning: Not in MINGW64 environment!"; \
-		echo "Current MSYSTEM: $(MSYSTEM_DETECTED)"; \
-	fi
-endef
-
-define mingw64_toolchain_verify
+# Toolchain Validation Functions
+define toolchain_verify
 	@echo "🔍 Verifying toolchain..."
 	@if command -v $(CC) >/dev/null 2>&1; then \
 		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
@@ -269,8 +262,8 @@ define mingw64_toolchain_verify
 	fi
 endef
 
-# Checking DLL dependencies to avoid Windows Universal CRT
-define mingw64_dll_check
+# Checking DLL dependencies on Windows (avoid Universal CRT)
+define windows_dll_check
 	@if [ -f "lambda.exe" ]; then \
 		ldd lambda.exe 2>/dev/null | grep -E "not found|mingw64|msys64|ucrt|api-ms-win-crt" || echo "✅ No problematic dependencies found"; \
 	else \
@@ -340,34 +333,6 @@ endef
 # Combined tree-sitter libraries target
 tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
-# Build tree-sitter without Unicode/ICU dependencies (minimal build)
-# Uses the amalgamated lib.c file approach recommended by ChatGPT
-build-tree-sitter:
-	@echo "Building minimal tree-sitter without Unicode/ICU dependencies..."
-	@echo "🔧 Using amalgamated build (lib.c) - no Unicode dependencies"
-	@cd lambda/tree-sitter && \
-	echo "🧹 Cleaning previous build..." && \
-	rm -f libtree-sitter-minimal.a tree_sitter.o && \
-	echo "🔧 Compiling amalgamated tree-sitter..." && \
-	env PATH="/mingw64/bin:$$PATH" $(CC) -c lib/src/lib.c \
-		-Ilib/include \
-		-O3 -Wall -Wextra -std=c11 -fPIC \
-		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
-		-o tree_sitter.o && \
-	echo "� Creating static library..." && \
-	env PATH="/mingw64/bin:$$PATH" $(AR) rcs libtree-sitter-minimal.a tree_sitter.o && \
-	echo "🧹 Cleaning object file..." && \
-	rm -f tree_sitter.o && \
-	echo "✅ Minimal tree-sitter library built: lambda/tree-sitter/libtree-sitter-minimal.a" && \
-	ls -la libtree-sitter-minimal.a
-
-# Clean minimal tree-sitter build
-clean-tree-sitter-minimal:
-	@echo "Cleaning minimal tree-sitter build..."
-	@cd lambda/tree-sitter && \
-	rm -f libtree-sitter-minimal.a tree_sitter.o && \
-	echo "✅ Minimal tree-sitter build cleaned."
-
 # Default target
 .DEFAULT_GOAL := build
 
@@ -375,13 +340,12 @@ clean-tree-sitter-minimal:
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
 	    lambda lambda-cli build-cli format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
-	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
-	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
+	    tree-sitter-libs \
+	    verify-windows verify-linux \
 	    generate-premake clean-premake build-test build-test-linux \
-	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-fuzz
+	    test-fuzzy test-fuzzy-extended test-c2mir type-chart
 
 # Help target - shows available commands
 help:
@@ -389,18 +353,14 @@ help:
 	@echo ""
 	@echo "Build Targets (Premake-based):"
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
-	@echo "                  On Windows/MSYS2: Automatically configures MINGW64 toolchain with PATH fixes"
-	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
+	@echo "                  On Windows/MSYS2: Uses CLANG64 Clang (avoids Universal CRT)"
+	@echo "                  All platforms use Clang as the default compiler"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  all           - Build all projects"
-	@echo ""
-	@echo "MINGW64 Targets (Universal CRT Avoidance):"
-	@echo "  build-mingw64 - Enforce MINGW64 environment build (fails if not in MINGW64)"
-	@echo "                  Ensures traditional MSVCRT.dll usage instead of Universal CRT"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
@@ -418,11 +378,8 @@ help:
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
 	@echo "                     (automatic when grammar.js changes)"
-	@echo "  tree-sitter-libs - Build tree-sitter, tree-sitter-lambda, and tree-sitter-latex libraries"
+	@echo "  tree-sitter-libs - Build all tree-sitter libraries (amalgamated, no ICU)"
 	@echo "                     Automatically regenerates LaTeX parser if grammar.js changes"
-	@echo "  build-tree-sitter - Build tree-sitter without Unicode/ICU dependencies (Windows)"
-	@echo "                      Creates libtree-sitter-minimal.a for Windows builds"
-	@echo "  clean-tree-sitter-minimal - Clean minimal tree-sitter build artifacts"
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run ALL test suites (baseline + extended, alias for test-all)"
@@ -445,20 +402,16 @@ help:
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
 	@echo "  test-mir      - Run MIR JIT tests only"
+	@echo "  test-c2mir    - Run Lambda baseline tests with legacy C2MIR JIT path"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
-	@echo "  test-verbose  - Run tests with verbose output"
-	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
-	@echo "  test-memory   - Run memory leak detection tests"
 	@echo "  test-benchmark- Run performance benchmark tests"
-	@echo "  test-fuzz     - Run fuzzy tests for robustness (alias for test-fuzzy)"
 	@echo "  test-fuzzy    - Run fuzzy tests (5 minutes, mutation + random generation)"
 	@echo "  test-fuzzy-extended - Run extended fuzzy tests (1 hour)"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
-	@echo "  test-windows  - Run CI tests for Windows executable"
-	@echo "  test-linux    - Run CI tests for Linux executable"
+
 	@echo "  run           - Build and run the default executable"
 	@echo "  analyze       - Run static analysis with scan-build (fixed for custom build)"
 	@echo "  analyze-verbose - Run detailed static analysis with extra checkers"
@@ -511,33 +464,22 @@ env-debug:
 	@echo "MSYSTEM: '$(MSYSTEM)'"
 	@echo "MSYSTEM_DETECTED: '$(MSYSTEM_DETECTED)'"
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
-	@echo "IS_MINGW64: '$(IS_MINGW64)'"
-	@echo "IS_CLANG64: '$(IS_CLANG64)'"
 
-# Main build target (incremental) - Windows/MSYS2 optimized
+# Main build target (incremental)
 build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
-ifeq ($(IS_CLANG64),yes)
-	@echo "Building $(PROJECT_NAME) using CLANG64 environment..."
+	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
 	PATH="/clang64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
 	PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-else
-	@echo "Building $(PROJECT_NAME) using MINGW64 environment..."
-	PATH="/mingw64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-endif
+	$(call windows_dll_check)
 	@echo "✅ Build completed successfully!"
 else
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
-	$(call mingw64_env_check)
-	$(call mingw64_toolchain_verify)
+	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
@@ -558,42 +500,14 @@ print-jobs:
 
 $(LAMBDA_EXE): build
 
-# MINGW64-specific build target (enforced environment)
-build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "🔄 Building with MINGW64 environment (avoids Universal CRT)..."
-	@if [ "$(IS_MSYS2)" = "yes" ] && [ "$(IS_MINGW64)" != "yes" ]; then \
-		echo "❌ Error: Must be in MINGW64 environment for this target"; \
-		echo "Current MSYSTEM: $(MSYSTEM_DETECTED)"; \
-		echo "💡 Switch to MINGW64:"; \
-		echo "   1. Close this terminal"; \
-		echo "   2. Open MSYS2 MINGW64 terminal"; \
-		echo "   3. Navigate to: cd /d/Projects/Lambda"; \
-		echo "   4. Run: make build-mingw64"; \
-		exit 1; \
-	fi
-	$(call mingw64_toolchain_verify)
-	@echo "Setting MINGW64 environment variables..."
-	@export CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" PATH="/mingw64/bin:$$PATH"
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w" 2>&1 | grep -v "warning:"
-	@echo "✅ MINGW64 build completed. Executable: lambda.exe"
-	@echo "🧪 Testing executable..."
-	@./lambda.exe --help >/dev/null 2>&1 && echo "✅ Executable runs successfully" || echo "⚠️  Executable test failed"
-	$(call mingw64_dll_check)
 
 
 
-
-# Debug build - Now uses Premake with MINGW64 preference
+# Debug build
 debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
-	$(call mingw64_env_check)
-	$(call mingw64_toolchain_verify)
+	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
@@ -601,7 +515,7 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Debug build completed. Executable: lambda.exe"
-	$(call mingw64_dll_check)
+	$(call windows_dll_check)
 
 # Release build (optimized with size reduction)
 # Optimizations applied:
@@ -619,8 +533,7 @@ build-release:
 build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
-	$(call mingw64_env_check)
-	$(call mingw64_toolchain_verify)
+	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
@@ -637,7 +550,7 @@ endif
 	@echo "Release build completed."
 	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
 	@touch .lambda_release_build
-	$(call mingw64_dll_check)
+	$(call windows_dll_check)
 
 # Headless CLI build (no Radiant layout engine or GUI support)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
@@ -746,6 +659,11 @@ intellisense:
 	@echo "Updating IntelliSense database..."
 	@./utils/update_intellisense.sh
 
+# Generate type hierarchy chart
+type-chart:
+	dot -Tsvg doc/type_hierarchy.dot -o doc/type_hierarchy.svg
+	@echo "Type hierarchy chart generated: doc/type_hierarchy.svg"
+
 # Generate grammar explicitly (useful for development)
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
@@ -758,21 +676,11 @@ clean-all: clean-premake clean-test
 	@rm -rf $(BUILD_WINDOWS_DIR)
 	@rm -rf $(BUILD_LINUX_DIR)
 	@echo "Cleaning tree-sitter libraries..."
-	@if [ -d "lambda/tree-sitter" ]; then \
-		cd lambda/tree-sitter && $(MAKE) clean; \
-	fi
-	@if [ -d "lambda/tree-sitter-lambda" ]; then \
-		cd lambda/tree-sitter-lambda && $(MAKE) clean; \
-	fi
-	@if [ -d "lambda/tree-sitter-javascript" ]; then \
-		cd lambda/tree-sitter-javascript && rm -f src/*.o *.a *.so *.dylib; \
-	fi
-	@if [ -d "lambda/tree-sitter-latex" ]; then \
-		cd lambda/tree-sitter-latex && rm -f src/*.o *.a *.so *.dylib; \
-	fi
-	@if [ -d "lambda/tree-sitter-latex-math" ]; then \
-		cd lambda/tree-sitter-latex-math && rm -f src/*.o *.a *.so *.dylib; \
-	fi
+	@rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o
+	@rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o
+	@rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o
+	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
+	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
 	@rm -f $(RE2_LIB)
 	@echo "All build directories and tree-sitter libraries cleaned."
 
@@ -818,6 +726,17 @@ test-lambda-baseline: build-test
 	@echo "Running LAMBDA baseline test suite..."
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --target=lambda --category=baseline --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-c2mir: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		LAMBDA_USE_C2MIR=1 ./test/test_run.sh --target=lambda --category=baseline --parallel; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
@@ -1082,17 +1001,6 @@ test-extended: build-test
 		exit 1; \
 	fi
 
-test-dev:
-	@echo "Running comprehensive test suite (development mode)..."
-	@if [ -f "test_modern.sh" ]; then \
-		./test_modern.sh || echo "Note: Some tests failed due to incomplete features (math parser, missing dependencies)"; \
-	elif [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --parallel || echo "Note: Some tests failed due to incomplete features"; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
-
 test-library: build
 	@echo "Running library test suite..."
 	@if [ -f "test/test_run.sh" ]; then \
@@ -1246,16 +1154,6 @@ test-coverage:
 		exit 1; \
 	fi
 
-test-memory:
-	@echo "Running memory leak detection tests..."
-	@if [ -f "test/test_memory.sh" ]; then \
-		chmod +x test/test_memory.sh; \
-		./test/test_memory.sh; \
-	else \
-		echo "Memory test script not found at test/test_memory.sh"; \
-		exit 1; \
-	fi
-
 test-benchmark:
 	@echo "Running performance benchmark tests..."
 	@if [ -f "test/test_benchmark.sh" ]; then \
@@ -1283,9 +1181,6 @@ test-fuzzy-extended: build
 	@./test/fuzzy/test_fuzzy.sh --duration=3600
 	@echo "✅ Extended fuzzy tests completed"
 
-# Legacy alias for backward compatibility
-test-fuzz: test-fuzzy
-
 test-integration:
 	@echo "Running integration tests..."
 	@if [ -f "test/test_integration.sh" ]; then \
@@ -1295,80 +1190,6 @@ test-integration:
 		echo "Integration test script not found at test/test_integration.sh"; \
 		exit 1; \
 	fi
-
-# Typesetting system testing
-test-typeset: build
-	@echo "Testing typesetting system..."
-	./$(LAMBDA_EXE) test/lambda/typeset/test_typesetting.ls
-
-test-typeset-math: build
-	@echo "Testing mathematical typesetting..."
-	./$(LAMBDA_EXE) -c "math_expr = input('test_simple_math.ls', 'math'); pages = typeset(math_expr); output('test_math_output.svg', pages[0].svg_content, 'svg'); print('Math typesetting complete')"
-
-test-typeset-markdown: build
-	@echo "Testing Markdown typesetting..."
-	./$(LAMBDA_EXE) -c "md_content = input('README.md', 'markdown'); pages = typeset(md_content); output('readme_typeset.svg', pages[0].svg_content, 'svg'); print('Markdown typesetting complete')"
-
-test-typeset-refined: build
-	@echo "Testing refined typesetting system (view tree architecture)..."
-	./$(LAMBDA_EXE) test/lambda/typeset/test_refined_typesetting.ls
-
-test-typeset-all: build
-	@echo "Running all typesetting tests..."
-	./$(LAMBDA_EXE) test/lambda/typeset/run_all_tests.ls
-
-test-typeset-end-to-end: build
-	@echo "Testing end-to-end typesetting workflow..."
-	./$(LAMBDA_EXE) test/lambda/typeset/test_end_to_end.ls
-
-# C-based end-to-end test using Lambda runtime directly (no MIR/JIT)
-test-typeset-c: build
-	@echo "Building C-based end-to-end test with Lambda runtime..."
-	gcc -I. -Iinclude -o test_end_to_end_direct test/lambda/typeset/test_end_to_end.c \
-		lambda/lambda-mem.c lambda/lambda-eval.c lambda/print.c \
-		typeset/typeset.c typeset/view/view_tree.c \
-		typeset/integration/lambda_bridge.c typeset/serialization/lambda_serializer.c \
-		typeset/output/svg_renderer.c \
-		lib/strbuf.c lib/arraylist.c lib/hashmap.c \
-		-lm
-	@echo "Running C-based end-to-end test..."
-	./test_end_to_end_direct
-	@echo "Cleaning up test executable..."
-	rm -f test_end_to_end_direct
-
-# Minimal typesetting test without Lambda dependencies
-test-typeset-minimal:
-	@echo "Building minimal typesetting test..."
-	gcc -I. -Iinclude -o test_minimal test/lambda/typeset/test_minimal.c \
-		typeset/view/view_tree.c typeset/output/renderer.c typeset/output/svg_renderer.c \
-		lib/strbuf.c \
-		-lm
-	@echo "Running minimal typesetting test..."
-	./test_minimal
-	@echo "Cleaning up test executable..."
-	rm -f test_minimal
-
-# Simple proof-of-concept test
-test-typeset-simple:
-	@echo "Building simple typesetting proof of concept..."
-	gcc -I. -Iinclude -o test_simple test/lambda/typeset/test_simple.c \
-		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
-		-lm
-	@echo "Running simple typesetting test..."
-	./test_simple
-	@echo "Cleaning up test executable..."
-	rm -f test_simple
-
-# Complete workflow demonstration
-test-typeset-workflow:
-	@echo "Building Lambda typesetting workflow demonstration..."
-	gcc -I. -Iinclude -o test_workflow test/lambda/typeset/test_workflow.c \
-		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
-		-lm
-	@echo "Running typesetting workflow demonstration..."
-	./test_workflow
-	@echo "Cleaning up test executable..."
-	rm -f test_workflow
 
 # Phase 6: Build System Integration Targets
 validate-build:
@@ -1385,12 +1206,6 @@ validate-build:
 		echo "❌ Build utilities not found"; \
 		exit 1; \
 	fi
-
-test-ci:
-	@echo "Running CI test suite..."
-	@$(MAKE) test
-	@$(MAKE) test-memory
-	@$(MAKE) test-integration
 
 run: build
 	@echo "Running $(LAMBDA_EXE)..."

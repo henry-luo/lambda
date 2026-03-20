@@ -64,7 +64,7 @@ _underscore_name
 ### Collection Access
 
 ```lambda
-// Array/list index access
+// Array index access
 arr[0]
 arr.1             // same as arr[1]
 arr[1 to 4]       // Slice
@@ -91,7 +91,7 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 10 / 3             // Division: 3.333...
 10 div 3           // Integer division: 3
 17 % 5             // Modulo: 2
-2 ** 3              // Exponentiation: 8
+2 ** 3             // Exponentiation: 8
 ```
 
 ### Unary Operators
@@ -113,7 +113,7 @@ let a = [1, 2, 3]
 [0, *a, 4]             // [0, 1, 2, 3, 4] — items spread into array
 
 let b = (10, 20)
-(*a, *b)               // (1, 2, 3, 10, 20) — spread into list
+(*a, *b)               // (1, 2, 3, 10, 20) — spread into tuple
 
 // Spread in function calls
 fn sum_all(...args) = args | reduce((a, b) => a + b, 0)
@@ -161,10 +161,10 @@ The `==` operator performs **structural deep value equality** for all types — 
 
 #### Container Equality
 
-Containers (lists, arrays, maps, elements) are compared by **structure**, not by reference. Two containers are equal if they have the same shape and all corresponding elements are equal:
+Containers (arrays, maps, elements) are compared by **structure**, not by reference. Two containers are equal if they have the same shape and all corresponding elements are equal:
 
 ```lambda
-// List and array equality
+// Array equality
 [1, 2, 3] == [1, 2, 3]           // true
 [1, 2, 3] == [1, 2, 4]           // false (element mismatch)
 [1, 2, 3] == [1, 2]              // false (different length)
@@ -186,10 +186,10 @@ Containers (lists, arrays, maps, elements) are compared by **structure**, not by
 
 #### Cross-Type Sequence Equality
 
-Ranges, lists, and arrays are all **sequences** — they compare equal across types if they contain the same elements:
+Ranges and arrays are **sequences** — they compare equal across types if they contain the same elements:
 
 ```lambda
-(1 to 3) == [1, 2, 3]            // true (range vs list)
+(1 to 3) == [1, 2, 3]            // true (range vs array)
 [1, 2, 3] == (1 to 3)            // true (symmetric)
 (1 to 3) == [1, 2, 4]            // false
 (1 to 3) == [1, 2]               // false (different length)
@@ -504,7 +504,7 @@ users that (age >= min_age)
 | Left Side | `~` Binds To | `~#` Binds To | Result |
 |-----------|--------------|---------------|--------|
 | `[a, b, c]` (array) | Each element | Index (0, 1, 2) | Array of results |
-| `(a, b, c)` (list) | Each element | Index (0, 1, 2) | List of results |
+| `(a, b, c)` (tuple) | Each element | Index (0, 1, 2) | Array of results |
 | `1 to 10` (range) | Each number | Position (0-9) | Array of results |
 | `{a: 1, b: 2}` (map) | Each value | Key ('a', 'b') | Collection of results |
 | `42` (scalar) | The value itself | N/A | Single result |
@@ -536,7 +536,7 @@ fn double(x: int) { x * 2 }
 
 ## Query Expressions
 
-Lambda provides type-based query operators for searching nested data structures — elements, maps, arrays, and lists.
+Lambda provides type-based query operators for searching nested data structures — elements, maps, and arrays.
 
 ### Recursive Query: `?` and `.?`
 
@@ -559,7 +559,7 @@ div.?<div>                  // includes div itself if it matches
 el.?int                     // self + all int values in subtree
 ```
 
-Both operators traverse attributes, children, map values, and array/list items in **document order** (depth-first, pre-order). Results are returned as a spreadable array.
+Both operators traverse attributes, children, map values, and array items in **document order** (depth-first, pre-order). Results are returned as a spreadable array.
 
 ### Child-Level Query: `[T]`
 
@@ -580,7 +580,7 @@ The `[T]` syntax reuses the index operator `expr[x]`. When `x` is a **type value
 | `string` or `symbol` value | Named field access |
 | Type | Child-level query |
 
-On **elements**, `[T]` searches both attribute values and direct children. On **maps**, it searches values only. On **arrays** and **lists**, it searches items.
+On **elements**, `[T]` searches both attribute values and direct children. On **maps**, it searches values only. On **arrays**, it searches items.
 
 #### Chaining
 
@@ -728,7 +728,7 @@ for (k, v at {a: 1, b: 5, c: 2} where v > 2) k
 // ['b']
 ```
 
-> **Note**: Use `in` to iterate over arrays and lists; use `at` to iterate over maps.
+> **Note**: Use `in` to iterate over arrays; use `at` to iterate over maps.
 
 #### Spreadable Array Behavior
 
@@ -743,7 +743,7 @@ For expressions produce spreadable arrays that flatten when nested in other coll
 [0, for (x in [1, 2, 3]) x * 10, 99]
 // [0, 10, 20, 30, 99] — for-expr items spread into the array
 
-// Spreading into lists
+// Spreading into tuples
 (0, for (x in [1, 2]) x * 5, 99)
 // (0, 5, 10, 99)
 

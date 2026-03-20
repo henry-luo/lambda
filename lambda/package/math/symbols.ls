@@ -93,6 +93,7 @@ let misc_symbols = {
     flat: "♭", natural: "♮", sharp: "♯",
     clubsuit: "♣", diamondsuit: "♢",
     heartsuit: "♡", spadesuit: "♠",
+    varheartsuit: "♥",
     checkmark: "✓", maltese: "✠",
     degree: "°", copyright: "©",
     dots: "…", ldots: "…", cdots: "⋯",

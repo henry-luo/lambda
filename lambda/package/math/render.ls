@@ -38,12 +38,15 @@ fn dispatch_element(node, context) {
         case 'subsup':          scripts.render(node, context, render_node)
         case 'fraction':        fraction.render(node, context, render_node)
         case 'binomial':        fraction.render(node, context, render_node)
+        case 'frac_like':       render_frac_like(node, context)
         case 'command':         render_command(node, context)
         case 'text_command':    render_text_command(node, context)
         case 'style_command':   style.render(node, context, render_node)
+        case 'textstyle_command': render_textstyle_command(node, context)
         case 'space_command':   spacing.render(node, context, render_node)
         case 'hspace_command':  spacing.render(node, context, render_node)
         case 'skip_command':    spacing.render(node, context, render_node)
+        case 'spacing_command': spacing.render(node, context, render_node)
         case 'color_command':   color.render(node, context, render_node)
         case 'genfrac':         fraction.render(node, context, render_node)
         case 'infix_frac':      fraction.render(node, context, render_node)
@@ -167,6 +170,19 @@ fn render_command(node, context) {
 fn render_text_command(node, context) {
     let content = if (node.content != null) get_text(node.content) else ""
     box.text_box(content, css.TEXT, "mord")
+}
+
+// textstyle_command fallback (for CST nodes not yet converted by C++)
+fn render_textstyle_command(node, context) {
+    let cmd = if (node.cmd != null) string(node.cmd) else ""
+    let is_text = (contains(cmd, "text") or contains(cmd, "mbox") or contains(cmd, "hbox"))
+    if (is_text) {
+        let content = if (node.content != null) get_text(node.content)
+            else if (node.arg != null) get_text(node.arg) else ""
+        box.text_box(content, css.TEXT, "mord")
+    } else {
+        style.render(node, context, render_node)
+    }
 }
 
 // ============================================================
@@ -339,6 +355,26 @@ fn render_default(node, context) {
 }
 
 // ============================================================
+// frac_like fallback (for CST nodes not yet converted by C++)
+// ============================================================
+
+fn render_frac_like(node, context) {
+    // if the C++ converter already set numer/denom, delegate to fraction renderer
+    if (node.numer != null or node.denom != null) {
+        fraction.render(node, context, render_node)
+    } else {
+        // fallback: treat children[0] as numer, children[1] as denom
+        let n = len(node)
+        let numer_node = if (n > 0) node[0] else null
+        let denom_node = if (n > 1) node[1] else null
+        let cmd_text = if (node.cmd != null) string(node.cmd) else "\\frac"
+        // build a synthetic node map for fraction.render
+        let synth = {cmd: cmd_text, numer: numer_node, denom: denom_node}
+        fraction.render(synth, context, render_node)
+    }
+}
+
+// ============================================================
 // Helpers
 // ============================================================
 
@@ -367,6 +403,7 @@ fn get_text_from_element(node) {
     if (len(node) > 0 and node[0] is string) string(node[0])
     else if (node.value != null) string(node.value)
     else if (node.text != null) string(node.text)
+    else if (node.name != null) string(node.name)
     else ""
 }
 

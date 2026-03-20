@@ -505,7 +505,10 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (last_backslash && (!last_slash || last_backslash > last_slash))
         last_slash = last_backslash;
 #endif
-    if (last_slash) {
+    if (!is_import && runtime->import_base_dir) {
+        // use caller-specified import base directory for main script
+        new_script->directory = strdup(runtime->import_base_dir);
+    } else if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
         char* dir = (char*)malloc(dir_len + 1);
         memcpy(dir, lookup_path, dir_len);

@@ -32,7 +32,7 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 
 Lambda Script is designed around functional programming principles with modern syntax. Programs consist of expressions that evaluate to values, with support for:
 
-- Immutable data structures (lists, arrays, maps, elements)
+- Immutable data structures (arrays, maps, elements)
 - First-class functions and closures
 - Pattern matching and destructuring
 - Comprehensive type system with inference
@@ -56,7 +56,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | Document | Description |
 |----------|-------------|
 | **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, identifiers, names, symbols, namespaces |
-| **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, lists, maps, elements, ranges, and data composition expressions |
+| **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, maps, elements, ranges, and data composition expressions |
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
@@ -82,21 +82,20 @@ The Lambda language documentation is organized into focused sub-documents for ea
 
 #### Data Types (see [Lambda_Data.md](Lambda_Data.md))
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `int` | 56-bit signed integer | `42`, `-123` |
-| `float` | 64-bit floating point | `3.14`, `1e-10` |
-| `string` | UTF-8 text | `"hello"` |
-| `symbol` | Interned identifier | `'json` |
-| `bool` | Boolean | `true`, `false` |
-| `path` | File path or URL | `/etc.hosts`, `https.api.com` |
-| `list` | Immutable tuple | `(1, 2, 3)` |
-| `array` | Mutable array | `[1, 2, 3]` |
-| `int[]` | Typed int array | `var a: int[] = [1, 2]` |
-| `float[]` | Typed float array | `var b: float[] = [0.1]` |
-| `map` | Key-value mapping | `{name: "Alice"}` |
-| `object` | Nominally-typed map with methods | `{Point x: 1, y: 2}` |
-| `element` | Markup element | `<div; "content">` |
+| Type      | Description                      | Example                       |
+| --------- | -------------------------------- | ----------------------------- |
+| `int`     | 56-bit signed integer            | `42`, `-123`                  |
+| `float`   | 64-bit floating point            | `3.14`, `1e-10`               |
+| `string`  | UTF-8 text                       | `"hello"`                     |
+| `symbol`  | Interned identifier              | `'json'`                       |
+| `bool`    | Boolean                          | `true`, `false`               |
+| `path`    | File path or URL                 | `/etc.hosts`, `https.api.com` |
+| `array`   | Ordered collection                   | `[1, 2, 3]`                   |
+| `int[]`   | Typed int array                  | `var a: int[] = [1, 2]`       |
+| `float[]` | Typed float array                | `var b: float[] = [0.1]`      |
+| `map`     | Key-value mapping                | `{name: "Alice"}`             |
+| `object`  | Nominally-typed map with methods | `{Point x: 1, y: 2}`          |
+| `element` | Markup element                   | `<div "content">`             |
 
 #### Type System (see [Lambda_Type.md](Lambda_Type.md))
 
@@ -252,7 +251,7 @@ pub type Vec2 {
 }
 
 // Public with error destructuring
-pub config^err = input("config.json", 'json)
+pub config^err = input("config.json", 'json')
 
 // Private (not exported)
 let v = 123
@@ -354,7 +353,7 @@ if (err != null) {
 
 ```lambda
 // Read and process JSON data
-let data = input("sales.json", 'json);
+let data = input("sales.json", 'json');
 
 // Calculate total sales
 let total = data.sales | ~.amount | sum;
@@ -370,14 +369,14 @@ let report = {
     timestamp: datetime()
 };
 
-print(format(report, 'json));
+print(format(report, 'json'));
 ```
 
 ### Document Processing
 
 ```lambda
 // Parse Markdown document
-let doc = input("article.md", 'markdown);
+let doc = input("article.md", 'markdown');
 
 // Query for all headings using type-based search
 let headings = doc?(h1 | h2) | ~.content;
@@ -390,7 +389,7 @@ let toc = <div class: "toc";
     >
 >;
 
-print(format(toc, 'html));
+print(format(toc, 'html'));
 ```
 
 ### Mathematical Computation
@@ -425,7 +424,7 @@ pn main() {
 
     // Load configuration
     let config = if exists(.config.json) {
-        input(.config.json, 'json)
+        input(.config.json, 'json')
     } else {
         {default: true}
     }

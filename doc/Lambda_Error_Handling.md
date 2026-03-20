@@ -340,7 +340,7 @@ Errors are categorized by numeric code ranges:
 | 206 | `argument_count_mismatch` | Wrong number of arguments |
 | 228 | `unhandled_error` | Error from can-raise function not handled |
 | 301 | `null_reference` | Null dereference |
-| 302 | `index_out_of_bounds` | Array/list index out of range |
+| 302 | `index_out_of_bounds` | Array index out of range |
 | 304 | `division_by_zero` | Division or modulo by zero |
 | 318 | `user_error` | User-defined error via `error()` |
 | 401 | `file_not_found` | File does not exist |
@@ -454,7 +454,7 @@ compute(5)^   // 20
 
 ```lambda
 fn process_file(path: string) ProcessedData^ {
-    let content = input(path, 'text)^
+    let content = input(path, 'text')^
     let lines = split(content, "\n")
     let parsed = (for line in lines parse_line(line)^)
     aggregate(parsed)
@@ -465,11 +465,11 @@ fn process_file(path: string) ProcessedData^ {
 
 ```lambda
 fn load_config(path: string) Config^ {
-    let content^file_err = input(path, 'text)
+    let content^file_err = input(path, 'text')
     if (^file_err)
         raise error("failed to read config file", file_err)
 
-    let parsed^parse_err = input(content, 'json)
+    let parsed^parse_err = input(content, 'json')
     if (^parse_err)
         raise error("invalid JSON in config", parse_err)
 
@@ -481,7 +481,7 @@ fn load_config(path: string) Config^ {
 
 ```lambda
 pn main() {
-    let config = input("config.json", 'json)^
+    let config = input("config.json", 'json')^
 
     for item in config.items {
         let result^err = process(item)

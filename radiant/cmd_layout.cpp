@@ -2880,6 +2880,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     const char* tmp_script_path = "temp/_view_latex_tmp.ls";
     write_text_file(tmp_script_path, script_buf);
+    latex_runtime.import_base_dir = "./";  // resolve imports from project root, not temp/
     Input* script_result = run_script_mir(&latex_runtime, nullptr, (char*)tmp_script_path, false);
 
     if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL

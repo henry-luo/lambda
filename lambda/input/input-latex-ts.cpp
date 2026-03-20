@@ -356,6 +356,50 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         return elem.final();
     }
 
+    // frac_like: merged grammar rule for \frac, \dfrac, \tfrac, \binom, etc.
+    // Grammar: field('cmd', _frac_like_cmd), repeat1(field('arg', _frac_arg))
+    // Convert to 'fraction' element with cmd, numer, denom attributes
+    if (strcmp(node_type, "frac_like") == 0) {
+        // extract the command name to determine fraction vs binomial
+        char cmd_buf[64];
+        cmd_buf[0] = '\0';
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            size_t cmd_len = cmd_end - cmd_start;
+            if (cmd_len >= sizeof(cmd_buf)) cmd_len = sizeof(cmd_buf) - 1;
+            memcpy(cmd_buf, source + cmd_start, cmd_len);
+            cmd_buf[cmd_len] = '\0';
+        } else {
+            extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+        }
+
+        ElementBuilder elem = builder.element("fraction");
+        if (cmd_buf[0]) {
+            elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf))});
+        }
+
+        // collect 'arg' fields: first = numer, second = denom
+        uint32_t child_count = ts_node_child_count(node);
+        int arg_index = 0;
+        for (uint32_t i = 0; i < child_count; i++) {
+            const char* field = ts_node_field_name_for_child(node, i);
+            if (field && strcmp(field, "arg") == 0) {
+                TSNode arg_node = ts_node_child(node, i);
+                Item arg_item = convert_math_node(ctx, arg_node, source);
+                if (arg_index == 0) {
+                    elem.attr("numer", arg_item);
+                } else if (arg_index == 1) {
+                    elem.attr("denom", arg_item);
+                }
+                arg_index++;
+            }
+        }
+
+        return elem.final();
+    }
+
     // Radical (sqrt)
     if (strcmp(node_type, "radical") == 0) {
         ElementBuilder elem = builder.element("radical");
@@ -581,6 +625,63 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         return elem.final();
     }
 
+    // textstyle_command: merged grammar rule for \text, \mathrm, \mathbf, \displaystyle, etc.
+    // Grammar: field('cmd', _textstyle_cmd), optional(field('arg', choice(text_group, group)))
+    // Text commands (\text, \textrm, \textit, etc.) → text_command with 'content'
+    // Style commands (\mathrm, \mathbf, \displaystyle, etc.) → style_command with 'arg'
+    if (strcmp(node_type, "textstyle_command") == 0) {
+        // extract cmd
+        char cmd_buf[64];
+        cmd_buf[0] = '\0';
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            size_t cmd_len = cmd_end - cmd_start;
+            if (cmd_len >= sizeof(cmd_buf)) cmd_len = sizeof(cmd_buf) - 1;
+            memcpy(cmd_buf, source + cmd_start, cmd_len);
+            cmd_buf[cmd_len] = '\0';
+        } else {
+            extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+        }
+
+        // determine if text or style command
+        bool is_text = (strstr(cmd_buf, "\\text") != nullptr ||
+                        strstr(cmd_buf, "\\mbox") != nullptr ||
+                        strstr(cmd_buf, "\\hbox") != nullptr);
+
+        TSNode arg = ts_node_child_by_field_name(node, "arg", 3);
+
+        if (is_text) {
+            ElementBuilder elem = builder.element("text_command");
+            if (cmd_buf[0]) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf))});
+            }
+            if (!ts_node_is_null(arg)) {
+                uint32_t txt_start = ts_node_start_byte(arg);
+                uint32_t txt_end = ts_node_end_byte(arg);
+                const char* txt = source + txt_start;
+                size_t txt_len = txt_end - txt_start;
+                // strip { } from text_group
+                if (txt_len >= 2 && txt[0] == '{' && txt[txt_len - 1] == '}') {
+                    txt++;
+                    txt_len -= 2;
+                }
+                elem.attr("content", {.item = s2it(builder.createString(txt, txt_len))});
+            }
+            return elem.final();
+        } else {
+            ElementBuilder elem = builder.element("style_command");
+            if (cmd_buf[0]) {
+                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf))});
+            }
+            if (!ts_node_is_null(arg)) {
+                elem.attr("arg", convert_math_node(ctx, arg, source));
+            }
+            return elem.final();
+        }
+    }
+
     // Style command (\mathbf, \displaystyle, etc.)
     if (strcmp(node_type, "style_command") == 0) {
         ElementBuilder elem = builder.element("style_command");
@@ -609,6 +710,15 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
 
     // Space command (\, \: \; \! \quad \qquad)
     if (strcmp(node_type, "space_command") == 0) {
+        ElementBuilder elem = builder.element("space_command");
+        elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
+        return elem.final();
+    }
+
+    // spacing_command: merged grammar rule for \, \: \; \! \quad \qquad \hspace \kern etc.
+    // Grammar: field('cmd', _spacing_cmd), optional(field('arg', choice(group, _dim_value)))
+    // Convert to 'space_command' with 'value' attribute
+    if (strcmp(node_type, "spacing_command") == 0) {
         ElementBuilder elem = builder.element("space_command");
         elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
         return elem.final();

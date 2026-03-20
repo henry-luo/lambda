@@ -25,7 +25,6 @@ This document covers Lambda's literal values, collection types, and expressions 
    - [Boolean and Null Literals](#boolean-and-null-literals)
 3. [Path Literals](#path-literals)
 4. [Collections](#collections)
-   - [Lists](#lists)
    - [Arrays](#arrays)
    - [Maps](#maps)
    - [Elements](#elements)
@@ -57,8 +56,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 
 | Type       | Description                 | Example                                 |
 | ---------- | --------------------------- | --------------------------------------- |
-| `list`     | Immutable ordered sequences | `(1, 2, 3)`                             |
-| `array`    | Mutable ordered collections | `[1, 2, 3]`                             |
+| `array`    | Ordered collections         | `[1, 2, 3]`                             |
 | `map`      | Key-value mappings          | `{key: "value"}`                        |
 | `element`  | Structured markup elements  | `<tag attr: value; content>`            |
 | `range`    | Numeric ranges              | `1 to 10`                               |
@@ -167,11 +165,11 @@ chr(128512)        // "😀"
 Symbols are interned identifiers, often used as keys or tags:
 
 ```lambda
-'identifier
-'symbol-name
-'CamelCase
-'json
-'markdown
+'identifier'
+'symbol-name'
+'CamelCase'
+'json'
+'markdown'
 ```
 
 **Symbol vs String**:
@@ -184,10 +182,10 @@ Symbols are interned identifiers, often used as keys or tags:
 Like strings, symbols support character indexing and range slicing. The result is always a symbol:
 
 ```lambda
-let sym = 'hello;
-sym[0]             // 'h   — single character (symbol)
-sym[1 to 3]        // 'ell  — substring (symbol)
-sym[0 to 4]        // 'hello — full symbol
+let sym = 'hello';
+sym[0]             // 'h'   — single character (symbol)
+sym[1 to 3]        // 'ell'  — substring (symbol)
+sym[0 to 4]        // 'hello' — full symbol
 ```
 
 ### Binary Literals
@@ -318,10 +316,10 @@ dt.format("YYYY-MM-DD hh:mm:ss")     // "2025-04-26 10:30:45"
 dt.format("MMM DD, YYYY")            // "Apr 26, 2025"
 
 // Predefined format names (symbol argument)
-dt.format('iso)                      // "2025-04-26T10:30:45"
-dt.format('human)                    // "April 26, 2025 10:30 AM"
-dt.format('date)                     // "2025-04-26"
-dt.format('time)                     // "10:30:45"
+dt.format('iso')                      // "2025-04-26T10:30:45"
+dt.format('human')                    // "April 26, 2025 10:30 AM"
+dt.format('date')                     // "2025-04-26"
+dt.format('time')                     // "10:30:45"
 ```
 
 **Format Pattern Tokens:**
@@ -512,8 +510,8 @@ let p = /home.user.config
 let s = "/home/user/config"
 
 // Both work with input()
-let data1 = input(p, 'json)
-let data2 = input(s, 'json)
+let data1 = input(p, 'json')
+let data2 = input(s, 'json')
 ```
 
 ### Path Operations
@@ -524,8 +522,8 @@ exists(/etc.hosts)            // true or false
 exists(.config.json)          // true or false
 
 // Load content
-let content = input(/etc.hosts, 'text)    // Load file content
-let data = input(https.api.example.com.data, 'json)  // Fetch URL
+let content = input(/etc.hosts, 'text')    // Load file content
+let data = input(https.api.example.com.data, 'json')  // Fetch URL
 ```
 
 ### System Info Paths (`sys.*`)
@@ -651,46 +649,9 @@ let path_dirs = split(sys.proc.self.env.PATH, ":")
 
 ## Collections
 
-### Lists
-
-Immutable ordered sequences (tuples):
-
-```lambda
-// List creation
-(1, 2, 3)
-("hello", "world")
-(true, 42, "mixed")
-
-// Empty list
-()
-
-// Single-element list
-(42,)
-
-// Nested lists
-((1, 2), (3, 4), (5, 6))
-```
-
-#### List Access
-
-```lambda
-let lst = (1, 2, 3);
-lst[0]    // First element: 1
-lst[1]    // Second element: 2
-```
-
-#### List Operations
-
-```lambda
-len(lst)           // Length: 3
-head(lst)          // First: 1
-tail(lst)          // Rest: (2, 3)
-lst ++ (4, 5)      // Concatenate: (1, 2, 3, 4, 5)
-```
-
 ### Arrays
 
-Mutable ordered collections:
+Ordered collections:
 
 ```lambda
 // Array creation
@@ -794,19 +755,19 @@ Structured markup elements with attributes and content, used for document proces
 <div id: "main", class: "container">
 
 // Element with content (after semicolon)
-<p; "Hello, world!">
+<p "Hello, world!">
 
 // Element with attributes and content
-<div class: "header";
-    "Page Title";
-    <span; "Subtitle">
+<div class: "header"
+    "Page Title"
+    <span "Subtitle">
 >
 
 // Complex elements
-<article title: "My Article", author: "John Doe";
-    <h1; "Introduction">
-    <p; "This is the first paragraph.">
-    <p; "This is the second paragraph.">
+<article title: "My Article", author: "John Doe"
+    <h1 "Introduction">
+    <p "This is the first paragraph.">
+    <p "This is the second paragraph.">
 >
 ```
 
@@ -814,7 +775,7 @@ Structured markup elements with attributes and content, used for document proces
 
 ```lambda
 let el = <div class: "main"; "content">;
-el.name      // 'div (built-in: element tag name)
+el.name      // 'div' (built-in: element tag name)
 el.class     // "main" (attribute access)
 el[0]        // "content" (content/child access)
 ```
@@ -824,7 +785,7 @@ el[0]        // "content" (content/child access)
 ```lambda
 let custom = <div name: "custom">;
 custom.name  // "custom" (user-defined takes precedence)
-name(custom) // 'div (function always returns tag)
+name(custom) // 'div' (function always returns tag)
 ```
 
 ### Ranges
@@ -923,19 +884,19 @@ users | ~.name              // ["Alice", "Bob", ...]
 
 ### Spread Operator
 
-The spread operator (`...`) expands collections:
+The spread operator `*` expands collections:
 
 ```lambda
 // Array spread
 let a = [1, 2, 3]
-let b = [0, ...a, 4]        // [0, 1, 2, 3, 4]
+let b = [0, *a, 4]        // [0, 1, 2, 3, 4]
 
 // Map spread (merge)
 let base = {x: 1, y: 2}
-let extended = {...base, z: 3}  // {x: 1, y: 2, z: 3}
+let extended = {*base, z: 3}  // {x: 1, y: 2, z: 3}
 
 // Override values
-let updated = {...base, x: 10}  // {x: 10, y: 2}
+let updated = {*base, x: 10}  // {x: 10, y: 2}
 ```
 
 ### Concatenation
@@ -945,10 +906,7 @@ let updated = {...base, x: 10}  // {x: 10, y: 2}
 [1, 2] ++ [3, 4]            // [1, 2, 3, 4]
 
 // String concatenation
-"hello" ++ " " ++ "world"   // "hello world"
-
-// List concatenation
-(1, 2) ++ (3, 4)            // (1, 2, 3, 4)
+"hello" ++ " world"   // "hello world"
 
 // Path concatenation
 /home.user ++ "config"      // /home.user.config
@@ -1028,13 +986,10 @@ float("3.14")               // 3.14
 float(42)                   // 42.0
 
 // To symbol
-symbol("hello")             // 'hello
+symbol("hello")             // 'hello'
 
 // To array
 array((1, 2, 3))            // [1, 2, 3]
-
-// To list
-list([1, 2, 3])             // (1, 2, 3)
 ```
 
 ---

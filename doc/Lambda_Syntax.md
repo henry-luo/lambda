@@ -63,7 +63,7 @@ Several key constructs have both expression and statement forms:
 | --------- | -------------------------- | ------------------------------ | ------------------------ | ---------------------------------- |
 | **if**    | `if (cond) expr else expr` | Returns value; `else` required | `if cond { ... }`        | Executes block; `else` optional    |
 | **let**   | `let x = val; expr`        | Binds `x` in following expr    | `let x = val`            | Binds `x` in current block of code |
-| **for**   | `for (x in items) expr`    | Returns list of results        | `for x in items { ... }` | Executes block for each            |
+| **for**   | `for (x in items) expr`    | Returns array of results       | `for x in items { ... }` | Executes block for each            |
 | **fn**    | `fn name(x) => expr`       | Expr as function body          | `fn name(x) { ... }`     | Statements as function body        |
 
 ```lambda
@@ -168,7 +168,7 @@ Built-in type names are also reserved:
 
 ```
 int    int64   float   decimal  bool   string  symbol  binary
-list   array   map     element  range  path    type    any
+array   map     element  range  path    type    any
 null   error   datetime
 ```
 
@@ -402,7 +402,7 @@ let drawing = <svg.svg svg.width: 200, svg.height: 200;
 
 ## See Also
 
-- **[Lambda_Data.md](Lambda_Data.md)** — Literals, arrays, lists, maps, elements
+- **[Lambda_Data.md](Lambda_Data.md)** — Literals, arrays, maps, elements
 - **[Lambda_Type.md](Lambda_Type.md)** — Type system and type annotations
 - **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** — Expressions and statements
 - **[Lambda_Func.md](Lambda_Func.md)** — Functions and closures

@@ -107,7 +107,9 @@ class LambdaScriptTest : public ::testing::TestWithParam<LambdaTestInfo> {
 
 TEST_P(LambdaScriptTest, ExecuteAndCompare) {
     const LambdaTestInfo& info = GetParam();
-    test_lambda_script_against_file(info.script_path.c_str(), info.expected_path.c_str(), info.is_procedural, /*use_mir=*/true);
+    // LAMBDA_USE_C2MIR env var switches to legacy C2MIR path (use_mir=false)
+    bool use_mir = !getenv("LAMBDA_USE_C2MIR");
+    test_lambda_script_against_file(info.script_path.c_str(), info.expected_path.c_str(), info.is_procedural, use_mir);
 }
 
 // Custom name generator for better test output

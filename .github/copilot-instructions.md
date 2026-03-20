@@ -45,7 +45,7 @@ Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 - **Compound scalars** (int64, float, datetime, decimal, symbol, string, binary): tagged pointers
   - Numerics stored in GC nursery (bump-allocated) at runtime
   - Strings/symbols/decimals/datetimes are heap-allocated and GC-managed
-- **Container types** (list, array, map, element, range): direct pointers extending `struct Container`
+- **Container types** (array, map, element, range): direct pointers extending `struct Container`
   - All start with `TypeId` field for runtime type identification
   - Heap-allocated and GC-managed
 - **Maps**: Packed structs with linked list of `ShapeEntry` defining fields

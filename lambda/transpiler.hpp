@@ -53,6 +53,7 @@ struct Runtime {
     const char* transpile_dir;   // directory for transpiled C output files (NULL = current dir)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
+    const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)

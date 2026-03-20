@@ -210,6 +210,12 @@ table.latex-tabular td[rowspan] {
 .latex-enumerate .latex-enumerate .latex-enumerate { list-style-type: lower-roman; }
 .latex-enumerate .latex-enumerate .latex-enumerate .latex-enumerate { list-style-type: upper-alpha; }
 .latex-item-label { font-weight: normal; margin-right: 0.3em; }
+.latex-logo { font-family: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif; }
+.latex-logo sup { font-size: 0.85em; vertical-align: 0.15em; margin-left: -0.36em; margin-right: -0.15em; }
+.latex-logo sub { font-size: 0.7em; vertical-align: -0.5ex; margin-left: -0.15em; margin-right: -0.12em; }
+.tex-logo { font-family: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif; }
+.tex-logo sub { font-size: 0.7em; vertical-align: -0.5ex; margin-left: -0.15em; margin-right: -0.12em; }
+.latex-2e { font-size: 0.8em; vertical-align: -0.2em; margin-left: 0.05em; }
 "
 
 // return the stylesheet

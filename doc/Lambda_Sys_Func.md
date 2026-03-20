@@ -29,7 +29,7 @@ Functions for type conversion and inspection.
 | `float(x)` | Convert to float | `float("3.14")` | `3.14` |
 | `decimal(x)` | Convert to arbitrary precision decimal | `decimal("123.456")` | `123.456n` |
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
-| `symbol(x)` | Convert to symbol | `symbol("text")` | `'text` |
+| `symbol(x)` | Convert to symbol | `symbol("text")` | `'text'` |
 | `binary(x)` | Convert to binary | `binary("hello")` | `b'...'` |
 | `number(x)` | Convert to number (int or float) | `number("3.14")` | `3.14` |
 
@@ -37,8 +37,8 @@ Functions for type conversion and inspection.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `type(x)` | Get type of value | `type(42)` | `'int` |
-| `name(x)` | Get name of element, function, or type | `name(<div>)` | `'div` |
+| `type(x)` | Get type of value | `type(42)` | `'int'` |
+| `name(x)` | Get name of element, function, or type | `name(<div>)` | `'div'` |
 | `len(x)` | Get length of collection or string | `len([1, 2, 3])` | `3` |
 
 ```lambda
@@ -46,14 +46,14 @@ Functions for type conversion and inspection.
 int("42")          // 42
 float("3.14")      // 3.14
 string(42)         // "42"
-symbol("text")     // 'text
+symbol("text")     // 'text'
 
 // Type inspection
-type(42)           // 'int
-type("hello")      // 'string
-type([1, 2, 3])    // 'array
-name(<div>)        // 'div
-name(type(42))     // 'int
+type(42)           // 'int'
+type("hello")      // 'string'
+type([1, 2, 3])    // 'array'
+name(<div>)        // 'div'
+name(type(42))     // 'int'
 len([1, 2, 3])     // 3
 len("hello")       // 5
 ```
@@ -337,7 +337,7 @@ find("hello world hello", "lo")
 // [{value: "lo", index: 3}, {value: "lo", index: 14}]
 
 find("no-match", digits)
-// [] (empty list)
+// [] (empty array)
 
 // Extract just matching values via pipe
 find("a1b22", digits) | ~.value     // ["1", "22"]
@@ -381,7 +381,7 @@ ord(chr(65))         // 65
 
 ## Collection Functions
 
-Functions for working with arrays, lists, and other collections.
+Functions for working with arrays and other collections.
 
 ### Query & Test
 
@@ -405,9 +405,9 @@ Functions for working with arrays, lists, and other collections.
 | -------------------- | ----------------------------------- | -------------------------------------- | ------------------ |
 | `reverse(vec)`       | Reverse order                       | `reverse([1, 2, 3])`                   | `[3, 2, 1]`        |
 | `sort(vec)`          | Sort ascending                      | `sort([3, 1, 2])`                      | `[1, 2, 3]`        |
-| `sort(vec, 'desc)`   | Sort descending                     | `sort([1, 2, 3], 'desc)`               | `[3, 2, 1]`        |
+| `sort(vec, 'desc')`   | Sort descending                     | `sort([1, 2, 3], 'desc')`               | `[3, 2, 1]`        |
 | `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
-| `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc, by: ~.age})` | Sorted by age desc |
+| `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc', by: ~.age})` | Sorted by age desc |
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `set(vec)`           | Remove duplicates                   | `set([1, 1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
@@ -437,12 +437,12 @@ any([false, false, true])  // true
 
 reverse([1, 2, 3])         // [3, 2, 1]
 sort([3, 1, 2])            // [1, 2, 3]
-sort([1, 2, 3], 'desc)     // [3, 2, 1]
+sort([1, 2, 3], 'desc')     // [3, 2, 1]
 
 // Sort by key function
 let users = [{name: "Bob", age: 30}, {name: "Alice", age: 25}]
 sort(users, ~.age)         // sorted by age ascending
-sort(users, {dir: 'desc, by: ~.age})   // sorted by age descending
+sort(users, {dir: 'desc', by: ~.age})   // sorted by age descending
 
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
 zip([1, 2], ["a", "b"])    // [(1, "a"), (2, "b")]
@@ -546,39 +546,39 @@ Parse content from a file path or URL.
 | Function | Description | Example |
 |----------|-------------|---------|
 | `input(target)` | Parse target (auto-detect format) | `input(@./data.json)` |
-| `input(target, format)` | Parse target with specified format | `input("data.json", 'json)` |
+| `input(target, format)` | Parse target with specified format | `input("data.json", 'json')` |
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
 
 | Format | Description | Example |
 |--------|-------------|---------|
-| JSON | JavaScript Object Notation | `input(@./data.json, 'json)` |
-| XML | Extensible Markup Language | `input(@./config.xml, 'xml)` |
-| HTML | HyperText Markup Language | `input(@./page.html, 'html)` |
-| YAML | YAML Ain't Markup Language | `input(@./config.yaml, 'yaml)` |
-| TOML | Tom's Obvious Minimal Language | `input(@./config.toml, 'toml)` |
-| Markdown | Markdown markup | `input(@./doc.md, 'markdown)` |
-| CSV | Comma-Separated Values | `input(@./data.csv, 'csv)` |
-| LaTeX | LaTeX markup | `input(@./doc.tex, 'latex)` |
-| RTF | Rich Text Format | `input(@./doc.rtf, 'rtf)` |
-| PDF | Portable Document Format | `input(@./doc.pdf, 'pdf)` |
-| CSS | Cascading Style Sheets | `input(@./style.css, 'css)` |
-| INI | Configuration files | `input(@./config.ini, 'ini)` |
-| Math | Mathematical expressions | `input(@./formula.txt, 'math)` |
+| JSON | JavaScript Object Notation | `input(@./data.json, 'json')` |
+| XML | Extensible Markup Language | `input(@./config.xml, 'xml')` |
+| HTML | HyperText Markup Language | `input(@./page.html, 'html')` |
+| YAML | YAML Ain't Markup Language | `input(@./config.yaml, 'yaml')` |
+| TOML | Tom's Obvious Minimal Language | `input(@./config.toml, 'toml')` |
+| Markdown | Markdown markup | `input(@./doc.md, 'markdown')` |
+| CSV | Comma-Separated Values | `input(@./data.csv, 'csv')` |
+| LaTeX | LaTeX markup | `input(@./doc.tex, 'latex')` |
+| RTF | Rich Text Format | `input(@./doc.rtf, 'rtf')` |
+| PDF | Portable Document Format | `input(@./doc.pdf, 'pdf')` |
+| CSS | Cascading Style Sheets | `input(@./style.css, 'css')` |
+| INI | Configuration files | `input(@./config.ini, 'ini')` |
+| Math | Mathematical expressions | `input(@./formula.txt, 'math')` |
 
 **Input Function Usage:**
 
 ```lambda
 // Basic input parsing with Path literals
-let data = input(@./file.json, 'json)
-let config = input(@./settings.yaml, 'yaml)
+let data = input(@./file.json, 'json')
+let config = input(@./settings.yaml, 'yaml')
 
 // Input from URLs
 let api_data = input(@https://api.example.com/users.json)
 
 // Input with options map
-let math_expr = input(@./formula.txt, {type: 'math, flavor: 'latex})
-let csv_data = input(@./data.csv, {type: 'csv, delimiter: ','})
+let math_expr = input(@./formula.txt, {type: 'math', flavor: 'latex'})
+let csv_data = input(@./data.csv, {type: 'csv', delimiter: ','})
 
 // Auto-detection (based on file extension)
 let auto_data = input(@./document.md)  // Automatically detects Markdown
@@ -591,13 +591,13 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 | Function | Description | Example |
 |----------|-------------|--------|
 | `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
-| `parse(str, format)` | Parse string with specified format | `parse(str, 'json)` |
+| `parse(str, format)` | Parse string with specified format | `parse(str, 'json')` |
 
 **Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`
 
 ```lambda
 // Parse JSON string
-let data^err = parse("{\"name\": \"Alice\", \"age\": 30}", 'json)
+let data^err = parse("{\"name\": \"Alice\", \"age\": 30}", 'json')
 data.name     // "Alice"
 
 // Auto-detect JSON from content
@@ -605,10 +605,10 @@ let data2^err = parse("{\"x\": 1}")
 data2.x       // 1
 
 // Parse with options map
-let expr^err = parse("x^2 + y", {type: 'math, flavor: 'latex})
+let expr^err = parse("x^2 + y", {type: 'math', flavor: 'latex'})
 
 // Parse CSV from string
-let csv^err = parse("name,age\nAlice,30\nBob,25", 'csv)
+let csv^err = parse("name,age\nAlice,30\nBob,25", 'csv')
 ```
 
 > **Note**: `parse()` can raise errors. Use `let result^err = parse(...)` for error-safe handling.
@@ -633,17 +633,17 @@ Format data as a string in various formats. This is a pure function that returns
 | Function | Description | Example |
 |----------|-------------|---------|
 | `format(data)` | Format data as Lambda representation | `format(obj)` |
-| `format(data, type)` | Format data as specified type | `format(obj, 'json)` |
+| `format(data, type)` | Format data as specified type | `format(obj, 'json')` |
 
 ```lambda
 // Format data as different types
-let json_str = format(data, 'json)
-let yaml_str = format(data, 'yaml)
-let xml_str = format(data, 'xml)
+let json_str = format(data, 'json')
+let yaml_str = format(data, 'yaml')
+let xml_str = format(data, 'xml')
 
 // Format with options
-let pretty_json = format(data, {type: 'json, indent: 2})
-let compact_json = format(data, {type: 'json, compact: true})
+let pretty_json = format(data, {type: 'json', indent: 2})
+let compact_json = format(data, {type: 'json', compact: true})
 ```
 
 ### Procedural I/O Functions
@@ -666,7 +666,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.symlink(target, link)` | Create symbolic link | `io.symlink(@./src, @./link)` |
 | `io.chmod(path, mode)` | Change file permissions | `io.chmod(@./script.sh, "755")` |
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(@./a.txt, @./b.txt)` |
-| `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(@https://api.example.com, {method: 'POST})` |
+| `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(@https://api.example.com, {method: 'POST'})` |
 | `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
@@ -694,11 +694,11 @@ pn save_data() {
     output(data, @./result.xml)      // Writes XML
 
     // Explicit format specification
-    output(data, @./data.txt, 'json)    // Force JSON format
-    output(data, @./data.out, 'yaml)    // Force YAML format
+    output(data, @./data.txt, 'json')    // Force JSON format
+    output(data, @./data.out, 'yaml')    // Force YAML format
 
     // With options
-    output(data, @./pretty.json, {type: 'json, indent: 4})
+    output(data, @./pretty.json, {type: 'json', indent: 4})
 }
 ```
 
@@ -739,7 +739,7 @@ The `|>>` operator appends data to a target:
 
 ```lambda
 pn log_event(event) {
-    let entry = format({time: now(), event: event}, 'json)
+    let entry = format({time: now(), event: event}, 'json')
     entry |>> @./logs/events.jsonl
 }
 
@@ -852,15 +852,15 @@ Perform HTTP requests with full control over method, headers, and body.
 pn api_operations() {
     // GET request
     let data = io.fetch(@https://api.example.com/users, {
-        method: 'GET,
+        method: 'GET',
         headers: {Authorization: "Bearer token123"}
     })
 
     // POST request
     let result = io.fetch(@https://api.example.com/users, {
-        method: 'POST,
+        method: 'POST',
         headers: {Content-Type: "application/json"},
-        body: format({name: "Alice", email: "alice@example.com"}, 'json)
+        body: format({name: "Alice", email: "alice@example.com"}, 'json')
     })
 }
 ```
