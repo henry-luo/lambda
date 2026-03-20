@@ -166,7 +166,7 @@ fn render_element(el, info) {
         case 'lstlisting': render_verbatim_env(el)
         case 'abstract': render_abstract(el, info)
         case 'figure': render_figure(el, info)
-        case 'picture': picture.render_picture(el)
+        case 'picture': picture.render_picture(el, info.unitlength)
         case 'minipage': render_env_div(el, info, "latex-minipage", null)
         case 'multicols': render_multicols(el, info)
 
@@ -300,6 +300,7 @@ let SKIP_COMMANDS = {
     'newcommand': true, 'renewcommand': true, 'providecommand': true,
     'setcounter': true, 'newcounter': true, 'addtocounter': true,
     'stepcounter': true, 'comment': true,
+    'setlength': true, 'newlength': true,
     // picture sub-commands handled inside picture.render_picture
     'put': true, 'line': true, 'vector': true,
     'circle': true, 'oval': true, 'bezier': true, 'qbezier': true,
@@ -358,9 +359,16 @@ fn collect_children(el, i, n, acc, info) {
     if (i >= n) { acc }
     else {
         let child = el[i]
-        let rendered = render_node(child, info)
+        // track \setlength{\unitlength}{value} updates for picture rendering
+        let next_info = if (child is element and string(name(child)) == "setlength"
+                            and len(child) >= 2 and child[0] is element
+                            and string(name(child[0])) == "unitlength"
+                            and child[1] is string) {
+                            {*:info, unitlength: trim(child[1])}
+                        } else { info }
+        let rendered = render_node(child, next_info)
         let new_acc = if (rendered != null) acc ++ [rendered] else acc
-        collect_children(el, i + 1, n, new_acc, info)
+        collect_children(el, i + 1, n, new_acc, next_info)
     }
 }
 
@@ -519,8 +527,16 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
         else { split_parbreaks_rec(el, i + 1, n, [], acc, info) }
     }
     else {
-        let rendered = render_node(el[i], info)
-        split_parbreaks_rec(el, i + 1, n, current_children ++ [rendered], acc, info)
+        let child = el[i]
+        // track \setlength{\unitlength}{value} updates
+        let next_info = if (child is element and string(name(child)) == "setlength"
+                            and len(child) >= 2 and child[0] is element
+                            and string(name(child[0])) == "unitlength"
+                            and child[1] is string) {
+                            {*:info, unitlength: trim(child[1])}
+                        } else { info }
+        let rendered = render_node(child, next_info)
+        split_parbreaks_rec(el, i + 1, n, current_children ++ [rendered], acc, next_info)
     }
 }
 

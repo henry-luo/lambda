@@ -3100,6 +3100,58 @@ static const char* strip_comment_environments(Arena* arena, const char* latex_st
     return output;
 }
 
+// Pre-process LaTeX source to unwrap \frame{...} around picture environments.
+// The tree-sitter grammar can't handle \begin{picture} inside a command's curly group,
+// so \frame{\setlength{\unitlength}{X}\begin{picture}...\end{picture}} gets misparsed.
+// This transforms it to \setlength{\unitlength}{X}\begin{picture}...\end{picture}
+// (removing the \frame wrapper and the outermost braces).
+static const char* unwrap_frame_picture(Arena* arena, const char* latex, size_t len) {
+    if (!memmem(latex, len, "\\frame{", 7) || !memmem(latex, len, "\\begin{picture}", 15)) {
+        return latex;
+    }
+
+    log_debug("unwrap_frame_picture: found \\frame + picture, unwrapping...");
+
+    char* output = (char*)arena_alloc(arena, len + 1);
+    if (!output) return latex;
+
+    size_t out = 0;
+    size_t i = 0;
+
+    while (i < len) {
+        if (i + 7 <= len && strncmp(latex + i, "\\frame{", 7) == 0) {
+            // find the matching closing brace by tracking brace depth
+            size_t content_start = i + 7;
+            int depth = 1;
+            size_t j = content_start;
+            while (j < len && depth > 0) {
+                if (latex[j] == '{') depth++;
+                else if (latex[j] == '}') depth--;
+                j++;
+            }
+            // j is now one past the matching '}'
+            size_t content_end = j - 1; // position of the matching '}'
+            size_t content_len = content_end - content_start;
+
+            // check if the content contains \begin{picture}
+            if (content_len > 15 && memmem(latex + content_start, content_len, "\\begin{picture}", 15)) {
+                // unwrap: copy content without \frame{ and }
+                memcpy(output + out, latex + content_start, content_len);
+                out += content_len;
+                i = j; // skip past the closing }
+            } else {
+                output[out++] = latex[i++];
+            }
+        } else {
+            output[out++] = latex[i++];
+        }
+    }
+
+    output[out] = '\0';
+    log_debug("unwrap_frame_picture: unwrapped from %zu to %zu bytes", len, out);
+    return output;
+}
+
 // Main entry point - tree-sitter LaTeX parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
     if (!latex_string || !*latex_string) {
@@ -3113,6 +3165,11 @@ extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
     // This handles malformed content inside comment environments correctly
     size_t orig_len = strlen(latex_string);
     const char* processed = strip_comment_environments(input->arena, latex_string, orig_len);
+
+    // Pre-process: unwrap \frame{...} around picture environments
+    // The tree-sitter grammar can't nest \begin{env} inside command curly groups
+    size_t processed_len_pre = strlen(processed);
+    processed = unwrap_frame_picture(input->arena, processed, processed_len_pre);
 
     // Create tree-sitter parser
     TSParser* parser = ts_parser_new();

@@ -116,12 +116,12 @@ fn parse_num(s) {
 // SVG generation — main entry point
 // ============================================================
 
-pub fn render_picture(el) {
-    if (len(el) > 0 and el[0] is element) { render_picture_para(el[0]) }
-    else { render_picture_para(el) }
+pub fn render_picture(el, unitlength_str = null) {
+    if (len(el) > 0 and el[0] is element) { render_picture_para(el[0], unitlength_str) }
+    else { render_picture_para(el, unitlength_str) }
 }
 
-fn render_picture_para(para) {
+fn render_picture_para(para, unitlength_str) {
     let n = len(para)
     if (n == 0) {
         <svg class: "latex-picture">
@@ -130,7 +130,7 @@ fn render_picture_para(para) {
         let wh = parse_coord(size_text)
         let w = pic_dim(wh, 0, 100.0)
         let h = pic_dim(wh, 1, 100.0)
-        let sc = 10.0
+        let sc = unitlength_to_scale(unitlength_str)
         let svg_w = w * sc
         let svg_h = h * sc
         let vb = "0 0 " ++ fmt(svg_w) ++ " " ++ fmt(svg_h)
@@ -505,6 +505,36 @@ fn fmt(num) {
     let rounded = float(int(num * 100.0)) / 100.0
     if (rounded == float(int(rounded))) { string(int(rounded)) }
     else { string(rounded) }
+}
+
+// Convert \unitlength string (e.g. "20.4mm", "5cm", "1in") to SVG scale factor.
+// Scale = unitlength_in_mm * 10.0 (10 SVG pixels per millimeter).
+// Default: 10.0 (assumes unitlength = 1mm).
+fn unitlength_to_scale(ul_str) {
+    if (ul_str == null or ul_str == "") { 10.0 }
+    else {
+        let t = trim(ul_str)
+        if (ends_with(t, "mm")) {
+            let v = float(trim(slice(t, 0, len(t) - 2)))
+            if (v != null) { v * 10.0 } else { 10.0 }
+        }
+        else if (ends_with(t, "cm")) {
+            let v = float(trim(slice(t, 0, len(t) - 2)))
+            if (v != null) { v * 100.0 } else { 10.0 }
+        }
+        else if (ends_with(t, "in")) {
+            let v = float(trim(slice(t, 0, len(t) - 2)))
+            if (v != null) { v * 254.0 } else { 10.0 }
+        }
+        else if (ends_with(t, "pt")) {
+            let v = float(trim(slice(t, 0, len(t) - 2)))
+            if (v != null) { v * 3.528 } else { 10.0 }
+        }
+        else {
+            let v = float(t)
+            if (v != null) { v * 10.0 } else { 10.0 }
+        }
+    }
 }
 
 fn parse_length(text) {
