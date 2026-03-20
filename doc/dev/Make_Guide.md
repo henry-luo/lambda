@@ -8,17 +8,16 @@ Run `make help` for a quick summary, or see below for full details.
 
 ## Build Targets
 
-| Target | Description |
-|--------|-------------|
-| `build` | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain. Builds tree-sitter libs, RE2, and regenerates parser/embed headers if needed. |
-| `debug` | Debug build with AddressSanitizer enabled. |
-| `release` | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda_release.exe`. |
-| `rebuild` | Force complete rebuild (`clean-all` + `build`). |
-| `lambda` | Alias for `build`. |
-| `all` | Alias for `lambda`. |
-| `lambda-cli` | Headless CLI-only release build. Excludes Radiant layout engine, GUI, font rendering, image codecs. Output: `lambda-cli.exe`. |
-| `build-wasm` | Build WebAssembly version via `compile-wasm.sh`. |
-| `build-mingw64` | Windows-only: enforce MINGW64 environment build to avoid Universal CRT dependencies. |
+| Target          | Description                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds tree-sitter libs, RE2, and regenerates parser/embed headers if needed. |
+| `debug`         | Debug build with AddressSanitizer enabled.                                                                                                                                           |
+| `release`       | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda_release.exe`.   |
+| `rebuild`       | Force complete rebuild (`clean-all` + `build`).                                                                                                                                      |
+| `lambda`        | Alias for `build`.                                                                                                                                                                   |
+| `all`           | Alias for `lambda`.                                                                                                                                                                  |
+| `lambda-cli`    | Headless CLI-only release build. Excludes Radiant layout engine, GUI, font rendering, image codecs. Output: `lambda-cli.exe`.                                                        |
+| `build-wasm`    | Build WebAssembly version via `compile-wasm.sh`.                                                                                                                                     |
 
 ### Options
 
@@ -298,7 +297,7 @@ make format                                                 # auto-format code
 | Target | Description |
 |--------|-------------|
 | `help` | Show summary of available make targets. |
-| `env-debug` | Print environment detection variables (MSYSTEM, IS_MSYS2, IS_MINGW64, IS_CLANG64). |
+| `env-debug` | Print environment detection variables (MSYSTEM, IS_MSYS2). |
 | `print-vars` | Print Unicode support status. |
 | `print-jobs` | Print detected CPU cores, parallel jobs, and link jobs settings. |
 | `validate-build` | Validate build objects for testing. |

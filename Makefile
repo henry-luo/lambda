@@ -65,25 +65,19 @@ endif
 # On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
 PREMAKE5 := $(shell command -v premake5 2>/dev/null || command -v /mingw64/bin/premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
 
-# MINGW64 Environment Detection and Validation
+# MSYS2/Windows Environment Detection
 MSYSTEM_DETECTED := $(shell echo $$MSYSTEM)
-IS_MINGW64 := $(shell [ "$(MSYSTEM_DETECTED)" = "MINGW64" ] && echo "yes" || echo "no")
-IS_CLANG64 := $(shell [ "$(MSYSTEM_DETECTED)" = "CLANG64" ] && echo "yes" || echo "no")
 IS_MSYS2 := $(shell [ -n "$(MSYSTEM_DETECTED)" ] && echo "yes" || echo "no")
 
 # Detect C/C++ compilers
-# On MSYS2/Windows, prefer CLANG64 Clang (matches premake5.win.lua flags)
+# All platforms use Clang by default
+# On MSYS2/Windows: CLANG64 Clang (avoids Universal CRT, uses MSVCRT.dll)
 # Force explicit paths for MSYS environment compatibility
 ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
 	CC := /clang64/bin/clang
 	CXX := /clang64/bin/clang++
 	AR := /clang64/bin/ar
 	RANLIB := /clang64/bin/ranlib
-else ifeq ($(shell test -f /mingw64/bin/gcc && echo yes),yes)
-	CC := /mingw64/bin/gcc
-	CXX := /mingw64/bin/g++
-	AR := /mingw64/bin/ar
-	RANLIB := /mingw64/bin/ranlib
 else ifeq ($(OS),Linux)
 	CC := clang
 	CXX := clang++
@@ -253,15 +247,8 @@ $(RE2_LIB):
 		cmake --build . --target re2 -- -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
-# MINGW64 Environment Validation Functions
-define mingw64_env_check
-	@if [ "$(IS_MSYS2)" = "yes" ] && [ "$(IS_MINGW64)" != "yes" ]; then \
-		echo "⚠️  Warning: Not in MINGW64 environment!"; \
-		echo "Current MSYSTEM: $(MSYSTEM_DETECTED)"; \
-	fi
-endef
-
-define mingw64_toolchain_verify
+# Toolchain Validation Functions
+define toolchain_verify
 	@echo "🔍 Verifying toolchain..."
 	@if command -v $(CC) >/dev/null 2>&1; then \
 		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
@@ -275,8 +262,8 @@ define mingw64_toolchain_verify
 	fi
 endef
 
-# Checking DLL dependencies to avoid Windows Universal CRT
-define mingw64_dll_check
+# Checking DLL dependencies on Windows (avoid Universal CRT)
+define windows_dll_check
 	@if [ -f "lambda.exe" ]; then \
 		ldd lambda.exe 2>/dev/null | grep -E "not found|mingw64|msys64|ucrt|api-ms-win-crt" || echo "✅ No problematic dependencies found"; \
 	else \
@@ -356,7 +343,6 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux \
 	    generate-premake clean-premake build-test build-test-linux \
-	    build-mingw64 \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended test-fuzz
@@ -367,18 +353,14 @@ help:
 	@echo ""
 	@echo "Build Targets (Premake-based):"
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
-	@echo "                  On Windows/MSYS2: Automatically configures MINGW64 toolchain with PATH fixes"
-	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
+	@echo "                  On Windows/MSYS2: Uses CLANG64 Clang (avoids Universal CRT)"
+	@echo "                  All platforms use Clang as the default compiler"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  all           - Build all projects"
-	@echo ""
-	@echo "MINGW64 Targets (Universal CRT Avoidance):"
-	@echo "  build-mingw64 - Enforce MINGW64 environment build (fails if not in MINGW64)"
-	@echo "                  Ensures traditional MSVCRT.dll usage instead of Universal CRT"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
@@ -486,33 +468,22 @@ env-debug:
 	@echo "MSYSTEM: '$(MSYSTEM)'"
 	@echo "MSYSTEM_DETECTED: '$(MSYSTEM_DETECTED)'"
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
-	@echo "IS_MINGW64: '$(IS_MINGW64)'"
-	@echo "IS_CLANG64: '$(IS_CLANG64)'"
 
-# Main build target (incremental) - Windows/MSYS2 optimized
+# Main build target (incremental)
 build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
-ifeq ($(IS_CLANG64),yes)
-	@echo "Building $(PROJECT_NAME) using CLANG64 environment..."
+	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
 	PATH="/clang64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
 	PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-else
-	@echo "Building $(PROJECT_NAME) using MINGW64 environment..."
-	PATH="/mingw64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-endif
+	$(call windows_dll_check)
 	@echo "✅ Build completed successfully!"
 else
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
-	$(call mingw64_env_check)
-	$(call mingw64_toolchain_verify)
+	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
@@ -533,42 +504,14 @@ print-jobs:
 
 $(LAMBDA_EXE): build
 
-# MINGW64-specific build target (enforced environment)
-build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "🔄 Building with MINGW64 environment (avoids Universal CRT)..."
-	@if [ "$(IS_MSYS2)" = "yes" ] && [ "$(IS_MINGW64)" != "yes" ]; then \
-		echo "❌ Error: Must be in MINGW64 environment for this target"; \
-		echo "Current MSYSTEM: $(MSYSTEM_DETECTED)"; \
-		echo "💡 Switch to MINGW64:"; \
-		echo "   1. Close this terminal"; \
-		echo "   2. Open MSYS2 MINGW64 terminal"; \
-		echo "   3. Navigate to: cd /d/Projects/Lambda"; \
-		echo "   4. Run: make build-mingw64"; \
-		exit 1; \
-	fi
-	$(call mingw64_toolchain_verify)
-	@echo "Setting MINGW64 environment variables..."
-	@export CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" PATH="/mingw64/bin:$$PATH"
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w" 2>&1 | grep -v "warning:"
-	@echo "✅ MINGW64 build completed. Executable: lambda.exe"
-	@echo "🧪 Testing executable..."
-	@./lambda.exe --help >/dev/null 2>&1 && echo "✅ Executable runs successfully" || echo "⚠️  Executable test failed"
-	$(call mingw64_dll_check)
 
 
 
-
-# Debug build - Now uses Premake with MINGW64 preference
+# Debug build
 debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
-	$(call mingw64_env_check)
-	$(call mingw64_toolchain_verify)
+	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
@@ -576,7 +519,7 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Debug build completed. Executable: lambda.exe"
-	$(call mingw64_dll_check)
+	$(call windows_dll_check)
 
 # Release build (optimized with size reduction)
 # Optimizations applied:
@@ -594,8 +537,7 @@ build-release:
 build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
-	$(call mingw64_env_check)
-	$(call mingw64_toolchain_verify)
+	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
@@ -612,7 +554,7 @@ endif
 	@echo "Release build completed."
 	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
 	@touch .lambda_release_build
-	$(call mingw64_dll_check)
+	$(call windows_dll_check)
 
 # Headless CLI build (no Radiant layout engine or GUI support)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
