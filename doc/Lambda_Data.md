@@ -165,11 +165,11 @@ chr(128512)        // "😀"
 Symbols are interned identifiers, often used as keys or tags:
 
 ```lambda
-'identifier
-'symbol-name
-'CamelCase
-'json
-'markdown
+'identifier'
+'symbol-name'
+'CamelCase'
+'json'
+'markdown'
 ```
 
 **Symbol vs String**:
@@ -182,10 +182,10 @@ Symbols are interned identifiers, often used as keys or tags:
 Like strings, symbols support character indexing and range slicing. The result is always a symbol:
 
 ```lambda
-let sym = 'hello;
-sym[0]             // 'h   — single character (symbol)
-sym[1 to 3]        // 'ell  — substring (symbol)
-sym[0 to 4]        // 'hello — full symbol
+let sym = 'hello';
+sym[0]             // 'h'   — single character (symbol)
+sym[1 to 3]        // 'ell'  — substring (symbol)
+sym[0 to 4]        // 'hello' — full symbol
 ```
 
 ### Binary Literals
@@ -316,10 +316,10 @@ dt.format("YYYY-MM-DD hh:mm:ss")     // "2025-04-26 10:30:45"
 dt.format("MMM DD, YYYY")            // "Apr 26, 2025"
 
 // Predefined format names (symbol argument)
-dt.format('iso)                      // "2025-04-26T10:30:45"
-dt.format('human)                    // "April 26, 2025 10:30 AM"
-dt.format('date)                     // "2025-04-26"
-dt.format('time)                     // "10:30:45"
+dt.format('iso')                      // "2025-04-26T10:30:45"
+dt.format('human')                    // "April 26, 2025 10:30 AM"
+dt.format('date')                     // "2025-04-26"
+dt.format('time')                     // "10:30:45"
 ```
 
 **Format Pattern Tokens:**
@@ -510,8 +510,8 @@ let p = /home.user.config
 let s = "/home/user/config"
 
 // Both work with input()
-let data1 = input(p, 'json)
-let data2 = input(s, 'json)
+let data1 = input(p, 'json')
+let data2 = input(s, 'json')
 ```
 
 ### Path Operations
@@ -522,8 +522,8 @@ exists(/etc.hosts)            // true or false
 exists(.config.json)          // true or false
 
 // Load content
-let content = input(/etc.hosts, 'text)    // Load file content
-let data = input(https.api.example.com.data, 'json)  // Fetch URL
+let content = input(/etc.hosts, 'text')    // Load file content
+let data = input(https.api.example.com.data, 'json')  // Fetch URL
 ```
 
 ### System Info Paths (`sys.*`)
@@ -775,7 +775,7 @@ Structured markup elements with attributes and content, used for document proces
 
 ```lambda
 let el = <div class: "main"; "content">;
-el.name      // 'div (built-in: element tag name)
+el.name      // 'div' (built-in: element tag name)
 el.class     // "main" (attribute access)
 el[0]        // "content" (content/child access)
 ```
@@ -785,7 +785,7 @@ el[0]        // "content" (content/child access)
 ```lambda
 let custom = <div name: "custom">;
 custom.name  // "custom" (user-defined takes precedence)
-name(custom) // 'div (function always returns tag)
+name(custom) // 'div' (function always returns tag)
 ```
 
 ### Ranges
@@ -906,7 +906,7 @@ let updated = {*base, x: 10}  // {x: 10, y: 2}
 [1, 2] ++ [3, 4]            // [1, 2, 3, 4]
 
 // String concatenation
-"hello" ++ " " ++ "world"   // "hello world"
+"hello" ++ " world"   // "hello world"
 
 // Path concatenation
 /home.user ++ "config"      // /home.user.config
@@ -986,7 +986,7 @@ float("3.14")               // 3.14
 float(42)                   // 42.0
 
 // To symbol
-symbol("hello")             // 'hello
+symbol("hello")             // 'hello'
 
 // To array
 array((1, 2, 3))            // [1, 2, 3]

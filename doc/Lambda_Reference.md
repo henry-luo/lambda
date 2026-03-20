@@ -87,7 +87,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | `int`     | 56-bit signed integer            | `42`, `-123`                  |
 | `float`   | 64-bit floating point            | `3.14`, `1e-10`               |
 | `string`  | UTF-8 text                       | `"hello"`                     |
-| `symbol`  | Interned identifier              | `'json`                       |
+| `symbol`  | Interned identifier              | `'json'`                       |
 | `bool`    | Boolean                          | `true`, `false`               |
 | `path`    | File path or URL                 | `/etc.hosts`, `https.api.com` |
 | `array`   | Ordered collection                   | `[1, 2, 3]`                   |
@@ -251,7 +251,7 @@ pub type Vec2 {
 }
 
 // Public with error destructuring
-pub config^err = input("config.json", 'json)
+pub config^err = input("config.json", 'json')
 
 // Private (not exported)
 let v = 123
@@ -353,7 +353,7 @@ if (err != null) {
 
 ```lambda
 // Read and process JSON data
-let data = input("sales.json", 'json);
+let data = input("sales.json", 'json');
 
 // Calculate total sales
 let total = data.sales | ~.amount | sum;
@@ -369,14 +369,14 @@ let report = {
     timestamp: datetime()
 };
 
-print(format(report, 'json));
+print(format(report, 'json'));
 ```
 
 ### Document Processing
 
 ```lambda
 // Parse Markdown document
-let doc = input("article.md", 'markdown);
+let doc = input("article.md", 'markdown');
 
 // Query for all headings using type-based search
 let headings = doc?(h1 | h2) | ~.content;
@@ -389,7 +389,7 @@ let toc = <div class: "toc";
     >
 >;
 
-print(format(toc, 'html));
+print(format(toc, 'html'));
 ```
 
 ### Mathematical Computation
@@ -424,7 +424,7 @@ pn main() {
 
     // Load configuration
     let config = if exists(.config.json) {
-        input(.config.json, 'json)
+        input(.config.json, 'json')
     } else {
         {default: true}
     }

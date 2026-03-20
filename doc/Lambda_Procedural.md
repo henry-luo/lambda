@@ -308,8 +308,8 @@ Available anywhere (in both `fn` and `pn`):
 
 ```lambda
 // Read data
-let data = input("config.json", 'json)
-let html = input(https.example.com.page, 'html)
+let data = input("config.json", 'json')
+let html = input(https.example.com.page, 'html')
 
 // Check existence
 if exists(.config.json) { ... }
@@ -342,14 +342,14 @@ pn setup_project() {
 
 | Format | Extensions | Symbol |
 |--------|------------|--------|
-| JSON | `.json` | `'json` |
-| YAML | `.yaml`, `.yml` | `'yaml` |
-| XML | `.xml` | `'xml` |
-| HTML | `.html` | `'html` |
-| Markdown | `.md` | `'markdown` |
-| CSV | `.csv` | `'csv` |
-| TOML | `.toml` | `'toml` |
-| Plain text | `.txt` | `'text` |
+| JSON | `.json` | `'json'` |
+| YAML | `.yaml`, `.yml` | `'yaml'` |
+| XML | `.xml` | `'xml'` |
+| HTML | `.html` | `'html'` |
+| Markdown | `.md` | `'markdown'` |
+| CSV | `.csv` | `'csv'` |
+| TOML | `.toml` | `'toml'` |
+| Plain text | `.txt` | `'text'` |
 
 ---
 

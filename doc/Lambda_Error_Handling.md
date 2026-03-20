@@ -454,7 +454,7 @@ compute(5)^   // 20
 
 ```lambda
 fn process_file(path: string) ProcessedData^ {
-    let content = input(path, 'text)^
+    let content = input(path, 'text')^
     let lines = split(content, "\n")
     let parsed = (for line in lines parse_line(line)^)
     aggregate(parsed)
@@ -465,11 +465,11 @@ fn process_file(path: string) ProcessedData^ {
 
 ```lambda
 fn load_config(path: string) Config^ {
-    let content^file_err = input(path, 'text)
+    let content^file_err = input(path, 'text')
     if (^file_err)
         raise error("failed to read config file", file_err)
 
-    let parsed^parse_err = input(content, 'json)
+    let parsed^parse_err = input(content, 'json')
     if (^parse_err)
         raise error("invalid JSON in config", parse_err)
 
@@ -481,7 +481,7 @@ fn load_config(path: string) Config^ {
 
 ```lambda
 pn main() {
-    let config = input("config.json", 'json)^
+    let config = input("config.json", 'json')^
 
     for item in config.items {
         let result^err = process(item)

@@ -267,19 +267,6 @@ let matrix: int[][] = [[1, 2], [3, 4]]
 let names: [string+] = ["Alice", "Bob"]
 ```
 
-### Tuple Types
-
-```lambda
-// Fixed-length tuples with specific types
-(int, string)              // Pair of int and string
-(int, int, int)            // Triple of ints
-(string, int, bool)        // Mixed types
-
-// Examples
-let point: (int, int) = (10, 20)
-let record: (string, int, bool) = ("Alice", 30, true)
-```
-
 ### Map Types
 
 ```lambda
@@ -430,41 +417,6 @@ p is map       // true (objects are map-compatible)
 
 // Object update (copy with overrides)
 let p2 = {Point p, x: 10.0}   // copy p, override x
-```
-
-### Map Types
-
-Map type aliases remain available for structural typing:
-
-```lambda
-// Structural map type (type alias — no methods, no nominal checking)
-type Config = {
-    host: string,
-    port: int,
-    timeout?: int,      // Optional
-    debug?: bool        // Optional
-}
-```
-
-### Element Types
-
-```lambda
-// Define document structure types
-type Section = <section heading: string;
-    string            // Section content
->
-
-type Article = <article title: string, author: string;
-    string,           // Intro text
-    Section*          // Zero or more sections
->
-
-// Usage
-let doc: Article = <article title: "Lambda Guide", author: "Team";
-    "Introduction to Lambda Script"
-    <section heading: "Basics"; "Getting started...">
-    <section heading: "Advanced"; "Deep dive...">
->
 ```
 
 ---

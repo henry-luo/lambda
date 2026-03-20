@@ -167,7 +167,7 @@ arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
 "hello"[1 to 3]   // "ell" — string slicing
-'hello'[1 to 3]   // 'ell  — symbol slicing
+'hello'[1 to 3]   // 'ell'  — symbol slicing
 "café"[2 to 3]    // "fé"  — UTF-8 aware
 ```
 
@@ -561,7 +561,7 @@ pub type Counter {               // Export object type
     value: int = 0;
     fn double() => value * 2
 }
-pub data^err = input("f", 'json) // Export with error var
+pub data^err = input(\"f\", 'json') // Export with error var
 ```
 
 **Module Usage:**
