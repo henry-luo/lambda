@@ -6,6 +6,7 @@ import ctx: lambda.package.math.context
 import css: lambda.package.math.css
 import met: lambda.package.math.metrics
 import util: lambda.package.math.util
+import sym: lambda.package.math.symbols
 
 // ============================================================
 // Script rendering (superscript, subscript, or both)
@@ -15,6 +16,49 @@ import util: lambda.package.math.util
 // node has: base, sub, sup, modifier attributes
 // render_fn: top-level render function for recursive calls
 pub fn render(node, context, render_fn) {
+    // check if base is a big operator (e.g. \sum, \prod, \int, \lim)
+    let base = node.base
+    let is_big_op = base != null and base is element and name(base) == 'command' and
+        base.name != null and sym.is_limit_op(string(base.name))
+
+    if (is_big_op and ctx.is_display(context))
+        render_big_op_limits(base, node, context, render_fn)
+    else
+        render_scripts(node, context, render_fn)
+}
+
+// render a big operator with limits above/below (display mode)
+fn render_big_op_limits(base, node, context, render_fn) {
+    let cmd = string(base.name)
+    let unicode = sym.lookup_symbol(cmd)
+    let is_text_op = sym.get_operator_name(
+        if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
+    )
+    let display_text = if (unicode != null) unicode
+        else if (is_text_op != null) is_text_op
+        else cmd
+    let op_font = if (is_text_op != null) css.CMR else css.CMR
+    let op_box = box.text_box(display_text, op_font, "mop")
+    let scaled_op = box.with_scale(op_box, 1.5)
+
+    let has_sub = node.sub != null
+    let has_sup = node.sup != null
+
+    let sub_box = if (has_sub) render_fn(node.sub, ctx.sub_context(context)) else null
+    let sup_box = if (has_sup) render_fn(node.sup, ctx.sup_context(context)) else null
+
+    let parts = [{box: scaled_op, shift: 0.0}]
+    let parts2 = if (has_sup)
+        [{box: sup_box, shift: 0.0 - scaled_op.height - 0.1}] ++ parts
+    else parts
+    let parts3 = if (has_sub)
+        parts2 ++ [{box: sub_box, shift: scaled_op.depth + 0.1}]
+    else parts2
+    box.vbox(parts3)
+}
+
+// render normal inline subscript/superscript
+fn render_scripts(node, context, render_fn) {
     // render the base
     let base_box = if (node.base != null) render_fn(node.base, context)
         else box.text_box("", null, "ord")

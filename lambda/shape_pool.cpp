@@ -165,6 +165,8 @@ static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names,
         entry->type = type_info[field_types[i]].type;
         entry->byte_offset = byte_offset;
         entry->next = NULL;
+        entry->ns = NULL;
+        entry->default_value = NULL;
         
         if (!first) first = entry;
         if (prev) prev->next = entry;

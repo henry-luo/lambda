@@ -188,6 +188,16 @@ pub fn get_operator_name(name) {
     operator_names[name]
 }
 
+// check if a command name is a limit-style operator (limits above/below in display)
+pub fn is_limit_op(cmd) {
+    let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
+    big_operators[name] != null or
+    name == "lim" or name == "limsup" or name == "liminf" or
+    name == "sup" or name == "inf" or
+    name == "min" or name == "max" or
+    name == "det" or name == "gcd" or name == "Pr"
+}
+
 // look up an accent character by key
 pub fn get_accent(name) {
     accents[name]
