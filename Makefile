@@ -1683,7 +1683,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text"; \
+		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -1711,7 +1711,7 @@ capture-layout:
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in basic baseline css2.1 flex grid yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text; do \
+	                for dir in basic baseline css2.1 flex grid yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
 	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
 	                        FOUND_SUITE="$$dir"; \
@@ -1773,7 +1773,7 @@ test-layout:
 				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
 				*) \
 					TEST_FILE=""; \
-					for dir in basic baseline css2.1 flex grid; do \
+					for dir in basic baseline css2.1 flex grid yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
 						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
 							TEST_FILE="$${TEST_VAR}.htm"; \
 							break; \
