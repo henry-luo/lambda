@@ -11,9 +11,11 @@
 // Directory Configuration (same directories as test_lambda_gtest.cpp)
 //==============================================================================
 
+// C2MIR tests only run core functional and procedural scripts.
+// Chart tests are excluded because they take 20-30s each in C2MIR
+// (vs ~2-3s for regular tests), and are already verified via MIR Direct.
 static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda",
-    "test/lambda/chart",
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
 
