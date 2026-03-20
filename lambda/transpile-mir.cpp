@@ -3627,8 +3627,25 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
                         MIR_reg_t val = transpile_expr(mt, asn->as);
                         char name_buf[128];
                         snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
-                        TypeId tid = asn->as->type ? asn->as->type->type_id : LMD_TYPE_ANY;
-                        set_var(mt, name_buf, val, type_to_mir(tid), tid);
+                        // Use get_effective_type to match actual MIR register type
+                        // (raw AST type may say FLOAT while boxed runtime returns I64)
+                        TypeId expr_tid = get_effective_type(mt, asn->as);
+                        TypeId var_tid = declare->type ? declare->type->type_id : expr_tid;
+                        if (expr_tid == LMD_TYPE_ANY) var_tid = LMD_TYPE_ANY;
+                        if (var_tid == LMD_TYPE_ANY && expr_tid != LMD_TYPE_ANY) var_tid = expr_tid;
+                        // Convert value if expression type differs from variable type
+                        if (var_tid == LMD_TYPE_FLOAT && expr_tid == LMD_TYPE_INT) {
+                            MIR_reg_t fval = new_reg(mt, "i2d", MIR_T_D);
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+                                MIR_new_reg_op(mt->ctx, fval), MIR_new_reg_op(mt->ctx, val)));
+                            val = fval;
+                        } else if (var_tid == LMD_TYPE_INT && expr_tid == LMD_TYPE_FLOAT) {
+                            MIR_reg_t ival = new_reg(mt, "d2i", MIR_T_I64);
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I,
+                                MIR_new_reg_op(mt->ctx, ival), MIR_new_reg_op(mt->ctx, val)));
+                            val = ival;
+                        }
+                        set_var(mt, name_buf, val, type_to_mir(var_tid), var_tid);
                     }
                 }
                 declare = declare->next;
@@ -3647,8 +3664,23 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
                     MIR_reg_t val = transpile_expr(mt, asn->as);
                     char name_buf[128];
                     snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
-                    TypeId tid = asn->as->type ? asn->as->type->type_id : LMD_TYPE_ANY;
-                    set_var(mt, name_buf, val, type_to_mir(tid), tid);
+                    // Use get_effective_type to match actual MIR register type
+                    TypeId expr_tid = get_effective_type(mt, asn->as);
+                    TypeId var_tid = declare->type ? declare->type->type_id : expr_tid;
+                    if (expr_tid == LMD_TYPE_ANY) var_tid = LMD_TYPE_ANY;
+                    if (var_tid == LMD_TYPE_ANY && expr_tid != LMD_TYPE_ANY) var_tid = expr_tid;
+                    if (var_tid == LMD_TYPE_FLOAT && expr_tid == LMD_TYPE_INT) {
+                        MIR_reg_t fval = new_reg(mt, "i2d", MIR_T_D);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+                            MIR_new_reg_op(mt->ctx, fval), MIR_new_reg_op(mt->ctx, val)));
+                        val = fval;
+                    } else if (var_tid == LMD_TYPE_INT && expr_tid == LMD_TYPE_FLOAT) {
+                        MIR_reg_t ival = new_reg(mt, "d2i", MIR_T_I64);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I,
+                            MIR_new_reg_op(mt->ctx, ival), MIR_new_reg_op(mt->ctx, val)));
+                        val = ival;
+                    }
+                    set_var(mt, name_buf, val, type_to_mir(var_tid), var_tid);
                 }
             }
             declare = declare->next;
