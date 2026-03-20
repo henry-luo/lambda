@@ -56,10 +56,13 @@ lambda view
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 - **Format-aware validation** helpers that unwrap/normalize documents before validation.
 
-**Radiant HTML/CSS/SVG layout, rendering & viewer**
-- **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
+![Type Hierarchy](doc/type_hierarchy.svg)
+
+**Radiant HTML/CSS/SVG/JS layout, rendering & viewer**
+- **Browser-compatible layout engine** supporting block, inline, flex, grid, and tables.
 - **Unified interactive viewer** via `lambda view`:
-   - HTML / XML (treated as HTML with CSS styling)
+   - static HTML/CSS/SVG with some basic JS support
+   - XML (treated as HTML with CSS styling)
    - Markdown / Wiki (rendered with styling)
    - LaTeX (`.tex`) via conversion to HTML
    - Lambda script (`.ls`) evaluated to HTML and rendered (think of PHP)
