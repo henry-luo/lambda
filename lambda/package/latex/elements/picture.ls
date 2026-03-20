@@ -127,23 +127,26 @@ fn render_picture_para(para, unitlength_str) {
         <svg class: "latex-picture">
     } else {
         let size_text = find_first_text(para, 0, n)
-        let wh = parse_coord(size_text)
+        let coords = parse_two_coords(size_text)
+        let wh = if (len(coords) >= 1) coords[0] else null
+        let offset = if (len(coords) >= 2) coords[1] else null
         let w = pic_dim(wh, 0, 100.0)
         let h = pic_dim(wh, 1, 100.0)
+        let ox = pic_dim(offset, 0, 0.0)
+        let oy = pic_dim(offset, 1, 0.0)
         let sc = unitlength_to_scale(unitlength_str)
         let svg_w = w * sc
         let svg_h = h * sc
         let vb = "0 0 " ++ fmt(svg_w) ++ " " ++ fmt(svg_h)
 
         let start_idx = find_first_command_idx(para, 0, n)
-        let svg_children = process_commands(para, start_idx, n, 0.4, sc, h, [])
+        let svg_children = process_commands(para, start_idx, n, 0.4, sc, h, ox, oy, [])
 
         <svg class: "latex-picture",
              xmlns: "http://www.w3.org/2000/svg",
              viewBox: vb,
              width: fmt(svg_w) ++ "px",
-             height: fmt(svg_h) ++ "px",
-             style: "overflow:visible";
+             height: fmt(svg_h) ++ "px";
             for child in svg_children { child }
         >
     }
@@ -178,10 +181,10 @@ fn find_first_command_idx(el, i, n) {
 
 // ============================================================
 // Command processing — walk flat sibling list
-// sw=stroke_width, sc=scale, ht=picture_height
+// sw=stroke_width, sc=scale, ht=picture_height, ox/oy=origin offset
 // ============================================================
 
-fn process_commands(para, i, n, sw, sc, ht, acc) {
+fn process_commands(para, i, n, sw, sc, ht, ox, oy, acc) {
     if (i >= n) { acc }
     else {
         let child = para[i]
@@ -193,9 +196,11 @@ fn process_commands(para, i, n, sw, sc, ht, acc) {
                 let body_idx = find_next_curly(para, i + 1, n)
                 if (coord != null and body_idx < n) {
                     let body = para[body_idx]
-                    let svg_els = render_put_body(body, 0, len(body), coord_x(coord), coord_y(coord), sw, sc, ht, [])
-                    process_commands(para, body_idx + 1, n, sw, sc, ht, acc ++ svg_els)
-                } else { process_commands(para, i + 1, n, sw, sc, ht, acc) }
+                    let px = coord_x(coord) - ox
+                    let py = coord_y(coord) - oy
+                    let svg_els = render_put_body(body, 0, len(body), px, py, sw, sc, ht, [])
+                    process_commands(para, body_idx + 1, n, sw, sc, ht, ox, oy, acc ++ svg_els)
+                } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
             }
             else if (tag == "multiput") {
                 let coord_text = get_next_text(para, i + 1, n)
@@ -203,8 +208,8 @@ fn process_commands(para, i, n, sw, sc, ht, acc) {
                 let first_curly = find_next_curly(para, i + 1, n)
                 let second_curly = next_curly_or(para, first_curly + 1, n, n)
                 if (len(coords) >= 2 and second_curly < n) {
-                    let sx0 = coord_x(coords[0])
-                    let sy0 = coord_y(coords[0])
+                    let sx0 = coord_x(coords[0]) - ox
+                    let sy0 = coord_y(coords[0]) - oy
                     let dx = coord_x(coords[1])
                     let dy = coord_y(coords[1])
                     let count_text = trim(text_of_curly(para[first_curly]))
@@ -212,33 +217,33 @@ fn process_commands(para, i, n, sw, sc, ht, acc) {
                     let count = safe_int(count_val)
                     let body = para[second_curly]
                     let svg_els = build_multiput(sx0, sy0, dx, dy, count, body, sw, sc, ht, 0, [])
-                    process_commands(para, second_curly + 1, n, sw, sc, ht, acc ++ svg_els)
-                } else { process_commands(para, i + 1, n, sw, sc, ht, acc) }
+                    process_commands(para, second_curly + 1, n, sw, sc, ht, ox, oy, acc ++ svg_els)
+                } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
             }
             else if (tag == "qbezier") {
                 let coord_text = get_next_text(para, i + 1, n)
                 let coords = parse_three_coords(coord_text)
                 if (len(coords) >= 3) {
                     let svg_el = make_qbezier(
-                        coord_x(coords[0]), coord_y(coords[0]),
-                        coord_x(coords[1]), coord_y(coords[1]),
-                        coord_x(coords[2]), coord_y(coords[2]),
+                        coord_x(coords[0]) - ox, coord_y(coords[0]) - oy,
+                        coord_x(coords[1]) - ox, coord_y(coords[1]) - oy,
+                        coord_x(coords[2]) - ox, coord_y(coords[2]) - oy,
                         sw, sc, ht)
-                    process_commands(para, i + 2, n, sw, sc, ht, acc ++ [svg_el])
-                } else { process_commands(para, i + 1, n, sw, sc, ht, acc) }
+                    process_commands(para, i + 2, n, sw, sc, ht, ox, oy, acc ++ [svg_el])
+                } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
             }
             else if (tag == "thicklines") {
-                process_commands(para, i + 1, n, 0.8, sc, ht, acc)
+                process_commands(para, i + 1, n, 0.8, sc, ht, ox, oy, acc)
             }
             else if (tag == "thinlines") {
-                process_commands(para, i + 1, n, 0.4, sc, ht, acc)
+                process_commands(para, i + 1, n, 0.4, sc, ht, ox, oy, acc)
             }
             else if (tag == "linethickness") {
                 let thick = parse_length(trim(text_of_curly(child)))
-                process_commands(para, i + 1, n, thick, sc, ht, acc)
+                process_commands(para, i + 1, n, thick, sc, ht, ox, oy, acc)
             }
-            else { process_commands(para, i + 1, n, sw, sc, ht, acc) }
-        } else { process_commands(para, i + 1, n, sw, sc, ht, acc) }
+            else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
+        } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
     }
 }
 
@@ -350,8 +355,9 @@ fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) {
                 } else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }
             }
             else if (tag == "inline_math" or tag == "display_math") {
-                let math_text = text_of_curly(child)
-                let svg_el = make_text(px, py, "$" ++ math_text ++ "$", sc, ht)
+                let math_text = if (child.source is string) child.source
+                                else text_of_curly(child)
+                let svg_el = make_text(px, py, math_text, sc, ht)
                 render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
             }
             else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }
@@ -509,7 +515,7 @@ fn make_qbezier(x1, y1, x2, y2, x3, y3, sw, sc, ht) {
 
 fn make_text(px, py, text, sc, ht) {
     <text x: fmt(cx(px, sc)), y: fmt(cy(py, ht, sc)),
-          'font-size': fmt(sc) ++ "px", fill: "black";
+          'font-size': "14px", fill: "black";
         text
     >
 }

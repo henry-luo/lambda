@@ -1893,13 +1893,40 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     float x = rdcon->block.x + view->x * scale;
     float y = rdcon->block.y + view->y * scale;
 
-    tvg_paint_translate(svg_scene, x, y);
-    tvg_paint_scale(svg_scene, scale);
+    // build_svg_scene already called tvg_paint_set_transform for the viewBox,
+    // which sets overriding=true and blocks subsequent translate/scale calls.
+    // We must compose the position+scale into the existing transform matrix.
+    Tvg_Matrix scene_m;
+    tvg_paint_get_transform(svg_scene, &scene_m);
+
+    // Compose: first apply scene transform (viewBox), then scale by pixel_ratio,
+    // then translate to document position.
+    // Combined = Translate(x,y) * Scale(scale) * scene_m
+    Tvg_Matrix combined = {
+        scale * scene_m.e11, scale * scene_m.e12, scale * scene_m.e13 + x,
+        scale * scene_m.e21, scale * scene_m.e22, scale * scene_m.e23 + y,
+        scene_m.e31,         scene_m.e32,         scene_m.e33
+    };
 
     // apply document transform if any
     if (rdcon->has_transform) {
-        tvg_paint_set_transform(svg_scene, &rdcon->transform);
+        // Multiply: rdcon->transform * combined
+        Tvg_Matrix dm = rdcon->transform;
+        Tvg_Matrix final_m = {
+            dm.e11 * combined.e11 + dm.e12 * combined.e21 + dm.e13 * combined.e31,
+            dm.e11 * combined.e12 + dm.e12 * combined.e22 + dm.e13 * combined.e32,
+            dm.e11 * combined.e13 + dm.e12 * combined.e23 + dm.e13 * combined.e33,
+            dm.e21 * combined.e11 + dm.e22 * combined.e21 + dm.e23 * combined.e31,
+            dm.e21 * combined.e12 + dm.e22 * combined.e22 + dm.e23 * combined.e32,
+            dm.e21 * combined.e13 + dm.e22 * combined.e23 + dm.e23 * combined.e33,
+            dm.e31 * combined.e11 + dm.e32 * combined.e21 + dm.e33 * combined.e31,
+            dm.e31 * combined.e12 + dm.e32 * combined.e22 + dm.e33 * combined.e32,
+            dm.e31 * combined.e13 + dm.e32 * combined.e23 + dm.e33 * combined.e33
+        };
+        combined = final_m;
     }
+
+    tvg_paint_set_transform(svg_scene, &combined);
 
     // apply clip region (e.g. iframe content box, overflow:hidden)
     Bound* clip = &rdcon->block.clip;
