@@ -484,7 +484,7 @@ Item list_fill(List *list, int count, ...) {
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
-        list_push(list, {.item = va_arg(args, uint64_t)});
+        list_push_spread(list, {.item = va_arg(args, uint64_t)});
     }
     va_end(args);
     return list_end(list);

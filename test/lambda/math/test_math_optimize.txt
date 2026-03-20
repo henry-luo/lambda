@@ -4,13 +4,10 @@ true
 0.7
 "4. single type:mord5. merged child count:"
 1
-"6. merged text:"
-<span class: "mord"
-  "xy">
-"7. no merge count:"
-1
+"6. merged text:xy7. no merge count:"
+2
 "8. styled no merge:"
-1
+2
 "9. preserve height:"
 0.8
 "10. preserve depth:"
@@ -23,7 +20,4 @@ true
 0.05
 "14. triple merge count:"
 1
-"15. triple merge text:"
-<span class: "mord"
-  "abc">
-"===== ALL MATH OPTIMIZE TESTS DONE ====="
+"15. triple merge text:abc===== ALL MATH OPTIMIZE TESTS DONE ====="

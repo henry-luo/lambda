@@ -1,0 +1,18 @@
+"=== for-loop in element content ==="
+3
+element
+'b'
+'b'
+'b'
+"=== for-loop with transform ==="
+3
+'li'
+"abc=== for-loop with filter ==="
+2
+"24=== nested for-loops ==="
+2
+2
+2
+"ad=== empty for-loop ==="
+0
+"=== format preserves structure ===<div><b>a</b><b>b</b></div>"
