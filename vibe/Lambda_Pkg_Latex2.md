@@ -840,3 +840,67 @@ fn get_number(state, def) = {
   else { step_and_get_custom(state, def.counter) }
 }
 ```
+
+---
+
+## Appendix B — Font Handling in the LaTeX/Math Pipeline
+
+### B.1 Overview
+
+The LaTeX rendering pipeline uses two distinct font families that coexist in `lambda/input/latex/fonts/`:
+
+| Family | Files | Purpose |
+|--------|-------|---------|
+| **CMU** (Computer Modern Unicode) | `Serif/`, `Sans/`, `Typewriter/`, etc. (`.woff`) | Document body text — prose, headings, captions |
+| **KaTeX** | `KaTeX_*.woff2` (20 files) | Math rendering — symbols, operators, stretchy delimiters |
+
+### B.2 Why Both Font Families Are Needed
+
+**CMU fonts** cover the full document text. The Lambda LaTeX package converts `.tex` source to HTML and uses CMU to faithfully reproduce TeX's Computer Modern typeface for body paragraphs, section headings, and other document text. CMU is the Unicode-extended version of Knuth's original Computer Modern, with broad Unicode coverage. Declared via `lambda/input/latex/css/cmu.css`.
+
+**KaTeX fonts** cover math-specific Unicode ranges that CMU either omits or does not render correctly in web contexts:
+
+- `KaTeX_Main` — standard math upright/italic glyphs (matches `cmunrm.woff` visually, but tuned for inline math metrics)
+- `KaTeX_Math` — math italic alphabet (`𝑎`–`𝑧`, `𝐴`–`𝑍`) with correct sidebearings for formula layout
+- `KaTeX_Size1` through `KaTeX_Size4` — pre-designed taller variants of delimiter characters `( ) [ ] { } |`. Each font contains the same set of bracket glyphs at progressively larger sizes. These are **not** scalable — each file has one fixed design size, selected based on the content height being enclosed (thresholds: 1.2em, 1.8em, 2.4em, 3.0em). Content taller than 3.0em uses the CSS `scaleY()` transform on a KaTeX_Size4 glyph instead.
+- `KaTeX_AMS` — AMS mathematical symbols (`∀`, `∃`, `ℝ`, `ℤ`, etc.)
+- `KaTeX_Caligraphic`, `KaTeX_Fraktur`, `KaTeX_Script`, `KaTeX_SansSerif`, `KaTeX_Typewriter` — math alphabets (`𝒜`, `𝔄`, etc.)
+
+The math package (`lambda/package/math/`) emits HTML elements with CSS classes like `.ML__delim-size2` (→ `font-family:KaTeX_Size2`) and `.ML__mathit` (→ `font-family:KaTeX_Math`). These classes are defined in the embedded stylesheet returned by `math/css.ls:get_stylesheet()`. The KaTeX fonts must be registered with FreeType before layout and rendering, which is handled by `process_document_font_faces()` reading `@font-face` declarations from `lambda/input/latex/css/katex.css`.
+
+**Visual consistency:** Both families derive from Knuth's Computer Modern, so they blend seamlessly in a rendered document — body text (CMU) and math (KaTeX) share the same visual heritage despite coming from different font files.
+
+### B.3 Font Loading in the Pipeline
+
+`load_latex_doc()` in `radiant/cmd_layout.cpp` loads both stylesheets and stores them in `dom_doc->stylesheets[]`:
+
+1. `lambda/input/latex/css/article.css` — declares CMU `@font-face` rules, referencing `cmu.css` which points to the `Serif/`, `Sans/`, etc. subdirectories
+2. `lambda/input/latex/css/katex.css` — declares KaTeX `@font-face` rules with paths like `url('../fonts/KaTeX_Size1-Regular.woff2')`
+
+`process_document_font_faces()` in `radiant/font_face.cpp` iterates the stored stylesheets and resolves each `@font-face` `src` URL relative to the stylesheet's `origin_url`. For `katex.css` (loaded with the relative path `lambda/input/latex/css/katex.css`), the path is resolved to an absolute path via `realpath()` before computing relative font URLs — ensuring `../fonts/KaTeX_Size1-Regular.woff2` correctly resolves to `lambda/input/latex/fonts/KaTeX_Size1-Regular.woff2`.
+
+### B.4 Stretchy Delimiter Selection
+
+`lambda/package/math/atoms/delimiters.ls:render_stretchy(delim, content_height, atom_type)` selects the appropriate KaTeX Size font level:
+
+```
+content_height ≤ 1.2em  →  KaTeX_Main (regular glyph, class ML__small-delim)
+content_height ≤ 1.8em  →  KaTeX_Size1 (class ML__delim-size1)
+content_height ≤ 2.4em  →  KaTeX_Size2 (class ML__delim-size2)
+content_height ≤ 3.0em  →  KaTeX_Size3 (class ML__delim-size3)
+content_height ≤ 4.0em  →  KaTeX_Size4 (class ML__delim-size4)
+content_height  > 4.0em  →  KaTeX_Size4 + CSS scaleY() transform (SVG-based fallback)
+```
+
+`lambda/package/math/atoms/array.ls:wrap_delimiters()` computes `content_height = table_box.height + table_box.depth` and passes it to `render_stretchy`, ensuring matrix `( )` and cases `{` brackets scale with the table they enclose.
+
+### B.5 License
+
+Both font families are free to use, modify, and redistribute, including in commercial products:
+
+| Font family | License |
+|-------------|---------|
+| CMU (Computer Modern Unicode) | **SIL Open Font License 1.1** |
+| KaTeX fonts | **SIL Open Font License 1.1** |
+
+The OFL is one of the most permissive font licenses available. The full license text is included at `lambda/input/latex/fonts/OFL.txt`. No attribution requirement applies to rendered output (only to redistribution of the font files themselves).

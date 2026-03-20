@@ -2980,6 +2980,26 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         log_debug("No latex.css file found, LaTeX HTML will use embedded and inline styles");
     }
 
+    // Load KaTeX font stylesheet for math rendering (@font-face declarations for KaTeX_Size1-4 etc.)
+    const char* katex_css_filename = "lambda/input/latex/css/katex.css";
+    CssStylesheet* katex_stylesheet = nullptr;
+    char* katex_css_content = read_text_file(katex_css_filename);
+    if (katex_css_content) {
+        size_t katex_css_len = strlen(katex_css_content);
+        char* katex_css_pool_copy = (char*)pool_alloc(pool, katex_css_len + 1);
+        if (katex_css_pool_copy) {
+            str_copy(katex_css_pool_copy, katex_css_len + 1, katex_css_content, katex_css_len);
+            free(katex_css_content);
+            katex_stylesheet = css_parse_stylesheet(css_engine, katex_css_pool_copy, katex_css_filename);
+            if (katex_stylesheet) {
+                log_debug("[Lambda LaTeX] Loaded KaTeX font stylesheet with %zu rules",
+                        katex_stylesheet->rule_count);
+            }
+        } else {
+            free(katex_css_content);
+        }
+    }
+
     // Step 6: Extract and parse any inline <style> elements from HTML
     log_debug("[Lambda LaTeX] Extracting inline <style> elements from LaTeX-generated HTML...");
     int inline_stylesheet_count = 0;
@@ -3010,7 +3030,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     log_debug("[Lambda LaTeX] CSS cascade complete");
 
     // Store stylesheets in DomDocument for @font-face processing later
-    int total_stylesheets = inline_stylesheet_count + (latex_stylesheet ? 1 : 0);
+    int total_stylesheets = inline_stylesheet_count + (latex_stylesheet ? 1 : 0) + (katex_stylesheet ? 1 : 0);
     if (total_stylesheets > 0) {
         dom_doc->stylesheet_capacity = total_stylesheets;
         dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
@@ -3018,6 +3038,9 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
         if (latex_stylesheet) {
             dom_doc->stylesheets[dom_doc->stylesheet_count++] = latex_stylesheet;
+        }
+        if (katex_stylesheet) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = katex_stylesheet;
         }
         for (int i = 0; i < inline_stylesheet_count; i++) {
             if (inline_stylesheets[i]) {
