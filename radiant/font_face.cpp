@@ -214,6 +214,16 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
                         clog_debug(font_log, "Using stylesheet origin_url (file URL) for font resolution: %s", base_path);
                     }
                 }
+            } else {
+                // Relative path - resolve to absolute using CWD so font paths are correct
+                char resolved[4096];
+                if (realpath(stylesheet->origin_url, resolved)) {
+                    stylesheet_path = strdup(resolved);
+                    if (stylesheet_path) {
+                        base_path = stylesheet_path;
+                        clog_debug(font_log, "Using stylesheet origin_url (resolved relative path) for font resolution: %s", base_path);
+                    }
+                }
             }
         }
 

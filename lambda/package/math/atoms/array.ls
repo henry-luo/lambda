@@ -9,6 +9,7 @@
 import box: lambda.package.math.box
 import ctx: lambda.package.math.context
 import css: lambda.package.math.css
+import delims: lambda.package.math.atoms.delimiters
 
 // ============================================================
 // Public entry points
@@ -237,8 +238,9 @@ fn get_right_delim(env_name) {
 fn wrap_delimiters(table_box, env_name) {
     let ld = get_left_delim(env_name)
     let rd = get_right_delim(env_name)
-    let left_box = if (ld != null) box.text_box(ld, css.SMALL_DELIM, "mopen") else null
-    let right_box = if (rd != null) box.text_box(rd, css.SMALL_DELIM, "mclose") else null
+    let content_height = table_box.height + table_box.depth
+    let left_box = if (ld != null) delims.render_stretchy(ld, content_height, "mopen") else null
+    let right_box = if (rd != null) delims.render_stretchy(rd, content_height, "mclose") else null
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
     box.hbox(parts)
 }
