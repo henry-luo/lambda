@@ -341,11 +341,11 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    lambda lambda-cli build-cli format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs \
-	    verify-windows verify-linux test-windows test-linux \
+	    verify-windows verify-linux \
 	    generate-premake clean-premake build-test build-test-linux \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-fuzz test-c2mir
+	    test-fuzzy test-fuzzy-extended test-c2mir
 
 # Help target - shows available commands
 help:
@@ -405,18 +405,13 @@ help:
 	@echo "  test-c2mir    - Run Lambda baseline tests with legacy C2MIR JIT path"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
-	@echo "  test-verbose  - Run tests with verbose output"
-	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
-	@echo "  test-memory   - Run memory leak detection tests"
 	@echo "  test-benchmark- Run performance benchmark tests"
-	@echo "  test-fuzz     - Run fuzzy tests for robustness (alias for test-fuzzy)"
 	@echo "  test-fuzzy    - Run fuzzy tests (5 minutes, mutation + random generation)"
 	@echo "  test-fuzzy-extended - Run extended fuzzy tests (1 hour)"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
-	@echo "  test-windows  - Run CI tests for Windows executable"
-	@echo "  test-linux    - Run CI tests for Linux executable"
+
 	@echo "  run           - Build and run the default executable"
 	@echo "  analyze       - Run static analysis with scan-build (fixed for custom build)"
 	@echo "  analyze-verbose - Run detailed static analysis with extra checkers"
@@ -1001,17 +996,6 @@ test-extended: build-test
 		exit 1; \
 	fi
 
-test-dev:
-	@echo "Running comprehensive test suite (development mode)..."
-	@if [ -f "test_modern.sh" ]; then \
-		./test_modern.sh || echo "Note: Some tests failed due to incomplete features (math parser, missing dependencies)"; \
-	elif [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --parallel || echo "Note: Some tests failed due to incomplete features"; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
-
 test-library: build
 	@echo "Running library test suite..."
 	@if [ -f "test/test_run.sh" ]; then \
@@ -1165,16 +1149,6 @@ test-coverage:
 		exit 1; \
 	fi
 
-test-memory:
-	@echo "Running memory leak detection tests..."
-	@if [ -f "test/test_memory.sh" ]; then \
-		chmod +x test/test_memory.sh; \
-		./test/test_memory.sh; \
-	else \
-		echo "Memory test script not found at test/test_memory.sh"; \
-		exit 1; \
-	fi
-
 test-benchmark:
 	@echo "Running performance benchmark tests..."
 	@if [ -f "test/test_benchmark.sh" ]; then \
@@ -1202,9 +1176,6 @@ test-fuzzy-extended: build
 	@./test/fuzzy/test_fuzzy.sh --duration=3600
 	@echo "✅ Extended fuzzy tests completed"
 
-# Legacy alias for backward compatibility
-test-fuzz: test-fuzzy
-
 test-integration:
 	@echo "Running integration tests..."
 	@if [ -f "test/test_integration.sh" ]; then \
@@ -1214,80 +1185,6 @@ test-integration:
 		echo "Integration test script not found at test/test_integration.sh"; \
 		exit 1; \
 	fi
-
-# Typesetting system testing
-test-typeset: build
-	@echo "Testing typesetting system..."
-	./$(LAMBDA_EXE) test/lambda/typeset/test_typesetting.ls
-
-test-typeset-math: build
-	@echo "Testing mathematical typesetting..."
-	./$(LAMBDA_EXE) -c "math_expr = input('test_simple_math.ls', 'math'); pages = typeset(math_expr); output('test_math_output.svg', pages[0].svg_content, 'svg'); print('Math typesetting complete')"
-
-test-typeset-markdown: build
-	@echo "Testing Markdown typesetting..."
-	./$(LAMBDA_EXE) -c "md_content = input('README.md', 'markdown'); pages = typeset(md_content); output('readme_typeset.svg', pages[0].svg_content, 'svg'); print('Markdown typesetting complete')"
-
-test-typeset-refined: build
-	@echo "Testing refined typesetting system (view tree architecture)..."
-	./$(LAMBDA_EXE) test/lambda/typeset/test_refined_typesetting.ls
-
-test-typeset-all: build
-	@echo "Running all typesetting tests..."
-	./$(LAMBDA_EXE) test/lambda/typeset/run_all_tests.ls
-
-test-typeset-end-to-end: build
-	@echo "Testing end-to-end typesetting workflow..."
-	./$(LAMBDA_EXE) test/lambda/typeset/test_end_to_end.ls
-
-# C-based end-to-end test using Lambda runtime directly (no MIR/JIT)
-test-typeset-c: build
-	@echo "Building C-based end-to-end test with Lambda runtime..."
-	gcc -I. -Iinclude -o test_end_to_end_direct test/lambda/typeset/test_end_to_end.c \
-		lambda/lambda-mem.c lambda/lambda-eval.c lambda/print.c \
-		typeset/typeset.c typeset/view/view_tree.c \
-		typeset/integration/lambda_bridge.c typeset/serialization/lambda_serializer.c \
-		typeset/output/svg_renderer.c \
-		lib/strbuf.c lib/arraylist.c lib/hashmap.c \
-		-lm
-	@echo "Running C-based end-to-end test..."
-	./test_end_to_end_direct
-	@echo "Cleaning up test executable..."
-	rm -f test_end_to_end_direct
-
-# Minimal typesetting test without Lambda dependencies
-test-typeset-minimal:
-	@echo "Building minimal typesetting test..."
-	gcc -I. -Iinclude -o test_minimal test/lambda/typeset/test_minimal.c \
-		typeset/view/view_tree.c typeset/output/renderer.c typeset/output/svg_renderer.c \
-		lib/strbuf.c \
-		-lm
-	@echo "Running minimal typesetting test..."
-	./test_minimal
-	@echo "Cleaning up test executable..."
-	rm -f test_minimal
-
-# Simple proof-of-concept test
-test-typeset-simple:
-	@echo "Building simple typesetting proof of concept..."
-	gcc -I. -Iinclude -o test_simple test/lambda/typeset/test_simple.c \
-		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
-		-lm
-	@echo "Running simple typesetting test..."
-	./test_simple
-	@echo "Cleaning up test executable..."
-	rm -f test_simple
-
-# Complete workflow demonstration
-test-typeset-workflow:
-	@echo "Building Lambda typesetting workflow demonstration..."
-	gcc -I. -Iinclude -o test_workflow test/lambda/typeset/test_workflow.c \
-		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
-		-lm
-	@echo "Running typesetting workflow demonstration..."
-	./test_workflow
-	@echo "Cleaning up test executable..."
-	rm -f test_workflow
 
 # Phase 6: Build System Integration Targets
 validate-build:
@@ -1304,12 +1201,6 @@ validate-build:
 		echo "❌ Build utilities not found"; \
 		exit 1; \
 	fi
-
-test-ci:
-	@echo "Running CI test suite..."
-	@$(MAKE) test
-	@$(MAKE) test-memory
-	@$(MAKE) test-integration
 
 run: build
 	@echo "Running $(LAMBDA_EXE)..."

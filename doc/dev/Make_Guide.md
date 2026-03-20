@@ -156,26 +156,18 @@ When `grammar.js` is modified, `parser.c` and `ts-enum.h` are regenerated before
 
 ### Fuzzy / Fuzz Tests
 
-| Target | Description |
-|--------|-------------|
-| `test-fuzzy` | Run fuzzy tests for robustness (5 minutes, mutation + random generation). |
-| `test-fuzzy-extended` | Run extended fuzzy tests (1 hour). |
-| `test-fuzz` | Alias for `test-fuzzy`. |
+| Target                | Description                                                               |
+| --------------------- | ------------------------------------------------------------------------- |
+| `test-fuzzy`          | Run fuzzy tests for robustness (5 minutes, mutation + random generation). |
+| `test-fuzzy-extended` | Run extended fuzzy tests (1 hour).                                        |
 
 ### Other Test Targets
 
-| Target | Description |
-|--------|-------------|
-| `test-dev` | Run comprehensive tests in development mode (tolerates failures from incomplete features). |
-| `test-verbose` | Run tests with verbose output. |
-| `test-sequential` | Run tests sequentially (not parallel). |
-| `test-coverage` | Run tests with code coverage analysis (requires `gcov` + `lcov`). |
-| `test-memory` | Run memory leak detection tests. |
-| `test-benchmark` | Run performance benchmark tests. |
-| `test-integration` | Run end-to-end integration tests. |
-| `test-ci` | Run CI test suite (`test` + `test-memory` + `test-integration`). |
-| `test-windows` | Run CI tests for Windows executable. |
-| `test-linux` | Run CI tests for Linux executable. |
+| Target             | Description                                                       |
+| ------------------ | ----------------------------------------------------------------- |
+| `test-coverage`    | Run tests with code coverage analysis (requires `gcov` + `lcov`). |
+| `test-benchmark`   | Run performance benchmark tests.                                  |
+| `test-integration` | Run end-to-end integration tests.                                 |
 
 ### Test Examples
 
@@ -249,23 +241,6 @@ make tidy-printf FILE='lambda/*.cpp' BACKUP=1              # with backups
 make lint                                                   # run cppcheck
 make format                                                 # auto-format code
 ```
-
----
-
-## Typesetting Targets
-
-| Target | Description |
-|--------|-------------|
-| `test-typeset` | Test typesetting system. |
-| `test-typeset-math` | Test mathematical typesetting. |
-| `test-typeset-markdown` | Test Markdown typesetting. |
-| `test-typeset-refined` | Test refined typesetting (view tree architecture). |
-| `test-typeset-all` | Run all typesetting tests. |
-| `test-typeset-end-to-end` | End-to-end typesetting workflow test. |
-| `test-typeset-c` | C-based end-to-end test using Lambda runtime directly (no MIR/JIT). |
-| `test-typeset-minimal` | Minimal typesetting test without Lambda dependencies. |
-| `test-typeset-simple` | Simple typesetting proof of concept. |
-| `test-typeset-workflow` | Lambda typesetting workflow demonstration. |
 
 ---
 
