@@ -681,7 +681,7 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
 	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
-	@rm -f $(RE2_LIB)
+	@rm -rf build_temp/re2-noabsl/build
 	@echo "All build directories and tree-sitter libraries cleaned."
 
 distclean: clean-all clean-grammar clean-test

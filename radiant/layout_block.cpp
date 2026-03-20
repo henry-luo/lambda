@@ -7,6 +7,7 @@
 #include "layout_positioned.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_cache.hpp"
+#include "layout_counters.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
@@ -4228,6 +4229,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             counter_increment(lycon->counter_context, block->blk->counter_increment);
         }
 
+        // Apply counter-set if specified (CSS Lists 3)
+        // Processed after counter-reset and counter-increment per spec
+        if (block->blk && block->blk->counter_set) {
+            log_debug("    [Block] Applying counter-set: %s", block->blk->counter_set);
+            counter_set(lycon->counter_context, block->blk->counter_set);
+        }
+
         // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
         // For display:list-item, auto-increment list-item counter
         if (display.outer == CSS_VALUE_LIST_ITEM) {
@@ -4260,13 +4268,25 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (effective_list_style == 0) {
                 effective_list_style = CSS_VALUE_DISC;
             }
-            if (effective_list_style != CSS_VALUE_NONE) {
+
+            // CSS Lists 3 §4.1: check for string marker value
+            const char* string_marker = (block->blk) ? block->blk->list_style_type_string : nullptr;
+            bool has_marker = (effective_list_style != CSS_VALUE_NONE) || (string_marker != nullptr);
+
+            if (has_marker) {
                 CssEnum marker_style = effective_list_style;
-                const CssEnumInfo* info = css_enum_info(marker_style);
-                log_debug("    [List] Generating marker with style: %s (0x%04X)", info ? info->name : "unknown", marker_style);
+                bool is_string_marker = (string_marker != nullptr);
+
+                if (!is_string_marker) {
+                    const CssEnumInfo* info = css_enum_info(marker_style);
+                    log_debug("    [List] Generating marker with style: %s (0x%04X)", info ? info->name : "unknown", marker_style);
+                } else {
+                    log_debug("    [List] Generating string marker: \"%s\"", string_marker);
+                }
 
                 // Determine if this is a bullet marker (disc, circle, square) or text marker (decimal, roman, alpha)
-                bool is_bullet_marker = (marker_style == CSS_VALUE_DISC ||
+                bool is_bullet_marker = !is_string_marker &&
+                                        (marker_style == CSS_VALUE_DISC ||
                                         marker_style == CSS_VALUE_CIRCLE ||
                                         marker_style == CSS_VALUE_SQUARE);
 
@@ -4303,8 +4323,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             marker_prop->width = fixed_marker_width;
                             marker_prop->bullet_size = bullet_size;
 
-                            // For text markers (decimal, roman, alpha), format the counter text
-                            if (!is_bullet_marker) {
+                            // For text markers (decimal, roman, alpha) or string markers, set text content
+                            if (is_string_marker) {
+                                // CSS Lists 3 §4.1: use the string directly as marker content
+                                size_t slen = strlen(string_marker);
+                                char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
+                                if (text_copy) {
+                                    memcpy(text_copy, string_marker, slen + 1);
+                                    marker_prop->text_content = text_copy;
+                                }
+                            } else if (!is_bullet_marker) {
                                 char marker_text[64];
                                 int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
                                 if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {

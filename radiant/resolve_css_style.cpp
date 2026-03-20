@@ -8542,18 +8542,31 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // List Properties (Group 18)
         case CSS_PROPERTY_LIST_STYLE_TYPE: {
             log_debug("[CSS] Processing list-style-type property");
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                if (!block->blk) {
-                    block->blk = alloc_block_prop(lycon);
-                }
                 CssEnum type = value->data.keyword;
                 block->blk->list_style_type = type;
+                block->blk->list_style_type_string = nullptr;
                 if (type > 0) {
                     const CssEnumInfo* info = css_enum_info(type);
                     log_debug("[CSS] list-style-type: %s -> 0x%04X (stored)", info ? info->name : "unknown", type);
                 } else {
                     const CssEnumInfo* info = css_enum_info(type);
                     log_debug("[CSS] list-style-type: %s (stored)", info ? info->name : "unknown");
+                }
+            } else if (value->type == CSS_VALUE_TYPE_STRING) {
+                // CSS Lists 3 §4.1: list-style-type can be a <string>
+                // The string is used as the marker content directly
+                const char* str = value->data.string;
+                if (str) {
+                    size_t len = strlen(str);
+                    block->blk->list_style_type_string = (char*)alloc_prop(lycon, len + 1);
+                    str_copy(block->blk->list_style_type_string, len + 1, str, len);
+                    // set list_style_type to a sentinel indicating string mode
+                    block->blk->list_style_type = CSS_VALUE_NONE;
+                    log_debug("[CSS] list-style-type: \"%s\" (string marker)", str);
                 }
             }
             break;
@@ -8684,6 +8697,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] list-style: keyword 0x%04X not recognized", keyword);
                 }
             }
+            // Handle string value for list-style-type (CSS Lists 3 §4.1)
+            else if (value->type == CSS_VALUE_TYPE_STRING && value->data.string) {
+                size_t slen = strlen(value->data.string);
+                char* str_copy_buf = (char*)alloc_prop(lycon, slen + 1);
+                memcpy(str_copy_buf, value->data.string, slen + 1);
+                block->blk->list_style_type_string = str_copy_buf;
+                block->blk->list_style_type = CSS_VALUE_NONE; // sentinel
+                log_debug("[CSS] list-style shorthand: set string marker '%s'", value->data.string);
+            }
             // Handle custom property reference (which might be misidentified keywords like "inside")
             else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
                 // Check if it's actually a keyword like "inside" or "outside"
@@ -8777,6 +8799,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             block->blk->list_style_position = (CssEnum)2;
                             log_debug("[CSS] list-style: expanded to list-style-position=outside");
                         }
+                    }
+                    else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
+                        // CSS Lists 3 §4.1: string value for list-style-type in shorthand
+                        size_t slen = strlen(item->data.string);
+                        char* str_copy_buf = (char*)alloc_prop(lycon, slen + 1);
+                        memcpy(str_copy_buf, item->data.string, slen + 1);
+                        block->blk->list_style_type_string = str_copy_buf;
+                        block->blk->list_style_type = CSS_VALUE_NONE; // sentinel
+                        log_debug("[CSS] list-style shorthand list: set string marker '%s'", item->data.string);
                     }
                     else if (item->type == CSS_VALUE_TYPE_URL) {
                         const char* url = item->data.url;
@@ -8916,6 +8947,61 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->blk->counter_increment = (char*)alloc_prop(lycon, sb->length + 1);
                     str_copy(block->blk->counter_increment, sb->length + 1, sb->str->chars, sb->length);
                     log_debug("[CSS] counter-increment: %s", sb->str->chars);
+                }
+                stringbuf_free(sb);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COUNTER_SET: {
+            // CSS Lists 3 §5.2: counter-set property
+            // Syntax: counter-set: [ <counter-name> <integer>? ]+ | none
+            log_debug("[CSS] counter-set value type=%d", (int)value->type);
+
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->counter_set = (char*)alloc_prop(lycon, 5);
+                str_copy(block->blk->counter_set, 5, "none", 4);
+                log_debug("[CSS] counter-set: none");
+            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
+                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
+                if (str) {
+                    size_t len = strlen(str);
+                    block->blk->counter_set = (char*)alloc_prop(lycon, len + 1);
+                    str_copy(block->blk->counter_set, len + 1, str, len);
+                    log_debug("[CSS] counter-set: %s", str);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                log_debug("[CSS] counter-set list with %d items", value->data.list.count);
+                StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
+                if (!sb) {
+                    log_error("[CSS] counter-set: stringbuf_new failed!");
+                    break;
+                }
+
+                int count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (int i = 0; i < count; i++) {
+                    CssValue* item = values[i];
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                        if (info) {
+                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                            stringbuf_append_str(sb, info->name);
+                        }
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_int(sb, (int)item->data.number.value);
+                    }
+                }
+
+                if (sb->length > 0) {
+                    block->blk->counter_set = (char*)alloc_prop(lycon, sb->length + 1);
+                    str_copy(block->blk->counter_set, sb->length + 1, sb->str->chars, sb->length);
+                    log_debug("[CSS] counter-set: %s", sb->str->chars);
                 }
                 stringbuf_free(sb);
             }

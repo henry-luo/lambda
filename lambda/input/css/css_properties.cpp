@@ -303,6 +303,7 @@ static CssProperty property_definitions[] = {
     // Counter Properties
     {CSS_PROPERTY_COUNTER_RESET, "counter-reset", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COUNTER_INCREMENT, "counter-increment", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COUNTER_SET, "counter-set", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
 
     // Content Properties
     {CSS_PROPERTY_CONTENT, "content", PROP_TYPE_STRING, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_string, NULL},
