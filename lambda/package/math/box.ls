@@ -105,7 +105,7 @@ pub fn hbox(boxes) {
 }
 
 // ============================================================
-// VBox — vertical stacking using inline-block layout
+// VBox — vertical stacking using inline-table layout
 // ============================================================
 
 // create a vertical box with individually shifted children
@@ -121,14 +121,16 @@ fn build_vbox(children) {
     // Reverse children for top-to-bottom order (callers provide bottom-to-top)
     let reversed = reverse(children)
 
-    // Each child becomes a block-level row, centered
+    // Each child becomes a table-row > table-cell, centered
     let items = (for (c in reversed)
-        <span style: "display:block;text-align:center"; c.box.element>
+        <span style: "display:table-row";
+            <span style: "display:table-cell;text-align:center"; c.box.element>
+        >
     )
 
     // vertical-align positions the vbox so baseline is correct
     let va = if (depth > 0.01) util.fmt_em(0.0 - depth) else "middle"
-    let vbox_style = "display:inline-block;vertical-align:" ++ va
+    let vbox_style = "display:inline-table;vertical-align:" ++ va
 
     let vbox_el = <span style: vbox_style;
         for (item in items) item

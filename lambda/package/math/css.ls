@@ -109,7 +109,7 @@ pub fn get_stylesheet() {
     ".ML__bold{font-weight:700}" ++
     ".ML__it{font-style:italic}" ++
     ".ML__mfrac{display:inline-block}" ++
-    ".ML__frac-line{display:block;width:100%;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
+    ".ML__frac-line{display:block;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
     ".ML__sqrt{display:inline-block}" ++
     ".ML__sqrt-sign{display:inline-block;position:relative}" ++
     ".ML__sqrt-line{display:inline-block;height:1px;width:100%;background:currentColor}" ++
