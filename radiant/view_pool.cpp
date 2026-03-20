@@ -59,6 +59,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         case RDT_VIEW_TABLE: {
             ViewTable* table = (ViewTable*)node;
             table->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
+            table->item_prop_type = DomElement::ITEM_PROP_TABLE;
             // Initialize defaults
             table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
             // CSS 2.1 Section 17.6.1: initial value for border-spacing is 0
@@ -76,6 +77,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             // Initialize rowspan/colspan from DOM attributes (for Lambda CSS support)
             ViewTableCell* cell = (ViewTableCell*)view;
             cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
+            cell->item_prop_type = DomElement::ITEM_PROP_CELL;
             // Read colspan attribute
             const char* colspan_str = node->get_attribute("colspan");
             if (colspan_str && *colspan_str) {
@@ -88,7 +90,8 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             const char* rowspan_str = node->get_attribute("rowspan");
             if (rowspan_str && *rowspan_str) {
                 int rowspan = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0);
-                cell->td->row_span = (rowspan > 0) ? rowspan : 1;
+                // HTML spec: rowspan=0 means "span all remaining rows" - resolved later
+                cell->td->row_span = (rowspan >= 0) ? rowspan : 1;
             } else {
                 cell->td->row_span = 1;
             }
@@ -176,7 +179,8 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
         return prop;
     }
     else {
-        log_debug("Failed to allocate property");
+        log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
+                  (void*)lycon->doc->view_tree->pool, size);
         return NULL;
     }
 }

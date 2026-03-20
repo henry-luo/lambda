@@ -2026,6 +2026,27 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 
                 finalize_block_flow(lycon, block, block->display.outer);
 
+                // CSS 2.1 §17.5.2: Tables shrink-to-fit their content (unlike block elements
+                // which stretch to container width). For auto-width tables, update block->width
+                // from the actual table width computed by table_auto_layout.
+                // Pre-layout initialization sets block->width = container_width, which is wrong
+                // for auto-width tables narrower than their container (e.g., empty tables).
+                // finalize_block_flow already computed flow_width from lycon->block.max_width
+                // (which includes pad.left + border.left) + pad.right + border.right.
+                // Just use that flow_width (= content_width + border.right) here.
+                if (!block->blk || block->blk->given_width < 0) {
+                    // flow_width = max_width + padding.right + border.right (per finalize_block_flow)
+                    float shrink_width = block->content_width +
+                        (block->bound && block->bound->border ? block->bound->border->width.right : 0);
+                    // CSS Tables 3: table layout already handles max-width during column
+                    // distribution (respecting min-content floor). Only apply min-width here.
+                    if (block->blk && block->blk->given_min_width >= 0 && shrink_width < block->blk->given_min_width)
+                        shrink_width = block->blk->given_min_width;
+                    block->width = shrink_width;
+                    log_debug("TABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)",
+                              block->width, block->content_width);
+                }
+
                 // WORKAROUND: Save table height to global - it gets corrupted after return
                 // This is a mysterious issue where the height field gets zeroed between
                 // the return statement and the caller's next instruction
@@ -2076,6 +2097,39 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     lycon->block.advance_y, block->height);
 
                 finalize_block_flow(lycon, block, block->display.outer);
+                return;
+            }
+            else if (block->display.inner == CSS_VALUE_TABLE) {
+                auto t_table_start = high_resolution_clock::now();
+                log_debug("EMPTY TABLE LAYOUT for %s", block->node_name());
+                layout_table_content(lycon, block, block->display);
+                g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
+
+                lycon->block.advance_y = block->height;
+                if (block->bound && block->bound->border) {
+                    lycon->block.advance_y -= block->bound->border->width.bottom;
+                }
+                if (block->bound) {
+                    lycon->block.advance_y -= block->bound->padding.bottom;
+                }
+                log_debug("EMPTY TABLE FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
+                    lycon->block.advance_y, block->height);
+
+                finalize_block_flow(lycon, block, block->display.outer);
+
+                // Shrink-to-fit: auto-width tables use their content width, not container width
+                // lycon->block.max_width (= table->width from table_auto_layout) already includes
+                // border.left + padding.left. finalize_block_flow adds padding.right + border.right
+                // to get content_width and flow_width. Use flow_width here.
+                if (!block->blk || block->blk->given_width < 0) {
+                    float shrink_width = block->content_width +
+                        (block->bound && block->bound->border ? block->bound->border->width.right : 0);
+                    block->width = adjust_min_max_width(block, shrink_width);
+                    log_debug("EMPTY TABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)",
+                              block->width, block->content_width);
+                }
+
+                g_layout_table_height = block->height;
                 return;
             }
         }
@@ -3027,12 +3081,30 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 - (block->bound->margin.right_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
         }
         else { content_width = available_from_parent; }
+        // CSS Tables 3: For auto-width tables, max-width is handled by the table
+        // layout algorithm (which respects min-content width). Don't apply max-width
+        // here — it would pre-constrain available width below the table's needs.
+        // Only apply min-width as a floor.
+        bool is_auto_width_table = (block->view_type == RDT_VIEW_TABLE) &&
+            (!block->blk || block->blk->given_width < 0 || block->blk->given_width_type == CSS_VALUE_AUTO);
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            content_width = adjust_min_max_width(block, content_width);
+            if (is_auto_width_table) {
+                // Only apply min-width, skip max-width
+                if (block->blk->given_min_width >= 0 && content_width < block->blk->given_min_width)
+                    content_width = block->blk->given_min_width;
+            } else {
+                content_width = adjust_min_max_width(block, content_width);
+            }
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         } else {
-            content_width = adjust_border_padding_width(block, content_width);
-            content_width = adjust_min_max_width(block, content_width);
+            if (block->bound) content_width = adjust_border_padding_width(block, content_width);
+            if (is_auto_width_table) {
+                // Only apply min-width, skip max-width
+                if (block->blk && block->blk->given_min_width >= 0 && content_width < block->blk->given_min_width)
+                    content_width = block->blk->given_min_width;
+            } else {
+                content_width = adjust_min_max_width(block, content_width);
+            }
         }
     }
     // Clamp to 0 - negative content_width can occur with very narrow containers

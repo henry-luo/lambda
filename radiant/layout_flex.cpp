@@ -529,6 +529,7 @@ void cleanup_flex_container(LayoutContext* lycon) {
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_info("=== layout_flex_container ENTRY ===");
     FlexContainerLayout* flex_layout = lycon->flex_container;
+
     log_info("FLEX START - container: %dx%d at (%d,%d)",
            container->width, container->height, container->x, container->y);
     log_debug("FLEX PROPERTIES - direction=%d, align_items=%d, justify=%d, wrap=%d",

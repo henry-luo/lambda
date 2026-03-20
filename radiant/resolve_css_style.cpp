@@ -2202,6 +2202,47 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 continue;
             }
 
+            // HTML spec: <th> uses "-internal-center-or-inherit" UA rule.
+            // This means: use center if the inherited value is the initial value (start),
+            // otherwise use the inherited value. E.g.:
+            //   table { text-align: start } -> th: center (start is initial, UA wins)
+            //   table { text-align: end }   -> th: end (non-initial, inherit wins)
+            // Explicit author rules on <th> itself are handled above by the 'existing' check.
+            if (prop_id == CSS_PROPERTY_TEXT_ALIGN) {
+                DomElement* cur_elem = static_cast<DomElement*>(lycon->view);
+                if (cur_elem && cur_elem->tag_name && strcmp(cur_elem->tag_name, "th") == 0) {
+                    // Peek at what ancestor would be inherited
+                    bool inherited_is_noninitial = false;
+                    for (DomElement* p = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                         p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
+                        // Check computed value first
+                        if (p->blk && p->blk->text_align != CSS_VALUE__UNDEF &&
+                            p->blk->text_align != CSS_VALUE_INHERIT &&
+                            p->blk->text_align != CSS_VALUE_CENTER) {
+                            inherited_is_noninitial = (p->blk->text_align != CSS_VALUE_START);
+                            break;
+                        }
+                        // Fall back to specified style
+                        if (p->specified_style) {
+                            CssDeclaration* pd = style_tree_get_declaration(p->specified_style, CSS_PROPERTY_TEXT_ALIGN);
+                            if (pd && pd->value && pd->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum v = pd->value->data.keyword;
+                                if (v != CSS_VALUE__UNDEF && v != CSS_VALUE_INHERIT) {
+                                    inherited_is_noninitial = (v != CSS_VALUE_START);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!inherited_is_noninitial) {
+                        // Inherited value is initial (start) → keep UA center
+                        log_debug("[CSS INHERIT] <th>: inherited text-align is initial, keeping UA center");
+                        continue;
+                    }
+                    log_debug("[CSS INHERIT] <th>: inherited text-align is non-initial, allowing inheritance");
+                }
+            }
+
             // Special case: font shorthand sets font-family directly on span->font
             // without creating a CssDeclaration, so also check if font->family is set
             if (prop_id == CSS_PROPERTY_FONT_FAMILY) {
@@ -2450,6 +2491,23 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     block->blk->given_height_type = CSS_VALUE_AUTO;
                     block->blk->given_height_percent = NAN;
                 }
+            }
+        }
+    }
+
+    // HTML UA stylesheet: <table> elements default to box-sizing: border-box.
+    // CSS Tables 3 §5: The table grid box uses border-box sizing by default.
+    // Only apply to actual <table> HTML elements, not to other elements with display:table.
+    // Only apply if not explicitly set by author CSS.
+    bool is_html_table = (dom_elem->tag_id == HTM_TAG_TABLE) ||
+        (dom_elem->tag_name && strcmp(dom_elem->tag_name, "table") == 0);
+    if (is_html_table && di == CSS_VALUE_TABLE) {
+        ViewBlock* block = (ViewBlock*)span;
+        if (block->blk) {
+            CssDeclaration* box_sizing_decl = style_tree ? style_tree_get_declaration(style_tree, CSS_PROPERTY_BOX_SIZING) : nullptr;
+            if (!box_sizing_decl) {
+                block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+                log_debug("[CSS] Table UA default: box-sizing: border-box applied");
             }
         }
     }
