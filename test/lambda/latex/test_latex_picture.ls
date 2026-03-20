@@ -46,10 +46,10 @@ let pic_vec = <picture; <paragraph; "(100,50)"
     <put> "(10,10)" <curly_group; <vector> "(1,1)" <curly_group; "30">>
 >>
 let svg_vec = format(picture.render_picture(pic_vec), 'xml')
-"11. vector has arrowhead marker-end:"
-contains(svg_vec, "marker-end:url(#arrowhead)")
-"12. vector has arrowhead def:"
-contains(svg_vec, "<marker id=\"arrowhead\"")
+"11. vector has arrowhead polygon:"
+contains(svg_vec, "<polygon")
+"12. vector has line element:"
+contains(svg_vec, "<line")
 
 // ---- oval ----
 let pic_oval = <picture; <paragraph; "(100,50)"

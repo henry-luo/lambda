@@ -14,9 +14,9 @@ true
 true
 "10. line y values equal (horizontal):"
 true
-"11. vector has arrowhead marker-end:"
+"11. vector has arrowhead polygon:"
 true
-"12. vector has arrowhead def:"
+"12. vector has line element:"
 true
 "13. oval is ellipse:"
 true

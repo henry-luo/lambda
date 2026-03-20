@@ -144,14 +144,6 @@ fn render_picture_para(para, unitlength_str) {
              width: fmt(svg_w) ++ "px",
              height: fmt(svg_h) ++ "px",
              style: "overflow:visible";
-            <defs;
-                <marker id: "arrowhead",
-                        markerWidth: "10", markerHeight: "7",
-                        refX: "10", refY: "3.5",
-                        orient: "auto";
-                    <polygon points: "0 0, 10 3.5, 0 7", fill: "black">
-                >
-            >
             for child in svg_children { child }
         >
     }
@@ -334,8 +326,8 @@ fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) {
                 let len_idx = find_next_curly(body, i + 1, n)
                 if (dir != null and len_idx < n) {
                     let length = parse_num(trim(text_of_curly(body[len_idx])))
-                    let svg_el = make_vector(px, py, coord_x(dir), coord_y(dir), length, sw, sc, ht)
-                    render_put_body(body, len_idx + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
+                    let svg_els = make_vector(px, py, coord_x(dir), coord_y(dir), length, sw, sc, ht)
+                    render_put_body(body, len_idx + 1, n, px, py, sw, sc, ht, acc ++ svg_els)
                 } else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }
             }
             else if (tag == "circle") {
@@ -398,19 +390,45 @@ fn cy(y, ht, sc) { flip_y(y, ht) * sc }
 fn make_line(px, py, dx, dy, length, sw, sc, ht) {
     let x2 = px + line_dx(dx, length)
     let y2 = py + line_dy(dx, dy, length)
-    let sty = "stroke:black;stroke-width:" ++ fmt(sw)
     <line x1: fmt(cx(px, sc)), y1: fmt(cy(py, ht, sc)),
           x2: fmt(cx(x2, sc)), y2: fmt(cy(y2, ht, sc)),
-          style: sty>
+          stroke: "black", 'stroke-width': fmt(sw), fill: "none">
+}
+
+// draw an arrowhead triangle at tip (tx,ty) pointing in direction (ddx,ddy)
+fn make_arrowhead(tx, ty, ddx, ddy) {
+    let len = math.sqrt(ddx * ddx + ddy * ddy)
+    if (len == 0.0) { <g> }
+    else {
+        let ux = ddx / len
+        let uy = ddy / len
+        let sz = 5.0
+        // base of arrowhead, offset back from tip
+        let bx = tx - ux * sz
+        let by = ty - uy * sz
+        // perpendicular offsets for the two base corners
+        let px1 = bx - uy * sz * 0.4
+        let py1 = by + ux * sz * 0.4
+        let px2 = bx + uy * sz * 0.4
+        let py2 = by - ux * sz * 0.4
+        let pts = fmt(tx) ++ "," ++ fmt(ty) ++ " " ++
+                  fmt(px1) ++ "," ++ fmt(py1) ++ " " ++
+                  fmt(px2) ++ "," ++ fmt(py2)
+        <polygon points: pts, fill: "black">
+    }
 }
 
 fn make_vector(px, py, dx, dy, length, sw, sc, ht) {
     let x2 = px + line_dx(dx, length)
     let y2 = py + line_dy(dx, dy, length)
-    let sty = "stroke:black;stroke-width:" ++ fmt(sw) ++ ";marker-end:url(#arrowhead)"
-    <line x1: fmt(cx(px, sc)), y1: fmt(cy(py, ht, sc)),
-          x2: fmt(cx(x2, sc)), y2: fmt(cy(y2, ht, sc)),
-          style: sty>
+    let sx1 = fmt(cx(px, sc))
+    let sy1 = fmt(cy(py, ht, sc))
+    let sx2 = fmt(cx(x2, sc))
+    let sy2 = fmt(cy(y2, ht, sc))
+    let arrow = make_arrowhead(cx(x2, sc), cy(y2, ht, sc), cx(x2, sc) - cx(px, sc), cy(y2, ht, sc) - cy(py, ht, sc))
+    [<line x1: sx1, y1: sy1, x2: sx2, y2: sy2,
+           stroke: "black", 'stroke-width': fmt(sw), fill: "none">,
+     arrow]
 }
 
 fn line_dx(dx, length) {
@@ -433,8 +451,8 @@ fn make_circle(px, py, diam, filled, sw, sc, ht) {
     if (filled) {
         <circle cx: fmt(cx(px, sc)), cy: fmt(cy(py, ht, sc)), r: fmt(r), fill: "black">
     } else {
-        let sty = "fill:none;stroke:black;stroke-width:" ++ fmt(sw)
-        <circle cx: fmt(cx(px, sc)), cy: fmt(cy(py, ht, sc)), r: fmt(r), style: sty>
+        <circle cx: fmt(cx(px, sc)), cy: fmt(cy(py, ht, sc)), r: fmt(r),
+                fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
     }
 }
 
@@ -443,12 +461,12 @@ fn make_oval(px, py, ow, oh, part, sw, sc, ht) {
     let ocy = cy(py, ht, sc)
     let rx = ow * sc / 2.0
     let ry = oh * sc / 2.0
-    let sty = "fill:none;stroke:black;stroke-width:" ++ fmt(sw)
     if (part == null) {
-        <ellipse cx: fmt(ocx), cy: fmt(ocy), rx: fmt(rx), ry: fmt(ry), style: sty>
+        <ellipse cx: fmt(ocx), cy: fmt(ocy), rx: fmt(rx), ry: fmt(ry),
+                 fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
     } else {
         let d = build_oval_arc(ocx, ocy, rx, ry, part)
-        <path d: d, style: sty>
+        <path d: d, fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
     }
 }
 
@@ -486,13 +504,12 @@ fn make_qbezier(x1, y1, x2, y2, x3, y3, sw, sc, ht) {
     let d = "M " ++ fmt(cx(x1, sc)) ++ " " ++ fmt(cy(y1, ht, sc)) ++
             " Q " ++ fmt(cx(x2, sc)) ++ " " ++ fmt(cy(y2, ht, sc)) ++
             " " ++ fmt(cx(x3, sc)) ++ " " ++ fmt(cy(y3, ht, sc))
-    let sty = "fill:none;stroke:black;stroke-width:" ++ fmt(sw)
-    <path d: d, style: sty>
+    <path d: d, fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
 }
 
 fn make_text(px, py, text, sc, ht) {
-    let sty = "font-size:" ++ fmt(sc) ++ "px;fill:black"
-    <text x: fmt(cx(px, sc)), y: fmt(cy(py, ht, sc)), style: sty;
+    <text x: fmt(cx(px, sc)), y: fmt(cy(py, ht, sc)),
+          'font-size': fmt(sc) ++ "px", fill: "black";
         text
     >
 }
