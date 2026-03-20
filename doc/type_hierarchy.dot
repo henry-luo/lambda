@@ -22,15 +22,15 @@ digraph TypeHierarchy {
     // Top type
     any [fillcolor="#E8F0FE", color="#4285F4", penwidth=1.5];
 
-    // Invisible waypoint nodes for straight any→scalar center line
-    dot1 [shape=point, width=0.01, height=0.01, style=invis];
-    dot2 [shape=point, width=0.01, height=0.01, style=invis];
+    // Waypoint nodes for straight any→scalar center line (zero-size)
+    dot1 [shape=point, width=0, height=0];
+    dot2 [shape=point, width=0, height=0];
 
     // Level 1 children of any
     scalar [fillcolor="#FFF3E0", color="#FB8C00"];
     container [fillcolor="#E8F5E9", color="#43A047"];
     type [fillcolor="#F3E5F5", color="#8E24AA"];
-    function [fillcolor="#FDE0DC", color="#E53935"];
+    function [fillcolor="#EDE7F6", color="#5C6BC0"];
     error [fillcolor="#FFEBEE", color="#C62828"];
 
     // Scalar subtypes
@@ -54,8 +54,8 @@ digraph TypeHierarchy {
     element [fillcolor="#E8F5E9", color="#66BB6A"];
 
     // Function subtypes
-    fn [fillcolor="#FDE0DC", color="#EF5350"];
-    pn [fillcolor="#FDE0DC", color="#EF5350"];
+    fn [fillcolor="#EDE7F6", color="#7986CB"];
+    pn [fillcolor="#EDE7F6", color="#7986CB"];
 
     // Center line: any → dot1 → dot2 → scalar (straight vertical)
     any -> dot1 [arrowhead=none, weight=100];
@@ -101,6 +101,6 @@ digraph TypeHierarchy {
     container -> dot1 [style=invis];
     dot1 -> type [style=invis];
     range -> dot2 [style=invis];
-    dot2 -> pn [style=invis];
+    dot2 -> pn [style=invis, minlen=3];
     pn -> fn [style=invis];
 }
