@@ -4,34 +4,34 @@
 
 ### Codebase Size
 
-| Module | Files | Lines |
-|--------|-------|-------|
-| Block layout | `layout_block.cpp` | 5,018 |
-| Inline layout | `layout_inline.cpp`, `layout_text.cpp` | 2,373 |
-| Flex layout | `layout_flex.cpp`, `layout_flex_multipass.cpp`, `layout_flex_measurement.cpp`, `layout_flex.hpp` | 10,428 |
-| Grid layout | `layout_grid.cpp`, `layout_grid_multipass.cpp`, `grid_sizing*.hpp`, `grid_*.cpp/hpp` (11 files) | 8,873 |
-| Table layout | `layout_table.cpp`, `layout_table.hpp` | 8,218 |
-| Positioned layout | `layout_positioned.cpp`, `layout_positioned.hpp` | 1,812 |
-| Multicol layout | `layout_multicol.cpp`, `layout_multicol.hpp` | 456 |
-| Shared infra | `layout.cpp`, `layout.hpp`, `block_context.cpp`, `intrinsic_sizing.cpp`, `layout_alignment.cpp`, `available_space.hpp`, `layout_mode.hpp`, `view.hpp` | 7,725 |
-| **Total** | 30+ files | **~49,000** |
+| Module            | Files                                                                                                                                                 | Lines       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Block layout      | `layout_block.cpp`                                                                                                                                    | 5,018       |
+| Inline layout     | `layout_inline.cpp`, `layout_text.cpp`                                                                                                                | 2,373       |
+| Flex layout       | `layout_flex.cpp`, `layout_flex_multipass.cpp`, `layout_flex_measurement.cpp`, `layout_flex.hpp`                                                      | 10,428      |
+| Grid layout       | `layout_grid.cpp`, `layout_grid_multipass.cpp`, `grid_sizing*.hpp`, `grid_*.cpp/hpp` (11 files)                                                       | 8,873       |
+| Table layout      | `layout_table.cpp`, `layout_table.hpp`                                                                                                                | 8,218       |
+| Positioned layout | `layout_positioned.cpp`, `layout_positioned.hpp`                                                                                                      | 1,812       |
+| Multicol layout   | `layout_multicol.cpp`, `layout_multicol.hpp`                                                                                                          | 456         |
+| Shared infra      | `layout.cpp`, `layout.hpp`, `block_context.cpp`, `intrinsic_sizing.cpp`, `layout_alignment.cpp`, `available_space.hpp`, `layout_mode.hpp`, `view.hpp` | 7,725       |
+| **Total**         | 30+ files                                                                                                                                             | **~49,000** |
 
 ### Test Pass Rates (WPT CSS Level 3)
 
 | Suite | Tests | Initial Pass | Current Pass | Pass Rate |
 |-------|-------|--------------|--------------|-----------|
-| wpt-css-box | 67 | 19 | 19 | 28.4% |
+| wpt-css-box | 67 | 19 | 9 | 13.4% |
 | wpt-css-images | 452 | 213 | 213 | 47.1% |
-| wpt-css-tables | 148 | 41 | 42 (+1) | 28.4% |
-| wpt-css-position | 219 | 43 | 43 | 19.6% |
-| wpt-css-text | 1,388 | 196 | 201 (+5) | 14.5% |
-| **Total** | **2,274** | **512** | **518 (+6)** | **22.8%** |
+| wpt-css-tables | 148 | 41 | 77 (+36) | 52.0% |
+| wpt-css-position | 219 | 43 | 40 | 18.3% |
+| wpt-css-text | 1,388 | 196 | 196 | 14.1% |
+| **Total** | **2,274** | **512** | **535 (+23)** | **23.5%** |
 
 ### Internal Suite Pass Rates (for reference)
 
 | Suite | Tests | Pass | Pass Rate |
 |-------|-------|------|-----------|
-| baseline (CSS 2.1) | 2,645 | 2,631 | 99.5% |
+| baseline (CSS 2.1) | 2,644 | 2,644 | 100% |
 | grid (internal) | 47 | 45 | 95.7% |
 
 ---
@@ -230,7 +230,7 @@ Failure breakdown:
 
 3. **`inset` shorthand and logical properties** — ✅ **`inset` shorthand done (Phase 1).** Expands to `top`/`right`/`bottom`/`left` with standard 1-4 value CSS shorthand rules, including `auto` keyword and percentage support. Logical properties (`inset-block`, `inset-inline`) still not implemented.
 
-### 2.3 CSS Tables (148 tests, 27.7% pass rate)
+### 2.3 CSS Tables (148 tests, 52.0% pass rate)
 
 Failure breakdown:
 
@@ -341,15 +341,18 @@ Failure breakdown:
 | Table percentage height resolution | ~8 | Medium | ✅ Done (+2 WPT tables) |
 | `border-collapse: collapse` table model | ~24 | Large | Deferred (extensive implementation already exists) |
 | Sticky positioning improvements | ~30-40 | Large | Deferred (most test failures are from other CSS issues, not sticky logic) |
-| **Subtotal** | **~130-150** | | **4/6 done, 2 deferred** |
+| Table-in-flex SEGFAULT fix (`item_prop_type`) | +33 | Medium | ✅ Done (fixes heap corruption + unlocks table-in-flex) |
+| **Subtotal** | **~130-150** | | **5/7 done, 2 deferred** |
 
-**Phase 2 actual test impact:** +3 WPT tests passing (202 text + 44 tables vs 201 + 42). Baseline regression: **0** (2631/2644 unchanged).
+**Phase 2 actual test impact:** +36 WPT tables tests passing (77 vs 41), +0 wpt-css-text. Baseline: **2644/2644** (100%, +13 from 2631).
 
 **Phase 2 changes:**
 - CSS percentage height resolution fix (CSS 2.1 §10.5): Unresolvable percentage heights now correctly compute to `auto` instead of `0px`
 - Table cell explicit height propagation: Cells with explicit CSS height set `given_height` in block context for child percentage resolution
 - `margin-trim`: Full parsing (single/multi-value), storage (`uint8_t` bitmask), and block/inline trim application
 - `line-break: anywhere`: CSS property handler, inherited getter, and break logic (break_all + overflow-wrap: anywhere behavior)
+- **Table-in-flex SEGFAULT fix**: Root cause was `set_view()` in `view_pool.cpp` not updating `item_prop_type` when writing to the DomElement union. When `init_flex_item_view` was called twice for the same `<table>` node, `set_view(TABLE)` allocated a 32-byte `TableProp` and overwrote the union, but `item_prop_type` remained `ITEM_PROP_FLEX`. `alloc_flex_item_prop()` then skipped re-allocation, and subsequent writes to 72-byte `FlexItemProp` fields overflowed the 32-byte block into adjacent rpmalloc free-list metadata, causing heap corruption. Fix: set `item_prop_type = ITEM_PROP_TABLE` / `ITEM_PROP_CELL` in `set_view()` for TABLE and TABLE_CELL cases.
+- **Table-in-flex layout support**: Added TABLE case to `layout_flex_item_content()`, added `RDT_VIEW_TABLE` to `layout_final_flex_content` loop filter, and re-allocate `tbl->tb` before calling `layout_table_content` (since FlexItemProp overwrites the union).
 
 **Files modified (Phase 2):**
 - `lambda/input/css/css_style.hpp` — added `CSS_PROPERTY_MARGIN_TRIM`
@@ -359,6 +362,8 @@ Failure breakdown:
 - `radiant/layout_block.cpp` — margin-trim: block-start (L4618), inline-start/end (L3115), block-end (L1033)
 - `radiant/layout_text.cpp` — `get_line_break()` getter, break_all/keep_all/break_word logic for line-break: anywhere
 - `radiant/layout_table.cpp` — `layout_table_cell_content()`: set `given_height` from explicit CSS for percentage resolution
+- `radiant/view_pool.cpp` — set `item_prop_type` to `ITEM_PROP_TABLE`/`ITEM_PROP_CELL` in `set_view()` (SEGFAULT fix)
+- `radiant/layout_flex_multipass.cpp` — TABLE case in `layout_flex_item_content`, `RDT_VIEW_TABLE` in loop filter, `tb` re-allocation
 
 ### Phase 3: Structural Refactoring
 
@@ -380,19 +385,19 @@ Failure breakdown:
 | Full Unicode line-break algorithm (UAX #14) | ~100+ | Very Large |
 | CSS Text Level 4 (text-wrap, text-autospace) | ~50 | Large (spec not fully stable) |
 
-### Projected Impact
+### Actual Impact (Phase 1 + Phase 2 completed)
 
-If Phase 1 + Phase 2 are completed:
-
-| Suite | Pre-Phase Pass | Current Pass | Change |
-|-------|---------------|-------------|--------|
-| wpt-css-box | 9 (13.4%) | 9 (13.4%) | +0 (margin-trim: Chrome lacks support) |
+| Suite | Initial Pass | Current Pass | Change |
+|-------|-------------|-------------|--------|
+| wpt-css-box | 19 (28.4%) | 9 (13.4%) | -10 |
 | wpt-css-images | 213 (47.1%) | 213 (47.1%) | +0 |
-| wpt-css-tables | 42 (28.4%) | 44 (29.7%) | +2 (table % height) |
-| wpt-css-position | 43 (19.6%) | 43 (19.6%) | +0 |
-| wpt-css-text | 201 (14.5%) | 202 (14.6%) | +1 (line-break: anywhere) |
-| **Total** | **508 (22.3%)** | **511 (22.5%)** | **+3** |
-| **Baseline** | **2631/2644** | **2631/2644** | **0 regressions** |
+| wpt-css-tables | 41 (27.7%) | 77 (52.0%) | **+36** |
+| wpt-css-position | 43 (19.6%) | 40 (18.3%) | -3 |
+| wpt-css-text | 196 (14.1%) | 196 (14.1%) | +0 |
+| **Total** | **512 (22.5%)** | **535 (23.5%)** | **+23** |
+| **Baseline** | **2631/2644** | **2644/2644** | **+13 (100%)** |
+
+**Key wins:** CSS Tables suite nearly doubled (27.7% → 52.0%) driven by table-in-flex support and the `item_prop_type` SEGFAULT fix. Baseline reached 100% (2644/2644).
 
 ---
 
