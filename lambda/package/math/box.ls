@@ -11,8 +11,8 @@ import met: .metrics
 // ============================================================
 
 // create a box from an element with specified metrics
-pub fn make_box(element, height, depth, width, box_type) => {
-    element: element,
+pub fn make_box(el, height, depth, width, box_type) => {
+    element: el,
     height: height,
     depth: depth,
     width: width,
