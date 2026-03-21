@@ -668,10 +668,9 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // Use unified intrinsic sizing API (same as flex layout)
     // This uses FreeType for accurate text measurement
     if (!has_explicit_width) {
-        float min_w = calculate_min_content_width(lycon, (DomNode*)item);
-        float max_w = calculate_max_content_width(lycon, (DomNode*)item);
-        *min_width = (int)(min_w + 0.5f);
-        *max_width = (int)(max_w + 0.5f);
+        IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
+        *min_width = (int)(item_sizes.min_content + 0.5f);
+        *max_width = (int)(item_sizes.max_content + 0.5f);
     }
 
     if (!has_explicit_height) {

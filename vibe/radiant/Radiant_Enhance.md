@@ -374,7 +374,7 @@ Failure breakdown:
 | `std::vector` → fixed arrays in grid (§1.7) | 0 | C+ convention compliance | ✅ Done |
 | Context save/restore scope guard (§1.8) | 0 | Prevent context leaks | ✅ Done |
 | Auto-margin unification (§1.6) | ~5-10 | Grid auto-margin correctness | ✅ Already existed |
-| Intrinsic sizing interface cleanup (§1.5) | 0 | Foundation for future work | ❌ Not started |
+| Intrinsic sizing interface cleanup (§1.5) | 0 | Foundation for future work | ✅ Done |
 
 **Phase 3 changes so far:**
 
@@ -405,7 +405,13 @@ Failure breakdown:
 - `layout_flex_measurement.cpp`: 2 sites — `measure_context.run_mode = ComputeSize` and `lycon->run_mode = ComputeSize`
 - `layout_table.cpp`: Save/restore `run_mode` instead of `is_measuring` in `measure_cell_preferred_content_width()`
 
-**Phase 3 test results:** Baseline 3017/3017 ✅ | Grid 45/47 ✅ (pre-existing failures unchanged) | Warnings: 390
+**§1.5 — Intrinsic Sizing Interface Cleanup:**
+- `IntrinsicSizes` struct (with `min_content` / `max_content`) already existed in `view.hpp`; `IntrinsicSizesBidirectional` + `measure_intrinsic_sizes()` unified API already existed in `intrinsic_sizing.hpp/cpp`
+- `layout_grid_multipass.cpp`: Replaced two separate `calculate_min_content_width` + `calculate_max_content_width` calls with a single `measure_element_intrinsic_widths()` call that returns both at once
+- `layout_flex_measurement.cpp`: In `layout_block_measure_mode` child loop, replaced two-branch `calculate_min/max_content_width` calls with one `measure_element_intrinsic_widths()` call (pick the right field per `constrain_width`)
+- Removed dead `measure_block_intrinsic_sizes()` + `layout_block_measure_mode()` functions from `layout_flex_measurement.cpp` and their declarations from `layout_flex_measurement.hpp` (no external callers)
+
+**Phase 3 test results:** Baseline 3017/3017 ✅ | Grid 45/47 ✅ (pre-existing failures unchanged) | Warnings: 0
 
 ### Phase 4: Long-Term Features
 
