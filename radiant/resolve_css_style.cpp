@@ -660,6 +660,13 @@ DisplayValue resolve_display_value(void* child) {
                                 display.outer = CSS_VALUE_NONE;
                                 display.inner = CSS_VALUE_NONE;
                                 return display;
+                            } else if (keyword == CSS_VALUE_CONTENTS) {
+                                // CSS Display Level 3: display: contents
+                                // Element does not generate any box, but children are laid out
+                                // as if they were children of the element's parent
+                                display.outer = CSS_VALUE_CONTENTS;
+                                display.inner = CSS_VALUE_CONTENTS;
+                                return display;
                             } else if (keyword == CSS_VALUE_INHERIT) {
                                 // CSS 2.1 §9.2.4: display: inherit — use parent's computed display
                                 DomElement* parent_elem = dom_element_get_parent(dom_elem);

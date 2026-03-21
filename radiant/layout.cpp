@@ -3,6 +3,7 @@
 #include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
 #include "layout_cache.hpp"
+#include "layout_counters.hpp"
 #include "font_face.h"
 #include "../lib/font/font.h"
 
@@ -1293,6 +1294,61 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         case CSS_VALUE_NONE:
             log_debug("skipping element of display: none");
             break;
+        case CSS_VALUE_CONTENTS: {
+            // CSS Display Level 3: display: contents
+            // Element does not generate a box, but its children are laid out
+            // as if they were children of the element's parent.
+            // Counter properties still apply per CSS Lists 3 §5.3.
+            log_debug("display:contents for <%s> - no box, layout children directly", node->node_name());
+
+            // Mark element in the view tree with zero dimensions (no box generated)
+            // Don't use set_view() — avoid affecting line start view
+            elem->view_type = RDT_VIEW_INLINE;
+            elem->display.outer = CSS_VALUE_CONTENTS;
+            elem->display.inner = CSS_VALUE_CONTENTS;
+            elem->x = 0;
+            elem->y = 0;
+            elem->width = 0;
+            elem->height = 0;
+
+            // Set lycon->view for style resolution (resolve_css_styles uses it)
+            View* saved_view = lycon->view;
+            lycon->view = (View*)elem;
+
+            // Resolve CSS styles so counter properties are populated on elem->blk
+            dom_node_resolve_style(node, lycon);
+
+            // Restore view context
+            lycon->view = saved_view;
+
+            // Apply counter properties if present
+            if (lycon->counter_context) {
+                counter_push_scope(lycon->counter_context);
+                if (elem->blk && elem->blk->counter_reset) {
+                    log_debug("    [Contents] Applying counter-reset: %s", elem->blk->counter_reset);
+                    counter_reset(lycon->counter_context, elem->blk->counter_reset);
+                }
+                if (elem->blk && elem->blk->counter_increment) {
+                    log_debug("    [Contents] Applying counter-increment: %s", elem->blk->counter_increment);
+                    counter_increment(lycon->counter_context, elem->blk->counter_increment);
+                }
+                if (elem->blk && elem->blk->counter_set) {
+                    log_debug("    [Contents] Applying counter-set: %s", elem->blk->counter_set);
+                    counter_set(lycon->counter_context, elem->blk->counter_set);
+                }
+            }
+
+            // Layout children directly in parent's formatting context
+            for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+                layout_flow_node(lycon, child);
+            }
+
+            // Pop counter scope
+            if (lycon->counter_context) {
+                counter_pop_scope(lycon->counter_context);
+            }
+            break;
+        }
         default:
             log_debug("unknown display type: outer=%d", display.outer);
             // skip the element

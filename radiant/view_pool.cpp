@@ -796,6 +796,23 @@ static bool calculate_transform_offset(View* view, float* out_dx, float* out_dy)
 }
 
 void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr) {
+    // CSS Display Level 3: display:contents elements don't generate a box
+    // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
+    if (view->is_element()) {
+        DomElement* elem = (DomElement*)view;
+        if (elem->display.outer == CSS_VALUE_CONTENTS) {
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"x\": 0.0,\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"y\": 0.0,\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"width\": 0.0,\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"height\": 0.0\n");
+            return;
+        }
+    }
+
     // calculate absolute position for view (already in CSS logical pixels)
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
 
@@ -2082,7 +2099,12 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"computed\": {\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"display\": \"inline\"");
+    // Check for display:contents — element has no box but children are laid out
+    if (span->display.outer == CSS_VALUE_CONTENTS) {
+        strbuf_append_str(buf, "\"display\": \"contents\"");
+    } else {
+        strbuf_append_str(buf, "\"display\": \"inline\"");
+    }
 
     // Add inline properties if available
     if (span->in_line) {
