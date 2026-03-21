@@ -34,15 +34,17 @@
 
 #include "grid_types.hpp"
 #include "grid_occupancy.hpp"
-#include <vector>
-#include <functional>
 
 namespace radiant {
 namespace grid {
 
-/**
- * Grid auto-flow mode
- */
+// Cursor position for grid auto-placement iteration (replaces std::pair)
+struct GridCursor {
+    OriginZeroLine primary;    // primary axis index
+    OriginZeroLine secondary;  // secondary axis index
+};
+
+
 enum class GridAutoFlow {
     Row = 0,         // Fill row by row (default)
     Column = 1,      // Fill column by column
@@ -221,6 +223,29 @@ struct GridItemInfo {
     LineSpan resolved_column;
 
     GridItemInfo() : item_index(-1), row(), column(), resolved_row(), resolved_column() {}
+};
+
+// Fixed-capacity array of GridItemInfo (replaces std::vector<GridItemInfo>)
+// MAX_GRID_ITEMS is defined in grid_sizing_algorithm.hpp (256); use same constant
+#ifndef MAX_GRID_ITEMS
+#define MAX_GRID_ITEMS 256
+#endif
+struct ItemInfoArray {
+    GridItemInfo data[MAX_GRID_ITEMS];
+    size_t count;
+    ItemInfoArray() : count(0) {}
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    GridItemInfo& operator[](size_t i) { return data[i]; }
+    const GridItemInfo& operator[](size_t i) const { return data[i]; }
+    void push_back(const GridItemInfo& v) { if (count < MAX_GRID_ITEMS) data[count++] = v; }
+    GridItemInfo& back() { return data[count - 1]; }
+    void reserve(size_t) {} // no-op
+    void clear() { count = 0; }
+    GridItemInfo* begin() { return data; }
+    GridItemInfo* end()   { return data + count; }
+    const GridItemInfo* begin() const { return data; }
+    const GridItemInfo* end()   const { return data + count; }
 };
 
 /**
@@ -428,11 +453,11 @@ inline void place_definite_secondary_axis_item(
  * @param cursor Current search position (primary_idx, secondary_idx)
  * @return Updated cursor position
  */
-inline std::pair<OriginZeroLine, OriginZeroLine> place_indefinite_item(
+inline GridCursor place_indefinite_item(
     CellOccupancyMatrix& matrix,
     GridItemInfo& item,
     GridAutoFlow auto_flow,
-    std::pair<OriginZeroLine, OriginZeroLine> cursor
+    GridCursor cursor
 ) {
     AbsoluteAxis primary = primary_axis(auto_flow);
 
@@ -448,8 +473,8 @@ inline std::pair<OriginZeroLine, OriginZeroLine> place_indefinite_item(
     OriginZeroLine primary_end_line = matrix.track_counts(primary).implicit_end_line();
     OriginZeroLine secondary_start_line = matrix.track_counts(other_axis(primary)).implicit_start_line();
 
-    OriginZeroLine primary_idx = cursor.first;
-    OriginZeroLine secondary_idx = cursor.second;
+    OriginZeroLine primary_idx = cursor.primary;
+    OriginZeroLine secondary_idx = cursor.secondary;
 
     // Check if primary position is definite
     bool has_definite_primary = primary_placement.is_definite;
@@ -571,7 +596,7 @@ inline std::pair<OriginZeroLine, OriginZeroLine> place_indefinite_item(
  */
 inline void place_grid_items(
     CellOccupancyMatrix& matrix,
-    std::vector<GridItemInfo>& items,
+    ItemInfoArray& items,
     GridAutoFlow auto_flow,
     uint16_t explicit_row_count,
     uint16_t explicit_col_count
@@ -624,8 +649,8 @@ inline void place_grid_items(
     // Both are processed in DOM order, which is critical for correct placement
     OriginZeroLine primary_neg_tracks = matrix.track_counts(primary).implicit_start_line();
     OriginZeroLine secondary_neg_tracks = matrix.track_counts(secondary).implicit_start_line();
-    auto cursor = std::make_pair(primary_neg_tracks, secondary_neg_tracks);
-    auto grid_start = cursor;
+    GridCursor cursor = {primary_neg_tracks, secondary_neg_tracks};
+    GridCursor grid_start = cursor;
 
     for (auto& item : items) {
         bool row_definite = item.row.is_definite;

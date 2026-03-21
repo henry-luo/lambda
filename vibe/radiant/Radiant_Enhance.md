@@ -367,14 +367,51 @@ Failure breakdown:
 
 ### Phase 3: Structural Refactoring
 
-| Item | Tests Fixed | Benefit |
-|------|-------------|---------|
-| Unify min/max constraint application (§1.1) | 0 (correctness) | Consistency, fewer edge-case bugs |
-| Deprecate `is_measuring` flag (§1.2) | 0 | Cleaner measurement paths |
-| `std::vector` → `ArrayList` in grid (§1.7) | 0 | C+ convention compliance |
-| Context save/restore scope guard (§1.8) | 0 | Prevent context leaks |
-| Auto-margin unification (§1.6) | ~5-10 | Grid auto-margin correctness |
-| Intrinsic sizing interface cleanup (§1.5) | 0 | Foundation for future work |
+| Item | Tests Fixed | Benefit | Status |
+|------|-------------|---------|--------|
+| Unify min/max constraint application (§1.1) | 0 (correctness) | Consistency, fewer edge-case bugs | ✅ Done |
+| Deprecate `is_measuring` flag (§1.2) | 0 | Cleaner measurement paths | ✅ Done |
+| `std::vector` → fixed arrays in grid (§1.7) | 0 | C+ convention compliance | ✅ Done |
+| Context save/restore scope guard (§1.8) | 0 | Prevent context leaks | ✅ Done |
+| Auto-margin unification (§1.6) | ~5-10 | Grid auto-margin correctness | ✅ Already existed |
+| Intrinsic sizing interface cleanup (§1.5) | 0 | Foundation for future work | ✅ Done |
+
+**Phase 3 changes so far:**
+
+**§1.8 — Context Save/Restore Scope Guards:**
+- Added `BlockContextScope` and `LayoutContextScope` RAII structs to `layout.hpp`
+- Replaced manual `BlockContext saved = lycon->block; ... lycon->block = saved;` patterns in `layout_flex_multipass.cpp`, `layout_grid_multipass.cpp`, `layout_positioned.cpp`
+
+**§1.1 — Min/Max Constraint Unification:**
+- Added `apply_size_constraints(float computed, float min, float max)` utility to `layout.hpp`
+- Replaced inline constraint application patterns across `layout_block.cpp`, `layout_flex.cpp`, `grid_sizing_algorithm.hpp`, `layout_table.cpp`, `layout_positioned.cpp`
+
+**§1.7 — `std::vector` Migration in Grid Files:**
+- Defined `TrackArray` (`EnhancedGridTrack[64]`) and `IndexArray` (`size_t[64]` with `erase_if()`) in `grid_track.hpp`
+- Defined `ContribArray` (`GridItemContribution[256]`) in `grid_sizing_algorithm.hpp`
+- Defined `ItemInfoArray` (`GridItemInfo[256]`) and `GridCursor` struct in `grid_placement.hpp`
+- Defined `GridExtent` struct (replacing `std::pair<int,int>`) in `grid_enhanced_adapter.hpp`
+- Replaced all `std::vector<float>`, `std::vector<bool>`, `std::vector<FlexEntry/FlexInfo/PctColInfo/PctRowInfo>` locals with fixed C arrays
+- Replaced `std::function<>` callbacks with `auto` generic lambdas
+- Deleted dead `distribute_space_to_tracks` function (was taking `std::function<>` callbacks)
+- Removed `#include <vector>`, `#include <functional>`, `#include <optional>` from grid files
+
+**§1.2 — Deprecate `is_measuring` Flag:**
+- Removed `bool is_measuring` field from `LayoutContext` struct in `layout.hpp`
+- Simplified `layout_context_is_measuring()` → `run_mode == RunMode::ComputeSize` (no longer ORs the legacy flag)
+- Simplified `layout_context_should_position()` → `run_mode == PerformLayout` (no longer ANDs `!is_measuring`)
+- `layout.cpp`: Replaced 3 direct `lycon->is_measuring` checks with `layout_context_is_measuring(lycon)`
+- `intrinsic_sizing.cpp`: Save/restore `run_mode` instead of `is_measuring` flag
+- `layout_flex_measurement.cpp`: 2 sites — `measure_context.run_mode = ComputeSize` and `lycon->run_mode = ComputeSize`
+- `layout_table.cpp`: Save/restore `run_mode` instead of `is_measuring` in `measure_cell_preferred_content_width()`
+
+**§1.5 — Intrinsic Sizing Interface Cleanup:**
+- `IntrinsicSizes` struct (with `min_content` / `max_content`) already existed in `view.hpp`; `IntrinsicSizesBidirectional` + `measure_intrinsic_sizes()` unified API already existed in `intrinsic_sizing.hpp/cpp`
+- `layout_grid_multipass.cpp`: Replaced two separate `calculate_min_content_width` + `calculate_max_content_width` calls with a single `measure_element_intrinsic_widths()` call that returns both at once
+- `layout_flex_measurement.cpp`: In `layout_block_measure_mode` child loop, replaced two-branch `calculate_min/max_content_width` calls with one `measure_element_intrinsic_widths()` call (pick the right field per `constrain_width`)
+- Removed dead `measure_block_intrinsic_sizes()` + `layout_block_measure_mode()` functions from `layout_flex_measurement.cpp` and their declarations from `layout_flex_measurement.hpp` (no external callers)
+
+**Phase 3 test results:** Baseline 3017/3017 ✅ | Grid 45/47 ✅ (pre-existing failures unchanged) | Warnings: 0
 
 ### Phase 4: Long-Term Features
 

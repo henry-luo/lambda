@@ -10,9 +10,6 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
-// Forward declarations from layout_block.cpp
-extern float adjust_min_max_width(ViewBlock* block, float width);
-extern float adjust_min_max_height(ViewBlock* block, float height);
 
 /*
  * RADIANT TABLE LAYOUT ENGINE
@@ -387,7 +384,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     // Set up line-height for this cell so we can use it for text content measurement
     // This ensures we use the cell's own line-height, not a stale value from lycon
     FontBox saved_font = lycon->font;
-    BlockContext saved_block = lycon->block;
+    BlockContextScope bscope(lycon);
 
     if (tcell->font) {
         setup_font(lycon->ui_context, &lycon->font, tcell->font);
@@ -397,7 +394,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
 
     // Restore context
     lycon->font = saved_font;
-    lycon->block = saved_block;
+    // block auto-restored by bscope destructor
 
     for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
@@ -3597,9 +3594,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 }
             }
 
-            BlockContext saved_block = lycon->block;
-            Linebox saved_line = lycon->line;
-            FontBox saved_font = lycon->font;
+            LayoutContextScope lscope(lycon);
 
             int caption_width = lycon->line.right - lycon->line.left;
             if (caption_width <= 0) caption_width = 600;
@@ -3735,9 +3730,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             caption->width = (float)caption_width;  // Preliminary width; final width set during positioning
             log_debug("Caption layout end: caption->height=%.1f (given=%.1f, content=%.1f), advance_y=%.1f",
                 caption->height, caption_given_height, caption_content_height, lycon->block.advance_y);
-            lycon->block = saved_block;
-            lycon->line = saved_line;
-            lycon->font = saved_font;
+            // Context auto-restored by lscope destructor
         }
     }
     else if (tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT ||
@@ -4566,11 +4559,11 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     BlockContext saved_block = lycon->block;
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
-    bool saved_measuring = lycon->is_measuring;
+    radiant::RunMode saved_run_mode = lycon->run_mode;
     FontBox saved_font = lycon->font; // Save font context
 
     // Set up CSS 2.1 measurement context with infinite width
-    lycon->is_measuring = true; // Flag to indicate measurement mode
+    lycon->run_mode = radiant::RunMode::ComputeSize; // measurement mode
     lycon->elmt = cell;
 
     // Apply the cell's CSS font properties for accurate measurement
@@ -4848,7 +4841,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     lycon->block = saved_block;
     lycon->line = saved_line;
     lycon->elmt = saved_elmt;
-    lycon->is_measuring = saved_measuring;
+    lycon->run_mode = saved_run_mode;
     lycon->font = saved_font; // Restore original font context
 
     // Add padding and border to both widths
@@ -6614,8 +6607,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // The views share memory with DOM nodes (ViewElement extends DomElement)
 
             // Save and set up layout context for caption
-            BlockContext saved_block = lycon->block;
-            Linebox saved_line = lycon->line;
+            LayoutContextScope lscope(lycon);
             View* saved_view = lycon->view;
 
             // Calculate content width by subtracting padding and border (CSS box model)
@@ -6766,9 +6758,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             log_debug("Updated current_y after caption re-layout: %d", current_y);
 
-            lycon->block = saved_block;
-            lycon->line = saved_line;
             lycon->view = saved_view;
+            // block, line, font auto-restored by lscope destructor
         } else {
             // Just re-align caption text content for centering
             if (caption->blk && caption->blk->text_align == CSS_VALUE_CENTER) {
@@ -7921,8 +7912,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Save and set up layout context for caption
-            BlockContext saved_block = lycon->block;
-            Linebox saved_line = lycon->line;
+            LayoutContextScope lscope2(lycon);
             View* saved_view = lycon->view;
 
             // Calculate content width by subtracting padding and border
@@ -8060,9 +8050,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             caption_height = (int)(caption->height + margin_v);
             log_debug("Bottom caption height recalculated after re-layout: %d", caption_height);
 
-            lycon->block = saved_block;
-            lycon->line = saved_line;
             lycon->view = saved_view;
+            // block, line, font auto-restored by lscope2 destructor
         }
 
         final_table_height += caption_height;  // Add caption height to table

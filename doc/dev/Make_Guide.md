@@ -122,17 +122,6 @@ When `grammar.js` is modified, `parser.c` and `ts-enum.h` are regenerated before
 | `test-c2mir`     | Run Lambda baseline tests with legacy C2MIR JIT path (`--c2mir` flag). |
 | `test-std`       | Run Lambda Standard Tests (custom test runner).     |
 
-### TeX / LaTeX Tests
-
-| Target | Description |
-|--------|-------------|
-| `test-tex` | Run all TeX typesetting unit tests (output, AST, box, math layout, paragraph, integration). |
-| `test-tex-baseline` | Run TeX baseline tests (core box/AST tests). |
-| `test-tex-dvi` | Run TeX DVI comparison tests against reference (all). |
-| `test-tex-dvi-baseline` | Run TeX DVI comparison baseline tests. **Must pass.** |
-| `test-tex-dvi-extended` | Run TeX DVI comparison extended tests (work-in-progress). |
-| `test-tex-reference` | Generate reference DVI files from `test/latex/test_*.tex` using system `latex`. |
-
 ### Math Tests
 
 | Target | Description |

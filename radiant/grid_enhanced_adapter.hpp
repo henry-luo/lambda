@@ -13,7 +13,7 @@
  * 3. Migration path utilities for incremental adoption
  *
  * TODO: std::* Migration Plan (Phase 5+) - COMPLEX
- * - std::vector<EnhancedGridTrack> → Pool-allocated arrays with count
+ * - TrackArray → Pool-allocated arrays with count
  * - std::vector<GridItemInfo> → ArrayList* or fixed arrays
  * - std::vector<GridItemContribution> → ArrayList*
  * - std::pair<int, int> → Simple struct { int first; int second; }
@@ -40,8 +40,6 @@
 #include "grid_placement.hpp"
 #include "grid_sizing_algorithm.hpp"
 
-#include <vector>
-#include <optional>
 #include <algorithm>
 
 namespace radiant {
@@ -176,10 +174,10 @@ inline EnhancedGridTrack convert_to_enhanced_track(::GridTrack* old_track) {
 /**
  * Convert old GridContainerLayout tracks to vector of EnhancedGridTrack
  */
-inline std::vector<EnhancedGridTrack> convert_tracks_to_enhanced(
+inline TrackArray convert_tracks_to_enhanced(
     ::GridTrack* old_tracks, int count)
 {
-    std::vector<EnhancedGridTrack> result;
+    TrackArray result;
     result.reserve(count);
 
     for (int i = 0; i < count; i++) {
@@ -213,7 +211,7 @@ inline void copy_enhanced_to_old(const EnhancedGridTrack& enhanced, ::GridTrack*
  * This prevents accumulated truncation errors (e.g. 4×17.5 → 158 instead of 160).
  */
 inline void copy_enhanced_tracks_to_old(
-    const std::vector<EnhancedGridTrack>& enhanced_tracks,
+    const TrackArray& enhanced_tracks,
     ::GridTrack* old_tracks, int count)
 {
     int copy_count = std::min(static_cast<int>(enhanced_tracks.size()), count);
@@ -237,20 +235,22 @@ inline void copy_enhanced_tracks_to_old(
     if (remainder > 0 && copy_count > 0) {
         // Build (fractional_part, index) pairs and sort descending
         // Use a simple selection approach to keep code minimal
-        std::vector<std::pair<float, int>> fracs;
-        fracs.reserve(copy_count);
+        struct FracEntry { float frac; int idx; };
+        FracEntry fracs[MAX_GRID_TRACKS];
+        size_t frac_count = 0;
+        fracs[0] = {};  // suppress potential uninitialized warning
         for (int i = 0; i < copy_count; i++) {
             float frac = enhanced_tracks[i].base_size
                        - static_cast<float>(static_cast<int>(enhanced_tracks[i].base_size));
-            if (frac > 0.0f) fracs.push_back({frac, i});
+            if (frac > 0.0f && frac_count < MAX_GRID_TRACKS) fracs[frac_count++] = {frac, i};
         }
-        std::sort(fracs.begin(), fracs.end(),
-                  [](const std::pair<float,int>& a, const std::pair<float,int>& b) {
-                      return a.first > b.first;
+        std::sort(fracs, fracs + frac_count,
+                  [](const FracEntry& a, const FracEntry& b) {
+                      return a.frac > b.frac;
                   });
-        int to_add = std::min(remainder, static_cast<int>(fracs.size()));
+        int to_add = std::min(remainder, static_cast<int>(frac_count));
         for (int j = 0; j < to_add; j++) {
-            int idx = fracs[j].second;
+            int idx = fracs[j].idx;
             old_tracks[idx].base_size++;
             old_tracks[idx].computed_size++;
         }
@@ -467,7 +467,7 @@ inline void apply_placement_to_item(ViewBlock* item, const GridItemInfo& info,
  * @param total_row_count Total row count (explicit + implicit)
  */
 inline void resolve_negative_lines_in_items(
-    std::vector<GridItemInfo>& items,
+    ItemInfoArray& items,
     int total_col_count,
     int total_row_count)
 {
@@ -520,17 +520,19 @@ inline void resolve_negative_lines_in_items(
     }
 }
 
+struct GridExtent { int cols; int rows; };
+
 /**
  * Calculate initial grid extent from items with definite positive positions.
  * This determines how many tracks are needed before resolving negative lines.
  *
- * @param items Vector of item infos
+ * @param items Array of item infos
  * @param explicit_col_count Number of explicit columns
  * @param explicit_row_count Number of explicit rows
- * @return pair of (max_col, max_row) needed
+ * @return GridExtent with max cols and rows needed
  */
-inline std::pair<int, int> calculate_initial_grid_extent(
-    const std::vector<GridItemInfo>& items,
+inline GridExtent calculate_initial_grid_extent(
+    const ItemInfoArray& items,
     int explicit_col_count,
     int explicit_row_count)
 {
@@ -627,7 +629,7 @@ inline void place_items_with_occupancy(
     }
 
     // Extract item info
-    std::vector<GridItemInfo> item_infos;
+    ItemInfoArray item_infos;
     item_infos.reserve(item_count);
     int explicit_col_count = grid_layout->explicit_column_count;
     int explicit_row_count = grid_layout->explicit_row_count;
@@ -642,8 +644,8 @@ inline void place_items_with_occupancy(
     }
 
     // Step 1: Calculate initial grid extent from definite positive positions
-    auto [initial_cols, initial_rows] = calculate_initial_grid_extent(
-        item_infos, explicit_col_count, explicit_row_count);
+    // (result used indirectly: resolve_negative_lines_in_items uses the resolved grid size)
+    (void)calculate_initial_grid_extent(item_infos, explicit_col_count, explicit_row_count);
 
     // Step 2: Resolve negative line numbers against the EXPLICIT grid only
     // CSS Grid spec §8.3: "Numeric indices count from the edges of the EXPLICIT grid."
@@ -745,15 +747,15 @@ inline void place_items_with_occupancy(
  * @param items Array of grid items
  * @param item_count Number of items
  * @param is_column_axis True if sizing columns, false if sizing rows
- * @return Vector of item contributions
+ * @return ContribArray of item contributions
  */
-inline std::vector<GridItemContribution> collect_item_contributions(
+inline ContribArray collect_item_contributions(
     GridContainerLayout* grid_layout,
     ViewBlock** items,
     int item_count,
     bool is_column_axis)
 {
-    std::vector<GridItemContribution> contributions;
+    ContribArray contributions;
     if (!grid_layout || !items || item_count <= 0) return contributions;
 
     contributions.reserve(item_count);
@@ -910,10 +912,10 @@ inline void run_enhanced_track_sizing(
               grid_layout->computed_column_count, grid_layout->computed_row_count);
 
     // Convert existing tracks to enhanced format
-    std::vector<EnhancedGridTrack> col_tracks =
+    TrackArray col_tracks =
         convert_tracks_to_enhanced(grid_layout->computed_columns,
                                    grid_layout->computed_column_count);
-    std::vector<EnhancedGridTrack> row_tracks =
+    TrackArray row_tracks =
         convert_tracks_to_enhanced(grid_layout->computed_rows,
                                    grid_layout->computed_row_count);
 
@@ -950,22 +952,23 @@ inline void run_enhanced_track_sizing(
         // This covers: bare % tracks, fit-content(%), and minmax(*, %) tracks.
         enum class PctKind : uint8_t { BarePercent, FitContentPercent, MaxPercent };
         struct PctColInfo { int idx; float pct; PctKind kind; MinTrackSizingFunction orig_min; };
-        std::vector<PctColInfo> pct_col_infos;
+        PctColInfo pct_col_infos[MAX_GRID_TRACKS];
+        size_t pct_col_count = 0;
         if (col_available < 0.0f) {
             for (int i = 0; i < (int)col_tracks.size(); i++) {
                 auto& t = col_tracks[i];
                 if (t.min_track_sizing_function.type == SizingFunctionType::Percent) {
                     // Bare "20%" track or minmax(20%, ...) where both min and max are %
-                    pct_col_infos.push_back({i, t.min_track_sizing_function.value, PctKind::BarePercent, t.min_track_sizing_function});
+                    if (pct_col_count < MAX_GRID_TRACKS) pct_col_infos[pct_col_count++] = {i, t.min_track_sizing_function.value, PctKind::BarePercent, t.min_track_sizing_function};
                     t.min_track_sizing_function = MinTrackSizingFunction::Auto();
                     t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
                 } else if (t.max_track_sizing_function.type == SizingFunctionType::FitContentPercent) {
                     // fit-content(50%) → treat as minmax(min-content, max-content) in first pass
-                    pct_col_infos.push_back({i, t.max_track_sizing_function.value, PctKind::FitContentPercent, t.min_track_sizing_function});
+                    if (pct_col_count < MAX_GRID_TRACKS) pct_col_infos[pct_col_count++] = {i, t.max_track_sizing_function.value, PctKind::FitContentPercent, t.min_track_sizing_function};
                     t.max_track_sizing_function = MaxTrackSizingFunction::MaxContent();
                 } else if (t.max_track_sizing_function.type == SizingFunctionType::Percent) {
                     // minmax(auto/min-content/etc, 20%) → treat max as auto in first pass
-                    pct_col_infos.push_back({i, t.max_track_sizing_function.value, PctKind::MaxPercent, t.min_track_sizing_function});
+                    if (pct_col_count < MAX_GRID_TRACKS) pct_col_infos[pct_col_count++] = {i, t.max_track_sizing_function.value, PctKind::MaxPercent, t.min_track_sizing_function};
                     t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
                 }
             }
@@ -975,7 +978,7 @@ inline void run_enhanced_track_sizing(
         initialize_track_sizes(col_tracks, col_available);
 
         // 11.5 Resolve Intrinsic Track Sizes
-        std::vector<GridItemContribution> col_contributions =
+        ContribArray col_contributions =
             collect_item_contributions(grid_layout, items, item_count, true /* is_column_axis */);
 
         // When the container has definite width, cap auto track growth limits to prevent
@@ -996,7 +999,7 @@ inline void run_enhanced_track_sizing(
                 if (track.kind != GridTrackKind::Track) continue;
                 if (track.max_track_sizing_function.type == SizingFunctionType::Auto && !track.is_flexible()) {
                     auto_max_count++;
-                } else if (!track.is_flexible() && !std::isinf(track.growth_limit)) {
+                } else if (!track.is_flexible() && !isinf(track.growth_limit)) {
                     fixed_track_space += track.growth_limit;
                 }
             }
@@ -1008,12 +1011,14 @@ inline void run_enhanced_track_sizing(
                 if (per_auto > 0.0f) {
                     // Find per-track min-content and max-content floors from single-span items
                     // For scroll containers, the effective minimum is 0 (CSS Grid §6.6)
-                    std::vector<float> track_min_floor(col_tracks.size(), 0.0f);
-                    std::vector<float> track_max_floor(col_tracks.size(), 0.0f);
+                    float track_min_floor[MAX_GRID_TRACKS];
+                    float track_max_floor[MAX_GRID_TRACKS];
+                    size_t n_col = col_tracks.size();
+                    for (size_t i = 0; i < n_col; ++i) { track_min_floor[i] = 0.0f; track_max_floor[i] = 0.0f; }
                     for (const auto& contrib : col_contributions) {
                         if (contrib.track_span == 1) {
                             size_t ti = contrib.track_start;
-                            if (ti < track_min_floor.size()) {
+                            if (ti < n_col) {
                                 float effective_min = contrib.is_scroll_container ? 0.0f
                                                                                   : contrib.min_content_contribution;
                                 track_min_floor[ti] = std::max(track_min_floor[ti], effective_min);
@@ -1031,9 +1036,9 @@ inline void run_enhanced_track_sizing(
                         auto& track = col_tracks[i];
                         if (track.kind != GridTrackKind::Track) continue;
                         if (track.max_track_sizing_function.type == SizingFunctionType::Auto &&
-                            !track.is_flexible() && std::isinf(track.growth_limit)) {
-                            float floor = (i < track_min_floor.size()) ? track_min_floor[i] : 0.0f;
-                            float max_fl = (i < track_max_floor.size()) ? track_max_floor[i] : 0.0f;
+                            !track.is_flexible() && isinf(track.growth_limit)) {
+                            float floor = (i < n_col) ? track_min_floor[i] : 0.0f;
+                            float max_fl = (i < n_col) ? track_max_floor[i] : 0.0f;
                             if (max_fl > per_auto && floor <= per_auto) {
                                 // Cap: max-content exceeds equal share but min-content fits
                                 track.growth_limit = per_auto;
@@ -1102,7 +1107,7 @@ inline void run_enhanced_track_sizing(
         // === Second pass: re-resolve percentage tracks and/or percentage gaps ===
         // After the first pass (where pct were treated as auto, pct gaps as 0),
         // we know the container width. Re-resolve and re-run all phases.
-        bool needs_second_pass = !pct_col_infos.empty() || has_pct_col_gap;
+        bool needs_second_pass = (pct_col_count > 0) || has_pct_col_gap;
         if (needs_second_pass) {
             // Compute first-pass total width (sum of track base_sizes + gaps)
             float first_total = col_gap_total;
@@ -1111,7 +1116,7 @@ inline void run_enhanced_track_sizing(
             // Expose the intrinsic width for the caller so it can cap container size
             if (out_col_intrinsic_width) *out_col_intrinsic_width = first_total;
             log_debug("PCT/GAP second pass: first_total=%.1f, %zu pct tracks, pct_gap=%d",
-                      first_total, pct_col_infos.size(), has_pct_col_gap);
+                      first_total, pct_col_count, has_pct_col_gap);
 
             // Resolve the percentage gap against the intrinsic width
             float resolved_col_gap = effective_col_gap;
@@ -1128,11 +1133,12 @@ inline void run_enhanced_track_sizing(
             float col_available2 = first_total - col_gap_total2;
 
             // Re-create col_tracks from the original track definitions
-            std::vector<EnhancedGridTrack> col_tracks2 =
+            TrackArray col_tracks2 =
                 convert_tracks_to_enhanced(grid_layout->computed_columns,
                                            grid_layout->computed_column_count);
             // Override pct tracks with their resolved values based on kind
-            for (const auto& pti : pct_col_infos) {
+            for (size_t _pi = 0; _pi < pct_col_count; _pi++) {
+                const auto& pti = pct_col_infos[_pi];
                 float resolved = first_total * (pti.pct / 100.0f);
                 switch (pti.kind) {
                     case PctKind::BarePercent:
@@ -1176,23 +1182,24 @@ inline void run_enhanced_track_sizing(
         // during intrinsic sizing, then re-resolved against the determined container height.
         enum class RowPctKind : uint8_t { BarePercent, FitContentPercent, MaxPercent };
         struct PctRowInfo { int idx; float pct; RowPctKind kind; MinTrackSizingFunction orig_min; };
-        std::vector<PctRowInfo> pct_row_infos;
+        PctRowInfo pct_row_infos[MAX_GRID_TRACKS];
+        size_t pct_row_count = 0;
         bool needs_row_second_pass = false;
 
         if (row_available < 0.0f) {
             for (int i = 0; i < (int)row_tracks.size(); i++) {
                 auto& t = row_tracks[i];
                 if (t.min_track_sizing_function.type == SizingFunctionType::Percent) {
-                    pct_row_infos.push_back({i, t.min_track_sizing_function.value, RowPctKind::BarePercent, t.min_track_sizing_function});
+                    if (pct_row_count < MAX_GRID_TRACKS) pct_row_infos[pct_row_count++] = {i, t.min_track_sizing_function.value, RowPctKind::BarePercent, t.min_track_sizing_function};
                     t.min_track_sizing_function = MinTrackSizingFunction::Auto();
                     t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
                     needs_row_second_pass = true;
                 } else if (t.max_track_sizing_function.type == SizingFunctionType::FitContentPercent) {
-                    pct_row_infos.push_back({i, t.max_track_sizing_function.value, RowPctKind::FitContentPercent, t.min_track_sizing_function});
+                    if (pct_row_count < MAX_GRID_TRACKS) pct_row_infos[pct_row_count++] = {i, t.max_track_sizing_function.value, RowPctKind::FitContentPercent, t.min_track_sizing_function};
                     t.max_track_sizing_function = MaxTrackSizingFunction::MaxContent();
                     needs_row_second_pass = true;
                 } else if (t.max_track_sizing_function.type == SizingFunctionType::Percent) {
-                    pct_row_infos.push_back({i, t.max_track_sizing_function.value, RowPctKind::MaxPercent, t.min_track_sizing_function});
+                    if (pct_row_count < MAX_GRID_TRACKS) pct_row_infos[pct_row_count++] = {i, t.max_track_sizing_function.value, RowPctKind::MaxPercent, t.min_track_sizing_function};
                     t.max_track_sizing_function = MaxTrackSizingFunction::Auto();
                     needs_row_second_pass = true;
                 }
@@ -1204,7 +1211,7 @@ inline void run_enhanced_track_sizing(
 
         // 11.5 Resolve Intrinsic Track Sizes
         // NOTE: This uses grid_layout->computed_columns which was just updated above
-        std::vector<GridItemContribution> row_contributions =
+        ContribArray row_contributions =
             collect_item_contributions(grid_layout, items, item_count, false /* is_column_axis */);
         if (!row_contributions.empty()) {
             resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, row_available);
@@ -1233,8 +1240,9 @@ inline void run_enhanced_track_sizing(
             if (out_row_intrinsic_height) *out_row_intrinsic_height = first_row_total;
 
             // Re-resolve percentage row tracks against first-pass intrinsic height
-            std::vector<EnhancedGridTrack> row_tracks2 = row_tracks;
-            for (const auto& pri : pct_row_infos) {
+            TrackArray row_tracks2 = row_tracks;
+            for (size_t _pi = 0; _pi < pct_row_count; _pi++) {
+                const auto& pri = pct_row_infos[_pi];
                 float resolved = first_row_total * (pri.pct / 100.0f);
                 switch (pri.kind) {
                     case RowPctKind::BarePercent:

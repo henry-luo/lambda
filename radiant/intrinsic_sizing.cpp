@@ -656,9 +656,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Resolve CSS styles for this element if not already resolved
     // This is needed during intrinsic measurement to get correct display property
     if (!element->styles_resolved && element->specified_style) {
-        // Set measuring flag to prevent marking as permanently resolved
-        bool was_measuring = lycon->is_measuring;
-        lycon->is_measuring = true;
+        // Set measuring mode to prevent marking as permanently resolved
+        radiant::RunMode saved_run_mode = lycon->run_mode;
+        lycon->run_mode = radiant::RunMode::ComputeSize;
 
         // Resolve CSS display property at minimum
         // We don't need full style resolution, just display property
@@ -680,7 +680,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        lycon->is_measuring = was_measuring;
+        lycon->run_mode = saved_run_mode;
     }
 
     log_debug("measure_element_intrinsic: tag=%s, outer=%d", element->node_name(),

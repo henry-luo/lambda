@@ -17,8 +17,8 @@
  *
  * TODO: std::* Migration Plan (Phase 5+) - COMPLEX
  * This file has extensive std::* usage requiring careful migration:
- * - std::vector<EnhancedGridTrack>* → Pool-allocated arrays with count tracking
- * - std::vector<size_t> eligible_indices → Fixed-size arrays with MAX_TRACKS limit
+ * - TrackArray* → Pool-allocated arrays with count tracking
+ * - IndexArray eligible_indices → Fixed-size arrays with MAX_TRACKS limit
  * - std::vector<GridItemContribution> → ArrayList* from lib/arraylist.h
  * - std::function<...> callbacks → Function pointers with void* context
  * - std::sort → qsort() from <stdlib.h>
@@ -41,10 +41,9 @@
 
 #include "grid_track.hpp"
 #include "grid_types.hpp"
-#include <vector>
-#include <cmath>
+#include <math.h>    // isinf, INFINITY, fabsf
+#include <float.h>   // FLT_MAX
 #include <algorithm>
-#include <functional>
 
 struct LayoutContext;
 struct ViewBlock;
@@ -66,10 +65,10 @@ enum class IntrinsicContributionType {
  */
 struct TrackSizingContext {
     /** Tracks in the axis being sized */
-    std::vector<EnhancedGridTrack>* axis_tracks;
+    TrackArray* axis_tracks;
 
     /** Tracks in the other axis (for content sizing estimates) */
-    std::vector<EnhancedGridTrack>* other_axis_tracks;
+    TrackArray* other_axis_tracks;
 
     /** Available space in the sizing axis (may be indefinite = -1) */
     float axis_available_space;
@@ -114,7 +113,7 @@ struct TrackSizingContext {
  * @param axis_inner_size The inner size of the container in this axis (or -1 if indefinite)
  */
 inline void initialize_track_sizes(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     float axis_inner_size
 ) {
     for (auto& track : tracks) {
@@ -135,9 +134,9 @@ inline void initialize_track_sizes(
                    track.max_track_sizing_function.type == SizingFunctionType::FitContentPercent) {
             // fit-content(N) tracks: growth_limit = N (the cap argument)
             float limit = track.max_track_sizing_function.fit_content_limit(axis_inner_size);
-            track.growth_limit = (limit >= 0) ? limit : std::numeric_limits<float>::infinity();
+            track.growth_limit = (limit >= 0) ? limit : (float)INFINITY;
         } else {
-            track.growth_limit = std::numeric_limits<float>::infinity();
+            track.growth_limit = (float)INFINITY;
         }
 
         // In all cases, if the growth limit is less than the base size,
@@ -157,7 +156,7 @@ inline void initialize_track_sizes(
  * Add any planned base size increases to the base size after a round of distributing space.
  * Reset the planned base size increase to zero ready for the next round.
  */
-inline void flush_planned_base_size_increases(std::vector<EnhancedGridTrack>& tracks) {
+inline void flush_planned_base_size_increases(TrackArray& tracks) {
     for (auto& track : tracks) {
         track.base_size += track.base_size_planned_increase;
         track.base_size_planned_increase = 0.0f;
@@ -171,12 +170,12 @@ inline void flush_planned_base_size_increases(std::vector<EnhancedGridTrack>& tr
  * @param set_infinitely_growable Whether to mark tracks as infinitely growable
  */
 inline void flush_planned_growth_limit_increases(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     bool set_infinitely_growable
 ) {
     for (auto& track : tracks) {
         if (track.growth_limit_planned_increase > 0.0f) {
-            if (std::isinf(track.growth_limit)) {
+            if (isinf(track.growth_limit)) {
                 track.growth_limit = track.base_size + track.growth_limit_planned_increase;
             } else {
                 track.growth_limit += track.growth_limit_planned_increase;
@@ -193,7 +192,7 @@ inline void flush_planned_growth_limit_increases(
  * Compute the sum of base sizes for a range of tracks
  */
 inline float sum_base_sizes(
-    const std::vector<EnhancedGridTrack>& tracks,
+    const TrackArray& tracks,
     size_t start_index,
     size_t end_index
 ) {
@@ -209,7 +208,7 @@ inline float sum_base_sizes(
  */
 template<typename Predicate>
 inline size_t count_tracks_matching(
-    const std::vector<EnhancedGridTrack>& tracks,
+    const TrackArray& tracks,
     Predicate pred
 ) {
     size_t count = 0;
@@ -217,84 +216,6 @@ inline size_t count_tracks_matching(
         if (pred(track)) ++count;
     }
     return count;
-}
-
-/**
- * Distribute space to tracks, increasing their planned_increase values.
- * Used by the track sizing algorithm to distribute extra space.
- *
- * @param space The amount of space to distribute
- * @param tracks The tracks to distribute space to
- * @param filter_fn Predicate to select which tracks receive space
- * @param planned_increase_fn Function to get/set the planned increase for a track
- * @param growth_limit_fn Function to get the growth limit for a track
- * @param item_incurred_increase_fn Function to get/set the item incurred increase
- */
-inline void distribute_space_to_tracks(
-    float space,
-    std::vector<EnhancedGridTrack>& tracks,
-    std::function<bool(const EnhancedGridTrack&)> filter_fn,
-    std::function<float&(EnhancedGridTrack&)> planned_increase_fn,
-    std::function<float(const EnhancedGridTrack&)> limit_fn,
-    bool distribute_beyond_limits = false
-) {
-    if (space <= 0) return;
-
-    // Count eligible tracks
-    std::vector<size_t> eligible_indices;
-    float total_limit = 0.0f;
-
-    for (size_t i = 0; i < tracks.size(); ++i) {
-        if (filter_fn(tracks[i])) {
-            eligible_indices.push_back(i);
-            float limit = limit_fn(tracks[i]);
-            if (!std::isinf(limit)) {
-                total_limit += limit - tracks[i].base_size;
-            }
-        }
-    }
-
-    if (eligible_indices.empty()) return;
-
-    float remaining_space = space;
-
-    // Distribute space equally, respecting limits
-    while (remaining_space > 0.01f && !eligible_indices.empty()) {
-        float space_per_track = remaining_space / eligible_indices.size();
-        bool made_progress = false;
-
-        std::vector<size_t> still_eligible;
-        for (size_t idx : eligible_indices) {
-            auto& track = tracks[idx];
-            float limit = limit_fn(track);
-            float current = track.base_size + planned_increase_fn(track);
-            float room = std::isinf(limit) ? space_per_track : std::max(0.0f, limit - current);
-
-            float increase = std::min(space_per_track, room);
-            if (increase > 0) {
-                planned_increase_fn(track) += increase;
-                remaining_space -= increase;
-                made_progress = true;
-            }
-
-            // Track is still eligible if it has room or we're distributing beyond limits
-            if (room > space_per_track || distribute_beyond_limits) {
-                still_eligible.push_back(idx);
-            }
-        }
-
-        eligible_indices = std::move(still_eligible);
-
-        if (!made_progress) break;
-    }
-
-    // If distributing beyond limits and there's still space, distribute equally
-    if (distribute_beyond_limits && remaining_space > 0.01f && !eligible_indices.empty()) {
-        float extra_per_track = remaining_space / eligible_indices.size();
-        for (size_t idx : eligible_indices) {
-            planned_increase_fn(tracks[idx]) += extra_per_track;
-        }
-    }
 }
 
 // ============================================================================
@@ -315,12 +236,32 @@ struct GridItemContribution {
     ViewBlock* item;                   // Reference to the item for debugging
 };
 
+#define MAX_GRID_ITEMS 256
+
+// Fixed-capacity array of GridItemContribution (replaces std::vector<GridItemContribution>)
+struct ContribArray {
+    GridItemContribution data[MAX_GRID_ITEMS];
+    size_t count;
+    ContribArray() : count(0) {}
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    GridItemContribution& operator[](size_t i) { return data[i]; }
+    const GridItemContribution& operator[](size_t i) const { return data[i]; }
+    void push_back(const GridItemContribution& c) { if (count < MAX_GRID_ITEMS) data[count++] = c; }
+    void reserve(size_t) {} // no-op
+    void clear() { count = 0; }
+    GridItemContribution* begin() { return data; }
+    GridItemContribution* end()   { return data + count; }
+    const GridItemContribution* begin() const { return data; }
+    const GridItemContribution* end()   const { return data + count; }
+};
+
 /**
  * Calculate the space already accounted for by spanned tracks.
  * Used when distributing item contributions across multiple tracks.
  */
 inline float spanned_tracks_size(
-    const std::vector<EnhancedGridTrack>& tracks,
+    const TrackArray& tracks,
     size_t start_index,
     size_t span,
     float gap
@@ -350,7 +291,7 @@ inline float spanned_tracks_size(
  *        Maximum distribution (used for scroll-container items whose minimum_contribution=0)
  */
 inline void increase_sizes_for_spanning_item(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     size_t start_index,
     size_t span,
     float space_to_distribute,
@@ -369,8 +310,8 @@ inline void increase_sizes_for_spanning_item(
     // treated equally (single tier).
 
     // Helper lambda: build eligible track list filtered by a predicate
-    auto build_eligible = [&](std::function<bool(const EnhancedGridTrack&)> include) {
-        std::vector<size_t> result;
+    auto build_eligible = [&](auto include) {
+        IndexArray result;
         for (size_t i = start_index; i < end; ++i) {
             const auto& track = tracks[i];
             bool is_truly_flexible = track.is_flexible() && track.max_track_sizing_function.flex_factor() > 0;
@@ -412,7 +353,7 @@ inline void increase_sizes_for_spanning_item(
     // Phase 2: all tracks with intrinsic min (auto, min-content, max-content) uncapped,
     //          because base_size must reach the item's max-content contribution.
     auto no_cap = [&](const EnhancedGridTrack& track) -> bool {
-        if (std::isinf(track.growth_limit)) return true;
+        if (isinf(track.growth_limit)) return true;
         if (is_phase1) {
             auto max_type = track.max_track_sizing_function.type;
             if (max_type == SizingFunctionType::FitContentPx ||
@@ -433,33 +374,33 @@ inline void increase_sizes_for_spanning_item(
     // Uses the no_cap logic to determine if the track should be capped at its growth_limit
     // or allowed to grow without limit.
     auto effective_cap = [&](const EnhancedGridTrack& track) -> float {
-        if (no_cap(track)) return std::numeric_limits<float>::infinity();
-        return std::isinf(track.growth_limit) ? std::numeric_limits<float>::infinity()
+        if (no_cap(track)) return (float)INFINITY;
+        return isinf(track.growth_limit) ? (float)INFINITY
                                               : track.growth_limit;
     };
 
-    auto distribute = [&](std::vector<size_t> eligible_indices, float space) -> float {
+    auto distribute = [&](IndexArray eligible_indices, float space) -> float {
         if (eligible_indices.empty() || space <= 0) return space;
         float remaining = space;
         while (remaining > 0.01f && !eligible_indices.empty()) {
-            float min_base = std::numeric_limits<float>::max();
-            float second_min_base = std::numeric_limits<float>::max();
+            float min_base = FLT_MAX;
+            float second_min_base = FLT_MAX;
             for (size_t idx : eligible_indices) {
                 float bs = tracks[idx].base_size;
                 if (bs < min_base) { second_min_base = min_base; min_base = bs; }
                 else if (bs < second_min_base) { second_min_base = bs; }
             }
-            std::vector<size_t> min_tracks;
+            IndexArray min_tracks;
             for (size_t idx : eligible_indices) {
-                if (std::abs(tracks[idx].base_size - min_base) < 0.01f) min_tracks.push_back(idx);
+                if (fabsf(tracks[idx].base_size - min_base) < 0.01f) min_tracks.push_back(idx);
             }
-            if (std::isinf(second_min_base) || second_min_base == min_base) {
+            if (isinf(second_min_base) || second_min_base == min_base) {
                 float per_track = remaining / min_tracks.size();
                 float total_given = 0.0f;
                 for (size_t idx : min_tracks) {
                     auto& track = tracks[idx];
                     float cap = effective_cap(track);
-                    float room = std::isinf(cap) ? per_track
+                    float room = isinf(cap) ? per_track
                                  : std::max(0.0f, cap - track.base_size);
                     float given = std::min(per_track, room);
                     track.base_size += given;
@@ -476,7 +417,7 @@ inline void increase_sizes_for_spanning_item(
                     for (size_t idx : min_tracks) {
                         auto& track = tracks[idx];
                         float cap = effective_cap(track);
-                        float new_base = std::isinf(cap) ? second_min_base
+                        float new_base = isinf(cap) ? second_min_base
                                          : std::min(second_min_base, cap);
                         float given = new_base - track.base_size;
                         track.base_size = new_base;
@@ -488,27 +429,23 @@ inline void increase_sizes_for_spanning_item(
                     for (size_t idx : min_tracks) {
                         auto& track = tracks[idx];
                         float cap = effective_cap(track);
-                        float room = std::isinf(cap) ? per_track
+                        float room = isinf(cap) ? per_track
                                      : std::max(0.0f, cap - track.base_size);
                         track.base_size += std::min(per_track, room);
                     }
                     remaining = 0;
                 }
             }
-            eligible_indices.erase(
-                std::remove_if(eligible_indices.begin(), eligible_indices.end(),
-                               [&tracks, &effective_cap](size_t idx) {
-                                   float cap = effective_cap(tracks[idx]);
-                                   return !std::isinf(cap) &&
-                                          tracks[idx].base_size >= cap - 0.01f;
-                               }),
-                eligible_indices.end());
+            eligible_indices.erase_if([&tracks, &effective_cap](size_t idx) {
+                float cap = effective_cap(tracks[idx]);
+                return !isinf(cap) && tracks[idx].base_size >= cap - 0.01f;
+            });
         }
         return remaining;
     };
 
     // Build eligible tracks (filtered by phase rules)
-    std::vector<size_t> all_eligible = build_eligible(max_type_filter);
+    IndexArray all_eligible = build_eligible(max_type_filter);
     if (all_eligible.empty()) return;
 
     if (contribution_type == IntrinsicContributionType::Maximum) {
@@ -517,7 +454,7 @@ inline void increase_sizes_for_spanning_item(
         auto is_max_content_tier = [](const EnhancedGridTrack& t) {
             return t.max_track_sizing_function.type == SizingFunctionType::MaxContent;
         };
-        std::vector<size_t> tier1, tier2;
+        IndexArray tier1, tier2;
         for (size_t idx : all_eligible) {
             if (is_max_content_tier(tracks[idx])) tier1.push_back(idx);
             else tier2.push_back(idx);
@@ -538,7 +475,7 @@ inline void increase_sizes_for_spanning_item(
     for (size_t i = start_index; i < span_end; ++i) {
         auto& track = tracks[i];
         if (contribution_type == IntrinsicContributionType::Maximum) {
-            if (!std::isinf(track.growth_limit)) {
+            if (!isinf(track.growth_limit)) {
                 track.growth_limit = std::max(track.growth_limit, track.base_size);
             }
         }
@@ -562,7 +499,7 @@ inline void increase_sizes_for_spanning_item(
  * @return true if any spanned track is flexible (has non-zero fr unit)
  */
 inline bool item_crosses_flexible_track(
-    const std::vector<EnhancedGridTrack>& tracks,
+    const TrackArray& tracks,
     size_t start_index,
     size_t span
 ) {
@@ -588,7 +525,7 @@ inline bool item_crosses_flexible_track(
  * This is equivalent to Taffy's ItemBatcher approach.
  */
 inline void sort_contributions_for_intrinsic_sizing(
-    std::vector<GridItemContribution>& contributions
+    ContribArray& contributions
 ) {
     std::sort(contributions.begin(), contributions.end(),
         [](const GridItemContribution& a, const GridItemContribution& b) {
@@ -613,8 +550,8 @@ inline void sort_contributions_for_intrinsic_sizing(
  * @param gap Gap between tracks
  */
 inline void resolve_intrinsic_track_sizes(
-    std::vector<EnhancedGridTrack>& tracks,
-    std::vector<GridItemContribution>& contributions,
+    TrackArray& tracks,
+    ContribArray& contributions,
     float gap,
     float axis_inner_size = -1.0f
 ) {
@@ -728,7 +665,7 @@ inline void resolve_intrinsic_track_sizes(
 
         // Tier 1: distribute min_content to non-fit-content-max tracks
         {
-            std::vector<size_t> tier1;
+            IndexArray tier1;
             for (size_t i = contrib.track_start; i < end; ++i) {
                 auto min_type = tracks[i].min_track_sizing_function.type;
                 auto max_type = tracks[i].max_track_sizing_function.type;
@@ -795,7 +732,7 @@ inline void resolve_intrinsic_track_sizes(
             //     the item's max-content contribution regardless of overflow.
 
             // --- Part (A): auto-MIN distribution ---
-            float spanned_fc_limit = std::numeric_limits<float>::infinity();
+            float spanned_fc_limit = (float)INFINITY;
             for (size_t i = contrib.track_start; i < end; ++i) {
                 auto max_type = tracks[i].max_track_sizing_function.type;
                 if (max_type == SizingFunctionType::FitContentPx) {
@@ -851,7 +788,7 @@ inline void resolve_intrinsic_track_sizes(
                     float extra_space = contrib.max_content_contribution - current_size;
                     if (extra_space > 0) {
                         // Distribute to MaxContent MIN tracks only
-                        std::vector<size_t> mc_min_tracks;
+                        IndexArray mc_min_tracks;
                         for (size_t i = contrib.track_start; i < end; ++i) {
                             auto& track = tracks[i];
                             if (track.min_track_sizing_function.type != SizingFunctionType::MaxContent) continue;
@@ -906,7 +843,7 @@ inline void resolve_intrinsic_track_sizes(
 
             // Distribute to max-content MIN tracks, excluding those with MinContent MAX.
             // Uses tiered distribution: MaxContent MAX tracks first, then other eligible MAX.
-            std::vector<size_t> mc_min_tracks;
+            IndexArray mc_min_tracks;
             for (size_t i = contrib.track_start; i < end; ++i) {
                 auto& track = tracks[i];
                 if (track.min_track_sizing_function.type != SizingFunctionType::MaxContent) continue;
@@ -965,7 +902,7 @@ inline void resolve_intrinsic_track_sizes(
                 if (is_fc && tracks[i].base_size == 0) {
                     // Fit-content track with no contributions: don't count its gl
                     sum += 0.0f;
-                } else if (std::isinf(tracks[i].growth_limit)) {
+                } else if (isinf(tracks[i].growth_limit)) {
                     sum += tracks[i].base_size;
                 } else {
                     sum += tracks[i].growth_limit;
@@ -979,10 +916,10 @@ inline void resolve_intrinsic_track_sizes(
         };
 
         // Helper: distribute space to growth_limits of eligible tracks
-        auto distribute_to_gl = [&](float space, std::function<bool(const EnhancedGridTrack&)> is_eligible) {
+        auto distribute_to_gl = [&](float space, auto is_eligible) {
             if (space <= 0.01f) return;
             // Build eligible list
-            std::vector<size_t> eligible;
+            IndexArray eligible;
             for (size_t i = contrib.track_start; i < end; ++i) {
                 if (is_eligible(tracks[i])) eligible.push_back(i);
             }
@@ -991,7 +928,7 @@ inline void resolve_intrinsic_track_sizes(
             float per_track = space / static_cast<float>(eligible.size());
             for (size_t idx : eligible) {
                 auto& track = tracks[idx];
-                float eff_gl = std::isinf(track.growth_limit)
+                float eff_gl = isinf(track.growth_limit)
                                    ? track.base_size : track.growth_limit;
                 float new_gl = eff_gl + per_track;
                 // CSS Grid §11.5.1: fit-content growth_limit must not exceed the limit
@@ -1038,7 +975,7 @@ inline void resolve_intrinsic_track_sizes(
 
     // After growth_limit distribution: ensure growth_limit >= base_size
     for (auto& track : tracks) {
-        if (!std::isinf(track.growth_limit) && track.growth_limit < track.base_size) {
+        if (!isinf(track.growth_limit) && track.growth_limit < track.base_size) {
             track.growth_limit = track.base_size;
         }
     }
@@ -1048,9 +985,9 @@ inline void resolve_intrinsic_track_sizes(
     // for span=1 items, or to cover remaining content for spanning items.
     {
         // Track per-track max_content from span=1 items for fit-content clamping
-        std::vector<float> fc_span1_max(tracks.size(), -1.0f); // -1 = no span=1 items
-        // Track spanning item coverage
-        std::vector<float> fc_max_growth(tracks.size(), -1.0f); // -1 = no span coverage
+        float fc_span1_max[MAX_GRID_TRACKS];
+        float fc_max_growth[MAX_GRID_TRACKS];
+        for (size_t i = 0; i < tracks.size(); ++i) { fc_span1_max[i] = -1.0f; fc_max_growth[i] = -1.0f; }
         for (const auto& contrib : contributions) {
             if (contrib.crosses_flexible_track) continue;
             size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
@@ -1148,7 +1085,8 @@ inline void resolve_intrinsic_track_sizes(
 
         // Gather flex tracks to update and their respective contribution floors
         struct FlexEntry { size_t idx; float contribution; float flex_factor; };
-        std::vector<FlexEntry> flex_entries;
+        FlexEntry flex_entries[MAX_GRID_TRACKS];
+        size_t fe_count = 0;
         float total_flex_factor = 0.0f;
         for (size_t i = contrib.track_start; i < p3_end; ++i) {
             const auto& t = tracks[i];
@@ -1164,17 +1102,18 @@ inline void resolve_intrinsic_track_sizes(
             if (mt == SizingFunctionType::Auto ||
                 mt == SizingFunctionType::MinContent ||
                 mt == SizingFunctionType::MaxContent) {
-                flex_entries.push_back({i, item_contrib, t.flex_factor()});
+                if (fe_count < MAX_GRID_TRACKS) flex_entries[fe_count++] = {i, item_contrib, t.flex_factor()};
                 total_flex_factor += t.flex_factor();
             }
         }
 
-        if (total_flex_factor <= 0.0f || flex_entries.empty()) continue;
+        if (total_flex_factor <= 0.0f || fe_count == 0) continue;
 
         // For each flex track, compute how much it needs to cover its portion of the item.
         // Use the track's own contribution type for the "required" size.
         // Distribute the excess proportionally by flex factor (CSS §11.7.1 pattern).
-        for (const auto& entry : flex_entries) {
+        for (size_t fe = 0; fe < fe_count; ++fe) {
+            const auto& entry = flex_entries[fe];
             auto& track = tracks[entry.idx];
             // Total space the item needs, minus the non-flex portion and current flex size
             float remaining_needed = entry.contribution - non_flex_span_size - current_flex_size;
@@ -1204,7 +1143,7 @@ inline void resolve_intrinsic_track_sizes(
  * Distributes free space (if any) to tracks with FINITE growth limits, up to their limits.
  */
 inline void maximize_tracks(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     float axis_inner_size,
     float axis_available_space
 ) {
@@ -1219,7 +1158,7 @@ inline void maximize_tracks(
         // base=0 should NOT grow — their space was already accounted for in step 2.5.
         bool has_non_fc_finite_gl = false;
         for (const auto& track : tracks) {
-            if (track.is_flexible() || std::isinf(track.growth_limit)) continue;
+            if (track.is_flexible() || isinf(track.growth_limit)) continue;
             auto mt = track.max_track_sizing_function.type;
             if (mt != SizingFunctionType::FitContentPx &&
                 mt != SizingFunctionType::FitContentPercent &&
@@ -1230,7 +1169,7 @@ inline void maximize_tracks(
             }
         }
         for (auto& track : tracks) {
-            if (track.is_flexible() || std::isinf(track.growth_limit)) continue;
+            if (track.is_flexible() || isinf(track.growth_limit)) continue;
             // Skip fit-content tracks with no contributions if other tracks claimed
             // growth via step 2.5 — their gl space was not counted in step 2.5.
             auto mt = track.max_track_sizing_function.type;
@@ -1271,13 +1210,13 @@ inline void maximize_tracks(
     float space_to_distribute = free_space;
 
     while (space_to_distribute > 0.01f) {
-        std::vector<size_t> eligible;
+        IndexArray eligible;
         for (size_t i = 0; i < tracks.size(); i++) {
             const auto& t = tracks[i];
             if (t.is_flexible()) continue;
             // When FR tracks exist, skip infinite-growth-limit tracks (let FR claim that space)
-            if (has_fr_tracks && std::isinf(t.growth_limit)) continue;
-            if (!std::isinf(t.growth_limit) && t.base_size >= t.growth_limit - 0.01f) continue;
+            if (has_fr_tracks && isinf(t.growth_limit)) continue;
+            if (!isinf(t.growth_limit) && t.base_size >= t.growth_limit - 0.01f) continue;
             eligible.push_back(i);
         }
         if (eligible.empty()) break;
@@ -1287,7 +1226,7 @@ inline void maximize_tracks(
 
         for (size_t i : eligible) {
             auto& track = tracks[i];
-            float room = std::isinf(track.growth_limit)
+            float room = isinf(track.growth_limit)
                              ? share
                              : std::min(share, track.growth_limit - track.base_size);
             if (room <= 0) continue;
@@ -1307,11 +1246,11 @@ inline void maximize_tracks(
  * Sizes flexible tracks using the largest value it can assign to an fr without exceeding available space.
  */
 inline void expand_flexible_tracks(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     float axis_min_size,
     float axis_max_size,
     float axis_available_space,
-    const std::vector<GridItemContribution>& contributions = {},
+    const ContribArray& contributions = ContribArray(),
     float gap = 0.0f,
     float* out_intrinsic_total = nullptr
 ) {
@@ -1342,7 +1281,8 @@ inline void expand_flexible_tracks(
 
         // Save Phase 3 base_sizes as min floors for Pass 2
         size_t n = tracks.size();
-        std::vector<float> phase3_base(n, 0.0f);
+        float phase3_base[MAX_GRID_TRACKS];
+        for (size_t i = 0; i < n; ++i) phase3_base[i] = 0.0f;
         for (size_t i = 0; i < n; ++i) {
             if (tracks[i].is_flexible()) phase3_base[i] = tracks[i].base_size;
         }
@@ -1371,24 +1311,26 @@ inline void expand_flexible_tracks(
             float span_gap = (span_count > 1) ? (span_count - 1) * gap : 0.0f;
 
             struct FlexInfo { size_t idx; float flex; float base; };
-            std::vector<FlexInfo> flex_infos;
+            FlexInfo flex_infos[MAX_GRID_TRACKS];
+            size_t fi_count = 0;
             for (size_t i = contrib.track_start; i < p_end; ++i) {
                 if (tracks[i].is_flexible()) {
-                    flex_infos.push_back({i, tracks[i].flex_factor(), tracks[i].base_size});
+                    if (fi_count < MAX_GRID_TRACKS) flex_infos[fi_count++] = {i, tracks[i].flex_factor(), tracks[i].base_size};
                 } else {
                     non_flex_size += tracks[i].base_size;
                 }
             }
-            if (flex_infos.empty()) continue;
+            if (fi_count == 0) continue;
 
             float target = contrib.max_content_contribution - span_gap;
             // Iterative "Find the Size of an fr" sub-algorithm (§12.7.1)
             float fr_result = 0.0f;
-            std::vector<bool> inflexible(flex_infos.size(), false);
+            bool inflexible[MAX_GRID_TRACKS];
+            for (size_t fi = 0; fi < fi_count; ++fi) inflexible[fi] = false;
             for (;;) {
                 float leftover = target - non_flex_size;
                 float sum_flex = 0.0f;
-                for (size_t fi = 0; fi < flex_infos.size(); ++fi) {
+                for (size_t fi = 0; fi < fi_count; ++fi) {
                     if (inflexible[fi]) {
                         leftover -= flex_infos[fi].base;
                     } else {
@@ -1399,7 +1341,7 @@ inline void expand_flexible_tracks(
                 float eff_sum = std::max(sum_flex, 1.0f);
                 float hyp_fr = leftover / eff_sum;
                 bool any_frozen = false;
-                for (size_t fi = 0; fi < flex_infos.size(); ++fi) {
+                for (size_t fi = 0; fi < fi_count; ++fi) {
                     if (inflexible[fi]) continue;
                     if (flex_infos[fi].flex * hyp_fr < flex_infos[fi].base - 0.001f) {
                         inflexible[fi] = true;
@@ -1453,8 +1395,9 @@ inline void expand_flexible_tracks(
     // recompute the fr size from the remaining unfrozen tracks. Repeat until stable.
 
     size_t n = tracks.size();
-    std::vector<float> min_floor(n, 0.0f);
-    std::vector<bool> frozen(n, false);
+    float min_floor[MAX_GRID_TRACKS];
+    bool frozen[MAX_GRID_TRACKS];
+    for (size_t i = 0; i < n; ++i) { min_floor[i] = 0.0f; frozen[i] = false; }
 
     for (size_t i = 0; i < n; ++i) {
         if (!tracks[i].is_flexible()) {
@@ -1523,7 +1466,7 @@ inline void expand_flexible_tracks(
  * positive, definite free space equally amongst them.
  */
 inline void stretch_auto_tracks(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     float axis_min_size,
     float axis_available_space
 ) {
@@ -1557,7 +1500,7 @@ inline void stretch_auto_tracks(
     for (auto& track : tracks) {
         if (track.max_track_sizing_function.type == SizingFunctionType::Auto && !track.is_flexible()) {
             track.base_size += extra_per_track;
-            if (!std::isinf(track.growth_limit)) {
+            if (!isinf(track.growth_limit)) {
                 track.growth_limit += extra_per_track;
             }
         }
@@ -1607,7 +1550,7 @@ inline void run_track_sizing_algorithm(
  * Call this after track sizing to determine the position of each track.
  */
 inline void compute_track_offsets(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     float gap
 ) {
     float offset = 0.0f;
@@ -1658,7 +1601,7 @@ inline bool is_space_distribution_alignment(int alignment) {
 inline float compute_alignment_gutter_adjustment(
     int alignment,
     float axis_inner_size,
-    const std::vector<EnhancedGridTrack>& tracks,
+    const TrackArray& tracks,
     float gap
 ) {
     // If inner size is indefinite, we can't compute gutters
@@ -1764,7 +1707,7 @@ inline float compute_alignment_start_offset(
  * @param gap The explicit gap between tracks
  */
 inline void apply_alignment_to_tracks(
-    std::vector<EnhancedGridTrack>& tracks,
+    TrackArray& tracks,
     int alignment,
     float axis_inner_size,
     float gap
@@ -1820,7 +1763,7 @@ inline void apply_alignment_to_tracks(
  * Used during intrinsic sizing to estimate container size.
  */
 inline float estimate_content_size_with_gutters(
-    const std::vector<EnhancedGridTrack>& tracks,
+    const TrackArray& tracks,
     float gap,
     int alignment,
     float axis_inner_size

@@ -14,10 +14,7 @@ using std::max;
 
 // Forward declarations
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
-float adjust_min_max_width(ViewBlock* block, float width);
-float adjust_min_max_height(ViewBlock* block, float height);
-float adjust_border_padding_width(ViewBlock* block, float width);
-float adjust_border_padding_height(ViewBlock* block, float height);
+// adjust_min_max_* and adjust_border_padding_* declared in layout.hpp
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
