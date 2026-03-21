@@ -211,7 +211,7 @@ TEST_F(NetworkLayoutTest, LayoutWithHttpUrl) {
     std::cout << "\n📊 Testing: lambda layout with HTTP URL\n";
 
     std::string url = testUrl("cern.html");
-    std::string cmd = "./lambda.exe layout " + url;
+    std::string cmd = "./lambda.exe layout --no-log " + url;
 
     std::cout << "Executing: " << cmd << std::endl;
 
@@ -242,12 +242,12 @@ TEST_F(NetworkLayoutTest, RenderHttpUrlToPng) {
     std::cout << "\n🖼️  Testing: lambda render HTTP URL to PNG\n";
 
     std::string url = testUrl("cern.html");
-    std::string output_file = "/tmp/test_network_layout_render.png";
+    std::string output_file = "./temp/test_network_layout_render.png";
 
     // remove output file if exists
     unlink(output_file.c_str());
 
-    std::string cmd = "./lambda.exe render " + url + " -o " + output_file;
+    std::string cmd = "./lambda.exe render --no-log " + url + " -o " + output_file;
 
     std::cout << "Executing: " << cmd << std::endl;
 
@@ -283,12 +283,12 @@ TEST_F(NetworkLayoutTest, RenderHttpUrlToSvg) {
     std::cout << "\n📐 Testing: lambda render HTTP URL to SVG\n";
 
     std::string url = testUrl("cern.html");
-    std::string output_file = "/tmp/test_network_layout_render.svg";
+    std::string output_file = "./temp/test_network_layout_render.svg";
 
     // remove output file if exists
     unlink(output_file.c_str());
 
-    std::string cmd = "./lambda.exe render " + url + " -o " + output_file;
+    std::string cmd = "./lambda.exe render --no-log " + url + " -o " + output_file;
 
     std::cout << "Executing: " << cmd << std::endl;
 
@@ -337,7 +337,7 @@ TEST_F(NetworkLayoutTest, LayoutMultipleHttpPages) {
     int success_count = 0;
     for (const char* page : test_pages) {
         std::string url = testUrl(page);
-        std::string cmd = "./lambda.exe layout " + url;
+        std::string cmd = "./lambda.exe layout --no-log " + url;
 
         auto [exitCode, output] = executeCommand(cmd);
 
@@ -361,7 +361,7 @@ TEST_F(NetworkLayoutTest, LayoutHttpNotFound) {
     std::cout << "\n🚫 Testing: lambda layout with non-existent HTTP URL\n";
 
     std::string url = testUrl("does_not_exist_12345.html");
-    std::string cmd = "./lambda.exe layout " + url;
+    std::string cmd = "./lambda.exe layout --no-log " + url;
 
     std::cout << "Executing: " << cmd << std::endl;
 
@@ -392,7 +392,7 @@ TEST_F(NetworkLayoutTest, HttpCachingWorks) {
     std::cout << "\n💾 Testing: HTTP caching for repeated requests\n";
 
     std::string url = testUrl("demo.html");
-    std::string cmd = "./lambda.exe layout " + url;
+    std::string cmd = "./lambda.exe layout --no-log " + url;
 
     // first request
     auto start1 = std::chrono::high_resolution_clock::now();
@@ -424,12 +424,12 @@ TEST_F(NetworkLayoutTest, RenderHttpUrlToPdf) {
     std::cout << "\n📄 Testing: lambda render HTTP URL to PDF\n";
 
     std::string url = testUrl("cern.html");
-    std::string output_file = "/tmp/test_network_layout_render.pdf";
+    std::string output_file = "./temp/test_network_layout_render.pdf";
 
     // remove output file if exists
     unlink(output_file.c_str());
 
-    std::string cmd = "./lambda.exe render " + url + " -o " + output_file;
+    std::string cmd = "./lambda.exe render --no-log " + url + " -o " + output_file;
 
     std::cout << "Executing: " << cmd << std::endl;
 
@@ -463,7 +463,7 @@ TEST_F(NetworkLayoutTest, LayoutExternalHttpsWithContentTypeDetection) {
 
     // Use example.com which is a stable test page with no extension
     std::string url = "https://example.com/";
-    std::string cmd = "./lambda.exe layout " + url;
+    std::string cmd = "./lambda.exe layout --no-log " + url;
 
     std::cout << "Executing: " << cmd << std::endl;
 

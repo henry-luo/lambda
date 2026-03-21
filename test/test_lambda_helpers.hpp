@@ -512,6 +512,7 @@ inline void run_sub_batch(
     }
 
     pclose(pipe);
+    unlink(manifest_path);
 }
 
 // Max scripts per lambda.exe process to avoid state accumulation crashes
@@ -524,7 +525,8 @@ static const size_t BATCH_CHUNK_SIZE = 50;
 inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     const std::vector<std::string>& scripts,
     const std::vector<bool>& is_procedural,
-    bool use_mir = true)
+    bool use_mir = true,
+    size_t batch_chunk_size = BATCH_CHUNK_SIZE)
 {
     std::unordered_map<std::string, BatchResult> results;
     if (scripts.empty()) return results;
@@ -533,8 +535,8 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     struct SubBatch { size_t start; size_t end; int id; };
     std::vector<SubBatch> batches;
     int batch_id = 0;
-    for (size_t start = 0; start < scripts.size(); start += BATCH_CHUNK_SIZE) {
-        size_t end = std::min(start + BATCH_CHUNK_SIZE, scripts.size());
+    for (size_t start = 0; start < scripts.size(); start += batch_chunk_size) {
+        size_t end = std::min(start + batch_chunk_size, scripts.size());
         batches.push_back({start, end, batch_id++});
     }
 

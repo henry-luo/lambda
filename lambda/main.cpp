@@ -796,10 +796,15 @@ int main(int argc, char *argv[]) {
     log_init("");  // Initialize with parsed config or defaults
 
     // Check for --no-log flag early (before any logging)
+    // Strip it from argv so subcommand handlers don't see it
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--no-log") == 0) {
             log_disable_all();
-            break;
+            for (int j = i; j < argc - 1; j++) {
+                argv[j] = argv[j + 1];
+            }
+            argc--;
+            i--;
         }
     }
 

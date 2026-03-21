@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <thread>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -124,68 +125,6 @@ static bool is_procedural_mode(const char* script_path) {
     }
     fclose(f);
     return false;
-}
-
-// Execute a lambda script, capture stdout only (stderr discarded)
-// Uses --c2mir to ensure C2MIR path (these structured tests target C2MIR features)
-static char* execute_script(const char* script_path) {
-    char command[512];
-    bool procedural = is_procedural_mode(script_path);
-#ifdef _WIN32
-    if (procedural)
-        snprintf(command, sizeof(command), "lambda.exe run --no-log --c2mir \"%s\" 2>NUL", script_path);
-    else
-        snprintf(command, sizeof(command), "lambda.exe --no-log --c2mir \"%s\" 2>NUL", script_path);
-#else
-    if (procedural)
-        snprintf(command, sizeof(command), "./lambda.exe run --no-log --c2mir \"%s\" 2>/dev/null", script_path);
-    else
-        snprintf(command, sizeof(command), "./lambda.exe --no-log --c2mir \"%s\" 2>/dev/null", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        fprintf(stderr, "Error: Could not execute: %s\n", command);
-        return nullptr;
-    }
-
-    char buffer[4096];
-    size_t total_size = 0;
-    char* output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(output, total_size + len + 1);
-        if (!new_output) {
-            free(output);
-            pclose(pipe);
-            return nullptr;
-        }
-        output = new_output;
-        memcpy(output + total_size, buffer, len);
-        total_size += len;
-        output[total_size] = '\0';
-    }
-
-    pclose(pipe);
-
-    if (!output) {
-        return strdup("");
-    }
-
-    // If output contains "##### Script" marker, extract everything after it
-    char* marker = strstr(output, "##### Script");
-    if (marker) {
-        char* result_start = strchr(marker, '\n');
-        if (result_start) {
-            result_start++; // skip newline
-            char* result = strdup(result_start);
-            free(output);
-            return result;
-        }
-    }
-
-    return output;
 }
 
 // Read file contents
@@ -353,6 +292,7 @@ static void run_std_sub_batch(
     }
 
     pclose(pipe);
+    unlink(manifest_path);
 }
 
 static std::unordered_map<std::string, StdBatchResult> execute_std_batch(
@@ -361,11 +301,33 @@ static std::unordered_map<std::string, StdBatchResult> execute_std_batch(
     std::unordered_map<std::string, StdBatchResult> results;
     if (tests.empty()) return results;
 
+    // Build list of sub-batch ranges
+    struct SubBatch { size_t start; size_t end; int id; };
+    std::vector<SubBatch> batches;
     int batch_id = 0;
     for (size_t start = 0; start < tests.size(); start += STD_BATCH_CHUNK_SIZE) {
         size_t end = std::min(start + STD_BATCH_CHUNK_SIZE, tests.size());
-        run_std_sub_batch(tests, start, end, batch_id++, results);
+        batches.push_back({start, end, batch_id++});
     }
+
+    // Run sub-batches in parallel — each thread gets its own result map
+    std::vector<std::unordered_map<std::string, StdBatchResult>> thread_results(batches.size());
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < batches.size(); i++) {
+        threads.emplace_back([&, i]() {
+            run_std_sub_batch(tests, batches[i].start, batches[i].end,
+                              batches[i].id, thread_results[i]);
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    // Merge results
+    for (auto& partial : thread_results) {
+        for (auto& kv : partial) {
+            results[kv.first] = std::move(kv.second);
+        }
+    }
+
     return results;
 }
 
@@ -382,21 +344,7 @@ public:
 
     static void SetUpTestSuite() {
         if (batch_executed) return;
-
-        // Determine shard subset
-        const char* total_env = getenv("GTEST_TOTAL_SHARDS");
-        const char* index_env = getenv("GTEST_SHARD_INDEX");
-        int total_shards = total_env ? atoi(total_env) : 1;
-        int shard_index = index_env ? atoi(index_env) : 0;
-
-        std::vector<StdTestInfo> shard_tests;
-        for (size_t i = 0; i < g_std_tests.size(); i++) {
-            if ((int)(i % total_shards) == shard_index) {
-                shard_tests.push_back(g_std_tests[i]);
-            }
-        }
-
-        batch_results = execute_std_batch(shard_tests);
+        batch_results = execute_std_batch(g_std_tests);
         batch_executed = true;
     }
 };

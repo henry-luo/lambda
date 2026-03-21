@@ -184,9 +184,9 @@ INSTANTIATE_TEST_SUITE_P(
 void test_lambda_script_expects_error(const char* script_path) {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>&1", script_path);
+    snprintf(command, sizeof(command), "lambda.exe --no-log \"%s\" 2>&1", script_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>&1", script_path);
+    snprintf(command, sizeof(command), "./lambda.exe --no-log \"%s\" 2>&1", script_path);
 #endif
 
     FILE* pipe = popen(command, "r");

@@ -835,4 +835,90 @@ Phase 3 achieves a **28% reduction** from baseline (23.7s → 17s) with a clean,
 | File | Change |
 |------|--------|
 | `test/test_lambda_helpers.hpp` | `execute_lambda_batch()` → parallel `std::thread` per sub-batch |
+| `test/test_lambda_std_gtest.cpp` | `execute_std_batch()` → parallel `std::thread` per sub-batch; removed dead shard code and unused `execute_script()` |
 | `test/test_run.sh` | Removed all sharding infrastructure (~100 lines deleted) |
+
+### Additional: test_lambda_std_gtest Threading
+
+`test_lambda_std_gtest.exe` (106 tests) had its own sequential batch implementation (`execute_std_batch()` / `run_std_sub_batch()`) separate from the shared `test_lambda_helpers.hpp`. This was updated to match the threaded pattern:
+
+- `execute_std_batch()` now runs sub-batches (3 chunks of ~50) concurrently via `std::thread`
+- Dead shard code removed from `SetUpTestSuite()` (`GTEST_TOTAL_SHARDS`/`GTEST_SHARD_INDEX` logic)
+- Unused `execute_script()` function (old per-test popen executor) removed
+
+**Measured results (test_lambda_std_gtest.exe alone, 106 tests):**
+
+| Mode | GTest Time | Wall Time | CPU % | Speedup |
+|------|-----------|-----------|-------|---------|
+| Sequential (3 serial sub-batches) | 861 ms | 1.33 s | 66% | — |
+| **Threaded (3 concurrent sub-batches)** | **518 ms** | **0.56 s** | **165%** | **2.4×** |
+
+---
+
+## 13. Phase 4 — `--no-log` Correctness & C2MIR Batch Size Tuning
+
+### 13.1 `--no-log` Argv Stripping Fix
+
+**Problem:** The `--no-log` flag was added to test commands in earlier phases, but placing it *before* a subcommand (e.g., `./lambda.exe --no-log js`) broke subcommand dispatch. All subcommands (`js`, `validate`, `convert`, `layout`, `render`, `view`) check `argv[1]` for the command name, so `--no-log` in `argv[1]` prevented the subcommand from being recognized.
+
+**Fix:** Modified `main.cpp` to **strip `--no-log` from argv** early in `main()`, shifting subsequent arguments down and decrementing `argc`. This ensures no subcommand handler ever sees the flag, regardless of where it appears in the command line.
+
+```cpp
+// Before: scan-only (flag stays in argv)
+for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--no-log") == 0) {
+        log_disable_all();
+        break;
+    }
+}
+
+// After: scan + strip (flag removed from argv)
+for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--no-log") == 0) {
+        log_disable_all();
+        for (int j = i; j < argc - 1; j++) {
+            argv[j] = argv[j + 1];
+        }
+        argc--;
+        i--;
+    }
+}
+```
+
+**Test file fixes:** Corrected `--no-log` placement in test files where it was positioned before subcommands:
+
+| File | Before | After |
+|------|--------|-------|
+| `test_js_gtest.cpp` | `./lambda.exe --no-log js 2>&1` | `./lambda.exe js --no-log 2>&1` |
+| `test_validator_path_reporting.cpp` | `./lambda.exe --no-log validate %s` | `./lambda.exe validate --no-log %s` |
+| `test_view_cmd_gtest.cpp` | `./lambda.exe --no-log view ...` | `./lambda.exe view --no-log ...` |
+| `test_network_layout_gtest.cpp` | `./lambda.exe --no-log layout ...` | `./lambda.exe layout --no-log ...` |
+| `test_html_roundtrip_gtest.cpp` | `./lambda.exe --no-log convert ...` | `./lambda.exe convert --no-log ...` |
+
+With the argv stripping fix, both placements now work, but the test files were corrected for clarity.
+
+### 13.2 C2MIR Batch Size Tuning
+
+Reduced the C2MIR batch chunk size from 50 to 5 scripts per `lambda.exe` process. With 164 tests, this creates 33 sub-batches running as concurrent threads, compared to 4 sub-batches with the default size of 50.
+
+**Rationale:** C2MIR scripts are lightweight (~5ms each). Smaller batches create more parallelism across threads, and the per-process startup cost (~15ms) is small relative to the parallelism gain on an 8-core machine.
+
+**Measured results (test_c2mir_gtest.exe alone, 164 tests):**
+
+| Batch Size | Sub-batches | GTest Time | Speedup |
+|-----------|-------------|-----------|---------|
+| 50 | 4 threads | 1096 ms | — |
+| **5** | **33 threads** | **821 ms** | **25% faster** |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `lambda/main.cpp` | `--no-log` argv stripping (scan + shift + decrement argc) |
+| `test/test_c2mir_gtest.cpp` | Batch chunk size: 50 → 5 |
+| `test/test_lambda_helpers.hpp` | `execute_lambda_batch()` accepts optional `batch_chunk_size` parameter |
+| `test/test_js_gtest.cpp` | Fixed `--no-log` placement for builtin test command |
+| `test/test_validator_path_reporting.cpp` | Fixed `--no-log` placement |
+| `test/test_view_cmd_gtest.cpp` | Fixed `--no-log` placement |
+| `test/test_network_layout_gtest.cpp` | Fixed `--no-log` placement for all layout/render commands |
+| `test/test_html_roundtrip_gtest.cpp` | Fixed `--no-log` placement for convert command |

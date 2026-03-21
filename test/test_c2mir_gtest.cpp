@@ -75,8 +75,8 @@ public:
             procs.push_back(test.is_procedural);
         }
 
-        // C2MIR: use_mir=false
-        batch_results = execute_lambda_batch(scripts, procs, /*use_mir=*/false);
+        // C2MIR: use_mir=false, batch_chunk_size=5
+        batch_results = execute_lambda_batch(scripts, procs, /*use_mir=*/false, /*batch_chunk_size=*/5);
         batch_executed = true;
     }
 };
