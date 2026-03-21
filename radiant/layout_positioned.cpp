@@ -93,11 +93,37 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // Get containing block dimensions for percentage resolution
     // CSS Position 3 §3.4: percentage top/bottom resolve against containing block height,
     // percentage left/right resolve against containing block width
+    // Note: We cannot use parent->content_width/content_height here because those fields
+    // are set in finalize_block_flow() AFTER all children are laid out. At this point
+    // (during child layout), they are still 0. Instead, derive from the parent's
+    // border-box width/height minus padding and border.
     float cb_width = 0, cb_height = 0;
     if (parent && parent->is_block()) {
         ViewBlock* parent_block = (ViewBlock*)parent;
-        cb_width = parent_block->content_width;
-        cb_height = parent_block->content_height;
+        // Compute content-box width from border-box width
+        float pad_border_h = 0;
+        if (parent_block->bound) {
+            pad_border_h = parent_block->bound->padding.left + parent_block->bound->padding.right;
+            if (parent_block->bound->border)
+                pad_border_h += parent_block->bound->border->width.left + parent_block->bound->border->width.right;
+        }
+        cb_width = parent_block->width - pad_border_h;
+
+        // CSS 2.1 §10.5: If containing block height is auto, percentage top/bottom = 0
+        // Only use parent height if it has an explicit (non-auto) height
+        bool parent_has_definite_height = false;
+        if (parent_block->blk && parent_block->blk->given_height >= 0) {
+            parent_has_definite_height = true;
+        }
+        if (parent_has_definite_height) {
+            float pad_border_v = 0;
+            if (parent_block->bound) {
+                pad_border_v = parent_block->bound->padding.top + parent_block->bound->padding.bottom;
+                if (parent_block->bound->border)
+                    pad_border_v += parent_block->bound->border->width.top + parent_block->bound->border->width.bottom;
+            }
+            cb_height = parent_block->height - pad_border_v;
+        }
     }
 
     // horizontal offset: precedence depends on containing block's direction
