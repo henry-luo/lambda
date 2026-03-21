@@ -798,10 +798,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                       span->x, span->width, pb->width, pb_border_left, pb_border_right);
         }
 
-        // Apply CSS relative positioning after normal layout
+        // Apply CSS relative/sticky positioning after normal layout
         if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
             log_debug("Applying relative positioning to inline span (with block children)");
             layout_relative_positioned(lycon, (ViewBlock*)span);
+        } else if (span->position && span->position->position == CSS_VALUE_STICKY) {
+            layout_sticky_positioned(lycon, (ViewBlock*)span);
         }
 
         lycon->font = pa_font;
@@ -1043,11 +1045,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         last_child_for_trim->width += saved_trailing;
     }
 
-    // Apply CSS relative positioning after normal layout
+    // Apply CSS relative/sticky positioning after normal layout
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
     if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
         log_debug("Applying relative positioning to inline span");
         layout_relative_positioned(lycon, (ViewBlock*)span);
+    } else if (span->position && span->position->position == CSS_VALUE_STICKY) {
+        layout_sticky_positioned(lycon, (ViewBlock*)span);
     }
 
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;

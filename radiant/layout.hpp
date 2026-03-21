@@ -486,6 +486,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt);
 
 // CSS Positioning functions
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
+void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 

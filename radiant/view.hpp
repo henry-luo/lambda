@@ -840,6 +840,7 @@ typedef struct MarkerProp {
     float width;             // Fixed marker width (typically ~1.4em = 22px at 16px font)
     float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
     char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
+    bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
 } MarkerProp;
 
 /**
@@ -868,6 +869,7 @@ enum ContentType {
 typedef struct PseudoContentProp {
     DomElement* before;    // ::before pseudo-element (NULL if none)
     DomElement* after;     // ::after pseudo-element (NULL if none)
+    DomElement* marker;    // ::marker pseudo-element (NULL if none)
 
     // Content value storage for generation
     char* before_content;         // Parsed content string/template (or counter name for counters)
@@ -880,6 +882,7 @@ typedef struct PseudoContentProp {
     uint8_t after_content_type;
     bool before_generated;         // True if before element created
     bool after_generated;          // True if after element created
+    bool marker_generated;         // True if marker element created
 } PseudoContentProp;
 
 typedef struct BlockProp {

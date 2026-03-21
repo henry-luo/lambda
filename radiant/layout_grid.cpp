@@ -428,12 +428,15 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 7 - Aligning grid items");
     align_grid_items(grid_layout);
 
-    // Phase 7.5: Apply relative positioning offsets to grid items
-    // Items with position:relative + top/right/bottom/left should be offset from their grid-area position
+    // Phase 7.5: Apply relative/sticky positioning offsets to grid items
     log_debug("DEBUG: Phase 7.5 - Applying relative positioning offsets");
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
         if (!item || !item->position) continue;
+        if (item->position->position == CSS_VALUE_STICKY) {
+            layout_sticky_positioned(lycon, item);
+            continue;
+        }
         if (item->position->position != CSS_VALUE_RELATIVE) continue;
         float offset_x = 0, offset_y = 0;
         float parent_w = (float)container->width;

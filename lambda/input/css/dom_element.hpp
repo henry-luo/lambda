@@ -163,6 +163,7 @@ struct DomElement : DomNode {
     StyleTree* before_styles;    // Styles for ::before pseudo-element
     StyleTree* after_styles;     // Styles for ::after pseudo-element
     StyleTree* first_letter_styles;  // Styles for ::first-letter pseudo-element
+    StyleTree* marker_styles;    // Styles for ::marker pseudo-element
     // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change

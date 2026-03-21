@@ -177,7 +177,7 @@ void counter_pop_scope_propagate(CounterContext* ctx) {
  */
 static void parse_counter_spec(const char* spec,
                                char*** names_out, int** values_out, int* count_out,
-                               Arena* arena) {
+                               Arena* arena, int default_value = 0) {
     if (!spec || !names_out || !values_out || !count_out) return;
 
     *names_out = nullptr;
@@ -241,7 +241,7 @@ static void parse_counter_spec(const char* spec,
         while (*p && isspace(*p)) p++;
 
         // Parse optional integer value (sign must be followed by digit)
-        int value = 0;
+        int value = default_value;
         if (*p && (isdigit(*p) || ((*p == '-' || *p == '+') && *(p+1) && isdigit(*(p+1))))) {
             char* endptr = nullptr;
             long long_value = strtol(p, &endptr, 10);
@@ -331,14 +331,14 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
     int* values = nullptr;
     int count = 0;
 
-    parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena);
+    parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena, 1);
 
     log_debug("[Counters] counter-increment parsed: count=%d", count);
 
     for (int i = 0; i < count; i++) {
         log_debug("[Counters]   Processing counter[%d]: name=%s, value=%d", i, names[i], values[i]);
 
-        int increment = (values[i] != 0) ? values[i] : 1;  // Default increment is 1
+        int increment = values[i];
 
         // Search for counter in current and parent scopes
         CounterValue search_key = {names[i], 0, false, false};
