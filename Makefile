@@ -862,67 +862,6 @@ test-layout-baseline: build-test
 	@echo "=============================================================="
 	@node test/layout/test_radiant_layout.js -c baseline
 
-# TeX Typesetting Test Targets
-# These tests validate LaTeX/TeX typesetting against reference DVI files
-
-test-tex: build-test
-	@echo "Running TeX typesetting test suite..."
-	@echo "=============================================================="
-	@if [ -f "test/test_tex_output_gtest.exe" ]; then \
-		./test/test_tex_output_gtest.exe; \
-	fi
-	@if [ -f "test/test_tex_ast_gtest.exe" ]; then \
-		./test/test_tex_ast_gtest.exe; \
-	fi
-	@if [ -f "test/test_tex_box_gtest.exe" ]; then \
-		./test/test_tex_box_gtest.exe; \
-	fi
-	@if [ -f "test/test_tex_math_layout_gtest.exe" ]; then \
-		./test/test_tex_math_layout_gtest.exe; \
-	fi
-	@if [ -f "test/test_tex_paragraph_gtest.exe" ]; then \
-		./test/test_tex_paragraph_gtest.exe; \
-	fi
-	@if [ -f "test/test_latex_integration_gtest.exe" ]; then \
-		./test/test_latex_integration_gtest.exe; \
-	fi
-
-test-tex-baseline: build-test
-	@echo "Running TeX BASELINE test suite..."
-	@echo "=============================================================="
-	@./test/test_tex_output_gtest.exe --gtest_filter=*Basic*:*Simple* 2>/dev/null || true
-	@./test/test_tex_ast_gtest.exe 2>/dev/null || true
-	@./test/test_tex_box_gtest.exe 2>/dev/null || true
-
-test-tex-dvi: build
-	@echo "Running TeX DVI comparison tests (ALL)..."
-	@echo "=============================================================="
-	@chmod +x test/latex/run_tex_tests.sh
-	@./test/latex/run_tex_tests.sh
-
-test-tex-dvi-baseline: build build-test
-	@echo "Running TeX DVI comparison BASELINE tests..."
-	@echo "=============================================================="
-	@./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareBaselineTest.*"
-
-test-tex-dvi-extended: build build-test
-	@echo "Running TeX DVI comparison EXTENDED tests..."
-	@echo "=============================================================="
-	@./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareExtendedTest.*"
-
-test-tex-reference:
-	@echo "Generating TeX reference DVI files..."
-	@echo "=============================================================="
-	@mkdir -p test/latex/reference
-	@for tex in test/latex/test_*.tex; do \
-		if [ -f "$$tex" ]; then \
-			base=$$(basename "$$tex" .tex); \
-			echo "  Compiling: $$base"; \
-			latex -output-directory=test/latex/reference -interaction=nonstopmode "$$tex" > /dev/null 2>&1 || echo "    Warning: $$base failed"; \
-		fi; \
-	done
-	@echo "Reference DVI files generated in test/latex/reference/"
-
 # Math Testing targets (multi-layered semantic comparison framework)
 test-math: build
 	@echo "Running LaTeX Math test suite (ALL)..."
