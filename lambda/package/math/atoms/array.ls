@@ -169,7 +169,7 @@ fn build_row_cells(cell_boxes, aligns, ncols, start, col, total_cols, acc) {
             else if (align == "r") "right"
             else "center"
         let col_margin = if (col < total_cols - 1) ";margin-right:0.5em" else ""
-        let cell_style = "text-align:" ++ text_align ++ col_margin
+        let cell_style = "white-space:nowrap;text-align:" ++ text_align ++ col_margin
         let cell_el = if (idx < total)
             <span style: cell_style; cell_boxes[idx].element>
         else
