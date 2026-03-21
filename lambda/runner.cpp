@@ -633,6 +633,11 @@ void runner_cleanup(Runner* runner) {
     }
     // decimal context is now shared global - don't free it
     runner->context.decimal_ctx = NULL;
+    // free runtime name_pool (hashmap is malloc-allocated, must be explicitly freed)
+    if (runner->context.name_pool) {
+        name_pool_release(runner->context.name_pool);
+        runner->context.name_pool = NULL;
+    }
     // free AST validator
     if (runner->context.validator) {
         log_debug("freeing validator");
@@ -645,6 +650,12 @@ void runner_cleanup(Runner* runner) {
         err_free(runner->context.last_error);
         runner->context.last_error = NULL;
     }
+
+    // Clear thread-local context pointers to prevent stale access
+    // between consecutive script executions (batch mode)
+    context = NULL;
+    input_context = NULL;
+
     log_debug("runner cleanup end");
 }
 
@@ -762,7 +773,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     // Now we can safely clean up the execution heap since output has its own copy
     log_debug("Cleaning up execution context");
-    // runner_cleanup(runner);
+    runner_cleanup(runner);
 
     log_debug("Script execution completed, returning output Input");
     return output;

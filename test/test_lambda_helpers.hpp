@@ -415,4 +415,139 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     free(actual_output);
 }
 
+// ============================================================================
+// Batch Execution Support
+//
+// Runs all test scripts in a single lambda.exe process via "test-batch"
+// command, eliminating per-test process spawn overhead.
+// ============================================================================
+
+#include <unordered_map>
+
+struct BatchResult {
+    std::string output;
+    int status;
+};
+
+// Extract output after "##### Script" marker (if present), same logic as execute_lambda_script
+inline char* extract_script_output(const std::string& raw_output) {
+    char* full = strdup(raw_output.c_str());
+    if (!full) return strdup("");
+
+    char* marker = strstr(full, "##### Script");
+    if (marker) {
+        char* result_start = strchr(marker, '\n');
+        if (result_start) {
+            result_start++;
+            char* result = strdup(result_start);
+            free(full);
+            return result;
+        }
+    }
+    return full;
+}
+
+// Run a single sub-batch of scripts via test-batch command.
+// Appends results to the provided map.
+inline void run_sub_batch(
+    const std::vector<std::string>& scripts,
+    const std::vector<bool>& is_procedural,
+    size_t start, size_t end,
+    bool use_mir,
+    int batch_id,
+    std::unordered_map<std::string, BatchResult>& results)
+{
+    // Write manifest for this chunk (include PID to avoid race between parallel shards)
+    char manifest_path[128];
+    snprintf(manifest_path, sizeof(manifest_path), "./temp/batch_%d_%d.txt", (int)getpid(), batch_id);
+    FILE* manifest = fopen(manifest_path, "w");
+    if (!manifest) return;
+
+    for (size_t i = start; i < end; i++) {
+        if (is_procedural[i]) {
+            fprintf(manifest, "run %s\n", scripts[i].c_str());
+        } else {
+            fprintf(manifest, "%s\n", scripts[i].c_str());
+        }
+    }
+    fclose(manifest);
+
+    char command[512];
+    const char* c2mir_flag = use_mir ? "" : " --c2mir";
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe test-batch --no-log%s < \"%s\"",
+             c2mir_flag, manifest_path);
+#else
+    snprintf(command, sizeof(command), "./lambda.exe test-batch --no-log%s < \"%s\"",
+             c2mir_flag, manifest_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    if (!pipe) return;
+
+    char buffer[4096];
+    std::string current_script;
+    std::string current_output;
+    bool in_script = false;
+
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        if (buffer[0] == '\x01') {
+            if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
+                current_script = std::string(buffer + 13);
+                while (!current_script.empty() &&
+                       (current_script.back() == '\n' || current_script.back() == '\r'))
+                    current_script.pop_back();
+                current_output.clear();
+                in_script = true;
+            } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
+                int status = atoi(buffer + 11);
+                results[current_script] = {current_output, status};
+                in_script = false;
+            }
+        } else if (in_script) {
+            current_output += buffer;
+        }
+    }
+
+    pclose(pipe);
+}
+
+// Max scripts per lambda.exe process to avoid state accumulation crashes
+static const size_t BATCH_CHUNK_SIZE = 50;
+
+// Run multiple scripts using test-batch command, splitting into sub-batches
+// to avoid memory/state accumulation in the lambda.exe process.
+// Returns a map from script_path -> BatchResult.
+inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
+    const std::vector<std::string>& scripts,
+    const std::vector<bool>& is_procedural,
+    bool use_mir = true)
+{
+    std::unordered_map<std::string, BatchResult> results;
+    if (scripts.empty()) return results;
+
+    int batch_id = 0;
+    for (size_t start = 0; start < scripts.size(); start += BATCH_CHUNK_SIZE) {
+        size_t end = std::min(start + BATCH_CHUNK_SIZE, scripts.size());
+        run_sub_batch(scripts, is_procedural, start, end, use_mir, batch_id++, results);
+    }
+
+    return results;
+}
+
+// Determine which test indices belong to the current GTest shard.
+// GTest uses: test_index % total_shards == shard_index
+inline void get_shard_indices(size_t total_tests, std::vector<size_t>& indices) {
+    const char* total_env = getenv("GTEST_TOTAL_SHARDS");
+    const char* index_env = getenv("GTEST_SHARD_INDEX");
+    int total_shards = total_env ? atoi(total_env) : 1;
+    int shard_index = index_env ? atoi(index_env) : 0;
+
+    for (size_t i = 0; i < total_tests; i++) {
+        if ((int)(i % total_shards) == shard_index) {
+            indices.push_back(i);
+        }
+    }
+}
+
 #endif // TEST_LAMBDA_HELPERS_HPP

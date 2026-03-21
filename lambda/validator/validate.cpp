@@ -292,6 +292,8 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
 ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstItem item, TypeMap* map_type) {
     ValidationResult* result = create_validation_result(validator->get_pool());
 
+    log_debug("[VALIDATOR] validate_against_map_type: item.item=0x%016lx map_type=%p",
+        (unsigned long)item.item, map_type);
     // Check if item is actually a map using ItemReader
     ItemReader item_reader(item);
     if (!item_reader.isMap()) {
@@ -333,6 +335,8 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
             }
         } else {
             // Field exists - check if it's null
+            log_debug("[VALIDATOR] About to read map field '%s', raw_map=%p raw_map->type=%p raw_map->data=%p",
+                field_name, raw_map, raw_map ? raw_map->type : nullptr, raw_map ? raw_map->data : nullptr);
             ItemReader field_value = map.get(field_name);
             ConstItem field_item = field_value.item().to_const();
 
