@@ -155,19 +155,10 @@ fn scale_to_class(scale) {
 // ============================================================
 
 fn render_svg_delim(ch, target_height, atom_type) {
-    // for SVG delimiters we use a vertical stack of the character
-    // with CSS transform to stretch to the target height
-    let base_height = 1.0
-    let scale_y = if (target_height > base_height) target_height / base_height else 1.0
-    let scale_str = "scaleY(" ++ util.fmt_num(scale_y, 3) ++ ")"
-    let style_str = "display:inline-block;transform:" ++ scale_str ++
-                    ";transform-origin:center;height:" ++ util.fmt_em(target_height)
-    let h = target_height * 0.5 + 0.1
-    let d = target_height * 0.5 - 0.1
-    box.make_box(
-        <span class: css.SMALL_DELIM, style: style_str; ch>,
-        h, d, 0.5, atom_type
-    )
+    // Beyond Size4, use Size4 at native font-size.
+    // (SVG-based stretchy delimiters are not yet supported;
+    //  font-size scaling is unreliable due to em cascade issues.)
+    render_sized(ch, 4, atom_type)
 }
 
 // ============================================================
