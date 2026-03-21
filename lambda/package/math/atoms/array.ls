@@ -122,7 +122,8 @@ fn build_table(cell_boxes, ncols, nrows, env_name) {
     let total_d = compute_depth(cell_boxes, total_cells, nrows)
     let total_w = compute_width(cell_boxes, total_cells)
     let row_els = build_rows(cell_boxes, ncols, nrows, aligns, 0, [])
-    let table_style = "display:inline-flex;flex-direction:column;vertical-align:middle"
+    let est_h = estimate_total_height(cell_boxes, total_cells, nrows)
+    let table_style = "display:inline-flex;flex-direction:column;vertical-align:middle;height:" ++ string(est_h) ++ "em"
     {
         element: <span class: css.MTABLE, style: table_style;
             for el in row_els { el }
@@ -168,7 +169,7 @@ fn build_row_cells(cell_boxes, aligns, ncols, start, col, total_cols, acc) {
             else if (align == "r") "right"
             else "center"
         let col_margin = if (col < total_cols - 1) ";margin-right:0.5em" else ""
-        let cell_style = "text-align:" ++ text_align ++ col_margin
+        let cell_style = "white-space:nowrap;text-align:" ++ text_align ++ col_margin
         let cell_el = if (idx < total)
             <span style: cell_style; cell_boxes[idx].element>
         else
@@ -242,21 +243,45 @@ fn wrap_delimiters(table_box, env_name) {
     let left_box = if (ld != null) delims.render_stretchy(ld, content_height, "mopen") else null
     let right_box = if (rd != null) delims.render_stretchy(rd, content_height, "mclose") else null
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
-    box.hbox(parts)
+    let children = (for (p in parts) p.element)
+    let total_width = sum((for (p in parts) p.width))
+    // report real height/depth for the box model; min-height on the ML__latex
+    // wrapper (set in math.ls) ensures the display equation container sizes correctly
+    {
+        element: <span style: "display:inline-flex;align-items:center;vertical-align:middle";
+            for child in children { child }
+        >,
+        height: content_height * 0.5,
+        depth: content_height * 0.5,
+        width: total_width,
+        type: "ord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 // ============================================================
 // Height / width estimation
 // ============================================================
 
+// estimate total visual height of the table accounting for line-height and gaps
+fn estimate_total_height(cell_boxes, total_cells, nrows) {
+    if (total_cells == 0) 1.0
+    else {
+        let max_h = max((for (i in 0 to (total_cells - 1)) cell_boxes[i].height))
+        let max_d = max((for (i in 0 to (total_cells - 1)) cell_boxes[i].depth))
+        let row_ht = max(max_h + max_d, 1.2)
+        let gap = if (nrows > 1) 0.3 else 0.0
+        float(nrows) * row_ht + float(nrows - 1) * gap
+    }
+}
+
 fn compute_height(cell_boxes, total_cells, nrows) {
-    if (total_cells == 0) 0.5
-    else max((for (i in 0 to (total_cells - 1)) cell_boxes[i].height)) * float(nrows) * 0.6
+    estimate_total_height(cell_boxes, total_cells, nrows) * 0.5
 }
 
 fn compute_depth(cell_boxes, total_cells, nrows) {
-    if (total_cells == 0) 0.2
-    else max((for (i in 0 to (total_cells - 1)) cell_boxes[i].depth)) * float(nrows) * 0.4
+    estimate_total_height(cell_boxes, total_cells, nrows) * 0.5
 }
 
 fn compute_width(cell_boxes, total_cells) {

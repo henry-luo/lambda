@@ -998,7 +998,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                            lycon->line.effective_right : lycon->line.right;
         // Only break if we're strictly past the end, not just at the end
         // Being exactly at the end is fine - whitespace might be collapsed
-        if (lycon->line.advance_x > line_right && !lycon->line.is_line_start) {
+        if (wrap_lines && lycon->line.advance_x > line_right && !lycon->line.is_line_start) {
             log_debug("Text starts past line end (advance_x=%.1f > line_right=%.1f), breaking line",
                       lycon->line.advance_x, line_right);
             line_break(lycon);
