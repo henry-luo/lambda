@@ -654,6 +654,7 @@ DisplayValue resolve_display_value(void* child) {
                             } else if (keyword == CSS_VALUE_LIST_ITEM) {
                                 display.outer = CSS_VALUE_LIST_ITEM;
                                 display.inner = CSS_VALUE_FLOW;
+                                display.list_item = true;
                                 log_debug("[CSS] ✅ MATCHED LIST_ITEM! Setting display to LIST_ITEM+FLOW");
                                 return display;
                             } else if (keyword == CSS_VALUE_NONE) {
@@ -722,17 +723,65 @@ DisplayValue resolve_display_value(void* child) {
                                 return needs_blockify ? blockify_display(display) : display;
                             }
                         } else if (decl->value->type == CSS_VALUE_TYPE_LIST) {
-                            // Handle CSS Display Level 3 two-value syntax: "display: <outer> <inner>"
-                            // e.g., "display: block flow", "display: inline flow", etc.
+                            // Handle CSS Display Level 3 multi-value syntax
+                            // e.g., "display: block flow", "display: inline list-item",
+                            // "display: inline flow-root list-item"
                             CssValue** values = decl->value->data.list.values;
                             int count = decl->value->data.list.count;
                             log_debug("[CSS] display LIST value with %d items", count);
 
-                            if (count >= 2 && values[0] && values[1] &&
-                                values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
-                                values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
-                                CssEnum outer_kw = values[0]->data.keyword;
-                                CssEnum inner_kw = values[1]->data.keyword;
+                            // Scan all keywords: separate list-item flag from outer/inner
+                            bool has_list_item = false;
+                            CssEnum outer_kw = (CssEnum)0;
+                            CssEnum inner_kw = (CssEnum)0;
+                            bool has_outer = false;
+                            bool has_inner = false;
+
+                            for (int i = 0; i < count; i++) {
+                                if (!values[i] || values[i]->type != CSS_VALUE_TYPE_KEYWORD) continue;
+                                CssEnum kw = values[i]->data.keyword;
+
+                                if (kw == CSS_VALUE_LIST_ITEM) {
+                                    has_list_item = true;
+                                } else if (kw == CSS_VALUE_BLOCK || kw == CSS_VALUE_INLINE || kw == CSS_VALUE_RUN_IN) {
+                                    outer_kw = kw;
+                                    has_outer = true;
+                                } else if (kw == CSS_VALUE_FLOW || kw == CSS_VALUE_FLOW_ROOT ||
+                                           kw == CSS_VALUE_FLEX || kw == CSS_VALUE_GRID ||
+                                           kw == CSS_VALUE_TABLE || kw == CSS_VALUE_RUBY) {
+                                    inner_kw = kw;
+                                    has_inner = true;
+                                }
+                            }
+
+                            if (has_list_item) {
+                                display.list_item = true;
+                                // Map outer: inline list-item → inline-block (for block layout + inline flow)
+                                // block list-item or unspecified → CSS_VALUE_LIST_ITEM (existing behavior)
+                                if (has_outer && outer_kw == CSS_VALUE_INLINE) {
+                                    display.outer = CSS_VALUE_INLINE_BLOCK;
+                                } else {
+                                    display.outer = CSS_VALUE_LIST_ITEM;
+                                }
+                                // Map inner display
+                                if (has_inner) {
+                                    if (inner_kw == CSS_VALUE_FLOW) {
+                                        display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                    } else if (inner_kw == CSS_VALUE_FLOW_ROOT) {
+                                        display.inner = CSS_VALUE_FLOW_ROOT;
+                                    } else {
+                                        display.inner = CSS_VALUE_FLOW;
+                                    }
+                                } else {
+                                    display.inner = CSS_VALUE_FLOW;
+                                }
+                                log_debug("[CSS] ✅ Resolved list-item display: outer=%d, inner=%d, list_item=true",
+                                    display.outer, display.inner);
+                                return display;
+                            }
+
+                            if (count >= 2 && has_outer && has_inner) {
+                                // Standard two-value display (no list-item)
                                 log_debug("[CSS] two-value display: outer=%d, inner=%d", outer_kw, inner_kw);
 
                                 // Map outer display keyword
@@ -743,7 +792,7 @@ DisplayValue resolve_display_value(void* child) {
                                 } else if (outer_kw == CSS_VALUE_RUN_IN) {
                                     // run-in unsupported — don't set
                                 } else {
-                                    display.outer = CSS_VALUE_BLOCK; // default to block
+                                    display.outer = CSS_VALUE_BLOCK;
                                 }
 
                                 // Map inner display keyword
@@ -760,7 +809,7 @@ DisplayValue resolve_display_value(void* child) {
                                 } else if (inner_kw == CSS_VALUE_RUBY) {
                                     display.inner = CSS_VALUE_RUBY;
                                 } else {
-                                    display.inner = CSS_VALUE_FLOW; // default to flow
+                                    display.inner = CSS_VALUE_FLOW;
                                 }
 
                                 log_debug("[CSS] ✅ Resolved two-value display: outer=%d, inner=%d",
@@ -824,6 +873,7 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_LI || tag_id == HTM_TAG_SUMMARY) {
             display.outer = CSS_VALUE_LIST_ITEM;
             display.inner = CSS_VALUE_FLOW;
+            display.list_item = true;
         } else if (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
@@ -8871,16 +8921,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
 
                 int count = value->data.list.count;
-                CssValue** values = value->data.list.values;
+                CssValue** values_list = value->data.list.values;
                 for (int i = 0; i < count; i++) {
-                    CssValue* item = values[i];
+                    CssValue* item = values_list[i];
                     if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* info = css_enum_info(item->data.keyword);
                         if (info) {
                             if (sb->length > 0) stringbuf_append_char(sb, ' ');
                             stringbuf_append_str(sb, info->name);
                         }
-                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, item->data.custom_property.name);
+                    } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, item->data.string);
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
                         if (sb->length > 0) stringbuf_append_char(sb, ' ');
                         stringbuf_append_int(sb, (int)item->data.number.value);
                     }
@@ -8934,9 +8990,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
 
                 CssValue** values = value->data.list.values;
-                log_debug("[CSS] counter-increment: about to iterate list");
                 for (int i = 0; i < count; i++) {
-                    log_debug("[CSS] counter-increment: processing item %d", i);
                     CssValue* item = values[i];
                     if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* info = css_enum_info(item->data.keyword);
@@ -8944,7 +8998,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             if (sb->length > 0) stringbuf_append_char(sb, ' ');
                             stringbuf_append_str(sb, info->name);
                         }
-                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, item->data.custom_property.name);
+                    } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, item->data.string);
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
                         if (sb->length > 0) stringbuf_append_char(sb, ' ');
                         stringbuf_append_int(sb, (int)item->data.number.value);
                     }
@@ -8999,7 +9059,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             if (sb->length > 0) stringbuf_append_char(sb, ' ');
                             stringbuf_append_str(sb, info->name);
                         }
-                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, item->data.custom_property.name);
+                    } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, item->data.string);
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
                         if (sb->length > 0) stringbuf_append_char(sb, ' ');
                         stringbuf_append_int(sb, (int)item->data.number.value);
                     }

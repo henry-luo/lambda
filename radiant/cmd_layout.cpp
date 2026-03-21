@@ -1610,15 +1610,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
-    StrBuf* htm_buf = strbuf_new();
-    print_item(htm_buf, input->root, 0);
-    // write html to 'html_tree.txt' for debugging
-    FILE* htm_file = fopen("html_tree.txt", "w");
-    if (htm_file) {
-        fwrite(htm_buf->str, 1, htm_buf->length, htm_file);
-        fclose(htm_file);
+    // write html to 'html_tree.txt' for debugging (skip in batch mode when logging is disabled)
+    if (log_default_category && log_default_category->enabled) {
+        StrBuf* htm_buf = strbuf_new();
+        print_item(htm_buf, input->root, 0);
+        FILE* htm_file = fopen("html_tree.txt", "w");
+        if (htm_file) {
+            fwrite(htm_buf->str, 1, htm_buf->length, htm_file);
+            fclose(htm_file);
+        }
+        strbuf_free(htm_buf);
     }
-    strbuf_free(htm_buf);
 
     auto t_debug = high_resolution_clock::now();
     log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
@@ -3598,7 +3600,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 /**
  * Parse command-line arguments
  */
-#define MAX_INPUT_FILES 1024
+#define MAX_INPUT_FILES 4096
 
 struct LayoutOptions {
     const char* input_files[MAX_INPUT_FILES];  // array of input file paths

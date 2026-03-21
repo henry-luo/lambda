@@ -1897,17 +1897,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     layout_cleanup(&lycon);
     log_debug("layout_cleanup complete");
 
-    // Print view tree (existing functionality)
-    log_debug("checking view tree: %p, root: %p", (void*)doc->view_tree,
-              doc->view_tree ? (void*)doc->view_tree->root : NULL);
-    if (doc->view_tree && doc->view_tree->root) {
-        log_debug("DOM tree: html version %d", doc->view_tree->html_version);
-        log_debug("calling print_view_tree...");
-        print_view_tree((ViewElement*)doc->view_tree->root, doc->url);
-        log_debug("print_view_tree complete");
-    } else {
-        log_debug("Warning: No view tree generated");
-    }
+    // Serialization is handled by the caller (cmd_layout.cpp layout_single_file).
+    // print_view_tree is NOT called here to avoid redundant file I/O.
 
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());

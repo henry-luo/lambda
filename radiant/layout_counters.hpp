@@ -20,6 +20,8 @@ typedef struct DomElement DomElement;
 typedef struct CounterValue {
     const char* name;     // Counter name (e.g., "chapter", "section")
     int value;            // Current counter value
+    bool propagated;      // True if propagated from an inline child scope on pop
+    bool created_by_reset; // True if created by counter-reset (properly scoped, don't propagate)
 } CounterValue;
 
 // Counter scope - represents counters at one element in the tree
@@ -60,6 +62,13 @@ void counter_push_scope(CounterContext* ctx);
  * Call when leaving an element during layout
  */
 void counter_pop_scope(CounterContext* ctx);
+
+/**
+ * Pop the current counter scope and propagate counter values to parent.
+ * Use for inline elements so counter values persist for following siblings.
+ * Propagated counters are marked so that sibling counter-reset can replace them.
+ */
+void counter_pop_scope_propagate(CounterContext* ctx);
 
 // ============================================================================
 // Counter Operations
