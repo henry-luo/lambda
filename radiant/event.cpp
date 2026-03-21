@@ -339,9 +339,10 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
         RadiantState* state = (RadiantState*)element->doc->state;
 
         // Pseudo-states that can affect layout (need reflow, not just repaint)
-        bool affects_layout = (pseudo_flag == PSEUDO_STATE_HOVER ||
-                               pseudo_flag == PSEUDO_STATE_ACTIVE ||
-                               pseudo_flag == PSEUDO_STATE_FOCUS ||
+        // :hover and :active only trigger repaint to avoid expensive full relayout
+        // on every mouse move/click. These are typically paint-only effects
+        // (background-color, opacity, box-shadow, cursor, transform).
+        bool affects_layout = (pseudo_flag == PSEUDO_STATE_FOCUS ||
                                pseudo_flag == PSEUDO_STATE_CHECKED ||
                                pseudo_flag == PSEUDO_STATE_DISABLED);
 

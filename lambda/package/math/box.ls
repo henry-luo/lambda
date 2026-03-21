@@ -113,31 +113,36 @@ pub fn hbox(boxes) {
 // Returns a box wrapping the vertically-stacked content
 // helper: build vbox internals when there are children
 fn build_vbox(children) {
-    let max_pos = max((for (c in children) 0.0 - c.shift))
-    let min_pos = min((for (c in children) 0.0 - c.shift - c.box.height - c.box.depth))
     let max_width = max((for (c in children) c.box.width))
-    let depth = 0.0 - min_pos
+    // compute bounding box: position above baseline = 0.0 - shift
+    let tops = (for (c in children) (0.0 - c.shift) + c.box.height)
+    let bottoms = (for (c in children) (0.0 - c.shift) - c.box.depth)
+    let height = max(max(tops), 0.0)
+    let depth = max(0.0 - min(bottoms), 0.0)
+    let total_h = height + depth
 
-    // Reverse children for top-to-bottom order (callers provide bottom-to-top)
-    let reversed = reverse(children)
-
-    // Each child becomes a table-row > table-cell, centered
-    let items = (for (c in reversed)
-        <span style: "display:table-row";
-            <span style: "display:table-cell;text-align:center"; c.box.element>
+    // position each child absolutely within a relative container
+    // child CSS top = height + shift - child.box.height
+    let items = (for (c in children,
+                      let ct = height + c.shift - c.box.height)
+        <span style: "position:absolute;top:" ++ util.fmt_em(ct) ++ ";left:0;width:100%;text-align:center";
+            c.box.element
         >
     )
 
-    // vertical-align positions the vbox so baseline is correct
-    let va = if (depth > 0.01) util.fmt_em(0.0 - depth) else "middle"
-    let vbox_style = "display:inline-table;vertical-align:" ++ va
+    // inline-block baseline = bottom edge (no in-flow content);
+    // vertical-align: -depth puts bottom at depth below parent baseline
+    let va = util.fmt_em(0.0 - depth)
+    let vbox_style = "display:inline-block;position:relative;vertical-align:" ++ va ++
+                     ";width:" ++ util.fmt_em(max_width) ++
+                     ";height:" ++ util.fmt_em(total_h)
 
     let vbox_el = <span style: vbox_style;
         for (item in items) item
     >
     {
         element: vbox_el,
-        height: max_pos,
+        height: height,
         depth: depth,
         width: max_width,
         type: "ord",
@@ -179,6 +184,17 @@ pub fn make_struts(bx) {
 // wrap a box with a CSS class
 pub fn with_class(bx, cls) => {
     element: <span class: cls; bx.element>,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew
+}
+
+// wrap a box with inline style string
+pub fn with_style(bx, style_str) => {
+    element: <span style: style_str; bx.element>,
     height: bx.height,
     depth: bx.depth,
     width: bx.width,

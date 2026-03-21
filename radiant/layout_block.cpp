@@ -4467,7 +4467,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.advance_x = effective_left;
             }
 
-            if (lycon->line.advance_x + block->width > effective_right) {
+            // Check if parent has white-space: nowrap/pre (no wrapping allowed)
+            bool parent_nowrap = false;
+            if (block->parent && block->parent->is_element()) {
+                DomElement* parent_elem = static_cast<DomElement*>(block->parent);
+                if (parent_elem->blk) {
+                    CssEnum ws = parent_elem->blk->white_space;
+                    parent_nowrap = (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
+                }
+            }
+
+            if (lycon->line.advance_x + block->width > effective_right && !parent_nowrap) {
                 if (!lycon->line.is_line_start) {
                     // CSS 2.1 §9.4.2: Break to next line if there's prior content
                     line_break(lycon);
@@ -4546,20 +4556,34 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float offset = calculate_vertical_align_offset(
                     lycon, valign, item_height, line_height,
                     baseline_ref, item_baseline, valign_offset);
+                // For baseline-relative alignment (including length/percentage offsets),
+                // update BOTH max_ascender and max_descender so the line box expands
+                // to accommodate raised/lowered inline-blocks.  This ensures that the
+                // offset recomputed below (and in view_vertical_align's second pass)
+                // is non-negative, making the max(offset,0) clamp a no-op.
+                if (has_explicit_valign && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
+                    float asc_contribution = item_baseline + valign_offset;
+                    float desc_contribution = item_height - item_baseline - valign_offset;
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, asc_contribution);
+                    lycon->line.max_descender = max(lycon->line.max_descender, desc_contribution);
+                    // Recompute offset with updated baseline so clamp is harmless
+                    float updated_baseline_ref = lycon->line.max_ascender;
+                    float updated_line_height = max(lycon->block.line_height,
+                        updated_baseline_ref + lycon->line.max_descender);
+                    offset = calculate_vertical_align_offset(
+                        lycon, valign, item_height, updated_line_height,
+                        updated_baseline_ref, item_baseline, valign_offset);
+                }
                 // Clamp offset to >= 0 to match view_vertical_align's behavior.
-                // This is critical because the view_vertical_align second pass may not
-                // re-process this span (start_view can advance past it after line_break),
-                // making this first-pass y the final value.
+                // After the max_ascender update above, offset should already be >= 0
+                // for baseline-relative alignment.
                 block->y = lycon->block.advance_y + max(offset, 0.0f);  // block->bound->margin.top will be added below
                 log_debug("valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d",
                     offset, line_height, block->height, lycon->block.advance_y, block->y, valign);
-                // For TOP/BOTTOM, we handle max_descender/max_ascender specially in the section below
-                // Don't apply this generic formula which assumes baseline-relative positioning
-                // Only update max_descender when there's explicit vertical-align, because
-                // the default baseline case is handled by the second section below which
-                // uses the correct content baseline for max_ascender/max_descender split.
+                // max_ascender/max_descender already updated above for
+                // baseline-relative alignment; only update here for other cases.
                 if (has_explicit_valign && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
-                    lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - baseline_ref);
+                    // already handled above
                 }
                 log_debug("new max_descender=%f", lycon->line.max_descender);
             } else {

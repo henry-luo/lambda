@@ -727,6 +727,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             block->in_line->vertical_align : lycon->line.vertical_align;
         float valign_offset = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
+        // Ensure max_ascender accommodates raised inline-blocks before computing offset
+        if (align == CSS_VALUE_BASELINE && valign_offset != 0) {
+            float asc_contribution = item_baseline + valign_offset;
+            lycon->line.max_ascender = max(lycon->line.max_ascender, asc_contribution);
+            // Recompute line_height with updated max_ascender
+            line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
+        }
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, lycon->line.max_ascender, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);

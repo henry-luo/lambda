@@ -510,7 +510,7 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
         // flush remaining children as a paragraph
         if (len(current_children) > 0) {
             let items = current_children that (~ != null)
-            if (len(items) > 0) acc ++ [<p; for c in items { c }>]
+            if (len(items) > 0) acc ++ flush_as_paragraph(items)
             else acc
         }
         else acc
@@ -520,7 +520,7 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
         if (len(current_children) > 0) {
             let items = current_children that (~ != null)
             if (len(items) > 0) {
-                split_parbreaks_rec(el, i + 1, n, [], acc ++ [<p; for c in items { c }>], info)
+                split_parbreaks_rec(el, i + 1, n, [], acc ++ flush_as_paragraph(items), info)
             }
             else { split_parbreaks_rec(el, i + 1, n, [], acc, info) }
         }
@@ -572,6 +572,13 @@ fn split_blocks_rec(items, i, n, current, acc) {
             split_blocks_rec(items, i + 1, n, current ++ [item], acc)
         }
     }
+}
+
+// flush items as paragraph, but extract block elements (like equation divs)
+// so they don't get wrapped in <p> tags (which is invalid HTML)
+fn flush_as_paragraph(items) {
+    if (has_block_child(items)) split_around_blocks(items)
+    else [<p; for c in items { c }>]
 }
 
 fn flush_inline(items, acc) {

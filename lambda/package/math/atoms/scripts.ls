@@ -84,15 +84,19 @@ fn render_scripts(node, context, render_fn) {
          let min_sup_shift = if (ctx.is_display(context)) met.at(met.sup1, si)
              else if (context.cramped) met.at(met.sup3, si)
              else met.at(met.sup2, si),
+         let parent_scale = met.style_scale(context.style),
+         let sup_font_scale = if (has_sup) met.style_scale(sup_ctx.style) / parent_scale else 1.0,
+         let sub_font_scale = if (has_sub) met.style_scale(sub_ctx_.style) / parent_scale else 1.0,
          let supsub_box = if (has_sup and has_sub)
              render_both(base_box, sup_box, sub_box, init_sup_shift, init_sub_shift,
-                         min_sup_shift, x_height, rule_width, si, scriptspace)
+                         min_sup_shift, x_height, rule_width, si,
+                         sup_font_scale, sub_font_scale)
          else if (has_sub)
              render_sub_only(base_box, sub_box, init_sub_shift, x_height, si,
-                             scriptspace, is_char)
+                             is_char, sub_font_scale)
          else
              render_sup_only(sup_box, init_sup_shift, min_sup_shift, x_height,
-                             scriptspace),
+                             sup_font_scale),
          box.hbox([base_box, box.with_class(supsub_box, css.MSUBSUP)]))
 }
 
@@ -101,7 +105,8 @@ fn render_scripts(node, context, render_fn) {
 // ============================================================
 
 fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
-               min_sup, x_height, rule_width, si, scriptspace) {
+               min_sup, x_height, rule_width, si,
+               sup_font_scale, sub_font_scale) {
     let sup_shift = max(init_sup, max(min_sup, sup_box.depth + 0.25 * x_height))
     let sub_shift = max(init_sub, met.at(met.sub2, si))
 
@@ -120,30 +125,69 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
     else
         {sup_shift: sup_shift, sub_shift: sub_shift}
 
-    box.vbox([
-        {box: sub_box, shift: adjusted.sub_shift},
-        {box: sup_box, shift: 0.0 - adjusted.sup_shift}
-    ])
+    let sup_scale_str = util.fmt_pct(sup_font_scale)
+    let sub_scale_str = util.fmt_pct(sub_font_scale)
+    let sup_inner = sup_box.element
+    let sub_inner = sub_box.element
+    let sup_el = <span style: "display:block;font-size:" ++ sup_scale_str ++ ";line-height:1;text-align:left"; sup_inner>
+    let sub_el = <span style: "display:block;font-size:" ++ sub_scale_str ++ ";line-height:1;text-align:left"; sub_inner>
+    // inline-block baseline = last child (sub) baseline; shift it down
+    let va = util.fmt_em(0.0 - adjusted.sub_shift)
+    let container_style = "display:inline-block;vertical-align:" ++ va ++ ";text-align:left"
+    let max_w = max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale)
+    let el = <span style: container_style;
+        sup_el
+        sub_el
+    >
+    {
+        element: el,
+        height: adjusted.sup_shift + sup_box.height * sup_font_scale,
+        depth: adjusted.sub_shift + sub_box.depth * sub_font_scale,
+        width: max_w,
+        type: "ord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 // ============================================================
 // Case B: Subscript only
 // ============================================================
 
-fn render_sub_only(base_box, sub_box, init_sub, x_height, si, scriptspace, is_char) {
+fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scale) {
     let sub_shift = max(init_sub, max(met.at(met.sub1, si), sub_box.height - 0.8 * x_height))
-    box.vbox([
-        {box: sub_box, shift: sub_shift}
-    ])
+    let scale_str = util.fmt_pct(font_scale)
+    let style = "display:inline-block;vertical-align:" ++ util.fmt_em(0.0 - sub_shift) ++ ";font-size:" ++ scale_str
+    let inner = sub_box.element
+    let el = <span style: style; inner>
+    {
+        element: el,
+        height: 0.0,
+        depth: sub_shift + sub_box.depth * font_scale,
+        width: sub_box.width * font_scale,
+        type: "ord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 // ============================================================
 // Case C: Superscript only
 // ============================================================
 
-fn render_sup_only(sup_box, init_sup, min_sup, x_height, scriptspace) {
+fn render_sup_only(sup_box, init_sup, min_sup, x_height, font_scale) {
     let sup_shift = max(init_sup, max(min_sup, sup_box.depth + 0.25 * x_height))
-    box.vbox([
-        {box: sup_box, shift: 0.0 - sup_shift}
-    ])
+    let scale_str = util.fmt_pct(font_scale)
+    let style = "display:inline-block;vertical-align:" ++ util.fmt_em(sup_shift) ++ ";font-size:" ++ scale_str
+    let inner = sup_box.element
+    let el = <span style: style; inner>
+    {
+        element: el,
+        height: sup_shift + sup_box.height * font_scale,
+        depth: 0.0,
+        width: sup_box.width * font_scale,
+        type: "ord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
