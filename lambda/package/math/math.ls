@@ -6,6 +6,7 @@ import ctx: .context
 import css: .css
 import box: .box
 import opt: .optimize
+import util: .util
 
 // ============================================================
 // Public API
@@ -31,7 +32,12 @@ pub fn render_math(ast, options) {
 
     // wrap with struts and ML__latex class
     let content_with_struts = box.make_struts(result_box)
-    let latex_el = <span class: css.LATEX; content_with_struts>
+    // set explicit height on the ML__latex span so flex measurement sees it
+    let total_h = result_box.height + result_box.depth
+    let latex_el = if (total_h > 0.0)
+        <span class: css.LATEX, style: "height:" ++ util.fmt_em(total_h); content_with_struts>
+    else
+        <span class: css.LATEX; content_with_struts>
 
     // optionally wrap with stylesheet for standalone HTML
     if (is_standalone) css.wrap_standalone(latex_el)
