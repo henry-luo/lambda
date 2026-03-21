@@ -134,7 +134,7 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
     char command[512];
     const char* c2mir_flag = use_mir ? "" : " --c2mir";
-    const char* no_log_flag = getenv("LAMBDA_NO_LOG") ? " --no-log" : "";
+    const char* no_log_flag = " --no-log";  // always disable logging in tests for performance
 #ifdef _WIN32
     if (is_procedural) {
         snprintf(command, sizeof(command), "lambda.exe run%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);

@@ -225,10 +225,10 @@ std::string transpile_and_get_code(const std::string& script_path, const std::st
     // Build command to execute lambda.exe with --transpile-dir
     char command[1024];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe --transpile-dir \"%s\" \"%s\" 2>&1",
+    snprintf(command, sizeof(command), "lambda.exe --no-log --transpile-dir \"%s\" \"%s\" 2>&1",
              output_dir.c_str(), script_path.c_str());
 #else
-    snprintf(command, sizeof(command), "./lambda.exe --transpile-dir \"%s\" \"%s\" 2>&1",
+    snprintf(command, sizeof(command), "./lambda.exe --no-log --transpile-dir \"%s\" \"%s\" 2>&1",
              output_dir.c_str(), script_path.c_str());
 #endif
 
