@@ -333,10 +333,12 @@ fn render_radical(node, context) {
     else null
 
     let sqrt_sign = box.text_box("\u221A", css.SQRT_SIGN, "ord")
-    let sqrt_line = box.box_cls(css.SQRT_LINE, 0.04, 0.0,
-                                 body_box.width, "ord")
 
-    let sqrt_body = box.hbox([sqrt_sign, body_box])
+    // wrap radicand with vinculum (overline bar) using border-top
+    let body_with_vinculum = box.with_style(body_box,
+        "display:inline-block;border-top:0.04em solid currentColor;padding-top:1px")
+
+    let sqrt_body = box.hbox([sqrt_sign, body_with_vinculum])
 
     if (index_box != null)
         box.hbox([index_box, box.with_class(sqrt_body, css.SQRT)])

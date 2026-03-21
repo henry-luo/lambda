@@ -1,27 +1,27 @@
 "===== MATH DELIMITER TESTS =====1. null delim type:mopen2. null delim width:"
 0.12
 "3. dot delim type:mopen4. empty delim type:mopen5. small paren type:mopen6. small paren has el:"
-false
+true
 "7. small paren height >0:"
 true
 "8. medium bracket type:mopen9. medium bracket height:"
 true
 "10. large brace type:mopen11. langle has el:"
-false
+true
 "12. langle type:mopen13. rangle type:mclose14. lbrace has el:"
-false
+true
 "15. rbrace has el:"
-false
+true
 "16. scale 1.2 type:mopen17. scale 1.2 height:"
 true
 "18. scale 1.8 type:mclose19. scale dot null type:mopen20. vert has el:"
-false
+true
 "21. Vert has el:"
-false
+true
 "22. floor has el:"
-false
+true
 "23. ceil has el:"
-false
+true
 "24. big paren type:mopen25. big paren height:"
 true
 "===== ALL MATH DELIMITER TESTS DONE ====="

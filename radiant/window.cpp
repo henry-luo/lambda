@@ -281,6 +281,14 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     event.mouse_position.x = xpos;
     event.mouse_position.y = ypos;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+
+    // Trigger redraw so any pending reflows/repaints from hover state
+    // changes get processed promptly. Without this, reflow requests
+    // accumulate without being cleared, causing O(n^2) list traversal.
+    RadiantState* mstate = ui_context.document ? ui_context.document->state : nullptr;
+    if (mstate && (mstate->needs_reflow || mstate->needs_repaint || mstate->is_dirty)) {
+        do_redraw = 1;
+    }
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
