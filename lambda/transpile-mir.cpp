@@ -61,6 +61,9 @@ extern Url* get_current_dir();
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
+void clear_persistent_last_error();
+extern __thread LambdaError* persistent_last_error;
+extern __thread EvalContext* context;
 
 // Forward declare has_current_item_ref from build_ast.cpp
 bool has_current_item_ref(AstNode* node);
@@ -10442,6 +10445,16 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         resolve_sys_paths_recursive(result);
         MarkBuilder builder(output);
         output->root = builder.deep_copy(result);
+
+        // Preserve runtime error before cleanup (transfer ownership to persistent storage)
+        if (context && context->last_error) {
+            clear_persistent_last_error();
+            persistent_last_error = context->last_error;
+            context->last_error = NULL;
+        }
+
+        // Clean up execution context (heap, nursery, validator) before runner goes out of scope
+        runner_cleanup(&runner);
 
         jit_cleanup(ctx);
         return output;

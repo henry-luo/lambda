@@ -47,7 +47,7 @@ protected:
         setenv("LAMBDA_AUTO_CLOSE", "1", 1);
 
         // Build command: ./lambda.exe view <file>
-        std::string cmd = "./lambda.exe view " + filePath + " 2>&1";
+        std::string cmd = "./lambda.exe view --no-log " + filePath + " 2>&1";
 
         // Execute command and capture output
         FILE* pipe = popen(cmd.c_str(), "r");

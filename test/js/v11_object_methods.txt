@@ -1,0 +1,12 @@
+fromEntries a: 1
+fromEntries b: 2
+fromEntries c: 3
+roundtrip x: 10
+roundtrip y: 20
+is(1, 1): true
+is(1, 2): false
+is(NaN, NaN): true
+is(null, null): true
+is(null, undefined): false
+is('a', 'a'): true
+null

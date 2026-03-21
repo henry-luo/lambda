@@ -31,9 +31,9 @@
 char* execute_js_script(const char* script_path) {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\"", script_path);
+    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log", script_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\"", script_path);
+    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --no-log", script_path);
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -150,9 +150,9 @@ void test_js_script_against_file(const char* script_path, const char* expected_f
 char* execute_js_builtin_tests() {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js 2>&1");
+    snprintf(command, sizeof(command), "lambda.exe js --no-log 2>&1");
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js 2>&1");
+    snprintf(command, sizeof(command), "./lambda.exe js --no-log 2>&1");
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -198,9 +198,9 @@ char* execute_js_builtin_tests() {
 char* execute_js_script_with_doc(const char* script_path, const char* html_path) {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --document \"%s\"", script_path, html_path);
+    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --document \"%s\" --no-log", script_path, html_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --document \"%s\"", script_path, html_path);
+    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --document \"%s\" --no-log", script_path, html_path);
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -449,6 +449,27 @@ TEST(JavaScriptTests, test_v9_number_json) {
 
 TEST(JavaScriptTests, test_v9_obj_destructuring) {
     test_js_script_against_file("test/js/v9_obj_destructuring.js", "test/js/v9_obj_destructuring.txt");
+}
+
+// v11 Tests
+TEST(JavaScriptTests, test_v11_optional_chaining) {
+    test_js_script_against_file("test/js/v11_optional_chaining.js", "test/js/v11_optional_chaining.txt");
+}
+
+TEST(JavaScriptTests, test_v11_sequence_expr) {
+    test_js_script_against_file("test/js/v11_sequence_expr.js", "test/js/v11_sequence_expr.txt");
+}
+
+TEST(JavaScriptTests, test_v11_error_subclasses) {
+    test_js_script_against_file("test/js/v11_error_subclasses.js", "test/js/v11_error_subclasses.txt");
+}
+
+TEST(JavaScriptTests, test_v11_nullish_assign) {
+    test_js_script_against_file("test/js/v11_nullish_assign.js", "test/js/v11_nullish_assign.txt");
+}
+
+TEST(JavaScriptTests, test_v11_object_methods) {
+    test_js_script_against_file("test/js/v11_object_methods.js", "test/js/v11_object_methods.txt");
 }
 
 int main(int argc, char **argv) {

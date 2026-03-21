@@ -118,8 +118,8 @@ TypeMap EmptyMap;
 TypeElmt EmptyElmt;
 TypeObject EmptyObject;
 
-Item ItemNull = {._type_id = LMD_TYPE_NULL};
-Item ItemError = {._type_id = LMD_TYPE_ERROR};
+const Item ItemNull = {._type_id = LMD_TYPE_NULL};
+const Item ItemError = {._type_id = LMD_TYPE_ERROR};
 
 // Note: ConstItem has const members and cannot be assigned after initialization.
 // These are zero-initialized and should be used via reinterpret_cast from appropriate Items.
@@ -982,6 +982,8 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
+            log_debug("_map_get_const: key='%s' type_id=%d byte_offset=%d field_ptr=%p raw_8bytes=0x%016lx map_type=%p map_data=%p",
+                key, type_id, field->byte_offset, field_ptr, *(uint64_t*)field_ptr, map_type, map_data);
             Item result = _map_field_to_item(field_ptr, type_id);
             return *(ConstItem*)&result;
         }

@@ -1,0 +1,10 @@
+null ??= 42: 42
+0 ??= 99: 0
+hello ??= world: hello
+0 ||= 10: 10
+keep ||= replace: keep
+null ||= fallback: fallback
+1 &&= 42: 42
+0 &&= 99: 0
+yes &&= no: no
+null

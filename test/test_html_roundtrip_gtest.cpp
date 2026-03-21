@@ -1270,11 +1270,11 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         printf("    String 2 (len=%zu): %.200s\n", len2, trim2);
 
         // Write full normalized strings to files for debugging
-        FILE* f1 = fopen("/tmp/norm1.html", "w");
-        FILE* f2 = fopen("/tmp/norm2.html", "w");
+        FILE* f1 = fopen("./temp/norm1.html", "w");
+        FILE* f2 = fopen("./temp/norm2.html", "w");
         if (f1) { fwrite(trim1, 1, len1, f1); fclose(f1); }
         if (f2) { fwrite(trim2, 1, len2, f2); fclose(f2); }
-        printf("  Debug: Wrote normalized strings to /tmp/norm1.html and /tmp/norm2.html\n");
+        printf("  Debug: Wrote normalized strings to ./temp/norm1.html and ./temp/norm2.html\n");
     }
 
     free(norm1);
@@ -1287,7 +1287,7 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
 class HtmlRoundtripTest : public ::testing::Test {
 protected:
     const char* lambda_exe = "./lambda.exe";
-    const char* temp_output = "/tmp/test_html_roundtrip_output.html";
+    const char* temp_output = "./temp/test_html_roundtrip_output.html";
 
     void SetUp() override {
         // Initialize logging
@@ -1330,7 +1330,7 @@ protected:
         // Build the CLI command
         char command[2048];
         snprintf(command, sizeof(command),
-                "%s convert -f html -t html -o %s %s 2>&1",
+                "%s convert --no-log -f html -t html -o %s %s 2>&1",
                 lambda_exe, temp_output, input_file);
 
         printf("Executing: %s\n", command);
@@ -1433,7 +1433,7 @@ protected:
 
     // Test a simple HTML string by writing it to a temp file first
     RoundtripResult test_html_string_roundtrip_cli(const char* html_content, const char* test_name) {
-        const char* temp_input = "/tmp/test_html_roundtrip_input.html";
+        const char* temp_input = "./temp/test_html_roundtrip_input.html";
 
         // Write content to temp file
         FILE* f = fopen(temp_input, "w");

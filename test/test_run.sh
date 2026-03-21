@@ -365,10 +365,6 @@ is_gtest_test() {
 run_test_with_timeout() {
     local test_exe="$1"
     local base_name="$(basename "$test_exe" .exe)"
-    # Append shard suffix if running as a GTest shard (set by start_test)
-    if [ -n "$SHARD_SUFFIX" ]; then
-        base_name="${base_name}${SHARD_SUFFIX}"
-    fi
     # TEST_OUTPUT_DIR is already an absolute path
     local json_file="$TEST_OUTPUT_DIR/${base_name}_results.json"
     # Use Windows-compatible path for GTest JSON output
@@ -381,11 +377,7 @@ run_test_with_timeout() {
     local orig_base="$(basename "$test_exe" .exe)"
     case "$orig_base" in
         test_c2mir_gtest|test_lambda_gtest)
-            if [ -n "$SHARD_SUFFIX" ]; then
-                test_timeout="300s"  # sharded: fewer tests per shard
-            else
-                test_timeout="600s"  # unsharded: 188+ scripts via subprocess, ~3s each
-            fi
+            test_timeout="600s"  # batch mode: many scripts via subprocess
             ;;
     esac
 
@@ -561,13 +553,7 @@ run_single_test() {
     local c_test_display_name=$(get_c_test_display_name "$base_name")
     local c_test_icon=$(get_c_test_icon "$base_name")
     local suite_category=$(get_test_suite_category "$base_name")
-    # Append shard suffix for sharded tests
-    local result_base_name="$base_name"
-    if [ -n "$SHARD_SUFFIX" ]; then
-        result_base_name="${base_name}${SHARD_SUFFIX}"
-        c_test_display_name="${c_test_display_name} ${SHARD_SUFFIX}"
-    fi
-    local result_file="$TEST_OUTPUT_DIR/${result_base_name}_test_result.json"
+    local result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
 
     # Ensure test is compiled and up to date
     if ! ensure_test_compiled "$test_exe"; then
@@ -832,11 +818,11 @@ echo ""
 
 # Execute tests (parallel or sequential)
 if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
-    echo "⚡ Running tests in parallel (max 8 concurrent)..."
+    echo "⚡ Running tests in parallel (max 12 concurrent)..."
     echo ""
 
     # Rolling window parallel execution
-    MAX_CONCURRENT=8
+    MAX_CONCURRENT=12
     result_files=()
     completed_count=0
 
@@ -844,81 +830,30 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
     running_pids=()
     running_names=()
 
-    # ── GTest Sharding ──────────────────────────────────────────────
-    # Large test executables (test_lambda_gtest, test_c2mir_gtest) run
-    # hundreds of parameterized tests sequentially. We split them into
-    # multiple shards via GTEST_TOTAL_SHARDS / GTEST_SHARD_INDEX env
-    # vars so they run in parallel across cores.
-    SHARD_COUNT_LAMBDA=4   # test_lambda_gtest → 4 shards (~60 tests each)
-    SHARD_COUNT_C2MIR=2    # test_c2mir_gtest  → 2 shards (~82 tests each)
-
-    # Build expanded task list: [ "exe_path|shard_count|shard_index" ... ]
-    # Non-sharded tests have shard_count=0, shard_index=0.
-    expanded_tasks=()
-    for test_exe in "${test_executables[@]}"; do
-        base_name=$(basename "$test_exe" .exe)
-        case "$base_name" in
-            test_lambda_gtest)
-                for ((si=0; si<SHARD_COUNT_LAMBDA; si++)); do
-                    expanded_tasks+=("${test_exe}|${SHARD_COUNT_LAMBDA}|${si}")
-                done
-                ;;
-            test_c2mir_gtest)
-                for ((si=0; si<SHARD_COUNT_C2MIR; si++)); do
-                    expanded_tasks+=("${test_exe}|${SHARD_COUNT_C2MIR}|${si}")
-                done
-                ;;
-            *)
-                expanded_tasks+=("${test_exe}|0|0")
-                ;;
-        esac
-    done
-
-    total_tests_count=${#expanded_tasks[@]}
+    total_tests_count=${#test_executables[@]}
     current_index=0
 
-    # Helper function to start a test (possibly sharded)
+    # Helper function to start a test
     start_test() {
-        local task_spec="$1"
-        local test_exe="${task_spec%%|*}"
-        local rest="${task_spec#*|}"
-        local shard_count="${rest%%|*}"
-        local shard_index="${rest#*|}"
+        local test_exe="$1"
         local base_name=$(basename "$test_exe" .exe)
-
-        # Build a display name that includes shard info
-        local display_name="$base_name"
-        if [ "$shard_count" -gt 0 ]; then
-            display_name="${base_name}_shard${shard_index}"
-        fi
 
         # Check if we have a source file for this test
         local source_file_c="test/${base_name}.c"
         local source_file_cpp="test/${base_name}.cpp"
         if [ -f "$source_file_c" ] || [ -f "$source_file_cpp" ] || [ -x "$test_exe" ]; then
-            # For sharded tests, each shard gets its own result file
-            local result_name="$display_name"
-            local result_file="$TEST_OUTPUT_DIR/${result_name}_test_result.json"
+            local result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
             result_files+=("$result_file")
 
-            echo "   [$((current_index + 1))/$total_tests_count] Starting $display_name..."
+            echo "   [$((current_index + 1))/$total_tests_count] Starting $base_name..."
 
-            # Run test in background, with shard env vars if applicable
-            local temp_output="$TEST_OUTPUT_DIR/${result_name}_temp_output.log"
-            if [ "$shard_count" -gt 0 ]; then
-                (
-                    export GTEST_TOTAL_SHARDS="$shard_count"
-                    export GTEST_SHARD_INDEX="$shard_index"
-                    export SHARD_SUFFIX="_shard${shard_index}"
-                    run_single_test "$test_exe"
-                ) > "$temp_output" 2>&1 &
-            else
-                run_single_test "$test_exe" > "$temp_output" 2>&1 &
-            fi
+            # Run test in background
+            local temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
+            run_single_test "$test_exe" > "$temp_output" 2>&1 &
             local pid=$!
 
             running_pids+=("$pid")
-            running_names+=("$display_name")
+            running_names+=("$base_name")
             current_index=$((current_index + 1))
             return 0
         else
@@ -930,7 +865,7 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
 
     # Start initial batch of tests
     while [ $current_index -lt $total_tests_count ] && [ ${#running_pids[@]} -lt $MAX_CONCURRENT ]; do
-        start_test "${expanded_tasks[$current_index]}"
+        start_test "${test_executables[$current_index]}"
     done
 
     echo ""
@@ -954,7 +889,7 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
 
                 # Start a new test if available
                 if [ $current_index -lt $total_tests_count ]; then
-                    start_test "${expanded_tasks[$current_index]}"
+                    start_test "${test_executables[$current_index]}"
                 fi
             fi
         done
@@ -980,90 +915,6 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
     echo ""
     echo "✅ All $completed_count parallel tests completed!"
     echo ""
-
-    # ── Merge shard results ──────────────────────────────────────────
-    # Combine results from sharded test executables into a single result
-    # file per original executable (e.g. test_lambda_gtest_shard{0..3} → test_lambda_gtest).
-    merge_shard_results() {
-        local base="$1"   # e.g. test_lambda_gtest
-        local count="$2"  # e.g. 4
-        local merged_passed=0
-        local merged_failed=0
-        local merged_total=0
-        local merged_status="✅ PASS"
-        local first_file="$TEST_OUTPUT_DIR/${base}_shard0_test_result.json"
-
-        # Read display metadata from the first shard
-        local m_display_name m_icon m_suite
-        m_display_name=$(jq -r '.display_name' "$first_file" 2>/dev/null | sed 's/ _shard0//')
-        m_icon=$(jq -r '.icon' "$first_file" 2>/dev/null)
-        m_suite=$(jq -r '.suite_category' "$first_file" 2>/dev/null)
-
-        local all_failed_tests="[]"
-        for ((si=0; si<count; si++)); do
-            local sf="$TEST_OUTPUT_DIR/${base}_shard${si}_test_result.json"
-            if [ -f "$sf" ]; then
-                local sp=$(jq -r '.passed // 0' "$sf" 2>/dev/null)
-                local sfail=$(jq -r '.failed // 0' "$sf" 2>/dev/null)
-                [[ "$sp" =~ ^[0-9]+$ ]] || sp=0
-                [[ "$sfail" =~ ^[0-9]+$ ]] || sfail=0
-                merged_passed=$((merged_passed + sp))
-                merged_failed=$((merged_failed + sfail))
-                if [ "$sfail" -gt 0 ]; then
-                    merged_status="❌ FAIL"
-                fi
-                # Merge failed_tests arrays
-                local shard_failures
-                shard_failures=$(jq -r '.failed_tests // []' "$sf" 2>/dev/null)
-                all_failed_tests=$(echo "$all_failed_tests" "$shard_failures" | jq -s 'add')
-            fi
-        done
-        merged_total=$((merged_passed + merged_failed))
-
-        # Write merged result file
-        local merged_file="$TEST_OUTPUT_DIR/${base}_test_result.json"
-        cat > "$merged_file" <<EOF
-{
-  "test_exe": "test/${base}.exe",
-  "base_name": "${base}",
-  "display_name": "${m_display_name}",
-  "icon": "${m_icon}",
-  "suite_category": "${m_suite}",
-  "passed": ${merged_passed},
-  "failed": ${merged_failed},
-  "total": ${merged_total},
-  "status": "${merged_status}",
-  "json_file": "",
-  "failed_tests": $(echo "$all_failed_tests" | jq -c '.')
-}
-EOF
-
-        # Replace shard result files in result_files array with single merged file
-        local new_result_files=()
-        local first_shard_replaced=false
-        for rf in "${result_files[@]}"; do
-            local rf_base=$(basename "$rf" "_test_result.json")
-            if [[ "$rf_base" == ${base}_shard* ]]; then
-                if [ "$first_shard_replaced" = false ]; then
-                    new_result_files+=("$merged_file")
-                    first_shard_replaced=true
-                fi
-                # Remove individual shard result file
-                rm -f "$rf"
-            else
-                new_result_files+=("$rf")
-            fi
-        done
-        result_files=("${new_result_files[@]}")
-    }
-
-    # Merge shards for known sharded tests
-    if [ "$SHARD_COUNT_LAMBDA" -gt 0 ]; then
-        merge_shard_results "test_lambda_gtest" "$SHARD_COUNT_LAMBDA"
-    fi
-    if [ "$SHARD_COUNT_C2MIR" -gt 0 ]; then
-        merge_shard_results "test_c2mir_gtest" "$SHARD_COUNT_C2MIR"
-    fi
 
     # Process results from all test files
     echo "🔍 Processing test results..."

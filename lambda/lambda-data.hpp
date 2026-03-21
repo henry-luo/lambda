@@ -435,8 +435,8 @@ extern TypeType LIT_TYPE_ERROR;
 
 extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;
-extern Item ItemNull;
-extern Item ItemError;
+extern const Item ItemNull;
+extern const Item ItemError;
 extern TypeInfo type_info[];
 
 typedef struct Input {

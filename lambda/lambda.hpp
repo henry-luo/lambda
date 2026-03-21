@@ -236,8 +236,8 @@ inline ConstItem Item::to_const() const {
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
-extern Item ItemNull;
-extern Item ItemError;
+extern const Item ItemNull;
+extern const Item ItemError;
 
 // ============================================================================
 // Error propagation guard macros (Phase 1 of error handling improvements)

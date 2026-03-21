@@ -222,6 +222,8 @@ Item js_get_prototype(Item object);
 
 Item js_object_values(Item object);
 Item js_object_entries(Item object);
+Item js_object_from_entries(Item iterable);
+Item js_object_is(Item left, Item right);
 Item js_object_assign(Item target, Item* sources, int count);
 Item js_has_own_property(Item obj, Item key);
 Item js_object_freeze(Item obj);
@@ -273,6 +275,12 @@ Item js_clear_exception(void);
  * Returns a Map with {name: "Error", message: msg}.
  */
 Item js_new_error(Item message);
+
+/**
+ * v11: Create a typed Error object (TypeError, RangeError, etc.).
+ * Returns a Map with {name: error_name, message: msg}.
+ */
+Item js_new_error_with_name(Item error_name, Item message);
 
 // =============================================================================
 // Runtime Context

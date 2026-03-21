@@ -1004,6 +1004,7 @@ JitImport jit_runtime_imports[] = {
     {"js_check_exception", FPTR(js_check_exception)},
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_new_error", FPTR(js_new_error)},
+    {"js_new_error_with_name", FPTR(js_new_error_with_name)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},
@@ -1052,6 +1053,8 @@ JitImport jit_runtime_imports[] = {
     // v9: Object extensions
     {"js_object_values", FPTR(js_object_values)},
     {"js_object_entries", FPTR(js_object_entries)},
+    {"js_object_from_entries", FPTR(js_object_from_entries)},
+    {"js_object_is", FPTR(js_object_is)},
     {"js_object_assign", FPTR(js_object_assign)},
     {"js_has_own_property", FPTR(js_has_own_property)},
     {"js_object_freeze", FPTR(js_object_freeze)},
