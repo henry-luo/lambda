@@ -1990,20 +1990,33 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 // Set document context to iframe doc for proper URL resolution (e.g., images)
                                 evcon.ui_context->document = new_doc;
                                 // iframe dimensions are now in CSS pixels
+                                int saved_viewport_width = evcon.ui_context->viewport_width;
+                                int saved_viewport_height = evcon.ui_context->viewport_height;
                                 evcon.ui_context->window_width = (float)css_vw;
                                 evcon.ui_context->window_height = (float)css_vh;
+                                evcon.ui_context->viewport_width = css_vw;
+                                evcon.ui_context->viewport_height = css_vh;
                                 // Process @font-face rules before layout (critical for custom fonts)
                                 process_document_font_faces(evcon.ui_context, new_doc);
                                 layout_html_doc(evcon.ui_context, new_doc, false);
-                                // Restore parent document and window dimensions
+                                // Restore parent document and window/viewport dimensions
                                 evcon.ui_context->document = parent_doc;
                                 evcon.ui_context->window_width = saved_window_width;
                                 evcon.ui_context->window_height = saved_window_height;
+                                evcon.ui_context->viewport_width = saved_viewport_width;
+                                evcon.ui_context->viewport_height = saved_viewport_height;
                             }
                             // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
                             // For PDF and other pre-laid-out documents, view_tree is already set
                             if (new_doc->view_tree && new_doc->view_tree->root) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;
+                                // Disable inner doc's viewport scroller — iframe container handles scrolling
+                                if (root->scroller) {
+                                    if (root->content_height > root->height) {
+                                        root->height = root->content_height;
+                                    }
+                                    root->scroller = NULL;
+                                }
                                 // Use width/height for PDF (content_width/height may be 0)
                                 block->content_width = root->content_width > 0 ? root->content_width : root->width;
                                 block->content_height = root->content_height > 0 ? root->content_height : root->height;
@@ -2048,11 +2061,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
 
-            // If the target was inside an iframe, also propagate the scroll
-            // event through the parent document's view stack so that the
-            // iframe block (or its scrollable ancestors) can handle scrolling
+            // Propagate scroll to iframe container (the outer iframe block handles scrolling)
             if (evcon.iframe_container) {
-                log_debug("propagating scroll event across iframe boundary");
                 ArrayList* parent_list = build_view_stack(&evcon, evcon.iframe_container);
                 fire_events(&evcon, parent_list);
                 arraylist_free(parent_list);

@@ -1239,6 +1239,11 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                             log_debug(">>> FLEX ITEM IFRAME: AFTER SET - uicon=%p, window_width=%.1f, window_height=%.1f",
                                       lycon->ui_context, lycon->ui_context->window_width, lycon->ui_context->window_height);
 
+                            int saved_viewport_width = lycon->ui_context->viewport_width;
+                            int saved_viewport_height = lycon->ui_context->viewport_height;
+                            lycon->ui_context->viewport_width = (int)flex_width;
+                            lycon->ui_context->viewport_height = (int)flex_height;
+
                             // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
                             process_document_font_faces(lycon->ui_context, doc);
 
@@ -1247,10 +1252,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                             log_debug(">>> FLEX ITEM IFRAME: after layout_html_doc, restoring window_width=%.1f, window_height=%.1f",
                                       saved_window_width, saved_window_height);
 
-                            // Restore parent document and window dimensions
+                            // Restore parent document and window/viewport dimensions
                             lycon->ui_context->document = parent_doc;
                             lycon->ui_context->window_width = saved_window_width;
                             lycon->ui_context->window_height = saved_window_height;
+                            lycon->ui_context->viewport_width = saved_viewport_width;
+                            lycon->ui_context->viewport_height = saved_viewport_height;
                         }
                         iframe_depth--;
                     } else {
@@ -1268,6 +1275,13 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 ViewBlock* doc_root = (ViewBlock*)flex_item->embed->doc->view_tree->root;
                 log_debug(">>> FLEX ITEM IFRAME: view_tree->root=%p", doc_root);
                 if (doc_root) {
+                    // Disable inner doc's viewport scroller — iframe container handles scrolling
+                    if (doc_root->scroller) {
+                        if (doc_root->content_height > doc_root->height) {
+                            doc_root->height = doc_root->content_height;
+                        }
+                        doc_root->scroller = NULL;
+                    }
                     flex_item->content_width = doc_root->content_width > 0 ? doc_root->content_width : doc_root->width;
                     flex_item->content_height = doc_root->content_height > 0 ? doc_root->content_height : doc_root->height;
                     log_debug(">>> FLEX ITEM IFRAME: content size=%.1fx%.1f (for scrolling)",

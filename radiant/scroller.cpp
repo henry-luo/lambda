@@ -53,7 +53,7 @@ void ScrollPane::reset() {
 }
 
 void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
-    float content_width, float content_height, Bound* clip) {
+    float content_width, float content_height, Bound* clip, float scale) {
     log_info("SCROLLPANE: content size: %.1f x %.1f, view bounds: %.1f x %.1f",
         content_width, content_height, block_bound->width, block_bound->height);
     log_debug("render scroller content size: %f x %f, blk bounds: %f x %f",
@@ -87,16 +87,19 @@ void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
         float bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar height: %f", bar_height);
         float v_ratio = min(view_height * 100 / content_height, 100.0f);
-        sp->v_handle_height = (v_ratio * bar_height) / 100;
-        sp->v_handle_height = max(sc.MIN_HANDLE_SIZE, sp->v_handle_height);
+        float v_handle_height_phys = (v_ratio * bar_height) / 100;
+        v_handle_height_phys = max(sc.MIN_HANDLE_SIZE, v_handle_height_phys);
         // v_scroll_position and v_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
         float scroll_ratio = (sp->v_max_scroll > 0) ? (sp->v_scroll_position / sp->v_max_scroll) : 0;
-        sp->v_handle_y = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - sp->v_handle_height);
+        float v_handle_y_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - v_handle_height_phys);
+        // Store handle position/size in CSS pixels (divide by scale) for hit-testing in event handlers
+        sp->v_handle_height = v_handle_height_phys / scale;
+        sp->v_handle_y = v_handle_y_phys / scale;
         float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
-        tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y,
-            sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
+        tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + v_handle_y_phys,
+            sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
         log_debug("v_scroll_handle rect: x %f, y %f, wd %f, hg %f",
-            v_scroll_x, view_y + sp->v_handle_y, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height);
+            v_scroll_x, view_y + v_handle_y_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys);
         tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     }
 
@@ -118,14 +121,17 @@ void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
         float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar width: %f", bar_width);
         float h_ratio = min(view_width * 100 / content_width, 100.0f);
-        sp->h_handle_width = (h_ratio * bar_width) / 100;
-        sp->h_handle_width = max(sc.MIN_HANDLE_SIZE, sp->h_handle_width);
+        float h_handle_width_phys = (h_ratio * bar_width) / 100;
+        h_handle_width_phys = max(sc.MIN_HANDLE_SIZE, h_handle_width_phys);
         // h_scroll_position and h_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
         float scroll_ratio = (sp->h_max_scroll > 0) ? (sp->h_scroll_position / sp->h_max_scroll) : 0;
-        sp->h_handle_x = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - sp->h_handle_width);
+        float h_handle_x_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - h_handle_width_phys);
+        // Store handle position/size in CSS pixels (divide by scale) for hit-testing in event handlers
+        sp->h_handle_width = h_handle_width_phys / scale;
+        sp->h_handle_x = h_handle_x_phys / scale;
         int h_scroll_y = view_y + view_height - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
-        tvg_shape_append_rect(h_scroll_handle, view_x + sp->h_handle_x, h_scroll_y,
-            sp->h_handle_width, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
+        tvg_shape_append_rect(h_scroll_handle, view_x + h_handle_x_phys, h_scroll_y,
+            h_handle_width_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
         tvg_paint_set_mask_method(h_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     }
 
@@ -166,9 +172,12 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
     ScrollPane* sp = block->scroller->pane;
     float bottom = evcon->block.y + block->height;  float right = evcon->block.x + block->width;
+    // sc.SCROLLBAR_SIZE is in physical pixels; convert to CSS pixels for event-coordinate comparisons
+    float pixel_ratio = evcon->ui_context->pixel_ratio;
+    float scrollbar_css = sc.SCROLLBAR_SIZE / pixel_ratio;
     if (block->scroller->has_hz_scroll) {
         if (evcon->block.x <= event->x && event->x < right &&
-            bottom - sc.SCROLLBAR_SIZE <= event->y && event->y < bottom) {
+            bottom - scrollbar_css <= event->y && event->y < bottom) {
             sp->is_h_hovered = true;
             return true;
         }
@@ -176,7 +185,7 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     }
     if (block->scroller->has_vt_scroll) {
         if (evcon->block.y <= event->y && event->y < bottom &&
-            right - sc.SCROLLBAR_SIZE <= event->x && event->x < right) {
+            right - scrollbar_css <= event->x && event->x < right) {
             sp->is_v_hovered = true;
             return true;
         }
@@ -246,9 +255,14 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
 
     // Vertical dragging
     if (sp->v_is_dragging) {
-        float handle_h = sp->v_handle_height;
-        float delta_y = event->y - sp->drag_start_y;
-        float scroll_range = block->height - handle_h;
+        float handle_h = sp->v_handle_height;  // CSS pixels
+        float delta_y = event->y - sp->drag_start_y;  // CSS pixels
+        // scroll track length in CSS pixels = block height - scrollbar bottom strip - borders
+        float pixel_ratio = evcon->ui_context->pixel_ratio;
+        float scrollbar_css = sc.SCROLLBAR_SIZE / pixel_ratio;
+        float border_css = sc.SCROLL_BORDER_MAIN / pixel_ratio;
+        float scroll_track = block->height - scrollbar_css - border_css * 2;
+        float scroll_range = scroll_track - handle_h;
         float scroll_per_pixel = scroll_range > 0 ? sp->v_max_scroll / scroll_range : 0;
         float v_scroll_position = sp->v_drag_start_scroll + (delta_y * scroll_per_pixel);
         v_scroll_position = v_scroll_position < 0 ? 0 :
@@ -261,9 +275,14 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
 
     // Horizontal dragging
     if (sp->h_is_dragging) {
-        float handle_w = sp->h_handle_width;
-        float delta_x = event->x - sp->drag_start_x;
-        float scroll_range = block->width - handle_w;
+        float handle_w = sp->h_handle_width;  // CSS pixels
+        float delta_x = event->x - sp->drag_start_x;  // CSS pixels
+        // scroll track length in CSS pixels = block width - scrollbar right strip - borders
+        float pixel_ratio2 = evcon->ui_context->pixel_ratio;
+        float scrollbar_css2 = sc.SCROLLBAR_SIZE / pixel_ratio2;
+        float border_css2 = sc.SCROLL_BORDER_MAIN / pixel_ratio2;
+        float scroll_track_h = block->width - scrollbar_css2 - border_css2 * 2;
+        float scroll_range = scroll_track_h - handle_w;
         float scroll_per_pixel = scroll_range > 0 ? sp->h_max_scroll / scroll_range : 0;
         float h_scroll_position = sp->h_drag_start_scroll + (delta_x * scroll_per_pixel);
         h_scroll_position = h_scroll_position < 0 ? 0 :
