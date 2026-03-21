@@ -133,14 +133,14 @@ static char* execute_script(const char* script_path) {
     bool procedural = is_procedural_mode(script_path);
 #ifdef _WIN32
     if (procedural)
-        snprintf(command, sizeof(command), "lambda.exe run --c2mir \"%s\" 2>NUL", script_path);
+        snprintf(command, sizeof(command), "lambda.exe run --no-log --c2mir \"%s\" 2>NUL", script_path);
     else
-        snprintf(command, sizeof(command), "lambda.exe --c2mir \"%s\" 2>NUL", script_path);
+        snprintf(command, sizeof(command), "lambda.exe --no-log --c2mir \"%s\" 2>NUL", script_path);
 #else
     if (procedural)
-        snprintf(command, sizeof(command), "./lambda.exe run --c2mir \"%s\" 2>/dev/null", script_path);
+        snprintf(command, sizeof(command), "./lambda.exe run --no-log --c2mir \"%s\" 2>/dev/null", script_path);
     else
-        snprintf(command, sizeof(command), "./lambda.exe --c2mir \"%s\" 2>/dev/null", script_path);
+        snprintf(command, sizeof(command), "./lambda.exe --no-log --c2mir \"%s\" 2>/dev/null", script_path);
 #endif
 
     FILE* pipe = popen(command, "r");
