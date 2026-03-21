@@ -637,6 +637,54 @@ extern "C" Item js_object_entries(Item object) {
 }
 
 // =============================================================================
+// Object.fromEntries(iterable) — create object from [key, value] pairs
+// =============================================================================
+
+extern "C" Item js_object_from_entries(Item iterable) {
+    TypeId type = get_type_id(iterable);
+    if (type != LMD_TYPE_ARRAY) return js_new_object();
+
+    Item result = js_new_object();
+    int64_t len = js_array_length(iterable);
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_array_get(iterable, (Item){.item = i2it(i)});
+        if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
+        Item key = js_array_get(pair, (Item){.item = i2it(0)});
+        Item val = js_array_get(pair, (Item){.item = i2it(1)});
+        Item key_str = js_to_string(key);
+        js_property_set(result, key_str, val);
+    }
+    return result;
+}
+
+// =============================================================================
+// Object.is(value1, value2) — SameValue comparison (handles NaN, +0/-0)
+// =============================================================================
+
+extern "C" Item js_object_is(Item left, Item right) {
+    TypeId left_type = get_type_id(left);
+    TypeId right_type = get_type_id(right);
+
+    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
+    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    if (left_is_num && right_is_num) {
+        double l = (left_type == LMD_TYPE_FLOAT) ? it2d(left) : (double)it2i(left);
+        double r = (right_type == LMD_TYPE_FLOAT) ? it2d(right) : (double)it2i(right);
+        // Object.is(NaN, NaN) → true (unlike ===)
+        if (isnan(l) && isnan(r)) return (Item){.item = b2it(true)};
+        if (isnan(l) || isnan(r)) return (Item){.item = b2it(false)};
+        // Object.is(+0, -0) → false (unlike ===)
+        if (l == 0.0 && r == 0.0) {
+            return (Item){.item = b2it(signbit(l) == signbit(r))};
+        }
+        return (Item){.item = b2it(l == r)};
+    }
+
+    // Fall back to strict equality for non-numeric types
+    return js_strict_equal(left, right);
+}
+
+// =============================================================================
 // Object.assign(target, ...sources)
 // =============================================================================
 

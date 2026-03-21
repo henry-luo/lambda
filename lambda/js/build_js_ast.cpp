@@ -128,6 +128,9 @@ JsOperator js_operator_from_string(const char* op_str, size_t len) {
         if (strncmp(op_str, "**=", 3) == 0) return JS_OP_EXP_ASSIGN;
         if (strncmp(op_str, "<<=", 3) == 0) return JS_OP_LSHIFT_ASSIGN;
         if (strncmp(op_str, ">>=", 3) == 0) return JS_OP_RSHIFT_ASSIGN;
+        if (strncmp(op_str, "??=", 3) == 0) return JS_OP_NULLISH_ASSIGN;
+        if (strncmp(op_str, "&&=", 3) == 0) return JS_OP_AND_ASSIGN;
+        if (strncmp(op_str, "||=", 3) == 0) return JS_OP_OR_ASSIGN;
     } else if (len == 4) {
         if (strncmp(op_str, "void", 4) == 0) return JS_OP_VOID;
         if (strncmp(op_str, ">>>=", 4) == 0) return JS_OP_URSHIFT_ASSIGN;
@@ -389,6 +392,10 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
     // Function calls return ANY type by default
     call->base.type = &TYPE_ANY;
 
+    // Detect optional chaining (obj?.method())
+    TSNode opt_chain = ts_node_child_by_field_name(call_node, "optional_chain", strlen("optional_chain"));
+    call->optional = !ts_node_is_null(opt_chain);
+
     return (JsAstNode*)call;
 }
 
@@ -399,6 +406,10 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
     // Get object
     TSNode object_node = ts_node_child_by_field_name(member_node, "object", strlen("object"));
     member->object = build_js_expression(tp, object_node);
+
+    // Detect optional chaining (obj?.prop or obj?.[prop])
+    TSNode opt_chain = ts_node_child_by_field_name(member_node, "optional_chain", strlen("optional_chain"));
+    member->optional = !ts_node_is_null(opt_chain);
 
     // Determine if computed (obj[prop]) or not (obj.prop) using node type string
     const char* node_type = ts_node_type(member_node);
@@ -980,6 +991,23 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         // Handle parenthesized expressions - just return the inner expression
         TSNode inner_node = ts_node_named_child(expr_node, 0);
         return build_js_expression(tp, inner_node);
+    } else if (strcmp(node_type, "sequence_expression") == 0) {
+        // v11: Comma operator — evaluate all, return last
+        JsSequenceNode* seq = (JsSequenceNode*)alloc_js_ast_node(
+            tp, JS_AST_NODE_SEQUENCE_EXPRESSION, expr_node, sizeof(JsSequenceNode));
+        uint32_t count = ts_node_named_child_count(expr_node);
+        JsAstNode* prev = NULL;
+        for (uint32_t i = 0; i < count; i++) {
+            TSNode child = ts_node_named_child(expr_node, i);
+            JsAstNode* expr = build_js_expression(tp, child);
+            if (expr) {
+                if (!prev) seq->expressions = expr;
+                else prev->next = expr;
+                prev = expr;
+            }
+        }
+        seq->base.type = &TYPE_ANY;
+        return (JsAstNode*)seq;
     } else if (strcmp(node_type, "ternary_expression") == 0) {
         JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
         log_debug("ternary: building conditional expression");

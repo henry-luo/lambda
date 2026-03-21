@@ -1,0 +1,11 @@
+TypeError name: TypeError
+TypeError msg: bad type
+RangeError name: RangeError
+RangeError msg: out of range
+SyntaxError name: SyntaxError
+SyntaxError msg: bad syntax
+ReferenceError name: ReferenceError
+ReferenceError msg: not defined
+Error name: Error
+Error msg: basic error
+null

@@ -91,6 +91,16 @@ extern "C" Item js_new_error(Item message) {
     return obj;
 }
 
+// v11: Create a typed Error (TypeError, RangeError, SyntaxError, ReferenceError)
+extern "C" Item js_new_error_with_name(Item error_name, Item message) {
+    Item obj = js_new_object();
+    Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+    js_property_set(obj, name_key, error_name);
+    Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
+    js_property_set(obj, msg_key, message);
+    return obj;
+}
+
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
 }
