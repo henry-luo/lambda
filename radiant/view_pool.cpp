@@ -990,6 +990,15 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     float css_width = rect ? rect->width : view->width;
     float css_height = rect ? rect->height : view->height;
 
+    // For the root <html> element, viewport clamping sets height to viewport size
+    // but browsers report the full content height. Use content_height when available.
+    if (!rect && view->is_element() && !view->parent) {
+        DomElement* elem = (DomElement*)view;
+        if (elem->content_height > css_height) {
+            css_height = elem->content_height;
+        }
+    }
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
