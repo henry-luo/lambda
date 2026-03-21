@@ -535,19 +535,4 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     return results;
 }
 
-// Determine which test indices belong to the current GTest shard.
-// GTest uses: test_index % total_shards == shard_index
-inline void get_shard_indices(size_t total_tests, std::vector<size_t>& indices) {
-    const char* total_env = getenv("GTEST_TOTAL_SHARDS");
-    const char* index_env = getenv("GTEST_SHARD_INDEX");
-    int total_shards = total_env ? atoi(total_env) : 1;
-    int shard_index = index_env ? atoi(index_env) : 0;
-
-    for (size_t i = 0; i < total_tests; i++) {
-        if ((int)(i % total_shards) == shard_index) {
-            indices.push_back(i);
-        }
-    }
-}
-
 #endif // TEST_LAMBDA_HELPERS_HPP

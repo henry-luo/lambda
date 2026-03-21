@@ -110,15 +110,16 @@ public:
     static void SetUpTestSuite() {
         if (batch_executed) return;
 
-        // Determine which tests this shard runs
-        std::vector<size_t> shard_indices;
-        get_shard_indices(g_lambda_tests.size(), shard_indices);
-
+        // Batch ALL scripts regardless of shard index.
+        // GTest sharding controls which TEST_P instances run, but the batch
+        // must contain results for all of them because GTest's shard index
+        // space (which includes non-parameterized tests like LambdaNegativeTests)
+        // differs from g_lambda_tests indices, causing misalignment.
         std::vector<std::string> scripts;
         std::vector<bool> procs;
-        for (size_t idx : shard_indices) {
-            scripts.push_back(g_lambda_tests[idx].script_path);
-            procs.push_back(g_lambda_tests[idx].is_procedural);
+        for (const auto& test : g_lambda_tests) {
+            scripts.push_back(test.script_path);
+            procs.push_back(test.is_procedural);
         }
 
         bool use_mir = !getenv("LAMBDA_USE_C2MIR");
