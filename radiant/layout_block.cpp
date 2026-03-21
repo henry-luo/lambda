@@ -4510,13 +4510,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.advance_x = effective_left;
             }
 
-            // Check if parent has white-space: nowrap/pre (no wrapping allowed)
+            // Check if any ancestor has white-space: nowrap/pre (no wrapping allowed)
+            // Walk up parent chain since inline spans don't have blk
             bool parent_nowrap = false;
-            if (block->parent && block->parent->is_element()) {
-                DomElement* parent_elem = static_cast<DomElement*>(block->parent);
-                if (parent_elem->blk) {
-                    CssEnum ws = parent_elem->blk->white_space;
+            for (DomNode* cur = block->parent; cur; cur = cur->parent) {
+                if (!cur->is_element()) break;
+                DomElement* elem = static_cast<DomElement*>(cur);
+                if (elem->blk && elem->blk->white_space != 0) {
+                    CssEnum ws = elem->blk->white_space;
                     parent_nowrap = (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
+                    break;
                 }
             }
 
@@ -5206,7 +5209,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
                 }
                 // Include lycon->line.left to account for parent's left border+padding
-                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width
+                // For auto-width parents (shrink-to-fit), auto-width block children
+                // should contribute their intrinsic content width, not their container-expanded width
+                float child_w = block->width;
+                if (lycon->block.given_width < 0 && block->blk && block->blk->given_width < 0
+                    && isnan(block->blk->given_width_percent)) {
+                    child_w = block->content_width;
+                    if (block->bound->border) {
+                        child_w += block->bound->border->width.left + block->bound->border->width.right;
+                    }
+                }
+                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + child_w
                     + block->bound->margin.left + block->bound->margin.right);
             } else {
                 // For no-bound blocks, use actual y position to compute advance_y.
@@ -5214,7 +5227,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // the original advance_y, so we must use the actual position.
                 lycon->block.advance_y = block->y + block->height;
                 // Include lycon->line.left to account for parent's left border+padding
-                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width);
+                // For auto-width parents (shrink-to-fit), auto-width block children
+                // should contribute their intrinsic content width, not container-expanded width
+                float child_w_nb = block->width;
+                if (lycon->block.given_width < 0
+                    && (!block->blk || (block->blk->given_width < 0 && isnan(block->blk->given_width_percent)))
+                    && block->content_width < block->width) {
+                    child_w_nb = block->content_width;
+                }
+                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + child_w_nb);
             }
             // For non-float blocks, we should be at line start after the block
             // (floats are handled above and don't require this assertion)
