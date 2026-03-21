@@ -1219,26 +1219,32 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 block->embed->doc = doc; // assign loaded document to embed property
                 if (doc->html_root) {
                     log_debug("IFRAME TRACE: about to layout iframe document");
-                    // Save parent document and window dimensions
+                    // Save parent document and window/viewport dimensions
                     DomDocument* parent_doc = lycon->ui_context->document;
                     float saved_window_width = lycon->ui_context->window_width;
                     float saved_window_height = lycon->ui_context->window_height;
+                    int saved_viewport_width = lycon->ui_context->viewport_width;
+                    int saved_viewport_height = lycon->ui_context->viewport_height;
 
-                    // Temporarily set window dimensions to iframe size
-                    // This ensures layout_html_doc uses iframe dimensions for layout
+                    // Temporarily set window/viewport dimensions to iframe size
+                    // Both window_ and viewport_ must match so layout_init picks up iframe dims
                     lycon->ui_context->document = doc;
                     lycon->ui_context->window_width = (float)iframe_width;
                     lycon->ui_context->window_height = (float)iframe_height;
+                    lycon->ui_context->viewport_width = iframe_width;
+                    lycon->ui_context->viewport_height = iframe_height;
 
                     // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
                     process_document_font_faces(lycon->ui_context, doc);
 
                     layout_html_doc(lycon->ui_context, doc, false);
 
-                    // Restore parent document and window dimensions
+                    // Restore parent document and window/viewport dimensions
                     lycon->ui_context->document = parent_doc;
                     lycon->ui_context->window_width = saved_window_width;
                     lycon->ui_context->window_height = saved_window_height;
+                    lycon->ui_context->viewport_width = saved_viewport_width;
+                    lycon->ui_context->viewport_height = saved_viewport_height;
                     log_debug("IFRAME TRACE: finished layout iframe document");
                 }
                 iframe_depth--;
@@ -1261,8 +1267,27 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
         lycon->block.max_width = iframe_width;
         lycon->block.advance_y = iframe_height;
         log_debug("IFRAME TRACE: set lycon->block.advance_y = %.1f from iframe_height", lycon->block.advance_y);
+
+        // Disable inner doc's viewport scroller — the iframe container handles scrolling.
+        // Otherwise we get double scrolling/clipping (inner root + outer iframe block).
+        if (root->scroller) {
+            if (root->content_height > root->height) {
+                root->height = root->content_height;  // restore full content height
+            }
+            root->scroller = NULL;
+        }
     }
+    // Set outer iframe block as scroll container (overflow:auto)
+    if (!block->scroller) {
+        block->scroller = alloc_scroll_prop(lycon);
+    }
+    block->scroller->overflow_y = CSS_VALUE_AUTO;
     finalize_block_flow(lycon, block, display.outer);
+    // Set v_max_scroll on the iframe block's pane
+    if (block->scroller && block->scroller->pane) {
+        block->scroller->pane->v_max_scroll = block->content_height > block->height ?
+            block->content_height - block->height : 0;
+    }
     log_debug("IFRAME TRACE: after finalize_block_flow, iframe block->content_height=%.1f", block->content_height);
 }
 

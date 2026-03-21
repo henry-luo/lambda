@@ -96,7 +96,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
-    float content_width, float content_height, Bound* clip);
+    float content_width, float content_height, Bound* clip, float scale);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
@@ -1319,7 +1319,7 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
         }
         if (block->scroller->pane) {
             scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
-                block->content_width * s, block->content_height * s, &rdcon->block.clip);
+                block->content_width * s, block->content_height * s, &rdcon->block.clip, s);
         } else {
             log_error("scroller has no scroll pane");
         }
@@ -1731,7 +1731,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
         }
     }
 
-    // render scrollbars
+    // Render scrollbar for the iframe scroll container
     if (block->scroller) {
         render_scroller(rdcon, block, &pa_block);
     }
