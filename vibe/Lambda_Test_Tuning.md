@@ -910,11 +910,31 @@ Reduced the C2MIR batch chunk size from 50 to 5 scripts per `lambda.exe` process
 | 50 | 4 threads | 1096 ms | — |
 | **5** | **33 threads** | **821 ms** | **25% faster** |
 
+### 13.3 Lambda GTest Batch Size Tuning
+
+Tested batch chunk sizes for `test_lambda_gtest.exe` (237 parameterized tests) to find the optimal parallelism level.
+
+**Measured results (test_lambda_gtest.exe, 237 tests, all pass):**
+
+| Batch Size | Sub-batches | GTest Time | Speedup vs 50 |
+|-----------|-------------|-----------|---------------|
+| 50 (default) | 5 threads | 11119 ms | — |
+| 25 | 10 threads | 9962 ms | 10% |
+| 10 | 24 threads | 6176 ms | 44% |
+| **5** | **48 threads** | **5271 ms** | **53%** |
+| 3 | 79 threads | 5021 ms | 55% |
+| 1 | 237 threads | 5853 ms | 47% |
+
+**Analysis:** Batch size 3-5 is the sweet spot. Below 3, per-process spawn overhead (~15ms each) starts to dominate. **Batch size 5** selected for consistency with c2mir and a good parallelism-to-overhead balance.
+
+Total improvement: **11.1s → 5.3s (53% faster)** for the largest baseline test executable.
+
 ### Files Modified
 
 | File | Change |
 |------|--------|
 | `lambda/main.cpp` | `--no-log` argv stripping (scan + shift + decrement argc) |
+| `test/test_lambda_gtest.cpp` | Batch chunk size: 50 → 5 |
 | `test/test_c2mir_gtest.cpp` | Batch chunk size: 50 → 5 |
 | `test/test_lambda_helpers.hpp` | `execute_lambda_batch()` accepts optional `batch_chunk_size` parameter |
 | `test/test_js_gtest.cpp` | Fixed `--no-log` placement for builtin test command |

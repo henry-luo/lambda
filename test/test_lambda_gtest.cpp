@@ -123,7 +123,7 @@ public:
         }
 
         bool use_mir = !getenv("LAMBDA_USE_C2MIR");
-        batch_results = execute_lambda_batch(scripts, procs, use_mir);
+        batch_results = execute_lambda_batch(scripts, procs, use_mir, /*batch_chunk_size=*/5);
         batch_executed = true;
     }
 };
