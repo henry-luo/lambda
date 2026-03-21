@@ -684,13 +684,16 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
     log_debug("=================\nView tree:");
     log_debug("%s", buf->str);
     log_debug("=================\n");
-    char vfile[1024];  const char *last_slash;
-    if (url && url->pathname && url->pathname->chars) {
-        last_slash = strrchr((const char*)url->pathname->chars, '/');
-        snprintf(vfile, sizeof(vfile), "./test_output/view_tree_%s.txt", last_slash + 1);
-        write_string_to_file(vfile, buf->str);
+    // only write text side-channel files when no explicit output_path is given
+    if (!output_path) {
+        char vfile[1024];  const char *last_slash;
+        if (url && url->pathname && url->pathname->chars) {
+            last_slash = strrchr((const char*)url->pathname->chars, '/');
+            snprintf(vfile, sizeof(vfile), "./test_output/view_tree_%s.txt", last_slash + 1);
+            write_string_to_file(vfile, buf->str);
+        }
+        write_string_to_file("./view_tree.txt", buf->str);
     }
-    write_string_to_file("./view_tree.txt", buf->str);
     strbuf_free(buf);
 
     // also generate JSON output
@@ -2271,9 +2274,9 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
     }
     strbuf_append_str(json_buf, "\n}\n");
 
-    // Write to file in both ./ and /tmp directory for easier access
+    // Write to file in ./test_output/ only when no explicit output_path is given
     char buf[1024];  const char *last_slash;
-    if (url && url->pathname && url->pathname->chars) {
+    if (!output_path && url && url->pathname && url->pathname->chars) {
         last_slash = strrchr((const char*)url->pathname->chars, '/');
         snprintf(buf, sizeof(buf), "./test_output/view_tree_%s.json", last_slash + 1);
         log_debug("Writing JSON layout data to: %s", buf);
