@@ -411,6 +411,64 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
         br_view->width = 0;  br_view->height = lycon->block.line_height;
         line_break(lycon);
+
+        // CSS 2.1 §9.5.2: check if the <br> has a 'clear' property and apply float clearance.
+        // Browsers treat <br style="clear:both"> as clearing floats at the line break point.
+        if (elmt->is_element()) {
+            DomElement* br_elem = static_cast<DomElement*>(elmt);
+            CssEnum clear_value = CSS_VALUE_NONE;
+            if (br_elem->specified_style && br_elem->specified_style->tree) {
+                AvlNode* clear_node = avl_tree_search(br_elem->specified_style->tree, CSS_PROPERTY_CLEAR);
+                if (clear_node) {
+                    StyleNode* sn = (StyleNode*)clear_node->declaration;
+                    if (sn && sn->winning_decl && sn->winning_decl->value &&
+                        sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        clear_value = sn->winning_decl->value->data.keyword;
+                    }
+                }
+            }
+            if (clear_value == CSS_VALUE_LEFT || clear_value == CSS_VALUE_RIGHT ||
+                clear_value == CSS_VALUE_BOTH) {
+                BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                if (bfc) {
+                    // Progressive clear: only clear past floats whose top edge is at or
+                    // above the current advance_y. This handles the case where all floats
+                    // were pre-laid in the prescan and we need to clear them incrementally
+                    // as the inline flow encounters each <br> clear point.
+                    float current_bfc_y = lycon->block.advance_y + lycon->block.bfc_offset_y;
+                    float clear_y = 0;
+                    if (clear_value == CSS_VALUE_LEFT || clear_value == CSS_VALUE_BOTH) {
+                        for (FloatBox* fb = bfc->left_floats; fb; fb = fb->next) {
+                            if (fb->margin_box_top <= current_bfc_y && fb->margin_box_bottom > clear_y)
+                                clear_y = fb->margin_box_bottom;
+                        }
+                    }
+                    if (clear_value == CSS_VALUE_RIGHT || clear_value == CSS_VALUE_BOTH) {
+                        for (FloatBox* fb = bfc->right_floats; fb; fb = fb->next) {
+                            if (fb->margin_box_top <= current_bfc_y && fb->margin_box_bottom > clear_y)
+                                clear_y = fb->margin_box_bottom;
+                        }
+                    }
+                    // clear_y is in BFC coordinates; convert to local
+                    float local_clear_y = clear_y - lycon->block.bfc_offset_y;
+                    if (local_clear_y > lycon->block.advance_y) {
+                        log_debug("<br> clear: advance_y %.1f -> %.1f (clear_y=%.1f, bfc_offset=%.1f)",
+                                  lycon->block.advance_y, local_clear_y, clear_y, lycon->block.bfc_offset_y);
+                        lycon->block.advance_y = local_clear_y;
+
+                        // CSS 2.1 §9.5.2: After clearing, re-adjust the line's effective
+                        // bounds and advance_x for float intrusion at the new y position.
+                        // line_break() already called line_reset() which set advance_x based
+                        // on float space at the pre-clear y; we must update for post-clear y.
+                        lycon->line.effective_left = lycon->line.left;
+                        lycon->line.effective_right = lycon->line.right;
+                        lycon->line.has_float_intrusion = false;
+                        lycon->line.advance_x = lycon->line.left + lycon->line.inline_start_edge_pending;
+                        adjust_line_for_floats(lycon);
+                    }
+                }
+            }
+        }
         return;
     }
 

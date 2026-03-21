@@ -61,7 +61,7 @@ static void offset_children_recursive(ViewElement* elem, int offset_x, int offse
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     log_debug("Applying relative positioning to element");
     // calculate offset from top/right/bottom/left properties
-    int offset_x = 0, offset_y = 0;
+    float offset_x = 0, offset_y = 0;
 
     // Get parent's text direction to determine horizontal offset precedence
     // The CSS 'direction' property determines which value wins when both left and right are specified
@@ -90,6 +90,16 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
+    // Get containing block dimensions for percentage resolution
+    // CSS Position 3 §3.4: percentage top/bottom resolve against containing block height,
+    // percentage left/right resolve against containing block width
+    float cb_width = 0, cb_height = 0;
+    if (parent && parent->is_block()) {
+        ViewBlock* parent_block = (ViewBlock*)parent;
+        cb_width = parent_block->content_width;
+        cb_height = parent_block->content_height;
+    }
+
     // horizontal offset: precedence depends on containing block's direction
     // CSS spec: If both left and right are not 'auto':
     // - If direction is 'ltr', left wins and right is ignored
@@ -99,38 +109,62 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     if (both_horizontal) {
         if (parent_direction == TD_RTL) {
             // CSS 2.1 §9.4.3: RTL — right wins, left becomes -right
-            offset_x = -block->position->right;
-            log_debug("Over-constrained relative positioning (RTL): right=%d wins, left=%d ignored",
-                     block->position->right, block->position->left);
+            if (!isnan(block->position->right_percent)) {
+                offset_x = -(block->position->right_percent * cb_width / 100.0f);
+            } else {
+                offset_x = -block->position->right;
+            }
+            log_debug("Over-constrained relative positioning (RTL): right wins, left ignored");
         } else {
             // LTR: left takes precedence (always, even if equal to right)
-            offset_x = block->position->left;
-            log_debug("Over-constrained relative positioning (LTR): left=%d wins, right=%d ignored",
-                     block->position->left, block->position->right);
+            if (!isnan(block->position->left_percent)) {
+                offset_x = block->position->left_percent * cb_width / 100.0f;
+            } else {
+                offset_x = block->position->left;
+            }
+            log_debug("Over-constrained relative positioning (LTR): left wins, right ignored");
         }
     } else if (block->position->has_left) {
-        offset_x = block->position->left;
+        if (!isnan(block->position->left_percent)) {
+            offset_x = block->position->left_percent * cb_width / 100.0f;
+        } else {
+            offset_x = block->position->left;
+        }
     } else if (block->position->has_right) {
-        offset_x = -block->position->right;
-    }    // vertical offset: top takes precedence over bottom
-    if (block->position->has_top) {
-        offset_y = block->position->top;
-    } else if (block->position->has_bottom) {
-        offset_y = -block->position->bottom;
+        if (!isnan(block->position->right_percent)) {
+            offset_x = -(block->position->right_percent * cb_width / 100.0f);
+        } else {
+            offset_x = -block->position->right;
+        }
     }
-    log_debug("Calculated relative offset: x=%d, y=%d (parent direction=%s)",
-             offset_x, offset_y, parent_direction == TD_RTL ? "RTL" : "LTR");
+    // vertical offset: top takes precedence over bottom
+    // CSS 2.1 §10.6.5: if containing block height is auto, percentage top/bottom = 0
+    if (block->position->has_top) {
+        if (!isnan(block->position->top_percent)) {
+            offset_y = block->position->top_percent * cb_height / 100.0f;
+        } else {
+            offset_y = block->position->top;
+        }
+    } else if (block->position->has_bottom) {
+        if (!isnan(block->position->bottom_percent)) {
+            offset_y = -(block->position->bottom_percent * cb_height / 100.0f);
+        } else {
+            offset_y = -block->position->bottom;
+        }
+    }
+    log_debug("Calculated relative offset: x=%.1f, y=%.1f (parent direction=%s, cb=%.0fx%.0f)",
+             offset_x, offset_y, parent_direction == TD_RTL ? "RTL" : "LTR", cb_width, cb_height);
 
     // apply offset to visual position (doesn't affect layout of other elements)
     block->x += offset_x;  block->y += offset_y;
-    log_debug("Applied relative positioning: offset (%d, %d), final position (%d, %d)",
+    log_debug("Applied relative positioning: offset (%.1f, %.1f), final position (%.0f, %.0f)",
               offset_x, offset_y, block->x, block->y);
 
     // For inline elements (spans), children have block-relative coordinates,
     // so we must also offset all descendants to move with the inline box
     if (block->view_type == RDT_VIEW_INLINE && (offset_x != 0 || offset_y != 0)) {
-        log_debug("Offsetting inline children by (%d, %d)", offset_x, offset_y);
-        offset_children_recursive((ViewElement*)block, offset_x, offset_y);
+        log_debug("Offsetting inline children by (%.1f, %.1f)", offset_x, offset_y);
+        offset_children_recursive((ViewElement*)block, (int)offset_x, (int)offset_y);
     }
 
     // todo: add to chain of positioned elements for z-index stacking
