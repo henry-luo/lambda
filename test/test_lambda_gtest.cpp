@@ -201,9 +201,10 @@ void test_lambda_script_expects_error(const char* script_path) {
     int exit_code = pclose(pipe);
     (void)exit_code;  // exit code may be 0 even with errors
     
-    // Should contain error messages (type_error or [ERR!])
+    // Should contain error messages (type_error, [ERR!], or error[E...])
     bool has_error_msg = output.find("type_error") != std::string::npos ||
-                         output.find("[ERR!]") != std::string::npos;
+                         output.find("[ERR!]") != std::string::npos ||
+                         output.find("error[E") != std::string::npos;
     EXPECT_TRUE(has_error_msg) << "Expected error messages in output for: " << script_path
                                << "\nOutput was: " << output;
     
