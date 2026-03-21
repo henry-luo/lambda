@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <thread>
+#include <unordered_map>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -517,6 +519,7 @@ static const size_t BATCH_CHUNK_SIZE = 50;
 
 // Run multiple scripts using test-batch command, splitting into sub-batches
 // to avoid memory/state accumulation in the lambda.exe process.
+// Sub-batches run in parallel threads for faster execution.
 // Returns a map from script_path -> BatchResult.
 inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     const std::vector<std::string>& scripts,
@@ -526,10 +529,32 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     std::unordered_map<std::string, BatchResult> results;
     if (scripts.empty()) return results;
 
+    // Build list of sub-batch ranges
+    struct SubBatch { size_t start; size_t end; int id; };
+    std::vector<SubBatch> batches;
     int batch_id = 0;
     for (size_t start = 0; start < scripts.size(); start += BATCH_CHUNK_SIZE) {
         size_t end = std::min(start + BATCH_CHUNK_SIZE, scripts.size());
-        run_sub_batch(scripts, is_procedural, start, end, use_mir, batch_id++, results);
+        batches.push_back({start, end, batch_id++});
+    }
+
+    // Run sub-batches in parallel — each thread gets its own result map
+    std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < batches.size(); i++) {
+        threads.emplace_back([&, i]() {
+            run_sub_batch(scripts, is_procedural,
+                          batches[i].start, batches[i].end,
+                          use_mir, batches[i].id, thread_results[i]);
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    // Merge results
+    for (auto& partial : thread_results) {
+        for (auto& kv : partial) {
+            results[kv.first] = std::move(kv.second);
+        }
     }
 
     return results;
