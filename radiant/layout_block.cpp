@@ -1902,7 +1902,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             // CSS 2.1 §17.2.1: Before flow layout, check if any children are orphaned
             // table-internal elements (table-cell, table-row, etc.) that need wrapping
             // in anonymous table structures. This must happen before layout.
-            if (block->display.inner == CSS_VALUE_FLOW && !is_orphaned_table_internal) {
+            if ((block->display.inner == CSS_VALUE_FLOW || block->display.inner == CSS_VALUE_FLOW_ROOT) && !is_orphaned_table_internal) {
                 DomElement* block_elem = block->as_element();
                 if (block_elem && wrap_orphaned_table_children(lycon, block_elem)) {
                     // Re-get first child after wrapping may have inserted anonymous elements
@@ -1910,7 +1910,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 }
             }
 
-            if (block->display.inner == CSS_VALUE_FLOW || is_orphaned_table_internal) {
+            if (block->display.inner == CSS_VALUE_FLOW || block->display.inner == CSS_VALUE_FLOW_ROOT || is_orphaned_table_internal) {
                 // Check for multi-column layout
                 bool is_multicol = is_multicol_container(block);
 
@@ -4217,6 +4217,29 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (lycon->counter_context) {
         counter_push_scope(lycon->counter_context);
 
+        // CSS 2.1 §12.5: OL, UL, MENU, DIR have implicit counter-reset: list-item
+        // This creates a new list-item counter instance for each list container,
+        // enabling counters(list-item, ".") to show nested numbering (e.g., "1.2.3").
+        if (dom_elem && !(block->blk && block->blk->counter_reset)) {
+            uintptr_t tag = dom_elem->tag_id;
+            if (tag == HTM_TAG_OL || tag == HTM_TAG_UL ||
+                tag == HTM_TAG_MENU || tag == HTM_TAG_DIR) {
+                // Check <ol start="N"> attribute: resets to N-1 so first li increments to N
+                int start_value = 0;  // default: counter-reset: list-item 0
+                if (tag == HTM_TAG_OL) {
+                    const char* start_attr = dom_element_get_attribute(dom_elem, "start");
+                    if (start_attr) {
+                        start_value = atoi(start_attr) - 1;
+                        log_debug("    [List] OL start=%s → counter-reset: list-item %d", start_attr, start_value);
+                    }
+                }
+                char reset_spec[64];
+                snprintf(reset_spec, sizeof(reset_spec), "list-item %d", start_value);
+                counter_reset(lycon->counter_context, reset_spec);
+                log_debug("    [List] Implicit counter-reset: %s for <%s>", reset_spec, dom_elem->tag_name);
+            }
+        }
+
         // Apply counter-reset if specified
         if (block->blk && block->blk->counter_reset) {
             log_debug("    [Block] Applying counter-reset: %s", block->blk->counter_reset);
@@ -4238,20 +4261,40 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
         // For display:list-item, auto-increment list-item counter
-        if (display.outer == CSS_VALUE_LIST_ITEM) {
+        if (display.outer == CSS_VALUE_LIST_ITEM || display.list_item) {
+            // Handle <li value="N"> attribute: sets counter to N before increment
+            if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
+                const char* value_attr = dom_element_get_attribute(dom_elem, "value");
+                if (value_attr) {
+                    int li_value = atoi(value_attr);
+                    // CSS Lists 3: li[value] acts as counter-set: list-item <value>
+                    // counter-set is processed after counter-increment, but we need
+                    // the value to be set BEFORE increment. So set to value-1 and let
+                    // the auto-increment bring it to value.
+                    char set_spec[64];
+                    snprintf(set_spec, sizeof(set_spec), "list-item %d", li_value - 1);
+                    counter_set(lycon->counter_context, set_spec);
+                    log_debug("    [List] LI value=%s → counter-set: list-item %d", value_attr, li_value - 1);
+                }
+            }
+
             log_debug("    [List] Auto-incrementing list-item counter");
             counter_increment(lycon->counter_context, "list-item 1");
 
+            // For inline list-item (outer != LIST_ITEM), force inside position
+            // since there's no block margin area for outside markers
+            bool is_inline_list_item = (display.outer != CSS_VALUE_LIST_ITEM && display.list_item);
+
             // Set default list-style-position to outside if not specified
             // CSS 2.1 Section 12.5.1: Initial value is 'outside'
-            bool is_outside_position = true;  // Default is outside
+            bool is_outside_position = !is_inline_list_item;  // Default is outside, but inside for inline
             if (block->blk && block->blk->list_style_position != 0) {
                 // Check if position is explicitly set to "inside"
                 // Position values: 1=inside, 2=outside (from shorthand expansion)
                 if (block->blk->list_style_position == 1) {
                     is_outside_position = false;
                     log_debug("    [List] list-style-position=inside (is_outside=0)");
-                } else {
+                } else if (!is_inline_list_item) {
                     is_outside_position = true;
                     log_debug("    [List] list-style-position=outside (is_outside=1)");
                 }

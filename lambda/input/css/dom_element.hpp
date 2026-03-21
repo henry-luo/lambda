@@ -106,6 +106,7 @@ struct DomDocument {
 typedef struct {
     CssEnum outer;
     CssEnum inner;
+    bool list_item;  // true when 'list-item' keyword present (generates ::marker)
 } DisplayValue;
 
 typedef struct InlineProp InlineProp;

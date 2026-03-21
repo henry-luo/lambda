@@ -113,6 +113,60 @@ void counter_pop_scope(CounterContext* ctx) {
     }
 }
 
+void counter_pop_scope_propagate(CounterContext* ctx) {
+    if (!ctx || !ctx->scope_stack) return;
+
+    int size = ctx->scope_stack->length;
+    if (size <= 1) return;
+
+    CounterScope* scope = (CounterScope*)ctx->scope_stack->data[size - 1];
+    CounterScope* parent = (size > 1) ? (CounterScope*)ctx->scope_stack->data[size - 2] : nullptr;
+
+    // Propagate counters from popped scope to parent
+    // Only propagate counters created by counter-set/counter-increment (implicit creation).
+    // Counters from counter-reset have proper scoping and should NOT propagate.
+    if (scope && scope->counters && parent && parent->counters) {
+        size_t iter = 0;
+        void* item;
+        while (hashmap_iter(scope->counters, &iter, &item)) {
+            CounterValue* cv = (CounterValue*)item;
+            if (cv->created_by_reset) continue;  // Don't propagate counter-reset counters
+
+            CounterValue search_key = {cv->name, 0, false, false};
+            CounterValue* parent_cv = (CounterValue*)hashmap_get(parent->counters, &search_key);
+            if (parent_cv) {
+                // Update existing parent counter value
+                parent_cv->value = cv->value;
+                parent_cv->propagated = true;
+            } else {
+                // Add new counter to parent scope, marked as propagated
+                CounterValue new_cv;
+                new_cv.name = cv->name;
+                new_cv.value = cv->value;
+                new_cv.propagated = true;
+                new_cv.created_by_reset = false;
+                hashmap_set(parent->counters, &new_cv);
+            }
+            log_debug("[Counters] Propagated '%s' = %d to parent scope", cv->name, cv->value);
+        }
+    }
+
+    // Free the hash map before removing
+    if (scope && scope->counters) {
+        hashmap_free(scope->counters);
+    }
+
+    // Pop from stack
+    arraylist_remove(ctx->scope_stack, size - 1);
+
+    // Update current scope to parent
+    if (size > 1) {
+        ctx->current_scope = (CounterScope*)ctx->scope_stack->data[size - 2];
+    } else {
+        ctx->current_scope = nullptr;
+    }
+}
+
 // ============================================================================
 // Counter Parsing Helpers
 // ============================================================================
@@ -167,11 +221,14 @@ static void parse_counter_spec(const char* spec,
         while (*p && isspace(*p)) p++;
         if (!*p) break;
 
-        // Parse name
+        // Parse name: read until whitespace (CSS <custom-ident> can contain hyphens, underscores, digits)
         const char* name_start = p;
-        while (*p && !isspace(*p) && !isdigit(*p) && *p != '-' && *p != '+') p++;
+        while (*p && !isspace(*p)) p++;
 
         if (p == name_start) break;
+
+        // verify it looks like a CSS identifier (starts with letter, underscore, or hyphen)
+        if (!isalpha(name_start[0]) && name_start[0] != '_' && name_start[0] != '-') break;
 
         size_t name_len = p - name_start;
         char* name = (char*)arena_alloc(arena, name_len + 1);
@@ -183,9 +240,9 @@ static void parse_counter_spec(const char* spec,
         // Skip whitespace
         while (*p && isspace(*p)) p++;
 
-        // Parse value (optional, defaults to 0 for reset, 1 for increment)
+        // Parse optional integer value (sign must be followed by digit)
         int value = 0;
-        if (*p && (isdigit(*p) || *p == '-' || *p == '+')) {
+        if (*p && (isdigit(*p) || ((*p == '-' || *p == '+') && *(p+1) && isdigit(*(p+1))))) {
             char* endptr = nullptr;
             long long_value = strtol(p, &endptr, 10);
 
@@ -201,10 +258,6 @@ static void parse_counter_spec(const char* spec,
             // Move pointer past the parsed number
             if (endptr > p) {
                 p = endptr;
-            } else {
-                // Skip manually if strtol failed
-                if (*p == '-' || *p == '+') p++;
-                while (*p && isdigit(*p)) p++;
             }
         }
 
@@ -235,14 +288,29 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
 
     for (int i = 0; i < count; i++) {
         // Create or update counter in current scope
-        CounterValue search_key = {names[i], 0};
+        CounterValue search_key = {names[i], 0, false, false};
         CounterValue* existing = (CounterValue*)hashmap_get(ctx->current_scope->counters, &search_key);
 
         if (!existing) {
+            // Before creating: check if parent scope has a propagated counter
+            // with the same name. If so, remove it — this is a sibling counter-reset
+            // replacing the previous sibling's counter (CSS 2.1 §12.4.1).
+            if (ctx->current_scope->parent && ctx->current_scope->parent->counters) {
+                CounterValue* parent_cv = (CounterValue*)hashmap_get(
+                    ctx->current_scope->parent->counters, &search_key);
+                if (parent_cv && parent_cv->propagated) {
+                    hashmap_delete(ctx->current_scope->parent->counters, &search_key);
+                    log_debug("[Counters]   Removed propagated '%s' from parent (sibling replacement)",
+                              names[i]);
+                }
+            }
+
             // Create new counter
             CounterValue new_counter;
             new_counter.name = names[i];
             new_counter.value = values[i];
+            new_counter.propagated = false;
+            new_counter.created_by_reset = true;
 
             hashmap_set(ctx->current_scope->counters, &new_counter);
             log_debug("[Counters]   Reset '%s' = %d (new)", names[i], values[i]);
@@ -273,7 +341,7 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
         int increment = (values[i] != 0) ? values[i] : 1;  // Default increment is 1
 
         // Search for counter in current and parent scopes
-        CounterValue search_key = {names[i], 0};
+        CounterValue search_key = {names[i], 0, false, false};
         CounterValue* cv = nullptr;
         CounterScope* scope = ctx->current_scope;
 
@@ -288,6 +356,8 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
             CounterValue new_counter;
             new_counter.name = names[i];
             new_counter.value = increment;
+            new_counter.propagated = false;
+            new_counter.created_by_reset = false;
 
             hashmap_set(ctx->current_scope->counters, &new_counter);
             log_debug("[Counters]   Increment '%s' by %d = %d (new)", names[i], increment, increment);
@@ -314,7 +384,7 @@ void counter_set(CounterContext* ctx, const char* counter_spec) {
         // of the given name. If no counter of the given name exists on the element,
         // a new counter is created with the specified value.
         // Unlike counter-reset, this does NOT create a new scope.
-        CounterValue search_key = {names[i], 0};
+        CounterValue search_key = {names[i], 0, false, false};
         CounterValue* cv = nullptr;
         CounterScope* scope = ctx->current_scope;
 
@@ -334,6 +404,8 @@ void counter_set(CounterContext* ctx, const char* counter_spec) {
             CounterValue new_counter;
             new_counter.name = names[i];
             new_counter.value = values[i];
+            new_counter.propagated = false;
+            new_counter.created_by_reset = false;
 
             hashmap_set(ctx->current_scope->counters, &new_counter);
             log_debug("[Counters]   Set '%s' = %d (new)", names[i], values[i]);
@@ -346,7 +418,7 @@ int counter_get_value(CounterContext* ctx, const char* name) {
 
     // Search for counter in current and parent scopes
     CounterScope* scope = ctx->current_scope;
-    CounterValue search_key = {name, 0};
+    CounterValue search_key = {name, 0, false, false};
 
     while (scope) {
         CounterValue* cv = (CounterValue*)hashmap_get(scope->counters, &search_key);
@@ -365,7 +437,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     *values = nullptr;
     *count = 0;
 
-    CounterValue search_key = {name, 0};
+    CounterValue search_key = {name, 0, false, false};
 
     // Count how many counters with this name exist in the scope chain
     int counter_count = 0;
@@ -564,13 +636,25 @@ static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
     if (value <= 0 || value > 19999 || buffer_size < 20) {
         return snprintf(buffer, buffer_size, "%d", value);
     }
-    // Georgian Mkhedruli letters for additive system
-    static const int geo_ones[] = {0, 0x10D0, 0x10D1, 0x10D2, 0x10D3, 0x10D4, 0x10D5, 0x10D6, 0x10D7, 0x10D8};
-    static const int geo_tens[] = {0, 0x10D9, 0x10DA, 0x10DB, 0x10DC, 0x10DD, 0x10DE, 0x10DF, 0x10E0, 0x10E1};
-    static const int geo_hundreds[] = {0, 0x10E2, 0x10E3, 0x10E4, 0x10E5, 0x10E6, 0x10E7, 0x10E8, 0x10E9, 0x10EA};
-    static const int geo_thousands[] = {0, 0x10EB, 0x10EC, 0x10ED, 0x10EE, 0x10EF, 0x10F0, 0x10F1, 0x10F2, 0x10F3};
+    // Georgian Mkhedruli letters for additive numeral system (non-sequential codepoints)
+    //                          0       1       2       3       4       5       6       7       8       9
+    static const int geo_ones[]      = {0, 0x10D0, 0x10D1, 0x10D2, 0x10D3, 0x10D4, 0x10D5, 0x10D6, 0x10F1, 0x10D7};
+    static const int geo_tens[]      = {0, 0x10D8, 0x10D9, 0x10DA, 0x10DB, 0x10DC, 0x10F2, 0x10DD, 0x10DE, 0x10DF};
+    static const int geo_hundreds[]  = {0, 0x10E0, 0x10E1, 0x10E2, 0x10F3, 0x10E4, 0x10E5, 0x10E6, 0x10E7, 0x10E8};
+    static const int geo_thousands[] = {0, 0x10E9, 0x10EA, 0x10EB, 0x10EC, 0x10ED, 0x10EE, 0x10F4, 0x10EF, 0x10F0};
 
     int len = 0;
+
+    // handle 10000 prefix (ჵ = U+10F5)
+    if (value >= 10000) {
+        if (len < (int)buffer_size - 3) {
+            buffer[len++] = (char)(0xE1);
+            buffer[len++] = (char)(0x80 + ((0x10F5 >> 6) & 0x3F));
+            buffer[len++] = (char)(0x80 + (0x10F5 & 0x3F));
+        }
+        value -= 10000;
+    }
+
     int th = value / 1000;
     int h = (value / 100) % 10;
     int t = (value / 10) % 10;

@@ -5424,6 +5424,12 @@ static float measure_flex_content_height(ViewElement* elem) {
         float result = elem->blk->given_height - padding_border;
         return result;
     }
+    // Check if intrinsic height was calculated (resolves CSS line-height correctly)
+    // Prefer this over content_height which may be stale from a prior pass
+    // that didn't account for line-height
+    if (elem->fi && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
+        return (float)elem->fi->intrinsic_height.max_content;
+    }
     // Prefer content_height (which is the actual content size without padding)
     if (elem->content_height > 0) {
         return elem->content_height;
@@ -5439,10 +5445,6 @@ static float measure_flex_content_height(ViewElement* elem) {
         }
         float result = (float)elem->height - padding_border;
         return result;
-    }
-    // Check if intrinsic height was calculated (intrinsic_height is content-based)
-    if (elem->fi && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
-        return (float)elem->fi->intrinsic_height.max_content;
     }
 
     // Check if this is a flex container
@@ -5572,8 +5574,12 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                             lycon, text, text_len);
                                         if (tw.max_content > item_content_width && tw.min_content > 0) {
                                             // Text wraps: compute height at constrained width
+                                            // Use CSS line-height if available, else font-size
                                             float line_height = 10.0f; // default
-                                            if (lycon->font.style && lycon->font.style->font_size > 0) {
+                                            if (item->fi && item->fi->has_intrinsic_height &&
+                                                item->fi->intrinsic_height.max_content > 0) {
+                                                line_height = item->fi->intrinsic_height.max_content;
+                                            } else if (lycon->font.style && lycon->font.style->font_size > 0) {
                                                 line_height = lycon->font.style->font_size;
                                             }
                                             text_height_at_width = compute_text_height_at_width(
@@ -5603,14 +5609,11 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                             log_debug("HYPOTHETICAL_CROSS: item[%d][%d] text height at width=%.1f → cross=%.1f",
                                       i, j, item_content_width, hypothetical_cross);
                         } else {
-                            // use measured/content height
-                            hypothetical_cross = item->height > 0 ? item->height : item->content_height;
-                            // Fallback: use intrinsic height from calculate_item_intrinsic_sizes
-                            // which correctly handles pseudo-element content (::before/::after icons).
-                            // This is needed because item->height and item->content_height may be 0
-                            // before the first layout pass, but intrinsic_height.max_content is populated
-                            // during flex constraint resolution.
-                            if (hypothetical_cross <= 0 && item->fi && item->fi->has_intrinsic_height &&
+                            // Prefer intrinsic height from calculate_item_intrinsic_sizes
+                            // which correctly resolves CSS line-height for text content.
+                            // item->height may be stale from a prior pass that didn't
+                            // account for line-height (e.g., font-size only).
+                            if (item->fi && item->fi->has_intrinsic_height &&
                                 item->fi->intrinsic_height.max_content > 0) {
                                 hypothetical_cross = item->fi->intrinsic_height.max_content;
                                 // intrinsic_height stores content-box values; add padding+border
@@ -5620,8 +5623,11 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                         hypothetical_cross += item->bound->border->width.top + item->bound->border->width.bottom;
                                     }
                                 }
-                                log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using intrinsic height fallback=%.1f",
+                                log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using intrinsic height=%.1f",
                                           i, j, hypothetical_cross);
+                            } else {
+                                // Fallback to measured/content height
+                                hypothetical_cross = item->height > 0 ? item->height : item->content_height;
                             }
                         }
                     }

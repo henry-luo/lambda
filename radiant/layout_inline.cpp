@@ -446,6 +446,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     dom_node_resolve_style(elmt, lycon);
 
     // CSS Counter handling (CSS 2.1 Section 12.4, CSS Lists 3)
+    // Push a new counter scope for this inline element so that counter-reset
+    // creates a properly nested counter instance (not modifying the parent scope)
+    bool pushed_counter_scope = false;
+    if (lycon->counter_context) {
+        counter_push_scope(lycon->counter_context);
+        pushed_counter_scope = true;
+    }
+
     // Apply counter operations for this inline element
     if (lycon->counter_context && span->blk) {
         // Apply counter-reset if specified
@@ -742,6 +750,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.vertical_align = pa_line_align;
         lycon->block.line_height = pa_line_height;
         lycon->block.line_height_is_normal = pa_line_height_is_normal;
+        if (pushed_counter_scope) counter_pop_scope_propagate(lycon->counter_context);
         return;
     }
 
@@ -987,6 +996,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->line.vertical_align_offset = pa_valign_offset;
     lycon->block.line_height = pa_line_height;
     lycon->block.line_height_is_normal = pa_line_height_is_normal;
+    if (pushed_counter_scope) counter_pop_scope_propagate(lycon->counter_context);
     log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
 }
