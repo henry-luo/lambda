@@ -136,9 +136,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent);
 bool is_table_internal_display(CssEnum display);
 
-// Forward declarations for min/max constraint functions
-float adjust_min_max_height(ViewBlock* block, float height);
-float adjust_min_max_width(ViewBlock* block, float width);
 
 // Forward declaration for self-collapsing block check (used by compute_collapsible_bottom_margin)
 static bool is_block_self_collapsing(ViewBlock* vb);
@@ -2321,6 +2318,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.has_float_intrusion = false;
     lycon->line.advance_x = inner_left;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
+    if (block->blk) lycon->block.text_align_last = block->blk->text_align_last;
     // CSS 2.1 §9.2.1: Propagate direction to block context
     // Must be set BEFORE line_reset() so text-indent RTL handling works correctly
     if (block->blk) lycon->block.direction = block->blk->direction;

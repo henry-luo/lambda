@@ -644,15 +644,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 } else if (item->fi && item->fi->has_intrinsic_width) {
                                     item_width = item->fi->intrinsic_width.max_content;
                                 }
-                                // Clamp by min-width/max-width if set
+                                // Clamp by min-width/max-width if set (§1.1)
                                 if (item->blk) {
-                                    if (item->blk->given_max_width > 0 && item_width > item->blk->given_max_width) {
+                                    if (item->blk->given_max_width >= 0 && item_width > item->blk->given_max_width)
                                         item_width = item->blk->given_max_width;
-                                    }
-                                    // min takes precedence over max per CSS spec
-                                    if (item->blk->given_min_width > 0 && item_width < item->blk->given_min_width) {
+                                    if (item->blk->given_min_width >= 0 && item_width < item->blk->given_min_width)
                                         item_width = item->blk->given_min_width;
-                                    }
                                 }
                                 total_item_width += item_width;
                                 child_count++;
@@ -949,14 +946,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         item_width > item->fi->flex_basis) {
                         item_width = item->fi->flex_basis;
                     }
-                    // 3) Clamp by min-width/max-width if set
+                    // 3) Clamp by min-width/max-width and border-box floor (§1.1)
                     if (item->blk) {
-                        if (item->blk->given_max_width > 0 && item_width > item->blk->given_max_width) {
+                        if (item->blk->given_max_width >= 0 && item_width > item->blk->given_max_width)
                             item_width = item->blk->given_max_width;
-                        }
-                        if (item->blk->given_min_width > 0 && item_width < item->blk->given_min_width) {
+                        if (item->blk->given_min_width >= 0 && item_width < item->blk->given_min_width)
                             item_width = item->blk->given_min_width;
-                        }
                         // CSS Box Model: In border-box, the box cannot be smaller than
                         // its padding+border (content area floors at 0).
                         if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {

@@ -447,6 +447,82 @@ struct EnhancedGridTrack {
     }
 };
 
+// ============================================================================
+// TrackArray — fixed-size array replacing std::vector<EnhancedGridTrack> (§1.7)
+// ============================================================================
+
+/** Maximum number of tracks (content + gutter) in one axis. */
+#define MAX_GRID_TRACKS 64
+
+/**
+ * Fixed-capacity array of EnhancedGridTrack.
+ * Replaces std::vector<EnhancedGridTrack> to comply with C+ convention.
+ * Capacity is MAX_GRID_TRACKS which safely handles 16×16 grids with all gaps.
+ */
+struct TrackArray {
+    EnhancedGridTrack data[MAX_GRID_TRACKS];
+    size_t count;
+
+    TrackArray() : count(0) {}
+
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+
+    EnhancedGridTrack& operator[](size_t i) { return data[i]; }
+    const EnhancedGridTrack& operator[](size_t i) const { return data[i]; }
+
+    void push_back(const EnhancedGridTrack& t) {
+        if (count < MAX_GRID_TRACKS) data[count++] = t;
+    }
+
+    void reserve(size_t) {} // no-op (pre-allocated)
+
+    /** Remove all elements (reset count, don't destruct — trivially reset) */
+    void clear() { count = 0; }
+
+    // Iterator support for range-based for
+    EnhancedGridTrack* begin() { return data; }
+    EnhancedGridTrack* end()   { return data + count; }
+    const EnhancedGridTrack* begin() const { return data; }
+    const EnhancedGridTrack* end()   const { return data + count; }
+};
+
+/**
+ * Fixed-capacity array of track indices (size_t).
+ * Replaces std::vector<size_t> eligible_indices throughout the sizing algorithm (§1.7).
+ */
+struct IndexArray {
+    size_t data[MAX_GRID_TRACKS];
+    size_t count;
+
+    IndexArray() : count(0) {}
+
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+
+    void push_back(size_t v) { if (count < MAX_GRID_TRACKS) data[count++] = v; }
+    void clear() { count = 0; }
+
+    // Filter in-place (replaces erase–remove_if idiom)
+    template<typename Predicate>
+    void erase_if(Predicate pred) {
+        size_t new_count = 0;
+        for (size_t i = 0; i < count; i++) {
+            if (!pred(data[i]))
+                data[new_count++] = data[i];
+        }
+        count = new_count;
+    }
+
+    size_t* begin() { return data; }
+    size_t* end()   { return data + count; }
+    const size_t* begin() const { return data; }
+    const size_t* end()   const { return data + count; }
+
+    size_t& operator[](size_t i) { return data[i]; }
+    const size_t& operator[](size_t i) const { return data[i]; }
+};
+
 } // namespace grid
 } // namespace radiant
 

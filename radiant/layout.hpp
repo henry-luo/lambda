@@ -79,6 +79,7 @@ typedef struct BlockContext {
     float init_descender;       // Initial descender at line start
     float lead_y;               // Leading space when line_height > font size
     CssEnum text_align;         // Text alignment
+    CssEnum text_align_last;    // text-align-last (CSS Text 3 §7.2): overrides text_align on last line
     CssEnum direction;          // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
     float given_width;          // CSS specified width (-1 if auto)
     float given_height;         // CSS specified height (-1 if auto)
@@ -262,10 +263,6 @@ typedef struct LayoutContext {
     // - ContentSize: Use content-based size (ignore CSS width/height)
     radiant::SizingMode sizing_mode;
 
-    // Legacy measurement mode flag - kept for backward compatibility
-    // Prefer using run_mode == RunMode::ComputeSize instead
-    bool is_measuring;
-
     // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
     CounterContext* counter_context;
 } LayoutContext;
@@ -278,14 +275,14 @@ typedef struct LayoutContext {
  * Check if layout is in measurement mode (only computing sizes)
  */
 inline bool layout_context_is_measuring(LayoutContext* lycon) {
-    return lycon->run_mode == radiant::RunMode::ComputeSize || lycon->is_measuring;
+    return lycon->run_mode == radiant::RunMode::ComputeSize;
 }
 
 /**
  * Check if layout should perform full positioning
  */
 inline bool layout_context_should_position(LayoutContext* lycon) {
-    return lycon->run_mode == radiant::RunMode::PerformLayout && !lycon->is_measuring;
+    return lycon->run_mode == radiant::RunMode::PerformLayout;
 }
 
 /**
@@ -541,6 +538,60 @@ uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool i
  * @return CSS text-transform value or CSS_VALUE_NONE
  */
 CssEnum get_text_transform_from_block(BlockProp* blk);
+
+// ============================================================================
+// Size Constraint Utilities (§1.1)
+// ============================================================================
+
+// Apply min/max width constraints from block's blk prop (includes border-box floor).
+float adjust_min_max_width(ViewBlock* block, float width);
+// Apply min/max height constraints from block's blk prop (includes border-box floor).
+float adjust_min_max_height(ViewBlock* block, float height);
+// Subtract padding+border from width when box-sizing is border-box (returns content width).
+float adjust_border_padding_width(ViewBlock* block, float width);
+// Subtract padding+border from height when box-sizing is border-box (returns content height).
+float adjust_border_padding_height(ViewBlock* block, float height);
+
+// ============================================================================
+// Context Scope Guards (§1.8: Prevent context leaks on early returns)
+// ============================================================================
+
+/**
+ * RAII guard that saves and restores lycon->block on scope exit.
+ *
+ * Usage:
+ *   BlockContextScope bscope(lycon);
+ *   // ... layout child, context auto-restored when bscope goes out of scope ...
+ */
+struct BlockContextScope {
+    LayoutContext* lycon;
+    BlockContext saved;
+    explicit BlockContextScope(LayoutContext* l) : lycon(l), saved(l->block) {}
+    ~BlockContextScope() { lycon->block = saved; }
+    // Non-copyable
+    BlockContextScope(const BlockContextScope&) = delete;
+    BlockContextScope& operator=(const BlockContextScope&) = delete;
+};
+
+/**
+ * RAII guard that saves and restores lycon->block, lycon->line, and lycon->font.
+ * Use when all three need to be preserved across a nested layout operation.
+ */
+struct LayoutContextScope {
+    LayoutContext* lycon;
+    BlockContext saved_block;
+    Linebox saved_line;
+    FontBox saved_font;
+    explicit LayoutContextScope(LayoutContext* l)
+        : lycon(l), saved_block(l->block), saved_line(l->line), saved_font(l->font) {}
+    ~LayoutContextScope() {
+        lycon->block = saved_block;
+        lycon->line  = saved_line;
+        lycon->font  = saved_font;
+    }
+    LayoutContextScope(const LayoutContextScope&) = delete;
+    LayoutContextScope& operator=(const LayoutContextScope&) = delete;
+};
 
 // Forward declaration
 struct RadiantState;

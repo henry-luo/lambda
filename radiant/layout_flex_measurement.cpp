@@ -363,7 +363,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         measure_context.block.content_height = -1;  // Unconstrained height
         measure_context.block.advance_y = 0;
         measure_context.block.max_width = 0;
-        measure_context.is_measuring = true;
+        measure_context.run_mode = radiant::RunMode::ComputeSize;
 
         // Initialize line context
         line_init(&measure_context, 0, container_width);
@@ -2092,7 +2092,7 @@ void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
     LayoutContext saved = *lycon;
 
     // Mark as measurement mode
-    lycon->is_measuring = true;
+    lycon->run_mode = radiant::RunMode::ComputeSize;
 
     // Phase 1: Max-content measurement (no width constraint)
     lycon->block.content_width = FLT_MAX;

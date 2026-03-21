@@ -1345,7 +1345,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else if (break_word && !lycon->line.is_line_start) {
                 log_debug("overflow-wrap: emergency mid-word break");
                 rect->width -= wd;  // undo the char that overflowed
-                output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+                int text_len = str - text_start - rect->start_index;
+                if (text_len > 0) {
+                    output_text(lycon, text_view, rect, text_len, rect->width);
+                } else {
+                    // first char of this rect already overflows: unlink the empty rect
+                    // so goto LAYOUT_TEXT starts fresh without a zero-length entry
+                    if (text_view->rect == rect) {
+                        text_view->rect = nullptr;
+                    } else {
+                        TextRect* prev = text_view->rect;
+                        while (prev && prev->next != rect) prev = prev->next;
+                        if (prev) prev->next = nullptr;
+                    }
+                }
                 line_break(lycon);
                 goto LAYOUT_TEXT;
             }

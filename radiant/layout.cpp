@@ -476,7 +476,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
 
 // DomNode style resolution function
 // Ensures styles are resolved only once per layout pass using styles_resolved flag
-// NOTE: Measurement mode (is_measuring=true) must NOT mark styles as resolved,
+// NOTE: Measurement mode (run_mode==ComputeSize) must NOT mark styles as resolved,
 // because percentage-based values need to be re-resolved against the actual
 // containing block dimensions during the real layout pass.
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
@@ -487,10 +487,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
         if (dom_elem && dom_elem->specified_style) {
             // Check if styles already resolved in this layout pass
-            // IMPORTANT: Skip this check during measurement mode (is_measuring=true)
+            // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
             // because measurement passes should not permanently mark styles as resolved
             // and percentage values may need different containing block dimensions
-            if (dom_elem->styles_resolved && !lycon->is_measuring) {
+            if (dom_elem->styles_resolved && !layout_context_is_measuring(lycon)) {
                 log_debug("[CSS] Skipping style resolution for <%s> - already resolved",
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
                 g_style_resolve_count++;
@@ -511,7 +511,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             apply_element_default_style(lycon, dom_elem);
 
             // Track measurement vs full resolution
-            if (lycon->is_measuring) {
+            if (layout_context_is_measuring(lycon)) {
                 g_style_resolve_measure++;
             } else {
                 g_style_resolve_full++;
@@ -557,7 +557,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
             // Mark as resolved for this layout pass
             // Don't mark as resolved during measurement mode - let the actual layout pass do that
-            if (!lycon->is_measuring) {
+            if (!layout_context_is_measuring(lycon)) {
                 dom_elem->styles_resolved = true;
                 log_debug("[CSS] Resolved styles for <%s> - marked as resolved",
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
@@ -933,6 +933,14 @@ void line_align(LayoutContext* lycon) {
     // CSS 2.1 §16.2: 'start' maps to 'left' for LTR and 'right' for RTL
     bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
     CssEnum text_align = lycon->block.text_align;
+
+    // CSS Text 3 §7.2: text-align-last overrides text-align on the last line
+    // (when text_align_last is not 'auto' and not unset)
+    if (lycon->line.is_last_line && lycon->block.text_align_last != 0 &&
+        lycon->block.text_align_last != CSS_VALUE_AUTO) {
+        text_align = lycon->block.text_align_last;
+    }
+
     if (text_align == CSS_VALUE_START) {
         text_align = is_rtl ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
     } else if (text_align == CSS_VALUE_END) {

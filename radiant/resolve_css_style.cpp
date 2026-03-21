@@ -2645,6 +2645,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         return;  // Custom properties don't have standard processing
     }
 
+    // Map CSS logical dimension properties to physical equivalents (horizontal LTR writing mode)
+    // CSS Logical Properties: https://www.w3.org/TR/css-logical-1/
+    switch (prop_id) {
+        case CSS_PROPERTY_INLINE_SIZE:     prop_id = CSS_PROPERTY_WIDTH;      break;
+        case CSS_PROPERTY_BLOCK_SIZE:      prop_id = CSS_PROPERTY_HEIGHT;     break;
+        case CSS_PROPERTY_MIN_INLINE_SIZE: prop_id = CSS_PROPERTY_MIN_WIDTH;  break;
+        case CSS_PROPERTY_MAX_INLINE_SIZE: prop_id = CSS_PROPERTY_MAX_WIDTH;  break;
+        case CSS_PROPERTY_MIN_BLOCK_SIZE:  prop_id = CSS_PROPERTY_MIN_HEIGHT; break;
+        case CSS_PROPERTY_MAX_BLOCK_SIZE:  prop_id = CSS_PROPERTY_MAX_HEIGHT; break;
+        default: break;
+    }
+
     // Dispatch based on property ID
     // Parallel implementation to resolve_element_style() in resolve_style.cpp
     ViewSpan* span = (ViewSpan*)lycon->view;
@@ -3272,11 +3284,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_TEXT_ALIGN_LAST: {
+            log_debug("[CSS] Processing text-align-last property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum v = value->data.keyword;
+                if (v != CSS_VALUE_INHERIT && v != CSS_VALUE__UNDEF) {
+                    block->blk->text_align_last = v;
+                    log_debug("[CSS] text-align-last: %s", css_enum_info(v)->name);
+                }
+            }
+            break;
+        }
+
         case CSS_PROPERTY_TEXT_INDENT: {
             log_debug("[CSS] Processing text-indent property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-
             // text-indent can be a length or percentage
             // CSS 2.1: text-indent applies to the first line of a block container
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -3753,6 +3778,32 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // margin-block-start: maps to top in horizontal writing mode
+        case CSS_PROPERTY_MARGIN_BLOCK_START: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (specificity >= span->bound->margin.top_specificity) {
+                span->bound->margin.top = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_BLOCK_START, value);
+                span->bound->margin.top_specificity = specificity;
+                span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
+            }
+            break;
+        }
+
+        // margin-block-end: maps to bottom in horizontal writing mode
+        case CSS_PROPERTY_MARGIN_BLOCK_END: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (specificity >= span->bound->margin.bottom_specificity) {
+                span->bound->margin.bottom = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_BLOCK_END, value);
+                span->bound->margin.bottom_specificity = specificity;
+                span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (value->type == CSS_VALUE_TYPE_PERCENTAGE ? CSS_VALUE__PERCENTAGE : CSS_VALUE__UNDEF);
+            }
+            break;
+        }
+
         case CSS_PROPERTY_MARGIN_TRIM: {
             log_debug("[CSS] Processing margin-trim property");
             if (!block || !block->blk) {
@@ -3842,6 +3893,88 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (specificity >= span->bound->padding.left_specificity) {
                 span->bound->padding.left = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_LEFT, value);
                 span->bound->padding.left_specificity = specificity;
+            }
+            break;
+        }
+
+        // padding-inline: sets padding-left and padding-right in horizontal writing mode
+        case CSS_PROPERTY_PADDING_INLINE: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            float pad_val = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_INLINE, value);
+            if (specificity >= span->bound->padding.left_specificity) {
+                span->bound->padding.left = pad_val;
+                span->bound->padding.left_specificity = specificity;
+            }
+            if (specificity >= span->bound->padding.right_specificity) {
+                span->bound->padding.right = pad_val;
+                span->bound->padding.right_specificity = specificity;
+            }
+            break;
+        }
+
+        // padding-inline-start: maps to padding-left in horizontal LTR writing mode
+        case CSS_PROPERTY_PADDING_INLINE_START: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (specificity >= span->bound->padding.left_specificity) {
+                span->bound->padding.left = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_INLINE_START, value);
+                span->bound->padding.left_specificity = specificity;
+            }
+            break;
+        }
+
+        // padding-inline-end: maps to padding-right in horizontal LTR writing mode
+        case CSS_PROPERTY_PADDING_INLINE_END: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (specificity >= span->bound->padding.right_specificity) {
+                span->bound->padding.right = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_INLINE_END, value);
+                span->bound->padding.right_specificity = specificity;
+            }
+            break;
+        }
+
+        // padding-block: sets padding-top and padding-bottom in horizontal writing mode
+        case CSS_PROPERTY_PADDING_BLOCK: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            float pad_val = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_BLOCK, value);
+            if (specificity >= span->bound->padding.top_specificity) {
+                span->bound->padding.top = pad_val;
+                span->bound->padding.top_specificity = specificity;
+            }
+            if (specificity >= span->bound->padding.bottom_specificity) {
+                span->bound->padding.bottom = pad_val;
+                span->bound->padding.bottom_specificity = specificity;
+            }
+            break;
+        }
+
+        // padding-block-start: maps to padding-top in horizontal writing mode
+        case CSS_PROPERTY_PADDING_BLOCK_START: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (specificity >= span->bound->padding.top_specificity) {
+                span->bound->padding.top = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_BLOCK_START, value);
+                span->bound->padding.top_specificity = specificity;
+            }
+            break;
+        }
+
+        // padding-block-end: maps to padding-bottom in horizontal writing mode
+        case CSS_PROPERTY_PADDING_BLOCK_END: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (specificity >= span->bound->padding.bottom_specificity) {
+                span->bound->padding.bottom = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_BLOCK_END, value);
+                span->bound->padding.bottom_specificity = specificity;
             }
             break;
         }
@@ -5662,6 +5795,159 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // CSS Logical border properties — horizontal writing mode (LTR):
+        //   inline axis = left/right, block axis = top/bottom
+        case CSS_PROPERTY_BORDER_INLINE: {
+            log_debug("[CSS] Processing border-inline shorthand (maps to border-left + border-right)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            MultiValue border = {0};
+            set_multi_value(&border, value);
+            for (int side = 1; side <= 3; side += 2) {  // sides 1=right, 3=left
+                float* width_p   = side == 1 ? &span->bound->border->width.right  : &span->bound->border->width.left;
+                int32_t* ws_p   = side == 1 ? &span->bound->border->width.right_specificity : &span->bound->border->width.left_specificity;
+                CssEnum* style_p  = side == 1 ? &span->bound->border->right_style : &span->bound->border->left_style;
+                int32_t* ss_p   = side == 1 ? &span->bound->border->right_style_specificity : &span->bound->border->left_style_specificity;
+                Color* color_p   = side == 1 ? &span->bound->border->right_color : &span->bound->border->left_color;
+                int32_t* cs_p   = side == 1 ? &span->bound->border->right_color_specificity : &span->bound->border->left_color_specificity;
+                CssPropertyId width_prop = side == 1 ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_BORDER_LEFT_WIDTH;
+                if (border.style) {
+                    *style_p = border.style->data.keyword;  *ss_p = specificity;
+                    if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                        border.style->data.keyword != CSS_VALUE_HIDDEN && specificity >= *ws_p) {
+                        *width_p = 3.0f;  *ws_p = specificity;
+                    }
+                }
+                if (border.length) { *width_p = resolve_length_value(lycon, width_prop, border.length);  *ws_p = specificity; }
+                if (border.color)  { *color_p = resolve_color_value(lycon, border.color);  *cs_p = specificity; }
+            }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_INLINE_START: {
+            log_debug("[CSS] Processing border-inline-start (maps to border-left)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            MultiValue border = {0};
+            set_multi_value(&border, value);
+            if (border.style) {
+                span->bound->border->left_style = border.style->data.keyword;
+                span->bound->border->left_style_specificity = specificity;
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.left_specificity) {
+                    span->bound->border->width.left = 3.0f;
+                    span->bound->border->width.left_specificity = specificity;
+                }
+            }
+            if (border.length) { span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length); span->bound->border->width.left_specificity = specificity; }
+            if (border.color)  { span->bound->border->left_color = resolve_color_value(lycon, border.color); span->bound->border->left_color_specificity = specificity; }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_INLINE_END: {
+            log_debug("[CSS] Processing border-inline-end (maps to border-right)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            MultiValue border = {0};
+            set_multi_value(&border, value);
+            if (border.style) {
+                span->bound->border->right_style = border.style->data.keyword;
+                span->bound->border->right_style_specificity = specificity;
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.right_specificity) {
+                    span->bound->border->width.right = 3.0f;
+                    span->bound->border->width.right_specificity = specificity;
+                }
+            }
+            if (border.length) { span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length); span->bound->border->width.right_specificity = specificity; }
+            if (border.color)  { span->bound->border->right_color = resolve_color_value(lycon, border.color); span->bound->border->right_color_specificity = specificity; }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK: {
+            log_debug("[CSS] Processing border-block shorthand (maps to border-top + border-bottom)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            MultiValue border = {0};
+            set_multi_value(&border, value);
+            for (int side = 0; side <= 2; side += 2) {  // sides 0=top, 2=bottom
+                float* width_p   = side == 0 ? &span->bound->border->width.top    : &span->bound->border->width.bottom;
+                int32_t* ws_p   = side == 0 ? &span->bound->border->width.top_specificity : &span->bound->border->width.bottom_specificity;
+                CssEnum* style_p  = side == 0 ? &span->bound->border->top_style   : &span->bound->border->bottom_style;
+                int32_t* ss_p   = side == 0 ? &span->bound->border->top_style_specificity : &span->bound->border->bottom_style_specificity;
+                Color* color_p   = side == 0 ? &span->bound->border->top_color    : &span->bound->border->bottom_color;
+                int32_t* cs_p   = side == 0 ? &span->bound->border->top_color_specificity : &span->bound->border->bottom_color_specificity;
+                CssPropertyId width_prop = side == 0 ? CSS_PROPERTY_BORDER_TOP_WIDTH : CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
+                if (border.style) {
+                    *style_p = border.style->data.keyword;  *ss_p = specificity;
+                    if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                        border.style->data.keyword != CSS_VALUE_HIDDEN && specificity >= *ws_p) {
+                        *width_p = 3.0f;  *ws_p = specificity;
+                    }
+                }
+                if (border.length) { *width_p = resolve_length_value(lycon, width_prop, border.length);  *ws_p = specificity; }
+                if (border.color)  { *color_p = resolve_color_value(lycon, border.color);  *cs_p = specificity; }
+            }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_START: {
+            log_debug("[CSS] Processing border-block-start (maps to border-top)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            MultiValue border = {0};
+            set_multi_value(&border, value);
+            if (border.style) {
+                span->bound->border->top_style = border.style->data.keyword;
+                span->bound->border->top_style_specificity = specificity;
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.top_specificity) {
+                    span->bound->border->width.top = 3.0f;
+                    span->bound->border->width.top_specificity = specificity;
+                }
+            }
+            if (border.length) { span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length); span->bound->border->width.top_specificity = specificity; }
+            if (border.color)  { span->bound->border->top_color = resolve_color_value(lycon, border.color); span->bound->border->top_color_specificity = specificity; }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_END: {
+            log_debug("[CSS] Processing border-block-end (maps to border-bottom)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            MultiValue border = {0};
+            set_multi_value(&border, value);
+            if (border.style) {
+                span->bound->border->bottom_style = border.style->data.keyword;
+                span->bound->border->bottom_style_specificity = specificity;
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.bottom_specificity) {
+                    span->bound->border->width.bottom = 3.0f;
+                    span->bound->border->width.bottom_specificity = specificity;
+                }
+            }
+            if (border.length) { span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length); span->bound->border->width.bottom_specificity = specificity; }
+            if (border.color)  { span->bound->border->bottom_color = resolve_color_value(lycon, border.color); span->bound->border->bottom_color_specificity = specificity; }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_END_COLOR: {
+            log_debug("[CSS] Processing border-block-end-color (maps to border-bottom-color)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
+                span->bound->border->bottom_color = resolve_color_value(lycon, value);
+                span->bound->border->bottom_color_specificity = specificity;
+            }
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH: {
+            log_debug("[CSS] Processing border-block-end-width (maps to border-bottom-width)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, value);
+            span->bound->border->width.bottom_specificity = specificity;
+            break;
+        }
+
         case CSS_PROPERTY_BORDER_STYLE: {
             log_debug("[CSS] Processing border-style shorthand property");
             if (!span->bound) {
@@ -6137,6 +6423,108 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // inset-inline: sets left and right (horizontal writing mode)
+        case CSS_PROPERTY_INSET_INLINE: {
+            if (!block) break;
+            if (!block->position) { block->position = alloc_position_prop(lycon); }
+            float val = 0;
+            float pct = NAN;
+            bool is_auto_val = false;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT)
+                is_auto_val = true;
+            else if (value->type != CSS_VALUE_TYPE_KEYWORD) {
+                val = resolve_length_value(lycon, CSS_PROPERTY_LEFT, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) pct = value->data.percentage.value;
+            }
+            if (!is_auto_val) {
+                block->position->left = val; block->position->left_percent = pct; block->position->has_left = true;
+                block->position->right = val; block->position->right_percent = pct; block->position->has_right = true;
+            } else {
+                block->position->has_left = false;
+                block->position->has_right = false;
+            }
+            break;
+        }
+
+        // inset-inline-start: maps to left in horizontal LTR writing mode
+        case CSS_PROPERTY_INSET_INLINE_START: {
+            if (!block) break;
+            if (!block->position) { block->position = alloc_position_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT) {
+                block->position->has_left = false;
+            } else {
+                block->position->left = resolve_length_value(lycon, CSS_PROPERTY_LEFT, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) block->position->left_percent = value->data.percentage.value;
+                block->position->has_left = true;
+            }
+            break;
+        }
+
+        // inset-inline-end: maps to right in horizontal LTR writing mode
+        case CSS_PROPERTY_INSET_INLINE_END: {
+            if (!block) break;
+            if (!block->position) { block->position = alloc_position_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT) {
+                block->position->has_right = false;
+            } else {
+                block->position->right = resolve_length_value(lycon, CSS_PROPERTY_RIGHT, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) block->position->right_percent = value->data.percentage.value;
+                block->position->has_right = true;
+            }
+            break;
+        }
+
+        // inset-block: sets top and bottom (horizontal writing mode)
+        case CSS_PROPERTY_INSET_BLOCK: {
+            if (!block) break;
+            if (!block->position) { block->position = alloc_position_prop(lycon); }
+            float val = 0;
+            float pct = NAN;
+            bool is_auto_val = false;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT)
+                is_auto_val = true;
+            else if (value->type != CSS_VALUE_TYPE_KEYWORD) {
+                val = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) pct = value->data.percentage.value;
+            }
+            if (!is_auto_val) {
+                block->position->top = val; block->position->top_percent = pct; block->position->has_top = true;
+                block->position->bottom = val; block->position->bottom_percent = pct; block->position->has_bottom = true;
+            } else {
+                block->position->has_top = false;
+                block->position->has_bottom = false;
+            }
+            break;
+        }
+
+        // inset-block-start: maps to top in horizontal writing mode
+        case CSS_PROPERTY_INSET_BLOCK_START: {
+            if (!block) break;
+            if (!block->position) { block->position = alloc_position_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT) {
+                block->position->has_top = false;
+            } else {
+                block->position->top = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) block->position->top_percent = value->data.percentage.value;
+                block->position->has_top = true;
+            }
+            break;
+        }
+
+        // inset-block-end: maps to bottom in horizontal writing mode
+        case CSS_PROPERTY_INSET_BLOCK_END: {
+            if (!block) break;
+            if (!block->position) { block->position = alloc_position_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT) {
+                block->position->has_bottom = false;
+            } else {
+                block->position->bottom = resolve_length_value(lycon, CSS_PROPERTY_BOTTOM, value);
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) block->position->bottom_percent = value->data.percentage.value;
+                block->position->has_bottom = true;
+            }
+            break;
+        }
+
         case CSS_PROPERTY_TOP: {
             log_debug("[CSS] Processing top property");
             if (!block) break;
@@ -6341,9 +6729,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing overflow property (sets both x and y)");
             if (!block) break;
             if (!block->scroller) {
-                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
-                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
+                block->scroller = alloc_scroll_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6364,9 +6750,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing overflow-x property");
             if (!block) break;
             if (!block->scroller) {
-                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
-                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
+                block->scroller = alloc_scroll_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6385,9 +6769,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing overflow-y property");
             if (!block) break;
             if (!block->scroller) {
-                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
-                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
+                block->scroller = alloc_scroll_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6467,10 +6849,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing clip property");
             if (!block) break;
             if (!block->scroller) {
-                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-                // initialize overflow to visible so that clip alone doesn't create a BFC
-                block->scroller->overflow_x = CSS_VALUE_VISIBLE;
-                block->scroller->overflow_y = CSS_VALUE_VISIBLE;
+                block->scroller = alloc_scroll_prop(lycon);
             }
 
             // CSS clip property uses rect(top, right, bottom, left) syntax

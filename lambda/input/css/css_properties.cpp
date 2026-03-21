@@ -105,6 +105,16 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
 
+    // CSS Logical border properties (inline/block axis, horizontal writing mode assumed)
+    {CSS_PROPERTY_BORDER_INLINE, "border-inline", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_START, "border-inline-start", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_END, "border-inline-end", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK, "border-block", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_START, "border-block-start", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_END, "border-block-end", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_END_COLOR, "border-block-end-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_END_WIDTH, "border-block-end-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
+
     {CSS_PROPERTY_BOX_SIZING, "box-sizing", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "content-box", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ASPECT_RATIO, "aspect-ratio", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
 
