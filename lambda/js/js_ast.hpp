@@ -123,6 +123,9 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_DO_WHILE_STATEMENT,
     JS_AST_NODE_FOR_OF_STATEMENT,
     JS_AST_NODE_FOR_IN_STATEMENT,
+
+    // v11: Sequence expression
+    JS_AST_NODE_SEQUENCE_EXPRESSION,
 } JsAstNodeType;
 
 // JavaScript operators
@@ -187,6 +190,11 @@ typedef enum JsOperator {
     JS_OP_INSTANCEOF,       // instanceof
     JS_OP_IN,               // in
     JS_OP_NULLISH_COALESCE, // ??
+
+    // v11: Logical/nullish assignment operators
+    JS_OP_NULLISH_ASSIGN,   // ??=
+    JS_OP_AND_ASSIGN,       // &&=
+    JS_OP_OR_ASSIGN,        // ||=
 } JsOperator;
 
 // JavaScript literal types
@@ -267,6 +275,7 @@ typedef struct JsCallNode {
     JsAstNode base;
     JsAstNode* callee;              // Function being called
     JsAstNode* arguments;           // Argument list
+    bool optional;                  // true for obj?.method()
 } JsCallNode;
 
 // JavaScript member expression node
@@ -275,6 +284,7 @@ typedef struct JsMemberNode {
     JsAstNode* object;              // Object being accessed
     JsAstNode* property;            // Property being accessed
     bool computed;                  // true for obj[prop], false for obj.prop
+    bool optional;                  // true for obj?.prop or obj?.[prop]
 } JsMemberNode;
 
 // JavaScript array expression node
@@ -493,3 +503,9 @@ typedef struct JsForOfNode {
 
 // Reuse same struct for for...in
 typedef JsForOfNode JsForInNode;
+
+// v11: Sequence expression node (comma operator)
+typedef struct JsSequenceNode {
+    JsAstNode base;
+    JsAstNode* expressions;          // Linked list of expressions
+} JsSequenceNode;

@@ -451,6 +451,27 @@ TEST(JavaScriptTests, test_v9_obj_destructuring) {
     test_js_script_against_file("test/js/v9_obj_destructuring.js", "test/js/v9_obj_destructuring.txt");
 }
 
+// v11 Tests
+TEST(JavaScriptTests, test_v11_optional_chaining) {
+    test_js_script_against_file("test/js/v11_optional_chaining.js", "test/js/v11_optional_chaining.txt");
+}
+
+TEST(JavaScriptTests, test_v11_sequence_expr) {
+    test_js_script_against_file("test/js/v11_sequence_expr.js", "test/js/v11_sequence_expr.txt");
+}
+
+TEST(JavaScriptTests, test_v11_error_subclasses) {
+    test_js_script_against_file("test/js/v11_error_subclasses.js", "test/js/v11_error_subclasses.txt");
+}
+
+TEST(JavaScriptTests, test_v11_nullish_assign) {
+    test_js_script_against_file("test/js/v11_nullish_assign.js", "test/js/v11_nullish_assign.txt");
+}
+
+TEST(JavaScriptTests, test_v11_object_methods) {
+    test_js_script_against_file("test/js/v11_object_methods.js", "test/js/v11_object_methods.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
