@@ -681,6 +681,11 @@ DisplayValue resolve_display_value(void* child) {
                                 // no parent (root element) — fall through to tag-based default
                             } else if (keyword == CSS_VALUE_RUN_IN) {
                                 // run-in is unsupported (Chrome dropped it); fall through to tag default
+                            } else if (keyword == CSS_VALUE_FLOW_ROOT) {
+                                // CSS Display Level 3: display:flow-root establishes a BFC
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_FLOW_ROOT;
+                                return display;
                             } else if (keyword == CSS_VALUE_TABLE) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE;

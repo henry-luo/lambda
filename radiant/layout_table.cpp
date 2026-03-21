@@ -8654,5 +8654,38 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // Tables are block-level elements and should not participate in line layout
     // Set is_line_start = true to prevent parent from calling line_break()
     lycon->line.is_line_start = true;
+
+    // CSS Position 3 §3.4: Apply relative positioning to table sub-elements
+    // (table cells, rows, row groups, captions) after all table layout is finalized.
+    // Table-internal elements can be relatively positioned per CSS 2.1 §17.5.1.
+    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            if (child->position && child->position->position == CSS_VALUE_RELATIVE)
+                layout_relative_positioned(lycon, child);
+            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+                if (row->view_type == RDT_VIEW_TABLE_ROW) {
+                    if (row->position && row->position->position == CSS_VALUE_RELATIVE)
+                        layout_relative_positioned(lycon, row);
+                    ViewTableRow* trow = (ViewTableRow*)row;
+                    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                        if (tcell->position && tcell->position->position == CSS_VALUE_RELATIVE)
+                            layout_relative_positioned(lycon, (ViewBlock*)tcell);
+                    }
+                }
+            }
+        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            if (child->position && child->position->position == CSS_VALUE_RELATIVE)
+                layout_relative_positioned(lycon, child);
+            ViewTableRow* trow = (ViewTableRow*)child;
+            for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                if (tcell->position && tcell->position->position == CSS_VALUE_RELATIVE)
+                    layout_relative_positioned(lycon, (ViewBlock*)tcell);
+            }
+        } else if (child->position && child->position->position == CSS_VALUE_RELATIVE) {
+            // Handle captions or other direct children (captions are RDT_VIEW_BLOCK)
+            layout_relative_positioned(lycon, child);
+        }
+    }
+
     log_debug("=== TABLE LAYOUT COMPLETE ===");
 }

@@ -1136,17 +1136,29 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // Tab characters with preserved whitespace: use tab-size * space_width
             // Only when whitespace is preserved (pre, pre-wrap, break-spaces)
             if (codepoint == '\t' && !collapse_spaces) {
-                DomElement* block_elem = lycon->view->is_element() ? static_cast<DomElement*>(lycon->view) : nullptr;
+                // CSS Text 3 §4.2: tab-size <number> = multiple of space advance width
+                // including associated letter-spacing and word-spacing
                 int ts = 8;
-                if (block_elem && block_elem->blk && block_elem->blk->tab_size > 0) {
-                    ts = block_elem->blk->tab_size;
+                ViewElement* ancestor = lycon->view->parent_view();
+                while (ancestor) {
+                    if (ancestor->is_element()) {
+                        DomElement* elem = static_cast<DomElement*>(ancestor);
+                        if (elem->blk && elem->blk->tab_size > 0) {
+                            ts = elem->blk->tab_size;
+                            break;
+                        }
+                    }
+                    ancestor = ancestor->parent_view();
                 }
-                wd = lycon->font.style->space_width * ts;
+                float space_advance = lycon->font.style->space_width
+                    + lycon->font.style->word_spacing
+                    + lycon->font.style->letter_spacing;
+                wd = space_advance * ts;
+            } else {
+                // Regular space: apply word-spacing and letter-spacing once
+                wd += lycon->font.style->word_spacing;
+                wd += lycon->font.style->letter_spacing;
             }
-            // Apply word-spacing to space characters
-            wd += lycon->font.style->word_spacing;
-            // CSS 2.1 §16.4: letter-spacing applies to every character
-            wd += lycon->font.style->letter_spacing;
             is_word_start = true;  // Next non-space char is word start
         }
         else {
