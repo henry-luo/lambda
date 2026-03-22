@@ -472,6 +472,26 @@ TEST(JavaScriptTests, test_v11_object_methods) {
     test_js_script_against_file("test/js/v11_object_methods.js", "test/js/v11_object_methods.txt");
 }
 
+TEST(JavaScriptTests, test_v11_labeled_statements) {
+    test_js_script_against_file("test/js/v11_labeled_statements.js", "test/js/v11_labeled_statements.txt");
+}
+
+TEST(JavaScriptTests, test_v11_function_bind) {
+    test_js_script_against_file("test/js/v11_function_bind.js", "test/js/v11_function_bind.txt");
+}
+
+TEST(JavaScriptTests, test_v11_regex_methods) {
+    test_js_script_against_file("test/js/v11_regex_methods.js", "test/js/v11_regex_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v11_date_methods) {
+    test_js_script_against_file("test/js/v11_date_methods.js", "test/js/v11_date_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v11_map_set) {
+    test_js_script_against_file("test/js/v11_map_set.js", "test/js/v11_map_set.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

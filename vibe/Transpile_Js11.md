@@ -18,16 +18,16 @@ After v10, LambdaJS passes **12/13 JetStream JS** files, **62/62** across 5 benc
 | A4 Integer index fast path (transpiler) | Perf | ❌ NOT STARTED | Complete P10e transpiler integration |
 | A5 Constructor shape pre-alloc | Perf | ❌ NOT STARTED | Carry-forward from P10g |
 | A6 Property name interning | Perf | ❌ NOT STARTED | Carry-forward from P10h |
-| B1 Optional chaining (`?.`) | Lang | ❌ NOT STARTED | |
-| B2 `Map` / `Set` collections | Lang | ❌ NOT STARTED | |
-| B3 `Function.prototype.bind` | Lang | ❌ NOT STARTED | |
-| B4 Regex `.test()` / `.exec()` | Lang | ❌ NOT STARTED | |
-| B5 Error subclasses | Lang | ❌ NOT STARTED | |
-| B6 Date instance methods | Lang | ❌ NOT STARTED | |
-| B7 Sequence expressions | Lang | ❌ NOT STARTED | |
-| B8 Labeled statements | Lang | ❌ NOT STARTED | |
-| B9 Nullish coalescing assignment (`??=`) | Lang | ❌ NOT STARTED | |
-| B10 `Object.fromEntries` / `Object.is` | Lang | ❌ NOT STARTED | |
+| B1 Optional chaining (`?.`) | Lang | ✅ DONE | Implemented in v11 sprint 1 |
+| B2 `Map` / `Set` collections | Lang | ✅ DONE | Runtime dispatch via js_map_method; HashMap-backed |
+| B3 `Function.prototype.bind` | Lang | ✅ DONE | Bound function with this/args capture |
+| B4 Regex `.test()` / `.exec()` | Lang | ✅ DONE | RE2-backed regex with test/exec dispatch |
+| B5 Error subclasses | Lang | ✅ DONE | TypeError, RangeError, SyntaxError, ReferenceError |
+| B6 Date instance methods | Lang | ✅ DONE | 10 methods: getTime thru toLocaleDateString |
+| B7 Sequence expressions | Lang | ✅ DONE | Implemented in v11 sprint 1 |
+| B8 Labeled statements | Lang | ✅ DONE | break/continue with labels |
+| B9 Nullish coalescing assignment (`??=`) | Lang | ✅ DONE | ??=, &&=, \|\|= all implemented |
+| B10 `Object.fromEntries` / `Object.is` | Lang | ✅ DONE | Implemented in v11 sprint 1 |
 
 ---
 
@@ -781,7 +781,8 @@ Estimated ~250 LOC.
 | `test/js/v11_regex_methods.js` | `.test()`, `.exec()`, `String.match()`, flags | B4 |
 | `test/js/v11_error_subclasses.js` | `TypeError`, `RangeError`, `instanceof`, `.name` | B5 |
 | `test/js/v11_date_methods.js` | All 12 Date instance methods, `toISOString` | B6 |
-| `test/js/v11_sequence_label.js` | Sequence expressions, labeled break/continue | B7, B8 |
+| `test/js/v11_sequence_expr.js` | Comma operator, sequence expressions | B7 |
+| `test/js/v11_labeled_statements.js` | Labeled break/continue | B8 |
 | `test/js/v11_nullish_assign.js` | `??=`, `\|\|=`, `&&=` | B9 |
 | `test/js/v11_object_extras.js` | `Object.fromEntries`, `Object.is` | B10 |
 

@@ -1044,6 +1044,35 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return (JsAstNode*)cond;
     } else if (strcmp(node_type, "template_string") == 0 || strcmp(node_type, "template_literal") == 0) {
         return build_js_template_literal(tp, expr_node);
+    } else if (strcmp(node_type, "regex") == 0) {
+        // v11: regex literal /pattern/flags
+        JsRegexNode* re = (JsRegexNode*)alloc_js_ast_node(tp, JS_AST_NODE_REGEX, expr_node, sizeof(JsRegexNode));
+        uint32_t start = ts_node_start_byte(expr_node);
+        uint32_t end = ts_node_end_byte(expr_node);
+        const char* text = tp->source + start;
+        int text_len = end - start;
+        // parse /pattern/flags: find last '/'
+        re->pattern = NULL;
+        re->pattern_len = 0;
+        re->flags = NULL;
+        re->flags_len = 0;
+        if (text_len > 1 && text[0] == '/') {
+            // find closing '/' (last one)
+            int last_slash = -1;
+            for (int i = text_len - 1; i > 0; i--) {
+                if (text[i] == '/') { last_slash = i; break; }
+            }
+            if (last_slash > 0) {
+                re->pattern = text + 1;
+                re->pattern_len = last_slash - 1;
+                if (last_slash + 1 < text_len) {
+                    re->flags = text + last_slash + 1;
+                    re->flags_len = text_len - last_slash - 1;
+                }
+            }
+        }
+        re->base.type = &TYPE_ANY;
+        return (JsAstNode*)re;
     } else if (strcmp(node_type, "spread_element") == 0) {
         JsSpreadElementNode* spread = (JsSpreadElementNode*)alloc_js_ast_node(
             tp, JS_AST_NODE_SPREAD_ELEMENT, expr_node, sizeof(JsSpreadElementNode));
@@ -1236,13 +1265,33 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
     } else if (strcmp(node_type, "statement_block") == 0) {
         return build_js_block_statement(tp, stmt_node);
     } else if (strcmp(node_type, "break_statement") == 0) {
-        JsAstNode* break_stmt = alloc_js_ast_node(tp, JS_AST_NODE_BREAK_STATEMENT, stmt_node, sizeof(JsAstNode));
-        break_stmt->type = &TYPE_NULL;
-        return break_stmt;
+        JsBreakContinueNode* break_stmt = (JsBreakContinueNode*)alloc_js_ast_node(tp, JS_AST_NODE_BREAK_STATEMENT, stmt_node, sizeof(JsBreakContinueNode));
+        break_stmt->base.type = &TYPE_NULL;
+        break_stmt->label = NULL;
+        break_stmt->label_len = 0;
+        // check for optional label child
+        TSNode label_node = ts_node_child_by_field_name(stmt_node, "label", strlen("label"));
+        if (!ts_node_is_null(label_node)) {
+            uint32_t start = ts_node_start_byte(label_node);
+            uint32_t end = ts_node_end_byte(label_node);
+            break_stmt->label = tp->source + start;
+            break_stmt->label_len = end - start;
+        }
+        return (JsAstNode*)break_stmt;
     } else if (strcmp(node_type, "continue_statement") == 0) {
-        JsAstNode* continue_stmt = alloc_js_ast_node(tp, JS_AST_NODE_CONTINUE_STATEMENT, stmt_node, sizeof(JsAstNode));
-        continue_stmt->type = &TYPE_NULL;
-        return continue_stmt;
+        JsBreakContinueNode* continue_stmt = (JsBreakContinueNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONTINUE_STATEMENT, stmt_node, sizeof(JsBreakContinueNode));
+        continue_stmt->base.type = &TYPE_NULL;
+        continue_stmt->label = NULL;
+        continue_stmt->label_len = 0;
+        // check for optional label child
+        TSNode label_node = ts_node_child_by_field_name(stmt_node, "label", strlen("label"));
+        if (!ts_node_is_null(label_node)) {
+            uint32_t start = ts_node_start_byte(label_node);
+            uint32_t end = ts_node_end_byte(label_node);
+            continue_stmt->label = tp->source + start;
+            continue_stmt->label_len = end - start;
+        }
+        return (JsAstNode*)continue_stmt;
     } else if (strcmp(node_type, "switch_statement") == 0) {
         return build_js_switch_statement(tp, stmt_node);
     } else if (strcmp(node_type, "do_statement") == 0) {
@@ -1255,6 +1304,26 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         return build_js_throw_statement(tp, stmt_node);
     } else if (strcmp(node_type, "class_declaration") == 0) {
         return build_js_class_declaration(tp, stmt_node);
+    } else if (strcmp(node_type, "labeled_statement") == 0) {
+        JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_LABELED_STATEMENT, stmt_node, sizeof(JsLabeledStatementNode));
+        labeled->base.type = &TYPE_NULL;
+        labeled->label = NULL;
+        labeled->label_len = 0;
+        labeled->body = NULL;
+        // get label name
+        TSNode label_node = ts_node_child_by_field_name(stmt_node, "label", strlen("label"));
+        if (!ts_node_is_null(label_node)) {
+            uint32_t start = ts_node_start_byte(label_node);
+            uint32_t end = ts_node_end_byte(label_node);
+            labeled->label = tp->source + start;
+            labeled->label_len = end - start;
+        }
+        // get body statement
+        TSNode body_node = ts_node_child_by_field_name(stmt_node, "body", strlen("body"));
+        if (!ts_node_is_null(body_node)) {
+            labeled->body = build_js_statement(tp, body_node);
+        }
+        return (JsAstNode*)labeled;
     } else if (strcmp(node_type, "else_clause") == 0) {
         // Handle else clause - return the statement inside
         TSNode inner_node = ts_node_named_child(stmt_node, 0);

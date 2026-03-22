@@ -133,6 +133,56 @@ extern "C" Item js_date_new(void) {
     return obj;
 }
 
+// v11: Date instance method dispatch
+// method_id: 0=getTime, 1=getFullYear, 2=getMonth, 3=getDate,
+//   4=getHours, 5=getMinutes, 6=getSeconds, 7=getMilliseconds,
+//   8=toISOString, 9=toLocaleDateString
+extern "C" Item js_date_method(Item date_obj, int method_id) {
+    // extract epoch-ms from the _time property
+    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item time_val = js_property_get(date_obj, key);
+    double ms = time_val.get_double();
+    if (method_id == 0) { // getTime
+        static double gt_buf[16];
+        static int gt_idx = 0;
+        double* fp = &gt_buf[gt_idx++ % 16];
+        *fp = ms;
+        return (Item){.item = d2it(fp)};
+    }
+    time_t secs = (time_t)(ms / 1000.0);
+    struct tm tm;
+    localtime_r(&secs, &tm);
+    switch (method_id) {
+        case 1: return (Item){.item = i2it(tm.tm_year + 1900)}; // getFullYear
+        case 2: return (Item){.item = i2it(tm.tm_mon)};         // getMonth (0-based)
+        case 3: return (Item){.item = i2it(tm.tm_mday)};        // getDate
+        case 4: return (Item){.item = i2it(tm.tm_hour)};        // getHours
+        case 5: return (Item){.item = i2it(tm.tm_min)};         // getMinutes
+        case 6: return (Item){.item = i2it(tm.tm_sec)};         // getSeconds
+        case 7: {                                                // getMilliseconds
+            int millis = (int)(ms - (double)secs * 1000.0);
+            return (Item){.item = i2it(millis)};
+        }
+        case 8: { // toISOString
+            char buf[32];
+            struct tm utc;
+            gmtime_r(&secs, &utc);
+            int millis = (int)(ms - (double)secs * 1000.0);
+            snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
+                utc.tm_hour, utc.tm_min, utc.tm_sec, millis);
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        case 9: { // toLocaleDateString
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%d/%d/%04d",
+                tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900);
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        default: return ItemNull;
+    }
+}
+
 // Process argv storage
 static Item js_process_argv_items = {.item = ITEM_NULL};
 

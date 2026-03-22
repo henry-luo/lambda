@@ -126,6 +126,12 @@ typedef enum JsAstNodeType {
 
     // v11: Sequence expression
     JS_AST_NODE_SEQUENCE_EXPRESSION,
+
+    // v11: Labeled statement
+    JS_AST_NODE_LABELED_STATEMENT,
+
+    // v11: Regex literal
+    JS_AST_NODE_REGEX,
 } JsAstNodeType;
 
 // JavaScript operators
@@ -509,3 +515,27 @@ typedef struct JsSequenceNode {
     JsAstNode base;
     JsAstNode* expressions;          // Linked list of expressions
 } JsSequenceNode;
+
+// v11: Break/continue with optional label
+typedef struct JsBreakContinueNode {
+    JsAstNode base;
+    const char* label;               // Optional label name (NULL if unlabeled)
+    int label_len;                   // Length of label name
+} JsBreakContinueNode;
+
+// v11: Labeled statement node
+typedef struct JsLabeledStatementNode {
+    JsAstNode base;
+    const char* label;               // Label name
+    int label_len;                   // Length of label name
+    JsAstNode* body;                 // Labeled statement body
+} JsLabeledStatementNode;
+
+// v11: Regex literal node
+typedef struct JsRegexNode {
+    JsAstNode base;
+    const char* pattern;             // Regex pattern (without slashes)
+    int pattern_len;
+    const char* flags;               // Regex flags (g, i, m, etc.)
+    int flags_len;
+} JsRegexNode;
