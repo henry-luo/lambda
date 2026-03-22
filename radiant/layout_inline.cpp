@@ -810,7 +810,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.vertical_align = pa_line_align;
         lycon->block.line_height = pa_line_height;
         lycon->block.line_height_is_normal = pa_line_height_is_normal;
-        if (pushed_counter_scope) counter_pop_scope_propagate(lycon->counter_context);
+        if (pushed_counter_scope) {
+            // Propagate counter-reset counters for real elements (sibling visibility)
+            // but not for pseudo-elements (their counter-reset stays scoped)
+            bool is_pseudo = elmt->is_element() &&
+                static_cast<DomElement*>(elmt)->tag_name &&
+                static_cast<DomElement*>(elmt)->tag_name[0] == ':';
+            counter_pop_scope_propagate(lycon->counter_context, !is_pseudo);
+        }
         return;
     }
 
@@ -964,6 +971,53 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             sib = sib->next_sibling;
         }
 
+        // CSS 2.1 §16.6.1: If no following inline content at this level, walk up
+        // the inline parent chain. The trailing whitespace should only be trimmed
+        // if the entire inline ancestor chain ends the line — not just the current
+        // inline element. A nested inline at end-of-parent still has trailing space
+        // visible if the parent inline has more content following.
+        if (!has_following_inline) {
+            DomNode* ancestor = ((DomNode*)span)->parent;
+            while (ancestor && !has_following_inline) {
+                if (!ancestor->is_element()) break;
+                DomElement* anc_elem = ancestor->as_element();
+                if (!anc_elem) break;
+                // Stop at block-level or non-inline-flow ancestors
+                if (anc_elem->view_type >= RDT_VIEW_INLINE_BLOCK) break;
+                if (anc_elem->view_type != RDT_VIEW_INLINE) break;
+                // Check ancestor's following siblings for inline content
+                DomNode* anc_sib = ancestor->next_sibling;
+                while (anc_sib) {
+                    if (anc_sib->is_element()) {
+                        DomElement* se = anc_sib->as_element();
+                        DisplayValue sdv = resolve_display_value(se);
+                        if (sdv.outer == CSS_VALUE_INLINE) {
+                            has_following_inline = true;
+                        }
+                        break;
+                    } else if (anc_sib->is_text()) {
+                        DomText* tn = anc_sib->as_text();
+                        if (tn && tn->text && tn->length > 0) {
+                            bool all_ws = true;
+                            for (size_t i = 0; i < tn->length; i++) {
+                                char c = tn->text[i];
+                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                                    all_ws = false;
+                                    break;
+                                }
+                            }
+                            if (!all_ws) {
+                                has_following_inline = true;
+                                break;
+                            }
+                        }
+                    }
+                    anc_sib = anc_sib->next_sibling;
+                }
+                ancestor = ancestor->parent;
+            }
+        }
+
         if (!has_following_inline) {
             // Span is last inline content on this line — trim trailing whitespace
             View* c = span->first_child;
@@ -1058,7 +1112,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->line.vertical_align_offset = pa_valign_offset;
     lycon->block.line_height = pa_line_height;
     lycon->block.line_height_is_normal = pa_line_height_is_normal;
-    if (pushed_counter_scope) counter_pop_scope_propagate(lycon->counter_context);
+    if (pushed_counter_scope) {
+        bool is_pseudo = elmt->is_element() &&
+            static_cast<DomElement*>(elmt)->tag_name &&
+            static_cast<DomElement*>(elmt)->tag_name[0] == ':';
+        counter_pop_scope_propagate(lycon->counter_context, !is_pseudo);
+    }
     log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
 }

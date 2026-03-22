@@ -2,7 +2,7 @@
 
 LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). It transpiles JavaScript source code into MIR IR which is then compiled to native machine code, enabling near-native execution of JavaScript programs within the Lambda runtime.
 
-> **Status:** Experimental. LambdaJS passes 62/62 benchmarks across 5 suites and 12/13 JetStream original JS files. It covers ES6 classes, prototype-based OOP, closures, typed arrays, template literals, try/catch/finally, destructuring, and regex via RE2.
+> **Status:** Experimental. LambdaJS passes 62/62 benchmarks across 5 suites and all 52/52 JS baseline tests. It covers ES6 classes, prototype-based OOP, closures, typed arrays, template literals, try/catch/finally, destructuring, regex via RE2, optional chaining, Map/Set collections, and error subclasses. JetStream geometric mean: **6.3×** vs Node.js (V8).
 
 ## Usage
 
@@ -27,7 +27,7 @@ LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). 
 | Default parameters                                 |   ✅    |                                                          |
 | Destructuring — arrays                             |   ✅    | `const [a, b] = arr`                                     |
 | Destructuring — objects                            |   ✅    | `const {x, y} = obj`, rename `{x: px}`, for-of           |
-| Destructuring — rest (`...rest`)                   |   ⚠️   | Parsed but not transpiled                                |
+| Destructuring — rest (`...rest`)                   |   ✅    | Object rest `{a, ...rest}` and array rest `[a, ...rest]` |
 | ES6 classes                                        |   ✅    | `class`, `extends`, `super()`, `static`, getters/setters |
 | Prototype-based OOP                                |   ✅    | `Foo.prototype.method = fn`, `new Foo()`                 |
 | Closures                                           |   ✅    | Multi-level transitive capture, shared scope env         |
@@ -54,12 +54,12 @@ LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). 
 | `async` / `await` / `Promise`                      |   ❌    |                                                          |
 | `import` / `export` (ES modules)                   |   ❌    |                                                          |
 | `WeakMap` / `WeakSet`                              |   ❌    |                                                          |
-| `Symbol` API                                       |   ❌    | `Symbol.iterator`, `Symbol.toPrimitive`                  |
+| `Symbol` API                                       |   ✅    | `Symbol()`, `Symbol.for()`, `Symbol.keyFor()`, well-known symbols |
 | `Proxy` / `Reflect`                                |   ❌    |                                                          |
 | `setTimeout` / `setInterval`                       |   ❌    |                                                          |
-| `encodeURIComponent` / `decodeURIComponent`        |   ❌    |                                                          |
+| `encodeURIComponent` / `decodeURIComponent`        |   ✅    | RFC 3986 percent-encoding via `lib/url.c`                |
 | `structuredClone`                                  |   ❌    |                                                          |
-| `globalThis`                                       |   ❌    |                                                          |
+| `globalThis`                                       |   ✅    | Singleton global object with `undefined`, `NaN`, `Infinity` |
 | `Intl`                                             |   ❌    |                                                          |
 
 ### Operators
@@ -79,104 +79,104 @@ LambdaJS includes a DOM bridge for use with the Radiant layout engine:
 
 #### Document Methods
 
-| Method                     | Status | Notes                              |
-| -------------------------- | :----: | ---------------------------------- |
-| `getElementById`           |   ✅    |                                    |
-| `getElementsByClassName`   |   ✅    |                                    |
-| `getElementsByTagName`     |   ✅    |                                    |
-| `querySelector`            |   ✅    |                                    |
-| `querySelectorAll`         |   ✅    |                                    |
-| `createElement`            |   ✅    |                                    |
-| `createTextNode`           |   ✅    |                                    |
-| `createElementNS`          |   ✅    | Namespace ignored, delegates to `createElement` |
-| `write` / `writeln`        |   ✅    | Simplified; appends text to body   |
-| `normalize`                |   ✅    | Merges adjacent text nodes at root |
-| `createDocumentFragment`   |   ❌    |                                    |
-| `createComment`            |   ❌    |                                    |
-| `importNode`               |   ❌    |                                    |
-| `adoptNode`                |   ❌    |                                    |
+| Method                   | Status | Notes                                           |
+| ------------------------ | :----: | ----------------------------------------------- |
+| `getElementById`         |   ✅    |                                                 |
+| `getElementsByClassName` |   ✅    |                                                 |
+| `getElementsByTagName`   |   ✅    |                                                 |
+| `querySelector`          |   ✅    |                                                 |
+| `querySelectorAll`       |   ✅    |                                                 |
+| `createElement`          |   ✅    |                                                 |
+| `createTextNode`         |   ✅    |                                                 |
+| `createElementNS`        |   ✅    | Namespace ignored, delegates to `createElement` |
+| `write` / `writeln`      |   ✅    | Simplified; appends text to body                |
+| `normalize`              |   ✅    | Merges adjacent text nodes at root              |
+| `createDocumentFragment` |   ✅    | Lightweight container; children transfer on append |
+| `createComment`          |   ✅    | Creates comment DOM node                          |
+| `importNode`             |   ✅    | Deep clone from external tree                     |
+| `adoptNode`              |   ✅    | Detaches node from current parent                 |
 
 #### Document Properties
 
-| Property            | Status | Notes |
-| ------------------- | :----: | ----- |
-| `body`              |   ✅    |       |
-| `documentElement`   |   ✅    |       |
-| `head`              |   ✅    |       |
-| `title`             |   ✅    |       |
-| `cookie`            |   ❌    |       |
-| `readyState`        |   ❌    |       |
-| `URL` / `location`  |   ❌    |       |
+| Property           | Status | Notes |
+| ------------------ | :----: | ----- |
+| `body`             |   ✅    |       |
+| `documentElement`  |   ✅    |       |
+| `head`             |   ✅    |       |
+| `title`            |   ✅    |       |
+| `cookie`           |   ❌    |       |
+| `readyState`       |   ❌    |       |
+| `URL` / `location` |   ✅    | `URL` returns href string; `location` object with `.href`, `.hostname`, `.pathname`, etc. |
 
 #### Element Properties
 
-| Property                | Status | Notes                                  |
-| ----------------------- | :----: | -------------------------------------- |
-| `tagName`               |   ✅    |                                        |
-| `id`                    |   ✅    |                                        |
-| `className`             |   ✅    |                                        |
-| `textContent`           |   ✅    |                                        |
-| `children`              |   ✅    |                                        |
-| `parentElement`         |   ✅    |                                        |
-| `parentNode`            |   ✅    |                                        |
-| `firstChild`            |   ✅    |                                        |
-| `lastChild`             |   ✅    |                                        |
-| `nextSibling`           |   ✅    |                                        |
-| `previousSibling`       |   ✅    |                                        |
-| `childNodes`            |   ✅    |                                        |
-| `childElementCount`     |   ✅    |                                        |
-| `nodeType`              |   ✅    |                                        |
-| `nodeName`              |   ✅    | Tag name or `"#text"`                  |
-| `nodeValue`             |   ✅    | Alias for text node `.data`            |
-| `firstElementChild`     |   ✅    | Skips text nodes                       |
-| `lastElementChild`      |   ✅    | Skips text nodes                       |
-| `nextElementSibling`    |   ✅    | Skips text nodes                       |
-| `previousElementSibling`|   ✅    | Skips text nodes                       |
-| `innerHTML`             |   ⚠️   | Getter only; setter not implemented    |
-| `offsetWidth`           |   ✅    | Returns 0 (JS runs before layout)      |
-| `offsetHeight`          |   ✅    | Returns 0 (JS runs before layout)      |
-| `clientWidth`           |   ✅    | Returns 0 (JS runs before layout)      |
-| `clientHeight`          |   ✅    | Returns 0 (JS runs before layout)      |
-| `outerHTML`             |   ❌    |                                        |
-| `classList`             |   ❌    | `add`, `remove`, `toggle`, `contains`  |
-| `dataset`               |   ❌    | `data-*` attribute access              |
-| `scrollTop` / `scrollLeft` |  ❌  |                                        |
-| `getBoundingClientRect` |   ❌    |                                        |
+| Property                   | Status | Notes                                                                       |
+| -------------------------- | :----: | --------------------------------------------------------------------------- |
+| `tagName`                  |   ✅    |                                                                             |
+| `id`                       |   ✅    |                                                                             |
+| `className`                |   ✅    |                                                                             |
+| `textContent`              |   ✅    |                                                                             |
+| `children`                 |   ✅    |                                                                             |
+| `parentElement`            |   ✅    |                                                                             |
+| `parentNode`               |   ✅    |                                                                             |
+| `firstChild`               |   ✅    |                                                                             |
+| `lastChild`                |   ✅    |                                                                             |
+| `nextSibling`              |   ✅    |                                                                             |
+| `previousSibling`          |   ✅    |                                                                             |
+| `childNodes`               |   ✅    |                                                                             |
+| `childElementCount`        |   ✅    |                                                                             |
+| `nodeType`                 |   ✅    |                                                                             |
+| `nodeName`                 |   ✅    | Tag name or `"#text"`                                                       |
+| `nodeValue`                |   ✅    | Alias for text node `.data`                                                 |
+| `firstElementChild`        |   ✅    | Skips text nodes                                                            |
+| `lastElementChild`         |   ✅    | Skips text nodes                                                            |
+| `nextElementSibling`       |   ✅    | Skips text nodes                                                            |
+| `previousElementSibling`   |   ✅    | Skips text nodes                                                            |
+| `innerHTML`                |   ✅    | Getter and setter; setter parses HTML fragment                              |
+| `offsetWidth`              |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `offsetHeight`             |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `clientWidth`              |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `clientHeight`             |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `outerHTML`                |   ✅    | Getter only                                                                 |
+| `classList`                |   ✅    | `add`, `remove`, `toggle`, `contains`, `item`, `replace`, `length`, `value` |
+| `dataset`                  |   ✅    | `data-*` attribute proxy with camelCase ↔ kebab-case conversion             |
+| `scrollTop` / `scrollLeft` |   ❌    |                                                                             |
+| `getBoundingClientRect`    |   ❌    |                                                                             |
 
 #### Element Methods
 
-| Method              | Status | Notes                        |
-| ------------------- | :----: | ---------------------------- |
-| `getAttribute`      |   ✅    |                              |
-| `setAttribute`      |   ✅    |                              |
-| `hasAttribute`      |   ✅    |                              |
-| `removeAttribute`   |   ✅    |                              |
-| `querySelector`     |   ✅    |                              |
-| `querySelectorAll`  |   ✅    |                              |
-| `matches`           |   ✅    |                              |
-| `closest`           |   ✅    |                              |
-| `appendChild`       |   ✅    |                              |
-| `removeChild`       |   ✅    |                              |
-| `insertBefore`      |   ✅    |                              |
-| `hasChildNodes`     |   ✅    |                              |
-| `cloneNode`         |   ✅    |                              |
-| `normalize`         |   ✅    | Merges adjacent text nodes   |
-| `replaceChild`      |   ❌    |                              |
-| `insertAdjacentHTML`|   ❌    |                              |
-| `insertAdjacentElement` | ❌ |                              |
-| `remove`            |   ❌    | Self-removal from parent     |
-| `contains`          |   ❌    |                              |
-| `toggleAttribute`   |   ❌    |                              |
+| Method                  | Status | Notes                      |
+| ----------------------- | :----: | -------------------------- |
+| `getAttribute`          |   ✅    |                            |
+| `setAttribute`          |   ✅    |                            |
+| `hasAttribute`          |   ✅    |                            |
+| `removeAttribute`       |   ✅    |                            |
+| `querySelector`         |   ✅    |                            |
+| `querySelectorAll`      |   ✅    |                            |
+| `matches`               |   ✅    |                            |
+| `closest`               |   ✅    |                            |
+| `appendChild`           |   ✅    |                            |
+| `removeChild`           |   ✅    |                            |
+| `insertBefore`          |   ✅    |                            |
+| `hasChildNodes`         |   ✅    |                            |
+| `cloneNode`             |   ✅    |                            |
+| `normalize`             |   ✅    | Merges adjacent text nodes |
+| `replaceChild`          |   ✅    |                            |
+| `insertAdjacentHTML`    |   ✅    | Parses HTML fragment at position |
+| `insertAdjacentElement` |   ✅    | Inserts element at position |
+| `remove`                |   ✅    | Self-removal from parent   |
+| `contains`              |   ✅    | Subtree containment check  |
+| `toggleAttribute`       |   ✅    | Optional force parameter   |
 
 #### Style
 
-| Feature                          | Status | Notes                        |
-| -------------------------------- | :----: | ---------------------------- |
-| `element.style.prop` get/set     |   ✅    | camelCase ↔ CSS conversion   |
-| `getComputedStyle()`             |   ✅    | Full cascade matching        |
-| `element.style.cssText`          |   ❌    |                              |
-| `element.style.setProperty()`    |   ❌    |                              |
-| `element.style.removeProperty()` |   ❌    |                              |
+| Feature                          | Status | Notes                      |
+| -------------------------------- | :----: | -------------------------- |
+| `element.style.prop` get/set     |   ✅    | camelCase ↔ CSS conversion |
+| `getComputedStyle()`             |   ✅    | Full cascade matching      |
+| `element.style.cssText`          |   ✅    | Getter only                |
+| `element.style.setProperty()`    |   ✅    | Sets inline style property  |
+| `element.style.removeProperty()` |   ✅    | Removes inline style property |
 
 ### Built-in Objects & Methods
 
@@ -264,7 +264,7 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 
 #### Global Functions
 
-`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `console.log`, `performance.now()`, `alert`
+`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `console.log`, `performance.now()`, `alert`, `encodeURIComponent`, `decodeURIComponent`, `globalThis`
 
 ---
 
@@ -285,8 +285,8 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 | BENG | 0.8× | 6 | 4 | 10 |
 | KOSTYA | 25.7× | 0 | 7 | 7 |
 | LARCENY | 15.5× | 2 | 10 | 12 |
-| JetStream | 14.7× | 0 | 7 | 7 |
-| **Overall** | **8.8×** | **13** | **47** | **60** |
+| JetStream | 6.3× | 0 | 9 | 11 |
+| **Overall** | **6.3×** | **13** | **47** | **60** |
 
 ### Where LambdaJS Beats Node.js (13 benchmarks)
 
@@ -328,19 +328,27 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 
 ### JetStream Benchmarks (Original JS Files)
 
+Measured after v11 Track A performance optimizations (property hash table, array fast path, float prescan widening, integer index fast path, constructor shape pre-allocation, property name interning).
+
 | Benchmark | Category | LambdaJS (ms) | Node.js (ms) | Ratio |
 |-----------|----------|-------------:|-----------:|------:|
-| cube3d | 3D | 22 | 18 | 1.2× |
-| splay | data | 48 | 20 | 2.4× |
-| deltablue | macro | 48 | 11 | 4.4× |
-| crypto_sha1 | crypto | 141 | 9.0 | 15.7× |
-| richards | macro | 483 | 8.3 | 58.2× |
-| raytrace3d | 3D | 709 | 19 | 37.3× |
-| nbody | numeric | 1,910 | 5.5 | 347× |
-| navier_stokes | numeric | — | 14 | — |
-| hashmap | data | — | 16 | — |
+| deltablue | macro | 11.0 | 5.8 | 1.9× |
+| regex_dna | string | 2.4 | — | — |
+| cube3d | 3D | 29.9 | 11.7 | 2.6× |
+| splay | data | 22.0 | 7.7 | 2.9× |
+| crypto_sha1 | crypto | 22.3 | 7.5 | 3.0× |
+| crypto_md5 | crypto | 21.7 | — | — |
+| richards | macro | 81.4 | 5.1 | 16.0× |
+| crypto_aes | crypto | 38.8 | — | — |
+| nbody | numeric | 260.8 | 3.1 | 84.1× |
+| navier_stokes | numeric | 569.2 | 7.5 | 75.9× |
+| base64 | string | 390.3 | — | — |
+| hashmap | data | TIMEOUT | 12.0 | — |
+| raytrace3d | 3D | FAIL | 9.1 | — |
 
-12 of 13 JetStream JS files run successfully. Two benchmarks (navier_stokes, hashmap) are still being optimized.
+**Geometric mean (exec):** LambdaJS 45.0ms vs Node.js 7.2ms → **6.3×** (improved from 8.8× in v10).
+
+11 of 13 JetStream JS files run successfully. hashmap times out (GC pressure from 90K constructor calls). raytrace3d has a pre-existing closure capture bug.
 
 ---
 

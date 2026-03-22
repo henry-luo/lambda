@@ -166,6 +166,20 @@ Url* parse_url(Url *base, const char* doc_url);
 // Returns NULL if the URL is not a valid file:// URL
 char* url_to_local_path(const Url* url);
 
+// Percent-encode a string per ECMAScript encodeURIComponent rules.
+// Unreserved chars (not encoded): A-Z a-z 0-9 - _ . ~ ! ' ( ) *
+// Returns a newly allocated string. Caller must free.
+char* url_encode_component(const char* str, size_t len);
+
+// Percent-decode a string: %XX → byte.
+// Returns a newly allocated string. Caller must free.
+// If out_len is non-NULL, stores the decoded length.
+char* url_decode_component(const char* str, size_t len, size_t* out_len);
+
+// Convert a hex character (0-9, A-F, a-f) to its integer value (0-15).
+// Returns -1 for invalid characters.
+int url_hex_to_int(char c);
+
 #ifdef __cplusplus
 }
 #endif

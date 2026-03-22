@@ -650,12 +650,14 @@ Url* parse_url(Url *base, const char* doc_url) {
 }
 
 // helper function to decode percent-encoded characters
-static int hex_to_int(char c) {
+int url_hex_to_int(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
 }
+// keep backward-compatible static alias
+static int hex_to_int(char c) { return url_hex_to_int(c); }
 
 // URL decode a string (decode percent-encoded characters)
 static char* url_decode(const char* str) {
@@ -769,4 +771,52 @@ char* url_to_local_path(const Url* url) {
     // On Unix, the pathname is already in the correct format
     return decoded_path;
     #endif
+}
+
+// Percent-encode a string per ECMAScript encodeURIComponent rules.
+// Unreserved chars: A-Z a-z 0-9 - _ . ~ ! ' ( ) *
+char* url_encode_component(const char* str, size_t len) {
+    if (!str) return NULL;
+    static const char hex[] = "0123456789ABCDEF";
+    char* encoded = malloc(len * 3 + 1);
+    if (!encoded) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+            c == '.' || c == '~' || c == '!' || c == '\'' ||
+            c == '(' || c == ')' || c == '*') {
+            encoded[j++] = c;
+        } else {
+            encoded[j++] = '%';
+            encoded[j++] = hex[c >> 4];
+            encoded[j++] = hex[c & 0x0F];
+        }
+    }
+    encoded[j] = '\0';
+    return encoded;
+}
+
+// Percent-decode a string: %XX -> byte.
+char* url_decode_component(const char* str, size_t len, size_t* out_len) {
+    if (!str) return NULL;
+    char* decoded = malloc(len + 1);
+    if (!decoded) return NULL;
+    size_t i = 0, j = 0;
+    while (i < len) {
+        if (str[i] == '%' && i + 2 < len) {
+            int high = url_hex_to_int(str[i + 1]);
+            int low  = url_hex_to_int(str[i + 2]);
+            if (high >= 0 && low >= 0) {
+                decoded[j++] = (char)((high << 4) | low);
+                i += 3;
+                continue;
+            }
+        }
+        decoded[j++] = str[i++];
+    }
+    decoded[j] = '\0';
+    if (out_len) *out_len = j;
+    return decoded;
 }

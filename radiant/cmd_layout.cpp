@@ -1351,10 +1351,13 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
 
     // Handle selector groups (comma-separated selectors like "th, td")
     if (selector_group && selector_group->selector_count > 0) {
-        // Try matching each selector in the group
-        bool any_match = false;
+        // Try matching each selector in the group.
+        // For pseudo-element selectors (e.g., ".scope::before, .scope::after"),
+        // each matching selector may target a different pseudo-element, so we
+        // must apply the rule for each match individually rather than breaking
+        // on the first match.
+        bool any_non_pseudo_match = false;
         CssSpecificity best_specificity = {0, 0, 0, 0, false};
-        PseudoElementType pseudo_element = PSEUDO_ELEMENT_NONE;
 
         for (size_t sel_idx = 0; sel_idx < selector_group->selector_count; sel_idx++) {
             CssSelector* group_sel = selector_group->selectors[sel_idx];
@@ -1374,19 +1377,26 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
 
             if (matched) {
                 g_selector_match_success++;
-                any_match = true;
-                best_specificity = match_result.specificity;
-                pseudo_element = match_result.pseudo_element;
-                break;
+                if (match_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
+                    // Apply pseudo-element rule immediately — different selectors
+                    // in the group may target different pseudo-elements
+                    if (rule->data.style_rule.declaration_count > 0) {
+                        dom_element_apply_pseudo_element_rule(elem, rule,
+                            match_result.specificity, (int)match_result.pseudo_element);
+                        g_property_apply_count++;
+                    }
+                } else {
+                    // For non-pseudo matches, track best specificity and apply once
+                    if (!any_non_pseudo_match) {
+                        best_specificity = match_result.specificity;
+                    }
+                    any_non_pseudo_match = true;
+                }
             }
         }
 
-        if (any_match && rule->data.style_rule.declaration_count > 0) {
-            if (pseudo_element != PSEUDO_ELEMENT_NONE) {
-                dom_element_apply_pseudo_element_rule(elem, rule, best_specificity, (int)pseudo_element);
-            } else {
-                dom_element_apply_rule(elem, rule, best_specificity);
-            }
+        if (any_non_pseudo_match && rule->data.style_rule.declaration_count > 0) {
+            dom_element_apply_rule(elem, rule, best_specificity);
             g_property_apply_count++;
         }
         return;

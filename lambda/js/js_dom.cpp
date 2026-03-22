@@ -18,11 +18,13 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/url.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_style_node.hpp"
 #include "../input/css/selector_matcher.hpp"
+#include "../input/html5/html5_parser.h"
 
 #include <cstring>
 #include <cctype>
@@ -30,6 +32,7 @@
 // Forward declarations
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
+DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // ============================================================================
 // Unique type marker for DOM-wrapped Maps
@@ -784,6 +787,54 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return ItemNull;
     }
 
+    // v12b: createDocumentFragment()
+    if (strcmp(method, "createDocumentFragment") == 0) {
+        // create a lightweight container element with a special tag
+        MarkBuilder builder(doc->input);
+        Item frag_item = builder.element("#document-fragment").final();
+        Element* frag_elem = frag_item.element;
+        DomElement* dom_frag = dom_element_create(doc, "#document-fragment", frag_elem);
+        return js_dom_wrap_element(dom_frag);
+    }
+
+    // v12b: createComment(data)
+    if (strcmp(method, "createComment") == 0) {
+        const char* text = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (!text) text = "";
+
+        // create a Lambda Element with comment tag for backing
+        MarkBuilder builder(doc->input);
+        Item comment_item = builder.element("!--").text(text).final();
+        Element* comment_elem = comment_item.element;
+
+        DomComment* comment_node = dom_comment_create(comment_elem, nullptr);
+        if (!comment_node) return ItemNull;
+        return js_dom_wrap_element(comment_node);
+    }
+
+    // v12b: importNode(node [, deep]) — deep clone a node
+    if (strcmp(method, "importNode") == 0) {
+        if (argc < 1) return ItemNull;
+        DomNode* source = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!source || !source->is_element()) return ItemNull;
+        bool deep = (argc >= 2) ? js_is_truthy(args[1]) : false;
+        Item source_item = js_dom_wrap_element(source);
+        Item deep_arg = (Item){.item = b2it(deep ? 1 : 0)};
+        Item method_str = (Item){.item = s2it(heap_create_name("cloneNode"))};
+        return js_dom_element_method(source_item, method_str, &deep_arg, 1);
+    }
+
+    // v12b: adoptNode(node) — detach from current parent
+    if (strcmp(method, "adoptNode") == 0) {
+        if (argc < 1) return ItemNull;
+        DomNode* node = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!node) return ItemNull;
+        if (node->parent) {
+            node->parent->remove_child(node);
+        }
+        return args[0];
+    }
+
     log_debug("js_document_method: unknown method '%s'", method);
     return ItemNull;
 }
@@ -865,6 +916,16 @@ extern "C" Item js_document_get_property(Item prop_name) {
                 }
             }
             child = child->next_sibling;
+        }
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // v12: URL — full document URL as string
+    if (strcmp(prop, "URL") == 0) {
+        Url* url = doc->url;
+        if (url) {
+            const char* href = url_get_href(url);
+            if (href) return (Item){.item = s2it(heap_create_name(href))};
         }
         return (Item){.item = s2it(heap_create_name(""))};
     }
@@ -972,6 +1033,15 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             collect_inner_html(child, sb);
             child = child->next_sibling;
         }
+        String* result = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
+
+    // v12: outerHTML (element itself + children)
+    if (strcmp(prop, "outerHTML") == 0) {
+        StrBuf* sb = strbuf_new_cap(256);
+        collect_inner_html((DomNode*)elem, sb);
         String* result = heap_create_name(sb->str ? sb->str : "");
         strbuf_free(sb);
         return (Item){.item = s2it(result)};
@@ -1356,6 +1426,57 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         return value;
     }
 
+    // v12b: innerHTML setter — parse HTML and replace children
+    if (strcmp(prop, "innerHTML") == 0) {
+        const char* html_str = fn_to_cstr(value);
+        if (!html_str) return ItemNull;
+
+        // 1. Remove all existing children
+        DomNode* child = elem->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            child->parent = nullptr;
+            child->next_sibling = nullptr;
+            child->prev_sibling = nullptr;
+            child = next;
+        }
+        elem->first_child = nullptr;
+        elem->last_child = nullptr;
+
+        // 2. Empty string → done (cleared children)
+        if (html_str[0] == '\0') return value;
+
+        // 3. Parse HTML fragment
+        DomDocument* doc = elem->doc;
+        if (!doc || !doc->input) return value;
+
+        Html5Parser* parser = html5_fragment_parser_create(
+            doc->pool, doc->arena, doc->input);
+        if (!parser) return value;
+
+        html5_fragment_parse(parser, html_str);
+        Element* body_elem = html5_fragment_get_body(parser);
+        if (!body_elem) return value;
+
+        // 4. Convert parsed Lambda Elements to DOM nodes and append
+        for (size_t i = 0; i < body_elem->length; i++) {
+            TypeId type = get_type_id(body_elem->items[i]);
+            if (type == LMD_TYPE_ELEMENT) {
+                build_dom_tree_from_element(
+                    body_elem->items[i].element, doc, elem);
+                // build_dom_tree_from_element already appends to parent
+            } else if (type == LMD_TYPE_STRING) {
+                String* s = it2s(body_elem->items[i]);
+                dom_text_create(s, elem);
+                // dom_text_create already sets parent
+            }
+        }
+
+        log_debug("js_dom_set_property: set innerHTML on <%s>",
+                  elem->tag_name ? elem->tag_name : "?");
+        return value;
+    }
+
     // generic property set via setAttribute
     const char* val_str = fn_to_cstr(value);
     if (val_str) {
@@ -1420,6 +1541,12 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     // convert camelCase JS property to CSS property
     char css_prop[128];
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+
+    // v12: cssText getter — return the raw inline style string
+    if (strcmp(css_prop, "cssText") == 0) {
+        const char* inline_style = dom_element_get_inline_style(elem);
+        return (Item){.item = s2it(heap_create_name(inline_style ? inline_style : ""))};
+    }
 
     // look up the CSS property ID
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
@@ -1652,6 +1779,20 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             log_error("js_dom_element_method appendChild: argument is not a DOM node");
             return ItemNull;
         }
+        // v12b: DocumentFragment support — move children instead of the fragment itself
+        if (child_node->is_element()) {
+            DomElement* child_elem = child_node->as_element();
+            if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+                DomNode* frag_child = child_elem->first_child;
+                while (frag_child) {
+                    DomNode* next = frag_child->next_sibling;
+                    child_elem->remove_child(frag_child);
+                    ((DomNode*)elem)->append_child(frag_child);
+                    frag_child = next;
+                }
+                return args[0];
+            }
+        }
         // detach child from current parent if any
         if (child_node->parent) {
             DomNode* old_parent = child_node->parent;
@@ -1682,6 +1823,20 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
         DomNode* ref_child = (DomNode*)js_dom_unwrap_element(args[1]);
         if (!new_child) return ItemNull;
+        // v12b: DocumentFragment support — move children instead of the fragment itself
+        if (new_child->is_element()) {
+            DomElement* new_elem = new_child->as_element();
+            if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
+                DomNode* frag_child = new_elem->first_child;
+                while (frag_child) {
+                    DomNode* next = frag_child->next_sibling;
+                    new_elem->remove_child(frag_child);
+                    ((DomNode*)elem)->insert_before(frag_child, ref_child);
+                    frag_child = next;
+                }
+                return args[0];
+            }
+        }
         // detach from old parent
         if (new_child->parent) {
             new_child->parent->remove_child(new_child);
@@ -1694,6 +1849,12 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "hasChildNodes") == 0) {
         bool has = (elem->first_child != nullptr);
         return (Item){.item = b2it(has ? 1 : 0)};
+    }
+
+    // v12: contains(other) → boolean (subtree containment check)
+    if (strcmp(method, "contains") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        return js_dom_contains(elem_item, args[0]);
     }
 
     // normalize() — merge adjacent text nodes
@@ -1767,6 +1928,505 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return js_dom_wrap_element(clone);
     }
 
+    // v12b: remove() — self-removal from parent
+    if (strcmp(method, "remove") == 0) {
+        DomNode* node = (DomNode*)elem;
+        if (node->parent) {
+            node->parent->remove_child(node);
+        }
+        return ItemNull;
+    }
+
+    // v12b: replaceChild(newChild, oldChild)
+    if (strcmp(method, "replaceChild") == 0) {
+        if (argc < 2) return ItemNull;
+        DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
+        DomNode* old_child = (DomNode*)js_dom_unwrap_element(args[1]);
+        if (!new_child || !old_child) return ItemNull;
+        // detach new_child from its current parent
+        if (new_child->parent) {
+            new_child->parent->remove_child(new_child);
+        }
+        // insert new before old, then remove old
+        ((DomNode*)elem)->insert_before(new_child, old_child);
+        ((DomNode*)elem)->remove_child(old_child);
+        return args[1]; // return removed old child
+    }
+
+    // v12b: toggleAttribute(name [, force])
+    if (strcmp(method, "toggleAttribute") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        const char* attr_name = fn_to_cstr(args[0]);
+        if (!attr_name) return (Item){.item = ITEM_FALSE};
+
+        bool has = dom_element_has_attribute(elem, attr_name);
+        bool should_have;
+        if (argc >= 2) {
+            should_have = js_is_truthy(args[1]);
+        } else {
+            should_have = !has; // toggle
+        }
+
+        if (should_have && !has) {
+            dom_element_set_attribute(elem, attr_name, "");
+        } else if (!should_have && has) {
+            dom_element_remove_attribute(elem, attr_name);
+        }
+        return (Item){.item = b2it(should_have ? 1 : 0)};
+    }
+
+    // v12b: insertAdjacentElement(position, newElement)
+    if (strcmp(method, "insertAdjacentElement") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* position = fn_to_cstr(args[0]);
+        DomNode* new_node = (DomNode*)js_dom_unwrap_element(args[1]);
+        if (!position || !new_node) return ItemNull;
+
+        // detach from old parent
+        if (new_node->parent) {
+            new_node->parent->remove_child(new_node);
+        }
+
+        if (strcasecmp(position, "beforebegin") == 0) {
+            if (elem->parent && elem->parent->is_element())
+                elem->parent->insert_before(new_node, (DomNode*)elem);
+        } else if (strcasecmp(position, "afterbegin") == 0) {
+            ((DomNode*)elem)->insert_before(new_node, elem->first_child);
+        } else if (strcasecmp(position, "beforeend") == 0) {
+            ((DomNode*)elem)->append_child(new_node);
+        } else if (strcasecmp(position, "afterend") == 0) {
+            if (elem->parent && elem->parent->is_element())
+                elem->parent->insert_before(new_node, elem->next_sibling);
+        }
+        return args[1]; // return the inserted element
+    }
+
+    // v12b: insertAdjacentHTML(position, text)
+    if (strcmp(method, "insertAdjacentHTML") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* position = fn_to_cstr(args[0]);
+        const char* html_str = fn_to_cstr(args[1]);
+        if (!position || !html_str || !elem->doc) return ItemNull;
+
+        DomDocument* doc = elem->doc;
+        if (!doc->input) return ItemNull;
+
+        // parse the HTML fragment
+        Html5Parser* parser = html5_fragment_parser_create(
+            doc->pool, doc->arena, doc->input);
+        if (!parser) return ItemNull;
+        html5_fragment_parse(parser, html_str);
+        Element* body_elem = html5_fragment_get_body(parser);
+        if (!body_elem) return ItemNull;
+
+        // determine target parent and reference node based on position
+        DomElement* target_parent = nullptr;
+        DomNode* ref_node = nullptr;
+
+        if (strcasecmp(position, "beforebegin") == 0) {
+            if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+            target_parent = elem->parent->as_element();
+            ref_node = (DomNode*)elem;
+        } else if (strcasecmp(position, "afterbegin") == 0) {
+            target_parent = elem;
+            ref_node = elem->first_child;
+        } else if (strcasecmp(position, "beforeend") == 0) {
+            target_parent = elem;
+            ref_node = nullptr;
+        } else if (strcasecmp(position, "afterend") == 0) {
+            if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+            target_parent = elem->parent->as_element();
+            ref_node = elem->next_sibling;
+        } else {
+            log_error("insertAdjacentHTML: invalid position '%s'", position);
+            return ItemNull;
+        }
+
+        // build DOM nodes from parsed fragment and insert
+        for (size_t i = 0; i < body_elem->length; i++) {
+            TypeId type = get_type_id(body_elem->items[i]);
+            if (type == LMD_TYPE_ELEMENT) {
+                DomElement* child_dom = build_dom_tree_from_element(
+                    body_elem->items[i].element, doc, nullptr);
+                if (child_dom) {
+                    if (ref_node)
+                        ((DomNode*)target_parent)->insert_before((DomNode*)child_dom, ref_node);
+                    else
+                        ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
+                }
+            } else if (type == LMD_TYPE_STRING) {
+                String* s = it2s(body_elem->items[i]);
+                DomText* text_node = dom_text_create_detached(s, doc);
+                if (text_node) {
+                    if (ref_node)
+                        ((DomNode*)target_parent)->insert_before((DomNode*)text_node, ref_node);
+                    else
+                        ((DomNode*)target_parent)->append_child((DomNode*)text_node);
+                }
+            }
+        }
+        return ItemNull;
+    }
+
     log_debug("js_dom_element_method: unknown method '%s'", method);
+    return ItemNull;
+}
+
+// ============================================================================
+// classList API (v12)
+// ============================================================================
+
+extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args, int argc) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) {
+        log_error("js_classlist_method: not a DOM element");
+        return ItemNull;
+    }
+
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return ItemNull;
+
+    log_debug("js_classlist_method: '%s' on <%s>", method,
+              elem->tag_name ? elem->tag_name : "?");
+
+    // add(className, ...)
+    if (strcmp(method, "add") == 0) {
+        for (int i = 0; i < argc; i++) {
+            const char* cls = fn_to_cstr(args[i]);
+            if (cls) dom_element_add_class(elem, cls);
+        }
+        return ItemNull;
+    }
+
+    // remove(className, ...)
+    if (strcmp(method, "remove") == 0) {
+        for (int i = 0; i < argc; i++) {
+            const char* cls = fn_to_cstr(args[i]);
+            if (cls) dom_element_remove_class(elem, cls);
+        }
+        return ItemNull;
+    }
+
+    // toggle(className [, force]) → boolean
+    if (strcmp(method, "toggle") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        const char* cls = fn_to_cstr(args[0]);
+        if (!cls) return (Item){.item = ITEM_FALSE};
+
+        if (argc >= 2) {
+            // force parameter: add if truthy, remove if falsy
+            bool force = js_is_truthy(args[1]);
+            if (force) {
+                dom_element_add_class(elem, cls);
+                return (Item){.item = ITEM_TRUE};
+            } else {
+                dom_element_remove_class(elem, cls);
+                return (Item){.item = ITEM_FALSE};
+            }
+        }
+        // no force: toggle
+        bool result = dom_element_toggle_class(elem, cls);
+        return (Item){.item = b2it(result ? 1 : 0)};
+    }
+
+    // contains(className) → boolean
+    if (strcmp(method, "contains") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        const char* cls = fn_to_cstr(args[0]);
+        if (!cls) return (Item){.item = ITEM_FALSE};
+        bool has = dom_element_has_class(elem, cls);
+        return (Item){.item = b2it(has ? 1 : 0)};
+    }
+
+    // item(index) → string or null
+    if (strcmp(method, "item") == 0) {
+        if (argc < 1) return ItemNull;
+        int64_t idx = it2i(args[0]);
+        if (idx < 0 || idx >= elem->class_count) return ItemNull;
+        return (Item){.item = s2it(heap_create_name(elem->class_names[idx]))};
+    }
+
+    // replace(oldClass, newClass) → boolean
+    if (strcmp(method, "replace") == 0) {
+        if (argc < 2) return (Item){.item = ITEM_FALSE};
+        const char* old_cls = fn_to_cstr(args[0]);
+        const char* new_cls = fn_to_cstr(args[1]);
+        if (!old_cls || !new_cls) return (Item){.item = ITEM_FALSE};
+        if (!dom_element_has_class(elem, old_cls)) return (Item){.item = ITEM_FALSE};
+        dom_element_remove_class(elem, old_cls);
+        dom_element_add_class(elem, new_cls);
+        return (Item){.item = ITEM_TRUE};
+    }
+
+    // toString() → space-separated class string
+    if (strcmp(method, "toString") == 0) {
+        if (elem->class_count == 0) return (Item){.item = s2it(heap_create_name(""))};
+        StrBuf* sb = strbuf_new_cap(64);
+        for (int i = 0; i < elem->class_count; i++) {
+            if (i > 0) strbuf_append_char(sb, ' ');
+            strbuf_append_str(sb, elem->class_names[i]);
+        }
+        String* result = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
+
+    log_debug("js_classlist_method: unknown method '%s'", method);
+    return ItemNull;
+}
+
+extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop) return ItemNull;
+
+    // length
+    if (strcmp(prop, "length") == 0) {
+        return (Item){.item = i2it((int64_t)elem->class_count)};
+    }
+
+    // value — space-separated class string
+    if (strcmp(prop, "value") == 0) {
+        if (elem->class_count == 0) return (Item){.item = s2it(heap_create_name(""))};
+        StrBuf* sb = strbuf_new_cap(64);
+        for (int i = 0; i < elem->class_count; i++) {
+            if (i > 0) strbuf_append_char(sb, ' ');
+            strbuf_append_str(sb, elem->class_names[i]);
+        }
+        String* result = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
+
+    // numeric index → item(index)
+    // (not common but classList[0] should work)
+
+    log_debug("js_classlist_get_property: unknown property '%s'", prop);
+    return ItemNull;
+}
+
+// ============================================================================
+// dataset API (v12)
+// ============================================================================
+
+// Helper: convert camelCase to data-kebab-case attribute name
+// e.g., "fooBar" → "data-foo-bar"
+static void camel_to_data_attr(const char* camel, char* buf, size_t buf_size) {
+    size_t pos = 0;
+    // prefix with "data-"
+    const char* prefix = "data-";
+    size_t plen = 5;
+    if (buf_size <= plen) { buf[0] = '\0'; return; }
+    memcpy(buf, prefix, plen);
+    pos = plen;
+
+    for (const char* p = camel; *p && pos < buf_size - 2; p++) {
+        if (isupper((unsigned char)*p)) {
+            buf[pos++] = '-';
+            buf[pos++] = (char)tolower((unsigned char)*p);
+        } else {
+            buf[pos++] = *p;
+        }
+    }
+    buf[pos] = '\0';
+}
+
+// Helper: convert data-kebab-case attribute name to camelCase
+// e.g., "data-foo-bar" → "fooBar"
+static void data_attr_to_camel(const char* attr, char* buf, size_t buf_size) {
+    // skip "data-" prefix
+    const char* src = attr;
+    if (strncmp(src, "data-", 5) == 0) src += 5;
+
+    size_t pos = 0;
+    bool next_upper = false;
+    for (; *src && pos < buf_size - 1; src++) {
+        if (*src == '-') {
+            next_upper = true;
+        } else {
+            buf[pos++] = next_upper ? (char)toupper((unsigned char)*src) : *src;
+            next_upper = false;
+        }
+    }
+    buf[pos] = '\0';
+}
+
+extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop) return ItemNull;
+
+    char attr_name[256];
+    camel_to_data_attr(prop, attr_name, sizeof(attr_name));
+
+    const char* val = dom_element_get_attribute(elem, attr_name);
+    if (val) {
+        return (Item){.item = s2it(heap_create_name(val))};
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item value) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+
+    const char* prop = fn_to_cstr(prop_name);
+    const char* val_str = fn_to_cstr(value);
+    if (!prop || !val_str) return ItemNull;
+
+    char attr_name[256];
+    camel_to_data_attr(prop, attr_name, sizeof(attr_name));
+
+    dom_element_set_attribute(elem, attr_name, val_str);
+    return value;
+}
+
+// ============================================================================
+// location API (v12) — document.URL / document.location
+// ============================================================================
+
+extern "C" Item js_location_get_property(Item prop_name) {
+    if (!_js_current_document) {
+        log_debug("js_location_get_property: no document set");
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop) return (Item){.item = s2it(heap_create_name(""))};
+
+    Url* url = _js_current_document->url;
+    if (!url) {
+        log_debug("js_location_get_property: document has no URL");
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    if (strcmp(prop, "href") == 0) {
+        const char* href = url_get_href(url);
+        return (Item){.item = s2it(heap_create_name(href ? href : ""))};
+    }
+    if (strcmp(prop, "protocol") == 0) {
+        const char* proto = url_get_protocol(url);
+        return (Item){.item = s2it(heap_create_name(proto ? proto : ""))};
+    }
+    if (strcmp(prop, "hostname") == 0) {
+        const char* hostname = url_get_hostname(url);
+        return (Item){.item = s2it(heap_create_name(hostname ? hostname : ""))};
+    }
+    if (strcmp(prop, "port") == 0) {
+        const char* port = url_get_port(url);
+        return (Item){.item = s2it(heap_create_name(port ? port : ""))};
+    }
+    if (strcmp(prop, "pathname") == 0) {
+        const char* pathname = url_get_pathname(url);
+        return (Item){.item = s2it(heap_create_name(pathname ? pathname : ""))};
+    }
+    if (strcmp(prop, "search") == 0) {
+        const char* search = url_get_search(url);
+        return (Item){.item = s2it(heap_create_name(search ? search : ""))};
+    }
+    if (strcmp(prop, "hash") == 0) {
+        const char* hash = url_get_hash(url);
+        return (Item){.item = s2it(heap_create_name(hash ? hash : ""))};
+    }
+    if (strcmp(prop, "host") == 0) {
+        const char* host = url_get_host(url);
+        return (Item){.item = s2it(heap_create_name(host ? host : ""))};
+    }
+    if (strcmp(prop, "origin") == 0) {
+        const char* origin = url_get_origin(url);
+        return (Item){.item = s2it(heap_create_name(origin ? origin : ""))};
+    }
+
+    log_debug("js_location_get_property: unknown property '%s'", prop);
+    return (Item){.item = s2it(heap_create_name(""))};
+}
+
+// ============================================================================
+// Node.contains() (v12)
+// ============================================================================
+
+extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    DomNode* other = (DomNode*)js_dom_unwrap_element(other_item);
+    if (!node || !other) return (Item){.item = ITEM_FALSE};
+
+    // a node contains itself per spec
+    if (node == other) return (Item){.item = ITEM_TRUE};
+
+    // walk up from other's parent
+    DomNode* current = other->parent;
+    while (current) {
+        if (current == node) return (Item){.item = ITEM_TRUE};
+        current = current->parent;
+    }
+    return (Item){.item = ITEM_FALSE};
+}
+
+// ============================================================================
+// style.setProperty() / style.removeProperty() (v12b)
+// ============================================================================
+
+extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return ItemNull;
+
+    // setProperty(property, value [, priority])
+    if (strcmp(method, "setProperty") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* css_prop = fn_to_cstr(args[0]);
+        const char* val_str = fn_to_cstr(args[1]);
+        if (!css_prop || !val_str) return ItemNull;
+
+        char style_decl[256];
+        if (argc >= 3) {
+            const char* priority = fn_to_cstr(args[2]);
+            if (priority && strcasecmp(priority, "important") == 0) {
+                snprintf(style_decl, sizeof(style_decl), "%s: %s !important", css_prop, val_str);
+            } else {
+                snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+            }
+        } else {
+            snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+        }
+        dom_element_apply_inline_style(elem, style_decl);
+        elem->styles_resolved = false;
+        log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
+                  css_prop, val_str, elem->tag_name ? elem->tag_name : "?");
+        return ItemNull;
+    }
+
+    // removeProperty(property) — returns old value
+    if (strcmp(method, "removeProperty") == 0) {
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        const char* css_prop = fn_to_cstr(args[0]);
+        if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
+
+        // get old value before removing
+        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        Item old_val = (Item){.item = s2it(heap_create_name(""))};
+        if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
+            CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
+            if (decl && decl->specificity.inline_style) {
+                // serialize old value via the getter
+                Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
+                old_val = js_dom_get_style_property(elem_item, prop_item);
+            }
+            // remove the declaration from the style tree
+            style_tree_remove_property(elem->specified_style, prop_id);
+        }
+        elem->styles_resolved = false;
+        log_debug("js_dom_style_method: removeProperty '%s' on <%s>",
+                  css_prop, elem->tag_name ? elem->tag_name : "?");
+        return old_val;
+    }
+
+    log_debug("js_dom_style_method: unknown method '%s'", method);
     return ItemNull;
 }

@@ -99,6 +99,8 @@ Item js_array_new(int length);
 Item js_array_new_from_item(Item arg);
 Item js_array_get(Item array, Item index);
 Item js_array_set(Item array, Item index, Item value);
+Item js_array_get_int(Item array, int64_t index);
+Item js_array_set_int(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 int64_t js_get_length(Item object);
@@ -309,6 +311,34 @@ void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
 Item js_constructor_create_object(Item callee);
+
+// A5: Constructor shape pre-allocation
+// Creates a new object with pre-built shape: all property slots pre-allocated
+// and initialized to null (8-byte slots). Subsequent js_property_set calls for
+// these properties will find existing keys and do fast in-place updates.
+Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count);
+// Same as above but also sets __proto__ from callee.prototype
+Item js_constructor_create_object_shaped(Item callee, const char** prop_names, const int* prop_lens, int count);
+
+// =============================================================================
+// v12: Language extensions
+// =============================================================================
+
+// Object rest destructuring: create object with all props except excluded keys
+Item js_object_rest(Item src, Item* exclude_keys, int exclude_count);
+
+// URI encoding/decoding
+Item js_encodeURIComponent(Item str_item);
+Item js_decodeURIComponent(Item str_item);
+
+// globalThis
+Item js_get_global_this(void);
+
+// Symbol API
+Item js_symbol_create(Item description);
+Item js_symbol_for(Item key);
+Item js_symbol_key_for(Item sym);
+Item js_symbol_to_string(Item sym);
 
 #ifdef __cplusplus
 }

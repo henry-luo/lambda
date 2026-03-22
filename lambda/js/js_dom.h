@@ -170,6 +170,89 @@ bool js_is_computed_style_item(Item item);
  */
 Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
 
+// =============================================================================
+// classList API (v12)
+// =============================================================================
+
+/**
+ * Dispatch classList.method(args) calls.
+ * Supported: add, remove, toggle, contains, item, replace, entries, forEach, toString
+ * @param elem        Wrapped DOM element Item
+ * @param method_name String Item with method name
+ * @param args        Array of argument Items
+ * @param argc        Argument count
+ * @return Result Item
+ */
+Item js_classlist_method(Item elem, Item method_name, Item* args, int argc);
+
+/**
+ * Get a classList property.
+ * Supported: length, value
+ * @param elem       Wrapped DOM element Item
+ * @param prop_name  String Item with property name
+ * @return Property value as Item
+ */
+Item js_classlist_get_property(Item elem, Item prop_name);
+
+// =============================================================================
+// dataset API (v12)
+// =============================================================================
+
+/**
+ * Get a dataset property (camelCase → data-kebab-case attribute).
+ * @param elem       Wrapped DOM element Item
+ * @param prop_name  String Item with camelCase property name
+ * @return String value or undefined
+ */
+Item js_dataset_get_property(Item elem, Item prop_name);
+
+/**
+ * Set a dataset property (camelCase → data-kebab-case attribute).
+ * @param elem       Wrapped DOM element Item
+ * @param prop_name  String Item with camelCase property name
+ * @param value      String value to set
+ * @return The value that was set
+ */
+Item js_dataset_set_property(Item elem, Item prop_name, Item value);
+
+// =============================================================================
+// location API (v12)
+// =============================================================================
+
+/**
+ * Get a location/URL property.
+ * Supported: href, protocol, hostname, port, pathname, search, hash, host, origin
+ * @param prop_name  String Item with property name
+ * @return String value
+ */
+Item js_location_get_property(Item prop_name);
+
+// =============================================================================
+// Node.contains() (v12)
+// =============================================================================
+
+/**
+ * Check if a node contains another node (or is the same node).
+ * @param elem   Wrapped DOM element (parent)
+ * @param other  Wrapped DOM element (potential descendant)
+ * @return Boolean Item
+ */
+Item js_dom_contains(Item elem, Item other);
+
+// =============================================================================
+// style.setProperty() / style.removeProperty() (v12b)
+// =============================================================================
+
+/**
+ * Dispatch style method calls: setProperty, removeProperty.
+ * @param elem        Wrapped DOM element Item
+ * @param method_name String Item with method name
+ * @param args        Array of argument Items
+ * @param argc        Argument count
+ * @return Result Item
+ */
+Item js_dom_style_method(Item elem, Item method_name, Item* args, int argc);
+
 #ifdef __cplusplus
 }
 #endif

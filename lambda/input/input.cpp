@@ -66,6 +66,9 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     map_type->last = shape_entry;
     map_type->length++;
 
+    // A1: populate inline hash table for O(1) property lookup
+    typemap_hash_insert(map_type, shape_entry);
+
     // ensure data capacity
     int bsize = type_info[type_id].byte_size;
     int byte_offset = shape_entry->byte_offset + bsize;

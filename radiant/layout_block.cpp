@@ -313,6 +313,99 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
 }
 
 /**
+ * Extract a counter property (counter-reset, counter-increment, counter-set) from a
+ * pseudo-element's StyleTree and convert it to a spec string suitable for
+ * counter_reset() / counter_increment() / counter_set().
+ * Returns nullptr if the property is not set or is "none".
+ */
+static const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyId css_property,
+                                                   LayoutContext* lycon) {
+    if (!style || !style->tree) return nullptr;
+
+    CssDeclaration* decl = style_tree_get_declaration(style, css_property);
+    if (!decl || !decl->value) return nullptr;
+
+    CssValue* value = decl->value;
+
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+        return nullptr;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_STRING && value->data.string) {
+        return value->data.string;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        return value->data.custom_property.name;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
+        if (!sb) return nullptr;
+
+        int count = value->data.list.count;
+        CssValue** values = value->data.list.values;
+        for (int i = 0; i < count; i++) {
+            CssValue* item = values[i];
+            if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                if (info) {
+                    if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                    stringbuf_append_str(sb, info->name);
+                }
+            } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                stringbuf_append_str(sb, item->data.custom_property.name);
+            } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
+                if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                stringbuf_append_str(sb, item->data.string);
+            } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
+                if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                stringbuf_append_int(sb, (int)item->data.number.value);
+            }
+        }
+
+        if (sb->length > 0) {
+            size_t len = sb->length;
+            char* result = (char*)alloc_prop(lycon, len + 1);
+            str_copy(result, len + 1, sb->str->chars, len);
+            stringbuf_free(sb);
+            return result;
+        }
+        stringbuf_free(sb);
+    }
+
+    return nullptr;
+}
+
+/**
+ * Apply counter operations (counter-reset, counter-increment, counter-set) from
+ * a pseudo-element's StyleTree. Per CSS spec, pseudo-elements can have counter
+ * properties that affect the element's counter scope.
+ */
+static void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
+    if (!lycon->counter_context || !style) return;
+
+    const char* cr = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_RESET, lycon);
+    if (cr) {
+        log_debug("    [Pseudo] Applying counter-reset: %s", cr);
+        counter_reset(lycon->counter_context, cr);
+    }
+
+    const char* ci = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_INCREMENT, lycon);
+    if (ci) {
+        log_debug("    [Pseudo] Applying counter-increment: %s", ci);
+        counter_increment(lycon->counter_context, ci);
+    }
+
+    const char* cs = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_SET, lycon);
+    if (cs) {
+        log_debug("    [Pseudo] Applying counter-set: %s", cs);
+        counter_set(lycon->counter_context, cs);
+    }
+}
+
+/**
  * Allocate PseudoContentProp and create pseudo-elements if needed
  *
  * On first layout: creates pseudo-elements and inserts them into DOM tree
@@ -356,6 +449,18 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     // Note: Even empty content "" creates a pseudo-element for layout purposes (e.g., clearfix)
     if (has_before && !pseudo->before_generated) {
         log_info("[PSEUDO] Getting before content for <%s>", elem->tag_name ? elem->tag_name : "?");
+
+        // CSS 2.1 §12.4: Apply counter operations from ::before styles in a
+        // temporary sub-scope, then resolve content. The sub-scope ensures that
+        // counter-reset on ::before doesn't leak into the element's scope
+        // (it should only be visible to ::before's own content resolution).
+        bool pushed_pseudo_scope = false;
+        if (lycon->counter_context && elem->before_styles) {
+            counter_push_scope(lycon->counter_context);
+            pushed_pseudo_scope = true;
+            apply_pseudo_counter_ops(lycon, elem->before_styles);
+        }
+
         const char* before_content = nullptr;
         if (lycon->counter_context) {
             log_info("[PSEUDO] Calling get_pseudo_element_content_with_counters");
@@ -372,6 +477,12 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
             log_info("[PSEUDO] Calling dom_element_get_pseudo_element_content");
             before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
             log_info("[PSEUDO] Returned: %p", (void*)before_content);
+        }
+
+        // Pop the temporary pseudo scope — counter-reset stays scoped,
+        // counter-increment values propagate to parent
+        if (pushed_pseudo_scope) {
+            counter_pop_scope_propagate(lycon->counter_context, false);
         }
 
         // Debug: log what font we're passing to pseudo-element
@@ -395,6 +506,11 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     // Create ::after pseudo-element if needed and not already created
     // Note: Even empty content "" creates a pseudo-element for layout purposes
     if (has_after && !pseudo->after_generated) {
+        // NOTE: Unlike ::before, we do NOT apply pseudo counter ops for ::after
+        // at this point. Per CSS spec, ::after counter operations (counter-increment,
+        // counter-reset) should happen AFTER the element's children are laid out.
+        // We only resolve the content string using the current counter values.
+        // The ::after counter ops will be handled during the ::after layout phase.
         const char* after_content = nullptr;
         if (lycon->counter_context) {
             after_content = dom_element_get_pseudo_element_content_with_counters(
@@ -403,6 +519,7 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
         if (!after_content) {
             after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
         }
+
         // Pass block->font (from ViewBlock) for accurate font-family inheritance
         pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font);
         log_debug("[PSEUDO] Created ::after for <%s> with content='%s'",
@@ -4470,24 +4587,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (!explicit_has_list_item) {
                     // Check <ol start="N"> attribute: resets to N-1 so first li increments to N
                     int start_value = 0;  // default: counter-reset: list-item 0
+                    bool is_reversed_ol = false;
                     if (tag == HTM_TAG_OL) {
                         // Check <ol reversed> attribute
-                        bool is_reversed = dom_element_get_attribute(dom_elem, "reversed") != nullptr;
+                        is_reversed_ol = dom_element_has_attribute(dom_elem, "reversed");
                         const char* start_attr = dom_element_get_attribute(dom_elem, "start");
-                        if (is_reversed) {
+                        if (is_reversed_ol) {
                             if (start_attr) {
                                 start_value = atoi(start_attr) + 1;
-                            } else {
-                                int li_count = 0;
-                                for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
-                                    if (child->is_element()) {
-                                        DomElement* child_elem = (DomElement*)child;
-                                        if (child_elem->tag_id == HTM_TAG_LI) li_count++;
-                                    }
-                                }
-                                start_value = li_count + 1;
                             }
-                            log_debug("    [List] OL reversed → counter-reset: list-item %d", start_value);
+                            // else: start_value stays 0; reversed initial computed below via DFS
+                            log_debug("    [List] OL reversed → counter-reset: list-item %d%s",
+                                      start_value, start_attr ? "" : " (will compute reversed initial)");
                         } else if (start_attr) {
                             start_value = atoi(start_attr) - 1;
                             log_debug("    [List] OL start=%s → counter-reset: list-item %d", start_attr, start_value);
@@ -4497,6 +4608,47 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     snprintf(reset_spec, sizeof(reset_spec), "list-item %d", start_value);
                     counter_reset(lycon->counter_context, reset_spec);
                     log_debug("    [List] Implicit counter-reset: %s for <%s>", reset_spec, dom_elem->tag_name);
+
+                    // For <ol reversed> without start attr, compute reversed initial value
+                    // using the same DFS algorithm as CSS counter-reset: reversed(list-item)
+                    if (is_reversed_ol && start_value == 0) {
+                        int total = 0, last_nz = 0, set_val = 0;
+                        // Account for implicit list-item auto-increment on LIs:
+                        // LIs without explicit counter-increment get implicit -1 (reversed)
+                        for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+                            if (!child->is_element()) continue;
+                            DomElement* child_elem = (DomElement*)child;
+                            // skip subtree if it resets list-item (new scope)
+                            if (element_resets_counter(child_elem, "list-item")) continue;
+                            // check explicit counter-increment
+                            int inc = 0;
+                            bool has_explicit = get_element_counter_inc(child_elem, "list-item", &inc);
+                            if (has_explicit) {
+                                if (inc != 0) {
+                                    total += inc;
+                                    last_nz = inc;
+                                }
+                            } else if (child_elem->tag_id == HTM_TAG_LI) {
+                                // implicit list-item -1 for reversed OL
+                                total += -1;
+                                last_nz = -1;
+                            }
+                            // check counter-set
+                            int sv = 0;
+                            if (get_element_counter_set_value(child_elem, "list-item", &sv)) {
+                                set_val = sv;
+                                break;
+                            }
+                        }
+                        if (last_nz != 0) {
+                            int initial = -(total + last_nz) + set_val;
+                            char set_spec2[64];
+                            snprintf(set_spec2, sizeof(set_spec2), "list-item %d", initial);
+                            counter_set(lycon->counter_context, set_spec2);
+                            log_debug("    [List] OL reversed computed: total=%d, last_nz=%d, set_val=%d, initial=%d",
+                                      total, last_nz, set_val, initial);
+                        }
+                    }
                 }
             }
         }
@@ -4575,7 +4727,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
                 DomElement* parent_elem = dom_element_get_parent(dom_elem);
                 if (parent_elem && parent_elem->tag_id == HTM_TAG_OL &&
-                    dom_element_get_attribute(parent_elem, "reversed") != nullptr) {
+                    dom_element_has_attribute(parent_elem, "reversed")) {
                     parent_reversed = true;
                 }
             }
@@ -4595,8 +4747,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
 
-            log_debug("    [List] Auto-%s list-item counter", parent_reversed ? "decrementing" : "incrementing");
-            counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
+            // CSS Lists 3 §4.5: auto-increment list-item only if the element
+            // does NOT already have an explicit counter-increment for list-item
+            bool explicit_list_item_inc = (block->blk && block->blk->counter_increment &&
+                                           strstr(block->blk->counter_increment, "list-item") != nullptr);
+            if (!explicit_list_item_inc) {
+                log_debug("    [List] Auto-%s list-item counter", parent_reversed ? "decrementing" : "incrementing");
+                counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
+            } else {
+                log_debug("    [List] Skipping auto-increment (explicit counter-increment includes list-item)");
+            }
 
             // For inline list-item (outer != LIST_ITEM), force inside position
             // since there's no block margin area for outside markers
@@ -4795,6 +4955,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     marker_prop->text_content = text_copy;
                                 }
                                 marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
+                            } else if (is_string_marker) {
+                                // CSS Lists 3 §4.1: use the string directly as marker content
+                                size_t slen = strlen(string_marker);
+                                char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
+                                if (text_copy) {
+                                    memcpy(text_copy, string_marker, slen + 1);
+                                    marker_prop->text_content = text_copy;
+                                }
                             } else if (!is_bullet_marker) {
                                 char marker_text[64];
                                 int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
@@ -5649,9 +5817,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    // Pop counter scope when leaving this block
+    // Pop counter scope when leaving this block — propagate so siblings see counters
+    // propagate_resets=true for regular elements (sibling visibility per CSS 2.1 §12.4.1)
     if (lycon->counter_context) {
-        counter_pop_scope(lycon->counter_context);
+        counter_pop_scope_propagate(lycon->counter_context, true);
     }
 
     // =========================================================================
