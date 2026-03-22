@@ -36,6 +36,7 @@ __pycache__/
 
 # Release directory
 release/
+release_past/
 conf
 
 # Executables and other project-specific generated files
